@@ -45,6 +45,8 @@ ai/models/
 .agents/
 _bmad/scripts/
 _bmad/*/scripts/
+# Cache de rendu des skills BMad : regenere a chaque invocation
+_bmad/render/
 # Reponses personnelles de configuration (non partagees)
 *.user.toml
 
