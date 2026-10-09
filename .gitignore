@@ -29,6 +29,10 @@ data/work/
 *.tiff
 *.jp2
 
+# Exception : les jeux de test de /fixtures sont versionnes, ils sont legers
+# et la recette en depend (CLAUDE.md §9).
+!fixtures/**
+
 # --- Modeles IA locaux (plusieurs Go, voir CLAUDE.md §3) ---
 *.gguf
 *.safetensors

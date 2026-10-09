@@ -1,0 +1,22 @@
+[package]
+name = "cassini-app"
+description = "Coquille de bureau de Cassini : fenetre, webview, pont vers le moteur"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "cassini_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Licences verifiees le 2026-10-09 : Apache-2.0 OR MIT pour tauri et tauri-build,
+# MIT OR Apache-2.0 pour serde et serde_json (CLAUDE.md §8).
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+cassini-core = { path = "../../core" }

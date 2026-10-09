@@ -1,0 +1,45 @@
+{
+  "version": 8,
+  "name": "Cassini hors ligne (provisoire)",
+  "sources": {
+    "repere": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": { "nom": "Villeneuve-le-Roi" },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [2.37, 48.71],
+                  [2.46, 48.71],
+                  [2.46, 48.76],
+                  [2.37, 48.76],
+                  [2.37, 48.71]
+                ]
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "layers": [
+    { "id": "fond", "type": "background", "paint": { "background-color": "#11151a" } },
+    {
+      "id": "repere-surface",
+      "type": "fill",
+      "source": "repere",
+      "paint": { "fill-color": "#2f5d8c", "fill-opacity": 0.25 }
+    },
+    {
+      "id": "repere-contour",
+      "type": "line",
+      "source": "repere",
+      "paint": { "line-color": "#8fb6dd", "line-width": 1.5 }
+    }
+  ]
+}

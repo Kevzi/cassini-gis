@@ -1,0 +1,22 @@
+{
+  "name": "cassini-app",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "license": "Apache-2.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "check": "tsc --noEmit && node scripts/check-offline.mjs",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "maplibre-gl": "^6.13.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.1",
+    "typescript": "^5.6.0",
+    "vite": "^5.4.0"
+  }
+}

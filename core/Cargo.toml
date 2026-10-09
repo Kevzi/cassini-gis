@@ -1,0 +1,11 @@
+[package]
+name = "cassini-core"
+description = "Moteur geographique et registre de commandes de Cassini"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Aucune dependance : le moteur reste compilable et testable partout.
+# Toute dependance future passe par la regle de licence du §2.2 de CLAUDE.md.
+[dependencies]
