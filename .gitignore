@@ -1,0 +1,54 @@
+# --- Rust / moteur (core, ai) ---
+target/
+**/target/
+*.pdb
+
+# --- Node / interface Tauri (app) ---
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# --- Donnees telechargees : jamais versionnees (voir CLAUDE.md §5) ---
+# /data ne contient que les scripts de telechargement et de preparation.
+data/downloads/
+data/cache/
+data/work/
+*.pmtiles
+*.mbtiles
+*.parquet
+*.geoparquet
+*.gpkg
+*.shp
+*.dbf
+*.shx
+*.prj
+*.cpg
+*.laz
+*.tif
+*.tiff
+*.jp2
+
+# --- Modeles IA locaux (plusieurs Go, voir CLAUDE.md §3) ---
+*.gguf
+*.safetensors
+*.bin
+ai/models/
+
+# --- Outillage BMad : reinstallable, pas versionne ---
+# Les skills se reinstallent depuis skills-lock.json (`npx skills install`),
+# et les scripts _bmad se regenerent avec `bmad setup`.
+.agents/
+_bmad/scripts/
+_bmad/*/scripts/
+# Reponses personnelles de configuration (non partagees)
+*.user.toml
+
+# --- Systeme et editeurs ---
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
