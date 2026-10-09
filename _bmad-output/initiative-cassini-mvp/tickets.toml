@@ -1,0 +1,56 @@
+# tickets.toml — les epics de l'initiative, en ordre de construction.
+# L'ordre des tables est l'ordre de construction ; `id` nomme un epic pour de bon.
+
+[[epic]]
+id = 1
+slug = "epic-socle-et-carte"
+title = "Socle technique et carte hors ligne"
+covers = ["CAP-1"]
+
+[[epic]]
+id = 2
+slug = "epic-registre-projet-import"
+title = "Registre de commandes, projet et import"
+covers = ["CAP-6", "CAP-10", "CAP-9", "CAP-1"]
+after = [{ epic = 1, needs = "le workspace, la coquille Tauri et la recette automatique" }]
+
+[[epic]]
+id = 3
+slug = "epic-analyses-et-historique"
+title = "Analyses vectorielles et historique rejouable"
+covers = ["CAP-3", "CAP-7"]
+after = [{ epic = 2, needs = "le contrat du registre de commandes et le format de projet sur disque" }]
+
+[[epic]]
+id = 4
+slug = "epic-raster-et-terrain"
+title = "Chaine raster et analyse de terrain"
+covers = ["CAP-11"]
+after = [
+  { epic = 2, needs = "le contrat du registre de commandes et le format de projet sur disque" },
+  { epic = 3, needs = "le motif d'interface de lancement d'une commande et de saisie de ses parametres" },
+]
+
+[[epic]]
+id = 5
+slug = "epic-agent-et-mcp"
+title = "Agent en langage naturel et serveur MCP"
+covers = ["CAP-4", "CAP-8"]
+after = [{ epic = 2, needs = "le registre complet, pour que l'agent ait des verbes a composer et un inventaire de projet a lire" }]
+
+[[epic]]
+id = 6
+slug = "epic-export-et-demo"
+title = "Export PDF et scenario de demo"
+covers = ["CAP-5"]
+after = [
+  { epic = 3, needs = "les analyses vectorielles de la phrase de demo" },
+  { epic = 5, needs = "l'agent qui enchaine les commandes et les fait valider" },
+]
+
+[[epic]]
+id = 7
+slug = "epic-publication"
+title = "Publication : installeurs, video, depot presentable"
+covers = []
+after = [{ epic = 6, needs = "le scenario de demo complet, a filmer et a documenter" }]

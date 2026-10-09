@@ -1,0 +1,80 @@
+# tickets.toml — epic 1, socle technique et carte hors ligne.
+# L'ordre des tables est l'ordre de construction. `id` nomme une entree pour de bon.
+
+[[entry]]
+id = 1
+type = "story"
+title = "Squelette, moteur et carte hors ligne"
+description = "Pose le workspace Cargo a deux etages, le moteur sans dependance avec son premier verrou hors ligne, la coquille Tauri avec son CSP, et la carte MapLibre en TypeScript strict."
+verify = "La recette passe : tests du moteur, clippy -D warnings, cargo fmt --check, tsc strict, garde hors ligne, vite build."
+covers = ["E1", "E2"]
+after = []
+hitl = false
+risk = "medium"
+notes = ["Traceur de l'epic : le chemin le plus mince qui traverse le moteur Rust, la coquille Tauri, la webview et MapLibre."]
+
+[[entry]]
+id = 2
+type = "story"
+title = "Generateur de fond de carte PMTiles de recette"
+description = "Ecrit un script qui fabrique un petit PMTiles valide dans /fixtures, puisque le projet ne telecharge aucune donnee."
+verify = "Le fichier genere est relu par la bibliotheque pmtiles et rend les tuiles attendues aux niveaux de zoom declares."
+covers = ["E1"]
+after = []
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 3
+type = "story"
+title = "Brancher le fond PMTiles dans la carte"
+description = "Fait lire le PMTiles local par MapLibre via le protocole pmtiles, et etend la garde hors ligne au nouveau chemin de chargement."
+verify = "La carte affiche les tuiles du fichier de /fixtures sur une machine sans reseau, et la garde hors ligne echoue si une adresse reseau est introduite."
+covers = ["E1", "E2"]
+after = [2]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 4
+type = "story"
+title = "Compiler et lancer l'application sous Windows"
+description = "Installe la chaine de compilation Tauri sur le poste du proprietaire et produit une application qui s'ouvre, ce que l'environnement de developpement ne peut pas faire."
+verify = "La fenetre Cassini s'ouvre sous Windows, affiche le fond de carte, et se navigue, cable reseau debranche."
+covers = ["E3"]
+after = [3]
+hitl = true
+risk = "high"
+
+[[entry]]
+id = 5
+type = "story"
+title = "README detaille avec schemas Mermaid"
+description = "Explique le projet a qui le decouvre : architecture en couches, flux d'une demande en langage naturel vers les commandes, et cycle de vie d'un projet, en schemas Mermaid."
+verify = "Les schemas se rendent sur la page du depot GitHub et une personne exterieure sait dire a quoi sert chaque dossier apres lecture."
+covers = ["E5"]
+after = []
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 6
+type = "story"
+title = "Recette automatique sur GitHub Actions"
+description = "Fait tourner la recette complete a chaque poussee : tests du moteur, clippy, fmt, typage strict et garde hors ligne."
+verify = "Une poussee qui casse l'un des cinq controles fait echouer le workflow, et une poussee saine le fait passer au vert."
+covers = ["E4"]
+after = [1]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 7
+type = "story"
+title = "Passe de nettoyage"
+description = "Reprend ce que les entrees precedentes ont laisse de cote : son perimetre est fixe a son demarrage, a partir des plans et des constats de revue reportes pendant l'epic."
+verify = "La recette passe au vert apres la passe, et aucun constat reporte ne reste ouvert sans decision ecrite."
+covers = []
+after = [2, 3, 4, 5, 6]
+hitl = false
+risk = "low"
