@@ -13,7 +13,7 @@ avec une exception pour ce dossier.
 
 | Fichier | Nature | Origine | Utilisé par |
 |---|---|---|---|
-| `basemap-villeneuve-le-roi.pmtiles` | Archive PMTiles v3, tuiles PNG en niveaux de gris, 35 tuiles, 25,7 Ko | **Généré**, aucun téléchargement : `app/scripts/generate-basemap.mjs` | L'affichage du fond de carte hors ligne (entrée 1.3), et la recette |
+| `basemap-villeneuve-le-roi.pmtiles` | Archive PMTiles v3, tuiles PNG en niveaux de gris, 35 tuiles, 25,7 Ko | **Généré**, aucun téléchargement : `app/scripts/generate-basemap.mjs` | Le fond de carte de l'application, et la recette |
 
 ## Le fond de carte de recette
 
@@ -28,6 +28,28 @@ carte à l'écran.
   s'ouvre au zoom 12 sur `2.415, 48.735`.
 - **Hors de l'emprise** : aucune tuile. Un lecteur doit répondre « pas de
   tuile », pas planter.
+
+### D'où l'application le lit
+
+L'archive est **embarquée dans l'installeur** : la carte affiche un fond dès la
+première ouverture, sans aucune manipulation. C'est un damier fabriqué par le
+dépôt, sans la moindre donnée géographique tierce, donc rien n'est redistribué
+(CLAUDE.md §2.4).
+
+1. `app/src-tauri/tauri.conf.json`, clé `bundle.resources`, copie ce fichier dans
+   l'installeur sous `fixtures/basemap-villeneuve-le-roi.pmtiles`.
+2. `app/src-tauri/src/lib.rs` le cherche d'abord dans le répertoire de ressources
+   de l'application installée, puis — en développement, où `cargo tauri dev` ne
+   passe pas par l'installeur — dans le fichier de ce dossier.
+3. Le chemin est validé par `BasemapSource::depuis_chemin_local`, puis lu par
+   plages d'octets avec `BasemapSource::lire_plage`. **L'interface ne connaît
+   jamais le chemin** : elle demande des octets par l'IPC Tauri, et la carte les
+   reçoit par le protocole `pmtiles://cassini-fond-de-recette`. Aucune requête
+   réseau, aucune origine HTTP ajoutée au CSP de la fenêtre.
+
+`app/scripts/verify-protocole.mjs` vérifie que ces endroits s'accordent : la clé
+du style est celle du code, le chemin du moteur est celui de l'installeur, et la
+commande appelée par l'interface est celle qu'enregistre le moteur.
 
 ### Régénérer
 
@@ -54,3 +76,10 @@ centre et le zoom d'ouverture annoncés, et enfin **quatre contrôles qui metten
 le validateur en échec exprès** — octet corrompu, tuile tronquée, signature
 absente — parce qu'un garde-fou qu'on n'a jamais vu refuser quelque chose ne
 garde rien.
+
+`npm run verify:protocole` ajoute 24 contrôles sur le chemin de chargement de la
+carte : le TileJSON construit depuis l'en-tête, une tuile connue servie en PNG,
+une tuile hors emprise ou hors zooms qui revient vide sans exception, et la
+preuve qu'une clé non enregistrée part bien sur le réseau — c'est ce que la garde
+de `check-offline.mjs` existe pour empêcher. Le refus d'une plage hors fichier,
+lui, est contrôlé là où il est écrit : les tests de `cassini-core`.
