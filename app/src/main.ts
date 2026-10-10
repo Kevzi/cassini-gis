@@ -1,12 +1,14 @@
-import { Map as CarteMapLibre, NavigationControl, ScaleControl } from "maplibre-gl";
+import { addProtocol, Map as CarteMapLibre, NavigationControl, ScaleControl } from "maplibre-gl";
 import type { ErrorEvent, MapOptions } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import { PMTiles, Protocol } from "pmtiles";
 import "./style.css";
+import { SourceFondDeCarte } from "./basemap.source";
 import styleBrut from "./basemap.style.json";
 
 // Étape 1 : la fenêtre, la carte, et un style qui ne sort jamais sur le réseau.
-// Le fond de carte PMTiles arrive à la tâche 3 ; ce style provisoire ne sert
-// qu'à prouver que la carte vit et se navigue sans aucune requête distante.
+// Le fond de carte est l'archive PMTiles du dépôt, lue par le moteur Rust et
+// servie à la fenêtre par l'IPC Tauri. Aucune requête distante, à aucun moment.
 //
 // Le style est importé en JSON, donc TypeScript en déduit `version: number`
 // alors que MapLibre attend le littéral `8`. On passe par le type public
@@ -20,6 +22,36 @@ function afficher(message: string): void {
   if (etat) etat.textContent = message;
 }
 
+// Un échec du fond de carte doit rester lisible. MapLibre marque sa source
+// chargée **avant** d'émettre l'erreur, et son `loaded()` répond vrai dès qu'une
+// source a échoué : `load` se déclenche donc juste après l'erreur, à chaque
+// fois. Sans ce verrou, « Carte prête » recouvrirait le nom du fichier manquant.
+//
+// Le verrou ne retient que les messages automatiques : un déplacement de la
+// carte est une action de l'utilisateur, et a le droit de reprendre la ligne.
+let fondEnEchec = false;
+
+// Le protocole doit être enregistré **avant** la création de la carte : MapLibre
+// résout les sources du style dès la construction, et un protocole inconnu
+// ferait échouer la source au lieu de la charger.
+//
+// `new Protocol()` sans option : `metadata: true` déclencherait une lecture
+// supplémentaire des métadonnées JSON, inutile ici puisque l'emprise et les
+// bornes de zoom sont déjà dans l'en-tête de l'archive.
+//
+// L'instance est enregistrée explicitement par `add`, ce qui est la seule chose
+// qui empêche `Protocol` de fabriquer un `FetchSource` sur la clé du style.
+const protocole = new Protocol();
+protocole.add(
+  new PMTiles(
+    new SourceFondDeCarte((message) => {
+      fondEnEchec = true;
+      afficher(`Fond de carte indisponible : ${message}`);
+    }),
+  ),
+);
+addProtocol("pmtiles", protocole.tile);
+
 const carte = new CarteMapLibre({
   container: "carte",
   style,
@@ -32,11 +64,14 @@ carte.addControl(new NavigationControl({ showCompass: true }), "top-right");
 carte.addControl(new ScaleControl({ unit: "metric" }), "bottom-right");
 
 carte.on("load", () => {
-  afficher("Carte prête — hors ligne");
+  if (!fondEnEchec) afficher("Carte prête — hors ligne");
 });
 
+// L'échec du fond de carte a déjà été nommé par sa source, et plus précisément :
+// cet événement ne fait que relayer la même erreur. Il reste en place pour tout
+// le reste, par exemple un style refusé.
 carte.on("error", (e: ErrorEvent) => {
-  afficher(`Erreur de carte : ${e.error.message}`);
+  if (!fondEnEchec) afficher(`Erreur de carte : ${e.error.message}`);
 });
 
 carte.on("moveend", () => {

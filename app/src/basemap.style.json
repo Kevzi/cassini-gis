@@ -1,7 +1,14 @@
 {
   "version": 8,
-  "name": "Cassini hors ligne (provisoire)",
+  "name": "Cassini hors ligne",
   "sources": {
+    "fond-pmtiles": {
+      "type": "raster",
+      "url": "pmtiles://cassini-fond-de-recette",
+      "tileSize": 256,
+      "minzoom": 10,
+      "maxzoom": 14
+    },
     "repere": {
       "type": "geojson",
       "data": {
@@ -29,6 +36,7 @@
   },
   "layers": [
     { "id": "fond", "type": "background", "paint": { "background-color": "#11151a" } },
+    { "id": "fond-tuiles", "type": "raster", "source": "fond-pmtiles" },
     {
       "id": "repere-surface",
       "type": "fill",
