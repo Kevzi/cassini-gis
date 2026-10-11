@@ -35,6 +35,19 @@ context: []
 
 **Pourquoi la route `oneshot`.** Le changement de code se réduit à un fichier binaire produit par un outil et à une ligne de configuration. Le livrable réel est une marche à suivre en français, calibrée pour quelqu'un qui ne code pas, et qui dépend entièrement de la recherche documentaire tenue dans cette session. La confier à un agent sans ce contexte la dégraderait.
 
+**Recette manuelle exécutée par le propriétaire le 2026-10-10, sous Windows 11.** Quatre faits établis, qu'aucun environnement de développement ne pouvait produire :
+
+1. **Les cinq prérequis étaient déjà satisfaits** — Build Tools 2022, WebView2 154.0.4258.62, Rust 1.93.1 sur `x86_64-pc-windows-msvc`, Node 24.13.0. Rien à installer. La vérification WebView2 ajoutée après la revue a servi : elle a répondu, là où l'ancienne rédaction aurait conseillé de ne pas l'installer sans savoir.
+2. **`app/src-tauri/src/lib.rs` compile** — `cargo check -p cassini-app` en 1 min 04, sans erreur. Le fichier n'avait jamais été jugé par un compilateur ; les API relues à la main contre `tauri 2.12.2` étaient justes.
+3. **`mainBinaryName` s'applique même avec `--no-bundle`** — l'exécutable produit est `Cassini.exe`. C'est l'incertitude que la revue avait signalée sans pouvoir la trancher ; elle est close, et la marche à suivre est corrigée. En mode développement la console montre `cassini-app.exe`, ce qui est le comportement attendu.
+4. **`bundle.resources` fonctionne sous Windows** — l'archive est recopiée à côté de l'exécutable, et elle est identique octet pour octet à celle du dépôt (26 360 octets, comparées).
+
+**Un défaut trouvé, antérieur à cette entrée.** L'application construite s'ouvrait sur « Erreur de carte : Worker failed to load », et le repère vectoriel ne s'affichait pas. Cause : MapLibre fabrique l'adresse de son programme auxiliaire à l'exécution, par concaténation sur `import.meta.url`, et Vite n'émet un fichier que lorsqu'il voit un chemin écrit en clair. Le worker n'était donc jamais recopié dans `dist/`, qui ne contenait que trois fichiers. Le fond de carte raster s'affichait quand même, parce qu'il est décodé sur le fil principal ; seul le vectoriel tombait.
+
+Le défaut **datait de l'étape 1** et aucune recette ne pouvait le voir : `npm run build` construit sans jamais ouvrir le résultat dans une fenêtre. Correctif : import du worker en `?url` — chemin constant, donc Vite l'émet — puis `setWorkerUrl`, l'API publique de MapLibre. Deux fichiers, plus `app/src/vite-env.d.ts` sans lequel le typage strict refuse l'import. Confirmé par le propriétaire : l'application construite s'ouvre réseau coupé, le fond s'affiche, **et le repère bleu est revenu**.
+
+**Hypothèse fausse, pour mémoire.** J'avais prédit que le défaut disparaîtrait dans la construction de production, en l'attribuant au cache de développement de Vite. Faux : il persistait, et la cause était plus profonde. C'est la construction du propriétaire qui l'a réfutée.
+
 ## Review Triage Log
 
 **Passe 1 — lentille `quick`, sous-agent en contexte vierge.** 7 constats, tous réels, tous corrigés sur place : la route `oneshot` les traite comme des correctifs, aucun n'exigeait de replanifier. Verdicts : 2 hauts, 4 moyens, 1 bas.

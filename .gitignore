@@ -9,6 +9,10 @@ dist/
 .vite/
 *.tsbuildinfo
 
+# Schemas d'autorisations regeneres par Tauri a chaque construction, et
+# differents selon le systeme qui compile : jamais versionnes.
+app/src-tauri/gen/schemas/
+
 # --- Donnees telechargees : jamais versionnees (voir CLAUDE.md §5) ---
 # /data ne contient que les scripts de telechargement et de preparation.
 data/downloads/

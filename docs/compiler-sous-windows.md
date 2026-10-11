@@ -182,9 +182,10 @@ Get-ChildItem "$projet\target\release\*.exe"
 Get-ChildItem "$projet\target\release\fixtures"
 ```
 
-Le fichier doit s'appeler **`Cassini.exe`**. S'il s'appelle `cassini-app.exe`,
-c'est le même programme — dis-le-moi, ça veut dire que le renommage ne s'applique
-pas quand on saute l'installeur. La seconde commande doit montrer
+Le fichier s'appelle **`Cassini.exe`** : vérifié sur un poste Windows le
+2026-10-10, le renommage s'applique bien même en sautant l'installeur. En mode
+développement (étape 5), en revanche, la console affiche `cassini-app.exe` — le
+nom technique du paquet, c'est normal. La seconde commande doit montrer
 `basemap-villeneuve-le-roi.pmtiles` : c'est le fond de carte, recopié
 automatiquement à côté de l'exécutable.
 

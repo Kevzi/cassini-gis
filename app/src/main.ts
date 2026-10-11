@@ -1,9 +1,16 @@
-import { addProtocol, Map as CarteMapLibre, NavigationControl, ScaleControl } from "maplibre-gl";
+import {
+  addProtocol,
+  Map as CarteMapLibre,
+  NavigationControl,
+  ScaleControl,
+  setWorkerUrl,
+} from "maplibre-gl";
 import type { ErrorEvent, MapOptions } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { PMTiles, Protocol } from "pmtiles";
 import "./style.css";
 import { SourceFondDeCarte } from "./basemap.source";
+import adresseDuWorker from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 import styleBrut from "./basemap.style.json";
 
 // Étape 1 : la fenêtre, la carte, et un style qui ne sort jamais sur le réseau.
@@ -30,6 +37,17 @@ function afficher(message: string): void {
 // Le verrou ne retient que les messages automatiques : un déplacement de la
 // carte est une action de l'utilisateur, et a le droit de reprendre la ligne.
 let fondEnEchec = false;
+
+// MapLibre fabrique l'adresse de son worker à l'exécution, à partir de
+// `import.meta.url`, par concaténation. Vite n'émet un fichier que s'il voit une
+// adresse écrite en clair : il n'a donc jamais recopié le worker dans la
+// construction, et l'application se chargeait sur une adresse morte — « Worker
+// failed to load », constaté sur Windows à l'entrée 1.4.
+//
+// L'import en `?url` règle les deux moitiés du problème : Vite émet le fichier
+// parce que le chemin est une constante, et nous rendons l'adresse produite à
+// MapLibre. Tout reste local, donc le CSP suffit tel quel (`worker-src 'self'`).
+setWorkerUrl(adresseDuWorker);
 
 // Le protocole doit être enregistré **avant** la création de la carte : MapLibre
 // résout les sources du style dès la construction, et un protocole inconnu
