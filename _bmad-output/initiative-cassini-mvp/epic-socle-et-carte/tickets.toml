@@ -47,6 +47,17 @@ hitl = true
 risk = "high"
 
 [[entry]]
+id = 8
+type = "story"
+title = "Passer les noms du code en anglais"
+description = "Renomme en anglais les fonctions, variables, types, constantes et noms de fichiers de tout le code, comme l'exige CLAUDE.md §9. Les commentaires et les textes montres a l'utilisateur restent en francais."
+verify = "La recette complete passe au vert apres le renommage, aucun identifiant du code ne porte plus de nom francais, et les textes affiches dans la fenetre sont inchanges mot pour mot."
+covers = []
+after = []
+hitl = false
+risk = "medium"
+
+[[entry]]
 id = 5
 type = "story"
 title = "README detaille avec schemas Mermaid"
@@ -75,6 +86,6 @@ title = "Passe de nettoyage"
 description = "Reprend ce que les entrees precedentes ont laisse de cote : son perimetre est fixe a son demarrage, a partir des plans et des constats de revue reportes pendant l'epic."
 verify = "La recette passe au vert apres la passe, et aucun constat reporte ne reste ouvert sans decision ecrite."
 covers = []
-after = [2, 3, 4, 5, 6]
+after = [2, 3, 4, 5, 6, 8]
 hitl = false
 risk = "low"
