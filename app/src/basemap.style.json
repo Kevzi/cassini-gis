@@ -2,21 +2,21 @@
   "version": 8,
   "name": "Cassini hors ligne",
   "sources": {
-    "fond-pmtiles": {
+    "basemap-pmtiles": {
       "type": "raster",
-      "url": "pmtiles://cassini-fond-de-recette",
+      "url": "pmtiles://cassini-basemap-fixture",
       "tileSize": 256,
       "minzoom": 10,
       "maxzoom": 14
     },
-    "repere": {
+    "marker": {
       "type": "geojson",
       "data": {
         "type": "FeatureCollection",
         "features": [
           {
             "type": "Feature",
-            "properties": { "nom": "Villeneuve-le-Roi" },
+            "properties": { "name": "Villeneuve-le-Roi" },
             "geometry": {
               "type": "Polygon",
               "coordinates": [
@@ -35,18 +35,18 @@
     }
   },
   "layers": [
-    { "id": "fond", "type": "background", "paint": { "background-color": "#11151a" } },
-    { "id": "fond-tuiles", "type": "raster", "source": "fond-pmtiles" },
+    { "id": "background", "type": "background", "paint": { "background-color": "#11151a" } },
+    { "id": "basemap-tiles", "type": "raster", "source": "basemap-pmtiles" },
     {
-      "id": "repere-surface",
+      "id": "marker-fill",
       "type": "fill",
-      "source": "repere",
+      "source": "marker",
       "paint": { "fill-color": "#2f5d8c", "fill-opacity": 0.25 }
     },
     {
-      "id": "repere-contour",
+      "id": "marker-outline",
       "type": "line",
-      "source": "repere",
+      "source": "marker",
       "paint": { "line-color": "#8fb6dd", "line-width": 1.5 }
     }
   ]

@@ -10,43 +10,43 @@
 // Spécification suivie : https://github.com/protomaps/PMTiles/blob/main/spec/v3/spec.md
 // Attention : le pseudocode de son annexe A.1 omet le nombre d'entrées en tête
 // du répertoire, alors que le §4.2 l'exige et que le décodage du §4.3 le lit en
-// premier. Voir `encoderRepertoire`.
+// premier. Voir `encodeDirectory`.
 
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import zlib from "node:zlib";
 
-const ICI = dirname(fileURLToPath(import.meta.url));
-export const CHEMIN_SORTIE = join(ICI, "..", "..", "fixtures", "basemap-villeneuve-le-roi.pmtiles");
+const HERE = dirname(fileURLToPath(import.meta.url));
+export const OUTPUT_PATH = join(HERE, "..", "..", "fixtures", "basemap-villeneuve-le-roi.pmtiles");
 
 /** Emprise du repère déjà présent dans `app/src/basemap.style.json`. */
-export const EMPRISE = { ouest: 2.37, sud: 48.71, est: 2.46, nord: 48.76 };
+export const EXTENT = { west: 2.37, south: 48.71, east: 2.46, north: 48.76 };
 /** Centre d'ouverture de la carte, aligné sur `app/src/main.ts`. */
-export const CENTRE = { lon: 2.415, lat: 48.735 };
+export const CENTER = { lon: 2.415, lat: 48.735 };
 export const ZOOM_MIN = 10;
 export const ZOOM_MAX = 14;
-export const ZOOM_CENTRE = 12;
+export const ZOOM_CENTER = 12;
 
-const COTE_TUILE = 256;
-const COTE_CELLULE = 64;
+const TILE_SIDE = 256;
+const CELL_SIDE = 64;
 
 // ---------------------------------------------------------------- varint
 
 /** Écrit un entier non signé en varint little-endian base 128. */
-function ecrireVarint(octets, valeur) {
-  let v = BigInt(valeur);
-  if (v < 0n) throw new Error(`varint négatif interdit : ${valeur}`);
+function writeVarint(bytes, value) {
+  let v = BigInt(value);
+  if (v < 0n) throw new Error(`varint négatif interdit : ${value}`);
   while (v >= 128n) {
-    octets.push(Number((v & 127n) | 128n));
+    bytes.push(Number((v & 127n) | 128n));
     v >>= 7n;
   }
-  octets.push(Number(v));
+  bytes.push(Number(v));
 }
 
 // ------------------------------------------------- identifiant de tuile
 
-function pivoter(n, x, y, rx, ry) {
+function rotate(n, x, y, rx, ry) {
   if (ry === 0) {
     if (rx === 1) {
       x = n - 1 - x;
@@ -58,13 +58,13 @@ function pivoter(n, x, y, rx, ry) {
 }
 
 /** Position de (x, y) sur la courbe de Hilbert d'ordre `n` = 2^z. */
-export function indiceHilbert(n, x, y) {
+export function hilbertIndex(n, x, y) {
   let d = 0;
   for (let s = n / 2; s > 0; s = Math.floor(s / 2)) {
     const rx = (x & s) > 0 ? 1 : 0;
     const ry = (y & s) > 0 ? 1 : 0;
     d += s * s * ((3 * rx) ^ ry);
-    [x, y] = pivoter(n, x, y, rx, ry);
+    [x, y] = rotate(n, x, y, rx, ry);
   }
   return d;
 }
@@ -79,53 +79,53 @@ export function indiceHilbert(n, x, y) {
  * des entiers exactement représentables en JavaScript et l'identifiant devient
  * faux silencieusement. Le MVP s'arrête au zoom 14.
  */
-export function identifiantTuile(z, x, y) {
+export function tileId(z, x, y) {
   if (!Number.isInteger(z) || z < 0 || z > 26) throw new Error(`zoom hors bornes : ${z}`);
   const n = 2 ** z;
   if (!Number.isInteger(x) || x < 0 || x >= n) throw new Error(`x hors bornes au zoom ${z} : ${x}`);
   if (!Number.isInteger(y) || y < 0 || y >= n) throw new Error(`y hors bornes au zoom ${z} : ${y}`);
-  return (4 ** z - 1) / 3 + indiceHilbert(n, x, y);
+  return (4 ** z - 1) / 3 + hilbertIndex(n, x, y);
 }
 
 // --------------------------------------------------- emprise vers tuiles
 
-const lonVersX = (lon, z) => Math.floor(((lon + 180) / 360) * 2 ** z);
+const lonToX = (lon, z) => Math.floor(((lon + 180) / 360) * 2 ** z);
 
-const latVersY = (lat, z) => {
+const latToY = (lat, z) => {
   const r = (lat * Math.PI) / 180;
   return Math.floor(((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * 2 ** z);
 };
 
 /** Les tuiles couvrant l'emprise, du zoom minimum au maximum, triées par identifiant. */
-export function tuilesCouvrantes() {
-  const liste = [];
+export function coveringTiles() {
+  const list = [];
   for (let z = ZOOM_MIN; z <= ZOOM_MAX; z += 1) {
     const n = 2 ** z;
-    const x0 = Math.max(0, lonVersX(EMPRISE.ouest, z));
-    const x1 = Math.min(n - 1, lonVersX(EMPRISE.est, z));
+    const x0 = Math.max(0, lonToX(EXTENT.west, z));
+    const x1 = Math.min(n - 1, lonToX(EXTENT.east, z));
     // Le nord donne le plus petit y : l'axe des tuiles descend.
-    const y0 = Math.max(0, latVersY(EMPRISE.nord, z));
-    const y1 = Math.min(n - 1, latVersY(EMPRISE.sud, z));
+    const y0 = Math.max(0, latToY(EXTENT.north, z));
+    const y1 = Math.min(n - 1, latToY(EXTENT.south, z));
     for (let x = x0; x <= x1; x += 1) {
       for (let y = y0; y <= y1; y += 1) {
-        liste.push({ z, x, y, id: identifiantTuile(z, x, y) });
+        list.push({ z, x, y, id: tileId(z, x, y) });
       }
     }
   }
-  liste.sort((a, b) => a.id - b.id);
-  return liste;
+  list.sort((a, b) => a.id - b.id);
+  return list;
 }
 
 // -------------------------------------------------------------------- PNG
 
-function morceauPng(type, donnees) {
-  const prefixe = Buffer.alloc(8);
-  prefixe.writeUInt32BE(donnees.length, 0);
-  prefixe.write(type, 4, "ascii");
+function pngChunk(type, data) {
+  const prefix = Buffer.alloc(8);
+  prefix.writeUInt32BE(data.length, 0);
+  prefix.write(type, 4, "ascii");
   const crc = Buffer.alloc(4);
   // Le CRC couvre le type et les données, pas la longueur.
-  crc.writeUInt32BE(zlib.crc32(Buffer.concat([prefixe.subarray(4), donnees])), 0);
-  return Buffer.concat([prefixe, donnees, crc]);
+  crc.writeUInt32BE(zlib.crc32(Buffer.concat([prefix.subarray(4), data])), 0);
+  return Buffer.concat([prefix, data, crc]);
 }
 
 /**
@@ -138,35 +138,35 @@ function morceauPng(type, donnees) {
  * Gris + alpha (type de couleur PNG 4) plutôt que RVBA : deux fois moins
  * d'octets pour un rendu identique ici, ce qui tient le fixture sous 200 Ko.
  */
-export function tuilePng(z, x, y) {
+export function pngTile(z, x, y) {
   const phase = (x + y) % 2;
   // Du plus sombre au plus clair quand on zoome : 5 paliers pour 5 niveaux.
-  const palier = Math.min(4, Math.max(0, z - ZOOM_MIN));
-  const sombre = 24 + palier * 7;
-  const clair = sombre + 16;
-  const lignes = [];
-  for (let py = 0; py < COTE_TUILE; py += 1) {
-    const ligne = Buffer.alloc(1 + COTE_TUILE * 2); // octet de filtre 0, puis (gris, alpha)
+  const step = Math.min(4, Math.max(0, z - ZOOM_MIN));
+  const dark = 24 + step * 7;
+  const light = dark + 16;
+  const lines = [];
+  for (let py = 0; py < TILE_SIDE; py += 1) {
+    const line = Buffer.alloc(1 + TILE_SIDE * 2); // octet de filtre 0, puis (gris, alpha)
     let o = 1;
-    for (let px = 0; px < COTE_TUILE; px += 1) {
-      const damier = (Math.floor(px / COTE_CELLULE) + Math.floor(py / COTE_CELLULE) + phase) % 2 === 0;
-      const bord = px < 2 || py < 2 || px > COTE_TUILE - 3 || py > COTE_TUILE - 3;
-      ligne[o] = bord ? 190 : damier ? sombre : clair;
-      ligne[o + 1] = 255;
+    for (let px = 0; px < TILE_SIDE; px += 1) {
+      const checker = (Math.floor(px / CELL_SIDE) + Math.floor(py / CELL_SIDE) + phase) % 2 === 0;
+      const edge = px < 2 || py < 2 || px > TILE_SIDE - 3 || py > TILE_SIDE - 3;
+      line[o] = edge ? 190 : checker ? dark : light;
+      line[o + 1] = 255;
       o += 2;
     }
-    lignes.push(ligne);
+    lines.push(line);
   }
   const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(COTE_TUILE, 0);
-  ihdr.writeUInt32BE(COTE_TUILE, 4);
+  ihdr.writeUInt32BE(TILE_SIDE, 0);
+  ihdr.writeUInt32BE(TILE_SIDE, 4);
   ihdr[8] = 8; // profondeur de bit
   ihdr[9] = 4; // type de couleur : gris + alpha
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    morceauPng("IHDR", ihdr),
-    morceauPng("IDAT", zlib.deflateSync(Buffer.concat(lignes), { level: 9 })),
-    morceauPng("IEND", Buffer.alloc(0)),
+    pngChunk("IHDR", ihdr),
+    pngChunk("IDAT", zlib.deflateSync(Buffer.concat(lines), { level: 9 })),
+    pngChunk("IEND", Buffer.alloc(0)),
   ]);
 }
 
@@ -179,45 +179,45 @@ export function tuilePng(z, x, y) {
  * Le nombre d'entrées est exigé par le §4.2 et lu en premier par le §4.3, mais
  * absent du pseudocode de l'annexe A.1. L'oublier produit une archive illisible.
  */
-export function encoderRepertoire(entrees) {
-  if (entrees.length === 0) throw new Error("un répertoire doit contenir au moins une entrée");
-  const octets = [];
-  ecrireVarint(octets, entrees.length);
-  let dernierId = 0;
-  for (const e of entrees) {
-    ecrireVarint(octets, e.id - dernierId);
-    dernierId = e.id;
+export function encodeDirectory(entries) {
+  if (entries.length === 0) throw new Error("un répertoire doit contenir au moins une entrée");
+  const bytes = [];
+  writeVarint(bytes, entries.length);
+  let lastId = 0;
+  for (const e of entries) {
+    writeVarint(bytes, e.id - lastId);
+    lastId = e.id;
   }
-  for (const e of entrees) ecrireVarint(octets, e.serie);
-  for (const e of entrees) ecrireVarint(octets, e.longueur);
-  let octetSuivant = 0;
-  for (const [i, e] of entrees.entries()) {
+  for (const e of entries) writeVarint(bytes, e.runLength);
+  for (const e of entries) writeVarint(bytes, e.length);
+  let nextByte = 0;
+  for (const [i, e] of entries.entries()) {
     // Un décalage contigu avec la tuile précédente s'écrit 0 ; sinon décalage + 1.
-    if (i > 0 && e.decalage === octetSuivant) ecrireVarint(octets, 0);
-    else ecrireVarint(octets, e.decalage + 1);
-    octetSuivant = e.decalage + e.longueur;
+    if (i > 0 && e.offset === nextByte) writeVarint(bytes, 0);
+    else writeVarint(bytes, e.offset + 1);
+    nextByte = e.offset + e.length;
   }
-  return Buffer.from(octets);
+  return Buffer.from(bytes);
 }
 
 // ---------------------------------------------------------------- en-tête
 
-function ecrirePosition(tampon, decalage, lon, lat) {
-  tampon.writeInt32LE(Math.round(lon * 1e7), decalage);
-  tampon.writeInt32LE(Math.round(lat * 1e7), decalage + 4);
+function writePosition(buffer, offset, lon, lat) {
+  buffer.writeInt32LE(Math.round(lon * 1e7), offset);
+  buffer.writeInt32LE(Math.round(lat * 1e7), offset + 4);
 }
 
 /** L'en-tête de 127 octets, disposition du §3.1 de la spécification. */
-export function encoderEntete(c) {
+export function encodeHeader(c) {
   const h = Buffer.alloc(127);
   h.write("PMTiles", 0, "ascii");
   h[7] = 3;
   const u64 = [
-    c.decalageRepertoireRacine, c.longueurRepertoireRacine,
-    c.decalageMetadonnees, c.longueurMetadonnees,
-    c.decalageRepertoiresFeuilles, c.longueurRepertoiresFeuilles,
-    c.decalageTuiles, c.longueurTuiles,
-    c.nbTuilesAdressees, c.nbEntreesTuiles, c.nbContenusTuiles,
+    c.rootDirectoryOffset, c.rootDirectoryLength,
+    c.metadataOffset, c.metadataLength,
+    c.leafDirectoriesOffset, c.leafDirectoriesLength,
+    c.tileDataOffset, c.tileDataLength,
+    c.addressedTilesCount, c.tileEntriesCount, c.tileContentsCount,
   ];
   u64.forEach((v, i) => h.writeBigUInt64LE(BigInt(v), 8 + i * 8));
   h[96] = 1; // groupé par identifiant
@@ -226,29 +226,29 @@ export function encoderEntete(c) {
   h[99] = 2; // type de tuile : PNG
   h[100] = ZOOM_MIN;
   h[101] = ZOOM_MAX;
-  ecrirePosition(h, 102, EMPRISE.ouest, EMPRISE.sud);
-  ecrirePosition(h, 110, EMPRISE.est, EMPRISE.nord);
-  h[118] = ZOOM_CENTRE;
-  ecrirePosition(h, 119, CENTRE.lon, CENTRE.lat);
+  writePosition(h, 102, EXTENT.west, EXTENT.south);
+  writePosition(h, 110, EXTENT.east, EXTENT.north);
+  h[118] = ZOOM_CENTER;
+  writePosition(h, 119, CENTER.lon, CENTER.lat);
   return h;
 }
 
 // -------------------------------------------------------------- assemblage
 
-export function construireArchive() {
-  const tuiles = tuilesCouvrantes();
+export function buildArchive() {
+  const tiles = coveringTiles();
   const blobs = [];
-  const entrees = [];
-  let decalage = 0;
-  for (const t of tuiles) {
-    const blob = tuilePng(t.z, t.x, t.y);
+  const entries = [];
+  let offset = 0;
+  for (const t of tiles) {
+    const blob = pngTile(t.z, t.x, t.y);
     blobs.push(blob);
-    entrees.push({ id: t.id, serie: 1, longueur: blob.length, decalage });
-    decalage += blob.length;
+    entries.push({ id: t.id, runLength: 1, length: blob.length, offset });
+    offset += blob.length;
   }
-  const donneesTuiles = Buffer.concat(blobs);
+  const tileData = Buffer.concat(blobs);
 
-  const metadonnees = zlib.gzipSync(
+  const metadata = zlib.gzipSync(
     Buffer.from(
       JSON.stringify({
         name: "Cassini — fond de recette, Villeneuve-le-Roi",
@@ -262,48 +262,48 @@ export function construireArchive() {
     ),
     { level: 9 },
   );
-  const repertoire = zlib.gzipSync(encoderRepertoire(entrees), { level: 9 });
+  const directory = zlib.gzipSync(encodeDirectory(entries), { level: 9 });
 
-  const decalageRepertoireRacine = 127;
-  const decalageMetadonnees = decalageRepertoireRacine + repertoire.length;
-  const decalageTuiles = decalageMetadonnees + metadonnees.length;
+  const rootDirectoryOffset = 127;
+  const metadataOffset = rootDirectoryOffset + directory.length;
+  const tileDataOffset = metadataOffset + metadata.length;
 
-  if (decalageMetadonnees > 16384) {
+  if (metadataOffset > 16384) {
     throw new Error(
-      `le répertoire racine dépasse les 16 384 premiers octets (${decalageMetadonnees}) : il faudrait des répertoires feuilles`,
+      `le répertoire racine dépasse les 16 384 premiers octets (${metadataOffset}) : il faudrait des répertoires feuilles`,
     );
   }
 
-  const entete = encoderEntete({
-    decalageRepertoireRacine,
-    longueurRepertoireRacine: repertoire.length,
-    decalageMetadonnees,
-    longueurMetadonnees: metadonnees.length,
-    decalageRepertoiresFeuilles: decalageTuiles,
-    longueurRepertoiresFeuilles: 0,
-    decalageTuiles,
-    longueurTuiles: donneesTuiles.length,
-    nbTuilesAdressees: entrees.length,
-    nbEntreesTuiles: entrees.length,
-    nbContenusTuiles: entrees.length,
+  const header = encodeHeader({
+    rootDirectoryOffset,
+    rootDirectoryLength: directory.length,
+    metadataOffset,
+    metadataLength: metadata.length,
+    leafDirectoriesOffset: tileDataOffset,
+    leafDirectoriesLength: 0,
+    tileDataOffset,
+    tileDataLength: tileData.length,
+    addressedTilesCount: entries.length,
+    tileEntriesCount: entries.length,
+    tileContentsCount: entries.length,
   });
 
-  return { archive: Buffer.concat([entete, repertoire, metadonnees, donneesTuiles]), tuiles };
+  return { archive: Buffer.concat([header, directory, metadata, tileData]), tiles };
 }
 
-function principal() {
-  const { archive, tuiles } = construireArchive();
-  mkdirSync(dirname(CHEMIN_SORTIE), { recursive: true });
-  writeFileSync(CHEMIN_SORTIE, archive);
-  const parZoom = {};
-  for (const t of tuiles) parZoom[t.z] = (parZoom[t.z] ?? 0) + 1;
-  console.log(`Fond de recette écrit : ${CHEMIN_SORTIE}`);
+function main() {
+  const { archive, tiles } = buildArchive();
+  mkdirSync(dirname(OUTPUT_PATH), { recursive: true });
+  writeFileSync(OUTPUT_PATH, archive);
+  const byZoom = {};
+  for (const t of tiles) byZoom[t.z] = (byZoom[t.z] ?? 0) + 1;
+  console.log(`Fond de recette écrit : ${OUTPUT_PATH}`);
   console.log(
-    `  ${tuiles.length} tuiles, zooms ${ZOOM_MIN} à ${ZOOM_MAX} (${Object.entries(parZoom)
+    `  ${tiles.length} tuiles, zooms ${ZOOM_MIN} à ${ZOOM_MAX} (${Object.entries(byZoom)
       .map(([z, n]) => `z${z}:${n}`)
       .join(", ")})`,
   );
   console.log(`  ${(archive.length / 1024).toFixed(1)} Ko, aucune requête réseau`);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) principal();
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) main();

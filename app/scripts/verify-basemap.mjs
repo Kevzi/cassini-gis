@@ -11,18 +11,18 @@ import { readFileSync, existsSync } from "node:fs";
 import zlib from "node:zlib";
 import { PMTiles, Compression, TileType, zxyToTileId } from "pmtiles";
 import {
-  CHEMIN_SORTIE,
-  CENTRE,
-  EMPRISE,
-  ZOOM_CENTRE,
+  OUTPUT_PATH,
+  CENTER,
+  EXTENT,
+  ZOOM_CENTER,
   ZOOM_MIN,
   ZOOM_MAX,
-  identifiantTuile,
-  tuilesCouvrantes,
-  construireArchive,
+  tileId,
+  coveringTiles,
+  buildArchive,
 } from "./generate-basemap.mjs";
 
-const SIGNATURE_PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 /**
  * Valide un PNG en parcourant ses morceaux et en recalculant leur CRC, puis en
@@ -30,28 +30,28 @@ const SIGNATURE_PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0
  * passer un octet corrompu au milieu des données : c'est arrivé pendant
  * l'écriture de cette story.
  */
-function pngValide(octets) {
-  if (!octets.subarray(0, 8).equals(SIGNATURE_PNG)) return "signature absente";
+function validatePng(bytes) {
+  if (!bytes.subarray(0, 8).equals(PNG_SIGNATURE)) return "signature absente";
   let i = 8;
-  const vus = [];
+  const seen = [];
   const idat = [];
-  while (i + 12 <= octets.length) {
-    const longueur = octets.readUInt32BE(i);
-    const type = octets.subarray(i + 4, i + 8).toString("ascii");
-    const fin = i + 8 + longueur;
-    if (fin + 4 > octets.length) return `morceau ${type} tronqué`;
-    const donnees = octets.subarray(i + 8, fin);
-    const crcLu = octets.readUInt32BE(fin);
-    const crcCalcule = zlib.crc32(Buffer.concat([octets.subarray(i + 4, i + 8), donnees]));
-    if (crcLu !== crcCalcule) return `CRC du morceau ${type} invalide`;
-    vus.push(type);
-    if (type === "IDAT") idat.push(donnees);
-    i = fin + 4;
+  while (i + 12 <= bytes.length) {
+    const length = bytes.readUInt32BE(i);
+    const type = bytes.subarray(i + 4, i + 8).toString("ascii");
+    const end = i + 8 + length;
+    if (end + 4 > bytes.length) return `morceau ${type} tronqué`;
+    const data = bytes.subarray(i + 8, end);
+    const crcRead = bytes.readUInt32BE(end);
+    const crcComputed = zlib.crc32(Buffer.concat([bytes.subarray(i + 4, i + 8), data]));
+    if (crcRead !== crcComputed) return `CRC du morceau ${type} invalide`;
+    seen.push(type);
+    if (type === "IDAT") idat.push(data);
+    i = end + 4;
     if (type === "IEND") break;
   }
-  if (i !== octets.length) return "octets en trop après IEND";
-  for (const attendu of ["IHDR", "IDAT", "IEND"]) {
-    if (!vus.includes(attendu)) return `morceau ${attendu} manquant`;
+  if (i !== bytes.length) return "octets en trop après IEND";
+  for (const expected of ["IHDR", "IDAT", "IEND"]) {
+    if (!seen.includes(expected)) return `morceau ${expected} manquant`;
   }
   try {
     zlib.inflateSync(Buffer.concat(idat));
@@ -61,212 +61,212 @@ function pngValide(octets) {
   return null;
 }
 
-let echecs = 0;
-const resultats = [];
+let failures = 0;
+const results = [];
 
-function verifier(nom, condition, detail = "") {
+function check(name, condition, detail = "") {
   if (condition) {
-    resultats.push(`  ok   ${nom}`);
+    results.push(`  ok   ${name}`);
   } else {
-    echecs += 1;
-    resultats.push(`  ÉCHEC ${nom}${detail ? ` — ${detail}` : ""}`);
+    failures += 1;
+    results.push(`  ÉCHEC ${name}${detail ? ` — ${detail}` : ""}`);
   }
 }
 
 /** Source PMTiles lisant un tampon en mémoire : aucun accès réseau, aucun fichier temporaire. */
-class SourceTampon {
-  constructor(tampon, cle) {
-    this.tampon = tampon;
-    this.cle = cle;
+class BufferSource {
+  constructor(buffer, key) {
+    this.buffer = buffer;
+    this.key = key;
   }
 
   getKey() {
-    return this.cle;
+    return this.key;
   }
 
-  async getBytes(decalage, longueur) {
-    const tranche = this.tampon.subarray(decalage, decalage + longueur);
-    if (tranche.byteLength !== longueur) {
+  async getBytes(offset, length) {
+    const slice = this.buffer.subarray(offset, offset + length);
+    if (slice.byteLength !== length) {
       // Sans ça une archive tronquée se lit à moitié et casse plus loin, de façon
       // inexplicable, au lieu d'échouer ici où la cause est visible.
       throw new Error(
-        `lecture courte à ${decalage} : ${tranche.byteLength} octets au lieu de ${longueur}, archive tronquée`,
+        `lecture courte à ${offset} : ${slice.byteLength} octets au lieu de ${length}, archive tronquée`,
       );
     }
     return {
-      data: tranche.buffer.slice(tranche.byteOffset, tranche.byteOffset + tranche.byteLength),
+      data: slice.buffer.slice(slice.byteOffset, slice.byteOffset + slice.byteLength),
     };
   }
 }
 
-async function principal() {
+async function main() {
   // --- Scénario : génération nominale -------------------------------------
-  if (!existsSync(CHEMIN_SORTIE)) {
+  if (!existsSync(OUTPUT_PATH)) {
     console.error(`Vérification du fond de recette : ÉCHEC, fichier absent.\n  Lance d'abord : npm run fixtures`);
     process.exit(1);
   }
-  const archive = readFileSync(CHEMIN_SORTIE);
-  verifier("l'archive dépasse 127 octets", archive.length > 127, `${archive.length} octets`);
-  verifier("la magie vaut PMTiles", archive.subarray(0, 7).toString("ascii") === "PMTiles");
-  verifier("la version de spécification vaut 3", archive[7] === 3, `lu : ${archive[7]}`);
-  verifier("l'archive pèse moins de 200 Ko", archive.length < 200 * 1024, `${(archive.length / 1024).toFixed(1)} Ko`);
+  const archive = readFileSync(OUTPUT_PATH);
+  check("l'archive dépasse 127 octets", archive.length > 127, `${archive.length} octets`);
+  check("la magie vaut PMTiles", archive.subarray(0, 7).toString("ascii") === "PMTiles");
+  check("la version de spécification vaut 3", archive[7] === 3, `lu : ${archive[7]}`);
+  check("l'archive pèse moins de 200 Ko", archive.length < 200 * 1024, `${(archive.length / 1024).toFixed(1)} Ko`);
 
   // --- Scénario : relecture par la bibliothèque ---------------------------
   // Aucun décompresseur fourni : on exerce volontairement le chemin par défaut
   // de la bibliothèque, celui que la carte empruntera à l'entrée 1.3.
-  const pmtiles = new PMTiles(new SourceTampon(archive, CHEMIN_SORTIE));
-  const entete = await pmtiles.getHeader();
-  verifier("la bibliothèque lit l'en-tête", entete.specVersion === 3);
-  verifier(
+  const pmtiles = new PMTiles(new BufferSource(archive, OUTPUT_PATH));
+  const header = await pmtiles.getHeader();
+  check("la bibliothèque lit l'en-tête", header.specVersion === 3);
+  check(
     "l'en-tête occupe exactement 127 octets",
-    entete.rootDirectoryOffset === 127,
-    `le répertoire racine commence à ${entete.rootDirectoryOffset}`,
+    header.rootDirectoryOffset === 127,
+    `le répertoire racine commence à ${header.rootDirectoryOffset}`,
   );
-  verifier("le type de tuile est PNG", entete.tileType === TileType.Png, `lu : ${entete.tileType}`);
-  verifier("la compression interne est gzip", entete.internalCompression === Compression.Gzip);
-  verifier("les tuiles ne sont pas compressées", entete.tileCompression === Compression.None);
-  verifier("l'archive est groupée par identifiant", entete.clustered === true);
+  check("le type de tuile est PNG", header.tileType === TileType.Png, `lu : ${header.tileType}`);
+  check("la compression interne est gzip", header.internalCompression === Compression.Gzip);
+  check("les tuiles ne sont pas compressées", header.tileCompression === Compression.None);
+  check("l'archive est groupée par identifiant", header.clustered === true);
 
   // --- Scénario : zoom hors bornes ---------------------------------------
-  verifier("le zoom minimum annoncé est correct", entete.minZoom === ZOOM_MIN, `lu : ${entete.minZoom}`);
-  verifier("le zoom maximum annoncé est correct", entete.maxZoom === ZOOM_MAX, `lu : ${entete.maxZoom}`);
-  const sousBorne = await pmtiles.getZxy(ZOOM_MIN - 1, 0, 0);
-  verifier("une tuile sous le zoom minimum est absente sans exception", sousBorne === undefined);
-  const surBorne = await pmtiles.getZxy(ZOOM_MAX + 1, 0, 0);
-  verifier("une tuile au-delà du zoom maximum est absente sans exception", surBorne === undefined);
+  check("le zoom minimum annoncé est correct", header.minZoom === ZOOM_MIN, `lu : ${header.minZoom}`);
+  check("le zoom maximum annoncé est correct", header.maxZoom === ZOOM_MAX, `lu : ${header.maxZoom}`);
+  const belowBound = await pmtiles.getZxy(ZOOM_MIN - 1, 0, 0);
+  check("une tuile sous le zoom minimum est absente sans exception", belowBound === undefined);
+  const aboveBound = await pmtiles.getZxy(ZOOM_MAX + 1, 0, 0);
+  check("une tuile au-delà du zoom maximum est absente sans exception", aboveBound === undefined);
 
   // --- Emprise annoncée ---------------------------------------------------
-  const proche = (a, b) => Math.abs(a - b) < 1e-6;
+  const near = (a, b) => Math.abs(a - b) < 1e-6;
   const style = JSON.parse(readFileSync(new URL("../src/basemap.style.json", import.meta.url), "utf8"));
-  const anneau = style.sources?.repere?.data?.features?.[0]?.geometry?.coordinates?.[0] ?? [];
-  const lons = anneau.map((c) => c[0]);
-  const lats = anneau.map((c) => c[1]);
-  verifier(
+  const ring = style.sources?.marker?.data?.features?.[0]?.geometry?.coordinates?.[0] ?? [];
+  const lons = ring.map((c) => c[0]);
+  const lats = ring.map((c) => c[1]);
+  check(
     "l'emprise du fond est bien celle du repère lu dans basemap.style.json",
-    anneau.length > 0 &&
-      proche(Math.min(...lons), entete.minLon) &&
-      proche(Math.max(...lons), entete.maxLon) &&
-      proche(Math.min(...lats), entete.minLat) &&
-      proche(Math.max(...lats), entete.maxLat),
-    anneau.length === 0 ? "repère introuvable dans le style" : `style : ${Math.min(...lons)},${Math.min(...lats)} → ${Math.max(...lons)},${Math.max(...lats)}`,
+    ring.length > 0 &&
+      near(Math.min(...lons), header.minLon) &&
+      near(Math.max(...lons), header.maxLon) &&
+      near(Math.min(...lats), header.minLat) &&
+      near(Math.max(...lats), header.maxLat),
+    ring.length === 0 ? "repère introuvable dans le style" : `style : ${Math.min(...lons)},${Math.min(...lats)} → ${Math.max(...lons)},${Math.max(...lats)}`,
   );
-  verifier(
+  check(
     "l'emprise annoncée correspond aux constantes du générateur",
-    proche(entete.minLon, EMPRISE.ouest) &&
-      proche(entete.minLat, EMPRISE.sud) &&
-      proche(entete.maxLon, EMPRISE.est) &&
-      proche(entete.maxLat, EMPRISE.nord),
-    `lu : ${entete.minLon},${entete.minLat} → ${entete.maxLon},${entete.maxLat}`,
+    near(header.minLon, EXTENT.west) &&
+      near(header.minLat, EXTENT.south) &&
+      near(header.maxLon, EXTENT.east) &&
+      near(header.maxLat, EXTENT.north),
+    `lu : ${header.minLon},${header.minLat} → ${header.maxLon},${header.maxLat}`,
   );
 
   // --- Centre annoncé : jamais contrôlé jusqu'ici, or une inversion
   // --- longitude/latitude à l'écriture passerait inaperçue ------------------
-  verifier(
+  check(
     "le centre annoncé est celui d'ouverture de la carte",
-    proche(entete.centerLon, CENTRE.lon) && proche(entete.centerLat, CENTRE.lat),
-    `lu : ${entete.centerLon}, ${entete.centerLat}`,
+    near(header.centerLon, CENTER.lon) && near(header.centerLat, CENTER.lat),
+    `lu : ${header.centerLon}, ${header.centerLat}`,
   );
-  verifier("le zoom central annoncé est correct", entete.centerZoom === ZOOM_CENTRE, `lu : ${entete.centerZoom}`);
+  check("le zoom central annoncé est correct", header.centerZoom === ZOOM_CENTER, `lu : ${header.centerZoom}`);
 
   // --- Métadonnées --------------------------------------------------------
-  const metadonnees = await pmtiles.getMetadata();
-  verifier("les métadonnées se relisent et annoncent le format png", metadonnees?.format === "png");
+  const metadata = await pmtiles.getMetadata();
+  check("les métadonnées se relisent et annoncent le format png", metadata?.format === "png");
 
   // --- Scénario : identifiant de tuile connu -----------------------------
-  verifier(
+  check(
     "l'identifiant de référence de la spécification est retrouvé",
-    identifiantTuile(12, 3423, 1763) === 19078479,
-    `calculé : ${identifiantTuile(12, 3423, 1763)}`,
+    tileId(12, 3423, 1763) === 19078479,
+    `calculé : ${tileId(12, 3423, 1763)}`,
   );
-  const tuiles = tuilesCouvrantes();
-  const desaccords = tuiles.filter((t) => identifiantTuile(t.z, t.x, t.y) !== zxyToTileId(t.z, t.x, t.y));
-  verifier(
+  const tiles = coveringTiles();
+  const mismatches = tiles.filter((t) => tileId(t.z, t.x, t.y) !== zxyToTileId(t.z, t.x, t.y));
+  check(
     "notre calcul d'identifiant concorde avec celui de la bibliothèque sur les 35 tuiles",
-    desaccords.length === 0,
-    desaccords.length > 0 ? `${desaccords.length} désaccords, dont z${desaccords[0].z}/${desaccords[0].x}/${desaccords[0].y}` : "",
+    mismatches.length === 0,
+    mismatches.length > 0 ? `${mismatches.length} désaccords, dont z${mismatches[0].z}/${mismatches[0].x}/${mismatches[0].y}` : "",
   );
-  verifier(
+  check(
     "le nombre de tuiles annoncé par l'en-tête correspond",
-    entete.numAddressedTiles === tuiles.length,
-    `en-tête : ${entete.numAddressedTiles}, attendu : ${tuiles.length}`,
+    header.numAddressedTiles === tiles.length,
+    `en-tête : ${header.numAddressedTiles}, attendu : ${tiles.length}`,
   );
 
   // --- Chaque tuile annoncée est servie et est un PNG valide -------------
-  let servies = 0;
-  let malFormees = 0;
-  let premierProbleme = null;
-  let premiereManquante = null;
-  for (const t of tuiles) {
-    const reponse = await pmtiles.getZxy(t.z, t.x, t.y);
-    if (!reponse) {
-      if (!premiereManquante) premiereManquante = `z${t.z}/${t.x}/${t.y}`;
+  let served = 0;
+  let malformed = 0;
+  let firstProblem = null;
+  let firstMissing = null;
+  for (const t of tiles) {
+    const response = await pmtiles.getZxy(t.z, t.x, t.y);
+    if (!response) {
+      if (!firstMissing) firstMissing = `z${t.z}/${t.x}/${t.y}`;
       continue;
     }
-    servies += 1;
-    const octets = Buffer.from(reponse.data);
-    const probleme = pngValide(octets);
-    if (probleme) {
-      malFormees += 1;
-      if (!premierProbleme) premierProbleme = `z${t.z}/${t.x}/${t.y} : ${probleme}`;
+    served += 1;
+    const bytes = Buffer.from(response.data);
+    const problem = validatePng(bytes);
+    if (problem) {
+      malformed += 1;
+      if (!firstProblem) firstProblem = `z${t.z}/${t.x}/${t.y} : ${problem}`;
     }
   }
-  verifier(
+  check(
     "chaque tuile annoncée est servie",
-    servies === tuiles.length,
-    `${servies} sur ${tuiles.length}${premiereManquante ? `, première manquante ${premiereManquante}` : ""}`,
+    served === tiles.length,
+    `${served} sur ${tiles.length}${firstMissing ? `, première manquante ${firstMissing}` : ""}`,
   );
-  verifier(
+  check(
     "chaque tuile servie est un PNG valide, CRC et IDAT compris",
-    malFormees === 0,
-    `${malFormees} mal formées${premierProbleme ? `, dont ${premierProbleme}` : ""}`,
+    malformed === 0,
+    `${malformed} mal formées${firstProblem ? `, dont ${firstProblem}` : ""}`,
   );
 
   // --- Scénario : hors de l'emprise --------------------------------------
-  const horsEmprise = await pmtiles.getZxy(12, 0, 0);
-  verifier("une tuile hors de l'emprise est absente sans exception", horsEmprise === undefined);
+  const outsideExtent = await pmtiles.getZxy(12, 0, 0);
+  check("une tuile hors de l'emprise est absente sans exception", outsideExtent === undefined);
 
   // --- Scénario : déterminisme -------------------------------------------
-  const refaite = construireArchive().archive;
-  verifier(
+  const rebuilt = buildArchive().archive;
+  check(
     "deux générations donnent le même fichier, octet pour octet",
-    refaite.equals(archive),
-    `${refaite.length} contre ${archive.length} octets`,
+    rebuilt.equals(archive),
+    `${rebuilt.length} contre ${archive.length} octets`,
   );
 
   // --- Le vérificateur sait-il échouer ? -------------------------------
   // Un garde-fou qu'on n'a jamais vu refuser quelque chose ne garde rien. On le
   // met donc en échec exprès, en mémoire, sans toucher au fichier du dépôt.
-  const tuileSaine = Buffer.from((await pmtiles.getZxy(tuiles[0].z, tuiles[0].x, tuiles[0].y)).data);
-  verifier("le validateur PNG accepte une tuile saine", pngValide(tuileSaine) === null);
-  const corrompue = Buffer.from(tuileSaine);
-  corrompue[corrompue.length - 20] ^= 0xff; // au milieu de l'IDAT, pas dans l'en-tête
-  verifier(
+  const healthyTile = Buffer.from((await pmtiles.getZxy(tiles[0].z, tiles[0].x, tiles[0].y)).data);
+  check("le validateur PNG accepte une tuile saine", validatePng(healthyTile) === null);
+  const corrupted = Buffer.from(healthyTile);
+  corrupted[corrupted.length - 20] ^= 0xff; // au milieu de l'IDAT, pas dans l'en-tête
+  check(
     "le validateur PNG refuse un octet corrompu",
-    pngValide(corrompue) !== null,
+    validatePng(corrupted) !== null,
     "un octet inversé dans l'IDAT a été accepté : le garde-fou ne garde rien",
   );
-  const tronquee = tuileSaine.subarray(0, tuileSaine.length - 10);
-  verifier("le validateur PNG refuse une tuile tronquée", pngValide(tronquee) !== null);
-  verifier("le validateur PNG refuse une signature absente", pngValide(Buffer.alloc(40)) !== null);
+  const truncated = healthyTile.subarray(0, healthyTile.length - 10);
+  check("le validateur PNG refuse une tuile tronquée", validatePng(truncated) !== null);
+  check("le validateur PNG refuse une signature absente", validatePng(Buffer.alloc(40)) !== null);
 
   // --- Rapport ------------------------------------------------------------
-  const parZoom = {};
-  for (const t of tuiles) parZoom[t.z] = (parZoom[t.z] ?? 0) + 1;
+  const byZoom = {};
+  for (const t of tiles) byZoom[t.z] = (byZoom[t.z] ?? 0) + 1;
   console.log(
-    echecs === 0
-      ? `Vérification du fond de recette : OK, ${resultats.length} contrôles.`
-      : `Vérification du fond de recette : ÉCHEC, ${echecs} contrôle(s) sur ${resultats.length}.`,
+    failures === 0
+      ? `Vérification du fond de recette : OK, ${results.length} contrôles.`
+      : `Vérification du fond de recette : ÉCHEC, ${failures} contrôle(s) sur ${results.length}.`,
   );
-  for (const l of resultats) if (echecs > 0 || l.startsWith("  ÉCHEC")) console.log(l);
+  for (const l of results) if (failures > 0 || l.startsWith("  ÉCHEC")) console.log(l);
   console.log(
-    `  ${tuiles.length} tuiles, zooms ${ZOOM_MIN} à ${ZOOM_MAX} (${Object.entries(parZoom)
+    `  ${tiles.length} tuiles, zooms ${ZOOM_MIN} à ${ZOOM_MAX} (${Object.entries(byZoom)
       .map(([z, n]) => `z${z}:${n}`)
       .join(", ")}), ${(archive.length / 1024).toFixed(1)} Ko`,
   );
-  if (echecs > 0) process.exit(1);
+  if (failures > 0) process.exit(1);
 }
 
-principal().catch((e) => {
+main().catch((e) => {
   console.error(`Vérification du fond de recette : ÉCHEC, exception inattendue.\n  ${e.message}`);
   process.exit(1);
 });
