@@ -17,27 +17,24 @@ use tauri::Manager;
 /// **Unique endroit du code qui porte ce chemin.** Il vaut aussi pour le dépôt :
 /// `tauri.conf.json > bundle > resources` copie `fixtures/…` de la racine du
 /// dépôt vers `$RESOURCE/fixtures/…`, donc la même chaîne sert au repli de
-/// développement. `app/scripts/verify-protocole.mjs` vérifie cette concordance.
-const CHEMIN_DE_LARCHIVE: &str = "fixtures/basemap-villeneuve-le-roi.pmtiles";
+/// développement. `app/scripts/verify-protocol.mjs` vérifie cette concordance.
+const ARCHIVE_PATH: &str = "fixtures/basemap-villeneuve-le-roi.pmtiles";
 
 /// Version du moteur, pour vérifier de bout en bout que le pont fonctionne.
 #[tauri::command]
-fn version_du_moteur() -> String {
+fn engine_version() -> String {
     cassini_core::VERSION.to_string()
 }
 
 /// Les emplacements où chercher l'archive, dans l'ordre.
 ///
 /// Le choix lui-même vit dans le moteur
-/// (`BasemapSource::depuis_le_premier_emplacement`), qui est testé ; ici il n'y
+/// (`BasemapSource::from_first_location`), qui est testé ; ici il n'y
 /// a que la construction de la liste, parce qu'elle dépend de Tauri.
-fn emplacements_candidats(app: &tauri::AppHandle) -> Vec<PathBuf> {
-    let mut candidats: Vec<PathBuf> = Vec::new();
-    if let Ok(dans_les_ressources) = app
-        .path()
-        .resolve(CHEMIN_DE_LARCHIVE, BaseDirectory::Resource)
-    {
-        candidats.push(dans_les_ressources);
+fn candidate_locations(app: &tauri::AppHandle) -> Vec<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(in_resources) = app.path().resolve(ARCHIVE_PATH, BaseDirectory::Resource) {
+        candidates.push(in_resources);
     }
     // Repli de développement seulement : `cargo tauri dev` ne passe pas par
     // l'installeur. Ce chemin vient de `CARGO_MANIFEST_DIR`, donc de la machine
@@ -45,14 +42,14 @@ fn emplacements_candidats(app: &tauri::AppHandle) -> Vec<PathBuf> {
     // à faire dans un message montré à l'utilisateur, d'où la condition.
     if cfg!(debug_assertions) {
         // `app/src-tauri` → `..` → `app` → `..` → racine du dépôt.
-        candidats.push(
+        candidates.push(
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("..")
                 .join("..")
-                .join(CHEMIN_DE_LARCHIVE),
+                .join(ARCHIVE_PATH),
         );
     }
-    candidats
+    candidates
 }
 
 /// Lit une plage d'octets de l'archive du fond de carte.
@@ -64,26 +61,19 @@ fn emplacements_candidats(app: &tauri::AppHandle) -> Vec<PathBuf> {
 /// Le retour est un `tauri::ipc::Response`, qui traverse l'IPC en binaire, là où
 /// un `Vec<u8>` serait sérialisé en tableau JSON.
 #[tauri::command]
-fn lire_le_fond_de_carte(
-    app: tauri::AppHandle,
-    decalage: u64,
-    longueur: u64,
-) -> Result<Response, String> {
-    let source = BasemapSource::depuis_le_premier_emplacement(&emplacements_candidats(&app))
-        .map_err(|erreur| erreur.to_string())?;
-    let octets = source
-        .lire_plage(decalage, longueur)
-        .map_err(|erreur| erreur.to_string())?;
-    Ok(Response::new(octets))
+fn read_basemap(app: tauri::AppHandle, offset: u64, length: u64) -> Result<Response, String> {
+    let source = BasemapSource::from_first_location(&candidate_locations(&app))
+        .map_err(|error| error.to_string())?;
+    let bytes = source
+        .read_range(offset, length)
+        .map_err(|error| error.to_string())?;
+    Ok(Response::new(bytes))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![
-            version_du_moteur,
-            lire_le_fond_de_carte
-        ])
+        .invoke_handler(tauri::generate_handler![engine_version, read_basemap])
         .run(tauri::generate_context!())
         .expect("le lancement de la fenêtre Cassini a échoué");
 }

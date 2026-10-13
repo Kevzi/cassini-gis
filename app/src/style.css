@@ -1,7 +1,7 @@
 :root {
-  --fond: #11151a;
-  --texte: #e8e8e4;
-  --bord: #2c3238;
+  --background: #11151a;
+  --text: #e8e8e4;
+  --border: #2c3238;
 }
 * {
   box-sizing: border-box;
@@ -10,25 +10,25 @@ html,
 body {
   margin: 0;
   height: 100%;
-  background: var(--fond);
-  color: var(--texte);
+  background: var(--background);
+  color: var(--text);
   font:
     14px/1.5 -apple-system,
     "Segoe UI",
     Roboto,
     sans-serif;
 }
-#carte {
+#map {
   position: absolute;
   inset: 0;
 }
-#etat {
+#status {
   position: absolute;
   left: 12px;
   bottom: 12px;
   z-index: 10;
   padding: 6px 12px;
-  border: 1px solid var(--bord);
+  border: 1px solid var(--border);
   border-radius: 6px;
   background: rgba(17, 21, 26, 0.85);
   font-variant-numeric: tabular-nums;

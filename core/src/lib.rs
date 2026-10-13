@@ -13,7 +13,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn la_version_est_renseignee() {
+    fn the_version_is_set() {
         assert!(!VERSION.is_empty());
     }
 }

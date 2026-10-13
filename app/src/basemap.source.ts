@@ -20,10 +20,10 @@ import type { RangeResponse, Source } from "pmtiles";
  * clé qu'il ne connaît pas le fait fabriquer un `FetchSource`, c'est-à-dire une
  * requête réseau, sans un mot dans la console.
  */
-export const CLE_DU_FOND = "cassini-fond-de-recette";
+export const BASEMAP_KEY = "cassini-basemap-fixture";
 
 /** Commande du moteur qui sert les octets de l'archive. */
-const COMMANDE = "lire_le_fond_de_carte";
+const COMMAND = "read_basemap";
 
 /**
  * Lecteur de l'archive locale pour la bibliothèque pmtiles.
@@ -32,9 +32,9 @@ const COMMANDE = "lire_le_fond_de_carte";
  * un fichier local servi par l'IPC n'a pas d'étiquette de version, et la
  * bibliothèque ne passe que ce qu'une source lui a d'abord renvoyé.
  */
-export class SourceFondDeCarte implements Source {
+export class BasemapSource implements Source {
   /**
-   * @param signalerEchec reçoit le message du moteur quand la lecture échoue,
+   * @param reportFailure reçoit le message du moteur quand la lecture échoue,
    * par exemple quand l'archive a été renommée ou supprimée.
    *
    * C'est le **seul** chemin par lequel un échec du fond de carte est rapporté.
@@ -42,26 +42,26 @@ export class SourceFondDeCarte implements Source {
    * marquée chargée avant que l'erreur ne soit émise, donc `load` suit
    * immédiatement et recouvrirait le message.
    */
-  constructor(private readonly signalerEchec: (message: string) => void) {}
+  constructor(private readonly reportFailure: (message: string) => void) {}
 
   getKey(): string {
-    return CLE_DU_FOND;
+    return BASEMAP_KEY;
   }
 
-  async getBytes(decalage: number, longueur: number, signal?: AbortSignal): Promise<RangeResponse> {
+  async getBytes(offset: number, length: number, signal?: AbortSignal): Promise<RangeResponse> {
     signal?.throwIfAborted();
-    const octets = await this.demander(decalage, longueur);
+    const bytes = await this.request(offset, length);
     signal?.throwIfAborted();
-    return { data: octets };
+    return { data: bytes };
   }
 
   /** L'appel au moteur, isolé pour ne rapporter que ses échecs à lui. */
-  private async demander(decalage: number, longueur: number): Promise<ArrayBuffer> {
+  private async request(offset: number, length: number): Promise<ArrayBuffer> {
     try {
-      return await invoke<ArrayBuffer>(COMMANDE, { decalage, longueur });
-    } catch (erreur) {
-      const message = erreur instanceof Error ? erreur.message : String(erreur);
-      this.signalerEchec(message);
+      return await invoke<ArrayBuffer>(COMMAND, { offset, length });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.reportFailure(message);
       throw new Error(message);
     }
   }

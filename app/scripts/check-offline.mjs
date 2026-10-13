@@ -26,19 +26,19 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const ICI = dirname(fileURLToPath(import.meta.url));
-export const CHEMIN_DU_STYLE = join(ICI, "..", "src", "basemap.style.json");
-export const CHEMIN_DE_LA_SOURCE = join(ICI, "..", "src", "basemap.source.ts");
-export const DOSSIER_DU_CODE = join(ICI, "..", "src");
-export const PAGE_DE_LA_FENETRE = join(ICI, "..", "index.html");
+const HERE = dirname(fileURLToPath(import.meta.url));
+export const STYLE_PATH = join(HERE, "..", "src", "basemap.style.json");
+export const SOURCE_PATH = join(HERE, "..", "src", "basemap.source.ts");
+export const CODE_DIR = join(HERE, "..", "src");
+export const WINDOW_PAGE = join(HERE, "..", "index.html");
 
 /** Les extensions de fichiers servis à la fenêtre, donc passés au crible. */
-const EXTENSIONS_CRIBLEES = [".ts", ".tsx", ".js", ".mjs", ".css", ".html"];
+const SCREENED_EXTENSIONS = [".ts", ".tsx", ".js", ".mjs", ".css", ".html"];
 
-const PREFIXE = "pmtiles://";
+const PREFIX = "pmtiles://";
 
 /** `glyphs` et `sprite` : les deux portes de sortie classiques d'un style MapLibre. */
-const CLES_A_SURVEILLER = ["glyphs", "sprite"];
+const KEYS_TO_WATCH = ["glyphs", "sprite"];
 
 /**
  * La clé du fond de carte, relue dans le seul fichier qui la déclare.
@@ -46,20 +46,20 @@ const CLES_A_SURVEILLER = ["glyphs", "sprite"];
  * Une extraction par expression régulière plutôt qu'un import : ce script est du
  * JavaScript brut lancé par Node, il ne peut pas importer un module TypeScript.
  */
-export function cleDuFond(chemin = CHEMIN_DE_LA_SOURCE) {
-  const code = readFileSync(chemin, "utf8");
-  const trouve = code.match(/export const CLE_DU_FOND = "([^"]+)"/);
-  if (!trouve) {
+export function basemapKey(path = SOURCE_PATH) {
+  const code = readFileSync(path, "utf8");
+  const found = code.match(/export const BASEMAP_KEY = "([^"]+)"/);
+  if (!found) {
     throw new Error(
-      `clé du fond introuvable dans ${chemin} : la garde ne peut rien vérifier sans elle`,
+      `clé du fond introuvable dans ${path} : la garde ne peut rien vérifier sans elle`,
     );
   }
-  return trouve[1];
+  return found[1];
 }
 
 /** Les deux seules formes de `pmtiles://` tolérées : l'archive, et son gabarit de tuile. */
-function formesAutorisees(cle) {
-  return [`${PREFIXE}${cle}`, `${PREFIXE}${cle}/{z}/{x}/{y}`];
+function allowedForms(key) {
+  return [`${PREFIX}${key}`, `${PREFIX}${key}/{z}/{x}/{y}`];
 }
 
 /**
@@ -67,50 +67,50 @@ function formesAutorisees(cle) {
  *
  * Fonction pure : c'est elle que les cas négatifs mettent en échec exprès.
  */
-export function fauteDeChaine(valeur, cle) {
-  const bas = valeur.toLowerCase();
-  if (bas.startsWith(PREFIXE)) {
-    const reste = valeur.slice(PREFIXE.length);
-    if (reste.includes("://") || reste.startsWith("//")) {
-      return `adresse distante imbriquée derrière ${PREFIXE} : ${valeur}`;
+export function stringFault(value, key) {
+  const lower = value.toLowerCase();
+  if (lower.startsWith(PREFIX)) {
+    const rest = value.slice(PREFIX.length);
+    if (rest.includes("://") || rest.startsWith("//")) {
+      return `adresse distante imbriquée derrière ${PREFIX} : ${value}`;
     }
-    if (!formesAutorisees(cle).includes(valeur)) {
-      return `clé inconnue derrière ${PREFIXE} (attendu « ${cle} ») : ${valeur} — Protocol en ferait un FetchSource, donc une requête réseau`;
+    if (!allowedForms(key).includes(value)) {
+      return `clé inconnue derrière ${PREFIX} (attendu « ${key} ») : ${value} — Protocol en ferait un FetchSource, donc une requête réseau`;
     }
     return null;
   }
-  if (bas.includes("://") || bas.startsWith("//")) {
-    return `adresse réseau : ${valeur}`;
+  if (lower.includes("://") || lower.startsWith("//")) {
+    return `adresse réseau : ${value}`;
   }
   return null;
 }
 
 /** Les fautes d'un style MapLibre, parcouru valeur par valeur. */
-export function analyserStyle(style, cle) {
-  const fautes = [];
+export function analyzeStyle(style, key) {
+  const faults = [];
 
-  const parcourir = (valeur, trace) => {
-    if (typeof valeur === "string") {
-      const faute = fauteDeChaine(valeur, cle);
-      if (faute) fautes.push(`${trace} : ${faute}`);
+  const walk = (value, trace) => {
+    if (typeof value === "string") {
+      const fault = stringFault(value, key);
+      if (fault) faults.push(`${trace} : ${fault}`);
       return;
     }
-    if (Array.isArray(valeur)) {
-      valeur.forEach((v, i) => parcourir(v, `${trace}[${i}]`));
+    if (Array.isArray(value)) {
+      value.forEach((v, i) => walk(v, `${trace}[${i}]`));
       return;
     }
-    if (valeur && typeof valeur === "object") {
-      for (const [k, v] of Object.entries(valeur)) parcourir(v, `${trace}.${k}`);
+    if (value && typeof value === "object") {
+      for (const [k, v] of Object.entries(value)) walk(v, `${trace}.${k}`);
     }
   };
-  parcourir(style, "style");
+  walk(style, "style");
 
-  for (const k of CLES_A_SURVEILLER) {
+  for (const k of KEYS_TO_WATCH) {
     if (style && typeof style === "object" && k in style) {
-      fautes.push(`style.${k} est défini : vérifier qu'il est local (${style[k]})`);
+      faults.push(`style.${k} est défini : vérifier qu'il est local (${style[k]})`);
     }
   }
-  return fautes;
+  return faults;
 }
 
 /**
@@ -123,18 +123,18 @@ export function analyserStyle(style, cle) {
  *
  * Le « au moins un caractère » laisse passer un schéma nu cité en commentaire,
  * comme `pmtiles://` dans une explication : il ne charge rien. Dans un style, en
- * revanche, un schéma nu reste une faute, et `analyserStyle` le refuse.
+ * revanche, un schéma nu reste une faute, et `analyzeStyle` le refuse.
  */
-export function analyserCode(texte, trace, cle) {
-  const fautes = [];
-  for (const [brut] of texte.matchAll(/\b[a-z][a-z0-9+.-]*:\/\/[^\s"'`),]+/gi)) {
-    const faute = fauteDeChaine(brut, cle);
-    if (faute) fautes.push(`${trace} : ${faute}`);
+export function analyzeCode(text, trace, key) {
+  const faults = [];
+  for (const [raw] of text.matchAll(/\b[a-z][a-z0-9+.-]*:\/\/[^\s"'`),]+/gi)) {
+    const fault = stringFault(raw, key);
+    if (fault) faults.push(`${trace} : ${fault}`);
   }
-  for (const [brut] of texte.matchAll(/[("'`]\/\/[^\s"'`)]+/g)) {
-    fautes.push(`${trace} : adresse réseau relative au protocole : ${brut}`);
+  for (const [raw] of text.matchAll(/[("'`]\/\/[^\s"'`)]+/g)) {
+    faults.push(`${trace} : adresse réseau relative au protocole : ${raw}`);
   }
-  return fautes;
+  return faults;
 }
 
 /**
@@ -143,36 +143,36 @@ export function analyserCode(texte, trace, cle) {
  * Parcours **récursif** : un sous-dossier ajouté plus tard est passé au crible
  * sans que personne ait à y penser.
  */
-export function fichiersDeCode(dossier = DOSSIER_DU_CODE, page = PAGE_DE_LA_FENETRE) {
-  const parcourir = (d) =>
+export function codeFiles(dir = CODE_DIR, page = WINDOW_PAGE) {
+  const walk = (d) =>
     readdirSync(d, { withFileTypes: true })
       .sort((a, b) => a.name.localeCompare(b.name))
       .flatMap((e) =>
         e.isDirectory()
-          ? parcourir(join(d, e.name))
-          : EXTENSIONS_CRIBLEES.some((x) => e.name.endsWith(x))
+          ? walk(join(d, e.name))
+          : SCREENED_EXTENSIONS.some((x) => e.name.endsWith(x))
             ? [join(d, e.name)]
             : [],
       );
-  return [page, ...parcourir(dossier)];
+  return [page, ...walk(dir)];
 }
 
 // ------------------------------------------------------------- cas négatifs
 
 // Un garde-fou qu'on n'a jamais vu refuser quelque chose ne garde rien. Ces cas
 // vivent en mémoire : ils ne touchent aucun fichier du dépôt.
-const sourceRaster = (adresse) => ({
+const rasterSource = (address) => ({
   version: 8,
-  sources: { fond: { type: "raster", url: adresse, tileSize: 256 } },
+  sources: { basemap: { type: "raster", url: address, tileSize: 256 } },
   layers: [],
 });
 
-const CAS_NEGATIFS_STYLE = [
-  ["une source distante en clair", sourceRaster("https://tuiles.exemple.fr/{z}/{x}/{y}.png")],
-  ["une adresse relative au protocole", sourceRaster("//tuiles.exemple.fr/{z}/{x}/{y}.png")],
-  ["une adresse distante imbriquée derrière pmtiles://", sourceRaster(`${PREFIXE}https://exemple.fr/f.pmtiles`)],
-  ["une clé inconnue derrière pmtiles://", sourceRaster(`${PREFIXE}une-autre-cle`)],
-  ["un gabarit de tuile sur une autre clé", sourceRaster(`${PREFIXE}une-autre-cle/{z}/{x}/{y}`)],
+const NEGATIVE_STYLE_CASES = [
+  ["une source distante en clair", rasterSource("https://tuiles.exemple.fr/{z}/{x}/{y}.png")],
+  ["une adresse relative au protocole", rasterSource("//tuiles.exemple.fr/{z}/{x}/{y}.png")],
+  ["une adresse distante imbriquée derrière pmtiles://", rasterSource(`${PREFIX}https://exemple.fr/f.pmtiles`)],
+  ["une clé inconnue derrière pmtiles://", rasterSource(`${PREFIX}une-autre-cle`)],
+  ["un gabarit de tuile sur une autre clé", rasterSource(`${PREFIX}une-autre-cle/{z}/{x}/{y}`)],
   ["des glyphes", { version: 8, glyphs: "fonts/{fontstack}/{range}.pbf", sources: {}, layers: [] }],
   ["un sprite", { version: 8, sprite: "sprites/base", sources: {}, layers: [] }],
   ["une adresse cachée au fond d'une expression", {
@@ -182,11 +182,11 @@ const CAS_NEGATIFS_STYLE = [
   }],
 ];
 
-const CAS_NEGATIFS_CODE = [
+const NEGATIVE_CODE_CASES = [
   ["un fetch distant", 'await fetch("https://exemple.fr/f.pmtiles");'],
   ["une adresse relative au protocole", 'const u = "//exemple.fr/f.pmtiles";'],
-  ["une autre clé pmtiles", `const u = "${PREFIXE}une-autre-cle";`],
-  ["une adresse distante imbriquée", `const u = "${PREFIXE}https://exemple.fr/f.pmtiles";`],
+  ["une autre clé pmtiles", `const u = "${PREFIX}une-autre-cle";`],
+  ["une adresse distante imbriquée", `const u = "${PREFIX}https://exemple.fr/f.pmtiles";`],
   ["une feuille de style qui importe une police distante", "@import url(https://exemple.fr/police.css);"],
   ["une feuille de style relative au protocole", "@import url(//exemple.fr/police.css);"],
   ["une image de fond distante", "body { background: url(https://exemple.fr/fond.png); }"],
@@ -195,63 +195,63 @@ const CAS_NEGATIFS_CODE = [
 
 // ------------------------------------------------------------------ rapport
 
-function principal() {
-  const cle = cleDuFond();
-  const style = JSON.parse(readFileSync(CHEMIN_DU_STYLE, "utf8"));
+function main() {
+  const key = basemapKey();
+  const style = JSON.parse(readFileSync(STYLE_PATH, "utf8"));
 
-  const fautes = analyserStyle(style, cle);
-  const fichiers = fichiersDeCode();
-  for (const chemin of fichiers) {
-    fautes.push(...analyserCode(readFileSync(chemin, "utf8"), chemin, cle));
+  const faults = analyzeStyle(style, key);
+  const files = codeFiles();
+  for (const path of files) {
+    faults.push(...analyzeCode(readFileSync(path, "utf8"), path, key));
   }
 
   // La clé doit apparaître dans le style, sinon la garde valide un style qui ne
   // charge rien, ou qui charge autre chose.
-  const adresses = [];
-  const collecter = (v) => {
+  const addresses = [];
+  const collect = (v) => {
     if (typeof v === "string") {
-      if (v.toLowerCase().startsWith(PREFIXE)) adresses.push(v);
-    } else if (Array.isArray(v)) v.forEach(collecter);
-    else if (v && typeof v === "object") Object.values(v).forEach(collecter);
+      if (v.toLowerCase().startsWith(PREFIX)) addresses.push(v);
+    } else if (Array.isArray(v)) v.forEach(collect);
+    else if (v && typeof v === "object") Object.values(v).forEach(collect);
   };
-  collecter(style);
-  if (!adresses.includes(`${PREFIXE}${cle}`)) {
-    fautes.push(
-      `aucune source du style ne vaut ${PREFIXE}${cle} : la clé du code et celle du style ont divergé (vu : ${adresses.join(", ") || "aucune"})`,
+  collect(style);
+  if (!addresses.includes(`${PREFIX}${key}`)) {
+    faults.push(
+      `aucune source du style ne vaut ${PREFIX}${key} : la clé du code et celle du style ont divergé (vu : ${addresses.join(", ") || "aucune"})`,
     );
   }
 
   // Les cas négatifs : la garde doit refuser chacun d'eux.
-  const manques = [];
-  for (const [nom, cas] of CAS_NEGATIFS_STYLE) {
-    if (analyserStyle(cas, cle).length === 0) manques.push(`style — ${nom}`);
+  const gaps = [];
+  for (const [name, testCase] of NEGATIVE_STYLE_CASES) {
+    if (analyzeStyle(testCase, key).length === 0) gaps.push(`style — ${name}`);
   }
-  for (const [nom, texte] of CAS_NEGATIFS_CODE) {
-    if (analyserCode(texte, "cas", cle).length === 0) manques.push(`code — ${nom}`);
+  for (const [name, text] of NEGATIVE_CODE_CASES) {
+    if (analyzeCode(text, "cas", key).length === 0) gaps.push(`code — ${name}`);
   }
   // …et accepter la forme légitime, sinon elle refuserait tout, ce qui ne prouve
   // rien non plus.
-  for (const forme of formesAutorisees(cle)) {
-    if (fauteDeChaine(forme, cle) !== null) manques.push(`forme légitime refusée — ${forme}`);
+  for (const form of allowedForms(key)) {
+    if (stringFault(form, key) !== null) gaps.push(`forme légitime refusée — ${form}`);
   }
 
-  if (manques.length > 0) {
+  if (gaps.length > 0) {
     console.error("Garde hors ligne : ÉCHEC, la garde ne sait pas refuser :");
-    for (const m of manques) console.error(`  - ${m}`);
+    for (const g of gaps) console.error(`  - ${g}`);
     process.exit(1);
   }
-  if (fautes.length > 0) {
+  if (faults.length > 0) {
     console.error("Garde hors ligne : ÉCHEC, le réseau est désigné.");
-    for (const f of fautes) console.error(`  - ${f}`);
+    for (const f of faults) console.error(`  - ${f}`);
     process.exit(1);
   }
 
   console.log(
-    `Garde hors ligne : OK, ${Object.keys(style.sources).length} source(s) de style et ${fichiers.length} fichier(s) servi(s) à la fenêtre, aucune adresse réseau.`,
+    `Garde hors ligne : OK, ${Object.keys(style.sources).length} source(s) de style et ${files.length} fichier(s) servi(s) à la fenêtre, aucune adresse réseau.`,
   );
   console.log(
-    `  seule exception admise : ${PREFIXE}${cle}, et ${CAS_NEGATIFS_STYLE.length + CAS_NEGATIFS_CODE.length} cas négatifs sont refusés comme prévu.`,
+    `  seule exception admise : ${PREFIX}${key}, et ${NEGATIVE_STYLE_CASES.length + NEGATIVE_CODE_CASES.length} cas négatifs sont refusés comme prévu.`,
   );
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) principal();
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) main();
