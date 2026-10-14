@@ -1,5 +1,8 @@
 # Documentation
 
+- `../README.md` — la présentation du dépôt : ce qui marche aujourd'hui,
+  l'architecture en schémas, le rôle de chaque dossier, le démarrage rapide et la
+  recette. À lire en premier quand on découvre le projet.
 - `../CLAUDE.md` — source de vérité du projet (vision, principes, architecture).
 - `../_bmad-output/initiative-cassini-mvp/spec-cassini-mvp/` — le contrat machine
   (capacités CAP-n, contraintes, non-objectifs) dont tout développement découle.
