@@ -41,10 +41,11 @@ Frontière par activité : l'empaquetage et la mise en ligne. Le README d'archit
 - parent — `_bmad-output/initiative-cassini-mvp/initiative-cassini-mvp.md`, section Requirements
 - spec — `../spec-cassini-mvp/spec-cassini-mvp.md`, section Capabilities
 - constraint — `CLAUDE.md` §10 licence, §2.7 rien de militaire dans le dépôt public
+- spine — `../architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md`, AD-17 distribution en deux artefacts et ordre de recherche du noyau, et l'enveloppe d'exploitation
 
 ## Notes
 
 - Decision: le README d'architecture avec schémas Mermaid est avancé à l'epic 1, cet epic ne portant que l'installation et l'usage (2026-10-09).
 - Decision: le dépôt d'extensions QGIS devient le canal de distribution principal ; l'installeur d'application autonome disparaît du MVP avec la V2 (2026-10-14).
-- Unknown: le dépôt d'extensions QGIS n'acceptera pas plusieurs Go de modèle GGUF ; le chemin de livraison du modèle sur poste isolé reste à trancher. Question ouverte de la spec.
+- Decision: distribution en deux artefacts — l'extension au dépôt d'extensions QGIS, sans binaire et sous 25 Mo ; un paquet Cassini par système (Windows, macOS, Linux) qui installe le noyau et, en option, le modèle. Le noyau seul découvre les modèles. Une clé USB portant les deux suffit sur un poste isolé. Contrat d'architecture, AD-17 (propriétaire, 2026-10-14).
 - Waits on epic 6 because: il n'y a rien à filmer ni à documenter avant que le scénario de démo passe.

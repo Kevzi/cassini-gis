@@ -66,12 +66,17 @@ assumé comme tel.
 - spec — `../spec-cassini-mvp/spec-cassini-mvp.md`, CAP-4, CAP-6 et section Open Questions
 - change — `../change-facade-qgis-avant-app-autonome/change-facade-qgis-avant-app-autonome.md`, sections 2.2 et 4 : pourquoi cet epic passe en premier
 - constraint — `CLAUDE.md` §2.5 hors ligne total, §2.8 indépendance des fournisseurs d'IA
+- spine — `../architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md`, AD-8, AD-9, AD-15, AD-19, AD-22, AD-23, Consistency Conventions et Deferred (forme de l'invite et du plan rendu)
 
 ## Notes
 
 - Decision: cet epic passe avant le registre et l'agent, parce que la promesse du produit était planifiée en dernier et conditionne tout le reste (propriétaire, 2026-10-14).
 - Decision: pas de passe de nettoyage de clôture dans cet epic, le code étant jetable et hors du produit (2026-10-14).
 - Unknown: quel modèle (Mistral ou Qwen), quelle quantification, et quelle configuration minimale de RAM et de CPU — c'est précisément ce que cet epic mesure. Question ouverte de la spec.
-- Unknown: comment le modèle GGUF, qui pèse plusieurs Go, est livré sur un poste isolé. L'épreuve ne le tranche pas mais nourrit la réponse. Question ouverte de la spec.
+- Decision: la livraison du modèle sur poste isolé est tranchée par le contrat d'architecture, AD-17 : un paquet Cassini installé à part le porte, jamais l'archive de l'extension (2026-10-14).
+- Decision: l'épreuve appelle la version compilée de llama.cpp (MIT) en ligne de commande, comme programme séparé, sans mode serveur ni port ouvert ; le harnais est en Python, bibliothèque standard seule. Écart assumé avec AD-15, qui charge le modèle dans le processus du noyau : limité à ce code jetable, la compilation de `llama-cpp-2` sous Windows restant un risque de l'epic 5 (propriétaire, 2026-10-14).
+- Decision: le code de l'épreuve vit dans `tests/epreuve-modele-local/`, hors des crates et de `qgis-plugin` ; les fichiers de modèle GGUF ne sont jamais versés au dépôt (2026-10-14).
+- Decision: re-découpage du 2026-10-14 pour aligner les entrées sur le contrat d'architecture, aucune n'étant commencée ; identifiants conservés. Traceur : l'entrée 1, un modèle qui répond hors ligne. Séquencement : 1 et 2 en parallèle, puis 3, puis 4 et 5 en parallèle, puis 6 (propriétaire, 2026-10-14).
+- Assumption: la forme de `layer.describe` et de l'inventaire de projet est inventée par l'entrée 2 pour les besoins de la mesure ; le vrai contrat de ces commandes appartient à l'epic 2.
 - Assumption: un catalogue de commandes typées suffit au modèle, qui n'a jamais besoin de voir les données elles-mêmes. C'est l'hypothèse que l'épreuve valide ou casse.
 - Waits on rien : l'épreuve ne dépend que d'un poste et d'un modèle téléchargé une fois.

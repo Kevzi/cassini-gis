@@ -63,12 +63,14 @@ n'est écrite dans le Python.
 - spec — `../spec-cassini-mvp/spec-cassini-mvp.md`, CAP-13, CAP-9, CAP-10, CAP-3, CAP-5 et section Constraints
 - change — `../change-facade-qgis-avant-app-autonome/change-facade-qgis-avant-app-autonome.md`, sections 3.2 et 3.3
 - constraint — `CLAUDE.md` §2.3 l'extension est en GPL et vit séparée, §2.4 le noyau tourne sans QGIS, §2.7 agent-first
+- spine — `../architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md`, AD-1 à AD-5, AD-7, AD-12, AD-14, AD-17, AD-18, AD-22 et la séquence de la phrase de démonstration
 
 ## Notes
 
-- Unknown: la forme du canal local entre l'extension et le noyau — entrée et sortie standard, socket local, ou fichiers d'échange. Elle porte l'argument juridique du §2.3, donc elle se tranche avant la première entrée de cet epic. Question ouverte de la spec.
-- Unknown: la version plancher de QGIS visée et la surface de l'API PyQGIS réellement nécessaire. Question ouverte de la spec.
-- Unknown: le dessin du panneau. L'expérience devient un panneau ancré dans un outil d'expert, alors que l'argument de vente est qu'un opérateur non cartographe obtient sa réponse en parlant. À esquisser avant la première entrée.
+- Decision: le canal local est l'entrée et la sortie standard d'un processus enfant lancé par l'extension, en JSON-RPC 2.0, un message par ligne, dans les deux sens ; aucune socket, aucun port, aucun fichier d'échange. Tranché par le contrat d'architecture, AD-2 et AD-3 (propriétaire, 2026-10-14).
+- Decision: une seule extension pour QGIS 3.44 LTR à 4.99, tout accès à Qt passant par le shim `qgis.PyQt`. Contrat d'architecture, AD-18 (propriétaire, 2026-10-14).
+- Unknown: la surface de l'API PyQGIS réellement nécessaire, à fixer geste par geste avec les commandes déléguées. Question ouverte de la spec.
+- Unknown: le dessin du panneau. L'expérience devient un panneau ancré dans un outil d'expert, alors que l'argument de vente est qu'un opérateur non cartographe obtient sa réponse en parlant. À esquisser avant la première entrée, par `bmad-ux` comme le reporte le contrat d'architecture.
 - Decision: l'extension est en GPL, QGIS l'étant ; ce n'est pas un choix mais une conséquence, et le module défense s'appuiera donc sur le noyau et non sur elle (2026-10-14).
 - Open question: la confirmation juridique de la frontière GPL est à obtenir avant toute vente, pas avant d'écrire du code.
 - Waits on epic 2 because: l'extension ne peut consommer le registre avant que son contrat existe.

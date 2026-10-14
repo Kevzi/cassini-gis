@@ -60,6 +60,7 @@ pas.
 - spec — `../spec-cassini-mvp/spec-cassini-mvp.md`, CAP-6 et CAP-7
 - change — `../change-facade-qgis-avant-app-autonome/change-facade-qgis-avant-app-autonome.md`, section 2.3 : pourquoi le format de projet disparaît et le journal reste
 - constraint — `CLAUDE.md` §2.4 le noyau tourne sans QGIS, §2.7 agent-first, §4 registre de commandes
+- spine — `../architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md`, AD-6, AD-8 à AD-11, AD-13, AD-21, AD-22 et Consistency Conventions
 
 ## Notes
 
@@ -67,6 +68,6 @@ pas.
 - Decision: le format de projet Cassini est abandonné au MVP ; le projet est un projet QGIS et le noyau écrit son journal à côté (2026-10-14).
 - Decision: une commande déclare son exécutant — Rust dans le noyau, ou délégation à QGIS — jamais implicitement et jamais les deux (2026-10-14).
 - Unknown: la forme des descriptions et des schémas de paramètres dépend du verdict de l'epic 8, qui mesure ce qu'un modèle local sait lire. À relire avant l'inception.
-- Unknown: quels systèmes de coordonnées au-delà de Lambert-93 et WGS84, et si MGRS entre au MVP — question ouverte de la spec.
+- Decision: QGIS possède les systèmes de coordonnées du vecteur et exécute la reprojection ; le noyau ne reprojette pas et toute coordonnée traverse le canal avec son code EPSG. MGRS est hors MVP. Contrat d'architecture, AD-19, et non-objectif de la spec (2026-10-14).
 - Waits on epic 1 because: le registre a besoin du workspace, du verrou hors ligne dans le moteur et de la recette.
 - Waits on epic 8 because: la forme des descriptions de commandes se rédige d'après ce que l'épreuve du modèle local aura retenu.
