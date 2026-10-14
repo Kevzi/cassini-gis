@@ -86,7 +86,7 @@ title = "Passe de nettoyage"
 description = "Reprend ce que les entrees precedentes ont laisse de cote : son perimetre est fixe a son demarrage, a partir des plans et des constats de revue reportes pendant l'epic. Ne supprime ni /app ni /fixtures : le premier est la fondation de la V2 autonome, le second prouve le verrou hors ligne."
 verify = "La recette passe au vert apres la passe, et aucun constat reporte ne reste ouvert sans decision ecrite."
 covers = []
-after = [2, 3, 4, 5, 6, 8]
+after = [2, 3, 4, 5, 6, 8, 9, 10]
 hitl = false
 risk = "low"
 
@@ -101,3 +101,16 @@ after = [5]
 hitl = false
 risk = "low"
 notes = ["Bloque la poussee sur GitHub : le depot public afficherait sinon une feuille de route abandonnee."]
+
+[[entry]]
+id = 10
+type = "story"
+title = "Mettre le README au contrat d'architecture"
+description = "Remet le README racine en accord avec le contrat d'architecture du 2026-10-14 : canal tranche (entree et sortie standard, JSON-RPC 2.0, dans les deux sens), dossier /cli et binaire cassini, plancher QGIS 3.44 a 4.99, distribution en deux artefacts, lecture du MNT par le noyau, et lien vers le contrat ; sans toucher au reste."
+verify = "Le README ne dit plus nulle part que la forme du canal reste a trancher, ses schemas montrent le canal stdin/stdout et le binaire cassini sous /cli, le tableau des dossiers porte /cli, et chaque fait qu'il ajoute se retrouve dans le contrat d'architecture sous un AD-n."
+covers = ["E5"]
+after = [9]
+hitl = false
+risk = "low"
+references = ["../architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md, AD-2, AD-3, AD-13, AD-17, AD-18, AD-20, Structural Seed et Arborescence"]
+notes = ["Le proprietaire, le 2026-10-14 : le README n'est pas a jour sur GitHub. A pousser avec le contrat, la spec et les tickets du meme jour."]
