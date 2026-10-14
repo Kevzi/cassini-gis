@@ -7,6 +7,10 @@
 > Dossier de recherche : `_bmad-output/initiative-cassini-mvp/research-sig-francais-hors-ligne-pour-la-defense/`.
 > Virage du 2026-10-14, qui explique l'organisation actuelle :
 > `_bmad-output/initiative-cassini-mvp/change-facade-qgis-avant-app-autonome/change-facade-qgis-avant-app-autonome.md`.
+>
+> Contrat d'architecture, qui fixe les invariants de la frontière entre le noyau
+> et l'extension, et ne se re-décide pas en passant :
+> `_bmad-output/initiative-cassini-mvp/architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md`.
 
 ## 1. Vision
 
@@ -57,7 +61,10 @@ code existant reste au dépôt comme fondation.
    noyau ne lie jamais QGIS, et les deux communiquent **à distance de bras, par
    processus séparé**. Passer par QGIS ne lève pas le principe 2 : QGIS embarque
    GDAL et GEOS de son côté, l'extension les utilise dans le processus de QGIS,
-   le noyau ne les lie jamais.
+   le noyau ne les lie jamais. Le canal ne porte que des messages publics et
+   documentés — identifiants, chemins, paramètres à schéma JSON, résultats typés —
+   et jamais une structure de données interne : la FAQ de la FSF réserve le cas
+   d'un échange assez intime pour que deux programmes n'en fassent qu'un.
 4. **Le noyau tourne sans QGIS.** Il se lance, s'exécute et se teste seul. C'est
    ce qui fonde l'argument juridique du principe 3 et ce qui rend la V2
    autonome possible. Toute dépendance du noyau envers QGIS est un bug.
@@ -84,28 +91,36 @@ code existant reste au dépôt comme fondation.
 ## 3. Architecture
 
 ```
-┌──────────────────────────────────────────────┐
-│  QGIS  (GPL — fourni, pas écrit ici)         │
-│  carte, formats, projet, analyses, mise en page│
-│  ┌────────────────────────────────────────┐  │
-│  │  Extension Cassini (Python, GPL)       │  │
-│  │  panneau de conversation, appels       │  │
-│  └──────────────┬─────────────────────────┘  │
-└─────────────────┼────────────────────────────┘
-                  │ canal local, processus séparé
-┌─────────────────▼────────────────────────────┐
-│  Noyau Cassini (Rust, Apache-2.0)            │
-│  ┌────────────────────────────────────────┐  │
-│  │  Registre de commandes                 │  │
-│  │  ← UI, CLI, agent local, serveur MCP   │  │
-│  └──┬──────────────┬──────────────┬───────┘  │
-│     │              │              │          │
-│  ┌──▼───────┐ ┌────▼──────┐ ┌─────▼───────┐  │
-│  │ Terrain  │ │ Journal   │ │ Couche IA   │  │
-│  │ (MNT)    │ │ rejouable │ │ llama.cpp + │  │
-│  │          │ │           │ │ serveur MCP │  │
-│  └──────────┘ └───────────┘ └─────────────┘  │
-└──────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────┐
+│  QGIS  (GPL — fourni, pas écrit ici)               │
+│  carte, formats, projet, analyses, mise en page    │
+│  ┌──────────────────────────────────────────────┐  │
+│  │  Extension Cassini (Python, GPL)             │  │
+│  │  panneau + exécutant des gestes QGIS,        │  │
+│  │  aucune logique métier, aucune décision      │  │
+│  └───────────────────┬──────────────────────────┘  │
+└──────────────────────┼─────────────────────────────┘
+                       │  JSON-RPC 2.0, un message par ligne,
+                       │  sur l'entrée et la sortie standard,
+                       │  dans les deux sens. Processus enfant
+                       │  lancé par l'extension. Aucun réseau.
+┌──────────────────────▼─────────────────────────────┐
+│  Noyau Cassini (Rust, Apache-2.0)                  │
+│  ┌──────────────────────────────────────────────┐  │
+│  │  /cli — binaire cassini                      │  │
+│  │  serve · mcp · run · replay                  │  │
+│  └───────────────────┬──────────────────────────┘  │
+│  ┌───────────────────▼──────────────────────────┐  │
+│  │  /core — Registre de commandes               │  │
+│  │  la boucle d'exécution vit ici               │  │
+│  └──┬────────────────┬────────────────┬────────┘   │
+│    │                 │                 │           │
+│  ┌──▼────────┐ ┌──────▼──────┐ ┌────────▼───────┐  │
+│  │ Terrain   │ │ Journal     │ │ /ai — modèle   │  │
+│  │ MNT, /core│ │ rejouable   │ │ GGUF lié au    │  │
+│  │           │ │ /core       │ │ processus      │  │
+│  └───────────┘ └─────────────┘ └────────────────┘  │
+└────────────────────────────────────────────────────┘
 ```
 
 - **Extension** : Python et PyQGIS. Un panneau ancré dans QGIS. Aucune logique
@@ -114,10 +129,23 @@ code existant reste au dépôt comme fondation.
   réimplémentée depuis `whitebox_next_gen` (MIT OR Apache-2.0), qui est en Rust.
   La géométrie vectorielle et la lecture des formats sont déléguées à QGIS au
   MVP ; la crate `geo` ne redevient nécessaire qu'avec la V2 autonome.
-- **Canal local** : forme non encore tranchée (question ouverte de la spec). Elle
-  porte l'argument juridique du §2.3, donc elle se décide avant l'extension.
-- **IA locale** : modèle open source (Mistral ou Qwen, quantifié GGUF) servi par
-  llama.cpp.
+- **Canal local** : tranché le 2026-10-14. L'extension lance le binaire du noyau
+  comme **processus enfant** et dialogue par son entrée et sa sortie standard, en
+  JSON-RPC 2.0, un message par ligne, **dans les deux sens**. Aucune socket,
+  aucun port, aucun fichier d'échange.
+- **Qui décide** : le noyau tient la boucle. Il compose le plan, le fait valider,
+  puis dicte une étape à la fois et journalise la réponse. L'extension n'enchaîne
+  jamais deux commandes d'elle-même.
+- **Plancher QGIS** : une seule extension pour les deux séries,
+  `qgisMinimumVersion=3.44` et `qgisMaximumVersion=4.99`, tout accès à Qt passant
+  par le shim `qgis.PyQt`. Aucun import direct de PyQt5 ni de PyQt6.
+- **Distribution** : l'extension au dépôt d'extensions de QGIS, sans binaire et
+  sous 25 Mo — le dépôt l'exige ; le binaire du noyau et le modèle dans un paquet
+  Cassini installé à part, que l'extension localise dans un ordre fixé, sans
+  jamais rien télécharger.
+- **IA locale** : modèle open source (Mistral ou Qwen, quantifié GGUF) chargé
+  **dans le processus du noyau** par llama.cpp lié en bibliothèque — jamais un
+  serveur HTTP, qui rouvrirait une interface réseau.
 - **IA externe (optionnel)** : serveur MCP qui expose le registre de commandes.
 - **Reporté en V2** : la coquille Tauri v2 et la carte MapLibre, sous `/app`.
   Testées et conservées, hors du chemin critique.
@@ -236,6 +264,10 @@ Ne commence pas une étape tant que la précédente n'est pas testée et commit�
 - **Ne jamais pousser dans ce dépôt public une fonction conçue pour l'usage
   militaire** (voir §2.9).
 - Sur GitHub, on ne pousse que `main` ; les branches d'entrée restent locales.
+- Les invariants d'architecture sont fixés dans le contrat d'architecture cité en
+  tête de ce fichier, sous des références stables (`AD-1` à `AD-23`). On les cite,
+  on ne les re-décide pas : une décision qui en contredit une se signale avant
+  d'agir.
 - Si quelque chose ne marche pas après deux essais, s'arrêter et expliquer le
   problème au lieu d'empiler des correctifs.
 
@@ -249,14 +281,19 @@ Ne commence pas une étape tant que la précédente n'est pas testée et commit�
 - Structure du dépôt :
 
 ```
-/core         noyau Rust : registre de commandes, terrain, journal
+/core         crate cassini-core : registre de commandes, terrain, journal
+/cli          crate cassini : binaire unique — serve, mcp, run, replay
 /qgis-plugin  extension QGIS (Python, GPL) — l'interface du MVP
-/ai           couche IA (llama.cpp, serveur MCP)
+/ai           crate cassini-ai : modèle local lié, planification
 /app          coquille Tauri + carte MapLibre — reporté en V2, conservé
 /fixtures     jeux de données de test, légers, pour la recette
 /docs         documentation, feuille de route
 /tests        tests d'intégration et scénario de démo
 ```
+
+Le binaire vit dans `/cli` parce qu'il a besoin du noyau **et** de la couche IA,
+alors que `/core` ne doit pas dépendre de `/ai` : le module défense privé et la V2
+autonome doivent pouvoir prendre le registre et le terrain sans l'IA.
 
 ## 10. Licence
 
