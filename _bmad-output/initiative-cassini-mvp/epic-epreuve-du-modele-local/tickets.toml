@@ -1,0 +1,72 @@
+# tickets.toml — epic 8, epreuve du modele local sur registre factice.
+# L'ordre des tables est l'ordre de construction. `id` nomme une entree pour de bon.
+# Tout le code de cet epic est jetable et vit hors du chemin de compilation du produit.
+
+[[entry]]
+id = 1
+type = "spike"
+title = "Faire repondre un modele quantifie hors ligne sur le poste"
+description = "Installe llama.cpp sur le poste Windows du proprietaire, y sert un modele open source quantifie, et obtient une reponse cable reseau debranche."
+verify = "Le proprietaire pose une question en francais au modele, obtient une reponse, et le gestionnaire de taches ne montre aucune connexion sortante."
+covers = ["E1"]
+after = []
+hitl = true
+risk = "high"
+notes = ["Traceur de l'epic : le chemin le plus mince, un modele qui parle sur la machine sans reseau. Rien ne peut etre mesure avant."]
+
+[[entry]]
+id = 2
+type = "story"
+title = "Registre factice et jeu de phrases de reference"
+description = "Ecrit une quinzaine de commandes factices typees, avec id, descriptions fr et en et schema JSON de parametres, et vingt-cinq phrases francaises de reference portant chacune le plan attendu."
+verify = "Chaque phrase de reference porte un plan attendu non ambigu, et deux relectures independantes donnent le meme plan attendu pour chaque phrase."
+covers = ["E2"]
+after = []
+hitl = false
+risk = "medium"
+notes = ["Les commandes factices imitent la forme prevue par CAP-6 sans rien implementer : c'est la forme qui est mesuree, pas le calcul."]
+
+[[entry]]
+id = 3
+type = "story"
+title = "Harnais de mesure du taux de plans corrects"
+description = "Donne le catalogue factice et une phrase au modele, recupere le plan propose, le compare au plan attendu et sort un taux par jeu d'essai."
+verify = "Le harnais rejoue les vingt-cinq phrases d'un coup et imprime un taux, et un plan volontairement faux est bien compte comme faux."
+covers = ["E3"]
+after = [1, 2]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 4
+type = "story"
+title = "Comparer modeles et quantifications"
+description = "Mesure au moins deux modeles et au moins deux quantifications avec le harnais, en relevant pour chacun le taux, la memoire occupee et le temps de reponse."
+verify = "Un tableau donne taux, RAM et temps par combinaison essayee, sur le meme jeu de vingt-cinq phrases."
+covers = ["E3"]
+after = [3]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 5
+type = "story"
+title = "Eprouver les formes de sollicitation"
+description = "Compare les manieres de presenter le catalogue au modele : complet ou filtre, avec ou sans exemples, sortie JSON contrainte ou libre."
+verify = "Le harnais donne un taux par forme de sollicitation, sur le meme modele et la meme quantification, et la meilleure forme est identifiee."
+covers = ["E4"]
+after = [3]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 6
+type = "story"
+title = "Verdict ecrit et recommandation"
+description = "Tranche par ecrit : oui, non, ou oui sous conditions, en nommant le modele, la quantification, la configuration minimale et la forme de sollicitation retenues, ou en documentant l'echec."
+verify = "Le document permet au proprietaire de decider seul si les epics 2 et 5 partent, et l'epic 2 peut y lire comment rediger ses descriptions de commandes."
+covers = ["E3", "E4"]
+after = [4, 5]
+hitl = true
+risk = "low"
+notes = ["C'est la sortie de l'epic. Si le verdict est non, le plan du projet est revu avant d'engager l'epic 2."]

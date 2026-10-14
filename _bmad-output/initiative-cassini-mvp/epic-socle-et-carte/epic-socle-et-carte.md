@@ -1,6 +1,6 @@
 ---
 type: epic
-title: "Socle technique et carte hors ligne"
+title: "Socle technique, verrou hors ligne et recette"
 parent: initiative-cassini-mvp
 covers: [CAP-1]
 after: []
@@ -8,7 +8,7 @@ assignee: ""
 risk: medium
 ---
 
-# Socle technique et carte hors ligne
+# Socle technique, verrou hors ligne et recette
 
 ## Description
 
@@ -50,9 +50,9 @@ que la recette passe au vert sans intervention à chaque poussée.
 
 ## Boundaries
 
-Frontière par couche technique : le workspace, la coquille, la carte, la recette.
-Pas de notion de projet, pas d'import de données de l'utilisateur, pas de
-commande métier — c'est l'epic 2. Pas de raster : c'est l'epic 4.
+Frontière par couche technique : le workspace, le verrou hors ligne, la carte de
+départ et la recette. Pas de registre de commandes — c'est l'epic 2. Pas
+d'extension QGIS — c'est l'epic 9. Pas de terrain — c'est l'epic 4.
 
 ## References
 
@@ -69,3 +69,9 @@ commande métier — c'est l'epic 2. Pas de raster : c'est l'epic 4.
 - Unknown: d'où viendra le fond de carte en production — apporté par l'utilisateur, livré avec l'app, ou aucun par défaut. L'entrée 3 travaille sur le fond de recette d'ici là.
 - Le traceur est l'entrée 1 : le chemin le plus mince qui traverse le moteur Rust, la coquille Tauri, la webview et MapLibre. Elle est faite.
 - Les entrées 2, 5 et 6 ne partagent aucun fichier et peuvent avancer en parallèle.
+- Decision: le virage du 2026-10-14 sort la carte MapLibre et la coquille Tauri du chemin
+  critique du MVP, mais cet epic reste livre tel quel : son travail est fait et son verrou
+  hors ligne sert aux deux scenarios. `/app` reste au depot comme fondation de V2.
+- Decision: l'entree 7, passe de nettoyage, ne doit **pas** supprimer `/app` ni `/fixtures` :
+  tous deux sont conserves, le premier comme fondation de V2, le second parce qu'il prouve
+  le verrou hors ligne (2026-10-14).

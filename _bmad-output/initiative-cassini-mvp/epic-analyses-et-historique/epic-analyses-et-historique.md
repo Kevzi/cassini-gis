@@ -2,11 +2,15 @@
 type: epic
 title: "Analyses vectorielles et historique rejouable"
 parent: initiative-cassini-mvp
-covers: [CAP-3, CAP-7]
+covers: []
 after: []
 assignee: ""
+status: dropped
 risk: medium
 ---
+
+> **Epic retire le 2026-10-14.** Conserve comme trace ; son id n'est jamais
+> reattribue. Contenu ci-dessous laisse tel qu'il etait au moment du retrait.
 
 # Analyses vectorielles et historique rejouable
 
@@ -41,6 +45,12 @@ Frontière par capacité : les analyses sur géométries vectorielles, et l'hist
 - constraint — `CLAUDE.md` §2.2 pas de GPL ni LGPL : la géométrie passe par la crate `geo`, jamais par GEOS
 
 ## Notes
+
+- Dropped: retire le 2026-10-14 par le virage vers la facade QGIS. CAP-3, les analyses
+  vectorielles, part a l'epic 9 ou elle est executee par le cadre de traitement de QGIS ;
+  CAP-7, le journal rejouable, part a l'epic 2 dont elle est l'autre moitie. Rien n'etait
+  construit dans cet epic, le retrait ne coute rien. Voir
+  `../change-facade-qgis-avant-app-autonome/change-facade-qgis-avant-app-autonome.md` §2.1.
 
 - Cet epic possède le motif d'interface de lancement d'une commande, que l'epic 4 attend.
 - Unknown: quel moteur de routage pour les isochrones, sous quelle licence, et quels attributs minimaux le réseau routier apporté doit porter — question ouverte de la spec.

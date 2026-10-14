@@ -1,56 +1,81 @@
 # tickets.toml — les epics de l'initiative, en ordre de construction.
 # L'ordre des tables est l'ordre de construction ; `id` nomme un epic pour de bon.
+# Reordonne le 2026-10-14 par le virage change-facade-qgis-avant-app-autonome :
+# QGIS porte l'habillage au MVP, le noyau porte le registre, l'agent, le journal
+# et le terrain. L'epic 3 est retire, les epics 8 et 9 sont nouveaux.
 
 [[epic]]
 id = 1
 slug = "epic-socle-et-carte"
-title = "Socle technique et carte hors ligne"
+title = "Socle technique, verrou hors ligne et recette"
 covers = ["CAP-1"]
+
+[[epic]]
+id = 8
+slug = "epic-epreuve-du-modele-local"
+title = "Epreuve du modele local sur registre factice"
+covers = []
 
 [[epic]]
 id = 2
 slug = "epic-registre-projet-import"
-title = "Registre de commandes, projet et import"
-covers = ["CAP-6", "CAP-10", "CAP-9", "CAP-1"]
-after = [{ epic = 1, needs = "le workspace, la coquille Tauri et la recette automatique" }]
-
-[[epic]]
-id = 3
-slug = "epic-analyses-et-historique"
-title = "Analyses vectorielles et historique rejouable"
-covers = ["CAP-3", "CAP-7"]
-after = [{ epic = 2, needs = "le contrat du registre de commandes et le format de projet sur disque" }]
-
-[[epic]]
-id = 4
-slug = "epic-raster-et-terrain"
-title = "Chaine raster et analyse de terrain"
-covers = ["CAP-11"]
+title = "Registre de commandes et journal rejouable"
+covers = ["CAP-6", "CAP-7"]
 after = [
-  { epic = 2, needs = "le contrat du registre de commandes et le format de projet sur disque" },
-  { epic = 3, needs = "le motif d'interface de lancement d'une commande et de saisie de ses parametres" },
+  { epic = 1, needs = "le workspace, le verrou hors ligne dans le moteur et la recette automatique" },
+  { epic = 8, needs = "le verdict sur la capacite d'un modele local a composer des commandes, qui dicte la forme des descriptions et des schemas de parametres" },
 ]
+
+[[epic]]
+id = 9
+slug = "epic-facade-qgis"
+title = "Facade QGIS : extension, canal local, commandes executees par QGIS"
+covers = ["CAP-13", "CAP-9", "CAP-10", "CAP-3", "CAP-5"]
+after = [{ epic = 2, needs = "le contrat du registre de commandes, que l'extension consomme" }]
 
 [[epic]]
 id = 5
 slug = "epic-agent-et-mcp"
 title = "Agent en langage naturel et serveur MCP"
 covers = ["CAP-4", "CAP-8"]
-after = [{ epic = 2, needs = "le registre complet, pour que l'agent ait des verbes a composer et un inventaire de projet a lire" }]
+after = [
+  { epic = 2, needs = "le registre complet, pour que l'agent ait des verbes a composer et un inventaire a lire" },
+  { epic = 8, needs = "le modele, la quantification et la forme de sollicitation retenus par l'epreuve" },
+  { epic = 9, needs = "le panneau ou afficher le plan etape par etape et le faire valider" },
+]
+
+[[epic]]
+id = 4
+slug = "epic-raster-et-terrain"
+title = "Analyse de terrain dans le noyau"
+covers = ["CAP-11"]
+after = [{ epic = 2, needs = "le contrat du registre de commandes" }]
 
 [[epic]]
 id = 6
 slug = "epic-export-et-demo"
-title = "Export PDF et scenario de demo"
-covers = ["CAP-5"]
+title = "Scenario de demo de bout en bout"
+covers = []
 after = [
-  { epic = 3, needs = "les analyses vectorielles de la phrase de demo" },
+  { epic = 9, needs = "les commandes executees par QGIS que la phrase de demo enchaine, export PDF compris" },
   { epic = 5, needs = "l'agent qui enchaine les commandes et les fait valider" },
+  { epic = 4, needs = "les commandes de terrain du noyau, pour la demonstration sur poste isole" },
 ]
 
 [[epic]]
 id = 7
 slug = "epic-publication"
-title = "Publication : installeurs, video, depot presentable"
+title = "Publication : depot d'extensions QGIS, installeurs, video"
 covers = []
 after = [{ epic = 6, needs = "le scenario de demo complet, a filmer et a documenter" }]
+
+# ---- Retire ----
+# L'epic 3 est retire le 2026-10-14 : CAP-3 part a l'epic 9 (executee par QGIS) et
+# CAP-7 part a l'epic 2. Sa table reste ici pour que l'id 3 ne soit jamais
+# reattribue. Voir le Dropped: de epic-analyses-et-historique.md.
+
+[[epic]]
+id = 3
+slug = "epic-analyses-et-historique"
+title = "Analyses vectorielles et historique rejouable"
+covers = []
