@@ -37,3 +37,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `epic-socle-et-carte/story-mettre-le-readme-au-plan-du-14-octobre-plan.md`
   summary: Le commentaire d'en-tête de `app/src-tauri/src/lib.rs` annonce le registre de commandes à l'étape 2, alors que la nouvelle séquence le place à l'étape 3.
   evidence: Constat de revue de l'entrée 1.9, verdict bas. La phrase est devenue fausse au commit de replanification du 2026-10-14, qui a renuméroté les étapes de CLAUDE.md §7 ; elle n'est pas causée par cette entrée, dont le diff ne touche pas ce fichier. À balayer dans l'entrée 1.7 (passe de nettoyage), avec une relecture des autres commentaires qui citent un numéro d'étape — un numéro d'étape dans un commentaire de code est un piège à obsolescence, et la passe pourrait décider de ne plus en citer du tout.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-socle-et-carte/story-recette-automatique-sur-github-actions-plan.md`
+  summary: Figer la version de Rust (`rust-toolchain.toml`) pour que la recette ne dépende pas de l'image du runner.
+  evidence: le job `noyau` prend le Rust stable d'`ubuntu-latest` avec `clippy -D warnings` ; un nouveau clippy peut faire échouer un run sans changement de code.

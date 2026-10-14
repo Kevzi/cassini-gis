@@ -1,0 +1,96 @@
+# Recette automatique de Cassini (CLAUDE.md §8 et §9, epic 1, E4).
+#
+# Les cinq contrôles que le README décrit, à chaque poussée : tests du noyau,
+# `cargo fmt`, `cargo clippy`, typage strict et garde hors ligne. Chaque étape
+# est une commande ordinaire : si elle sort en erreur, son job échoue et le run
+# passe au rouge. Rien d'autre que les actions officielles de GitHub (MIT).
+
+name: Recette
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Une nouvelle poussée annule le run en cours d'une même branche, sauf sur
+# `main` : chaque commit de `main` doit garder son verdict.
+concurrency:
+  group: recette-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  noyau:
+    name: Noyau Rust — fmt, tests, clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Outils Rust
+        run: rustup component add rustfmt clippy
+
+      - name: Mise en forme
+        run: cargo fmt --all --check
+
+      # Le noyau se teste seul, sans les dépendances système de la coquille
+      # (principe 4) : cette étape passe avant leur installation.
+      - name: Tests du noyau
+        run: cargo test -p cassini-core --locked
+
+      # Clippy couvre tout le workspace, coquille Tauri comprise, qui demande
+      # les bibliothèques système de Tauri v2 sous Linux.
+      - name: Dépendances système de Tauri v2
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev
+
+      # `tauri::generate_context!` refuse de compiler si `frontendDist` n'existe
+      # pas ; clippy n'a pas besoin de la webview construite, un dossier vide suffit.
+      - name: Dossier de la webview
+        run: mkdir -p app/dist
+
+      - name: Clippy, zéro avertissement
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  interface:
+    name: Interface — typage strict, garde hors ligne
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Dépendances
+        run: npm ci
+
+      # `tsc --noEmit`, puis la garde hors ligne et les deux vérificateurs du
+      # fond de carte de recette.
+      - name: Typage strict et garde hors ligne
+        run: npm run check
+
+  # Point d'accroche réservé à l'epic 9 : le contrôle du Python de l'extension
+  # QGIS (`qgis-plugin/`), quand elle existera. Il prendra place ici comme un
+  # troisième job, au même titre que les deux précédents.
+  #
+  # extension:
+  #   name: Extension QGIS — Python
+  #   runs-on: ubuntu-latest
+  #   defaults:
+  #     run:
+  #       working-directory: qgis-plugin
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - run: <contrôle du Python, fixé par l'epic 9>
