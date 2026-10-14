@@ -31,6 +31,11 @@ application de bureau complète ; le raisonnement est écrit en entier dans
 L'application autonome n'est pas abandonnée, elle est **reportée en V2**, et le
 code déjà écrit pour elle reste au dépôt.
 
+La frontière entre le noyau et l'extension est fixée par
+[le contrat d'architecture](_bmad-output/initiative-cassini-mvp/architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md),
+en vingt-trois décisions numérotées de AD-1 à AD-23 ; ce README en résume ce qui
+change la forme du produit.
+
 Le projet en est à l'**étape 1 sur 7** : le socle technique et le verrou hors
 ligne. La section suivante dit exactement ce que cela couvre.
 
@@ -82,7 +87,14 @@ commence avant que la précédente ne soit testée.
 Formats que QGIS ouvrira pour le compte du registre : GeoPackage, Shapefile,
 GeoJSON, CSV à coordonnées, GeoParquet. Systèmes de coordonnées : Lambert-93
 (EPSG:2154) et WGS84 au minimum, avec reprojection quand la couche diffère du
-projet. Aucune parité avec QGIS n'est visée ni revendiquée.
+projet — reprojection exécutée par QGIS, jamais par le noyau (AD-19). Aucune
+parité avec QGIS n'est visée ni revendiquée.
+
+Une seule extension servira QGIS 3.44 LTR et la série 4.x (AD-18). Cassini se
+distribuera en deux artefacts : l'extension, légère et sans binaire, par le
+dépôt d'extensions QGIS ; le noyau et, en option, le modèle d'IA, par un paquet
+Cassini installé à part. Une clé USB portant les deux suffira sur un poste qui
+n'a jamais vu le réseau (AD-17).
 
 ## Quatre principes non négociables
 
@@ -123,23 +135,26 @@ flowchart TB
         moteurQgis["Carte, fichiers, projet, analyses vectorielles, export PDF"]
     end
 
-    canal["Canal local — processus séparé, aller et retour — forme pas encore tranchée — prévu"]
+    canal["Canal local — JSON-RPC 2.0 sur l'entrée et la sortie standard, dans les deux sens, aucun réseau — prévu"]
 
     subgraph noyau["Noyau Cassini — Rust, Apache-2.0 — tourne sans QGIS"]
-        registre["Registre de commandes — prévu"]
+        binaire["Binaire cassini, sous cli/ — serve, mcp, run, replay — prévu"]
+        registre["Registre de commandes, qui tient la boucle d'exécution — prévu"]
+        binaire --> registre
         terrain["Terrain sur MNT — champ de vision, ligne de vue, pente — prévu"]
         journal["Journal rejouable, écrit à côté du projet QGIS — prévu"]
-        ia["Couche IA — llama.cpp et serveur MCP — prévu"]
+        ia["Couche IA — modèle local llama.cpp, lié au processus — prévu"]
         fond["Lecture du fond de carte, refus du réseau — fait"]
         registre --> terrain
         registre --> journal
-        registre --> ia
+        binaire --> ia
+        ia --> registre
     end
 
     v2["Coquille Tauri et carte MapLibre, sous app/ — reporté en V2, conservé"]
 
-    panneau --> canal
-    canal --> registre
+    panneau <--> canal
+    canal <--> binaire
     panneau -->|"délégation déclarée"| moteurQgis
     fond -.->|"sert aujourd'hui"| v2
     registre -.->|"servira en V2"| v2
@@ -149,7 +164,7 @@ flowchart TB
     classDef fourni fill:#e7eefb,stroke:#45659c,color:#1a2740
     classDef reporte fill:#f6eede,stroke:#9c7a45,color:#3d2f1a
     class fond fait
-    class panneau,canal,registre,terrain,journal,ia prevu
+    class panneau,canal,binaire,registre,terrain,journal,ia prevu
     class moteurQgis fourni
     class v2 reporte
 ```
@@ -165,16 +180,23 @@ Trois conséquences de ce découpage, qui valent dès maintenant :
 - **Indépendance vis-à-vis des fournisseurs d'IA.** Le code ne dépendra d'aucune
   IA en particulier : IA locale par défaut, IA externes par MCP.
 
-La forme du canal local n'est pas tranchée — entrée et sortie standard, socket
-local, fichiers d'échange. C'est elle qui porte l'argument de licence du principe
-2, donc elle se décide avant l'extension.
+Le canal local est tranché (AD-2, AD-3) : l'extension lance le binaire du noyau
+comme processus enfant et dialogue avec lui par son entrée et sa sortie
+standard, en JSON-RPC 2.0, un message par ligne, dans les deux sens. Aucune
+socket, aucun port, aucun fichier d'échange. Ce qui porte l'argument de licence
+du principe 2, c'est la **nature** de ce qui circule : des identifiants, des
+chemins relatifs, des paramètres à schéma JSON et des résultats typés — jamais
+une couche entière ni une structure interne (AD-8, AD-16).
+
+Le noyau lit lui-même les modèles numériques d'élévation dont le terrain a
+besoin ; QGIS ne lui passe qu'un chemin de fichier et une emprise (AD-20).
 
 ### Le trajet d'une demande en langage naturel
 
 **Schéma d'une cible.** Ni l'extension, ni le registre, ni l'agent ne sont
 écrits : le registre arrive à l'étape 3, la façade QGIS à l'étape 4, l'agent à
-l'étape 5. Ce qui est déjà vrai, c'est la forme de l'échange — le panneau
-demande, le noyau décide.
+l'étape 5. Ce qui est déjà fixé, c'est la forme de l'échange — le panneau
+demande, le noyau décide et dicte une étape à la fois (AD-5).
 
 ```mermaid
 sequenceDiagram
@@ -193,25 +215,28 @@ sequenceDiagram
     Agent-->>Panneau: un plan ordonné de commandes et de paramètres
     Panneau-->>Humain: le plan affiché étape par étape
     Humain->>Panneau: validation, ou correction d'une étape
-    loop pour chaque étape validée
-        Panneau->>Registre: appel de la commande, paramètres typés
+    Panneau->>Registre: le plan validé
+    loop le noyau dicte chaque étape, une à la fois
         alt commande portée par le noyau
             Registre->>Registre: calcul de terrain, en Rust
         else commande déléguée à QGIS
-            Registre-->>Panneau: délégation déclarée
+            Registre->>Panneau: ordre de l'étape, paramètres typés
             Panneau->>QGIS: exécution par le cadre de traitement
             QGIS-->>Panneau: couche ajoutée, ou mise en page produite
-            Panneau->>Registre: compte rendu de l'exécution
+            Panneau-->>Registre: résultat typé de l'étape
         end
         Registre->>Journal: étape journalisée
-        Registre-->>Panneau: résultat typé
+        Registre->>Panneau: avancement affiché
     end
     Panneau-->>Humain: projet QGIS à jour, et journal rejouable
 ```
 
 L'agent ne fait rien d'autre que **choisir des commandes du registre** : il n'a
-pas d'accès direct à QGIS ni au disque. Toute exécution est journalisée, pour que
-la même demande puisse être rejouée à l'identique.
+pas d'accès direct à QGIS ni au disque, et son plan est validé contre les schémas
+des commandes avant d'être montré ; rien de ce qu'il produit n'est exécuté comme
+du code (AD-23). L'extension n'enchaîne jamais deux commandes d'elle-même. Toute
+exécution est journalisée par le noyau seul (AD-11), pour que la même demande
+puisse être rejouée à l'identique.
 
 ### Le cycle de vie d'un projet QGIS
 
@@ -267,9 +292,13 @@ une analyse rejouable.
 À la racine : [`CLAUDE.md`](CLAUDE.md), la source de vérité du projet ;
 `Cargo.toml`, le workspace à deux membres (`core` et `app/src-tauri`) ; `LICENSE`.
 
-Deux dossiers annoncés par `CLAUDE.md` §9 n'existent pas encore : `qgis-plugin/`,
-l'extension QGIS en Python, **pas encore créée**, qui arrivera à l'étape 4 et
-portera le panneau du MVP ; et `ai/`, la couche IA, qui arrivera à l'étape 5.
+Trois dossiers annoncés par `CLAUDE.md` §9 n'existent pas encore :
+
+| Dossier | À quoi il servira |
+|---|---|
+| `cli/` | Le binaire unique `cassini`, crate du même nom, avec ses sous-commandes `serve` (le canal de l'extension), `mcp`, `run` et `replay`. Il vit à part parce qu'il a besoin du noyau **et** de la couche IA, alors que `cassini-core` ne dépend jamais de `cassini-ai` (AD-13, et la direction des dépendances du contrat). |
+| `qgis-plugin/` | L'extension QGIS en Python, **pas encore créée**, qui arrivera à l'étape 4 et portera le panneau du MVP. |
+| `ai/` | La couche IA, crate `cassini-ai` : le modèle local chargé dans le processus du noyau, jamais servi par HTTP (AD-15). Elle arrivera à l'étape 5. |
 
 ## Démarrage rapide
 
@@ -338,10 +367,10 @@ contrôles qui échouent exprès.
 
 Trois régimes, et celui de l'extension n'est pas un choix :
 
-- **Le noyau et la coquille de bureau** — `core/`, `app/`, et `ai/` quand il
-  existera : **Apache-2.0**, voir [`LICENSE`](LICENSE). L'usage commercial et
-  institutionnel est permis, et aucune dépendance GPL ou LGPL n'y est admise,
-  même par liaison statique.
+- **Le noyau et la coquille de bureau** — `core/`, `app/` et, quand ils
+  existeront, `cli/` et `ai/` : **Apache-2.0**, voir [`LICENSE`](LICENSE).
+  L'usage commercial et institutionnel est permis, et aucune dépendance GPL ou
+  LGPL n'y est admise, même par liaison statique.
 - **L'extension QGIS** — `qgis-plugin/`, pas encore créée : **GPL**, comme QGIS.
   C'est une conséquence de l'hôte, pas une préférence. Elle vit séparée du noyau,
   qui ne lie jamais QGIS et reste utilisable sans lui.
