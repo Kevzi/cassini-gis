@@ -3,6 +3,7 @@ id: SPEC-cassini-mvp
 companions:
   - ../../../CLAUDE.md
   - ../research-sig-francais-hors-ligne-pour-la-defense/research-sig-francais-hors-ligne-pour-la-defense.md
+  - ../architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md
 sources: []
 ---
 
@@ -46,7 +47,7 @@ CAP-2 a été retirée (préparation des données d'une commune par code INSEE) 
 
 - **CAP-7** — Journal rejouable
   - **intent:** l'utilisateur retrouve et rejoue ce qui a été fait, pour vérifier ou refaire un travail.
-  - **success:** toute exécution de commande est journalisée dans un journal Cassini écrit à côté du projet QGIS, et rejouer ce journal sur les mêmes fichiers redonne les mêmes résultats, y compris après fermeture et réouverture du projet.
+  - **success:** toute exécution de commande est journalisée dans un journal Cassini écrit à côté du projet QGIS, et rejouer ce journal sur les mêmes fichiers redonne les mêmes résultats, y compris après fermeture et réouverture du projet ; le journal ne contient aucun chemin absolu, ce qui le garde rejouable après déplacement du dossier (CAP-10).
 
 - **CAP-8** — Serveur MCP
   - **intent:** une IA externe choisie par l'utilisateur pilote Cassini à travers le même registre de commandes, en option.
@@ -78,7 +79,11 @@ CAP-2 a été retirée (préparation des données d'une commune par code INSEE) 
 - Aucune fonction de fonction réservée au module privé n'est écrite avant réponse écrite à une demande de classement (formulaire [retiré], Bureau de la réglementation, du classement, du double-usage et de la sécurité industrielle).
 - Cassini ne télécharge, ne catalogue et ne redistribue aucune donnée géographique. Cadastre, PLU, BAN, BD TOPO, ADMIN EXPRESS et fonds de carte sont apportés par l'utilisateur.
 - Hors ligne total : aucune fonction du MVP n'utilise le réseau. Le réseau ne sert qu'à brancher une IA externe, en option.
-- Le noyau est une chaîne Rust : analyse de terrain reprise ou réimplémentée depuis `whitebox_next_gen` (MIT OR Apache-2.0). La géométrie vectorielle et la lecture des formats sont déléguées à QGIS au MVP ; `georust/geo` ne redevient nécessaire qu'avec l'application autonome de V2.
+- Le canal entre l'extension et le noyau ne porte que des messages publics et documentés : identifiants, chemins relatifs, paramètres à schéma JSON, résultats typés, et quelques géométries ponctuelles en GeoJSON. Jamais une couche entière, jamais une structure de données interne : c'est la condition de l'argument de distance de bras, la FAQ de la FSF réservant le cas d'un échange assez intime pour que deux programmes n'en fassent qu'un.
+- Le plan composé par le modèle local est une entrée non fiable : il ne contient que des appels de commandes du registre, validés contre leurs schémas, et rien de ce que le modèle produit n'est exécuté comme du code ou une expression.
+- L'extension fonctionne sur QGIS 3.44 LTR et sur la série 4.x avec un seul code : les bureaux d'études et collectivités visés restent des années sur une version LTR.
+- Distribution en deux artefacts : l'extension au dépôt d'extensions QGIS, sans binaire et sous 25 Mo ; le noyau et le modèle dans un paquet Cassini installé à part. Une clé USB portant les deux suffit à installer Cassini sur un poste qui n'a jamais vu le réseau, et rien n'est jamais téléchargé pour réparer une installation.
+- Le noyau est une chaîne Rust : les trois commandes de terrain y sont réimplémentées, le portage depuis `whitebox_next_gen` (MIT OR Apache-2.0) restant permis avec attribution, et le noyau lit lui-même le modèle numérique d'élévation. La géométrie vectorielle et la lecture des formats sont déléguées à QGIS au MVP ; `georust/geo` ne redevient nécessaire qu'avec l'application autonome de V2.
 - Toute dépendance à licence agrégée, GDAL en particulier, est auditée avant adoption dans le noyau.
 - Clean-room : seules la documentation publique d'Esri et le comportement observable sont admis comme sources. Copier du code, des icônes, des noms de produits, des presets ou des assets d'Esri est interdit. Lire un format publié (Shapefile) est permis ; lire ou écrire un format de projet Esri ne l'est pas.
 - La licence d'une dépendance est demandée et donnée avant son ajout. Licences autorisées dans le noyau : MIT, Apache-2.0, BSD.
@@ -104,6 +109,8 @@ CAP-2 a été retirée (préparation des données d'une commune par code INSEE) 
 - Téléchargement, catalogue ou redistribution de données géographiques.
 - Lecture ou écriture des formats de projet Esri (`.aprx`, `.mxd`).
 - Formats et symbologies de défense au MVP : DTED, NITF, APP-6. Le profil GeoPackage du DGIWG, lui, est couvert par CAP-9 puisqu'il se lit comme un GeoPackage ordinaire.
+- MGRS au MVP : le noyau ne reprojette pas, QGIS porte les systèmes du vecteur.
+- Rejeu d'un journal sans QGIS au MVP : les commandes déléguées exigent QGIS pour être rejouées ; une étape impossible est nommée en échec, jamais sautée.
 - Édition avancée de données.
 - 3D.
 - IA appliquée aux images satellite.
@@ -117,22 +124,20 @@ Sur une machine débranchée du réseau, l'utilisateur ouvre QGIS sur un projet 
 ## Assumptions
 
 - Le projet est un projet QGIS ; le noyau n'invente pas de format de projet et écrit son journal à côté.
-- L'ordre de livraison est la séquence décidée le 2026-10-14 : socle et recette, épreuve du modèle local, registre et journal, façade QGIS, agent et MCP, terrain, démo, publication. Les étapes de CLAUDE.md §7 ne sont plus cet ordre.
+- L'ordre de livraison est la séquence décidée le 2026-10-14 : socle et recette, épreuve du modèle local, registre et journal, façade QGIS, agent et MCP, terrain, démo, publication — celle que porte CLAUDE.md §7.
 - Le dérisquage précède l'engagement : qu'un modèle local quantifié sache composer une suite de commandes typées correcte est vérifié sur un registre factice avant que le registre réel ne soit écrit.
 - « Compléter QGIS pour les usages courants » signifie couvrir CAP-3, CAP-5, CAP-9 à CAP-11 par le registre, sans objectif de parité.
 - Villeneuve-le-Roi reste le territoire de référence de la démo, avec des données apportées par l'utilisateur et non livrées.
 
 ## Open Questions
 
-- **Forme du canal local** entre l'extension et le noyau : entrée et sortie standard, socket local, ou fichiers d'échange ? Décision juridique autant que technique, puisqu'elle porte l'argument de distance de bras sur la GPL. À trancher avant l'epic de façade.
 - **Confirmation de la frontière GPL.** Le raisonnement de distance de bras est à faire confirmer avant toute vente, pas avant d'écrire du code.
-- **Version plancher de QGIS** visée, et surface de l'API PyQGIS réellement nécessaire.
-- **Livraison du modèle local.** Le dépôt d'extensions QGIS n'acceptera pas plusieurs gigaoctets de modèle GGUF : comment l'extension trouve-t-elle le modèle sur un poste isolé, et qui l'installe ?
+- **Surface de l'API PyQGIS** réellement nécessaire, à fixer geste par geste avec les commandes déléguées.
 - **Modèle et configuration minimale.** Mistral ou Qwen, quelle quantification, et quelle configuration minimale de RAM et de CPU sont visées pour l'agent local ?
 - **Dessin du panneau.** L'expérience devient un panneau ancré dans QGIS, outil dense et d'expert, alors que l'argument de vente est qu'un opérateur non cartographe obtient sa réponse en parlant. À esquisser avant d'ouvrir l'epic de façade.
-- **Maturité du moteur de terrain.** `whitebox_next_gen` expose-t-il son champ de vision comme bibliothèque réutilisable, et à quel niveau de maturité ? Version 0.1.0, conduit en open core. À trancher par compilation d'un cas d'essai avant de s'engager sur CAP-11.
+- **Maturité de la lecture du relief.** `wbgeotiff` 0.1.2 et `wbraster` 0.2.1 lisent-ils de façon fiable les modèles d'élévation visés ? Bibliothèques jeunes, à trancher par un cas d'essai compilé en tête de l'epic terrain, avant de s'engager sur CAP-11.
 - **Connaissance des schémas français sans les données.** Garde-t-on la capacité à reconnaître un export cadastre Etalab ou un zonage GPU et à proposer la symbologie et le nommage de champs correspondants ?
-- **Systèmes de coordonnées.** Lambert-93 (EPSG:2154) et WGS84 suffisent-ils, ou faut-il aussi les Lambert zones et NTF (EPSG:27572) pour les fichiers anciens ? Et MGRS entre-t-il au MVP, sa conversion étant de l'arithmétique peu coûteuse ?
+- **Systèmes des modèles d'élévation.** Le noyau lit le MNT dans son propre système et refuse une coordonnée exprimée dans un autre : quels systèmes doit-il savoir lire — Lambert-93 et WGS84 seuls, ou aussi les Lambert zones et NTF (EPSG:27572) des fichiers anciens ?
 - **Jeu de recette.** Avec quelles données la démo et les tests tournent-ils, puisque l'application n'en distribue aucune : des données fabriquées à la main, ou un échantillon réel sous licence ouverte versé dans le dépôt ?
 - **Définition de « parcelle constructible ».** En termes de quels champs du Géoportail de l'Urbanisme ? La couverture du PLU y est partielle et les schémas varient d'une commune à l'autre, alors que la phrase de démo repose sur cette définition.
 - **Classement.** La demande déposée par [retiré] est le préalable à tout développement de CAP-12. Tant qu'elle n'a pas reçu de réponse écrite, le périmètre du module défense reste indéterminé.
