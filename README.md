@@ -62,7 +62,8 @@ bureau désormais reportée en V2 :
   vérificateurs qui la relisent : conformité de l'archive, puis chemin complet de
   chargement de la carte.
 - Une recette qui tient en quatre commandes : 17 tests du noyau, `cargo fmt`,
-  `cargo clippy`, et le contrôle de l'interface.
+  `cargo clippy`, et le contrôle de l'interface — lancée par GitHub Actions à
+  chaque poussée.
 
 La carte et la coquille sont **hors du chemin critique du MVP** depuis le
 2026-10-14, mais elles marchent et elles restent : c'est la fondation de la V2
@@ -76,7 +77,7 @@ commence avant que la précédente ne soit testée.
 
 | Étape | Ce qu'elle apporte | État |
 |---|---|---|
-| 1 | Socle technique, verrou hors ligne, recette automatique | **faite pour l'essentiel** ; la recette se lance encore à la main |
+| 1 | Socle technique, verrou hors ligne, recette automatique | **faite pour l'essentiel** ; la recette tourne à chaque poussée |
 | 2 | Épreuve du modèle local — un modèle quantifié sait-il transformer une phrase française en suite de commandes typées correcte, sur un registre factice | la prochaine, et la plus rentable : si elle échoue, le produit perd son angle |
 | 3 | Registre de commandes et journal rejouable — l'épine dorsale | à venir |
 | 4 | Façade QGIS — extension, canal local, commandes exécutées par QGIS | à venir |
@@ -334,14 +335,17 @@ Il n'y a encore rien à installer dans QGIS : l'extension arrive à l'étape 4.
 
 ## La recette
 
-Quatre commandes, à lancer à la main pour l'instant. Une exécution automatique à
-chaque poussée est la prochaine entrée de travail de l'étape 1.
+Quatre commandes, que le workflow
+[`.github/workflows/recette.yml`](.github/workflows/recette.yml) lance à chaque
+poussée, et qui se lancent aussi à la main. Si l'une échoue, le run passe au
+rouge. Un emplacement y est réservé au contrôle du Python de l'extension QGIS,
+qui arrivera avec elle.
 
 | Commande | Ce qu'elle contrôle |
 |---|---|
-| `cargo test -p cassini-core` | Les 17 tests du noyau, dont le refus de toute source réseau et celui d'une plage d'octets hors fichier. |
-| `cargo fmt --check` | La mise en forme du Rust. |
-| `cargo clippy --workspace --all-targets` | Zéro avertissement, sur les deux crates et leurs tests. |
+| `cargo test -p cassini-core --locked` | Les 17 tests du noyau, dont le refus de toute source réseau et celui d'une plage d'octets hors fichier. |
+| `cargo fmt --all --check` | La mise en forme du Rust. |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | Zéro avertissement, sur les deux crates et leurs tests. |
 | `npm run check`, depuis `app` | Le typage strict, puis trois vérifications décrites ci-dessous. |
 
 Ce que `npm run check` enchaîne après `tsc` :
