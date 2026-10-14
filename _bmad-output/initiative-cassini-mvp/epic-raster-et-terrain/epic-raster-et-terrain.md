@@ -62,10 +62,13 @@ d'fonction réservée : elle est hors de ce dépôt.
 - change — `../change-facade-qgis-avant-app-autonome/change-facade-qgis-avant-app-autonome.md`, section 2.4 : pourquoi trois commandes et pas neuf
 - constraint — `CLAUDE.md` §2.2 pas de GPL ni LGPL dans le noyau, §2.9 séparation civil/défense
 - research — `../research-sig-francais-hors-ligne-pour-la-defense/research-sig-francais-hors-ligne-pour-la-defense.md`, section D4
+- spine — `../architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md`, AD-1, AD-19, AD-20, AD-22
 
 ## Notes
 
 - Decision: réduit de neuf commandes à trois au MVP (champ de vision, ligne de vue, pente). Motif : en mode extension QGIS fait déjà le reste, mais par GRASS qui est en GPL ; trois commandes suffisent à établir une base en licence permissive pour le module défense. Les six autres sont reportées, pas abandonnées (propriétaire, 2026-10-14).
 - Decision: GRASS et SAGA restent exclus du noyau car sous GPL ; les algorithmes de visibilité sont repris du code MIT de Whitebox ou réimplémentés depuis la littérature publique (2026-10-09).
-- Unknown: `whitebox_next_gen` expose-t-il son champ de vision comme bibliothèque réutilisable, et à quel niveau de maturité — version 0.1.0, projet conduit en open core. À trancher par un cas d'essai compilé avant de s'engager ; la recherche recommande un spike.
+- Decision: `whitebox_next_gen` n'expose pas son champ de vision comme bibliothèque, seul le substrat raster l'est sur crates.io. Les trois commandes sont réimplémentées dans le noyau, le portage avec attribution restant permis, et le noyau lit lui-même le MNT dans un unique module remplaçable. Contrat d'architecture, AD-20 (propriétaire, 2026-10-14).
+- Unknown: la maturité de `wbgeotiff` 0.1.2 et `wbraster` 0.2.1, bibliothèques jeunes. À trancher par un cas d'essai compilé en première entrée, avant de s'engager sur CAP-11.
+- Unknown: quels systèmes de coordonnées le noyau doit savoir lire dans un MNT — Lambert-93 et WGS84 seuls, ou aussi les Lambert zones et NTF. Le noyau refuse une coordonnée hors du système du MNT au lieu de la convertir (AD-19). Question ouverte de la spec.
 - Waits on epic 2 because: les trois commandes sont des commandes du registre et ont besoin de son contrat.

@@ -1,13 +1,17 @@
 # tickets.toml — epic 8, epreuve du modele local sur registre factice.
 # L'ordre des tables est l'ordre de construction. `id` nomme une entree pour de bon.
-# Tout le code de cet epic est jetable et vit hors du chemin de compilation du produit.
+# Tout le code de cet epic est jetable et vit dans tests/epreuve-modele-local/, hors des
+# crates et de qgis-plugin, donc hors du chemin de compilation du produit. Les fichiers
+# de modele GGUF ne sont jamais verses au depot.
+# Re-decoupe le 2026-10-14 pour s'aligner sur le contrat d'architecture (AD-8, AD-9,
+# AD-15, AD-19, AD-22, AD-23) ; aucune entree n'etait commencee.
 
 [[entry]]
 id = 1
 type = "spike"
 title = "Faire repondre un modele quantifie hors ligne sur le poste"
-description = "Installe llama.cpp sur le poste Windows du proprietaire, y sert un modele open source quantifie, et obtient une reponse cable reseau debranche."
-verify = "Le proprietaire pose une question en francais au modele, obtient une reponse, et le gestionnaire de taches ne montre aucune connexion sortante."
+description = "Installe la version compilee de llama.cpp (MIT) pour Windows et un modele GGUF quantifie dont la licence est notee, puis obtient une reponse en appelant llama.cpp en ligne de commande sur un fichier de modele local, sans mode serveur ni port ouvert."
+verify = "Cable reseau debranche, le proprietaire pose une question en francais en ligne de commande et obtient une reponse, et ni le gestionnaire de taches ni netstat ne montrent de connexion sortante ou de port en ecoute."
 covers = ["E1"]
 after = []
 hitl = true
@@ -18,31 +22,33 @@ notes = ["Traceur de l'epic : le chemin le plus mince, un modele qui parle sur l
 id = 2
 type = "story"
 title = "Registre factice et jeu de phrases de reference"
-description = "Ecrit une quinzaine de commandes factices typees, avec id, descriptions fr et en et schema JSON de parametres, et vingt-cinq phrases francaises de reference portant chacune le plan attendu."
-verify = "Chaque phrase de reference porte un plan attendu non ambigu, et deux relectures independantes donnent le meme plan attendu pour chaque phrase."
+description = "Ecrit une quinzaine de commandes factices typees aux conventions du contrat (noms domaine.verbe, parametres neutres sans expression QGIS, unites et EPSG explicites), un inventaire de projet factice a identifiants de couche opaques, vingt-cinq phrases francaises portant chacune le plan attendu, et un validateur minimal en Python, bibliotheque standard seule, limite au sous-ensemble de JSON Schema draft 2020-12 qu'emploie le catalogue, que l'entree 3 reutilise."
+verify = "Le validateur accepte chacun des vingt-cinq plans attendus et rejette un plan au parametre mal type, et deux relectures independantes donnent le meme plan attendu pour chaque phrase."
 covers = ["E2"]
 after = []
 hitl = false
 risk = "medium"
+references = ["../architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md, AD-8, AD-9, AD-19, AD-22 et Consistency Conventions (nommage des commandes)"]
 notes = ["Les commandes factices imitent la forme prevue par CAP-6 sans rien implementer : c'est la forme qui est mesuree, pas le calcul."]
 
 [[entry]]
 id = 3
 type = "story"
 title = "Harnais de mesure du taux de plans corrects"
-description = "Donne le catalogue factice et une phrase au modele, recupere le plan propose, le compare au plan attendu et sort un taux par jeu d'essai."
-verify = "Le harnais rejoue les vingt-cinq phrases d'un coup et imprime un taux, et un plan volontairement faux est bien compte comme faux."
+description = "Programme Python, bibliotheque standard seule, qui appelle llama.cpp en ligne de commande sur un modele local avec le catalogue, l'inventaire et une phrase, valide le plan rendu avec le validateur de l'entree 2, redemande une fois s'il est non conforme, le compare au plan attendu et sort un taux au premier essai et apres une relance ; il prend en parametres le modele, la quantification et la forme de sollicitation parmi catalogue complet ou filtre, avec ou sans exemples, sortie contrainte par la grammaire ou l'option json-schema de llama.cpp ou sortie libre, pour que les entrees 4 et 5 ne fassent que lancer des mesures."
+verify = "Le harnais rejoue les vingt-cinq phrases d'un coup et imprime les deux taux, un plan volontairement faux est compte faux, et un plan qui nomme une commande absente du catalogue, ou une couche ou un chemin absents de l'inventaire, est rejete comme non conforme."
 covers = ["E3"]
 after = [1, 2]
 hitl = false
 risk = "medium"
+references = ["../architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md, AD-23 : la sortie du modele est validee contre les schemas et une sortie non conforme est redemandee, jamais reparee"]
 
 [[entry]]
 id = 4
 type = "story"
 title = "Comparer modeles et quantifications"
-description = "Mesure au moins deux modeles et au moins deux quantifications avec le harnais, en relevant pour chacun le taux, la memoire occupee et le temps de reponse."
-verify = "Un tableau donne taux, RAM et temps par combinaison essayee, sur le meme jeu de vingt-cinq phrases."
+description = "Lance le harnais de l'entree 3 sur au moins deux modeles et au moins deux quantifications, en relevant pour chacun la licence, les deux taux, la memoire occupee, le temps de chargement et le temps de generation separement, le processeur et le nombre de fils d'execution."
+verify = "Reseau coupe, un tableau donne licence, taux, RAM, temps et processeur par combinaison essayee, sur le meme jeu de vingt-cinq phrases."
 covers = ["E3"]
 after = [3]
 hitl = false
@@ -52,19 +58,20 @@ risk = "medium"
 id = 5
 type = "story"
 title = "Eprouver les formes de sollicitation"
-description = "Compare les manieres de presenter le catalogue au modele : complet ou filtre, avec ou sans exemples, sortie JSON contrainte ou libre."
-verify = "Le harnais donne un taux par forme de sollicitation, sur le meme modele et la meme quantification, et la meilleure forme est identifiee."
-covers = ["E4"]
+description = "Lance le harnais de l'entree 3 sur chacune des formes de sollicitation qu'il accepte, la sortie libre servant de temoin, et mesure le taux par forme."
+verify = "Reseau coupe, le harnais donne un taux par forme de sollicitation, sur le meme modele et la meme quantification, et la meilleure forme est identifiee."
+covers = ["E3", "E4"]
 after = [3]
 hitl = false
 risk = "medium"
+notes = ["Le produit contraindra la sortie (AD-23) : la sortie libre n'est mesuree que comme temoin."]
 
 [[entry]]
 id = 6
 type = "story"
 title = "Verdict ecrit et recommandation"
-description = "Tranche par ecrit : oui, non, ou oui sous conditions, en nommant le modele, la quantification, la configuration minimale et la forme de sollicitation retenues, ou en documentant l'echec."
-verify = "Le document permet au proprietaire de decider seul si les epics 2 et 5 partent, et l'epic 2 peut y lire comment rediger ses descriptions de commandes."
+description = "Tranche par ecrit : oui, non, ou oui sous conditions, en nommant le modele et sa licence, la quantification, la configuration minimale, la forme de sollicitation et le format du plan rendu retenus, ou en documentant l'echec."
+verify = "Le document permet au proprietaire de decider seul si les epics 2 et 5 partent, et l'epic 2 peut y lire comment rediger ses descriptions de commandes et quel format de plan l'agent rendra."
 covers = ["E3", "E4"]
 after = [4, 5]
 hitl = true
