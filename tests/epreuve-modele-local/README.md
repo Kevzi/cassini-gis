@@ -7,9 +7,12 @@ Aucun fichier de modèle n'est versé au dépôt.
 
 ## État
 
-Entrées 8.2 (catalogue, inventaire, 25 phrases, validateur), 8.3 (harnais de
-mesure) et 8.5 (formes de sollicitation) **terminées**. Restent la comparaison
-des modèles (8.4) et le verdict (8.6).
+Toutes les entrées de l'epic 8 sont **terminées** : 8.2 (catalogue, inventaire,
+25 phrases, validateur), 8.3 (harnais), 8.4 (comparaison des modèles), 8.5
+(formes de sollicitation) et 8.6 (verdict, avec une mesure sur processeur seul,
+`resultats-8-6-cpu.json`). Le verdict est
+`_bmad-output/initiative-cassini-mvp/epic-epreuve-du-modele-local/verdict-epreuve-du-modele-local.md`
+(recommandation, à signer par le propriétaire).
 
 | Fichier | Rôle |
 |---|---|

@@ -3,14 +3,14 @@ title: 'Verdict écrit et recommandation'
 type: 'chore'
 ticket: '6'
 created: '2026-10-15'
-status: 'ready-for-dev'
-baseline_revision: ''
+status: 'built'
+baseline_revision: 'f2f60a91c11fdc80e5d78b159589d12fc3ddca58'
 route: 'oneshot'
 route_source: 'auto'
 risk: 'medium'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick']
 review_loop_iteration: 0
 context: ['{project-root}/CLAUDE.md']
 ---
@@ -59,3 +59,10 @@ Route oneshot : un document, une ligne de README et une mesure lancée avec le h
 
 **Manual checks:**
 - Relire chaque chiffre du verdict contre `resultats-8-4.md` et `resultats-8-5.md`.
+
+## Review Triage Log
+
+- medium, patch — S24 et S15 étaient donnés comme échouant partout : corrigé d'après les tableaux de 8.4 et 8.5.
+- medium, patch — le `step:1` de S15 sur processeur était présenté comme preuve contre `step:k` ; réécrit, cause marquée non vérifiée.
+- medium, patch — délai relevé à 900 s non dit, moyenne sans maximum, 8 Go de RAM non mesuré, saturation du Q6_K donnée comme fait, « un seul modèle valable », « quatre formes » : tous corrigés.
+- low, patch — chiffres tirés du README ou de la lecture à la main : renvoi ajouté.
