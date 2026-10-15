@@ -51,3 +51,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: none
   summary: Vectorisation d'images (plan satellite d'un village ou d'un réseau routier vers polygones et lignes exploitables pour des calculs), à faire bien après la démo.
   evidence: Demande du propriétaire le 2026-10-15. Deux niveaux : (1) raster déjà classé vers vecteur, commande déléguée à QGIS (GDAL Polygoniser, GRASS r.to.vect), peu de travail ; (2) détection des routes et bâtiments par un modèle de segmentation hors ligne, puis squelettisation et raccord en réseau topologiquement propre. Le niveau 2 est au hors-périmètre de CLAUDE.md §6 (« IA sur images satellite ») : il demande une épreuve préalable sur le modèle de l'étape 2 (un village, qualité des routes mesurée), et une licence MIT, Apache-2.0 ou BSD pour le modèle et ses poids (§2.2).
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-registre-projet-import/story-traceur-la-crate-cassini-et-une-premiere-commande-par-cassin-plan.md`
+  summary: `Registry::register` remplace en silence une commande de même id ; le contrat de 2.3 doit refuser un id en double.
+  evidence: `core/src/registry.rs`, `register` : `BTreeMap::insert` écarte l'ancienne entrée sans erreur, contre CLAUDE.md §4 (chaque commande décrite une seule fois). À traiter dans 2.2 (enregistrement) ou 2.3 (contrôles du contrat).

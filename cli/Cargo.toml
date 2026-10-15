@@ -1,0 +1,15 @@
+[package]
+name = "cassini"
+description = "Binaire cassini : points d'entree du registre de commandes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "cassini"
+path = "src/main.rs"
+
+[dependencies]
+cassini-core = { path = "../core" }
+serde_json = "1"
