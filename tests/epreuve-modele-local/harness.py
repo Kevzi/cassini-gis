@@ -14,11 +14,13 @@ sans modèle, ce qui sert au contrôle du harnais lui-même.
 """
 
 import argparse
+import ctypes
 import json
 import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -147,6 +149,12 @@ def build_prompt(template, no_think, system, user, previous=None, errors=None):
         turns += [("assistant", previous),
                   ("user", "Ta réponse n'est pas conforme : " + " ; ".join(errors[:8])
                    + ". Redonne le plan corrigé, uniquement le JSON.")]
+    if template == "mistral3":
+        # Fiche officielle de Ministral 3 : le jeton de début est ajouté par le chargeur, jamais écrit ici (sinon il est doublé).
+        text = "[SYSTEM_PROMPT]" + system + "[/SYSTEM_PROMPT][INST]" + turns[0][1] + "[/INST]"
+        for role, content in turns[1:]:
+            text += (content + "</s>") if role == "assistant" else ("[INST]" + content + "[/INST]")
+        return text
     if template == "mistral":
         text = "<s>[INST] " + system + "\n\n" + turns[0][1] + " [/INST]"
         for role, content in turns[1:]:
@@ -191,29 +199,85 @@ def judge(text, sentence, catalog, inventory):
 
 # -- appel du modèle ------------------------------------------------------------
 
+class _Counters(ctypes.Structure):
+    _fields_ = [("cb", ctypes.c_ulong), ("PageFaultCount", ctypes.c_ulong), ("PeakWorkingSetSize", ctypes.c_size_t),
+                ("WorkingSetSize", ctypes.c_size_t), ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPagedPoolUsage", ctypes.c_size_t), ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaNonPagedPoolUsage", ctypes.c_size_t), ("PagefileUsage", ctypes.c_size_t),
+                ("PeakPagefileUsage", ctypes.c_size_t)]
+
+
+def peak_ram_mb(proc):
+    """Pic de mémoire vive (jeu de travail) du processus enfant, en Mo ; None hors Windows ou si la lecture échoue."""
+    if sys.platform != "win32":
+        return None
+    counters = _Counters()
+    counters.cb = ctypes.sizeof(counters)
+    get = ctypes.windll.psapi.GetProcessMemoryInfo
+    get.argtypes = [ctypes.c_void_p, ctypes.POINTER(_Counters), ctypes.c_ulong]
+    if not get(int(proc._handle), ctypes.byref(counters), counters.cb):
+        return None
+    return counters.PeakWorkingSetSize / 2**20
+
+
+def gpu_used_mb():
+    """Mémoire vidéo occupée sur la carte (tous processus), en Mo ; None sans nvidia-smi."""
+    try:
+        done = subprocess.run(["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"],
+                              capture_output=True, timeout=10)
+        return float(done.stdout.decode().splitlines()[0])
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+        return None
+
+
+def run_watched(cmd, timeout):
+    """Lance `cmd`, rend (code, stdout, stderr, RAM au pic, VRAM au pic au-dessus de l'état initial)."""
+    baseline = gpu_used_mb()
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    captured = {}
+    reader = threading.Thread(target=lambda: captured.update(zip(("out", "err"), proc.communicate())))
+    reader.start()
+    deadline = time.time() + timeout
+    vram = None
+    while reader.is_alive() and time.time() < deadline:
+        used = gpu_used_mb()
+        if used is not None and baseline is not None:
+            vram = max(vram or 0.0, used - baseline)
+        reader.join(0.2)
+    if reader.is_alive():
+        proc.kill()
+        reader.join()
+        raise subprocess.TimeoutExpired(cmd, timeout)
+    return proc.returncode, captured["out"], captured["err"], peak_ram_mb(proc), vram
+
+
 def call_llama(args, prompt, schema):
     with tempfile.TemporaryDirectory() as tmp:
         prompt_file = Path(tmp) / "prompt.txt"
         prompt_file.write_text(prompt, encoding="utf-8")
         cmd = [args.llama, "-m", args.model, "-c", str(args.ctx), "-ngl", str(args.ngl), "-f", str(prompt_file),
                "-n", str(args.n_predict), "--temp", "0", "--seed", "1", "--no-display-prompt", "-no-cnv"]
+        if args.threads:
+            cmd += ["-t", str(args.threads)]
         if schema is not None:
             schema_file = Path(tmp) / "schema.json"
             schema_file.write_text(json.dumps(schema), encoding="utf-8")
             cmd += ["-jf", str(schema_file)]
         started = time.time()
-        done = subprocess.run(cmd, capture_output=True, timeout=args.timeout)
+        code, stdout, stderr, ram, vram = run_watched(cmd, args.timeout)
         wall = (time.time() - started) * 1000
-    out = ANSI.sub("", done.stdout.decode("utf-8", errors="replace")).replace("[end of text]", "").strip()
-    err = done.stderr.decode("utf-8", errors="replace")
+    out = ANSI.sub("", stdout.decode("utf-8", errors="replace")).replace("[end of text]", "").strip()
+    err = stderr.decode("utf-8", errors="replace")
 
     def grab(pattern):
         found = re.search(pattern, err)
         return tuple(float(g) for g in found.groups()) if found else None
-    timing = {"wall_ms": round(wall), "exit": done.returncode,
+    timing = {"wall_ms": round(wall), "exit": code,
               "load_ms": (grab(r"load time\s*=\s*([\d.]+)\s*ms") or (None,))[0],
               "prompt": grab(r"prompt eval time\s*=\s*([\d.]+)\s*ms\s*/\s*(\d+)\s*tokens"),
-              "generation": grab(r"\beval time\s*=\s*([\d.]+)\s*ms\s*/\s*(\d+)\s*runs")}
+              "generation": grab(r"(?<!prompt )eval time\s*=\s*([\d.]+)\s*ms\s*/\s*(\d+)\s*runs"),
+              "ram_peak_mb": ram, "vram_peak_mb": vram,
+              "threads": (grab(r"n_threads\s*=\s*(\d+)") or (None,))[0]}
     return out, timing
 
 
@@ -292,6 +356,9 @@ def summarize(results):
         "mean_prompt_tokens": mean([p[1] for p in pro if p]),
         "mean_generation_ms": mean([g[0] for g in gen if g]),
         "mean_generated_tokens": mean([g[1] for g in gen if g]),
+        "peak_ram_mb": max([a["timing"]["ram_peak_mb"] for a in attempts if a["timing"].get("ram_peak_mb")], default=None),
+        "peak_vram_mb": max([a["timing"]["vram_peak_mb"] for a in attempts if a["timing"].get("vram_peak_mb")], default=None),
+        "threads": max([a["timing"]["threads"] for a in attempts if a["timing"].get("threads")], default=None),
     }
 
 
@@ -306,10 +373,11 @@ def parse_args(argv):
     p.add_argument("--output", choices=["free", "schema"], default="free", help="sortie libre ou contrainte par schéma JSON")
     p.add_argument("--lang", choices=["fr", "en"], default="fr")
     p.add_argument("--ids", default="", help="phrases à mesurer, séparées par des virgules (défaut : toutes)")
-    p.add_argument("--template", choices=["chatml", "mistral"], default="chatml")
+    p.add_argument("--template", choices=["chatml", "mistral", "mistral3"], default="chatml")
     p.add_argument("--think", dest="no_think", action="store_false", help="laisse le mode réflexion du modèle (chatml)")
     p.add_argument("--ctx", type=int, default=8192)
     p.add_argument("--ngl", type=int, default=99)
+    p.add_argument("--threads", type=int, default=0, help="fils d'exécution (0 : le choix par défaut de llama.cpp)")
     p.add_argument("--n-predict", type=int, default=1200)
     p.add_argument("--timeout", type=int, default=300)
     p.add_argument("--replay", help="rejoue des sorties enregistrées au lieu d'appeler un modèle")

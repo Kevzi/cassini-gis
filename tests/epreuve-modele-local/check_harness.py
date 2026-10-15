@@ -165,11 +165,41 @@ def main():
     except SystemExit:
         pass
 
+    # 8. Gabarit mistral3 (fiche officielle de Ministral 3) : pas de <s> écrit à la main (le chargeur l'ajoute), relance en [INST].
+    prompt = harness.build_prompt("mistral3", True, "SYSTEME", "Demande", "REPONSE_PRECEDENTE", ["écart nommé"])
+    if (not prompt.startswith("[SYSTEM_PROMPT]SYSTEME[/SYSTEM_PROMPT][INST]Demande[/INST]REPONSE_PRECEDENTE</s>[INST]")
+            or "<s>" in prompt.replace("</s>", "") or not prompt.endswith("[/INST]") or "écart nommé" not in prompt):
+        errors.append(f"gabarit mistral3: ne suit pas la fiche officielle, reçu {prompt!r}")
+
+    # 9. run_models : trois combinaisons rejouées sans modèle, tableau avec licence, taux, mémoire, temps.
+    import run_models
+    with tempfile.TemporaryDirectory() as tmp:
+        replay_file = Path(tmp) / "rejeu.json"
+        replay_file.write_text(json.dumps(perfect, ensure_ascii=False), encoding="utf-8")
+        model_rows = run_models.run(["--replay", str(replay_file)], tmp, log=lambda line: None)
+        model_text = run_models.markdown(model_rows, "CPU de test", 16)
+    if len(model_rows) != 3 or any(r["summary"]["rate_first"] != 1 for r in model_rows):
+        errors.append("run_models: trois combinaisons attendues, toutes à 100 % en rejeu")
+    for needle in ("Licence", "Apache-2.0", "RAM au pic", "VRAM au pic", "Chargement", "Lecture de l'invite", "Génération", "Fils", "CPU de test", "n/a"):
+        if needle not in model_text:
+            errors.append(f"run_models: le tableau doit contenir « {needle} »")
+    try:
+        run_models.run(["--replay", "x.json", "--examples"], "x", log=lambda line: None)
+        errors.append("run_models: --examples passé en ligne de commande doit être refusé")
+    except SystemExit:
+        pass
+    # mémoire et fils repris au pic sur les appels ; une mesure absente ne casse pas la synthèse
+    fake = [{"status": "correct", "errors": [], "output": "", "timing": {"ram_peak_mb": 100.0, "vram_peak_mb": 5.0, "threads": 8}},
+            {"status": "correct", "errors": [], "output": "", "timing": {"ram_peak_mb": 300.0, "vram_peak_mb": None, "threads": 8}}]
+    fake_summary = harness.summarize([{"attempts": fake, "correct_first": True, "correct_after": True, "conform_first": True, "recall": True}])
+    if fake_summary["peak_ram_mb"] != 300.0 or fake_summary["peak_vram_mb"] != 5.0 or fake_summary["threads"] != 8:
+        errors.append(f"synthèse: pics de mémoire et fils mal relevés, reçu {fake_summary}")
+
     if errors:
         print("\n".join(errors))
         return 1
     print("harnais: 25 phrases rejouées à 100 %, plan faux compté faux, 4 types de sortie non conforme redemandés, "
-          "refus WGS84, catalogue filtré, schéma et exemples contrôlés")
+          "refus WGS84, catalogue filtré, schéma, exemples, gabarit mistral3 et comparaison de modèles contrôlés")
     return 0
 
 

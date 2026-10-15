@@ -3,14 +3,14 @@ title: 'Comparer modeles et quantifications'
 type: 'chore'
 ticket: '4'
 created: '2026-10-15'
-status: 'ready-for-dev'
+status: 'built'
 baseline_revision: '3031462'
 route: 'oneshot'
 route_source: 'pinned'
 risk: 'medium'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick']
 review_loop_iteration: 0
 context: ['{project-root}/CLAUDE.md']
 ---
@@ -61,11 +61,11 @@ context: ['{project-root}/CLAUDE.md']
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] Télécharger et contrôler les deux GGUF Ministral (licence lue sur la fiche).
-- [ ] `harness.py` -- gabarit `mistral3`, mémoire au pic, processeur et fils.
-- [ ] Essai de contrôle du gabarit sur une phrase simple, avec examen des jetons d'invite.
-- [ ] `run_models.py` et `check_harness.py` -- comparaison, contrôlée en rejeu.
-- [ ] Lancer les trois mesures, commiter `resultats-8-4.*` et `lecture-8-4.md`.
+- [x] Télécharger et contrôler les deux GGUF Ministral (licence lue sur la fiche).
+- [x] `harness.py` -- gabarit `mistral3`, mémoire au pic, processeur et fils.
+- [x] Essai de contrôle du gabarit sur une phrase simple, avec examen des jetons d'invite.
+- [x] `run_models.py` et `check_harness.py` -- comparaison, contrôlée en rejeu.
+- [x] Lancer les trois mesures, commiter `resultats-8-4.*` et `lecture-8-4.md`.
 
 **Acceptance Criteria:**
 - Given `resultats-8-4.md`, when on le lit, then il donne pour chacune des trois combinaisons : licence, taux d'emblée et après relance, mémoire vive et vidéo au pic, temps de chargement, de lecture et de génération, processeur et nombre de fils, sur les mêmes 25 phrases.
@@ -75,7 +75,23 @@ context: ['{project-root}/CLAUDE.md']
 
 Route oneshot épinglée : aucun sous-agent de codage autorisé. Les trois mesures durent environ 3 minutes chacune et sont lancées en arrière-plan.
 
+Fait : empreintes des trois GGUF égales à celles d'unsloth ; gabarit `mistral3` sans `<s>` (le chargeur l'ajoute, vérifié à `llama-tokenize`) ; `harness.py` relève RAM au pic (jeu de travail, ctypes), VRAM au pic (`nvidia-smi`), fils ; `run_models.py` créé ; `resultats-8-4.*` et `lecture-8-4.md`. Surprise : le Q6_K déborde les 8 Go de la carte, d'où une lecture d'invite sept fois plus lente.
+
 ## Verification
 
 **Commands:**
 - `python -I tests/epreuve-modele-local/check_harness.py` -- expected: sortie 0
+
+## Review Triage Log
+
+- Traçabilité des empreintes : réel, patché (hashes et dépôts écrits dans `lecture-8-4.md`).
+- Lecture trop ferme sur la carte de 8 Go : réel, patché (formulation sans verdict, journal non conservé dit).
+- Pas de mise en garde sur le Q6_K dans le tableau généré : réel, patché (`run_models.py` signale une lecture plus de trois fois plus lente).
+- `--catalog=x` contourne le garde-fou : réel, bas, patché (comparaison sur la partie avant `=`) ; le même défaut subsiste dans `run_forms.py` (8.5), non touché.
+- Lecture « rapporte trois phrases » contre sa propre prudence : patché (reformulé).
+- Comparaison à la seule première ligne : rejeté, c'est la référence par construction.
+- Échantillonnage de VRAM grossier : noté dans les limites, sans correction.
+- Fils « 8 » contre 16 logiques : noté dans les limites.
+- Virgule ou point décimal : rejeté, cosmétique.
+- Fichiers hors périmètre dans l'arbre (`skills-lock.json`, `.claude/`, `deferred-work.md`) : non commités avec 8.4.
+- Plan non mis à jour : patché.

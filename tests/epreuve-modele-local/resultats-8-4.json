@@ -1,0 +1,270 @@
+{
+ "cpu": "AMD Ryzen 7 5800X 8-Core Processor",
+ "logical_processors": 16,
+ "rows": [
+  {
+   "label": "Qwen3.5-9B Q4_K_M",
+   "file": "Qwen3.5-9B-Q4_K_M.gguf",
+   "quant": "Q4_K_M",
+   "template": "chatml",
+   "licence": "Apache-2.0",
+   "ctx": 8192,
+   "ngl": 99,
+   "summary": {
+    "sentences": 25,
+    "correct_first": 20,
+    "correct_after_retry": 20,
+    "rate_first": 0.8,
+    "rate_after_retry": 0.8,
+    "conform_first": 24,
+    "retried": 1,
+    "call_errors": 0,
+    "catalog_recall": 25,
+    "mean_load_ms": 2681.8,
+    "mean_prompt_ms": 1558.0,
+    "mean_prompt_tokens": 4873.8,
+    "mean_generation_ms": 1272.6,
+    "mean_generated_tokens": 109.2,
+    "peak_ram_mb": 5450.34765625,
+    "peak_vram_mb": 5932.0,
+    "threads": 8.0
+   },
+   "total_ms": 179094,
+   "outcomes": {
+    "S01": "✓",
+    "S02": "✓",
+    "S03": "✓",
+    "S04": "✓",
+    "S05": "✓",
+    "S06": "✓",
+    "S07": "✓",
+    "S08": "✓",
+    "S09": "✓",
+    "S10": "✓",
+    "S11": "✓",
+    "S12": "✓",
+    "S13": "✓",
+    "S14": "✓",
+    "S15": "✗",
+    "S16": "✓",
+    "S17": "✗",
+    "S18": "✗",
+    "S19": "✗",
+    "S20": "✓",
+    "S21": "✓",
+    "S22": "✓",
+    "S23": "✓",
+    "S24": "✗",
+    "S25": "✓"
+   },
+   "failures": {
+    "S15": {
+     "status": "wrong",
+     "errors": [],
+     "output": "[{\"command\": \"terrain.viewshed\", \"params\": {\"dem\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"observer\": {\"x\": 0, \"y\": 0, \"epsg\": 2154}, \"observer_height\": {\"value\": 1, \"unit\": \"m\"}, \"radius\": {\"value\": 100, \"unit\": \"km\"}}}, {\"command\": \"analysis.zonal_statistics\", \"params\": {\"zones\": \"communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946\", \"raster\": \"step:1\", \"statistics\": [\"mean\", \"max\"]}}]"
+    },
+    "S17": {
+     "status": "wrong",
+     "errors": [],
+     "output": "[{\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3\", \"filter\": {\"field\": \"section\", \"operator\": \"eq\", \"value\": \"U\"}}}, {\"command\": \"analysis.buffer\", \"params\": {\"layer\": \"gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1\", \"distance\": {\"value\": 500, \"unit\": \"m\"}, \"dissolve\": true}}, {\"command\": \"analysis.intersect\", \"params\": {\"layer\": \"step:1\", "
+    },
+    "S18": {
+     "status": "wrong",
+     "errors": [],
+     "output": "[{\"command\": \"map.zoom_to_layer\", \"params\": {\"layer\": \"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\"}}, {\"command\": \"layout.export_pdf\", \"params\": {\"title\": \"Accès aux gares\", \"layers\": [\"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\", \"gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1\"], \"paper\": \"A3\", \"orientation\": \"portrait\"}}]"
+    },
+    "S19": {
+     "status": "wrong",
+     "errors": [],
+     "output": "[{\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\", \"filter\": {\"field\": \"classe\", \"operator\": \"eq\", \"value\": \"départementale\"}}}, {\"command\": \"analysis.buffer\", \"params\": {\"layer\": \"step:1\", \"distance\": {\"value\": 100, \"unit\": \"m\"}}}, {\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649\""
+    },
+    "S24": {
+     "status": "wrong",
+     "errors": [],
+     "output": "[{\"command\": \"terrain.viewshed\", \"params\": {\"dem\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"observer\": {\"x\": 656120, \"y\": 6848060, \"epsg\": 2154}, \"observer_height\": {\"value\": 25, \"unit\": \"m\"}, \"radius\": {\"value\": 2, \"unit\": \"km\"}}}, {\"command\": \"analysis.zonal_statistics\", \"params\": {\"zones\": \"step:1\", \"raster\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"statistics\": [\"mean\"]}}]"
+    }
+   }
+  },
+  {
+   "label": "Ministral 3 8B Q4_K_M",
+   "file": "Ministral-3-8B-Instruct-2512-Q4_K_M.gguf",
+   "quant": "Q4_K_M",
+   "template": "mistral3",
+   "licence": "Apache-2.0",
+   "ctx": 8192,
+   "ngl": 99,
+   "summary": {
+    "sentences": 25,
+    "correct_first": 17,
+    "correct_after_retry": 17,
+    "rate_first": 0.68,
+    "rate_after_retry": 0.68,
+    "conform_first": 25,
+    "retried": 0,
+    "call_errors": 0,
+    "catalog_recall": 25,
+    "mean_load_ms": 2598.0,
+    "mean_prompt_ms": 1573.5,
+    "mean_prompt_tokens": 4938.0,
+    "mean_generation_ms": 1196.2,
+    "mean_generated_tokens": 99.3,
+    "peak_ram_mb": 5161.4921875,
+    "peak_vram_mb": 6284.0,
+    "threads": 8.0
+   },
+   "total_ms": 164479,
+   "outcomes": {
+    "S01": "✓",
+    "S02": "✓",
+    "S03": "✓",
+    "S04": "✓",
+    "S05": "✓",
+    "S06": "✓",
+    "S07": "✓",
+    "S08": "✓",
+    "S09": "✓",
+    "S10": "✓",
+    "S11": "✗",
+    "S12": "✗",
+    "S13": "✓",
+    "S14": "✗",
+    "S15": "✓",
+    "S16": "✓",
+    "S17": "✗",
+    "S18": "✓",
+    "S19": "✗",
+    "S20": "✗",
+    "S21": "✓",
+    "S22": "✓",
+    "S23": "✗",
+    "S24": "✗",
+    "S25": "✓"
+   },
+   "failures": {
+    "S11": {
+     "status": "wrong",
+     "errors": [],
+     "output": "[\r\n    {\"command\": \"layer.reproject\", \"params\": {\"layer\": \"batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649\", \"target_epsg\": 2154}},\r\n    {\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"step:1\", \"filter\": {\"field\": \"hauteur_m\", \"operator\": \"gt\", \"value\": 12}}}\r\n]"
+    },
+    "S12": {
+     "status": "wrong",
+     "errors": [],
+     "output": "{\"refusal\": \"La demande ne réclame aucune étape ou transformation, donc aucun plan n'est nécessaire.\"}"
+    },
+    "S14": {
+     "status": "wrong",
+     "errors": [],
+     "output": "[\r\n    {\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"plu_zonage_a81d5c06_2e9f_4a37_b6c4_5f13e07d92a8\", \"filter\": {\"field\": \"libelle\", \"operator\": \"eq\", \"value\": \"Zone à urbaniser\"}}},\r\n    {\"command\": \"analysis.buffer\", \"params\": {\"layer\": \"step:1\", \"distance\": {\"value\": 50, \"unit\": \"m\"}, \"dissolve\": true}}\r\n]"
+    },
+    "S17": {
+     "status": "wrong",
+     "errors": [],
+     "output": "[\r\n    {\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"plu_zonage_a81d5c06_2e9f_4a37_b6c4_5f13e07d92a8\", \"filter\": {\"field\": \"typezone\", \"operator\": \"eq\", \"value\": \"U\"}}},\r\n    {\"command\": \"analysis.buffer\", \"params\": {\"layer\": \"gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1\", \"distance\": {\"value\": 500, \"unit\": \"m\"}, \"dissolve\": true}},\r\n    {\"command\": \"analysis.intersect\", \"params\": {\""
+    },
+    "S19": {
+     "status": "wrong",
+     "errors": [],
+     "output": "[\r\n    {\"command\": \"layer.reproject\", \"params\": {\"layer\": \"batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649\", \"target_epsg\": 2154}},\r\n    {\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\", \"filter\": {\"field\": \"classe\", \"operator\": \"eq\", \"value\": \"départementale\"}}},\r\n    {\"command\": \"analysis.buffer\", \"params\": {\"layer\": \"step:1\", \"distance\": "
+    },
+    "S20": {
+     "status": "wrong",
+     "errors": [],
+     "output": "{\"refusal\": \"Le modèle numérique de terrain ne couvre pas toute la zone demandée (2 km autour du point).\"}"
+    },
+    "S23": {
+     "status": "wrong",
+     "errors": [],
+     "output": "{\"refusal\": \"La demande ne peut pas être satisfaite car le modèle numérique de terrain n'est pas dans le système de coordonnées des communes (2154).\"}"
+    },
+    "S24": {
+     "status": "wrong",
+     "errors": [],
+     "output": "[\r\n    {\"command\": \"terrain.viewshed\", \"params\": {\"dem\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"observer\": {\"x\": 656120, \"y\": 6848060, \"epsg\": 2154}, \"observer_height\": {\"value\": 25, \"unit\": \"m\"}, \"radius\": {\"value\": 2, \"unit\": \"km\"}}},\r\n    {\"command\": \"analysis.zonal_statistics\", \"params\": {\"zones\": \"step:1\", \"raster\": \"step:1\", \"statistics\": [\"count\"]}},\r\n    {\"command\": \"analysis.inte"
+    }
+   }
+  },
+  {
+   "label": "Ministral 3 8B Q6_K",
+   "file": "Ministral-3-8B-Instruct-2512-Q6_K.gguf",
+   "quant": "Q6_K",
+   "template": "mistral3",
+   "licence": "Apache-2.0",
+   "ctx": 8192,
+   "ngl": 99,
+   "summary": {
+    "sentences": 25,
+    "correct_first": 20,
+    "correct_after_retry": 20,
+    "rate_first": 0.8,
+    "rate_after_retry": 0.8,
+    "conform_first": 25,
+    "retried": 0,
+    "call_errors": 0,
+    "catalog_recall": 25,
+    "mean_load_ms": 3451.5,
+    "mean_prompt_ms": 11359.4,
+    "mean_prompt_tokens": 4938.0,
+    "mean_generation_ms": 2271.7,
+    "mean_generated_tokens": 112.4,
+    "peak_ram_mb": 7171.2421875,
+    "peak_vram_mb": 7550.0,
+    "threads": 8.0
+   },
+   "total_ms": 463211,
+   "outcomes": {
+    "S01": "✓",
+    "S02": "✓",
+    "S03": "✓",
+    "S04": "✓",
+    "S05": "✓",
+    "S06": "✓",
+    "S07": "✓",
+    "S08": "✓",
+    "S09": "✓",
+    "S10": "✓",
+    "S11": "✗",
+    "S12": "✓",
+    "S13": "✓",
+    "S14": "✗",
+    "S15": "✓",
+    "S16": "✓",
+    "S17": "✗",
+    "S18": "✓",
+    "S19": "✗",
+    "S20": "✓",
+    "S21": "✓",
+    "S22": "✓",
+    "S23": "✓",
+    "S24": "✗",
+    "S25": "✓"
+   },
+   "failures": {
+    "S11": {
+     "status": "wrong",
+     "errors": [],
+     "output": "[\r\n    {\"command\": \"layer.reproject\", \"params\": {\"layer\": \"batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649\", \"target_epsg\": 2154}},\r\n    {\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"step:1\", \"filter\": {\"field\": \"hauteur_m\", \"operator\": \"gt\", \"value\": 12}}}\r\n]"
+    },
+    "S14": {
+     "status": "wrong",
+     "errors": [],
+     "output": "[\r\n    {\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"plu_zonage_a81d5c06_2e9f_4a37_b6c4_5f13e07d92a8\", \"filter\": {\"field\": \"libelle\", \"operator\": \"eq\", \"value\": \"Zone à urbaniser\"}}},\r\n    {\"command\": \"analysis.buffer\", \"params\": {\"layer\": \"step:1\", \"distance\": {\"value\": 50, \"unit\": \"m\"}, \"dissolve\": true}}\r\n]"
+    },
+    "S17": {
+     "status": "wrong",
+     "errors": [],
+     "output": "[\r\n    {\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"plu_zonage_a81d5c06_2e9f_4a37_b6c4_5f13e07d92a8\", \"filter\": {\"field\": \"typezone\", \"operator\": \"eq\", \"value\": \"U\"}}},\r\n    {\"command\": \"analysis.buffer\", \"params\": {\"layer\": \"gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1\", \"distance\": {\"value\": 500, \"unit\": \"m\"}, \"dissolve\": true}},\r\n    {\"command\": \"analysis.intersect\", \"params\": {\""
+    },
+    "S19": {
+     "status": "wrong",
+     "errors": [],
+     "output": "[\r\n    {\"command\": \"layer.reproject\", \"params\": {\"layer\": \"batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649\", \"target_epsg\": 2154}},\r\n    {\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\", \"filter\": {\"field\": \"classe\", \"operator\": \"eq\", \"value\": \"départementale\"}}},\r\n    {\"command\": \"analysis.buffer\", \"params\": {\"layer\": \"step:1\", \"distance\": "
+    },
+    "S24": {
+     "status": "wrong",
+     "errors": [],
+     "output": "[\r\n    {\r\n        \"command\": \"terrain.viewshed\",\r\n        \"params\": {\r\n            \"dem\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\",\r\n            \"observer\": {\r\n                \"x\": 656120,\r\n                \"y\": 6848060,\r\n                \"epsg\": 2154\r\n            },\r\n            \"observer_height\": {\r\n                \"value\": 25,\r\n                \"unit\": \"m\"\r\n            },\r\n            \"radius"
+    }
+   }
+  }
+ ]
+}
