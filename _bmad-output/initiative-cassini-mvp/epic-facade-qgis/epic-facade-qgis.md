@@ -27,7 +27,7 @@ produit son résultat dans le projet, sur une machine sans réseau.
 
 ## Requirements
 
-À compléter à l'inception de cet epic. La source est la spec de l'initiative,
+Les exigences sont portées par la spec, une capacité à la fois ; les entrées citent les `CAP-N`. La source est la spec de l'initiative,
 `../spec-cassini-mvp/spec-cassini-mvp.md`, section Capabilities, CAP-13, CAP-9,
 CAP-10, CAP-3 et CAP-5.
 
@@ -74,3 +74,7 @@ n'est écrite dans le Python.
 - Decision: l'extension est en GPL, QGIS l'étant ; ce n'est pas un choix mais une conséquence, et le module défense s'appuiera donc sur le noyau et non sur elle (2026-10-14).
 - Open question: la confirmation juridique de la frontière GPL est à obtenir avant toute vente, pas avant d'écrire du code.
 - Waits on epic 2 because: l'extension ne peut consommer le registre avant que son contrat existe.
+- Decision: les ordres du noyau portent des chemins absolus, décidés par le noyau ; le journal garde ses chemins relatifs (2026-10-15). Exception volontaire à AD-9 pour le seul `order.execute`, car le noyau et l'extension sont sur la même machine et l'extension a besoin du chemin réel pour écrire.
+- Source conflict: AD-9 — « aucun chemin absolu sur le canal » vs `core/src/serve.rs` et `docs/canal-local.md` (2.11), où `order.execute` porte des chemins absolus, et `session.hello` le chemin absolu du projet (AD-7). Tranché par la Decision ci-dessus ; AD-9 reste à amender dans le contrat d'architecture.
+- Decision: le panneau est esquissé par `bmad-ux` avant la story 4 ; le traceur (story 1) garde un panneau minimal jetable (2026-10-15).
+- Decision: découpage en 14 entrées sur une seule piste Python, au-dessus des 8 à 12 habituels ; un refactor sweep et une suite de bout en bout ferment l'épic (2026-10-15).

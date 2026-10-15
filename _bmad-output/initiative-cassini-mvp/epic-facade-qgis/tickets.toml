@@ -1,0 +1,166 @@
+# tickets.toml — epic 9, facade QGIS : extension, canal local, commandes executees par QGIS.
+# L'ordre des tables est l'ordre de construction. `id` nomme une entree pour de bon.
+# Une seule piste Python (qgis-plugin/) ; chaque story de commande ajoute aussi la
+# declaration deleguee (runs_in = qgis) dans le noyau, avec son test, et le geste
+# correspondant dans l'extension. Aucune logique metier dans le Python (AD-22).
+# Inception le 2026-10-15, apres l'epic 2 (canal, ordres et annulation livres).
+
+[[entry]]
+id = 1
+type = "story"
+title = "Traceur : l'extension se charge dans QGIS et execute system.about par le noyau"
+description = "Cree qgis-plugin/ (paquet cassini_qgis, metadata.txt 3.44 a 4.99), trouve le noyau dans l'ordre fixe de AD-17 sans rien telecharger, le lance en cassini serve par QProcess, envoie session.hello avec le chemin du projet ouvert et affiche dans un panneau minimal le resultat de system.about."
+verify = "Dans QGIS 3.44, activer l'extension ouvre un panneau qui affiche la version du noyau et celle du protocole, et fermer QGIS ferme le noyau."
+covers = ["CAP-13"]
+after = ["2.11"]
+hitl = true
+risk = "high"
+notes = ["hitl : le proprietaire installe QGIS 3.44 et charge l'extension depuis le dossier du depot. Ce que la story rend visible : la version du noyau dans un panneau QGIS."]
+
+[[entry]]
+id = 2
+type = "story"
+title = "Boucle d'ordres non bloquante : executant, annulation, aucune lecture bloquante"
+description = "Fait de l'extension l'executant distant du noyau : elle recoit order.execute, route vers un geste enregistre, repond result ou error, relaie request.cancel, lit par les signaux de QProcess, draine stderr en continu et ne gele jamais l'interface (AD-4, AD-12)."
+verify = "Avec un geste de test lent, un ordre annule par request.cancel rend registry.cancelled sans geler QGIS, et un stderr tres bavard du noyau ne bloque rien."
+covers = ["CAP-13"]
+after = [1]
+hitl = false
+risk = "high"
+
+[[entry]]
+id = 3
+type = "story"
+title = "Garde hors ligne et recette du Python de l'extension"
+description = "Etend la recette au Python : imports urllib, requests, socket, http, PyQt5 et PyQt6 refuses, test zero requete sur QgsNetworkAccessManager, extension chargee sur les deux series de QGIS, taille du paquet sous 25 Mo, et noyau compile et teste sans QGIS (AD-1, AD-14, AD-18)."
+verify = "La recette echoue quand on ajoute un import urllib dans l'extension, et passe sans ; le noyau passe ses tests sur une machine sans QGIS."
+covers = ["CAP-13"]
+after = [1]
+hitl = false
+risk = "medium"
+unknown = "Comment faire tourner QGIS 3.44 et 4.x dans la recette (image de conteneur, runner, ou test sans QGIS par doublures de qgis.core) : a trancher avec le proprietaire avant la story."
+
+[[entry]]
+id = 4
+type = "story"
+title = "Panneau : lancer une commande du registre, voir son resultat, l'arreter"
+description = "Remplace le panneau minimal par le panneau esquisse : liste des commandes disponibles lue au catalogue, formulaire par schema, resultat affiche, journal des etapes, bouton d'arret qui envoie request.cancel (AD-12)."
+verify = "Depuis le panneau, on lance une commande du registre, on voit son resultat dans le projet, et on arrete une commande lente."
+covers = ["CAP-13"]
+after = [2]
+hitl = true
+risk = "medium"
+unknown = "Le dessin du panneau n'existe pas : bmad-ux doit produire l'esquisse (DESIGN.md et EXPERIENCE.md) avant cette story, que l'agent de l'epic 5 reutilisera pour afficher le plan."
+
+[[entry]]
+id = 5
+type = "story"
+title = "Ouvrir un GeoPackage, un Shapefile et un GeoJSON par QGIS"
+description = "Ajoute la commande deleguee layer.add pour les trois formats : couche creee dans le projet, reprojection si le systeme differe de celui du projet, id de couche rendu au noyau (AD-9, AD-19), fichier d'origine jamais ouvert en ecriture."
+verify = "Un fichier de chacun des trois formats apparait comme couche du projet, et son empreinte est identique avant et apres."
+covers = ["CAP-9"]
+after = [2, 3]
+hitl = false
+risk = "medium"
+unknown = "Mecanisme de l'empreinte : l'architecture journalise taille et date de modification, l'epic parle d'empreinte ; choisir une somme de controle (le fichier est lu en entier) ou taille et date."
+
+[[entry]]
+id = 6
+type = "story"
+title = "Ouvrir un CSV a coordonnees et un GeoParquet"
+description = "Etend layer.add au CSV (colonnes X et Y, systeme precise a l'ouverture) et au GeoParquet, avec la meme garantie de fichier inchange."
+verify = "Un CSV et un GeoParquet apparaissent comme couches du projet, avec leur systeme de coordonnees, et leur empreinte est inchangee."
+covers = ["CAP-9"]
+after = [5]
+hitl = false
+risk = "medium"
+unknown = "GeoParquet depend de la version de GDAL embarquee par QGIS 3.44, non verifiee : a verifier sur le poste du proprietaire avant la story, et si le format manque, le decider avec lui."
+
+[[entry]]
+id = 7
+type = "story"
+title = "Inventaire du projet, description d'une couche et journal a cote du projet"
+description = "Ajoute project.inventory (couches, ordre, etendue, systeme de coordonnees) et layer.describe (champs, etendue, EPSG) ; verifie que le journal Cassini vit a cote du fichier de projet et que deplacer l'ensemble sur un autre poste restitue les deux."
+verify = "L'inventaire d'un projet de test rend ses couches et son etendue, et le projet copie avec son journal sur un autre dossier se rejoue."
+covers = ["CAP-10"]
+after = [5]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 8
+type = "story"
+title = "Zone tampon par le cadre de traitement de QGIS"
+description = "Ajoute analysis.buffer avec des parametres neutres et types, traduits dans l'extension vers l'algorithme de QGIS (AD-22), et pose le gabarit commun des analyses : appel du cadre de traitement, couche de sortie nommee par le noyau, nombre d'entites rendu."
+verify = "Un tampon de 500 m autour de points de test produit la couche attendue, avec le bon nombre d'entites, hors ligne."
+covers = ["CAP-3"]
+after = [5]
+hitl = false
+risk = "high"
+
+[[entry]]
+id = 9
+type = "story"
+title = "Intersection et selection par attribut"
+description = "Ajoute analysis.intersect et analysis.select_by_attribute, la seconde par champ, operateur et valeur, jamais par expression (AD-22)."
+verify = "Chaque commande rend sur des couches de test le resultat attendu, par un test."
+covers = ["CAP-3"]
+after = [8]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 10
+type = "story"
+title = "Statistiques par zone"
+description = "Ajoute analysis.zonal_statistics, qui rend des statistiques d'une couche par zone, en nombre borne par le schema (AD-8)."
+verify = "Sur une couche de zones et une couche de points de test, la commande rend les comptes attendus."
+covers = ["CAP-3"]
+after = [8]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 11
+type = "story"
+title = "Isochrones a pied et en voiture"
+description = "Ajoute analysis.isochrone sur un reseau routier fourni par l'utilisateur, a pied et en voiture, par le cadre de traitement de QGIS."
+verify = "Sur un petit reseau de test, la commande rend une isochrone dont l'emprise est celle attendue."
+covers = ["CAP-3"]
+after = [8]
+hitl = false
+risk = "high"
+unknown = "L'utilisateur apporte-t-il un reseau routier ? La spec le suppose sans le confirmer, et les isochrones n'ont pas de donnees sans lui : a confirmer avec le proprietaire, sinon l'entree devient un spike ou sort du MVP."
+
+[[entry]]
+id = 12
+type = "story"
+title = "Export PDF par la mise en page de QGIS"
+description = "Ajoute layout.export_pdf : le moteur de mise en page de QGIS produit un PDF avec titre, legende, echelle, fleche du nord et sources, dans le dossier de travail choisi par le noyau (AD-10)."
+verify = "Le PDF d'un projet de test s'ouvre dans un lecteur standard et porte les cinq elements."
+covers = ["CAP-5"]
+after = [8]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 13
+type = "story"
+title = "Refactor sweep"
+description = "Reprend ce que les entrees precedentes ont laisse de cote : son perimetre est fixe a son demarrage, a partir des plans et des constats de revue reportes pendant l'epic."
+verify = "La recette passe au vert apres la passe, et aucun constat reporte ne reste ouvert sans decision ecrite."
+covers = []
+after = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 14
+type = "story"
+title = "Suite de bout en bout : ouvrir, analyser, exporter, rejouer"
+description = "Enchaine par le canal reel ouverture d'une couche, zone tampon et export PDF dans QGIS, ferme puis rouvre le projet et rejoue le journal pour redonner le meme resultat."
+verify = "Le scenario passe sur QGIS sans reseau, et le rejeu redonne les memes resultats."
+covers = ["CAP-13"]
+after = [13]
+hitl = false
+risk = "medium"
