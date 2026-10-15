@@ -13,7 +13,7 @@ import { BasemapSource } from "./basemap.source";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 import rawStyle from "./basemap.style.json";
 
-// Étape 1 : la fenêtre, la carte, et un style qui ne sort jamais sur le réseau.
+// La fenêtre, la carte, et un style qui ne sort jamais sur le réseau.
 // Le fond de carte est l'archive PMTiles du dépôt, lue par le moteur Rust et
 // servie à la fenêtre par l'IPC Tauri. Aucune requête distante, à aucun moment.
 //

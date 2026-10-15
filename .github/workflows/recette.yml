@@ -86,6 +86,12 @@ jobs:
       - name: Typage strict et garde hors ligne
         run: npm run check
 
+      # Le paquet construit nomme des fichiers : chacun doit exister dans dist/.
+      - name: Construction et assets de dist
+        run: |
+          npm run build
+          npm run verify:dist
+
   # Point d'accroche réservé à l'epic 9 : le contrôle du Python de l'extension
   # QGIS (`qgis-plugin/`), quand elle existera. Il prendra place ici comme un
   # troisième job, au même titre que les deux précédents.

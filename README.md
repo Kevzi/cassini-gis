@@ -71,7 +71,7 @@ bureau désormais reportée en V2 :
 - Un générateur **déterministe** de l'archive PMTiles de recette, et deux
   vérificateurs qui la relisent : conformité de l'archive, puis chemin complet de
   chargement de la carte.
-- Une recette qui tient en quatre commandes : 110 tests du noyau et de la CLI, `cargo fmt`,
+- Une recette qui tient en cinq commandes : 110 tests du noyau et de la CLI, `cargo fmt`,
   `cargo clippy`, et le contrôle de l'interface — lancée par GitHub Actions à
   chaque poussée.
 
@@ -345,7 +345,7 @@ Il n'y a encore rien à installer dans QGIS : l'extension arrive à l'étape 4.
 
 ## La recette
 
-Quatre commandes, que le workflow
+Cinq commandes, que le workflow
 [`.github/workflows/recette.yml`](.github/workflows/recette.yml) lance à chaque
 poussée, et qui se lancent aussi à la main. Si l'une échoue, le run passe au
 rouge. Un emplacement y est réservé au contrôle du Python de l'extension QGIS,
@@ -356,7 +356,12 @@ qui arrivera avec elle.
 | `cargo test -p cassini-core -p cassini --locked` | Les 110 tests du noyau et de la CLI, dont le refus de toute source réseau, la parité entre `run` et `serve` et le rejeu du journal. |
 | `cargo fmt --all --check` | La mise en forme du Rust. |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | Zéro avertissement, sur les deux crates et leurs tests. |
-| `npm run check`, depuis `app` | Le typage strict, puis trois vérifications décrites ci-dessous. |
+| `npm run check`, depuis `app` | Le typage strict, puis quatre vérifications décrites ci-dessous. |
+| `npm run build` puis `npm run verify:dist`, depuis `app` | Chaque fichier que le paquet construit désigne existe dans `dist/`. |
+
+Sous WSL, `--workspace` demande `libdbus` (dépendance de la coquille Tauri) : lancer
+`cargo clippy -p cassini-core -p cassini --all-targets --locked -- -D warnings`.
+La version de Rust est figée à 1.93.1 par `rust-toolchain.toml`.
 
 Ce que `npm run check` enchaîne après `tsc` :
 
@@ -373,6 +378,8 @@ Ce que `npm run check` enchaîne après `tsc` :
 - `scripts/verify-protocol.mjs` — 24 contrôles sur le chemin de chargement de la
   carte, et la preuve qu'une clé non enregistrée partirait bien sur le réseau,
   c'est-à-dire ce que la garde précédente existe pour empêcher.
+- `scripts/verify-ids.mjs` — chaque id de `app/index.html` est visé par `main.ts` ou
+  `style.css`, et chaque id visé existe dans le HTML.
 
 Un garde-fou qu'on n'a jamais vu refuser quelque chose ne garde rien : d'où les
 contrôles qui échouent exprès.

@@ -8,11 +8,13 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "check": "tsc --noEmit && node scripts/check-offline.mjs && node scripts/verify-basemap.mjs && node scripts/verify-protocol.mjs",
+    "check": "tsc --noEmit && node scripts/check-offline.mjs && node scripts/verify-basemap.mjs && node scripts/verify-protocol.mjs && node scripts/verify-ids.mjs",
     "tauri": "tauri",
     "fixtures": "node scripts/generate-basemap.mjs",
     "verify:fixtures": "node scripts/verify-basemap.mjs",
-    "verify:protocol": "node scripts/verify-protocol.mjs"
+    "verify:protocol": "node scripts/verify-protocol.mjs",
+    "verify:ids": "node scripts/verify-ids.mjs",
+    "verify:dist": "node scripts/verify-dist.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.2",
