@@ -1,0 +1,135 @@
+# tickets.toml — epic 2, registre de commandes et journal rejouable.
+# L'ordre des tables est l'ordre de construction. `id` nomme une entree pour de bon.
+# Une seule piste : tout touche cassini-core et la crate cli. Les vraies commandes
+# (layer.add, project.inventory, analysis.*, layout.export_pdf) arrivent avec l'epic 9 :
+# cet epic livre le contrat et sa mecanique, pas le catalogue.
+# Inception le 2026-10-15, apres le verdict de l'epic 8 (oui sous conditions).
+
+[[entry]]
+id = 1
+type = "story"
+title = "Traceur : la crate cassini et une premiere commande par cassini run"
+description = "Cree la crate cassini (/cli), le type Command du noyau, un registre qui porte une seule commande Rust de diagnostic, system.about (version du noyau et du protocole), avec ses schemas engendres, et la sous-commande cassini run <id> <json>."
+verify = "Sans QGIS installe, cassini run system.about rend la version du noyau et celle du protocole en JSON, et le test de la commande passe."
+covers = ["R1"]
+after = ["1.1", "1.6"]
+hitl = true
+risk = "medium"
+notes = ["hitl : le proprietaire donne la licence de schemars et de serde_json avant leur ajout (CLAUDE.md §8). Ce que la story rend visible : la commande tourne depuis le terminal."]
+
+[[entry]]
+id = 2
+type = "story"
+title = "Ajouter une commande sans toucher un fichier partage"
+description = "Met en place l'enregistrement automatique des commandes, pour qu'une commande nouvelle dans un fichier neuf apparaisse au registre sans modifier aucun fichier existant."
+verify = "Un test ajoute une commande dans un fichier neuf, le registre la liste, et aucun autre fichier du depot n'a ete modifie."
+covers = ["R2"]
+after = [1]
+hitl = true
+risk = "high"
+unknown = "Mecanisme d'enregistrement et de declaration des modules : un fichier neuf dans core/src a besoin d'une ligne mod dans lib.rs, donc d'un fichier partage. Orientation proposee : le crate inventory (ou linkme, licence a lire, MIT/Apache-2.0/BSD seulement) pour l'enregistrement, et un build.rs qui declare lui-meme les modules de core/src/commands/. A confirmer par le proprietaire avant la story, avec le point d'edition de liens entre core et cli que le test doit couvrir."
+
+[[entry]]
+id = 3
+type = "story"
+title = "Contrat complet d'une commande, controle par le registre lui-meme"
+description = "Fait refuser par le registre toute commande sans id domaine.verbe en anglais snake_case, sans descriptions fr et en, sans runs_in core ou qgis, sans declaration annulable ou non, sans schemas engendres en 2020-12, sans test, ou dont un schema declare une collection de geometries non bornee (AD-8), et ecrit la regle de redaction des descriptions et des schemas d'apres le verdict de l'epic 8."
+verify = "Un test d'auto-verification construit des registres de test a part du registre global, avec chacune de six commandes volontairement incompletes, et echoue a chaque fois ; il passe sur le registre reel et system.about."
+covers = ["R1"]
+after = [2, "8.6"]
+hitl = false
+risk = "medium"
+references = ["../epic-epreuve-du-modele-local/verdict-epreuve-du-modele-local.md, section Ce que l'epic 2 en retient"]
+
+[[entry]]
+id = 4
+type = "story"
+title = "Validation des parametres, erreurs typees et executant abstrait"
+description = "Valide les parametres contre le schema dans le noyau avant tout envoi, rend toute erreur sous la forme code domaine.cause, message en francais et id d'etape (AD-21), et separe l'execution en un executant Rust en processus et un executant delegue a QGIS, que cette story ne remplit que par un bouchon. Elle possede aussi le type du plan rendu (suite d'appels {command, params}, ou refus), la reference d'une etape a la sortie d'une autre et le typage de ces sorties, que le rejeu (6) et l'agent (epic 5) reprennent ; la forme step:k du verdict de l'epic 8 y est un choix remplacable."
+verify = "Un appel aux parametres invalides rend un code stable et un message en francais sans rien executer, un plan dont une etape cite une sortie inexistante ou d'un mauvais type est refuse avant tout envoi, et un appel a une commande runs_in qgis sans executant branche rend une erreur d'indisponibilite nommant la commande."
+covers = ["R1"]
+after = [3]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 5
+type = "story"
+title = "Journal en ecriture, ajout seul et verrou exclusif"
+description = "Ecrit, a chaque etape executee, une ligne JSON lisible dans le dossier de travail a cote du projet (id, parametres canonises, references d'entree en chemin relatif POSIX, resume du resultat, versions du noyau, du protocole et du registre), sous verrou exclusif ; une seconde session sur le meme projet obtient la lecture seule et le dit. Elle ajoute l'argument --project <fichier de projet> a cassini run et cassini replay (le canal le recevra par session.hello), le dossier de travail nomme d'apres le projet (AD-10), et un module de commandes de test, proprietaire unique que 6, 8 et 10 reutilisent : une commande qui lit un fichier relatif, une qui produit une sortie, et une runs_in qgis servie par un executant factice."
+verify = "Avec --project, apres trois commandes de test, le journal compte trois lignes lisibles sans chemin absolu dans le dossier de travail, et une seconde session ouverte sur le meme projet refuse d'ecrire en l'annoncant."
+covers = ["R4"]
+after = [4]
+hitl = true
+risk = "high"
+notes = ["hitl : licence du crate de verrou de fichier a donner par le proprietaire avant son ajout."]
+
+[[entry]]
+id = 6
+type = "story"
+title = "Rejeu du journal par cassini replay"
+description = "Rejoue un journal par le meme chemin que l'execution d'origine, en liant les sorties par repere local a l'etape, en echouant en nommant la commande que l'executant ne sait pas faire, et en signalant avant de commencer un fichier journalise comme non portable."
+verify = "Rejouer le journal d'un projet de test sur les memes fichiers rend des resultats identiques a ceux d'origine, et un journal portant une commande inconnue echoue en la nommant."
+covers = ["R5"]
+after = [5]
+hitl = false
+risk = "high"
+
+[[entry]]
+id = 7
+type = "story"
+title = "Le canal local : cassini serve, session.hello et commandes disponibles"
+description = "Ajoute la sous-commande cassini serve, qui parle JSON-RPC 2.0 sur l'entree et la sortie standard, un message par ligne (AD-3), repond a session.hello en refusant une version de protocole differente et en marquant indisponible toute commande qgis non annoncee, et execute une commande du registre sur demande, par la meme boucle d'execution et le meme journal que cassini run. La reponse a session.hello rend pour chaque commande disponible ses descriptions, ses schemas et ses valeurs d'exemple (lecture du registre pour l'agent et MCP) ; une commande qgis non annoncee y est rendue indisponible, etat produit par l'executant a bouchon de l'entree 4."
+verify = "Un client de test lance cassini serve sur un projet de test, envoie session.hello avec sa liste de commandes, recoit la liste des commandes disponibles avec leurs schemas, appelle system.about et recoit la reponse, et la ligne de journal de l'appel existe ; une version de protocole differente est refusee avec un message qui dit quoi mettre a jour."
+covers = ["R3", "R4"]
+after = [4, 5]
+hitl = false
+risk = "high"
+references = ["../architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md, AD-2, AD-3, AD-4, AD-7"]
+notes = ["C'est l'interface que l'epic 9 (extension QGIS) et l'epic 5 (agent) consomment."]
+
+[[entry]]
+id = 11
+type = "story"
+title = "Ordres du noyau vers l'extension et annulation par message"
+description = "Complete le canal local : le noyau envoie un ordre a l'extension et recoit sa reponse, une requete se laisse annuler par son id dans la version 1 du protocole, le noyau journalise l'etape comme annulee et nettoie ses sorties partielles, et aucun des deux cotes ne bloque en attendant l'autre (AD-3, AD-4, AD-12)."
+verify = "Un client de test recoit un ordre du noyau et y repond, annule une commande de test longue par l'id de sa requete, et le journal porte l'etape comme annulee sans sortie partielle sur le disque."
+covers = ["R3", "R4"]
+after = [7]
+hitl = false
+risk = "high"
+notes = ["Ces messages sont le contrat que l'epic 9 consomme : ils sont fixes ici pour qu'il ne les invente pas."]
+
+[[entry]]
+id = 8
+type = "story"
+title = "Meme appel, meme resultat : parite entre cassini run et cassini serve"
+description = "Ajoute le test qui appelle chaque commande core du registre par cassini run et par cassini serve, sur le meme projet de test, et compare les resultats octet a octet apres canonisation."
+verify = "Le test de parite passe sans QGIS installe pour toute commande core du registre, et echoue quand un point d'entree altere un resultat."
+covers = ["R3"]
+after = [7]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 9
+type = "story"
+title = "Refactor sweep"
+description = "Nettoie ce que l'epic a laisse : doublons, noms, documentation du contrat, d'apres les plans et les constats differes pendant l'epic."
+verify = "La recette complete passe et chaque constat differe pendant l'epic est traite ou ecarte par ecrit."
+covers = []
+after = [1, 2, 3, 4, 5, 6, 7, 8, 11]
+hitl = false
+risk = "low"
+notes = ["Perimetre fixe au demarrage, d'apres les plans et les constats differes ; rien d'autre qu'un nettoyage."]
+
+[[entry]]
+id = 10
+type = "story"
+title = "Suite de bout en bout : executer, fermer, rouvrir, rejouer, comparer"
+description = "Ecrit le scenario de recette qui execute une suite de commandes, ferme la session, la rouvre, rejoue le journal et compare les resultats, puis verifie que le journal est du texte lisible a cote du projet."
+verify = "La commande de recette du scenario passe sur un projet de test et echoue si un resultat rejoue differe ou si le journal n'est pas du texte."
+covers = ["R4", "R5"]
+after = [9]
+hitl = false
+risk = "medium"
