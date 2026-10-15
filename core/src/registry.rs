@@ -9,7 +9,7 @@ use std::fmt;
 
 use schemars::{schema_for, JsonSchema};
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value;
 
 /// Version du protocole du noyau.
@@ -113,6 +113,12 @@ struct Entry {
     handler: Handler,
 }
 
+/// Inscription d'une commande, faite par la commande elle-même dans son fichier :
+/// `inventory::submit! { Registration(|r| r.register(MaCommande)) }`.
+pub struct Registration(pub fn(&mut Registry));
+
+inventory::collect!(Registration);
+
 /// Le registre : id de commande vers description et exécution.
 #[derive(Default)]
 pub struct Registry {
@@ -150,46 +156,15 @@ impl Registry {
         (entry.handler)(params)
     }
 
-    /// Le registre standard du noyau.
+    /// Le registre standard du noyau : toutes les commandes qui se sont inscrites
+    /// (voir `Registration`). Le registre ne connaît aucune commande par son nom.
+    /// L'ordre vient de l'id (BTreeMap), jamais de l'ordre d'inscription.
     pub fn standard() -> Self {
         let mut registry = Self::new();
-        registry.register(SystemAbout);
-        registry
-    }
-}
-
-/// Paramètres de `system.about` : aucun, et aucun champ inconnu accepté.
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct AboutParams {}
-
-/// Résultat de `system.about`.
-#[derive(Debug, Serialize, JsonSchema)]
-pub struct AboutOutput {
-    pub core_version: String,
-    pub protocol_version: u32,
-}
-
-/// Commande `system.about` : versions du noyau et du protocole.
-pub struct SystemAbout;
-
-impl Command for SystemAbout {
-    type Params = AboutParams;
-    type Output = AboutOutput;
-
-    fn spec() -> CommandSpec {
-        CommandSpec::new::<AboutParams, AboutOutput>(
-            "system.about",
-            "Donne la version du noyau et celle du protocole.",
-            "Reports the core version and the protocol version.",
-        )
-    }
-
-    fn run(&self, _params: AboutParams) -> AboutOutput {
-        AboutOutput {
-            core_version: crate::VERSION.to_string(),
-            protocol_version: PROTOCOL_VERSION,
+        for registration in inventory::iter::<Registration> {
+            (registration.0)(&mut registry);
         }
+        registry
     }
 }
 
@@ -235,5 +210,14 @@ mod tests {
             .call("system.about", json!({"x": 1}))
             .unwrap_err();
         assert_eq!(err.code(), "registry.invalid_params");
+    }
+
+    #[test]
+    fn standard_registry_is_sorted_by_id() {
+        let ids: Vec<String> = Registry::standard().entries.keys().cloned().collect();
+        let mut sorted = ids.clone();
+        sorted.sort();
+        assert_eq!(ids, sorted);
+        assert!(ids.contains(&"system.about".to_string()));
     }
 }

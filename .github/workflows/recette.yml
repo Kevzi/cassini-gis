@@ -42,6 +42,11 @@ jobs:
       - name: Tests du noyau
         run: cargo test -p cassini-core -p cassini --locked
 
+      # En release l'éditeur de liens peut écarter une commande que rien ne
+      # référence : le binaire doit toujours connaître les commandes du noyau.
+      - name: Commande du noyau en release
+        run: cargo run -q --release -p cassini --locked -- run system.about
+
       # Clippy couvre tout le workspace, coquille Tauri comprise, qui demande
       # les bibliothèques système de Tauri v2 sous Linux.
       - name: Dépendances système de Tauri v2
