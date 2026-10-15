@@ -1,0 +1,106 @@
+{
+  "project": {
+    "name": "villeneuve-le-roi-urbanisme",
+    "epsg": 2154
+  },
+  "layers": [
+    {
+      "layer_id": "parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3",
+      "name": "Parcelles cadastrales",
+      "kind": "vector",
+      "geometry": "MultiPolygon",
+      "epsg": 2154,
+      "feature_count": 5120,
+      "source": "donnees/parcelles.gpkg",
+      "fields": [
+        { "name": "id_parcelle", "type": "string" },
+        { "name": "section", "type": "string" },
+        { "name": "surface_m2", "type": "number" }
+      ]
+    },
+    {
+      "layer_id": "plu_zonage_a81d5c06_2e9f_4a37_b6c4_5f13e07d92a8",
+      "name": "Zonage du PLU",
+      "kind": "vector",
+      "geometry": "MultiPolygon",
+      "epsg": 2154,
+      "feature_count": 48,
+      "source": "donnees/plu_zonage.gpkg",
+      "fields": [
+        { "name": "typezone", "type": "string" },
+        { "name": "libelle", "type": "string" },
+        { "name": "destdomi", "type": "string" }
+      ]
+    },
+    {
+      "layer_id": "gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1",
+      "name": "Gares",
+      "kind": "vector",
+      "geometry": "Point",
+      "epsg": 2154,
+      "feature_count": 3,
+      "source": "donnees/gares.gpkg",
+      "fields": [
+        { "name": "nom", "type": "string" },
+        { "name": "ligne", "type": "string" }
+      ]
+    },
+    {
+      "layer_id": "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67",
+      "name": "Routes",
+      "kind": "vector",
+      "geometry": "LineString",
+      "epsg": 2154,
+      "feature_count": 2310,
+      "source": "donnees/routes.gpkg",
+      "fields": [
+        { "name": "nom", "type": "string" },
+        { "name": "classe", "type": "string" },
+        { "name": "vitesse_kmh", "type": "number" }
+      ]
+    },
+    {
+      "layer_id": "batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649",
+      "name": "Bâtiments",
+      "kind": "vector",
+      "geometry": "Polygon",
+      "epsg": 4326,
+      "feature_count": 7840,
+      "source": "donnees/batiments.geojson",
+      "fields": [
+        { "name": "usage", "type": "string" },
+        { "name": "hauteur_m", "type": "number" },
+        { "name": "nb_etages", "type": "integer" }
+      ]
+    },
+    {
+      "layer_id": "communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946",
+      "name": "Communes",
+      "kind": "vector",
+      "geometry": "MultiPolygon",
+      "epsg": 2154,
+      "feature_count": 12,
+      "source": "donnees/communes.gpkg",
+      "fields": [
+        { "name": "nom", "type": "string" },
+        { "name": "code_insee", "type": "string" },
+        { "name": "population", "type": "integer" }
+      ]
+    },
+    {
+      "layer_id": "mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24",
+      "name": "Modèle numérique de terrain 5 m",
+      "kind": "raster",
+      "geometry": null,
+      "epsg": 2154,
+      "feature_count": null,
+      "source": "donnees/mnt_5m.tif",
+      "fields": []
+    }
+  ],
+  "unloaded_files": [
+    { "path": "donnees/ecoles.geojson", "kind": "vector" },
+    { "path": "donnees/hydrographie.shp", "kind": "vector" },
+    { "path": "donnees/mnt_zone_nord.tif", "kind": "raster" }
+  ]
+}

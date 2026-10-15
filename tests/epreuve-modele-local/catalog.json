@@ -1,0 +1,454 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Catalogue factice de l'épreuve du modèle local (epic 8, entrée 8.2)",
+  "$defs": {
+    "layer_ref": {
+      "description": "Une couche : soit son identifiant dans l'inventaire du projet (copié tel quel, jamais inventé), soit step:k pour la couche produite par l'étape k du plan.",
+      "type": "string",
+      "pattern": "^(step:[1-9][0-9]*|[a-z][a-z0-9_]*_[0-9a-f]{8}_[0-9a-f]{4}_[0-9a-f]{4}_[0-9a-f]{4}_[0-9a-f]{12})$"
+    },
+    "epsg": {
+      "description": "Code EPSG du système de coordonnées : 2154 Lambert-93, 4326 WGS84, 3857 Web Mercator, 4258 ETRS89.",
+      "type": "integer",
+      "enum": [2154, 4326, 3857, 4258]
+    },
+    "length": {
+      "description": "Une distance, une hauteur ou un rayon, toujours avec son unité.",
+      "type": "object",
+      "properties": {
+        "value": { "type": "number", "exclusiveMinimum": 0 },
+        "unit": { "type": "string", "enum": ["m", "km"] }
+      },
+      "required": ["value", "unit"],
+      "additionalProperties": false
+    },
+    "duration": {
+      "description": "Une durée, toujours avec son unité.",
+      "type": "object",
+      "properties": {
+        "value": { "type": "number", "exclusiveMinimum": 0 },
+        "unit": { "type": "string", "enum": ["s", "min"] }
+      },
+      "required": ["value", "unit"],
+      "additionalProperties": false
+    },
+    "point": {
+      "description": "Une coordonnée, toujours avec son système.",
+      "type": "object",
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "epsg": { "$ref": "#/$defs/epsg" }
+      },
+      "required": ["x", "y", "epsg"],
+      "additionalProperties": false
+    },
+    "filter": {
+      "description": "Un filtre d'attributs : un champ, un opérateur, une valeur. Jamais une expression.",
+      "type": "object",
+      "properties": {
+        "field": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "operator": {
+          "type": "string",
+          "enum": ["eq", "ne", "lt", "lte", "gt", "gte", "contains", "starts_with"]
+        },
+        "value": { "type": ["string", "number", "boolean"] }
+      },
+      "required": ["field", "operator", "value"],
+      "additionalProperties": false
+    },
+    "layer_id": {
+      "description": "L'identifiant concret d'une couche existante, tel que l'inventaire le donne.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*_[0-9a-f]{8}_[0-9a-f]{4}_[0-9a-f]{4}_[0-9a-f]{4}_[0-9a-f]{12}$"
+    },
+    "layer_result": {
+      "description": "Résultat d'une commande qui crée une couche. feature_count est absent pour un raster.",
+      "type": "object",
+      "properties": {
+        "layer_id": { "$ref": "#/$defs/layer_id" },
+        "feature_count": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["layer_id"],
+      "additionalProperties": false
+    },
+    "inventory_layer": {
+      "type": "object",
+      "properties": {
+        "layer_id": { "$ref": "#/$defs/layer_id" },
+        "name": { "type": "string", "maxLength": 120 },
+        "kind": { "type": "string", "enum": ["vector", "raster"] },
+        "geometry": { "type": ["string", "null"], "maxLength": 32 },
+        "epsg": { "$ref": "#/$defs/epsg" },
+        "feature_count": { "type": ["integer", "null"], "minimum": 0 },
+        "source": { "type": "string", "maxLength": 200 },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string", "maxLength": 64 },
+              "type": { "type": "string", "enum": ["string", "integer", "number", "boolean", "date"] }
+            },
+            "required": ["name", "type"],
+            "additionalProperties": false
+          },
+          "maxItems": 100
+        }
+      },
+      "required": ["layer_id", "name", "kind", "geometry", "epsg", "feature_count", "source", "fields"],
+      "additionalProperties": false
+    }
+  },
+  "commands": [
+    {
+      "id": "project.inventory",
+      "runs_in": "qgis",
+      "description_fr": "Liste les couches ouvertes dans le projet, avec leur identifiant, leur type, leur système de coordonnées et leurs champs, et les fichiers du dossier de projet pas encore ouverts.",
+      "description_en": "Lists the layers open in the project, with identifier, type, coordinate system and fields, and the project folder's files not yet opened.",
+      "params": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "layers": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/inventory_layer" },
+            "maxItems": 200
+          },
+          "unloaded_files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": { "type": "string", "maxLength": 200 },
+                "kind": { "type": "string", "enum": ["vector", "raster"] }
+              },
+              "required": ["path", "kind"],
+              "additionalProperties": false
+            },
+            "maxItems": 200
+          }
+        },
+        "required": ["layers", "unloaded_files"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "layer.add",
+      "runs_in": "qgis",
+      "description_fr": "Ouvre dans le projet un fichier de données de l'utilisateur, désigné par son chemin relatif au projet. Le fichier d'origine n'est jamais modifié.",
+      "description_en": "Opens a user data file in the project, given by its path relative to the project. The original file is never modified.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "description": "Chemin relatif au projet, séparateurs /, pris dans les fichiers non ouverts de l'inventaire.",
+            "type": "string",
+            "pattern": "^(?!.*\\.\\.)[A-Za-z0-9_][A-Za-z0-9_./ -]*$",
+            "maxLength": 200
+          }
+        },
+        "required": ["source"],
+        "additionalProperties": false
+      },
+      "result": { "$ref": "#/$defs/layer_result" }
+    },
+    {
+      "id": "layer.describe",
+      "runs_in": "qgis",
+      "description_fr": "Décrit une couche : type de géométrie, système de coordonnées, nombre d'entités, champs et leurs types.",
+      "description_en": "Describes a layer: geometry type, coordinate system, feature count, fields and their types.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "layer": { "$ref": "#/$defs/layer_ref" }
+        },
+        "required": ["layer"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "geometry": { "type": "string", "maxLength": 32 },
+          "epsg": { "$ref": "#/$defs/epsg" },
+          "feature_count": { "type": "integer", "minimum": 0 }
+        },
+        "required": ["geometry", "epsg", "feature_count"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "layer.remove",
+      "runs_in": "qgis",
+      "description_fr": "Retire une couche du projet. Le fichier de données n'est pas supprimé.",
+      "description_en": "Removes a layer from the project. The data file is not deleted.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "layer": { "$ref": "#/$defs/layer_ref" }
+        },
+        "required": ["layer"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "removed": { "type": "boolean" }
+        },
+        "required": ["removed"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "layer.reproject",
+      "runs_in": "qgis",
+      "description_fr": "Crée une nouvelle couche identique à une couche, exprimée dans un autre système de coordonnées.",
+      "description_en": "Creates a new layer identical to a layer, expressed in another coordinate system.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "layer": { "$ref": "#/$defs/layer_ref" },
+          "target_epsg": { "$ref": "#/$defs/epsg" }
+        },
+        "required": ["layer", "target_epsg"],
+        "additionalProperties": false
+      },
+      "result": { "$ref": "#/$defs/layer_result" }
+    },
+    {
+      "id": "layer.select_by_attribute",
+      "runs_in": "qgis",
+      "description_fr": "Crée une nouvelle couche des entités d'une couche dont un champ vérifie une condition (champ, opérateur, valeur).",
+      "description_en": "Creates a new layer of the features of a layer whose field meets a condition (field, operator, value).",
+      "params": {
+        "type": "object",
+        "properties": {
+          "layer": { "$ref": "#/$defs/layer_ref" },
+          "filter": { "$ref": "#/$defs/filter" }
+        },
+        "required": ["layer", "filter"],
+        "additionalProperties": false
+      },
+      "result": { "$ref": "#/$defs/layer_result" }
+    },
+    {
+      "id": "layer.export",
+      "runs_in": "qgis",
+      "description_fr": "Exporte une couche dans un format de fichier. Le nom et l'emplacement du fichier sont choisis par Cassini, à côté du projet.",
+      "description_en": "Exports a layer to a file format. Cassini chooses the file name and location, next to the project.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "layer": { "$ref": "#/$defs/layer_ref" },
+          "format": { "type": "string", "enum": ["gpkg", "geojson", "shp", "csv"] }
+        },
+        "required": ["layer", "format"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "file": { "type": "string", "maxLength": 200 }
+        },
+        "required": ["file"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "analysis.buffer",
+      "runs_in": "qgis",
+      "description_fr": "Crée une nouvelle couche de zones tampon autour des entités d'une couche, à une distance donnée.",
+      "description_en": "Creates a new layer of buffer zones around the features of a layer, at a given distance.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "layer": { "$ref": "#/$defs/layer_ref" },
+          "distance": { "$ref": "#/$defs/length" },
+          "dissolve": { "type": "boolean", "default": false }
+        },
+        "required": ["layer", "distance"],
+        "additionalProperties": false
+      },
+      "result": { "$ref": "#/$defs/layer_result" }
+    },
+    {
+      "id": "analysis.intersect",
+      "runs_in": "qgis",
+      "description_fr": "Crée une nouvelle couche des entités d'une couche qui recoupent celles d'une seconde couche, avec les attributs des deux.",
+      "description_en": "Creates a new layer of the features of a layer that overlap those of a second layer, with the attributes of both.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "layer": { "$ref": "#/$defs/layer_ref" },
+          "overlay": { "$ref": "#/$defs/layer_ref" }
+        },
+        "required": ["layer", "overlay"],
+        "additionalProperties": false
+      },
+      "result": { "$ref": "#/$defs/layer_result" }
+    },
+    {
+      "id": "analysis.zonal_statistics",
+      "runs_in": "qgis",
+      "description_fr": "Calcule, pour chaque polygone d'une couche, des statistiques des valeurs d'un raster qu'il recouvre, et les ajoute en nouveaux champs d'une nouvelle couche.",
+      "description_en": "Computes, for each polygon of a layer, statistics of the raster values it covers, and adds them as new fields of a new layer.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "zones": { "$ref": "#/$defs/layer_ref" },
+          "raster": { "$ref": "#/$defs/layer_ref" },
+          "statistics": {
+            "type": "array",
+            "items": { "type": "string", "enum": ["count", "sum", "mean", "min", "max"] },
+            "minItems": 1,
+            "maxItems": 5
+          }
+        },
+        "required": ["zones", "raster", "statistics"],
+        "additionalProperties": false
+      },
+      "result": { "$ref": "#/$defs/layer_result" }
+    },
+    {
+      "id": "analysis.isochrone",
+      "runs_in": "qgis",
+      "description_fr": "Crée une couche de la zone atteignable depuis un point en une durée donnée, en suivant un réseau de routes.",
+      "description_en": "Creates a layer of the area reachable from a point within a given time, following a road network.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "network": { "$ref": "#/$defs/layer_ref" },
+          "origin": { "$ref": "#/$defs/point" },
+          "duration": { "$ref": "#/$defs/duration" },
+          "mode": { "type": "string", "enum": ["walking", "driving"] }
+        },
+        "required": ["network", "origin", "duration", "mode"],
+        "additionalProperties": false
+      },
+      "result": { "$ref": "#/$defs/layer_result" }
+    },
+    {
+      "id": "map.zoom_to_layer",
+      "runs_in": "qgis",
+      "description_fr": "Cadre la carte sur l'emprise d'une couche.",
+      "description_en": "Frames the map on a layer's extent.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "layer": { "$ref": "#/$defs/layer_ref" }
+        },
+        "required": ["layer"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "zoomed": { "type": "boolean" }
+        },
+        "required": ["zoomed"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "layout.export_pdf",
+      "runs_in": "qgis",
+      "description_fr": "Exporte la carte en PDF avec titre, légende, échelle, flèche du nord et sources. Le nom et l'emplacement du PDF sont choisis par Cassini.",
+      "description_en": "Exports the map as a PDF with title, legend, scale bar, north arrow and sources. Cassini chooses the PDF name and location.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "layers": {
+            "description": "Les couches à montrer sur la carte, de la plus basse à la plus haute.",
+            "type": "array",
+            "items": { "$ref": "#/$defs/layer_ref" },
+            "minItems": 1,
+            "maxItems": 20
+          },
+          "paper": { "type": "string", "enum": ["A4", "A3"], "default": "A4" },
+          "orientation": { "type": "string", "enum": ["portrait", "landscape"], "default": "landscape" },
+          "include_legend": { "type": "boolean", "default": true },
+          "include_scale_bar": { "type": "boolean", "default": true },
+          "include_north_arrow": { "type": "boolean", "default": true },
+          "sources_note": { "type": "string", "maxLength": 200 }
+        },
+        "required": ["title", "layers"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "file": { "type": "string", "maxLength": 200 },
+          "page_count": { "type": "integer", "minimum": 1 }
+        },
+        "required": ["file", "page_count"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "terrain.viewshed",
+      "runs_in": "core",
+      "description_fr": "Calcule le champ de vision depuis un point d'observation : les zones d'un modèle numérique d'élévation visibles depuis ce point. Le point doit être exprimé dans le système du modèle d'élévation.",
+      "description_en": "Computes the viewshed from an observer point: the areas of an elevation model visible from that point. The point must be in the elevation model's coordinate system.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "dem": { "$ref": "#/$defs/layer_ref" },
+          "observer": { "$ref": "#/$defs/point" },
+          "observer_height": { "$ref": "#/$defs/length" },
+          "radius": { "$ref": "#/$defs/length" }
+        },
+        "required": ["dem", "observer", "observer_height", "radius"],
+        "additionalProperties": false
+      },
+      "result": { "$ref": "#/$defs/layer_result" }
+    },
+    {
+      "id": "terrain.line_of_sight",
+      "runs_in": "core",
+      "description_fr": "Dit si deux points se voient l'un l'autre au-dessus d'un modèle numérique d'élévation, et où la vue est coupée sinon. Les points doivent être exprimés dans le système du modèle d'élévation.",
+      "description_en": "Tells whether two points see each other over an elevation model, and where the view is blocked otherwise. The points must be in the elevation model's coordinate system.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "dem": { "$ref": "#/$defs/layer_ref" },
+          "from": { "$ref": "#/$defs/point" },
+          "to": { "$ref": "#/$defs/point" },
+          "from_height": { "$ref": "#/$defs/length" },
+          "to_height": { "$ref": "#/$defs/length" }
+        },
+        "required": ["dem", "from", "to"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "visible": { "type": "boolean" },
+          "blocked_at": { "$ref": "#/$defs/point" }
+        },
+        "required": ["visible"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "terrain.slope",
+      "runs_in": "core",
+      "description_fr": "Calcule la pente de chaque cellule d'un modèle numérique d'élévation et la rend en nouveau raster.",
+      "description_en": "Computes the slope of each cell of an elevation model and returns it as a new raster.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "dem": { "$ref": "#/$defs/layer_ref" },
+          "unit": { "type": "string", "enum": ["degrees", "percent"] }
+        },
+        "required": ["dem", "unit"],
+        "additionalProperties": false
+      },
+      "result": { "$ref": "#/$defs/layer_result" }
+    }
+  ]
+}
