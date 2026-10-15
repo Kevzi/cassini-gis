@@ -3,6 +3,8 @@
 use std::io::Write;
 use std::process::ExitCode;
 
+use cassini_core::error::ErrorReport;
+use cassini_core::exec::Router;
 use cassini_core::registry::{Registry, RegistryError};
 use serde_json::{json, Value};
 
@@ -19,10 +21,11 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         }
     };
     let registry = Registry::standard();
+    let router = Router::new(&registry);
     let outcome = match raw {
-        None => registry.call(id, json!({})),
+        None => router.call(id, json!({})),
         Some(text) => match serde_json::from_str::<Value>(text) {
-            Ok(params) => registry.call(id, params),
+            Ok(params) => router.call(id, params),
             Err(e) => Err(RegistryError::InvalidParams(e.to_string())),
         },
     };
@@ -38,7 +41,7 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
             let _ = writeln!(
                 err,
                 "{}",
-                json!({"code": e.code(), "message": e.to_string()})
+                serde_json::to_string(&ErrorReport::from(e)).expect("une erreur se sérialise")
             );
             1
         }
