@@ -2,6 +2,7 @@
 
 use serde::Serialize;
 
+use crate::journal::JournalError;
 use crate::plan::PlanError;
 use crate::registry::RegistryError;
 
@@ -51,6 +52,22 @@ impl From<&PlanError> for ErrorReport {
 
 impl From<PlanError> for ErrorReport {
     fn from(e: PlanError) -> Self {
+        ErrorReport::from(&e)
+    }
+}
+
+impl From<&JournalError> for ErrorReport {
+    fn from(e: &JournalError) -> Self {
+        ErrorReport {
+            code: e.code().to_string(),
+            message: e.to_string(),
+            step: None,
+        }
+    }
+}
+
+impl From<JournalError> for ErrorReport {
+    fn from(e: JournalError) -> Self {
         ErrorReport::from(&e)
     }
 }

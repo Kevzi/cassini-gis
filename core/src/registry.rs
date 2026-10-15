@@ -39,6 +39,14 @@ pub struct CommandSpec {
     /// Métadonnée interne : jamais sérialisée dans le catalogue (CLAUDE.md §2.3).
     #[serde(skip)]
     pub tests: Vec<String>,
+    /// Paramètres qui désignent un fichier d'entrée, relatif au projet (AD-9).
+    /// Métadonnée interne : jamais sérialisée dans le catalogue.
+    #[serde(skip)]
+    pub path_params: Vec<String>,
+    /// Paramètres de sortie, dont la valeur est donnée par le noyau dans le
+    /// dossier de travail (AD-10). Métadonnée interne : jamais sérialisée.
+    #[serde(skip)]
+    pub output_params: Vec<String>,
     /// Schéma JSON des paramètres, engendré depuis le type Rust.
     pub params_schema: Value,
     /// Schéma JSON du résultat, engendré depuis le type Rust.
@@ -59,6 +67,8 @@ impl CommandSpec {
             runs_in: None,
             cancellable: None,
             tests: Vec::new(),
+            path_params: Vec::new(),
+            output_params: Vec::new(),
             params_schema: schema_value::<P>(),
             output_schema: schema_value::<O>(),
         }
@@ -73,6 +83,18 @@ impl CommandSpec {
     /// Déclare si la commande est annulable.
     pub fn cancellable(mut self, cancellable: bool) -> Self {
         self.cancellable = Some(cancellable);
+        self
+    }
+
+    /// Déclare les paramètres qui sont des chemins d'entrée relatifs au projet.
+    pub fn path_params(mut self, names: &[&str]) -> Self {
+        self.path_params = names.iter().map(|n| n.to_string()).collect();
+        self
+    }
+
+    /// Déclare les paramètres de sortie, remplis par le noyau (AD-10).
+    pub fn output_params(mut self, names: &[&str]) -> Self {
+        self.output_params = names.iter().map(|n| n.to_string()).collect();
         self
     }
 
