@@ -7,17 +7,62 @@ Aucun fichier de modèle n'est versé au dépôt.
 
 ## État
 
-Entrée 8.2, **première moitié** : le catalogue et l'inventaire. Les 25 phrases
-de référence et le validateur viennent dans une seconde session.
+Entrée 8.2 **terminée** : catalogue, inventaire, 25 phrases de référence,
+phrases anglaises et validateur. Reste à écrire le harnais de mesure (8.3).
 
 | Fichier | Rôle |
 |---|---|
 | `catalog.json` | 16 commandes factices : id, descriptions fr et en, `runs_in`, schéma des paramètres, schéma du résultat |
 | `inventory.json` | ce que `project.inventory` rendrait pour un projet factice : 7 couches à identifiants opaques, 3 fichiers pas encore ouverts |
-| `check_catalog.py` | contrôle de cohérence ; `python check_catalog.py` sort 0 si tout tient, puis rejoue 9 mutations qui doivent toutes être refusées |
+| `sentences.json` | 25 phrases françaises `{id, text, expected, expect_refusal}` ; 5 portent un plan de terrain, une demande un refus |
+| `reading_independent.json` | la seconde lecture, faite sans voir les plans attendus : 25 plans sur 25 identiques ; rejouable avec `python check_sentences.py reading_independent.json` |
+| `sentences_en.json` | 10 phrases anglaises `{id, text, same_plan_as}` : même plan qu'une phrase française, mesurées à part |
+| `schema_validator.py` | valide une valeur contre le sous-ensemble de JSON Schema ci-dessous |
+| `plan_validator.py` | `check_plan`, `check_output`, `canonical`, `plans_equal` : ce que 8.3 réutilise |
+| `check_catalog.py` | cohérence du catalogue et de l'inventaire, plus 9 mutations qui doivent toutes être refusées |
+| `check_sentences.py` | cohérence des phrases, 19 plans faux qui doivent tous être refusés, égalité de plans ; avec un fichier `{"S01": plan, …}` en argument, compare une lecture indépendante aux plans attendus |
 
 Les commandes ne font rien : c'est la **forme** (CAP-6) qui est mesurée, pas le
-calcul. Les données de l'inventaire sont inventées.
+calcul. Les données de l'inventaire sont inventées. Recette :
+`python -I check_catalog.py && python -I check_sentences.py`.
+
+## Le plan et sa conformité
+
+Un plan est une liste d'étapes `{"command", "params"}`, rien d'autre. Un refus
+est `{"refusal": "<raison>"}`. Un plan est **conforme** quand (AD-23) :
+
+- chaque commande est au catalogue et chaque `params` valide son schéma ;
+- chaque couche est un identifiant de l'inventaire, ou `step:k` avec *k*
+  strictement inférieur au rang de l'étape et une étape qui produit une couche ;
+- chaque `layer.add` ouvre un fichier parmi les fichiers non ouverts ;
+- `dem` et `raster` désignent un raster ; sur une couche de l'inventaire, un filtre
+  cite un champ qui existe et dont la valeur a le bon type (le champ d'une couche
+  produite par une étape n'est pas contrôlé, et les `values` d'exemple n'enferment
+  pas la valeur : un filtre peut citer une valeur absente) ;
+- un point de terrain a l'EPSG du modèle d'élévation, suivi à travers les étapes
+  de terrain et de reprojection, sinon le plan est rejeté (AD-19) : la bonne réponse à une coordonnée WGS84 est un refus.
+
+## Égalité de plans
+
+Deux plans conformes sont **égaux** quand leurs formes canoniques le sont :
+chaque `step:k` est remplacé par l'étape qu'il désigne, on compare les arbres
+des étapes terminales, sans tenir compte de l'ordre des étapes ni de celui des
+listes. L'intersection est symétrique et associative. `title` et
+`sources_note` sont ignorés ; une valeur égale à son défaut équivaut à
+l'absence. Une étape en trop rend les plans différents. Deux refus sont égaux.
+
+**Limite connue :** les unités ne sont pas normalisées, donc 500 m et 0,5 km ou
+2 km et 2 000 m donnent deux plans différents, alors qu'ils sont équivalents.
+Les phrases de référence nomment leurs unités pour éviter le cas ; une
+normalisation est reportée (voir `deferred-work.md`).
+
+S19 croise des bâtiments en EPSG 4326 avec une zone tampon en 2154 sans les
+reprojeter : on suppose que QGIS aligne les systèmes à l'intersection, à
+vérifier à l'epic du registre.
+
+Règles de lecture communes aux phrases : une option facultative n'est posée que
+si la phrase la demande ; une carte PDF ne montre que la couche résultat, sauf
+si la phrase en nomme d'autres.
 
 ## Conventions suivies (contrat d'architecture)
 
@@ -49,13 +94,14 @@ verdict de 8.6 peut la remplacer (par exemple par un nom donné à chaque sortie
 
 ## Sous-ensemble de JSON Schema (draft 2020-12)
 
-Le validateur de la seconde session ne connaîtra que ces mots-clés :
+`schema_validator.py` ne connaît que ces mots-clés :
 
 `$ref` (uniquement `#/$defs/nom`, résolu contre le `$defs` de `catalog.json`),
 `description`, `default`, `type` (un nom ou une liste de noms), `enum`,
 `properties`, `required`, `additionalProperties` (toujours `false`), `items`,
 `minItems`, `maxItems`, `minimum`, `exclusiveMinimum`, `minLength`,
-`maxLength`, `pattern` (syntaxe commune à Python et ECMAScript).
+`maxLength`, `pattern` (syntaxe commune à Python et ECMAScript, **ancré** `^…$` et apparié en
+entier : un saut de ligne final est refusé).
 
 Pas de `oneOf`, `anyOf`, `allOf`, `not`, `if`, ni de `$ref` extérieur.
 `check_catalog.py` refuse tout mot-clé hors de cette liste.

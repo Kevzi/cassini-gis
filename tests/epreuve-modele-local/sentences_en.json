@@ -1,0 +1,12 @@
+[
+ {"id": "E01", "text": "Open the schools file.", "same_plan_as": "S01"},
+ {"id": "E03", "text": "Which layers are in my project?", "same_plan_as": "S03"},
+ {"id": "E05", "text": "Reproject the buildings to Lambert-93.", "same_plan_as": "S05"},
+ {"id": "E07", "text": "Make a 300 meter buffer around the stations.", "same_plan_as": "S07"},
+ {"id": "E11", "text": "Which buildings are taller than 12 meters?", "same_plan_as": "S11"},
+ {"id": "E12", "text": "Keep only the departmental roads.", "same_plan_as": "S12"},
+ {"id": "E13", "text": "Intersect the parcels with the zoning plan.", "same_plan_as": "S13"},
+ {"id": "E17", "text": "Find the parcels in zone U within 500 m of a station and export the map to PDF, titled \"Parcels in zone U near stations\".", "same_plan_as": "S17"},
+ {"id": "E20", "text": "What can be seen from the water tower at 656 120 / 6 848 060 (Lambert-93), 25 m high, within 2 km?", "same_plan_as": "S20"},
+ {"id": "E25", "text": "What can be seen from the point 2.4150 / 48.7350 (WGS84), 10 m high, within 1 km?", "same_plan_as": "S25"}
+]

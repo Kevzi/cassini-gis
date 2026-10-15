@@ -41,3 +41,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-socle-et-carte/story-recette-automatique-sur-github-actions-plan.md`
   summary: Figer la version de Rust (`rust-toolchain.toml`) pour que la recette ne dépende pas de l'image du runner.
   evidence: le job `noyau` prend le Rust stable d'`ubuntu-latest` avec `clippy -D warnings` ; un nouveau clippy peut faire échouer un run sans changement de code.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-8-2-phrases-et-validateur.md`
+  summary: Normaliser les unités (m et km, s et min) dans `canonical` de `plan_validator.py`, pour que 500 m et 0,5 km donnent des plans égaux.
+  evidence: Constat de relecture, verdict bas. Sans cela le taux de 8.3 compte faux un plan géométriquement identique dont le modèle a choisi une autre unité. Écarté de 8.2 parce que le bloc figé du plan définit l'égalité sans normalisation. À reprendre au début de 8.3, avant la première mesure.

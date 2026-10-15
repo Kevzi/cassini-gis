@@ -79,6 +79,8 @@ def walk(schema, where, defs, errors, in_params):
             re.compile(schema["pattern"])
         except re.error as exc:
             errors.append(f"{where}: motif invalide ({exc})")
+        if not (schema["pattern"].startswith("^") and schema["pattern"].endswith("$")):
+            errors.append(f"{where}: motif non ancré (^…$ attendu, le validateur apparie en entier)")
 
 
 def check(catalog, inventory):
