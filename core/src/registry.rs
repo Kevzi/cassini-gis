@@ -21,6 +21,8 @@ pub const PROTOCOL_VERSION: u32 = 1;
 pub enum RunsIn {
     /// Implémentée en Rust dans le noyau.
     Core,
+    /// Déléguée à QGIS, déclarée comme telle.
+    Qgis,
 }
 
 /// Description d'une commande, lue par l'IA et les points d'entrée.
@@ -29,7 +31,14 @@ pub struct CommandSpec {
     pub id: String,
     pub description_fr: String,
     pub description_en: String,
-    pub runs_in: RunsIn,
+    /// Où la commande s'exécute. `None` = non déclaré, une violation du contrat (2.3).
+    pub runs_in: Option<RunsIn>,
+    /// Annulable ou non. `None` = non déclaré, une violation du contrat (2.3).
+    pub cancellable: Option<bool>,
+    /// Noms des fonctions `#[test]` de `core/src/commands/` qui prouvent la commande.
+    /// Métadonnée interne : jamais sérialisée dans le catalogue (CLAUDE.md §2.3).
+    #[serde(skip)]
+    pub tests: Vec<String>,
     /// Schéma JSON des paramètres, engendré depuis le type Rust.
     pub params_schema: Value,
     /// Schéma JSON du résultat, engendré depuis le type Rust.
@@ -47,10 +56,30 @@ impl CommandSpec {
             id: id.to_string(),
             description_fr: description_fr.to_string(),
             description_en: description_en.to_string(),
-            runs_in: RunsIn::Core,
+            runs_in: None,
+            cancellable: None,
+            tests: Vec::new(),
             params_schema: schema_value::<P>(),
             output_schema: schema_value::<O>(),
         }
+    }
+
+    /// Déclare où la commande s'exécute.
+    pub fn runs_in(mut self, runs_in: RunsIn) -> Self {
+        self.runs_in = Some(runs_in);
+        self
+    }
+
+    /// Déclare si la commande est annulable.
+    pub fn cancellable(mut self, cancellable: bool) -> Self {
+        self.cancellable = Some(cancellable);
+        self
+    }
+
+    /// Déclare les noms des tests qui prouvent la commande.
+    pub fn tests(mut self, names: &[&str]) -> Self {
+        self.tests = names.iter().map(|n| n.to_string()).collect();
+        self
     }
 }
 
@@ -123,6 +152,8 @@ inventory::collect!(Registration);
 #[derive(Default)]
 pub struct Registry {
     entries: BTreeMap<String, Entry>,
+    /// Ids inscrits plus d'une fois, une entrée par tentative écartée.
+    duplicates: Vec<String>,
 }
 
 impl Registry {
@@ -130,9 +161,14 @@ impl Registry {
         Self::default()
     }
 
-    /// Inscrit une commande ; une commande de même id est remplacée.
+    /// Inscrit une commande. Si l'id existe déjà, la première entrée est gardée
+    /// et le doublon est noté : `check_contract` le rend (`contract.duplicate_id`).
     pub fn register<C: Command + Send + Sync + 'static>(&mut self, command: C) {
         let spec = C::spec();
+        if self.entries.contains_key(&spec.id) {
+            self.duplicates.push(spec.id);
+            return;
+        }
         let handler: Handler = Box::new(move |json| {
             let params: C::Params = serde_json::from_value(json)
                 .map_err(|e| RegistryError::InvalidParams(e.to_string()))?;
@@ -141,6 +177,16 @@ impl Registry {
         });
         self.entries
             .insert(spec.id.clone(), Entry { spec, handler });
+    }
+
+    /// Les descriptions de toutes les commandes, dans l'ordre des id.
+    pub(crate) fn specs(&self) -> impl Iterator<Item = &CommandSpec> {
+        self.entries.values().map(|e| &e.spec)
+    }
+
+    /// Les ids inscrits plus d'une fois.
+    pub(crate) fn duplicate_ids(&self) -> &[String] {
+        &self.duplicates
     }
 
     pub fn spec(&self, id: &str) -> Option<&CommandSpec> {
@@ -183,7 +229,7 @@ mod tests {
         assert_eq!(spec.output_schema["$schema"], DIALECT);
         assert!(spec.output_schema["properties"]["core_version"].is_object());
         assert_eq!(spec.params_schema["additionalProperties"], false);
-        assert_eq!(spec.runs_in, RunsIn::Core);
+        assert_eq!(spec.runs_in, Some(RunsIn::Core));
     }
 
     #[test]
