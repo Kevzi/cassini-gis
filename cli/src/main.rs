@@ -6,11 +6,12 @@ use std::process::ExitCode;
 
 use cassini_core::error::ErrorReport;
 use cassini_core::exec::Router;
-use cassini_core::journal::Session;
+use cassini_core::journal::{Replay, Session};
 use cassini_core::registry::{Registry, RegistryError};
 use serde_json::{json, Value};
 
 const USAGE: &str = "Usage : cassini run <id> [json] [--project <fichier>]
+       cassini replay <projet>
 ";
 
 /// Arguments de `run` : id, paramètres JSON facultatifs, projet facultatif.
@@ -54,6 +55,9 @@ fn parse_run(args: &[String]) -> Option<RunArgs<'_>> {
 
 /// Exécute la CLI ; renvoie le code de sortie. Résultat sur `out`, erreurs sur `err`.
 pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
+    if args.first().map(String::as_str) == Some("replay") {
+        return replay(&args[1..], out, err);
+    }
     let Some(RunArgs { id, raw, project }) = parse_run(args) else {
         let _ = err.write_all(USAGE.as_bytes());
         return 2;
@@ -77,6 +81,39 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         Ok(value) => {
             // Un résultat qu'on n'a pas pu écrire n'est pas un succès (AD-21).
             if writeln!(out, "{value}").is_err() {
+                return 1;
+            }
+            0
+        }
+        Err(e) => {
+            let _ = writeln!(
+                err,
+                "{}",
+                serde_json::to_string(&e).expect("une erreur se sérialise")
+            );
+            1
+        }
+    }
+}
+
+/// `cassini replay <projet>` : rejoue le journal du projet et rend le bilan.
+fn replay(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
+    let [project] = args else {
+        let _ = err.write_all(USAGE.as_bytes());
+        return 2;
+    };
+    let registry = Registry::standard();
+    let outcome = Replay::load(&registry, Path::new(project)).and_then(|replay| {
+        // Avant la première étape : les entrées non portables sont signalées.
+        for warning in replay.warnings() {
+            let _ = writeln!(err, "Avertissement : {warning}");
+        }
+        replay.run(&Router::new(&registry))
+    });
+    match outcome {
+        Ok(report) => {
+            let json = serde_json::to_string(&report).expect("un bilan se sérialise");
+            if writeln!(out, "{json}").is_err() {
                 return 1;
             }
             0
@@ -210,6 +247,58 @@ mod tests {
         assert_eq!(error_code(&err), "registry.invalid_params");
         assert!(!dir.join("p.cassini/journal.jsonl").exists());
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn replay_gives_an_identical_report_even_while_a_session_holds_the_lock() {
+        let (dir, project) = temp_project();
+        let registry = Registry::standard();
+        let mut holder = Session::open(&registry, Path::new(&project)).unwrap();
+        holder.call("system.about", json!({})).unwrap();
+        holder.call("system.about", json!({})).unwrap();
+        let before = std::fs::read_to_string(dir.join("p.cassini/journal.jsonl")).unwrap();
+        let (code, out, err) = call(&["replay", &project]);
+        assert_eq!((code, err.as_str()), (0, ""));
+        assert_eq!(out.trim(), r#"{"steps":2,"identical":true}"#);
+        let after = std::fs::read_to_string(dir.join("p.cassini/journal.jsonl")).unwrap();
+        assert_eq!(before, after);
+        drop(holder);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn replay_without_a_journal_is_refused() {
+        let (dir, project) = temp_project();
+        let (code, out, err) = call(&["replay", &project]);
+        assert_eq!((code, out.as_str()), (1, ""));
+        assert_eq!(error_code(&err), "replay.no_journal");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn replay_with_an_unknown_command_names_it() {
+        let (dir, project) = temp_project();
+        std::fs::create_dir_all(dir.join("p.cassini")).unwrap();
+        std::fs::write(
+            dir.join("p.cassini/journal.jsonl"),
+            "{\"step\":1,\"id\":\"no.such\",\"params\":{},\"inputs\":[],\"result\":{}}\n",
+        )
+        .unwrap();
+        let (code, out, err) = call(&["replay", &project]);
+        assert_eq!((code, out.as_str()), (1, ""));
+        assert_eq!(error_code(&err), "registry.unknown_command");
+        assert!(err.contains("no.such"));
+        assert!(!dir.join("p.cassini/replay").exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn replay_needs_exactly_one_project() {
+        for args in [&["replay"][..], &["replay", "a", "b"][..]] {
+            let (code, _, err) = call(args);
+            assert_eq!(code, 2);
+            assert!(err.contains("cassini replay"));
+        }
     }
 
     #[test]

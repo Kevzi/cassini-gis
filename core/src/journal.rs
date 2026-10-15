@@ -49,6 +49,12 @@ pub enum JournalError {
     /// Le dossier de travail ou le journal n'est pas accessible. Le détail ne
     /// porte jamais de chemin (AD-9).
     Io(String),
+    /// Le projet n'a pas de journal (dossier absent ou journal vide).
+    NoJournal,
+    /// Un repère `out:<k>.<n>` ne désigne aucune sortie d'une étape précédente.
+    BadReference(String),
+    /// Le rejeu ne redonne pas ce que le journal a gardé, à l'étape `step`.
+    Diverged { step: usize, why: String },
 }
 
 impl JournalError {
@@ -58,6 +64,9 @@ impl JournalError {
             JournalError::ReadOnly => "journal.read_only",
             JournalError::PathUnrepresentable => "journal.path_unrepresentable",
             JournalError::Io(_) => "journal.io",
+            JournalError::NoJournal => "replay.no_journal",
+            JournalError::BadReference(_) => "replay.bad_reference",
+            JournalError::Diverged { .. } => "replay.diverged",
         }
     }
 }
@@ -76,6 +85,15 @@ impl fmt::Display for JournalError {
             JournalError::Io(why) => write!(
                 f,
                 "Le dossier de travail ou le journal n'est pas accessible (détail technique : {why})."
+            ),
+            JournalError::NoJournal => write!(f, "Ce projet n'a pas de journal à rejouer."),
+            JournalError::BadReference(r) => write!(
+                f,
+                "Le repère « {r} » ne désigne aucune sortie d'une étape précédente."
+            ),
+            JournalError::Diverged { step, why } => write!(
+                f,
+                "Le rejeu diverge du journal à l'étape {step} : {why}."
             ),
         }
     }
@@ -105,20 +123,10 @@ impl<'a> Session<'a> {
     /// exister encore, son dossier doit exister). Crée le dossier de travail,
     /// prend le verrou ; si un autre le tient, la session est en lecture seule.
     pub fn open(registry: &'a Registry, project: &Path) -> Result<Self, JournalError> {
-        let absolute = normalize(&std::path::absolute(project).map_err(io_error)?);
-        let project_dir = absolute
-            .parent()
-            .ok_or_else(|| JournalError::Io("InvalidInput".to_string()))?
-            .to_path_buf();
-        let stem = absolute
-            .file_stem()
-            .ok_or_else(|| JournalError::Io("InvalidInput".to_string()))?
-            .to_string_lossy()
-            .into_owned();
+        let (project_dir, work_dir) = locate(project)?;
         if !project_dir.is_dir() {
             return Err(JournalError::Io("NotFound".to_string()));
         }
-        let work_dir = project_dir.join(format!("{stem}.cassini"));
         fs::create_dir_all(&work_dir).map_err(io_error)?;
 
         let lock = OpenOptions::new()
@@ -191,31 +199,22 @@ impl<'a> Session<'a> {
         let step = self.next_step;
 
         // Le journal garde les valeurs relatives ; l'exécutant reçoit des chemins
-        // absolus, décidés par le noyau (AD-9, AD-10).
-        let mut logged = params.clone();
-        let mut exec = params;
-        for name in &spec.output_params {
-            let file = if spec.output_params.len() == 1 {
-                format!("{step}-{id}.out")
-            } else {
-                format!("{step}-{id}-{name}.out")
-            };
-            if let (Some(l), Some(e)) = (logged.as_object_mut(), exec.as_object_mut()) {
-                l.insert(name.clone(), Value::String(file.clone()));
-                e.insert(
-                    name.clone(),
-                    Value::String(self.work_dir.join(&file).to_string_lossy().into_owned()),
-                );
-            }
-        }
-        self.registry.validate_params(id, &logged)?;
-
-        let mut inputs = Vec::new();
-        for name in &spec.path_params {
-            if let (Some(l), Some(e)) = (logged.get_mut(name), exec.get_mut(name)) {
-                self.resolve_param(l, e, &mut inputs)?;
-            }
-        }
+        // absolus, décidés par le noyau (AD-9, AD-10). Même résolution au rejeu.
+        let prior = if spec.path_params.is_empty() {
+            Vec::new()
+        } else {
+            journal_ids(&self.journal_path())
+        };
+        let resolver = Resolver {
+            registry: self.registry,
+            project_dir: &self.project_dir,
+            out_dir: &self.work_dir,
+        };
+        let Resolved {
+            logged,
+            exec,
+            inputs,
+        } = resolver.resolve_call(id, spec, step, params, &prior)?;
 
         let outcome = self.router.call(id, exec);
 
@@ -239,48 +238,6 @@ impl<'a> Session<'a> {
         self.append(&Value::Object(line))?;
         self.next_step += 1;
         outcome.map_err(ErrorReport::from)
-    }
-
-    /// Remplace, dans la copie journalisée, un chemin par sa forme relative au
-    /// projet, et dans la copie exécutée par sa forme absolue. Une chaîne ou un
-    /// tableau de chaînes ; toute autre valeur est laissée à la validation.
-    fn resolve_param(
-        &self,
-        logged: &mut Value,
-        exec: &mut Value,
-        inputs: &mut Vec<Value>,
-    ) -> Result<(), JournalError> {
-        match (logged, exec) {
-            (Value::String(l), Value::String(e)) => {
-                let (relative, absolute, portable) = self.resolve_path(l)?;
-                inputs.push(input_entry(&relative, &absolute, portable));
-                *l = relative;
-                *e = absolute.to_string_lossy().into_owned();
-            }
-            (Value::Array(ls), Value::Array(es)) => {
-                for (l, e) in ls.iter_mut().zip(es.iter_mut()) {
-                    self.resolve_param(l, e, inputs)?;
-                }
-            }
-            _ => {}
-        }
-        Ok(())
-    }
-
-    /// Forme relative POSIX, forme absolue et portabilité d'un chemin d'entrée.
-    fn resolve_path(&self, raw: &str) -> Result<(String, PathBuf, bool), JournalError> {
-        let given = Path::new(raw);
-        let absolute = if given.is_absolute() {
-            normalize(given)
-        } else {
-            normalize(&self.project_dir.join(given))
-        };
-        let relative =
-            relative_to(&self.project_dir, &absolute).ok_or(JournalError::PathUnrepresentable)?;
-        let portable = !relative
-            .components()
-            .any(|c| matches!(c, Component::ParentDir));
-        Ok((posix(&relative), absolute, portable))
     }
 
     /// Ajoute une ligne au journal, en un seul `write`, et la rend durable.
@@ -314,6 +271,318 @@ fn count_lines(path: &Path) -> Result<usize, JournalError> {
             .count()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(0),
         Err(e) => Err(io_error(e)),
+    }
+}
+
+/// Dossier du projet et dossier de travail, sans rien créer.
+fn locate(project: &Path) -> Result<(PathBuf, PathBuf), JournalError> {
+    let absolute = normalize(&std::path::absolute(project).map_err(io_error)?);
+    let project_dir = absolute
+        .parent()
+        .ok_or_else(|| JournalError::Io("InvalidInput".to_string()))?
+        .to_path_buf();
+    let stem = absolute
+        .file_stem()
+        .ok_or_else(|| JournalError::Io("InvalidInput".to_string()))?
+        .to_string_lossy()
+        .into_owned();
+    let work_dir = project_dir.join(format!("{stem}.cassini"));
+    Ok((project_dir, work_dir))
+}
+
+/// Ids des étapes déjà journalisées, dans l'ordre (vide si illisible).
+fn journal_ids(path: &Path) -> Vec<String> {
+    let text = fs::read_to_string(path).unwrap_or_default();
+    text.lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| {
+            serde_json::from_str::<Value>(l)
+                .ok()
+                .and_then(|v| v.get("id").and_then(Value::as_str).map(str::to_string))
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
+/// Nom du fichier de sortie `name` de l'étape `step`.
+fn output_file(step: usize, id: &str, outputs: &[String], name: &str) -> String {
+    if outputs.len() == 1 {
+        format!("{step}-{id}.out")
+    } else {
+        format!("{step}-{id}-{name}.out")
+    }
+}
+
+/// Paramètres d'un appel, tels que journalisés et tels que donnés à l'exécutant.
+struct Resolved {
+    logged: Value,
+    exec: Value,
+    inputs: Vec<Value>,
+}
+
+/// Résolution unique des chemins et des sorties d'un appel, partagée par
+/// l'exécution d'origine et le rejeu (AD-11).
+struct Resolver<'a> {
+    registry: &'a Registry,
+    project_dir: &'a Path,
+    /// Dossier où l'exécutant écrit ses sorties : le dossier de travail, ou `replay/`.
+    out_dir: &'a Path,
+}
+
+impl Resolver<'_> {
+    /// `prior` : ids des étapes précédentes, l'étape 1 en premier.
+    fn resolve_call(
+        &self,
+        id: &str,
+        spec: &crate::registry::CommandSpec,
+        step: usize,
+        params: Value,
+        prior: &[String],
+    ) -> Result<Resolved, ErrorReport> {
+        let prior = &prior[..prior.len().min(step.saturating_sub(1))];
+        let mut logged = params.clone();
+        let mut exec = params;
+        for name in &spec.output_params {
+            let file = output_file(step, id, &spec.output_params, name);
+            if let (Some(l), Some(e)) = (logged.as_object_mut(), exec.as_object_mut()) {
+                l.insert(name.clone(), Value::String(file.clone()));
+                e.insert(
+                    name.clone(),
+                    Value::String(self.out_dir.join(&file).to_string_lossy().into_owned()),
+                );
+            }
+        }
+        self.registry.validate_params(id, &logged)?;
+
+        let mut inputs = Vec::new();
+        for name in &spec.path_params {
+            if let (Some(l), Some(e)) = (logged.get_mut(name), exec.get_mut(name)) {
+                self.resolve_param(l, e, &mut inputs, prior)?;
+            }
+        }
+        Ok(Resolved {
+            logged,
+            exec,
+            inputs,
+        })
+    }
+
+    /// Remplace, dans la copie journalisée, un chemin par sa forme relative au
+    /// projet, et dans la copie exécutée par sa forme absolue. Une chaîne ou un
+    /// tableau de chaînes ; toute autre valeur est laissée à la validation.
+    /// Un repère `out:<k>.<n>` reste tel quel dans le journal.
+    fn resolve_param(
+        &self,
+        logged: &mut Value,
+        exec: &mut Value,
+        inputs: &mut Vec<Value>,
+        prior: &[String],
+    ) -> Result<(), JournalError> {
+        match (logged, exec) {
+            (Value::String(l), Value::String(e)) => {
+                if l.starts_with("out:") {
+                    let absolute = self.resolve_reference(l, prior)?;
+                    *e = absolute.to_string_lossy().into_owned();
+                } else {
+                    let (relative, absolute, portable) = self.resolve_path(l)?;
+                    inputs.push(input_entry(&relative, &absolute, portable));
+                    *l = relative;
+                    *e = absolute.to_string_lossy().into_owned();
+                }
+            }
+            (Value::Array(ls), Value::Array(es)) => {
+                for (l, e) in ls.iter_mut().zip(es.iter_mut()) {
+                    self.resolve_param(l, e, inputs, prior)?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Chemin absolu de la sortie `n` de l'étape `k` désignée par `out:<k>.<n>`.
+    fn resolve_reference(
+        &self,
+        reference: &str,
+        prior: &[String],
+    ) -> Result<PathBuf, JournalError> {
+        let bad = || JournalError::BadReference(reference.to_string());
+        let (k, n) = reference
+            .strip_prefix("out:")
+            .and_then(|r| r.split_once('.'))
+            .filter(|(k, n)| {
+                [k, n]
+                    .iter()
+                    .all(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+            })
+            .and_then(|(k, n)| Some((k.parse::<usize>().ok()?, n.parse::<usize>().ok()?)))
+            .ok_or_else(bad)?;
+        if k == 0 || n == 0 {
+            return Err(bad());
+        }
+        let id = prior.get(k - 1).ok_or_else(bad)?;
+        let outputs = &self.registry.spec(id).ok_or_else(bad)?.output_params;
+        let name = outputs.get(n - 1).ok_or_else(bad)?;
+        Ok(self.out_dir.join(output_file(k, id, outputs, name)))
+    }
+
+    /// Forme relative POSIX, forme absolue et portabilité d'un chemin d'entrée.
+    fn resolve_path(&self, raw: &str) -> Result<(String, PathBuf, bool), JournalError> {
+        let given = Path::new(raw);
+        let absolute = if given.is_absolute() {
+            normalize(given)
+        } else {
+            normalize(&self.project_dir.join(given))
+        };
+        let relative =
+            relative_to(self.project_dir, &absolute).ok_or(JournalError::PathUnrepresentable)?;
+        let portable = !relative
+            .components()
+            .any(|c| matches!(c, Component::ParentDir));
+        Ok((posix(&relative), absolute, portable))
+    }
+}
+
+/// Bilan d'un rejeu réussi.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ReplayReport {
+    /// Nombre d'étapes rejouées.
+    pub steps: usize,
+    /// Toujours vrai pour un rejeu réussi : le premier écart l'arrête.
+    pub identical: bool,
+}
+
+/// Rejeu d'un journal : même résolution, même `Router`, comparaison à ce que le
+/// journal a gardé. N'écrit pas le journal ; ses sorties vont sous `replay/`.
+pub struct Replay<'a> {
+    registry: &'a Registry,
+    project_dir: PathBuf,
+    work_dir: PathBuf,
+    replay_dir: PathBuf,
+    lines: Vec<Value>,
+    ids: Vec<String>,
+    warnings: Vec<String>,
+}
+
+impl<'a> Replay<'a> {
+    /// Relit le journal du projet et fait les contrôles préalables : journal
+    /// présent, toutes les commandes connues du registre. Rien n'est exécuté.
+    pub fn load(registry: &'a Registry, project: &Path) -> Result<Self, ErrorReport> {
+        let (project_dir, work_dir) = locate(project)?;
+        let text = match fs::read_to_string(work_dir.join(JOURNAL_FILE)) {
+            Ok(t) => t,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(JournalError::NoJournal.into())
+            }
+            Err(e) => return Err(io_error(e).into()),
+        };
+        let mut lines = Vec::new();
+        for raw in text.lines().filter(|l| !l.trim().is_empty()) {
+            let line = serde_json::from_str::<Value>(raw)
+                .map_err(|_| JournalError::Io("InvalidData".to_string()))?;
+            lines.push(line);
+        }
+        if lines.is_empty() {
+            return Err(JournalError::NoJournal.into());
+        }
+        let mut ids = Vec::new();
+        let mut warnings = Vec::new();
+        for (i, line) in lines.iter().enumerate() {
+            let step = i + 1;
+            let id = line
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| JournalError::Io("InvalidData".to_string()))?;
+            if registry.spec(id).is_none() {
+                return Err(
+                    ErrorReport::from(crate::registry::RegistryError::UnknownCommand(
+                        id.to_string(),
+                    ))
+                    .at_step(step),
+                );
+            }
+            ids.push(id.to_string());
+            for input in line
+                .get("inputs")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                if input.get("portable") == Some(&Value::Bool(false)) {
+                    let path = input.get("path").and_then(Value::as_str).unwrap_or("?");
+                    warnings.push(format!(
+                        "Étape {step} : l'entrée « {path} » est hors du projet (non portable) ; le rejeu continue avec ce chemin."
+                    ));
+                }
+            }
+        }
+        let replay_dir = work_dir.join("replay");
+        Ok(Replay {
+            registry,
+            project_dir,
+            work_dir,
+            replay_dir,
+            lines,
+            ids,
+            warnings,
+        })
+    }
+
+    /// Avertissements relevés avant la première étape (entrées non portables).
+    pub fn warnings(&self) -> &[String] {
+        &self.warnings
+    }
+
+    /// Réexécute chaque étape par `router`, dans l'ordre ; s'arrête au premier écart.
+    pub fn run(&self, router: &Router) -> Result<ReplayReport, ErrorReport> {
+        fs::create_dir_all(&self.replay_dir).map_err(io_error)?;
+        let resolver = Resolver {
+            registry: self.registry,
+            project_dir: &self.project_dir,
+            out_dir: &self.replay_dir,
+        };
+        for (i, line) in self.lines.iter().enumerate() {
+            let step = i + 1;
+            let id = self.ids[i].as_str();
+            let spec = self
+                .registry
+                .spec(id)
+                .ok_or_else(|| crate::registry::RegistryError::UnknownCommand(id.to_string()))
+                .map_err(|e| ErrorReport::from(e).at_step(step))?;
+            let params = line.get("params").cloned().unwrap_or_else(|| json!({}));
+            let resolved = resolver
+                .resolve_call(id, spec, step, params, &self.ids[..i])
+                .map_err(|e| e.at_step(step))?;
+            let outcome = router.call(id, resolved.exec);
+            if let Err(e @ crate::registry::RegistryError::Unavailable(_)) = &outcome {
+                return Err(ErrorReport::from(e).at_step(step));
+            }
+            let diverged = |why: String| ErrorReport::from(JournalError::Diverged { step, why });
+            let same = match (&outcome, line.get("result"), line.get("error")) {
+                (Ok(value), Some(kept), None) => summarize(value) == *kept,
+                (Err(e), None, Some(Value::String(code))) => e.code() == code,
+                _ => false,
+            };
+            if !same {
+                return Err(diverged(format!(
+                    "la commande {id} ne redonne pas le même résultat ou la même erreur"
+                )));
+            }
+            for name in &spec.output_params {
+                let file = output_file(step, id, &spec.output_params, name);
+                let kept = fs::read(self.work_dir.join(&file)).ok();
+                let again = fs::read(self.replay_dir.join(&file)).ok();
+                if kept != again {
+                    return Err(diverged(format!(
+                        "la sortie « {name} » de la commande {id} n'a pas les mêmes octets"
+                    )));
+                }
+            }
+        }
+        Ok(ReplayReport {
+            steps: self.lines.len(),
+            identical: true,
+        })
     }
 }
 
@@ -660,6 +929,185 @@ mod tests {
         assert_eq!(a, registry_version(&Registry::standard()));
         assert_eq!(a.len(), 16);
         assert_ne!(a, registry_version(&Registry::new()));
+    }
+
+    fn replay_of(
+        registry: &Registry,
+        project: &Path,
+    ) -> Result<(ReplayReport, Vec<String>), ErrorReport> {
+        let replay = Replay::load(registry, project)?;
+        let warnings = replay.warnings().to_vec();
+        replay
+            .run(&Router::new(registry))
+            .map(|report| (report, warnings))
+    }
+
+    #[test]
+    fn an_output_reference_is_journaled_as_is_and_replays_identically() {
+        let (dir, project, token) = temp_project();
+        let registry = Registry::standard();
+        let mut s = Session::open(&registry, &project).unwrap();
+        s.call("test.write_output", json!({"text": "salut"}))
+            .unwrap();
+        let out = s
+            .call("test.read_file", json!({"path": "out:1.1"}))
+            .unwrap();
+        assert_eq!(out, json!({"bytes": 5}));
+        let l = lines(&s);
+        assert_eq!(l[1]["params"], json!({"path": "out:1.1"}));
+        assert_eq!(l[1]["inputs"], json!([]));
+        let before = fs::read_to_string(s.journal_path()).unwrap();
+
+        // La session tient encore le verrou : le rejeu reste permis.
+        let (report, warnings) = replay_of(&registry, &project).unwrap();
+        assert_eq!(
+            report,
+            ReplayReport {
+                steps: 2,
+                identical: true
+            }
+        );
+        assert!(warnings.is_empty());
+        assert_eq!(fs::read_to_string(s.journal_path()).unwrap(), before);
+        let work = s.work_dir().to_path_buf();
+        assert_eq!(
+            fs::read_to_string(work.join("replay/1-test.write_output.out")).unwrap(),
+            "salut"
+        );
+        assert_eq!(
+            fs::read_to_string(work.join("1-test.write_output.out")).unwrap(),
+            "salut"
+        );
+        assert!(!before.contains(&token));
+        drop(s);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    /// Écrit un journal à la main, une ligne JSON par étape.
+    fn hand_journal(project: &Path, rows: &[Value]) {
+        let work = project.parent().unwrap().join("p.cassini");
+        fs::create_dir_all(&work).unwrap();
+        let text: String = rows.iter().map(|r| format!("{r}\n")).collect();
+        fs::write(work.join(JOURNAL_FILE), text).unwrap();
+    }
+
+    #[test]
+    fn an_unknown_command_fails_by_name_and_executes_nothing() {
+        let (dir, project, _) = temp_project();
+        let registry = Registry::standard();
+        hand_journal(
+            &project,
+            &[
+                json!({"step":1,"id":"test.write_output","params":{"out":"1-test.write_output.out","text":"a"},"inputs":[],"result":{"bytes":1}}),
+                json!({"step":2,"id":"no.such","params":{},"inputs":[],"result":{}}),
+            ],
+        );
+        let err = replay_of(&registry, &project).unwrap_err();
+        assert_eq!(err.code, "registry.unknown_command");
+        assert!(err.message.contains("no.such"));
+        assert_eq!(err.step, Some(2));
+        assert!(!dir.join("p.cassini/replay").exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_qgis_command_without_executor_is_unavailable_on_replay() {
+        let (dir, project, _) = temp_project();
+        let registry = Registry::standard();
+        let mut s = Session::open(&registry, &project).unwrap();
+        s.call("test.qgis_probe", json!({"layer": "l"}))
+            .unwrap_err();
+        drop(s);
+        let err = replay_of(&registry, &project).unwrap_err();
+        assert_eq!(err.code, "registry.unavailable");
+        assert!(err.message.contains("test.qgis_probe"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_non_portable_input_is_warned_and_replay_goes_on() {
+        let (dir, project, _) = temp_project();
+        let registry = Registry::standard();
+        let mut s = Session::open(&registry, &project).unwrap();
+        s.call("test.read_file", json!({"path": "../x.tif"}))
+            .unwrap();
+        drop(s);
+        let (report, warnings) = replay_of(&registry, &project).unwrap();
+        assert_eq!(report.steps, 1);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("../x.tif"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_changed_input_diverges_at_its_step() {
+        let (dir, project, _) = temp_project();
+        fs::write(dir.join("data.txt"), "abc").unwrap();
+        let registry = Registry::standard();
+        let mut s = Session::open(&registry, &project).unwrap();
+        s.call("system.about", json!({})).unwrap();
+        s.call("test.read_file", json!({"path": "data.txt"}))
+            .unwrap();
+        drop(s);
+        fs::write(dir.join("data.txt"), "abcdef").unwrap();
+        let err = replay_of(&registry, &project).unwrap_err();
+        assert_eq!(err.code, "replay.diverged");
+        assert_eq!(err.step, Some(2));
+        assert!(!err.message.contains("cassini-journal-"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn an_output_with_other_bytes_diverges() {
+        let (dir, project, _) = temp_project();
+        let registry = Registry::standard();
+        let mut s = Session::open(&registry, &project).unwrap();
+        s.call("test.write_output", json!({"text": "salut"}))
+            .unwrap();
+        let original = s.work_dir().join("1-test.write_output.out");
+        drop(s);
+        fs::write(original, "autre").unwrap();
+        let err = replay_of(&registry, &project).unwrap_err();
+        assert_eq!(err.code, "replay.diverged");
+        assert_eq!(err.step, Some(1));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn an_invalid_reference_is_refused_both_ways() {
+        let (dir, project, _) = temp_project();
+        let registry = Registry::standard();
+        let mut s = Session::open(&registry, &project).unwrap();
+        s.call("system.about", json!({})).unwrap();
+        for bad in ["out:9.1", "out:1.1", "out:1", "out:x.1", "out:0.1"] {
+            let err = s.call("test.read_file", json!({"path": bad})).unwrap_err();
+            assert_eq!(err.code, "replay.bad_reference", "{bad}");
+        }
+        assert_eq!(lines(&s).len(), 1);
+        drop(s);
+        hand_journal(
+            &project,
+            &[
+                json!({"step":1,"id":"test.read_file","params":{"path":"out:9.1"},"inputs":[],"result":{"bytes":0}}),
+            ],
+        );
+        let err = replay_of(&registry, &project).unwrap_err();
+        assert_eq!(err.code, "replay.bad_reference");
+        assert_eq!(err.step, Some(1));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn no_journal_is_refused() {
+        let (dir, project, _) = temp_project();
+        let registry = Registry::standard();
+        let err = replay_of(&registry, &project).unwrap_err();
+        assert_eq!(err.code, "replay.no_journal");
+        fs::create_dir_all(dir.join("p.cassini")).unwrap();
+        fs::write(dir.join("p.cassini").join(JOURNAL_FILE), "\n").unwrap();
+        let err = replay_of(&registry, &project).unwrap_err();
+        assert_eq!(err.code, "replay.no_journal");
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
