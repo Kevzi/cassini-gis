@@ -3,7 +3,7 @@ title: "Traceur : l'extension se charge dans QGIS et execute system.about par le
 type: 'feature'
 ticket: '1'
 created: '2026-10-15'
-status: 'built'
+status: 'done'
 baseline_revision: '3d36aeb1236d9d3e287091695b6ee4e8996a4329'
 route: 'full'
 route_source: 'auto'
@@ -101,3 +101,7 @@ Passe 1 (quick) : 1 medium x3, 1 medium (tests), 1 low corrigé, 5 low/false rej
 
 **Manual checks (if no CLI):**
 - Dans QGIS 3.44, charger l'extension, ouvrir un projet : le panneau affiche les deux versions ; fermer QGIS, vérifier dans le gestionnaire des tâches qu'aucun `cassini.exe` ne reste.
+
+## Recette manuelle
+
+Validée par le propriétaire le 2026-10-15 dans QGIS 3.44 : le panneau affiche « Noyau Cassini 0.1.0, protocole 1 », et aucun cassini.exe ne reste après la fermeture de QGIS.
