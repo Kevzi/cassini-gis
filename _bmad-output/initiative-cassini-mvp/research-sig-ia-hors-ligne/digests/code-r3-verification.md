@@ -1,0 +1,24 @@
+# Digest — vérification dans le code des extensions QGIS, tour 3
+
+Consultation : 2026-10-15. Dépôts clonés en lecture seule (`git clone --depth 1`), dans un dossier isolé, rien exécuté. Les constats ci-dessous sont des faits lus dans le code, avec fichier et ligne quand c'est utile. Ils corrigent les cases « incertain » des digests précédents.
+
+| Extension | Dépôt, dernier commit, licence | Réseau | Confirmation avant exécution | Génération de code | Journal / rejeu | Constat sur l'écart avec Cassini |
+|---|---|---|---|---|---|---|
+| GeoAgent (iamtekson) | github.com/iamtekson/GeoAgent, 2026-10-05, MIT | Parle à un serveur Ollama en HTTP sur `http://localhost:11434` (`config/settings.py:17`, `llm/client.py`). Peut télécharger un modèle (`ollama_pull_model`) et installer des paquets pip depuis un bouton (`utils/dependencies.py`). Fournisseurs cloud en option. | Boîtes de confirmation pour : installer des dépendances, télécharger un modèle, retirer une couche (`tools/io.py:343-355`). **Aucune pour exécuter un plan.** | Non : choisit un algorithme Processing, remplit ses paramètres par sortie structurée (Pydantic, `agents/schemas.py`). | Journal (`logger/processing_logger.py`) et export en modèle `.model3` (`utils/model_export.py`). | **Valide les paramètres avec QGIS avant chaque exécution** (`agents/geoprocessing_flow.py:378`, `validate_parameters`) et fait diagnostiquer l'échec par le LLM pour relancer (`ErrorAnalysis`). C'est une validation par étape, pas un plan validé en bloc, sans arrêt pour l'utilisateur. |
+| OpenGeoAgent (opengeos) | github.com/opengeos/GeoAgent, 2026-08-09, MIT | Outils de données réseau (NASA Earthdata, STAC, Earth Engine, Esri Wayback, timelapse) : l'extension n'est pas conçue pour tourner coupée du réseau. | Rappel de confirmation par outil (`geoagent/core/safety.py`), selon un profil de permissions : **« Trusted auto-approve » est le premier de la liste** (`dialogs/chat_dock.py:161-166`) et approuve tout (`chat_dock.py:265`). Le profil par défaut choisi à l'ouverture n'a pas été lu. | PyQGIS en repli, refusé par défaut hors du profil « Execute Scripts » (`chat_dock.py:269-271`). | Non lu. | Confirme appel par appel, pas un plan ; les profils laissent à l'utilisateur le choix entre sûreté et confort. |
+| QGIS Agent (bunkmr) | github.com/bunkmr/qgis-agent, 2026-10-09, MIT | Fournisseurs listés dans `llm_providers.py` (cloud) ; serveur MCP local. | Gestionnaire de clarification (`clarification_manager.py`) et confirmation des opérations dangereuses. | Oui : génère du PyQGIS, relu **par un LLM** (`code_reviewer.py`, prompt de revue), pas par une analyse statique. | **Enregistrement et rejeu de workflows** : `workflow_recorder.py`, `workflow_store.py`, `workflow_executor.py` (modèles de workflow ré-exécutables dans un autre projet, avec `dry_run`, sans appel au LLM dans l'exécuteur). | Le rejeu existe donc déjà ici, sous forme de **modèles de workflow à paramètres**, pas d'un journal d'audit rejouable à l'identique. |
+| AI Agent by TerraLab | github.com/TerraLabAI/QGIS_AI-Agent, 2026-10-11, GPL | Envoie à un serveur distant ; hors ligne exclu. | Montre chaque étape avant exécution (page). | Outils prédéfinis. | Une conversation par projet. | Plan visible, mais cloud. |
+| QGIS MCP (Karasiak) | github.com/nkarasiak/qgis-mcp, 2026-10-07, GPL | Serveur socket TCP, `DEFAULT_HOST = "localhost"` (`constants.py:11`), la liaison à toutes les interfaces est évitée (`server.py:255`). Le modèle est celui du client MCP externe. | Non lu. | Outils MCP typés. | Non lu. | Un pont ; la qualité dépend du client. |
+
+## Ce que ça change
+
+- **« Hors ligne » est une possibilité, pas une garantie :** GeoAgent parle à un **serveur HTTP local** (Ollama) et peut installer des paquets ou télécharger des modèles. Cassini l'interdit par construction (AD-15 : modèle lié au processus, jamais un serveur HTTP). C'est une différence réelle et défendable, pas seulement une préférence.
+- **La validation de paramètres existe déjà en partie** (GeoAgent, avec QGIS comme juge). Ce qui reste distinct : un **plan complet**, validé et montré **avant** toute exécution, contre des schémas du noyau, avec refus et relance contrôlés (AD-23).
+- **Le rejeu existe déjà en partie** (QGIS Agent : modèles de workflow ; GeoAgent : `.model3`). Ce qui reste distinct : un **journal ajouté en fin de fichier**, écrit par un seul auteur, rejouable à l'identique, avec repères d'étape (AD-11).
+- **Licences :** GeoAgent, OpenGeoAgent et QGIS Agent sont en MIT ; TerraLab et QGIS MCP en GPL. Aucun code n'a été copié ; ces lectures servent à comparer des comportements, et le principe 2.1 de ton CLAUDE.md (clean-room) reste respecté.
+
+## Non vérifié
+
+- AtQuery : dépôt non identifié, page seule.
+- Profil de permissions par défaut d'OpenGeoAgent au premier lancement.
+- Comportement réel hors réseau : aucune des extensions n'a été lancée.
