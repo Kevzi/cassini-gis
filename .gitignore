@@ -62,3 +62,6 @@ desktop.ini
 .vscode/*
 !.vscode/extensions.json
 *.swp
+
+__pycache__/
+*.pyc

@@ -1,0 +1,15 @@
+[general]
+name=Cassini
+qgisMinimumVersion=3.44
+qgisMaximumVersion=4.99
+description=Interface en langage naturel pour QGIS, hors ligne (traceur).
+version=0.0.1
+author=Cassini
+email=
+repository=
+tracker=
+about=Extension Cassini (GPL). Elle ne contient aucun binaire : le noyau Cassini (cassini, licence Apache-2.0) est une dependance externe a installer a part, avec le paquet Cassini. L'extension le cherche dans cet ordre : reglage QGIS cassini/core_path, variable d'environnement CASSINI_CORE, emplacement d'installation du paquet, PATH. Elle ne telecharge jamais rien.
+tags=offline,ai,cassini
+experimental=True
+deprecated=False
+supportsQt6=True
