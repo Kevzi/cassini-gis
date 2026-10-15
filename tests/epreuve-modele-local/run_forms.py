@@ -56,7 +56,7 @@ RESERVED = ("--catalog", "--output", "--examples")
 
 
 def run(common_argv, log=print):
-    clash = [a for a in common_argv if a in RESERVED]
+    clash = [a for a in common_argv if a.split("=")[0] in RESERVED]
     if clash:
         raise SystemExit(f"run_forms.py fait varier {', '.join(RESERVED)} lui-même : retire {', '.join(clash)} de la ligne de commande")
     catalog, inventory = harness.load_json("catalog.json"), harness.load_json("inventory.json")

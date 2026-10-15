@@ -12,7 +12,7 @@ Toutes les entrées de l'epic 8 sont **terminées** : 8.2 (catalogue, inventaire
 (formes de sollicitation) et 8.6 (verdict, avec une mesure sur processeur seul,
 `resultats-8-6-cpu.json`). Le verdict est
 `_bmad-output/initiative-cassini-mvp/epic-epreuve-du-modele-local/verdict-epreuve-du-modele-local.md`
-(recommandation, à signer par le propriétaire).
+(signé par le propriétaire le 2026-10-15 : oui sous conditions).
 
 | Fichier | Rôle |
 |---|---|
@@ -84,10 +84,9 @@ listes. L'intersection est symétrique et associative. `title` et
 `sources_note` sont ignorés ; une valeur égale à son défaut équivaut à
 l'absence. Une étape en trop rend les plans différents. Deux refus sont égaux.
 
-**Limite connue :** les unités ne sont pas normalisées, donc 500 m et 0,5 km ou
-2 km et 2 000 m donnent deux plans différents, alors qu'ils sont équivalents.
-Les phrases de référence nomment leurs unités pour éviter le cas ; une
-normalisation est reportée (voir `deferred-work.md`).
+Les **unités sont normalisées** (m et km, s et min, `UNIT_BASE` de
+`plan_validator.py`) : 500 m et 0,5 km, ou 2 km et 2 000 m, donnent le même
+plan. Les autres unités ne le sont pas.
 
 S19 croise des bâtiments en EPSG 4326 avec une zone tampon en 2154 sans les
 reprojeter : on suppose que QGIS aligne les systèmes à l'intersection, à
