@@ -4,7 +4,7 @@
 // qui sert à la recette est **fabriqué** ici : une archive PMTiles v3 à tuiles
 // PNG couvrant la commune de Villeneuve-le-Roi, aux zooms 10 à 14.
 //
-// Aucune dépendance tierce : Node seul, avec son `zlib` intégré. Aucune requête
+// Aucune dépendance tierce : Node seul, `zlib` ne servant qu'aux CRC. Aucune requête
 // réseau. Le fichier produit est déterministe, octet pour octet.
 //
 // Spécification suivie : https://github.com/protomaps/PMTiles/blob/main/spec/v3/spec.md
@@ -116,6 +116,115 @@ export function coveringTiles() {
   return list;
 }
 
+// ---------------------------------------------------------------- Compression
+
+// Le `zlib` de Node n'est pas figé : son flux deflate change d'une version à
+// l'autre, donc l'archive changerait d'octets sans que rien n'ait changé. Ce petit
+// encodeur (Huffman fixe, correspondances gloutonnes) est déterministe partout.
+// `zlib` ne sert plus qu'à calculer les CRC et à relire.
+
+const LENGTH_BASE = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258];
+const LENGTH_EXTRA = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0];
+const DIST_BASE = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577];
+const DIST_EXTRA = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13];
+
+/** Flux deflate brut : un seul bloc à codes de Huffman fixes (RFC 1951, 3.2.6). */
+function deflateRaw(data) {
+  const bytes = [];
+  let acc = 0;
+  let nbits = 0;
+  const bits = (value, count) => {
+    for (let i = 0; i < count; i += 1) {
+      acc |= ((value >> i) & 1) << nbits;
+      nbits += 1;
+      if (nbits === 8) {
+        bytes.push(acc);
+        acc = 0;
+        nbits = 0;
+      }
+    }
+  };
+  // Un code de Huffman s'écrit en commençant par son bit de poids fort.
+  const code = (value, count) => {
+    for (let i = count - 1; i >= 0; i -= 1) bits((value >> i) & 1, 1);
+  };
+  const symbol = (sym) => {
+    if (sym < 144) code(0x30 + sym, 8);
+    else if (sym < 256) code(0x190 + sym - 144, 9);
+    else if (sym < 280) code(sym - 256, 7);
+    else code(0xc0 + sym - 280, 8);
+  };
+  bits(1, 1); // dernier bloc
+  bits(1, 2); // codes fixes
+  const last = new Map();
+  let i = 0;
+  while (i < data.length) {
+    let bestLen = 0;
+    let bestDist = 0;
+    if (i + 3 <= data.length) {
+      // La dernière occurrence des trois mêmes octets, plus deux distances qui
+      // reviennent dans une image : le pixel d'avant et la ligne d'au-dessus.
+      const key = (data[i] << 16) | (data[i + 1] << 8) | data[i + 2];
+      const seen = last.get(key);
+      for (const at of [seen, i - 2, i - 513]) {
+        if (at === undefined || at < 0 || at >= i || i - at > 32768) continue;
+        let len = 0;
+        while (len < 258 && i + len < data.length && data[at + len] === data[i + len]) len += 1;
+        if (len >= 3 && len > bestLen) {
+          bestLen = len;
+          bestDist = i - at;
+        }
+      }
+    }
+    const step = bestLen >= 3 ? bestLen : 1;
+    for (let k = 0; k < step && i + k + 3 <= data.length; k += 1) {
+      last.set((data[i + k] << 16) | (data[i + k + 1] << 8) | data[i + k + 2], i + k);
+    }
+    if (bestLen >= 3) {
+      let lc = LENGTH_BASE.length - 1;
+      while (LENGTH_BASE[lc] > bestLen) lc -= 1;
+      symbol(257 + lc);
+      bits(bestLen - LENGTH_BASE[lc], LENGTH_EXTRA[lc]);
+      let dc = DIST_BASE.length - 1;
+      while (DIST_BASE[dc] > bestDist) dc -= 1;
+      code(dc, 5);
+      bits(bestDist - DIST_BASE[dc], DIST_EXTRA[dc]);
+    } else {
+      symbol(data[i]);
+    }
+    i += step;
+  }
+  symbol(256);
+  if (nbits > 0) bytes.push(acc);
+  return Buffer.from(bytes);
+}
+
+function adler32(data) {
+  let a = 1;
+  let b = 0;
+  for (const byte of data) {
+    a = (a + byte) % 65521;
+    b = (b + a) % 65521;
+  }
+  return ((b << 16) | a) >>> 0;
+}
+
+/** Flux zlib (RFC 1950), pour l'IDAT d'un PNG. */
+function deflateZlib(data) {
+  const tail = Buffer.alloc(4);
+  tail.writeUInt32BE(adler32(data), 0);
+  return Buffer.concat([Buffer.from([0x78, 0x01]), deflateRaw(data), tail]);
+}
+
+/** Fichier gzip (RFC 1952), sans date ni nom : le même texte donne les mêmes octets. */
+function gzipDeterministic(data) {
+  const tail = Buffer.alloc(8);
+  tail.writeUInt32LE(zlib.crc32(data), 0);
+  tail.writeUInt32LE(data.length, 4);
+  const header = Buffer.from([0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 0xff]);
+  return Buffer.concat([header, deflateRaw(data), tail]);
+}
+
 // -------------------------------------------------------------------- PNG
 
 function pngChunk(type, data) {
@@ -165,7 +274,7 @@ export function pngTile(z, x, y) {
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     pngChunk("IHDR", ihdr),
-    pngChunk("IDAT", zlib.deflateSync(Buffer.concat(lines), { level: 9 })),
+    pngChunk("IDAT", deflateZlib(Buffer.concat(lines))),
     pngChunk("IEND", Buffer.alloc(0)),
   ]);
 }
@@ -248,7 +357,7 @@ export function buildArchive() {
   }
   const tileData = Buffer.concat(blobs);
 
-  const metadata = zlib.gzipSync(
+  const metadata = gzipDeterministic(
     Buffer.from(
       JSON.stringify({
         name: "Cassini — fond de recette, Villeneuve-le-Roi",
@@ -260,9 +369,8 @@ export function buildArchive() {
         generated_by: "app/scripts/generate-basemap.mjs",
       }),
     ),
-    { level: 9 },
   );
-  const directory = zlib.gzipSync(encodeDirectory(entries), { level: 9 });
+  const directory = gzipDeterministic(encodeDirectory(entries));
 
   const rootDirectoryOffset = 127;
   const metadataOffset = rootDirectoryOffset + directory.length;

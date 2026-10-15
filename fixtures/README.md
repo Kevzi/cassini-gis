@@ -13,7 +13,7 @@ avec une exception pour ce dossier.
 
 | Fichier | Nature | Origine | Utilisé par |
 |---|---|---|---|
-| `basemap-villeneuve-le-roi.pmtiles` | Archive PMTiles v3, tuiles PNG en niveaux de gris, 35 tuiles, 25,7 Ko | **Généré**, aucun téléchargement : `app/scripts/generate-basemap.mjs` | Le fond de carte de l'application, et la recette |
+| `basemap-villeneuve-le-roi.pmtiles` | Archive PMTiles v3, tuiles PNG en niveaux de gris, 35 tuiles, 50,3 Ko | **Généré**, aucun téléchargement : `app/scripts/generate-basemap.mjs` | Le fond de carte de l'application, et la recette |
 
 ## Le fond de carte de recette
 
