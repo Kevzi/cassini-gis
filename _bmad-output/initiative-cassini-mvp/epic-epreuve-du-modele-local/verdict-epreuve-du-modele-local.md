@@ -1,6 +1,6 @@
 # Verdict de l'épreuve du modèle local (entrée 8.6)
 
-**État : recommandation, non signée.** Le propriétaire la signe ou la change (section « Décision »). Sources : `tests/epreuve-modele-local/resultats-8-4.md`, `resultats-8-5.md`, `lecture-8-4.md`, `lecture-8-5.md`, et la mesure sur processeur seul de cette entrée, `resultats-8-6-cpu.json`.
+**État : signé par le propriétaire le 2026-10-15 — oui sous conditions.** Sources : `tests/epreuve-modele-local/resultats-8-4.md`, `resultats-8-5.md`, `lecture-8-4.md`, `lecture-8-5.md`, et la mesure sur processeur seul de cette entrée, `resultats-8-6-cpu.json`.
 
 ## Réponse
 
@@ -80,4 +80,4 @@ Plus d'exemples ou une consigne « seulement les étapes demandées » ; un mod�
 
 ## Décision
 
-Signée par le propriétaire le : ____________  Verdict retenu : ☐ oui sous conditions ☐ oui ☐ non  Remarques : ____________
+Signée par le propriétaire le 2026-10-15. Verdict retenu : ☒ oui sous conditions ☐ oui ☐ non. Les epics 2 et 5 peuvent partir, aux conditions ci-dessus.
