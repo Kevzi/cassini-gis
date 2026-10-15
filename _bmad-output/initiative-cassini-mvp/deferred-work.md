@@ -47,3 +47,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
   evidence: Constat de relecture, verdict bas. Sans cela le taux de 8.3 compte faux un plan géométriquement identique dont le modèle a choisi une autre unité. Écarté de 8.2 parce que le bloc figé du plan définit l'égalité sans normalisation. À reprendre au début de 8.3, avant la première mesure.
   status: close, 2026-10-15, entrée 8.3 (`plan-8-3-harnais-de-mesure.md`)
   resolution: `canonical` ramène m et km en mètres, s et min en secondes ; 300 m et 0,3 km donnent le même plan, contrôlé par `check_sentences.py`.
+
+- source_plan: none
+  summary: Vectorisation d'images (plan satellite d'un village ou d'un réseau routier vers polygones et lignes exploitables pour des calculs), à faire bien après la démo.
+  evidence: Demande du propriétaire le 2026-10-15. Deux niveaux : (1) raster déjà classé vers vecteur, commande déléguée à QGIS (GDAL Polygoniser, GRASS r.to.vect), peu de travail ; (2) détection des routes et bâtiments par un modèle de segmentation hors ligne, puis squelettisation et raccord en réseau topologiquement propre. Le niveau 2 est au hors-périmètre de CLAUDE.md §6 (« IA sur images satellite ») : il demande une épreuve préalable sur le modèle de l'étape 2 (un village, qualité des routes mesurée), et une licence MIT, Apache-2.0 ou BSD pour le modèle et ses poids (§2.2).
