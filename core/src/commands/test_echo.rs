@@ -6,7 +6,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::registry::{Command, CommandSpec, Registration};
+use crate::registry::{Command, CommandSpec, Registration, RunsIn};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -31,6 +31,9 @@ impl Command for TestEcho {
             "Renvoie le texte reçu (tests seulement).",
             "Returns the given text (tests only).",
         )
+        .runs_in(RunsIn::Core)
+        .cancellable(false)
+        .tests(&["a_new_file_registers_its_command"])
     }
 
     fn run(&self, params: EchoParams) -> EchoOutput {

@@ -55,3 +55,5 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-registre-projet-import/story-traceur-la-crate-cassini-et-une-premiere-commande-par-cassin-plan.md`
   summary: `Registry::register` remplace en silence une commande de même id ; le contrat de 2.3 doit refuser un id en double.
   evidence: `core/src/registry.rs`, `register` : `BTreeMap::insert` écarte l'ancienne entrée sans erreur, contre CLAUDE.md §4 (chaque commande décrite une seule fois). À traiter dans 2.2 (enregistrement) ou 2.3 (contrôles du contrat).
+  status: close, 2026-10-15, entrée 2.3 (`epic-registre-projet-import/story-contrat-complet-d-une-commande-controle-par-le-registre-lui-plan.md`)
+  resolution: `register` garde la première entrée et note le doublon ; `check_contract` rend `contract.duplicate_id`.

@@ -14,5 +14,8 @@
   l'application sur un poste Windows, prérequis compris, et preuve du
   fonctionnement réseau coupé.
 
+- `regle-de-redaction-des-commandes.md` — comment écrire la description et les
+  schémas d'une commande, et ce que le registre contrôle lui-même.
+
 À remplir au fil des étapes : parité fonctionnelle visée et décisions
 d'architecture courtes (ADR).

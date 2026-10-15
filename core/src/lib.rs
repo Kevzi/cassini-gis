@@ -5,6 +5,7 @@
 
 pub mod basemap;
 pub mod commands;
+pub mod contract;
 pub mod registry;
 
 /// Version du moteur, alignée sur celle du workspace.

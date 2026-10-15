@@ -3,7 +3,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::registry::{Command, CommandSpec, Registration, PROTOCOL_VERSION};
+use crate::registry::{Command, CommandSpec, Registration, RunsIn, PROTOCOL_VERSION};
 
 /// Paramètres de `system.about` : aucun, et aucun champ inconnu accepté.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -30,6 +30,9 @@ impl Command for SystemAbout {
             "Donne la version du noyau et celle du protocole.",
             "Reports the core version and the protocol version.",
         )
+        .runs_in(RunsIn::Core)
+        .cancellable(false)
+        .tests(&["system_about_returns_the_versions_through_the_command"])
     }
 
     fn run(&self, _params: AboutParams) -> AboutOutput {
@@ -41,3 +44,20 @@ impl Command for SystemAbout {
 }
 
 inventory::submit! { Registration(|r| r.register(SystemAbout)) }
+
+#[cfg(test)]
+mod tests {
+    use crate::registry::{Registry, PROTOCOL_VERSION};
+    use serde_json::json;
+
+    #[test]
+    fn system_about_returns_the_versions_through_the_command() {
+        let out = Registry::standard()
+            .call("system.about", json!({}))
+            .unwrap();
+        assert_eq!(
+            out,
+            json!({"core_version": crate::VERSION, "protocol_version": PROTOCOL_VERSION})
+        );
+    }
+}
