@@ -1,0 +1,744 @@
+[
+ {
+  "name": "libre · catalogue complet · sans exemples",
+  "catalog": "full",
+  "examples": false,
+  "output": "free",
+  "summary": {
+   "sentences": 25,
+   "correct_first": 16,
+   "correct_after_retry": 16,
+   "rate_first": 0.64,
+   "rate_after_retry": 0.64,
+   "conform_first": 22,
+   "retried": 3,
+   "call_errors": 0,
+   "catalog_recall": 25,
+   "mean_load_ms": 2542.2,
+   "mean_prompt_ms": 1418.2,
+   "mean_prompt_tokens": 4467.1,
+   "mean_generation_ms": 1319.2,
+   "mean_generated_tokens": 113.8
+  },
+  "total_ms": 183662,
+  "outcomes": {
+   "S01": "✓",
+   "S02": "✓",
+   "S03": "✓",
+   "S04": "✓",
+   "S05": "✓",
+   "S06": "✓",
+   "S07": "✓",
+   "S08": "✓",
+   "S09": "✓",
+   "S10": "✓",
+   "S11": "✗",
+   "S12": "✓",
+   "S13": "✓",
+   "S14": "✓",
+   "S15": "!",
+   "S16": "✗",
+   "S17": "✗",
+   "S18": "✗",
+   "S19": "!",
+   "S20": "✓",
+   "S21": "!",
+   "S22": "✓",
+   "S23": "✗",
+   "S24": "✗",
+   "S25": "✓"
+  },
+  "failures": {
+   "S11": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"layer.describe\", \"params\": {\"layer\": \"batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649\"}}, {\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649\", \"filter\": {\"field\": \"hauteur_m\", \"operator\": \"gt\", \"value\": 12}}}]"
+   },
+   "S15": {
+    "status": "nonconform",
+    "errors": [
+     "étape 2.params.raster: « mnt_zone_nord » ne respecte pas le motif"
+    ],
+    "output": "[{\"command\": \"layer.add\", \"params\": {\"source\": \"donnees/mnt_zone_nord.tif\"}}, {\"command\": \"analysis.zonal_statistics\", \"params\": {\"zones\": \"communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946\", \"raster\": \"mnt_zone_nord\", \"statistics\": [\"mean\", \"max\"]}}, {\"command\": \"map.zoom_to_layer\", \"params\": {\"layer\": \"step:1\"}}]"
+   },
+   "S16": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"analysis.isochrone\", \"params\": {\"network\": \"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\", \"origin\": {\"x\": 656, \"y\": 6847920, \"epsg\": 2154}, \"duration\": {\"value\": 10, \"unit\": \"min\"}, \"mode\": \"walking\"}}]"
+   },
+   "S17": {
+    "status": "wrong",
+    "errors": [],
+    "output": "```json\r\n[\r\n  {\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3\", \"filter\": {\"field\": \"section\", \"operator\": \"eq\", \"value\": \"U\"}}},\r\n  {\"command\": \"analysis.buffer\", \"params\": {\"layer\": \"gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1\", \"distance\": {\"value\": 500, \"unit\": \"m\"}, \"dissolve\": true}},\r\n  {\"command\": \"analysis.intersect\", \"params\": {"
+   },
+   "S18": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"map.zoom_to_layer\", \"params\": {\"layer\": \"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\"}}, {\"command\": \"layout.export_pdf\", \"params\": {\"title\": \"Accès aux gares\", \"layers\": [\"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\", \"gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1\"], \"paper\": \"A3\", \"orientation\": \"portrait\"}}]"
+   },
+   "S19": {
+    "status": "nonconform",
+    "errors": [
+     "étape 1: fichier absent de l'inventaire « donnees/batiments.geojson »",
+     "étape 2: fichier absent de l'inventaire « donnees/routes.gpkg »"
+    ],
+    "output": "[{\"command\": \"layer.add\", \"params\": {\"source\": \"donnees/batiments.geojson\"}}, {\"command\": \"layer.add\", \"params\": {\"source\": \"donnees/routes.gpkg\"}}, {\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"step:1\", \"filter\": {\"field\": \"classe\", \"operator\": \"eq\", \"value\": \"départementale\"}}}, {\"command\": \"analysis.buffer\", \"params\": {\"layer\": \"step:2\", \"distance\": {\"value\": 100, \"unit\": \"m\"}, "
+   },
+   "S21": {
+    "status": "nonconform",
+    "errors": [
+     "la sortie n'est pas du JSON valide (Expecting ',' delimiter)"
+    ],
+    "output": "[{\"command\": \"terrain.line_of_sight\", \"params\": {\"dem\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"from\": {\"x\": 656300, \"y\": 6847500, \"epsg\": 2154}, \"to\": {\"x\": 657100, \"y\": 6848200, \"epsg\": 2154}, \"from_height\": {\"value\": 2, \"unit\": \"m\"}, \"to_height\": {\"value\": 2, \"unit\": \"m\"}}]"
+   },
+   "S23": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"terrain.slope\", \"params\": {\"dem\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"unit\": \"degrees\"}}, {\"command\": \"analysis.zonal_statistics\", \"params\": {\"zones\": \"step:1\", \"raster\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"statistics\": [\"mean\"]}}]"
+   },
+   "S24": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"terrain.viewshed\", \"params\": {\"dem\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"observer\": {\"x\": 656, \"y\": 120, \"epsg\": 2154}, \"observer_height\": {\"value\": 25, \"unit\": \"m\"}, \"radius\": {\"value\": 2, \"unit\": \"km\"}}}, {\"command\": \"analysis.zonal_statistics\", \"params\": {\"zones\": \"step:1\", \"raster\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"statistics\": [\"mean\"]}}]"
+   }
+  }
+ },
+ {
+  "name": "libre · catalogue complet · avec exemples",
+  "catalog": "full",
+  "examples": true,
+  "output": "free",
+  "summary": {
+   "sentences": 25,
+   "correct_first": 20,
+   "correct_after_retry": 20,
+   "rate_first": 0.8,
+   "rate_after_retry": 0.8,
+   "conform_first": 24,
+   "retried": 1,
+   "call_errors": 0,
+   "catalog_recall": 25,
+   "mean_load_ms": 2552.0,
+   "mean_prompt_ms": 1560.7,
+   "mean_prompt_tokens": 4870.7,
+   "mean_generation_ms": 1206.6,
+   "mean_generated_tokens": 103.3
+  },
+  "total_ms": 171408,
+  "outcomes": {
+   "S01": "✓",
+   "S02": "✓",
+   "S03": "✓",
+   "S04": "✓",
+   "S05": "✓",
+   "S06": "✓",
+   "S07": "✓",
+   "S08": "✓",
+   "S09": "✓",
+   "S10": "✓",
+   "S11": "✓",
+   "S12": "✓",
+   "S13": "✓",
+   "S14": "✓",
+   "S15": "!",
+   "S16": "✓",
+   "S17": "✗",
+   "S18": "✗",
+   "S19": "✗",
+   "S20": "✓",
+   "S21": "✓",
+   "S22": "✓",
+   "S23": "✓",
+   "S24": "✗",
+   "S25": "✓"
+  },
+  "failures": {
+   "S15": {
+    "status": "nonconform",
+    "errors": [
+     "étape 1: commande absente du catalogue « terrain.zonal_statistics »"
+    ],
+    "output": "[{\"command\": \"terrain.zonal_statistics\", \"params\": {\"zones\": \"communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946\", \"raster\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"statistics\": [\"mean\", \"max\"]}}]"
+   },
+   "S17": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3\", \"filter\": {\"field\": \"section\", \"operator\": \"eq\", \"value\": \"U\"}}}, {\"command\": \"analysis.buffer\", \"params\": {\"layer\": \"gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1\", \"distance\": {\"value\": 500, \"unit\": \"m\"}, \"dissolve\": true}}, {\"command\": \"analysis.intersect\", \"params\": {\"layer\": \"step:1\", "
+   },
+   "S18": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"map.zoom_to_layer\", \"params\": {\"layer\": \"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\"}}, {\"command\": \"layout.export_pdf\", \"params\": {\"title\": \"Accès aux gares\", \"layers\": [\"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\", \"gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1\"], \"paper\": \"A3\", \"orientation\": \"portrait\"}}]"
+   },
+   "S19": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\", \"filter\": {\"field\": \"classe\", \"operator\": \"eq\", \"value\": \"départementale\"}}}, {\"command\": \"analysis.buffer\", \"params\": {\"layer\": \"step:1\", \"distance\": {\"value\": 100, \"unit\": \"m\"}}}, {\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649\""
+   },
+   "S24": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"terrain.viewshed\", \"params\": {\"dem\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"observer\": {\"x\": 656120, \"y\": 6848060, \"epsg\": 2154}, \"observer_height\": {\"value\": 25, \"unit\": \"m\"}, \"radius\": {\"value\": 2, \"unit\": \"km\"}}}, {\"command\": \"analysis.zonal_statistics\", \"params\": {\"zones\": \"step:1\", \"raster\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"statistics\": [\"mean\"]}}]"
+   }
+  }
+ },
+ {
+  "name": "libre · catalogue filtré · sans exemples",
+  "catalog": "filtered",
+  "examples": false,
+  "output": "free",
+  "summary": {
+   "sentences": 25,
+   "correct_first": 16,
+   "correct_after_retry": 16,
+   "rate_first": 0.64,
+   "rate_after_retry": 0.64,
+   "conform_first": 20,
+   "retried": 5,
+   "call_errors": 0,
+   "catalog_recall": 20,
+   "mean_load_ms": 2561.2,
+   "mean_prompt_ms": 1103.1,
+   "mean_prompt_tokens": 3450.2,
+   "mean_generation_ms": 1680.8,
+   "mean_generated_tokens": 145.7
+  },
+  "total_ms": 199461,
+  "outcomes": {
+   "S01": "✓",
+   "S02": "✓",
+   "S03": "✓",
+   "S04": "✓",
+   "S05": "✓",
+   "S06": "✓",
+   "S07": "✓",
+   "S08": "✓",
+   "S09": "✓",
+   "S10": "✓",
+   "S11": "✗",
+   "S12": "✓",
+   "S13": "!",
+   "S14": "✓",
+   "S15": "!",
+   "S16": "✗",
+   "S17": "!",
+   "S18": "✓",
+   "S19": "!",
+   "S20": "✗",
+   "S21": "✓",
+   "S22": "✓",
+   "S23": "✗",
+   "S24": "✗",
+   "S25": "✓"
+  },
+  "failures": {
+   "S11": {
+    "status": "wrong",
+    "errors": [],
+    "output": "```json\r\n[\r\n  {\"command\": \"layer.describe\", \"params\": {\"layer\": \"batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649\"}},\r\n  {\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649\", \"filter\": {\"field\": \"hauteur_m\", \"operator\": \"gt\", \"value\": 12}}}\r\n]\r\n```"
+   },
+   "S13": {
+    "status": "nonconform",
+    "errors": [
+     "étape 1: fichier absent de l'inventaire « donnees/plu_zonage.gpkg »",
+     "étape 5: step:2 désigne une étape qui ne produit pas de couche"
+    ],
+    "output": "[{\"command\": \"layer.add\", \"params\": {\"source\": \"donnees/plu_zonage.gpkg\"}}, {\"command\": \"layer.describe\", \"params\": {\"layer\": \"step:1\"}}, {\"command\": \"layer.describe\", \"params\": {\"layer\": \"parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3\"}}, {\"command\": \"layer.reproject\", \"params\": {\"layer\": \"step:1\", \"target_epsg\": 2154}}, {\"command\": \"analysis.buffer\", \"params\": {\"layer\": \"step:2\", \"distance\": {\"v"
+   },
+   "S15": {
+    "status": "nonconform",
+    "errors": [
+     "étape 3: fichier absent de l'inventaire « donnees/communes.gpkg »"
+    ],
+    "output": "[{\"command\": \"layer.add\", \"params\": {\"source\": \"donnees/mnt_zone_nord.tif\"}}, {\"command\": \"layer.describe\", \"params\": {\"layer\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\"}}, {\"command\": \"layer.add\", \"params\": {\"source\": \"donnees/communes.gpkg\"}}, {\"command\": \"layer.describe\", \"params\": {\"layer\": \"communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946\"}}, {\"command\": \"layer.export\", \"params\": {\"layer\": \""
+   },
+   "S16": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"analysis.isochrone\", \"params\": {\"network\": \"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\", \"origin\": {\"x\": 656, \"y\": 6847920, \"epsg\": 2154}, \"duration\": {\"value\": 10, \"unit\": \"min\"}, \"mode\": \"walking\"}}]"
+   },
+   "S17": {
+    "status": "nonconform",
+    "errors": [
+     "étape 1: fichier absent de l'inventaire « donnees/gares.gpkg »",
+     "étape 3.params.duration.unit: « m » hors de ['s', 'min']"
+    ],
+    "output": "[{\"command\": \"layer.add\", \"params\": {\"source\": \"donnees/gares.gpkg\"}}, {\"command\": \"layer.describe\", \"params\": {\"layer\": \"step:1\"}}, {\"command\": \"analysis.isochrone\", \"params\": {\"network\": \"step:1\", \"origin\": {\"x\": 0, \"y\": 0, \"epsg\": 2154}, \"duration\": {\"value\": 500, \"unit\": \"m\"}, \"mode\": \"walking\"}}, {\"command\": \"layer.describe\", \"params\": {\"layer\": \"step:2\"}}, {\"command\": \"layer.add\", \"params\": "
+   },
+   "S19": {
+    "status": "nonconform",
+    "errors": [
+     "étape 4: commande absente du catalogue « refusal »"
+    ],
+    "output": "[{\"command\": \"layer.reproject\", \"params\": {\"layer\": \"batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649\", \"target_epsg\": 2154}}, {\"command\": \"layer.describe\", \"params\": {\"layer\": \"step:1\"}}, {\"command\": \"layer.describe\", \"params\": {\"layer\": \"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\"}}, {\"command\": \"refusal\", \"params\": {\"reason\": \"Aucune commande du catalogue ne permet de calculer la distance entre "
+   },
+   "S20": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"layer.add\", \"params\": {\"source\": \"donnees/mnt_zone_nord.tif\"}}, {\"command\": \"analysis.buffer\", \"params\": {\"layer\": \"step:1\", \"distance\": {\"value\": 2000, \"unit\": \"m\"}, \"dissolve\": true}}, {\"command\": \"layer.describe\", \"params\": {\"layer\": \"step:1\"}}]"
+   },
+   "S23": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"terrain.slope\", \"params\": {\"dem\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"unit\": \"degrees\"}}, {\"command\": \"analysis.zonal_statistics\", \"params\": {\"zones\": \"step:1\", \"raster\": \"step:1\", \"statistics\": [\"mean\"]}}]"
+   },
+   "S24": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"terrain.viewshed\", \"params\": {\"dem\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"observer\": {\"x\": 656, \"y\": 120, \"epsg\": 2154}, \"observer_height\": {\"value\": 25, \"unit\": \"m\"}, \"radius\": {\"value\": 2, \"unit\": \"km\"}}}, {\"command\": \"analysis.zonal_statistics\", \"params\": {\"zones\": \"step:1\", \"raster\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"statistics\": [\"mean\"]}}]"
+   }
+  }
+ },
+ {
+  "name": "libre · catalogue filtré · avec exemples",
+  "catalog": "filtered",
+  "examples": true,
+  "output": "free",
+  "summary": {
+   "sentences": 25,
+   "correct_first": 20,
+   "correct_after_retry": 20,
+   "rate_first": 0.8,
+   "rate_after_retry": 0.8,
+   "conform_first": 23,
+   "retried": 2,
+   "call_errors": 0,
+   "catalog_recall": 20,
+   "mean_load_ms": 2604.7,
+   "mean_prompt_ms": 1255.0,
+   "mean_prompt_tokens": 3843.3,
+   "mean_generation_ms": 1499.7,
+   "mean_generated_tokens": 126.9
+  },
+  "total_ms": 180016,
+  "outcomes": {
+   "S01": "✓",
+   "S02": "✓",
+   "S03": "✓",
+   "S04": "✓",
+   "S05": "✓",
+   "S06": "✓",
+   "S07": "✓",
+   "S08": "✓",
+   "S09": "✓",
+   "S10": "✓",
+   "S11": "✓",
+   "S12": "✓",
+   "S13": "✗",
+   "S14": "✓",
+   "S15": "!",
+   "S16": "✓",
+   "S17": "!",
+   "S18": "✗",
+   "S19": "✗",
+   "S20": "✓",
+   "S21": "✓",
+   "S22": "✓",
+   "S23": "✓",
+   "S24": "✓",
+   "S25": "✓"
+  },
+  "failures": {
+   "S13": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"layer.reproject\", \"params\": {\"layer\": \"batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649\", \"target_epsg\": 2154}}]"
+   },
+   "S15": {
+    "status": "nonconform",
+    "errors": [
+     "étape 4: step:2 désigne une étape qui ne produit pas de couche",
+     "étape 5.params: « statistics » manquant"
+    ],
+    "output": "[{\"command\": \"layer.add\", \"params\": {\"source\": \"donnees/mnt_zone_nord.tif\"}}, {\"command\": \"layer.describe\", \"params\": {\"layer\": \"step:1\"}}, {\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946\", \"filter\": {\"field\": \"nom\", \"operator\": \"eq\", \"value\": \"Villeneuve-le-Roi\"}}}, {\"command\": \"analysis.buffer\", \"params\": {\"layer\": \"step:2\", \"distance\":"
+   },
+   "S17": {
+    "status": "nonconform",
+    "errors": [
+     "étape 3.params.origin: attendu object, reçu str"
+    ],
+    "output": "[{\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"plu_zonage_a81d5c06_2e9f_4a37_b6c4_5f13e07d92a8\", \"filter\": {\"field\": \"typezone\", \"operator\": \"eq\", \"value\": \"U\"}}}, {\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1\", \"filter\": {\"field\": \"nom\", \"operator\": \"contains\", \"value\": \"\"}}}, {\"command\": \"analysis.isochrone\", \"params\": {\""
+   },
+   "S18": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"map.zoom_to_layer\", \"params\": {\"layer\": \"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\"}}, {\"command\": \"layout.export_pdf\", \"params\": {\"title\": \"Accès aux gares\", \"layers\": [\"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\", \"gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1\"], \"paper\": \"A3\", \"orientation\": \"portrait\"}}]"
+   },
+   "S19": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\", \"filter\": {\"field\": \"classe\", \"operator\": \"eq\", \"value\": \"départementale\"}}}, {\"command\": \"analysis.buffer\", \"params\": {\"layer\": \"step:1\", \"distance\": {\"value\": 100, \"unit\": \"m\"}}}, {\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649\""
+   }
+  }
+ },
+ {
+  "name": "schéma · catalogue complet · sans exemples",
+  "catalog": "full",
+  "examples": false,
+  "output": "schema",
+  "summary": {
+   "sentences": 25,
+   "correct_first": 17,
+   "correct_after_retry": 17,
+   "rate_first": 0.68,
+   "rate_after_retry": 0.68,
+   "conform_first": 23,
+   "retried": 2,
+   "call_errors": 0,
+   "catalog_recall": 25,
+   "mean_load_ms": 2620.4,
+   "mean_prompt_ms": 1464.8,
+   "mean_prompt_tokens": 4461.8,
+   "mean_generation_ms": 1301.9,
+   "mean_generated_tokens": 109.4
+  },
+  "total_ms": 181800,
+  "outcomes": {
+   "S01": "✓",
+   "S02": "✓",
+   "S03": "✓",
+   "S04": "✓",
+   "S05": "✓",
+   "S06": "✓",
+   "S07": "✓",
+   "S08": "✓",
+   "S09": "✓",
+   "S10": "✓",
+   "S11": "✗",
+   "S12": "✓",
+   "S13": "✓",
+   "S14": "✓",
+   "S15": "!",
+   "S16": "✗",
+   "S17": "✗",
+   "S18": "✗",
+   "S19": "!",
+   "S20": "✓",
+   "S21": "✓",
+   "S22": "✓",
+   "S23": "✗",
+   "S24": "✗",
+   "S25": "✓"
+  },
+  "failures": {
+   "S11": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"layer.describe\", \"params\": {\"layer\": \"batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649\"}}, {\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649\", \"filter\": {\"field\": \"hauteur_m\", \"operator\": \"gt\", \"value\": 12}}}]"
+   },
+   "S15": {
+    "status": "nonconform",
+    "errors": [
+     "étape 2: couche absente de l'inventaire « mnt_zone_nord_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24 »"
+    ],
+    "output": "[{\"command\": \"layer.add\", \"params\": {\"source\": \"donnees/mnt_zone_nord.tif\"}}, {\"command\": \"analysis.zonal_statistics\", \"params\": {\"zones\": \"communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946\", \"raster\": \"mnt_zone_nord_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"statistics\": [\"mean\", \"max\"]}}, {\"command\": \"map.zoom_to_layer\", \"params\": {\"layer\": \"step:1\"}}]"
+   },
+   "S16": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"analysis.isochrone\", \"params\": {\"network\": \"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\", \"origin\": {\"x\": 656, \"y\": 6847920, \"epsg\": 2154}, \"duration\": {\"value\": 10, \"unit\": \"min\"}, \"mode\": \"walking\"}}]"
+   },
+   "S17": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3\", \"filter\": {\"field\": \"section\", \"operator\": \"eq\", \"value\": \"U\"}}}, {\"command\": \"analysis.buffer\", \"params\": {\"layer\": \"gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1\", \"distance\": {\"value\": 500, \"unit\": \"m\"}, \"dissolve\": true}}, {\"command\": \"analysis.intersect\", \"params\": {\"layer\": \"step:1\", "
+   },
+   "S18": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"map.zoom_to_layer\", \"params\": {\"layer\": \"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\"}}, {\"command\": \"layout.export_pdf\", \"params\": {\"title\": \"Accès aux gares\", \"layers\": [\"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\", \"gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1\"], \"paper\": \"A3\", \"orientation\": \"portrait\"}}]"
+   },
+   "S19": {
+    "status": "nonconform",
+    "errors": [
+     "étape 1: fichier absent de l'inventaire « donnees/batiments.geojson »",
+     "étape 2: fichier absent de l'inventaire « donnees/routes.gpkg »"
+    ],
+    "output": "[{\"command\": \"layer.add\", \"params\": {\"source\": \"donnees/batiments.geojson\"}}, {\"command\": \"layer.add\", \"params\": {\"source\": \"donnees/routes.gpkg\"}}, {\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"step:1\", \"filter\": {\"field\": \"classe\", \"operator\": \"eq\", \"value\": \"départementale\"}}}, {\"command\": \"analysis.buffer\", \"params\": {\"layer\": \"step:2\", \"distance\": {\"value\": 100, \"unit\": \"m\"}, "
+   },
+   "S23": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"terrain.slope\", \"params\": {\"dem\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"unit\": \"degrees\"}}, {\"command\": \"analysis.zonal_statistics\", \"params\": {\"zones\": \"step:1\", \"raster\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"statistics\": [\"mean\"]}}]"
+   },
+   "S24": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"terrain.viewshed\", \"params\": {\"dem\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"observer\": {\"x\": 656, \"y\": 120, \"epsg\": 2154}, \"observer_height\": {\"value\": 25, \"unit\": \"m\"}, \"radius\": {\"value\": 2, \"unit\": \"km\"}}}, {\"command\": \"analysis.zonal_statistics\", \"params\": {\"zones\": \"step:1\", \"raster\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"statistics\": [\"mean\"]}}]"
+   }
+  }
+ },
+ {
+  "name": "schéma · catalogue complet · avec exemples",
+  "catalog": "full",
+  "examples": true,
+  "output": "schema",
+  "summary": {
+   "sentences": 25,
+   "correct_first": 20,
+   "correct_after_retry": 20,
+   "rate_first": 0.8,
+   "rate_after_retry": 0.8,
+   "conform_first": 24,
+   "retried": 1,
+   "call_errors": 0,
+   "catalog_recall": 25,
+   "mean_load_ms": 2676.2,
+   "mean_prompt_ms": 1579.5,
+   "mean_prompt_tokens": 4873.8,
+   "mean_generation_ms": 1287.3,
+   "mean_generated_tokens": 109.2
+  },
+  "total_ms": 180430,
+  "outcomes": {
+   "S01": "✓",
+   "S02": "✓",
+   "S03": "✓",
+   "S04": "✓",
+   "S05": "✓",
+   "S06": "✓",
+   "S07": "✓",
+   "S08": "✓",
+   "S09": "✓",
+   "S10": "✓",
+   "S11": "✓",
+   "S12": "✓",
+   "S13": "✓",
+   "S14": "✓",
+   "S15": "✗",
+   "S16": "✓",
+   "S17": "✗",
+   "S18": "✗",
+   "S19": "✗",
+   "S20": "✓",
+   "S21": "✓",
+   "S22": "✓",
+   "S23": "✓",
+   "S24": "✗",
+   "S25": "✓"
+  },
+  "failures": {
+   "S15": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"terrain.viewshed\", \"params\": {\"dem\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"observer\": {\"x\": 0, \"y\": 0, \"epsg\": 2154}, \"observer_height\": {\"value\": 1, \"unit\": \"m\"}, \"radius\": {\"value\": 100, \"unit\": \"km\"}}}, {\"command\": \"analysis.zonal_statistics\", \"params\": {\"zones\": \"communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946\", \"raster\": \"step:1\", \"statistics\": [\"mean\", \"max\"]}}]"
+   },
+   "S17": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3\", \"filter\": {\"field\": \"section\", \"operator\": \"eq\", \"value\": \"U\"}}}, {\"command\": \"analysis.buffer\", \"params\": {\"layer\": \"gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1\", \"distance\": {\"value\": 500, \"unit\": \"m\"}, \"dissolve\": true}}, {\"command\": \"analysis.intersect\", \"params\": {\"layer\": \"step:1\", "
+   },
+   "S18": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"map.zoom_to_layer\", \"params\": {\"layer\": \"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\"}}, {\"command\": \"layout.export_pdf\", \"params\": {\"title\": \"Accès aux gares\", \"layers\": [\"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\", \"gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1\"], \"paper\": \"A3\", \"orientation\": \"portrait\"}}]"
+   },
+   "S19": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\", \"filter\": {\"field\": \"classe\", \"operator\": \"eq\", \"value\": \"départementale\"}}}, {\"command\": \"analysis.buffer\", \"params\": {\"layer\": \"step:1\", \"distance\": {\"value\": 100, \"unit\": \"m\"}}}, {\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649\""
+   },
+   "S24": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"terrain.viewshed\", \"params\": {\"dem\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"observer\": {\"x\": 656120, \"y\": 6848060, \"epsg\": 2154}, \"observer_height\": {\"value\": 25, \"unit\": \"m\"}, \"radius\": {\"value\": 2, \"unit\": \"km\"}}}, {\"command\": \"analysis.zonal_statistics\", \"params\": {\"zones\": \"step:1\", \"raster\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"statistics\": [\"mean\"]}}]"
+   }
+  }
+ },
+ {
+  "name": "schéma · catalogue filtré · sans exemples",
+  "catalog": "filtered",
+  "examples": false,
+  "output": "schema",
+  "summary": {
+   "sentences": 25,
+   "correct_first": 16,
+   "correct_after_retry": 16,
+   "rate_first": 0.64,
+   "rate_after_retry": 0.64,
+   "conform_first": 20,
+   "retried": 5,
+   "call_errors": 0,
+   "catalog_recall": 20,
+   "mean_load_ms": 2658.3,
+   "mean_prompt_ms": 1098.6,
+   "mean_prompt_tokens": 3433.9,
+   "mean_generation_ms": 1585.8,
+   "mean_generated_tokens": 137.5
+  },
+  "total_ms": 201278,
+  "outcomes": {
+   "S01": "✓",
+   "S02": "✓",
+   "S03": "✓",
+   "S04": "✓",
+   "S05": "✓",
+   "S06": "✓",
+   "S07": "✓",
+   "S08": "✓",
+   "S09": "✓",
+   "S10": "✓",
+   "S11": "✗",
+   "S12": "✓",
+   "S13": "!",
+   "S14": "✓",
+   "S15": "!",
+   "S16": "✗",
+   "S17": "!",
+   "S18": "✓",
+   "S19": "!",
+   "S20": "!",
+   "S21": "✓",
+   "S22": "✓",
+   "S23": "✗",
+   "S24": "✗",
+   "S25": "✓"
+  },
+  "failures": {
+   "S11": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"layer.describe\", \"params\": {\"layer\": \"batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649\"}}, {\"command\": \"layer.reproject\", \"params\": {\"layer\": \"batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649\", \"target_epsg\": 2154}}, {\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"step:2\", \"filter\": {\"field\": \"hauteur_m\", \"operator\": \"gt\", \"value\": 12}}}]"
+   },
+   "S13": {
+    "status": "nonconform",
+    "errors": [
+     "étape 1: fichier absent de l'inventaire « donnees/plu_zonage.gpkg »",
+     "étape 5: step:2 désigne une étape qui ne produit pas de couche"
+    ],
+    "output": "[{\"command\": \"layer.add\", \"params\": {\"source\": \"donnees/plu_zonage.gpkg\"}}, {\"command\": \"layer.describe\", \"params\": {\"layer\": \"step:1\"}}, {\"command\": \"layer.describe\", \"params\": {\"layer\": \"parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3\"}}, {\"command\": \"layer.reproject\", \"params\": {\"layer\": \"step:1\", \"target_epsg\": 2154}}, {\"command\": \"analysis.buffer\", \"params\": {\"layer\": \"step:2\", \"distance\": {\"v"
+   },
+   "S15": {
+    "status": "nonconform",
+    "errors": [
+     "étape 2: couche absente de l'inventaire « mnt_zone_nord_5m_8a13_4d65_9b0f_7c6e3a158d24_step1_result_layer_id_placeholder_00000000_0000_0000_0000_000000000000 »"
+    ],
+    "output": "[{\"command\": \"layer.add\", \"params\": {\"source\": \"donnees/mnt_zone_nord.tif\"}}, {\"command\": \"layer.describe\", \"params\": {\"layer\": \"mnt_zone_nord_5m_8a13_4d65_9b0f_7c6e3a158d24_step1_result_layer_id_placeholder_00000000_0000_0000_0000_000000000000\"}}, {\"command\": \"layer.reproject\", \"params\": {\"layer\": \"communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946\", \"target_epsg\": 2154}}, {\"command\": \"analysis.buffer"
+   },
+   "S16": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"analysis.isochrone\", \"params\": {\"network\": \"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\", \"origin\": {\"x\": 656, \"y\": 6847920, \"epsg\": 2154}, \"duration\": {\"value\": 10, \"unit\": \"min\"}, \"mode\": \"walking\"}}]"
+   },
+   "S17": {
+    "status": "nonconform",
+    "errors": [
+     "étape 5: step:2 désigne une étape qui ne produit pas de couche"
+    ],
+    "output": "[{\"command\": \"layer.add\", \"params\": {\"source\": \"donnees/ecoles.geojson\"}}, {\"command\": \"layer.describe\", \"params\": {\"layer\": \"step:1\"}}, {\"command\": \"analysis.isochrone\", \"params\": {\"network\": \"step:1\", \"origin\": {\"x\": 0, \"y\": 0, \"epsg\": 2154}, \"duration\": {\"value\": 500, \"unit\": \"min\"}, \"mode\": \"walking\"}}, {\"command\": \"layer.remove\", \"params\": {\"layer\": \"step:1\"}}, {\"command\": \"layer.remove\", \"pa"
+   },
+   "S19": {
+    "status": "nonconform",
+    "errors": [
+     "étape 5: step:1 désigne une étape qui ne produit pas de couche",
+     "étape 6: step:2 désigne une étape qui ne produit pas de couche"
+    ],
+    "output": "[{\"command\": \"layer.describe\", \"params\": {\"layer\": \"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\"}}, {\"command\": \"layer.describe\", \"params\": {\"layer\": \"batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649\"}}, {\"command\": \"layer.reproject\", \"params\": {\"layer\": \"batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649\", \"target_epsg\": 2154}}, {\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"routes_09b3d"
+   },
+   "S20": {
+    "status": "nonconform",
+    "errors": [
+     "étape 2: couche absente de l'inventaire « mnt_zone_nord_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24 »"
+    ],
+    "output": "[{\"command\": \"layer.add\", \"params\": {\"source\": \"donnees/mnt_zone_nord.tif\"}}, {\"command\": \"analysis.buffer\", \"params\": {\"layer\": \"mnt_zone_nord_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"distance\": {\"value\": 2000, \"unit\": \"m\"}, \"dissolve\": true}}, {\"command\": \"layer.describe\", \"params\": {\"layer\": \"step:1\"}}]"
+   },
+   "S23": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"terrain.slope\", \"params\": {\"dem\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"unit\": \"degrees\"}}, {\"command\": \"analysis.zonal_statistics\", \"params\": {\"zones\": \"step:1\", \"raster\": \"step:1\", \"statistics\": [\"mean\"]}}]"
+   },
+   "S24": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"terrain.viewshed\", \"params\": {\"dem\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"observer\": {\"x\": 656, \"y\": 120, \"epsg\": 2154}, \"observer_height\": {\"value\": 25, \"unit\": \"m\"}, \"radius\": {\"value\": 2, \"unit\": \"km\"}}}, {\"command\": \"analysis.zonal_statistics\", \"params\": {\"zones\": \"step:1\", \"raster\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"statistics\": [\"mean\"]}}]"
+   }
+  }
+ },
+ {
+  "name": "schéma · catalogue filtré · avec exemples",
+  "catalog": "filtered",
+  "examples": true,
+  "output": "schema",
+  "summary": {
+   "sentences": 25,
+   "correct_first": 19,
+   "correct_after_retry": 19,
+   "rate_first": 0.76,
+   "rate_after_retry": 0.76,
+   "conform_first": 23,
+   "retried": 2,
+   "call_errors": 0,
+   "catalog_recall": 20,
+   "mean_load_ms": 2689.0,
+   "mean_prompt_ms": 1258.2,
+   "mean_prompt_tokens": 3849.6,
+   "mean_generation_ms": 1827.1,
+   "mean_generated_tokens": 155.6
+  },
+  "total_ms": 193641,
+  "outcomes": {
+   "S01": "✓",
+   "S02": "✓",
+   "S03": "✓",
+   "S04": "✓",
+   "S05": "✓",
+   "S06": "✓",
+   "S07": "✓",
+   "S08": "✓",
+   "S09": "✓",
+   "S10": "✓",
+   "S11": "✓",
+   "S12": "✓",
+   "S13": "✗",
+   "S14": "✓",
+   "S15": "!",
+   "S16": "✓",
+   "S17": "!",
+   "S18": "✗",
+   "S19": "✗",
+   "S20": "✗",
+   "S21": "✓",
+   "S22": "✓",
+   "S23": "✓",
+   "S24": "✓",
+   "S25": "✓"
+  },
+  "failures": {
+   "S13": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"layer.reproject\", \"params\": {\"layer\": \"batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649\", \"target_epsg\": 2154}}]"
+   },
+   "S15": {
+    "status": "nonconform",
+    "errors": [
+     "étape 4: step:2 désigne une étape qui ne produit pas de couche"
+    ],
+    "output": "[{\"command\": \"layer.add\", \"params\": {\"source\": \"donnees/mnt_zone_nord.tif\"}}, {\"command\": \"layer.describe\", \"params\": {\"layer\": \"step:1\"}}, {\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946\", \"filter\": {\"field\": \"nom\", \"operator\": \"eq\", \"value\": \"Villeneuve-le-Roi\"}}}, {\"command\": \"analysis.buffer\", \"params\": {\"layer\": \"step:2\", \"distance\":"
+   },
+   "S17": {
+    "status": "nonconform",
+    "errors": [
+     "étape 5: step:1 désigne une étape qui ne produit pas de couche",
+     "étape 6: step:1 désigne une étape qui ne produit pas de couche"
+    ],
+    "output": "[{\"command\": \"layer.describe\", \"params\": {\"layer\": \"gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1\"}}, {\"command\": \"analysis.isochrone\", \"params\": {\"network\": \"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\", \"origin\": {\"x\": 0, \"y\": 0, \"epsg\": 2154}, \"duration\": {\"value\": 1, \"unit\": \"min\"}, \"mode\": \"walking\"}}, {\"command\": \"layer.describe\", \"params\": {\"layer\": \"plu_zonage_a81d5c06_2e9f_4a37_b6c4_5f13e07d"
+   },
+   "S18": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"map.zoom_to_layer\", \"params\": {\"layer\": \"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\"}}, {\"command\": \"layout.export_pdf\", \"params\": {\"title\": \"Accès aux gares\", \"layers\": [\"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\", \"gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1\"], \"paper\": \"A3\", \"orientation\": \"portrait\"}}]"
+   },
+   "S19": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\", \"filter\": {\"field\": \"classe\", \"operator\": \"eq\", \"value\": \"départementale\"}}}, {\"command\": \"analysis.isochrone\", \"params\": {\"network\": \"step:1\", \"origin\": {\"x\": 0, \"y\": 0, \"epsg\": 2154}, \"duration\": {\"value\": 100, \"unit\": \"min\"}, \"mode\": \"walking\"}}, {\"command\": \"layer.select_by_attribute\", "
+   },
+   "S20": {
+    "status": "wrong",
+    "errors": [],
+    "output": "[{\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3\", \"filter\": {\"field\": \"section\", \"operator\": \"eq\", \"value\": \"AB\"}}}, {\"command\": \"analysis.buffer\", \"params\": {\"layer\": \"step:1\", \"distance\": {\"value\": 25, \"unit\": \"m\"}}}, {\"command\": \"layer.reproject\", \"params\": {\"layer\": \"step:2\", \"target_epsg\": 2154}}, {\"command\": \"analysis.buffer\", \"pa"
+   }
+  }
+ }
+]

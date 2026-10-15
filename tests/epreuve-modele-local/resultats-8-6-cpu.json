@@ -1,0 +1,842 @@
+{
+ "parameters": {
+  "llama": "C:/Users/kevin/cassini-modeles/llama.cpp/llama-completion.exe",
+  "model": "C:/Users/kevin/cassini-modeles/modeles/Qwen3.5-9B-Q4_K_M.gguf",
+  "quant": "Q4_K_M",
+  "catalog": "full",
+  "filter_size": 8,
+  "examples": true,
+  "output": "schema",
+  "lang": "fr",
+  "ids": "",
+  "template": "chatml",
+  "no_think": true,
+  "ctx": 8192,
+  "ngl": 0,
+  "threads": 0,
+  "n_predict": 1200,
+  "timeout": 900,
+  "replay": null
+ },
+ "summary": {
+  "sentences": 25,
+  "correct_first": 20,
+  "correct_after_retry": 20,
+  "rate_first": 0.8,
+  "rate_after_retry": 0.8,
+  "conform_first": 24,
+  "retried": 1,
+  "call_errors": 0,
+  "catalog_recall": 25,
+  "mean_load_ms": 1899.0,
+  "mean_prompt_ms": 5975.9,
+  "mean_prompt_tokens": 4873.2,
+  "mean_generation_ms": 18638.0,
+  "mean_generated_tokens": 104.8,
+  "peak_ram_mb": 5731.78515625,
+  "peak_vram_mb": 1556.0,
+  "threads": 8.0
+ },
+ "results": [
+  {
+   "id": "S01",
+   "text": "Ouvre le fichier des écoles.",
+   "recall": true,
+   "attempts": [
+    {
+     "status": "correct",
+     "errors": [],
+     "output": "[{\"command\": \"layer.add\", \"params\": {\"source\": \"donnees/ecoles.geojson\"}}]",
+     "timing": {
+      "wall_ms": 14391,
+      "exit": 0,
+      "load_ms": 2951.53,
+      "prompt": [
+       6118.12,
+       4850.0
+      ],
+      "generation": [
+       3770.68,
+       22.0
+      ],
+      "ram_peak_mb": 5686.6015625,
+      "vram_peak_mb": 1527.0,
+      "threads": 8.0
+     }
+    }
+   ],
+   "correct_first": true,
+   "correct_after": true,
+   "conform_first": true
+  },
+  {
+   "id": "S02",
+   "text": "Décris la couche des gares.",
+   "recall": true,
+   "attempts": [
+    {
+     "status": "correct",
+     "errors": [],
+     "output": "[{\"command\": \"layer.describe\", \"params\": {\"layer\": \"gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1\"}}]",
+     "timing": {
+      "wall_ms": 18727,
+      "exit": 0,
+      "load_ms": 1492.21,
+      "prompt": [
+       5993.69,
+       4852.0
+      ],
+      "generation": [
+       9737.01,
+       55.0
+      ],
+      "ram_peak_mb": 5687.0546875,
+      "vram_peak_mb": 1537.0,
+      "threads": 8.0
+     }
+    }
+   ],
+   "correct_first": true,
+   "correct_after": true,
+   "conform_first": true
+  },
+  {
+   "id": "S03",
+   "text": "Quelles couches y a-t-il dans mon projet ?",
+   "recall": true,
+   "attempts": [
+    {
+     "status": "correct",
+     "errors": [],
+     "output": "[{\"command\": \"project.inventory\", \"params\": {}}]",
+     "timing": {
+      "wall_ms": 11728,
+      "exit": 0,
+      "load_ms": 1907.79,
+      "prompt": [
+       5988.14,
+       4854.0
+      ],
+      "generation": [
+       2333.99,
+       14.0
+      ],
+      "ram_peak_mb": 5686.88671875,
+      "vram_peak_mb": 1527.0,
+      "threads": 8.0
+     }
+    }
+   ],
+   "correct_first": true,
+   "correct_after": true,
+   "conform_first": true
+  },
+  {
+   "id": "S04",
+   "text": "Retire la couche des routes du projet.",
+   "recall": true,
+   "attempts": [
+    {
+     "status": "correct",
+     "errors": [],
+     "output": "[{\"command\": \"layer.remove\", \"params\": {\"layer\": \"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\"}}]",
+     "timing": {
+      "wall_ms": 18896,
+      "exit": 0,
+      "load_ms": 1874.32,
+      "prompt": [
+       6004.86,
+       4852.0
+      ],
+      "generation": [
+       9542.19,
+       54.0
+      ],
+      "ram_peak_mb": 5687.18359375,
+      "vram_peak_mb": 1533.0,
+      "threads": 8.0
+     }
+    }
+   ],
+   "correct_first": true,
+   "correct_after": true,
+   "conform_first": true
+  },
+  {
+   "id": "S05",
+   "text": "Mets les bâtiments en Lambert-93.",
+   "recall": true,
+   "attempts": [
+    {
+     "status": "correct",
+     "errors": [],
+     "output": "[{\"command\": \"layer.reproject\", \"params\": {\"layer\": \"batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649\", \"target_epsg\": 2154}}]",
+     "timing": {
+      "wall_ms": 21444,
+      "exit": 0,
+      "load_ms": 1887.67,
+      "prompt": [
+       6072.05,
+       4853.0
+      ],
+      "generation": [
+       11938.51,
+       67.0
+      ],
+      "ram_peak_mb": 5686.89453125,
+      "vram_peak_mb": 1556.0,
+      "threads": 8.0
+     }
+    }
+   ],
+   "correct_first": true,
+   "correct_after": true,
+   "conform_first": true
+  },
+  {
+   "id": "S06",
+   "text": "Garde seulement les parcelles de la section AB.",
+   "recall": true,
+   "attempts": [
+    {
+     "status": "correct",
+     "errors": [],
+     "output": "[{\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3\", \"filter\": {\"field\": \"section\", \"operator\": \"eq\", \"value\": \"AB\"}}}]",
+     "timing": {
+      "wall_ms": 23554,
+      "exit": 0,
+      "load_ms": 1897.36,
+      "prompt": [
+       5999.4,
+       4854.0
+      ],
+      "generation": [
+       14183.54,
+       79.0
+      ],
+      "ram_peak_mb": 5686.48046875,
+      "vram_peak_mb": 1518.0,
+      "threads": 8.0
+     }
+    }
+   ],
+   "correct_first": true,
+   "correct_after": true,
+   "conform_first": true
+  },
+  {
+   "id": "S07",
+   "text": "Fais une zone tampon de 300 mètres autour des gares.",
+   "recall": true,
+   "attempts": [
+    {
+     "status": "correct",
+     "errors": [],
+     "output": "[{\"command\": \"analysis.buffer\", \"params\": {\"layer\": \"gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1\", \"distance\": {\"value\": 300, \"unit\": \"m\"}}}]",
+     "timing": {
+      "wall_ms": 22230,
+      "exit": 0,
+      "load_ms": 1889.49,
+      "prompt": [
+       5991.08,
+       4860.0
+      ],
+      "generation": [
+       12833.38,
+       72.0
+      ],
+      "ram_peak_mb": 5687.15234375,
+      "vram_peak_mb": 1527.0,
+      "threads": 8.0
+     }
+    }
+   ],
+   "correct_first": true,
+   "correct_after": true,
+   "conform_first": true
+  },
+  {
+   "id": "S08",
+   "text": "Fais une zone tampon de 1 km autour des gares, en fusionnant les zones.",
+   "recall": true,
+   "attempts": [
+    {
+     "status": "correct",
+     "errors": [],
+     "output": "[{\"command\": \"analysis.buffer\", \"params\": {\"layer\": \"gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1\", \"distance\": {\"value\": 1, \"unit\": \"km\"}, \"dissolve\": true}}]",
+     "timing": {
+      "wall_ms": 23268,
+      "exit": 0,
+      "load_ms": 1903.83,
+      "prompt": [
+       6018.48,
+       4864.0
+      ],
+      "generation": [
+       13848.18,
+       77.0
+      ],
+      "ram_peak_mb": 5686.515625,
+      "vram_peak_mb": 1536.0,
+      "threads": 8.0
+     }
+    }
+   ],
+   "correct_first": true,
+   "correct_after": true,
+   "conform_first": true
+  },
+  {
+   "id": "S09",
+   "text": "Exporte les parcelles en GeoPackage.",
+   "recall": true,
+   "attempts": [
+    {
+     "status": "correct",
+     "errors": [],
+     "output": "[{\"command\": \"layer.export\", \"params\": {\"layer\": \"parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3\", \"format\": \"gpkg\"}}]",
+     "timing": {
+      "wall_ms": 20578,
+      "exit": 0,
+      "load_ms": 1888.08,
+      "prompt": [
+       5971.95,
+       4852.0
+      ],
+      "generation": [
+       11225.47,
+       63.0
+      ],
+      "ram_peak_mb": 5686.84765625,
+      "vram_peak_mb": 1529.0,
+      "threads": 8.0
+     }
+    }
+   ],
+   "correct_first": true,
+   "correct_after": true,
+   "conform_first": true
+  },
+  {
+   "id": "S10",
+   "text": "Cadre la carte sur les communes.",
+   "recall": true,
+   "attempts": [
+    {
+     "status": "correct",
+     "errors": [],
+     "output": "[{\"command\": \"map.zoom_to_layer\", \"params\": {\"layer\": \"communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946\"}}]",
+     "timing": {
+      "wall_ms": 19445,
+      "exit": 0,
+      "load_ms": 1921.23,
+      "prompt": [
+       5992.92,
+       4851.0
+      ],
+      "generation": [
+       10014.08,
+       57.0
+      ],
+      "ram_peak_mb": 5686.51953125,
+      "vram_peak_mb": 1527.0,
+      "threads": 8.0
+     }
+    }
+   ],
+   "correct_first": true,
+   "correct_after": true,
+   "conform_first": true
+  },
+  {
+   "id": "S11",
+   "text": "Quels bâtiments font plus de 12 mètres de haut ?",
+   "recall": true,
+   "attempts": [
+    {
+     "status": "correct",
+     "errors": [],
+     "output": "[{\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649\", \"filter\": {\"field\": \"hauteur_m\", \"operator\": \"gt\", \"value\": 12}}}]",
+     "timing": {
+      "wall_ms": 23624,
+      "exit": 0,
+      "load_ms": 1896.06,
+      "prompt": [
+       5971.42,
+       4856.0
+      ],
+      "generation": [
+       14254.9,
+       81.0
+      ],
+      "ram_peak_mb": 5686.671875,
+      "vram_peak_mb": 1477.0,
+      "threads": 8.0
+     }
+    }
+   ],
+   "correct_first": true,
+   "correct_after": true,
+   "conform_first": true
+  },
+  {
+   "id": "S12",
+   "text": "Garde les routes départementales.",
+   "recall": true,
+   "attempts": [
+    {
+     "status": "correct",
+     "errors": [],
+     "output": "[{\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\", \"filter\": {\"field\": \"classe\", \"operator\": \"eq\", \"value\": \"départementale\"}}}]",
+     "timing": {
+      "wall_ms": 23467,
+      "exit": 0,
+      "load_ms": 1851.28,
+      "prompt": [
+       5895.28,
+       4850.0
+      ],
+      "generation": [
+       14234.81,
+       81.0
+      ],
+      "ram_peak_mb": 5686.94140625,
+      "vram_peak_mb": 1528.0,
+      "threads": 8.0
+     }
+    }
+   ],
+   "correct_first": true,
+   "correct_after": true,
+   "conform_first": true
+  },
+  {
+   "id": "S13",
+   "text": "Croise les parcelles avec le zonage du PLU.",
+   "recall": true,
+   "attempts": [
+    {
+     "status": "correct",
+     "errors": [],
+     "output": "[{\"command\": \"analysis.intersect\", \"params\": {\"layer\": \"parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3\", \"overlay\": \"plu_zonage_a81d5c06_2e9f_4a37_b6c4_5f13e07d92a8\"}}]",
+     "timing": {
+      "wall_ms": 27402,
+      "exit": 0,
+      "load_ms": 1854.33,
+      "prompt": [
+       5926.75,
+       4856.0
+      ],
+      "generation": [
+       18106.69,
+       102.0
+      ],
+      "ram_peak_mb": 5686.12890625,
+      "vram_peak_mb": 1536.0,
+      "threads": 8.0
+     }
+    }
+   ],
+   "correct_first": true,
+   "correct_after": true,
+   "conform_first": true
+  },
+  {
+   "id": "S14",
+   "text": "Isole les zones du PLU dont le libellé est « Zone à urbaniser » et fais-en une zone tampon de 50 mètres.",
+   "recall": true,
+   "attempts": [
+    {
+     "status": "correct",
+     "errors": [],
+     "output": "[{\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"plu_zonage_a81d5c06_2e9f_4a37_b6c4_5f13e07d92a8\", \"filter\": {\"field\": \"libelle\", \"operator\": \"eq\", \"value\": \"Zone à urbaniser\"}}}, {\"command\": \"analysis.buffer\", \"params\": {\"layer\": \"step:1\", \"distance\": {\"value\": 50, \"unit\": \"m\"}}}]",
+     "timing": {
+      "wall_ms": 30412,
+      "exit": 0,
+      "load_ms": 1832.05,
+      "prompt": [
+       5947.19,
+       4875.0
+      ],
+      "generation": [
+       21128.65,
+       119.0
+      ],
+      "ram_peak_mb": 5687.23828125,
+      "vram_peak_mb": 1532.0,
+      "threads": 8.0
+     }
+    }
+   ],
+   "correct_first": true,
+   "correct_after": true,
+   "conform_first": true
+  },
+  {
+   "id": "S15",
+   "text": "Donne-moi l'altitude moyenne et maximale par commune.",
+   "recall": true,
+   "attempts": [
+    {
+     "status": "nonconform",
+     "errors": [
+      "étape 2: couche absente de l'inventaire « mnt_zone_nord_00000000_0000_0000_0000_000000000000 »"
+     ],
+     "output": "[{\"command\": \"layer.add\", \"params\": {\"source\": \"donnees/mnt_zone_nord.tif\"}}, {\"command\": \"analysis.zonal_statistics\", \"params\": {\"zones\": \"communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946\", \"raster\": \"mnt_zone_nord_00000000_0000_0000_0000_000000000000\", \"statistics\": [\"mean\", \"max\"]}}]",
+     "timing": {
+      "wall_ms": 33716,
+      "exit": 0,
+      "load_ms": 1838.72,
+      "prompt": [
+       5926.99,
+       4856.0
+      ],
+      "generation": [
+       24354.88,
+       137.0
+      ],
+      "ram_peak_mb": 5731.78515625,
+      "vram_peak_mb": 1533.0,
+      "threads": 8.0
+     }
+    },
+    {
+     "status": "nonconform",
+     "errors": [
+      "étape 2: raster doit être un raster, or step:1 ne l'est pas"
+     ],
+     "output": "[{\"command\": \"layer.add\", \"params\": {\"source\": \"donnees/mnt_zone_nord.tif\"}}, {\"command\": \"analysis.zonal_statistics\", \"params\": {\"zones\": \"communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946\", \"raster\": \"step:1\", \"statistics\": [\"mean\", \"max\"]}}]",
+     "timing": {
+      "wall_ms": 26829,
+      "exit": 0,
+      "load_ms": 1840.08,
+      "prompt": [
+       6017.19,
+       5077.0
+      ],
+      "generation": [
+       17470.44,
+       99.0
+      ],
+      "ram_peak_mb": 5686.49609375,
+      "vram_peak_mb": 1526.0,
+      "threads": 8.0
+     }
+    }
+   ],
+   "correct_first": false,
+   "correct_after": false,
+   "conform_first": false
+  },
+  {
+   "id": "S16",
+   "text": "Trace la zone atteignable à pied en 10 minutes depuis le point 656 410 / 6 847 920 (Lambert-93), sur le réseau routier.",
+   "recall": true,
+   "attempts": [
+    {
+     "status": "correct",
+     "errors": [],
+     "output": "[{\"command\": \"analysis.isochrone\", \"params\": {\"network\": \"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\", \"origin\": {\"x\": 656410, \"y\": 6847920, \"epsg\": 2154}, \"duration\": {\"value\": 10, \"unit\": \"min\"}, \"mode\": \"walking\"}}]",
+     "timing": {
+      "wall_ms": 29856,
+      "exit": 0,
+      "load_ms": 1977.08,
+      "prompt": [
+       6034.13,
+       4892.0
+      ],
+      "generation": [
+       20276.5,
+       114.0
+      ],
+      "ram_peak_mb": 5686.95703125,
+      "vram_peak_mb": 1539.0,
+      "threads": 8.0
+     }
+    }
+   ],
+   "correct_first": true,
+   "correct_after": true,
+   "conform_first": true
+  },
+  {
+   "id": "S17",
+   "text": "Trouve les parcelles en zone U à moins de 500 m d'une gare et sors la carte en PDF, titre « Parcelles en zone U près des gares ».",
+   "recall": true,
+   "attempts": [
+    {
+     "status": "wrong",
+     "errors": [],
+     "output": "[{\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3\", \"filter\": {\"field\": \"section\", \"operator\": \"eq\", \"value\": \"U\"}}}, {\"command\": \"analysis.buffer\", \"params\": {\"layer\": \"gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1\", \"distance\": {\"value\": 500, \"unit\": \"m\"}, \"dissolve\": true}}, {\"command\": \"analysis.intersect\", \"params\": {\"layer\": \"step:1\", \"overlay\": \"step:2\"}}, {\"command\": \"layout.export_pdf\", \"params\": {\"title\": \"Parcelles en zone U près des gares\", \"layers\": [\"step:3\", \"gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1\", \"plu_zonage_a81d5c06_2e9f_4a37_b6c4_5f13e07d92a8\"], \"paper\": \"A4\", \"orientation\": \"portrait\"}}]",
+     "timing": {
+      "wall_ms": 65436,
+      "exit": 0,
+      "load_ms": 1838.48,
+      "prompt": [
+       5931.51,
+       4882.0
+      ],
+      "generation": [
+       56091.44,
+       313.0
+      ],
+      "ram_peak_mb": 5687.2265625,
+      "vram_peak_mb": 1540.0,
+      "threads": 8.0
+     }
+    }
+   ],
+   "correct_first": false,
+   "correct_after": false,
+   "conform_first": true
+  },
+  {
+   "id": "S18",
+   "text": "Fais une carte PDF A3 en portrait des routes et des gares, titre « Accès aux gares ».",
+   "recall": true,
+   "attempts": [
+    {
+     "status": "wrong",
+     "errors": [],
+     "output": "[{\"command\": \"map.zoom_to_layer\", \"params\": {\"layer\": \"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\"}}, {\"command\": \"layout.export_pdf\", \"params\": {\"title\": \"Accès aux gares\", \"layers\": [\"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\", \"gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1\"], \"paper\": \"A3\", \"orientation\": \"portrait\"}}]",
+     "timing": {
+      "wall_ms": 40222,
+      "exit": 0,
+      "load_ms": 1869.29,
+      "prompt": [
+       5947.98,
+       4866.0
+      ],
+      "generation": [
+       30849.83,
+       173.0
+      ],
+      "ram_peak_mb": 5686.74609375,
+      "vram_peak_mb": 1535.0,
+      "threads": 8.0
+     }
+    }
+   ],
+   "correct_first": false,
+   "correct_after": false,
+   "conform_first": true
+  },
+  {
+   "id": "S19",
+   "text": "Trouve les bâtiments à moins de 100 m d'une route départementale.",
+   "recall": true,
+   "attempts": [
+    {
+     "status": "wrong",
+     "errors": [],
+     "output": "[{\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67\", \"filter\": {\"field\": \"classe\", \"operator\": \"eq\", \"value\": \"départementale\"}}}, {\"command\": \"analysis.buffer\", \"params\": {\"layer\": \"step:1\", \"distance\": {\"value\": 100, \"unit\": \"m\"}}}, {\"command\": \"layer.select_by_attribute\", \"params\": {\"layer\": \"batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649\", \"filter\": {\"field\": \"usage\", \"operator\": \"eq\", \"value\": \"résidentiel\"}}}]",
+     "timing": {
+      "wall_ms": 44432,
+      "exit": 0,
+      "load_ms": 1843.55,
+      "prompt": [
+       5961.97,
+       4861.0
+      ],
+      "generation": [
+       35060.02,
+       196.0
+      ],
+      "ram_peak_mb": 5686.796875,
+      "vram_peak_mb": 1535.0,
+      "threads": 8.0
+     }
+    }
+   ],
+   "correct_first": false,
+   "correct_after": false,
+   "conform_first": true
+  },
+  {
+   "id": "S20",
+   "text": "Qu'est-ce qu'on voit depuis le château d'eau en 656 120 / 6 848 060 (Lambert-93), à 25 m de haut, sur 2 km ?",
+   "recall": true,
+   "attempts": [
+    {
+     "status": "correct",
+     "errors": [],
+     "output": "[{\"command\": \"terrain.viewshed\", \"params\": {\"dem\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"observer\": {\"x\": 656120, \"y\": 6848060, \"epsg\": 2154}, \"observer_height\": {\"value\": 25, \"unit\": \"m\"}, \"radius\": {\"value\": 2, \"unit\": \"km\"}}}]",
+     "timing": {
+      "wall_ms": 31729,
+      "exit": 0,
+      "load_ms": 1868.96,
+      "prompt": [
+       5969.35,
+       4895.0
+      ],
+      "generation": [
+       22375.74,
+       126.0
+      ],
+      "ram_peak_mb": 5686.49609375,
+      "vram_peak_mb": 1538.0,
+      "threads": 8.0
+     }
+    }
+   ],
+   "correct_first": true,
+   "correct_after": true,
+   "conform_first": true
+  },
+  {
+   "id": "S21",
+   "text": "Le point 656 300 / 6 847 500 voit-il le point 657 100 / 6 848 200 ? Lambert-93, 2 m de hauteur de chaque côté.",
+   "recall": true,
+   "attempts": [
+    {
+     "status": "correct",
+     "errors": [],
+     "output": "[{\"command\": \"terrain.line_of_sight\", \"params\": {\"dem\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"from\": {\"x\": 656300, \"y\": 6847500, \"epsg\": 2154}, \"to\": {\"x\": 657100, \"y\": 6848200, \"epsg\": 2154}, \"from_height\": {\"value\": 2, \"unit\": \"m\"}, \"to_height\": {\"value\": 2, \"unit\": \"m\"}}}]",
+     "timing": {
+      "wall_ms": 38561,
+      "exit": 0,
+      "load_ms": 1852.28,
+      "prompt": [
+       5929.44,
+       4902.0
+      ],
+      "generation": [
+       29260.82,
+       164.0
+      ],
+      "ram_peak_mb": 5687.01953125,
+      "vram_peak_mb": 1527.0,
+      "threads": 8.0
+     }
+    }
+   ],
+   "correct_first": true,
+   "correct_after": true,
+   "conform_first": true
+  },
+  {
+   "id": "S22",
+   "text": "Calcule la pente du terrain en pourcentage.",
+   "recall": true,
+   "attempts": [
+    {
+     "status": "correct",
+     "errors": [],
+     "output": "[{\"command\": \"terrain.slope\", \"params\": {\"dem\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"unit\": \"percent\"}}]",
+     "timing": {
+      "wall_ms": 20488,
+      "exit": 0,
+      "load_ms": 1859.92,
+      "prompt": [
+       5915.68,
+       4853.0
+      ],
+      "generation": [
+       11248.71,
+       64.0
+      ],
+      "ram_peak_mb": 5686.91796875,
+      "vram_peak_mb": 1541.0,
+      "threads": 8.0
+     }
+    }
+   ],
+   "correct_first": true,
+   "correct_after": true,
+   "conform_first": true
+  },
+  {
+   "id": "S23",
+   "text": "Calcule la pente en degrés puis sa moyenne par commune.",
+   "recall": true,
+   "attempts": [
+    {
+     "status": "correct",
+     "errors": [],
+     "output": "[{\"command\": \"terrain.slope\", \"params\": {\"dem\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"unit\": \"degrees\"}}, {\"command\": \"analysis.zonal_statistics\", \"params\": {\"zones\": \"communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946\", \"raster\": \"step:1\", \"statistics\": [\"mean\"]}}]",
+     "timing": {
+      "wall_ms": 33425,
+      "exit": 0,
+      "load_ms": 1843.69,
+      "prompt": [
+       5932.64,
+       4855.0
+      ],
+      "generation": [
+       24145.67,
+       136.0
+      ],
+      "ram_peak_mb": 5686.890625,
+      "vram_peak_mb": 1525.0,
+      "threads": 8.0
+     }
+    }
+   ],
+   "correct_first": true,
+   "correct_after": true,
+   "conform_first": true
+  },
+  {
+   "id": "S24",
+   "text": "Calcule le champ de vision depuis le point 656 120 / 6 848 060 (Lambert-93), à 25 m de haut, sur 2 km, puis sa moyenne par commune.",
+   "recall": true,
+   "attempts": [
+    {
+     "status": "wrong",
+     "errors": [],
+     "output": "[{\"command\": \"terrain.viewshed\", \"params\": {\"dem\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"observer\": {\"x\": 656120, \"y\": 6848060, \"epsg\": 2154}, \"observer_height\": {\"value\": 25, \"unit\": \"m\"}, \"radius\": {\"value\": 2, \"unit\": \"km\"}}}, {\"command\": \"analysis.zonal_statistics\", \"params\": {\"zones\": \"step:1\", \"raster\": \"mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24\", \"statistics\": [\"mean\"]}}]",
+     "timing": {
+      "wall_ms": 45139,
+      "exit": 0,
+      "load_ms": 1844.11,
+      "prompt": [
+       5978.85,
+       4898.0
+      ],
+      "generation": [
+       35806.67,
+       200.0
+      ],
+      "ram_peak_mb": 5686.73046875,
+      "vram_peak_mb": 1538.0,
+      "threads": 8.0
+     }
+    }
+   ],
+   "correct_first": false,
+   "correct_after": false,
+   "conform_first": true
+  },
+  {
+   "id": "S25",
+   "text": "Qu'est-ce qu'on voit depuis le point 2,4150 / 48,7350 (WGS84), à 10 m de haut, sur 1 km ?",
+   "recall": true,
+   "attempts": [
+    {
+     "status": "correct",
+     "errors": [],
+     "output": "{\"refusal\": \"Les coordonnées du point sont dans WGS84 (4326), mais le modèle numérique de terrain est dans Lambert-93 (2154). Il faut convertir le point dans le système du MNT avant de calculer le champ de vision.\"}",
+     "timing": {
+      "wall_ms": 19779,
+      "exit": 0,
+      "load_ms": 1849.74,
+      "prompt": [
+       5936.86,
+       4887.0
+      ],
+      "generation": [
+       10494.62,
+       60.0
+      ],
+      "ram_peak_mb": 5687.26953125,
+      "vram_peak_mb": 1524.0,
+      "threads": 8.0
+     }
+    }
+   ],
+   "correct_first": true,
+   "correct_after": true,
+   "conform_first": true
+  }
+ ]
+}

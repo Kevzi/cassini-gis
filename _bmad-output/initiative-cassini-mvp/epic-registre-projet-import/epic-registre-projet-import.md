@@ -28,8 +28,21 @@ le journal le redonne encore.
 
 ## Requirements
 
-À compléter à l'inception de cet epic. La source est la spec de l'initiative,
-`../spec-cassini-mvp/spec-cassini-mvp.md`, section Capabilities, CAP-6 et CAP-7.
+Source : la spec de l'initiative, `../spec-cassini-mvp/spec-cassini-mvp.md`,
+section Capabilities, CAP-6 et CAP-7.
+
+- R1 : une commande du registre porte un `id`, des descriptions courtes en
+  français et en anglais, des paramètres à schéma JSON engendré depuis les types
+  Rust, un résultat typé, un exécutant déclaré (`runs_in` : `core` ou `qgis`),
+  et au moins un test. (CAP-6 ; AD-6)
+- R2 : ajouter une commande ne modifie aucun fichier partagé. (CAP-6 ; Done when 2)
+- R3 : un même appel de commande donne le même résultat depuis la CLI et depuis
+  le canal local, le noyau tournant sans QGIS. (CAP-6 ; AD-3, AD-7, AD-13)
+- R4 : toute exécution est journalisée, en ajout seul et par un seul auteur, dans
+  un fichier texte lisible posé à côté du projet, sans chemin absolu. (CAP-7 ;
+  AD-9, AD-10, AD-11)
+- R5 : rejouer le journal sur les mêmes fichiers redonne des résultats
+  identiques, y compris après fermeture et réouverture. (CAP-7 ; AD-11)
 
 ## Done when
 
@@ -67,7 +80,14 @@ pas.
 - Cet epic possède la décision que les epics 9, 5 et 4 attendent : le contrat du registre de commandes.
 - Decision: le format de projet Cassini est abandonné au MVP ; le projet est un projet QGIS et le noyau écrit son journal à côté (2026-10-14).
 - Decision: une commande déclare son exécutant — Rust dans le noyau, ou délégation à QGIS — jamais implicitement et jamais les deux (2026-10-14).
-- Unknown: la forme des descriptions et des schémas de paramètres dépend du verdict de l'epic 8, qui mesure ce qu'un modèle local sait lire. À relire avant l'inception.
+- Decision: la forme des descriptions et des schémas suit le verdict de l'epic 8, signé le 2026-10-15 (oui sous conditions) : `epic-epreuve-du-modele-local/verdict-epreuve-du-modele-local.md`, section « Ce que l'epic 2 en retient » (2026-10-15).
+- Decision: cet epic livre le contrat et sa mécanique, pas le catalogue : les vraies commandes arrivent avec l'epic 9, pour que les epics 9, 5 et 4 en ajoutent en parallèle (2026-10-15).
+- Decision: la commande du traceur est `system.about`, une commande Rust de diagnostic (version du noyau et du protocole), inventée par cet epic et conservée ensuite pour `session.hello` (propriétaire, 2026-10-15).
+- Decision: le gate sur l'epic 1 est ramené à ses entrées 1.1 (workspace, verrou hors ligne) et 1.6 (recette) : l'epic 2 n'attend pas la passe de nettoyage 1.7 (propriétaire, 2026-10-15).
+- Decision: une passe de nettoyage et une suite de bout en bout ferment l'epic (propriétaire, 2026-10-15).
+- Decision: à l'inception, le propriétaire a délégué les choix ouverts (« fait le meilleur choix »). Retenus le 2026-10-15 : `--project` sur la CLI, porté par l'entrée 5 ; `serve` journalise par la même boucle que `run` (entrée 7 après 5) ; un module de commandes de test, propriétaire unique l'entrée 5 ; le type du plan et la référence entre étapes, propriétaire l'entrée 4 ; l'ordre du noyau vers l'extension et l'annulation (AD-3, AD-4, AD-12) livrés ici, entrée 11, pour que l'epic 9 ne les invente pas ; la lecture du registre (descriptions, schémas, valeurs d'exemple) dans la réponse à `session.hello`. AD-8 est contrôlé par l'entrée 3 ; AD-10 par l'entrée 5.
+- Decision: licences données par le propriétaire le 2026-10-15 pour l'entrée 2.1 : `schemars` (MIT), `serde_json` (MIT OR Apache-2.0) et `serde` (MIT OR Apache-2.0, requis par `schemars`), licences lues par `cargo info`. `inventory` (MIT OR Apache-2.0) et le crate de verrou de fichier restent à donner avant 2.2 et 2.5.
+- Unknown: le mécanisme d'enregistrement sans fichier partagé (entrée 2) reste à confirmer par le propriétaire avant cette story : le `unknown` de l'entrée donne l'orientation proposée.
 - Decision: QGIS possède les systèmes de coordonnées du vecteur et exécute la reprojection ; le noyau ne reprojette pas et toute coordonnée traverse le canal avec son code EPSG. MGRS est hors MVP. Contrat d'architecture, AD-19, et non-objectif de la spec (2026-10-14).
 - Waits on epic 1 because: le registre a besoin du workspace, du verrou hors ligne dans le moteur et de la recette.
 - Waits on epic 8 because: la forme des descriptions de commandes se rédige d'après ce que l'épreuve du modèle local aura retenu.

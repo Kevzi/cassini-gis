@@ -40,7 +40,7 @@ jobs:
       # Le noyau se teste seul, sans les dépendances système de la coquille
       # (principe 4) : cette étape passe avant leur installation.
       - name: Tests du noyau
-        run: cargo test -p cassini-core --locked
+        run: cargo test -p cassini-core -p cassini --locked
 
       # Clippy couvre tout le workspace, coquille Tauri comprise, qui demande
       # les bibliothèques système de Tauri v2 sous Linux.
