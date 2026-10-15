@@ -125,6 +125,46 @@ def main():
     if "REPONSE_PRECEDENTE" not in prompt or "écart nommé" not in prompt or prompt.count("<|im_start|>assistant") != 2:
         errors.append("invite de relance: doit rappeler la réponse précédente et les écarts")
 
+    # 7. run_forms : huit formes rejouées sans modèle, huit lignes à 100 %, la meilleure forme est contrainte.
+    import tempfile
+    import run_forms
+    with tempfile.TemporaryDirectory() as tmp:
+        replay_file = Path(tmp) / "rejeu.json"
+        replay_file.write_text(json.dumps(perfect, ensure_ascii=False), encoding="utf-8")
+        rows = run_forms.run(["--replay", str(replay_file)], log=lambda line: None)
+        text = run_forms.markdown(rows, "?", "rejeu")
+    if len(rows) != 8 or any(r["summary"]["rate_first"] != 1 for r in rows):
+        errors.append("run_forms: huit formes attendues, toutes à 100 % en rejeu")
+    if run_forms.best_form(rows)["output"] != "schema" or "Meilleure forme contrainte" not in text:
+        errors.append("run_forms: la meilleure forme doit être cherchée parmi les formes contraintes")
+    if "Aucune erreur d'appel" not in text or "n/a" not in text:
+        errors.append("run_forms: en rejeu, le tableau doit dire « n/a » pour une mesure absente et « Aucune erreur d'appel »")
+    # symboles de la grille, départage écrit, avertissement d'erreur d'appel
+    ok = {"correct_first": True, "correct_after": True, "attempts": [{"status": "correct"}]}
+    retried = {"correct_first": False, "correct_after": True, "attempts": [{"status": "nonconform"}, {"status": "correct"}]}
+    wrong = {"correct_first": False, "correct_after": False, "attempts": [{"status": "wrong"}]}
+    nonconform = {"correct_first": False, "correct_after": False, "attempts": [{"status": "nonconform"}]}
+    broken = {"correct_first": False, "correct_after": False, "attempts": [{"status": "error"}]}
+    if [run_forms.outcome(r) for r in (ok, retried, wrong, nonconform, broken)] != ["✓", "↻", "✗", "!", "E"]:
+        errors.append("run_forms: les symboles de la grille ne correspondent pas aux statuts")
+    tied = copy.deepcopy(rows)
+    for r in tied:
+        r["summary"]["call_errors"] = 0
+    schema_rows = [r for r in tied if r["output"] == "schema"]
+    schema_rows[0]["summary"]["rate_after_retry"], schema_rows[1]["summary"]["rate_after_retry"] = 1, 0.5
+    schema_rows[0]["total_ms"], schema_rows[1]["total_ms"] = 1000, 2000
+    tied_text = run_forms.markdown(tied, "?", "rejeu")
+    if "Départage, à taux d'emblée égal" not in tied_text or "taux après relance" not in tied_text:
+        errors.append("run_forms: le départage doit être écrit, avec le critère qui a joué")
+    tied[0]["summary"]["call_errors"] = 2
+    if "ATTENTION" not in run_forms.markdown(tied, "?", "rejeu"):
+        errors.append("run_forms: une erreur d'appel doit être signalée dans le tableau")
+    try:
+        run_forms.run(["--replay", "x.json", "--examples"], log=lambda line: None)
+        errors.append("run_forms: --examples passé en ligne de commande doit être refusé")
+    except SystemExit:
+        pass
+
     if errors:
         print("\n".join(errors))
         return 1

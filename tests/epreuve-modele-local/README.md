@@ -7,9 +7,9 @@ Aucun fichier de modèle n'est versé au dépôt.
 
 ## État
 
-Entrées 8.2 (catalogue, inventaire, 25 phrases, validateur) et 8.3 (harnais de
-mesure) **terminées**. Restent les mesures comparatives (8.4 et 8.5) et le
-verdict (8.6).
+Entrées 8.2 (catalogue, inventaire, 25 phrases, validateur), 8.3 (harnais de
+mesure) et 8.5 (formes de sollicitation) **terminées**. Restent la comparaison
+des modèles (8.4) et le verdict (8.6).
 
 | Fichier | Rôle |
 |---|---|
@@ -23,6 +23,8 @@ verdict (8.6).
 | `harness.py` | le harnais : pose les phrases à un modèle local, valide, redemande une fois, imprime deux taux, écrit un rapport JSON dans `reports/` (ignoré par git) |
 | `examples.json` | trois exemples phrase-plan pour l'invite, hors des phrases mesurées |
 | `check_harness.py` | contrôle le harnais sans modèle, par rejeu de sorties enregistrées |
+| `run_forms.py` | enchaîne les huit formes de sollicitation et écrit `resultats-8-5.md` (généré) et `.json` ; `--rebuild` refait le tableau sans appeler le modèle |
+| `lecture-8-5.md` | la lecture, écrite à la main, des mesures de 8.5 : ce qui joue, ce qui ne joue pas, la forme retenue |
 | `check_catalog.py` | cohérence du catalogue et de l'inventaire, plus 9 mutations qui doivent toutes être refusées |
 | `check_sentences.py` | cohérence des phrases, 19 plans faux qui doivent tous être refusés, égalité de plans ; avec un fichier `{"S01": plan, …}` en argument, compare une lecture indépendante aux plans attendus |
 
