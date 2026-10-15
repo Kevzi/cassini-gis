@@ -1,0 +1,9 @@
+[
+ {"text": "Montre-moi les gares de la ligne D.",
+  "plan": [{"command": "layer.select_by_attribute", "params": {"layer": "@Gares", "filter": {"field": "ligne", "operator": "eq", "value": "D"}}}]},
+ {"text": "Fais une zone tampon de 200 m autour des routes nationales.",
+  "plan": [{"command": "layer.select_by_attribute", "params": {"layer": "@Routes", "filter": {"field": "classe", "operator": "eq", "value": "nationale"}}},
+           {"command": "analysis.buffer", "params": {"layer": "step:1", "distance": {"value": 200, "unit": "m"}}}]},
+ {"text": "Calcule le champ de vision depuis le point 656 500 / 6 847 000 (Lambert-93), à 10 m de haut, sur 1 km.",
+  "plan": [{"command": "terrain.viewshed", "params": {"dem": "@Modèle numérique de terrain 5 m", "observer": {"x": 656500, "y": 6847000, "epsg": 2154}, "observer_height": {"value": 10, "unit": "m"}, "radius": {"value": 1, "unit": "km"}}}]}
+]

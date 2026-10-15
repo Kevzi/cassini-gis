@@ -1,0 +1,137 @@
+"""Contrôle du harnais sans modèle (code jetable) : rejeu de sorties enregistrées.
+
+    python check_harness.py     sort 0 si le harnais compte et rejette comme prévu
+"""
+
+import copy
+import json
+import sys
+from pathlib import Path
+
+HERE = Path(__file__).parent
+sys.path.insert(0, str(HERE))  # le mode isolé (-I) n'ajoute pas le dossier du script
+
+import harness  # noqa: E402
+from plan_validator import check_plan  # noqa: E402
+
+MIN_RECALL = 19  # plancher mesuré le 2026-10-15 ; un filtre qui régresse fait échouer le contrôle
+CATALOG, INVENTORY = harness.load_json("catalog.json"), harness.load_json("inventory.json")
+SENTENCES = harness.load_sentences("fr", [])
+
+
+class Args:
+    """Les paramètres du harnais pour un rejeu."""
+    catalog, filter_size, examples, output = "full", 8, False, "free"
+    template, no_think = "chatml", True
+
+
+def run(canned, ids=None):
+    sentences = [s for s in SENTENCES if ids is None or s["id"] in ids]
+    replay = lambda prompt, schema, attempt, sentence: (  # noqa: E731
+        (lambda o: o if isinstance(o, str) else json.dumps(o, ensure_ascii=False))(canned[sentence["id"]][attempt - 1]), {})
+    results = harness.measure(sentences, CATALOG, INVENTORY, Args, replay)
+    return results, harness.summarize(results)
+
+
+def expected(s):
+    return {"refusal": "coordonnées hors du système du modèle"} if s["expect_refusal"] else s["expected"]
+
+
+def main():
+    sys.stdout.reconfigure(encoding="utf-8")  # la console Windows n'est pas en UTF-8 par défaut
+    errors = []
+    perfect = {s["id"]: [expected(s)] for s in SENTENCES}
+
+    # 1. Les 25 plans attendus rejoués d'un coup : deux taux de 100 %.
+    _, summary = run(perfect)
+    if summary["sentences"] != 25 or summary["rate_first"] != 1 or summary["rate_after_retry"] != 1:
+        errors.append(f"rejeu parfait: attendu 25 phrases à 100 % deux fois, reçu {summary}")
+
+    def one(sentence_id, outputs):
+        results, _ = run({sentence_id: outputs}, {sentence_id})
+        return results[0]
+
+    s7, s8 = (next(s for s in SENTENCES if s["id"] == i)["expected"] for i in ("S07", "S08"))
+    # 2. Un plan conforme mais faux est compté faux et n'est pas redemandé.
+    r = one("S07", [s8])
+    if r["correct_after"] or len(r["attempts"]) != 1 or r["attempts"][0]["status"] != "wrong":
+        errors.append(f"plan faux: doit être compté faux sans relance, reçu {r['attempts']}")
+
+    # 3. Une commande, une couche, un chemin, un texte absents ou invalides : non conformes, redemandés.
+    absent_command = copy.deepcopy(s7); absent_command[0]["command"] = "layer.delete"
+    absent_layer = copy.deepcopy(s7); absent_layer[0]["params"]["layer"] = "gares_00000000_0000_0000_0000_000000000000"
+    absent_path = [{"command": "layer.add", "params": {"source": "donnees/inconnu.gpkg"}}]
+    for label, bad, needle in (("commande absente", absent_command, "layer.delete"),
+                               ("couche absente", absent_layer, "gares_00000000_0000_0000_0000_000000000000"),
+                               ("chemin absent", absent_path, "donnees/inconnu.gpkg"),
+                               ("texte libre", "Voici le plan que je propose.", "pas du JSON")):
+        r = one("S07", [bad, s7])
+        first = r["attempts"][0]
+        if first["status"] != "nonconform" or not any(needle in e for e in first["errors"]):
+            errors.append(f"{label}: doit être non conforme en nommant « {needle} », reçu {first['status']} {first['errors']}")
+        if r["correct_first"] or not r["correct_after"] or len(r["attempts"]) != 2:
+            errors.append(f"{label}: doit compter au taux après relance seulement")
+
+    # 4. Une relance qui échoue encore reste fausse ; une sortie encadrée de ``` est lue.
+    r = one("S07", [absent_command, absent_command])
+    if r["correct_after"] or len(r["attempts"]) != 2:
+        errors.append("deux sorties non conformes: doit rester faux après une seule relance")
+    fenced = "```json\n" + json.dumps(s7) + "\n```"
+    if not one("S07", [fenced])["correct_first"]:
+        errors.append("sortie encadrée de ```: doit être lue")
+    thought = "<think>\nje réfléchis [1] à {x}\n</think>\n" + json.dumps(s7)
+    if not one("S07", [thought])["correct_first"]:
+        errors.append("bloc de réflexion: doit être ignoré")
+    for label, wrapped in (("texte avant", "Voici le plan : " + json.dumps(s7)), ("texte après", json.dumps(s7) + " Voilà.")):
+        r = one("S07", [wrapped, s7])
+        if r["correct_first"] or not r["correct_after"]:
+            errors.append(f"{label}: la sortie doit être non conforme puis redemandée (AD-23)")
+    crashed = harness.measure([SENTENCES[0]], CATALOG, INVENTORY, Args,
+                              lambda prompt, schema, attempt, sentence: ("", {"exit": 1}))
+    if crashed[0]["attempts"][-1]["status"] != "error" or len(crashed[0]["attempts"]) != 1 or crashed[0]["correct_after"]:
+        errors.append("échec d'appel: doit être une erreur d'appel, sans relance")
+
+    # 5. Le refus WGS84 : correct s'il refuse ; un plan en 4326 est non conforme puis redemandé.
+    if not one("S25", [{"refusal": "Le point est en WGS84, le modèle en Lambert-93."}])["correct_first"]:
+        errors.append("refus WGS84: doit être correct")
+    wgs84_plan = [{"command": "terrain.viewshed", "params": {"dem": next(l["layer_id"] for l in INVENTORY["layers"] if l["kind"] == "raster"),
+                   "observer": {"x": 2.415, "y": 48.735, "epsg": 4326}, "observer_height": {"value": 10, "unit": "m"}, "radius": {"value": 1, "unit": "km"}}}]
+    r = one("S25", [wgs84_plan, {"refusal": "WGS84"}])
+    if r["attempts"][0]["status"] != "nonconform" or not r["correct_after"] or r["correct_first"]:
+        errors.append(f"plan WGS84: doit être non conforme puis corrigé par un refus, reçu {r['attempts'][0]['status']}")
+
+    # 6. Invite, catalogue filtré, schéma, exemples.
+    ids = harness.filter_commands("Fais une zone tampon de 300 mètres autour des gares.", CATALOG, 8)
+    if len(ids) != 8 or "analysis.buffer" not in ids:
+        errors.append(f"catalogue filtré: attendu 8 commandes dont analysis.buffer, reçu {ids}")
+    recall = sum(1 for s in SENTENCES if not s["expect_refusal"]
+                 and {x["command"] for x in s["expected"]} <= set(harness.filter_commands(s["text"], CATALOG, 8)))
+    total = sum(1 for s in SENTENCES if not s["expect_refusal"])
+    print(f"rappel du catalogue filtré à 8 commandes : {recall}/{total}")
+    if recall < MIN_RECALL:
+        errors.append(f"catalogue filtré: rappel {recall}/{total} sous le plancher {MIN_RECALL}")
+    schema_text = json.dumps(harness.plan_schema(CATALOG, [c["id"] for c in CATALOG["commands"]]))
+    if "(?!" in schema_text:
+        errors.append("schéma: une assertion négative est restée dans les motifs")
+    examples = harness.load_examples(INVENTORY)
+    texts = {s["text"] for s in SENTENCES} | {e["text"] for e in harness.load_json("sentences_en.json")}
+    for e in examples:
+        if e["text"] in texts:
+            errors.append(f"exemple « {e['text']} » est aussi une phrase mesurée")
+        bad = check_plan(e["plan"], CATALOG, INVENTORY)
+        if bad:
+            errors.append(f"exemple « {e['text']} » non conforme: {bad}")
+    prompt = harness.build_prompt("chatml", True, "SYSTEME", "Demande", "REPONSE_PRECEDENTE", ["écart nommé"])
+    if "REPONSE_PRECEDENTE" not in prompt or "écart nommé" not in prompt or prompt.count("<|im_start|>assistant") != 2:
+        errors.append("invite de relance: doit rappeler la réponse précédente et les écarts")
+
+    if errors:
+        print("\n".join(errors))
+        return 1
+    print("harnais: 25 phrases rejouées à 100 %, plan faux compté faux, 4 types de sortie non conforme redemandés, "
+          "refus WGS84, catalogue filtré, schéma et exemples contrôlés")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

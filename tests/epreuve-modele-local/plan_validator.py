@@ -136,6 +136,18 @@ def _norm(value):
     return value
 
 
+# Unités ramenées à la même base pour que 500 m et 0,5 km donnent le même plan.
+UNIT_BASE = {"m": ("m", 1), "km": ("m", 1000), "s": ("s", 1), "min": ("s", 60)}
+
+
+def _measure(value):
+    """Ramène {value, unit} à son unité de base ; rend None si ce n'est pas une mesure."""
+    if set(value) == {"value", "unit"} and value["unit"] in UNIT_BASE:
+        base, factor = UNIT_BASE[value["unit"]]
+        return {"value": _norm(round(value["value"] * factor, 6)), "unit": base}
+    return None
+
+
 def canonical(plan, catalog):
     """Forme canonique d'un plan : arbres des étapes terminales, sans l'ordre ni les doublons de forme."""
     commands = _catalog_index(catalog)
@@ -149,6 +161,9 @@ def canonical(plan, catalog):
         if isinstance(value, list):
             return sorted((conv(v) for v in value), key=lambda v: json.dumps(v, sort_keys=True))
         if isinstance(value, dict):
+            measure = _measure(value)
+            if measure is not None:
+                return measure
             return {k: conv(v) for k, v in value.items()}
         return _norm(value)
 

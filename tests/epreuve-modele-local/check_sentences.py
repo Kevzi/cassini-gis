@@ -120,6 +120,10 @@ def equality_checks(by_id, catalog, inventory):
     s7, s8 = by_id["S07"]["expected"], by_id["S08"]["expected"]
     if plans_equal(s7, s8, catalog):
         errors.append("égalité: 300 m sans fusion et 1 km fusionné doivent différer")
+    in_km = copy.deepcopy(s7)
+    in_km[0]["params"]["distance"] = {"value": 0.3, "unit": "km"}
+    if not plans_equal(s7, in_km, catalog):
+        errors.append("égalité: 300 m et 0,3 km doivent être égaux")
     explicit_default = copy.deepcopy(s7)
     explicit_default[0]["params"]["dissolve"] = False
     if not plans_equal(s7, explicit_default, catalog):

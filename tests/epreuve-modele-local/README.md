@@ -7,8 +7,9 @@ Aucun fichier de modèle n'est versé au dépôt.
 
 ## État
 
-Entrée 8.2 **terminée** : catalogue, inventaire, 25 phrases de référence,
-phrases anglaises et validateur. Reste à écrire le harnais de mesure (8.3).
+Entrées 8.2 (catalogue, inventaire, 25 phrases, validateur) et 8.3 (harnais de
+mesure) **terminées**. Restent les mesures comparatives (8.4 et 8.5) et le
+verdict (8.6).
 
 | Fichier | Rôle |
 |---|---|
@@ -19,12 +20,39 @@ phrases anglaises et validateur. Reste à écrire le harnais de mesure (8.3).
 | `sentences_en.json` | 10 phrases anglaises `{id, text, same_plan_as}` : même plan qu'une phrase française, mesurées à part |
 | `schema_validator.py` | valide une valeur contre le sous-ensemble de JSON Schema ci-dessous |
 | `plan_validator.py` | `check_plan`, `check_output`, `canonical`, `plans_equal` : ce que 8.3 réutilise |
+| `harness.py` | le harnais : pose les phrases à un modèle local, valide, redemande une fois, imprime deux taux, écrit un rapport JSON dans `reports/` (ignoré par git) |
+| `examples.json` | trois exemples phrase-plan pour l'invite, hors des phrases mesurées |
+| `check_harness.py` | contrôle le harnais sans modèle, par rejeu de sorties enregistrées |
 | `check_catalog.py` | cohérence du catalogue et de l'inventaire, plus 9 mutations qui doivent toutes être refusées |
 | `check_sentences.py` | cohérence des phrases, 19 plans faux qui doivent tous être refusés, égalité de plans ; avec un fichier `{"S01": plan, …}` en argument, compare une lecture indépendante aux plans attendus |
 
 Les commandes ne font rien : c'est la **forme** (CAP-6) qui est mesurée, pas le
 calcul. Les données de l'inventaire sont inventées. Recette :
 `python -I check_catalog.py && python -I check_sentences.py`.
+
+## Lancer une mesure
+
+```
+python harness.py --llama <llama-completion.exe> --model <fichier.gguf> --quant Q4_K_M
+       [--catalog full|filtered] [--examples] [--output free|schema] [--lang fr|en] [--ids S07,S17]
+```
+
+Un processus `llama-completion` par appel, aucun serveur, aucun réseau. La sortie
+doit être exactement du JSON : seuls le bloc de réflexion et une clôture ``` sont
+ignorés, tout autre texte autour la rend non conforme (AD-23). Un échec d'appel
+(délai dépassé, code de sortie non nul) est compté à part, jamais comme une erreur
+du modèle. Les
+paramètres de sollicitation sont : catalogue complet ou filtré (les 8 commandes
+les plus proches de la phrase par recouvrement lexical, rappel rapporté),
+avec ou sans exemples, sortie libre ou contrainte par un schéma JSON engendré
+depuis le catalogue. Le rapport donne par phrase la sortie, les écarts et les
+temps, et en tête : taux au premier essai, taux après relance, jetons, temps de
+chargement, de lecture et de génération. `--think` laisse le mode réflexion du
+modèle (coupé par défaut) ; `--template mistral` change le format d'invite.
+
+Une sortie non conforme est redemandée **une fois**, avec la liste des écarts ;
+un plan conforme mais différent de l'attendu est faux et n'est pas redemandé.
+Les chemins du poste sont passés en paramètres et n'apparaissent jamais en dur.
 
 ## Le plan et sa conformité
 
