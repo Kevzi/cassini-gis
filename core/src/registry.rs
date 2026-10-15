@@ -103,6 +103,8 @@ pub enum RegistryError {
     InvalidParams(String),
     /// Le résultat d'une commande n'a pas pu être mis en JSON : un défaut du noyau, pas de l'appelant.
     ResultNotSerializable(String),
+    /// La commande est déclarée mais aucun exécutant n'est branché pour elle (QGIS absent).
+    Unavailable(String),
 }
 
 impl RegistryError {
@@ -112,6 +114,7 @@ impl RegistryError {
             RegistryError::UnknownCommand(_) => "registry.unknown_command",
             RegistryError::InvalidParams(_) => "registry.invalid_params",
             RegistryError::ResultNotSerializable(_) => "registry.result_not_serializable",
+            RegistryError::Unavailable(_) => "registry.unavailable",
         }
     }
 }
@@ -123,6 +126,10 @@ impl fmt::Display for RegistryError {
             RegistryError::InvalidParams(why) => {
                 write!(f, "Paramètres invalides (détail technique : {why}).")
             }
+            RegistryError::Unavailable(id) => write!(
+                f,
+                "La commande « {id} » est déléguée à QGIS, qui n'est pas branché : elle ne peut pas s'exécuter."
+            ),
             RegistryError::ResultNotSerializable(why) => {
                 write!(
                     f,
@@ -137,9 +144,22 @@ impl std::error::Error for RegistryError {}
 
 type Handler = Box<dyn Fn(Value) -> Result<Value, RegistryError> + Send + Sync>;
 
+type Validator = Box<dyn Fn(&Value) -> Result<(), RegistryError> + Send + Sync>;
+
+/// Une commande déléguée à QGIS : ses types et sa description, sans implémentation Rust.
+pub trait Delegated {
+    type Params: DeserializeOwned + JsonSchema;
+    type Output: Serialize + JsonSchema;
+
+    fn spec() -> CommandSpec;
+}
+
 struct Entry {
     spec: CommandSpec,
-    handler: Handler,
+    /// Valide les paramètres par le type Rust qui a engendré le schéma.
+    validate: Validator,
+    /// `None` pour une commande déléguée : il n'y a rien à exécuter en processus.
+    handler: Option<Handler>,
 }
 
 /// Inscription d'une commande, faite par la commande elle-même dans son fichier :
@@ -169,19 +189,64 @@ impl Registry {
             self.duplicates.push(spec.id);
             return;
         }
+        let validate: Validator = Box::new(|json| {
+            serde_json::from_value::<C::Params>(json.clone())
+                .map(|_| ())
+                .map_err(|e| RegistryError::InvalidParams(e.to_string()))
+        });
         let handler: Handler = Box::new(move |json| {
             let params: C::Params = serde_json::from_value(json)
                 .map_err(|e| RegistryError::InvalidParams(e.to_string()))?;
             serde_json::to_value(command.run(params))
                 .map_err(|e| RegistryError::ResultNotSerializable(e.to_string()))
         });
-        self.entries
-            .insert(spec.id.clone(), Entry { spec, handler });
+        self.entries.insert(
+            spec.id.clone(),
+            Entry {
+                spec,
+                validate,
+                handler: Some(handler),
+            },
+        );
     }
 
-    /// Les descriptions de toutes les commandes, dans l'ordre des id.
-    pub(crate) fn specs(&self) -> impl Iterator<Item = &CommandSpec> {
-        self.entries.values().map(|e| &e.spec)
+    /// Inscrit une commande déléguée à QGIS : types et schémas, aucune implémentation.
+    /// Même règle de doublon que `register`.
+    pub fn register_delegated<D: Delegated>(&mut self) {
+        let spec = D::spec();
+        if self.entries.contains_key(&spec.id) {
+            self.duplicates.push(spec.id);
+            return;
+        }
+        let validate: Validator = Box::new(|json| {
+            serde_json::from_value::<D::Params>(json.clone())
+                .map(|_| ())
+                .map_err(|e| RegistryError::InvalidParams(e.to_string()))
+        });
+        self.entries.insert(
+            spec.id.clone(),
+            Entry {
+                spec,
+                validate,
+                handler: None,
+            },
+        );
+    }
+
+    /// Valide des paramètres contre le type de la commande, sans rien exécuter.
+    pub fn validate_params(&self, id: &str, params: &Value) -> Result<(), RegistryError> {
+        let entry = self
+            .entries
+            .get(id)
+            .ok_or_else(|| RegistryError::UnknownCommand(id.to_string()))?;
+        (entry.validate)(params)
+    }
+
+    /// Chaque description, avec un booléen vrai si la commande a une implémentation Rust.
+    pub(crate) fn implementations(&self) -> impl Iterator<Item = (&CommandSpec, bool)> {
+        self.entries
+            .values()
+            .map(|e| (&e.spec, e.handler.is_some()))
     }
 
     /// Les ids inscrits plus d'une fois.
@@ -199,7 +264,10 @@ impl Registry {
             .entries
             .get(id)
             .ok_or_else(|| RegistryError::UnknownCommand(id.to_string()))?;
-        (entry.handler)(params)
+        match &entry.handler {
+            Some(handler) => handler(params),
+            None => Err(RegistryError::Unavailable(id.to_string())),
+        }
     }
 
     /// Le registre standard du noyau : toutes les commandes qui se sont inscrites

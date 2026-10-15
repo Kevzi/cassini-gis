@@ -9,7 +9,7 @@ use std::fmt;
 
 use serde_json::Value;
 
-use crate::registry::{CommandSpec, Registry};
+use crate::registry::{CommandSpec, Registry, RunsIn};
 
 /// Dialecte JSON Schema que doivent déclarer les schémas engendrés.
 pub(crate) const DIALECT: &str = "https://json-schema.org/draft/2020-12/schema";
@@ -49,8 +49,20 @@ impl Registry {
     /// violations (liste vide = contrat respecté), dans l'ordre des id.
     pub fn check_contract(&self) -> Vec<ContractViolation> {
         let mut violations = Vec::new();
-        for spec in self.specs() {
+        for (spec, implemented_in_rust) in self.implementations() {
             check_spec(spec, &mut violations);
+            let mismatch = match spec.runs_in {
+                Some(RunsIn::Qgis) if implemented_in_rust => {
+                    Some("la commande a une implémentation Rust mais se déclare exécutée par QGIS.")
+                }
+                Some(RunsIn::Core) if !implemented_in_rust => {
+                    Some("la commande est déléguée à QGIS mais se déclare exécutée par le noyau.")
+                }
+                _ => None,
+            };
+            if let Some(message) = mismatch {
+                violations.push(violation("contract.runs_in_mismatch", &spec.id, message));
+            }
         }
         for id in self.duplicate_ids() {
             violations.push(violation(
@@ -235,7 +247,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::registry::{Command, RunsIn};
+    use crate::registry::{Command, Delegated, RunsIn};
 
     #[derive(Debug, Deserialize, JsonSchema)]
     #[serde(deny_unknown_fields)]
@@ -251,7 +263,7 @@ mod tests {
             "Crée une zone tampon.",
             "Creates a buffer.",
         )
-        .runs_in(RunsIn::Qgis)
+        .runs_in(RunsIn::Core)
         .cancellable(true)
         .tests(&["some_test"])
     }
@@ -351,6 +363,30 @@ mod tests {
         s
     });
 
+    struct QgisBuffer;
+
+    impl Delegated for QgisBuffer {
+        type Params = Empty;
+        type Output = Output;
+
+        fn spec() -> CommandSpec {
+            good_spec().runs_in(RunsIn::Qgis)
+        }
+    }
+
+    struct WronglyCore;
+
+    impl Delegated for WronglyCore {
+        type Params = Empty;
+        type Output = Output;
+
+        fn spec() -> CommandSpec {
+            good_spec()
+        }
+    }
+
+    command!(WronglyQgis, |s| s.runs_in(RunsIn::Qgis));
+
     fn codes(registry: &Registry) -> Vec<&'static str> {
         registry.check_contract().iter().map(|v| v.code).collect()
     }
@@ -372,6 +408,17 @@ mod tests {
         assert_eq!(codes(&only(BadIdCapital)), ["contract.id"]);
         assert_eq!(codes(&only(BadIdNoVerb)), ["contract.id"]);
         assert_eq!(codes(&only(BadIdCamelVerb)), ["contract.id"]);
+    }
+
+    #[test]
+    fn a_declared_executor_must_match_the_implementation() {
+        let mut ok = Registry::new();
+        ok.register_delegated::<QgisBuffer>();
+        assert!(ok.check_contract().is_empty());
+        let mut bad = Registry::new();
+        bad.register_delegated::<WronglyCore>();
+        assert_eq!(codes(&bad), ["contract.runs_in_mismatch"]);
+        assert_eq!(codes(&only(WronglyQgis)), ["contract.runs_in_mismatch"]);
     }
 
     #[test]
@@ -455,7 +502,7 @@ mod tests {
             .map(|p| fs::read_to_string(p).unwrap())
             .collect();
         let registry = Registry::standard();
-        for spec in registry.specs() {
+        for (spec, _) in registry.implementations() {
             for name in &spec.tests {
                 assert!(
                     sources.iter().any(|src| declares_test(src, name)),
