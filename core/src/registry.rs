@@ -136,16 +136,25 @@ pub enum RegistryError {
     ResultNotSerializable(String),
     /// La commande est déclarée mais aucun exécutant n'est branché pour elle (QGIS absent).
     Unavailable(String),
+    /// La commande a été annulée avant la fin (AD-12) ; porte son id.
+    Cancelled(String),
+    /// L'extension a répondu à l'ordre par une erreur : son code et son message sont gardés tels quels.
+    Delegated {
+        code: String,
+        message: String,
+    },
 }
 
 impl RegistryError {
     /// Code stable, destiné aux machines.
-    pub fn code(&self) -> &'static str {
+    pub fn code(&self) -> &str {
         match self {
             RegistryError::UnknownCommand(_) => "registry.unknown_command",
             RegistryError::InvalidParams(_) => "registry.invalid_params",
             RegistryError::ResultNotSerializable(_) => "registry.result_not_serializable",
             RegistryError::Unavailable(_) => "registry.unavailable",
+            RegistryError::Cancelled(_) => "registry.cancelled",
+            RegistryError::Delegated { code, .. } => code,
         }
     }
 }
@@ -161,6 +170,8 @@ impl fmt::Display for RegistryError {
                 f,
                 "La commande « {id} » est déléguée à QGIS, qui n'est pas branché : elle ne peut pas s'exécuter."
             ),
+            RegistryError::Cancelled(id) => write!(f, "La commande « {id} » a été annulée."),
+            RegistryError::Delegated { message, .. } => write!(f, "{message}"),
             RegistryError::ResultNotSerializable(why) => {
                 write!(
                     f,

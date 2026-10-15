@@ -17,5 +17,8 @@
 - `regle-de-redaction-des-commandes.md` — comment écrire la description et les
   schémas d'une commande, et ce que le registre contrôle lui-même.
 
+- `canal-local.md` — le contrat des messages du canal local : ordres du noyau
+  vers l'extension (`order.execute`), annulation (`request.cancel`) et erreurs.
+
 À remplir au fil des étapes : parité fonctionnelle visée et décisions
 d'architecture courtes (ADR).

@@ -126,7 +126,16 @@ impl Registry {
             }
             if !has_reference {
                 self.validate_params(&call.command, &call.params)
-                    .map_err(|e| error(e.code(), step, e.to_string()))?;
+                    .map_err(|e| {
+                        // `validate_params` ne rend que ces deux causes.
+                        let code = match e {
+                            crate::registry::RegistryError::UnknownCommand(_) => {
+                                "registry.unknown_command"
+                            }
+                            _ => "registry.invalid_params",
+                        };
+                        error(code, step, e.to_string())
+                    })?;
             }
         }
         Ok(())

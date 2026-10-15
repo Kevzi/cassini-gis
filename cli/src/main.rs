@@ -57,7 +57,7 @@ fn parse_run(args: &[String]) -> Option<RunArgs<'_>> {
 /// Exécute la CLI ; renvoie le code de sortie. Résultat sur `out`, erreurs sur `err`.
 pub fn run(
     args: &[String],
-    input: &mut dyn BufRead,
+    input: &mut (dyn BufRead + Send),
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> i32 {
@@ -108,7 +108,7 @@ pub fn run(
 /// `cassini serve` : le canal local JSON-RPC sur l'entrée et la sortie standard.
 fn serve(
     args: &[String],
-    input: &mut dyn BufRead,
+    input: &mut (dyn BufRead + Send),
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> i32 {
@@ -172,7 +172,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let code = run(
         &args,
-        &mut std::io::stdin().lock(),
+        &mut std::io::BufReader::new(std::io::stdin()),
         &mut std::io::stdout(),
         &mut std::io::stderr(),
     );

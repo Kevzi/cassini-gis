@@ -21,7 +21,7 @@ use serde_json::{json, Map, Value};
 
 use crate::error::ErrorReport;
 use crate::exec::{Executor, Router};
-use crate::registry::{Registry, PROTOCOL_VERSION};
+use crate::registry::{Registry, RegistryError, PROTOCOL_VERSION};
 
 /// Nom du journal, dans le dossier de travail.
 const JOURNAL_FILE: &str = "journal.jsonl";
@@ -223,8 +223,10 @@ impl<'a> Session<'a> {
         line.insert("id".into(), json!(id));
         line.insert("params".into(), canonical(&logged));
         line.insert("inputs".into(), Value::Array(inputs));
+        let cancelled = matches!(outcome, Err(RegistryError::Cancelled(_)));
         match &outcome {
             Ok(value) => line.insert("result".into(), summarize(value)),
+            Err(RegistryError::Cancelled(_)) => line.insert("cancelled".into(), json!(true)),
             Err(e) => line.insert("error".into(), json!(e.code())),
         };
         line.insert(
@@ -235,6 +237,13 @@ impl<'a> Session<'a> {
                 "registry": self.registry_version,
             }),
         );
+        if cancelled {
+            // Une étape annulée ne laisse pas de sortie partielle derrière elle (AD-12).
+            for name in &spec.output_params {
+                let file = output_file(step, id, &spec.output_params, name);
+                let _ = fs::remove_file(self.work_dir.join(file));
+            }
+        }
         self.append(&Value::Object(line))?;
         self.next_step += 1;
         outcome.map_err(ErrorReport::from)
@@ -542,8 +551,14 @@ impl<'a> Replay<'a> {
             project_dir: &self.project_dir,
             out_dir: &self.replay_dir,
         };
+        let mut replayed = 0;
         for (i, line) in self.lines.iter().enumerate() {
             let step = i + 1;
+            // Une étape annulée n'a ni résultat ni erreur : on la saute (AD-12).
+            if line.get("cancelled") == Some(&Value::Bool(true)) {
+                continue;
+            }
+            replayed += 1;
             let id = self.ids[i].as_str();
             let spec = self
                 .registry
@@ -581,7 +596,7 @@ impl<'a> Replay<'a> {
             }
         }
         Ok(ReplayReport {
-            steps: self.lines.len(),
+            steps: replayed,
             identical: true,
         })
     }
