@@ -3,6 +3,7 @@ name = "cassini-core"
 description = "Moteur geographique et registre de commandes de Cassini"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 

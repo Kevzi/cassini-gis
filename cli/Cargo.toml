@@ -3,6 +3,7 @@ name = "cassini"
 description = "Binaire cassini : points d'entree du registre de commandes"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
