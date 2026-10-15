@@ -45,30 +45,40 @@ Rien de l'extension QGIS n'existe encore — le dossier `qgis-plugin/` n'est pas
 créé. Ce qui est écrit, testé et conservé, c'est le socle, plus la coquille de
 bureau désormais reportée en V2 :
 
-- Un workspace Rust à deux étages : `cassini-core`, le noyau, **sans aucune
-  dépendance** ; `cassini-app`, la coquille de bureau en Tauri v2.
+- Un workspace Rust : `cassini-core`, le noyau ; `cassini`, le binaire de la
+  CLI ; `cassini-app`, la coquille de bureau en Tauri v2.
+- Le **registre de commandes** : chaque commande s'inscrit seule, sans toucher un
+  fichier partagé, et le registre contrôle son contrat (id, descriptions
+  française et anglaise, schémas, exécutant, test). Une seule commande de
+  production aujourd'hui, `system.about`.
+- Le **journal rejouable**, écrit à côté du projet en ajout seul sous verrou
+  exclusif, et le binaire `cassini` : `run` exécute une commande, `replay`
+  rejoue le journal, `serve` ouvre le canal local en JSON-RPC sur l'entrée et la
+  sortie standard. Un même appel donne le même résultat par `run` et par
+  `serve`, ce que contrôle un test sur le vrai binaire. `mcp` n'existe pas
+  encore.
 - Une fenêtre qui s'ouvre sous Windows et affiche une carte MapLibre GL JS,
   navigable au zoom et au déplacement.
 - Un fond de carte au format PMTiles **lu sur le disque** : le noyau en sert les
   octets par l'IPC de Tauri, l'interface ne connaît jamais le chemin du fichier,
   et aucune requête réseau n'intervient à aucun moment.
-- Deux commandes exposées, et deux seulement : `engine_version` et
-  `read_basemap`. L'interface n'appelle que la seconde. Le registre de commandes
-  décrit par `CLAUDE.md` §4 n'est pas encore écrit.
+- Deux commandes exposées par la coquille, et deux seulement : `engine_version`
+  et `read_basemap`. L'interface n'appelle que la seconde ; la coquille ne passe
+  pas encore par le registre de commandes.
 - Le verrou hors ligne vit dans le noyau — `BasemapSource` refuse à la
   construction toute source qui désigne le réseau — et il est doublé d'une garde
   qui relit l'interface fichier par fichier.
 - Un générateur **déterministe** de l'archive PMTiles de recette, et deux
   vérificateurs qui la relisent : conformité de l'archive, puis chemin complet de
   chargement de la carte.
-- Une recette qui tient en quatre commandes : 17 tests du noyau, `cargo fmt`,
+- Une recette qui tient en quatre commandes : 110 tests du noyau et de la CLI, `cargo fmt`,
   `cargo clippy`, et le contrôle de l'interface — lancée par GitHub Actions à
   chaque poussée.
 
 La carte et la coquille sont **hors du chemin critique du MVP** depuis le
 2026-10-14, mais elles marchent et elles restent : c'est la fondation de la V2
-autonome. Tout le reste de ce README — registre, journal, agent IA, extension,
-terrain — décrit une **cible**, pas une fonction disponible.
+autonome. Tout le reste de ce README — agent IA, serveur MCP, extension, terrain —
+décrit une **cible**, pas une fonction disponible.
 
 ## Ce qui est prévu
 
@@ -78,8 +88,8 @@ commence avant que la précédente ne soit testée.
 | Étape | Ce qu'elle apporte | État |
 |---|---|---|
 | 1 | Socle technique, verrou hors ligne, recette automatique | **faite pour l'essentiel** ; la recette tourne à chaque poussée |
-| 2 | Épreuve du modèle local — un modèle quantifié sait-il transformer une phrase française en suite de commandes typées correcte, sur un registre factice | la prochaine, et la plus rentable : si elle échoue, le produit perd son angle |
-| 3 | Registre de commandes et journal rejouable — l'épine dorsale | à venir |
+| 2 | Épreuve du modèle local — un modèle quantifié sait-il transformer une phrase française en suite de commandes typées correcte, sur un registre factice | **faite** : verdict « oui sous conditions », dans `_bmad-output/initiative-cassini-mvp/epic-epreuve-du-modele-local/` |
+| 3 | Registre de commandes et journal rejouable — l'épine dorsale | **en cours** : contrat, journal, `run`, `replay` et `serve` faits ; reste la suite de bout en bout |
 | 4 | Façade QGIS — extension, canal local, commandes exécutées par QGIS | à venir |
 | 5 | Agent IA local (llama.cpp) et serveur MCP | à venir |
 | 6 | Analyse de terrain dans le noyau — champ de vision, ligne de vue, pente | à venir |
@@ -136,14 +146,14 @@ flowchart TB
         moteurQgis["Carte, fichiers, projet, analyses vectorielles, export PDF"]
     end
 
-    canal["Canal local — JSON-RPC 2.0 sur l'entrée et la sortie standard, dans les deux sens, aucun réseau — prévu"]
+    canal["Canal local — JSON-RPC 2.0 sur l'entrée et la sortie standard, dans les deux sens, aucun réseau — côté noyau fait"]
 
     subgraph noyau["Noyau Cassini — Rust, Apache-2.0 — tourne sans QGIS"]
-        binaire["Binaire cassini, sous cli/ — serve, mcp, run, replay — prévu"]
-        registre["Registre de commandes, qui tient la boucle d'exécution — prévu"]
+        binaire["Binaire cassini, sous cli/ — run, replay, serve faits ; mcp prévu"]
+        registre["Registre de commandes, qui tient la boucle d'exécution — fait"]
         binaire --> registre
         terrain["Terrain sur MNT — champ de vision, ligne de vue, pente — prévu"]
-        journal["Journal rejouable, écrit à côté du projet QGIS — prévu"]
+        journal["Journal rejouable, écrit à côté du projet QGIS — fait"]
         ia["Couche IA — modèle local llama.cpp, lié au processus — prévu"]
         fond["Lecture du fond de carte, refus du réseau — fait"]
         registre --> terrain
@@ -164,8 +174,8 @@ flowchart TB
     classDef prevu fill:#f2f2f2,stroke:#8d8d8d,color:#333333
     classDef fourni fill:#e7eefb,stroke:#45659c,color:#1a2740
     classDef reporte fill:#f6eede,stroke:#9c7a45,color:#3d2f1a
-    class fond fait
-    class panneau,canal,binaire,registre,terrain,journal,ia prevu
+    class fond,canal,binaire,registre,journal fait
+    class panneau,terrain,ia prevu
     class moteurQgis fourni
     class v2 reporte
 ```
@@ -343,7 +353,7 @@ qui arrivera avec elle.
 
 | Commande | Ce qu'elle contrôle |
 |---|---|
-| `cargo test -p cassini-core --locked` | Les 17 tests du noyau, dont le refus de toute source réseau et celui d'une plage d'octets hors fichier. |
+| `cargo test -p cassini-core -p cassini --locked` | Les 110 tests du noyau et de la CLI, dont le refus de toute source réseau, la parité entre `run` et `serve` et le rejeu du journal. |
 | `cargo fmt --all --check` | La mise en forme du Rust. |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | Zéro avertissement, sur les deux crates et leurs tests. |
 | `npm run check`, depuis `app` | Le typage strict, puis trois vérifications décrites ci-dessous. |

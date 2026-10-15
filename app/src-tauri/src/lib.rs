@@ -1,9 +1,9 @@
 //! Coquille de bureau.
 //!
 //! Aucune logique métier ici : la coquille ouvre une fenêtre et relaie les
-//! appels vers `cassini-core` (CLAUDE.md §2.5). Tant que le registre de
-//! commandes n'existe pas (étape 2), elle n'expose que la version du moteur et
-//! la lecture du fond de carte.
+//! appels vers `cassini-core` (CLAUDE.md §2.5). Tant qu'elle n'appelle pas le
+//! registre de commandes, elle n'expose que la version du moteur et la lecture
+//! du fond de carte.
 
 use std::path::PathBuf;
 

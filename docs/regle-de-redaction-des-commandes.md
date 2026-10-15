@@ -38,4 +38,6 @@ Les règles 1 et 2 sont **contrôlées** par `Registry::check_contract()`
    prévoir de la remplacer (par exemple un nom donné à chaque sortie) et de
    re-mesurer.
 10. **Unités.** 500 m et 0,5 km ne donnent pas le même plan pour un comparateur
-    strict : la normalisation des unités est reportée.
+    strict. Le harnais de mesure de l'epic 8 ramène m et km en mètres, s et min
+    en secondes avant de comparer (`canonical`, entrée 8.3) ; le noyau, lui, ne
+    convertit aucune unité : un paramètre garde celle que le modèle a écrite.

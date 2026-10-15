@@ -263,12 +263,14 @@ impl<'a> Session<'a> {
     }
 }
 
+/// Lignes non vides d'un texte de journal : la seule définition d'une ligne écrite.
+fn content_lines(text: &str) -> impl Iterator<Item = &str> {
+    text.lines().filter(|l| !l.trim().is_empty())
+}
+
 fn count_lines(path: &Path) -> Result<usize, JournalError> {
     match fs::read(path) {
-        Ok(bytes) => Ok(bytes
-            .split(|b| *b == b'\n')
-            .filter(|l| !l.iter().all(u8::is_ascii_whitespace))
-            .count()),
+        Ok(bytes) => Ok(content_lines(&String::from_utf8_lossy(&bytes)).count()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(0),
         Err(e) => Err(io_error(e)),
     }
@@ -293,8 +295,7 @@ fn locate(project: &Path) -> Result<(PathBuf, PathBuf), JournalError> {
 /// Ids des étapes déjà journalisées, dans l'ordre (vide si illisible).
 fn journal_ids(path: &Path) -> Vec<String> {
     let text = fs::read_to_string(path).unwrap_or_default();
-    text.lines()
-        .filter(|l| !l.trim().is_empty())
+    content_lines(&text)
         .map(|l| {
             serde_json::from_str::<Value>(l)
                 .ok()
@@ -477,7 +478,7 @@ impl<'a> Replay<'a> {
             Err(e) => return Err(io_error(e).into()),
         };
         let mut lines = Vec::new();
-        for raw in text.lines().filter(|l| !l.trim().is_empty()) {
+        for raw in content_lines(&text) {
             let line = serde_json::from_str::<Value>(raw)
                 .map_err(|_| JournalError::Io("InvalidData".to_string()))?;
             lines.push(line);
