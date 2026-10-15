@@ -130,6 +130,9 @@ def check(catalog, inventory):
         for field in layer.get("fields", []):
             if field.get("type") not in FIELD_TYPES:
                 errors.append(f"inventaire: {lid} champ « {field.get('name')} » de type inconnu")
+            values = field.get("values", [])
+            if not isinstance(values, list) or len(values) > 12 or not all(isinstance(v, str) for v in values):
+                errors.append(f"inventaire: {lid} champ « {field.get('name')} » a des valeurs d'exemple invalides")
     if inventory.get("project", {}).get("epsg") not in defs.get("epsg", {}).get("enum", []):
         errors.append("inventaire: l'EPSG du projet est hors du catalogue")
     kinds = [l.get("kind") for l in inventory.get("layers", [])]

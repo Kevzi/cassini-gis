@@ -14,7 +14,7 @@
       "source": "donnees/parcelles.gpkg",
       "fields": [
         { "name": "id_parcelle", "type": "string" },
-        { "name": "section", "type": "string" },
+        { "name": "section", "type": "string", "values": ["AB", "AC", "AD", "AE", "B", "C"] },
         { "name": "surface_m2", "type": "number" }
       ]
     },
@@ -27,9 +27,9 @@
       "feature_count": 48,
       "source": "donnees/plu_zonage.gpkg",
       "fields": [
-        { "name": "typezone", "type": "string" },
-        { "name": "libelle", "type": "string" },
-        { "name": "destdomi", "type": "string" }
+        { "name": "typezone", "type": "string", "values": ["U", "AUc", "AUs", "A", "N"] },
+        { "name": "libelle", "type": "string", "values": ["Zone urbaine", "Zone à urbaniser", "Zone agricole", "Zone naturelle"] },
+        { "name": "destdomi", "type": "string", "values": ["habitat", "activités", "équipements", "mixte"] }
       ]
     },
     {
@@ -42,7 +42,7 @@
       "source": "donnees/gares.gpkg",
       "fields": [
         { "name": "nom", "type": "string" },
-        { "name": "ligne", "type": "string" }
+        { "name": "ligne", "type": "string", "values": ["C", "D"] }
       ]
     },
     {
@@ -55,7 +55,7 @@
       "source": "donnees/routes.gpkg",
       "fields": [
         { "name": "nom", "type": "string" },
-        { "name": "classe", "type": "string" },
+        { "name": "classe", "type": "string", "values": ["autoroute", "nationale", "départementale", "communale", "piétonne"] },
         { "name": "vitesse_kmh", "type": "number" }
       ]
     },
@@ -68,7 +68,7 @@
       "feature_count": 7840,
       "source": "donnees/batiments.geojson",
       "fields": [
-        { "name": "usage", "type": "string" },
+        { "name": "usage", "type": "string", "values": ["résidentiel", "commercial", "industriel", "public", "annexe"] },
         { "name": "hauteur_m", "type": "number" },
         { "name": "nb_etages", "type": "integer" }
       ]

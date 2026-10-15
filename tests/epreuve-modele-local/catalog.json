@@ -88,7 +88,13 @@
             "type": "object",
             "properties": {
               "name": { "type": "string", "maxLength": 64 },
-              "type": { "type": "string", "enum": ["string", "integer", "number", "boolean", "date"] }
+              "type": { "type": "string", "enum": ["string", "integer", "number", "boolean", "date"] },
+              "values": {
+                "description": "Valeurs d'exemple d'un champ de catégorie, pour que le filtre cite une valeur qui existe.",
+                "type": "array",
+                "items": { "type": "string", "maxLength": 64 },
+                "maxItems": 12
+              }
             },
             "required": ["name", "type"],
             "additionalProperties": false

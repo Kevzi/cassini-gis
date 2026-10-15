@@ -34,6 +34,18 @@ calcul. Les données de l'inventaire sont inventées.
   refuse tout nombre en tête d'un paramètre. La valeur d'un filtre, elle, est une
   donnée comparée à un champ, pas une mesure, et reste libre.
 - Les tableaux sont bornés par `maxItems` (AD-8).
+- Les champs de catégorie de l'inventaire portent `values`, des valeurs
+  d'exemple (12 au plus). Un premier essai à la main sur la phrase de démo,
+  le 2026-10-15, a montré que, sans elles, le modèle invente la valeur du filtre
+  (`typezone contains "constructible"` au lieu de `U` ou `AUc`).
+
+## À éprouver : la forme `step:k`
+
+Le même essai a montré une confusion de numérotation : le modèle a compté ses
+étapes de calcul sans compter les ouvertures de fichiers qu'il avait ajoutées,
+et chaque `step:k` pointait alors vers la mauvaise couche. La forme de
+référence entre étapes n'est donc pas acquise ; 8.3 à 8.5 la mesurent, et le
+verdict de 8.6 peut la remplacer (par exemple par un nom donné à chaque sortie).
 
 ## Sous-ensemble de JSON Schema (draft 2020-12)
 
