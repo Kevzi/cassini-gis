@@ -51,6 +51,8 @@ pub struct CommandSpec {
     pub params_schema: Value,
     /// Schéma JSON du résultat, engendré depuis le type Rust.
     pub output_schema: Value,
+    /// Exemples de paramètres valides, lus par l'IA.
+    pub examples: Vec<Value>,
 }
 
 impl CommandSpec {
@@ -71,7 +73,14 @@ impl CommandSpec {
             output_params: Vec::new(),
             params_schema: schema_value::<P>(),
             output_schema: schema_value::<O>(),
+            examples: Vec::new(),
         }
+    }
+
+    /// Ajoute un exemple de paramètres valides.
+    pub fn example(mut self, params: Value) -> Self {
+        self.examples.push(params);
+        self
     }
 
     /// Déclare où la commande s'exécute.
@@ -271,6 +280,11 @@ impl Registry {
             .map(|e| (&e.spec, e.handler.is_some()))
     }
 
+    /// Les descriptions de toutes les commandes, dans l'ordre des ids.
+    pub fn specs(&self) -> impl Iterator<Item = &CommandSpec> {
+        self.entries.values().map(|e| &e.spec)
+    }
+
     /// Les ids inscrits plus d'une fois.
     pub(crate) fn duplicate_ids(&self) -> &[String] {
         &self.duplicates
@@ -346,6 +360,19 @@ mod tests {
             .call("system.about", json!({"x": 1}))
             .unwrap_err();
         assert_eq!(err.code(), "registry.invalid_params");
+    }
+
+    #[test]
+    fn every_declared_example_validates_its_params() {
+        let registry = Registry::standard();
+        let mut seen = 0;
+        for spec in registry.specs() {
+            for example in &spec.examples {
+                registry.validate_params(&spec.id, example).unwrap();
+                seen += 1;
+            }
+        }
+        assert!(seen >= 1);
     }
 
     #[test]

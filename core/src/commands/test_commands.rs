@@ -37,6 +37,7 @@ impl Command for TestReadFile {
         .runs_in(RunsIn::Core)
         .cancellable(false)
         .path_params(&["path"])
+        .example(serde_json::json!({"path": "a"}))
         .tests(&["read_file_reports_the_size"])
     }
 

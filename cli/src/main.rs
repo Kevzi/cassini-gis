@@ -1,6 +1,6 @@
 //! Binaire `cassini` : premier point d'entrée du registre de commandes (AD-13).
 
-use std::io::Write;
+use std::io::{BufRead, Write};
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 
 const USAGE: &str = "Usage : cassini run <id> [json] [--project <fichier>]
        cassini replay <projet>
+       cassini serve
 ";
 
 /// Arguments de `run` : id, paramètres JSON facultatifs, projet facultatif.
@@ -54,7 +55,15 @@ fn parse_run(args: &[String]) -> Option<RunArgs<'_>> {
 }
 
 /// Exécute la CLI ; renvoie le code de sortie. Résultat sur `out`, erreurs sur `err`.
-pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
+pub fn run(
+    args: &[String],
+    input: &mut dyn BufRead,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    if args.first().map(String::as_str) == Some("serve") {
+        return serve(&args[1..], input, out, err);
+    }
     if args.first().map(String::as_str) == Some("replay") {
         return replay(&args[1..], out, err);
     }
@@ -96,6 +105,36 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
     }
 }
 
+/// `cassini serve` : le canal local JSON-RPC sur l'entrée et la sortie standard.
+fn serve(
+    args: &[String],
+    input: &mut dyn BufRead,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    if !args.is_empty() {
+        let _ = err.write_all(USAGE.as_bytes());
+        return 2;
+    }
+    let registry = Registry::standard();
+    match cassini_core::serve::serve(&registry, input, out) {
+        Ok(()) => 0,
+        Err(e) => {
+            let report = ErrorReport {
+                code: "serve.io".to_string(),
+                message: format!("Le canal est interrompu (détail technique : {}).", e.kind()),
+                step: None,
+            };
+            let _ = writeln!(
+                err,
+                "{}",
+                serde_json::to_string(&report).expect("une erreur se sérialise")
+            );
+            1
+        }
+    }
+}
+
 /// `cassini replay <projet>` : rejoue le journal du projet et rend le bilan.
 fn replay(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
     let [project] = args else {
@@ -131,7 +170,12 @@ fn replay(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let code = run(&args, &mut std::io::stdout(), &mut std::io::stderr());
+    let code = run(
+        &args,
+        &mut std::io::stdin().lock(),
+        &mut std::io::stdout(),
+        &mut std::io::stderr(),
+    );
     ExitCode::from(code as u8)
 }
 
@@ -140,9 +184,13 @@ mod tests {
     use super::*;
 
     fn call(args: &[&str]) -> (i32, String, String) {
+        call_with(args, "")
+    }
+
+    fn call_with(args: &[&str], input: &str) -> (i32, String, String) {
         let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let code = run(&args, &mut out, &mut err);
+        let code = run(&args, &mut input.as_bytes(), &mut out, &mut err);
         (
             code,
             String::from_utf8(out).unwrap(),
@@ -306,5 +354,50 @@ mod tests {
         let (code, _, err) = call(&["run", "system.about", "--project"]);
         assert_eq!(code, 2);
         assert!(err.contains("Usage"));
+    }
+
+    #[test]
+    fn serve_answers_hello_and_a_call_then_frees_the_lock() {
+        let (dir, project) = temp_project();
+        let project = project.replace('\\', "/");
+        let input = format!(
+            "{}
+{}
+",
+            json!({"jsonrpc":"2.0","id":1,"method":"session.hello",
+                "params":{"protocol_version":1,"commands":[],"project":project}}),
+            json!({"jsonrpc":"2.0","id":2,"method":"command.run",
+                "params":{"command":"system.about"}}),
+        );
+        let (code, out, err) = call_with(&["serve"], &input);
+        assert_eq!((code, err.as_str()), (0, ""));
+        let lines: Vec<Value> = out
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0]["result"]["commands"].is_array());
+        assert_eq!(lines[1]["result"]["protocol_version"], 1);
+        let journal = std::fs::read_to_string(dir.join("p.cassini/journal.jsonl")).unwrap();
+        assert_eq!(journal.lines().count(), 1);
+        let registry = Registry::standard();
+        let session = Session::open(&registry, Path::new(&project)).unwrap();
+        assert_eq!(session.mode(), cassini_core::journal::Mode::Write);
+        drop(session);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn serve_survives_an_unreadable_line_and_takes_no_argument() {
+        let (code, out, _) = call_with(
+            &["serve"],
+            "xx
+",
+        );
+        assert_eq!(code, 0);
+        assert!(out.contains("-32700"));
+        let (code, _, err) = call(&["serve", "extra"]);
+        assert_eq!(code, 2);
+        assert!(err.contains("cassini serve"));
     }
 }

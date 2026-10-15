@@ -32,6 +32,7 @@ impl Command for SystemAbout {
         )
         .runs_in(RunsIn::Core)
         .cancellable(false)
+        .example(serde_json::json!({}))
         .tests(&["system_about_returns_the_versions_through_the_command"])
     }
 
