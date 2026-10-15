@@ -296,6 +296,7 @@ dependencies = [
 name = "cassini-core"
 version = "0.1.0"
 dependencies = [
+ "inventory",
  "schemars 1.2.2",
  "serde",
  "serde_json",
@@ -1496,6 +1497,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f4200d433cbd5178df7797c9c2e75b348b728e39631cf14520d1e2fc424201f4"
 dependencies = [
  "cfb",
+]
+
+[[package]]
+name = "inventory"
+version = "0.3.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6928282826c822ad91bf1c9a1cb90a30ba1c26770749929b4656cd6be829cd7c"
+dependencies = [
+ "rustversion",
 ]
 
 [[package]]
