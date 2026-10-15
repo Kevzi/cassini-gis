@@ -26,6 +26,13 @@ Licence GPL, comme QGIS. L'extension ne contient aucun binaire : le noyau
 
 Sans QGIS : `python -I -m unittest discover -s qgis-plugin/tests`.
 
+Recette manuelle « QGIS ne gèle pas pendant un geste lent » : avec un noyau qui
+envoie `command.run` de `test.qgis_probe` (geste de test de dix secondes), le
+panneau affiche le bouton « Arrêter le geste en cours ». Pendant ces dix
+secondes, déplacez la carte et ouvrez des menus : l'interface reste réactive.
+Cliquez sur le bouton : le geste s'arrête, le noyau reçoit une réponse à son
+ordre (sans que le processus soit tué) et le bouton disparaît.
+
 Contrôle manuel : charger l'extension, ouvrir un projet, voir les deux versions,
 fermer QGIS et vérifier qu'aucun `cassini` ne reste dans le gestionnaire des
 tâches.

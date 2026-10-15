@@ -10,6 +10,7 @@ PKG = os.path.join(HERE, "..", "cassini_qgis")
 sys.path.insert(0, PKG)
 
 import client  # noqa: E402
+import gestures  # noqa: E402
 import locator  # noqa: E402
 
 
@@ -34,6 +35,8 @@ class FakeProcess:
         self.started = None
         self.written = []
         self.out = b""
+        self.err = b""
+        self.err_reads = 0
         self.closed = False
 
     def start(self, program, args):
@@ -47,7 +50,12 @@ class FakeProcess:
         return data
 
     def readAllStandardError(self):
-        return b""
+        self.err_reads += 1
+        data, self.err = self.err, b""
+        return data
+
+    def waitForReadyRead(self, ms=0):  # jamais appelé par la boucle d'ordres
+        raise AssertionError("lecture bloquante")
 
     def closeWriteChannel(self):
         self.closed = True
@@ -152,11 +160,177 @@ class ClientTest(unittest.TestCase):
         self.p.finished.emit(0, 0)
         self.assertEqual(self.events, [])
 
-    def test_garbage_and_orders_ignored(self):
+    def test_garbage_and_malformed_orders_ignored(self):
         self.c.start("cassini", "/p.qgz")
         self.p.feed(b"pas du json\n")
-        self.p.feed(b'{"jsonrpc":"2.0","id":"core-1","method":"order.execute"}\n')
+        self.p.feed(b'{"jsonrpc":"2.0","method":"order.execute"}\n')
         self.assertEqual(self.events, [])
+        self.assertEqual(len(self.p.written), 1)
+
+
+class FakeGesture:
+    """Geste lent factice : ne se termine que sur ordre du test."""
+
+    instances = []
+
+    def __init__(self):
+        self.done = None
+        self.params = None
+        self.cancelled = 0
+        FakeGesture.instances.append(self)
+
+    def start(self, params, done):
+        self.params = params
+        self.done = done
+
+    def cancel(self):
+        self.cancelled += 1
+        self.done(error=gestures.GestureError("qgis.cancelled", "Annulé."))
+
+
+class Raising:
+    def start(self, params, done):
+        raise RuntimeError("boum")
+
+    def cancel(self):
+        pass
+
+
+class OrderTest(unittest.TestCase):
+    def setUp(self):
+        FakeGesture.instances = []
+        self.reg = gestures.GestureRegistry()
+        self.reg.register("test.qgis_probe", FakeGesture)
+        self.reg.register("test.raising", Raising)
+        self.p = FakeProcess()
+        self.events = []
+        self.c = client.CoreClient(
+            self.p, lambda k, v: self.events.append((k, v)), self.reg
+        )
+        self.c.start("cassini", "/p.qgz")
+        self.p.feed(reply(1, {"protocol_version": 1, "core_version": "0.1", "commands": []}))
+        self.p.feed(reply(2, {"core_version": "0.1.0", "protocol_version": 1}))
+        self.base = len(self.p.written)
+
+    def order(self, ident="core-1", command="test.qgis_probe", params=None):
+        m = {"jsonrpc": "2.0", "id": ident, "method": "order.execute",
+             "params": {"command": command, "params": params or {"layer": "l"}}}
+        self.p.feed((json.dumps(m) + "\n").encode())
+
+    def cancel(self, ident="core-1", request_id=None):
+        m = {"jsonrpc": "2.0", "method": "request.cancel", "params": {"id": ident}}
+        if request_id is not None:
+            m["id"] = request_id
+        self.p.feed((json.dumps(m) + "\n").encode())
+
+    def new(self):
+        return [json.loads(w) for w in self.p.written[self.base:]]
+
+    def test_hello_announces_gesture_ids(self):
+        hello = json.loads(self.p.written[0])
+        self.assertEqual(hello["params"]["commands"], ["test.qgis_probe", "test.raising"])
+
+    def test_nominal_order(self):
+        self.order()
+        self.assertEqual(self.new(), [])  # lancé, pas encore fini : rien ne bloque
+        self.assertEqual(FakeGesture.instances[0].params, {"layer": "l"})
+        self.assertTrue(self.c.busy())
+        FakeGesture.instances[0].done(result={"ok": True})
+        self.assertEqual(self.new(), [{"jsonrpc": "2.0", "id": "core-1", "result": {"ok": True}}])
+        self.assertFalse(self.c.busy())
+        self.assertEqual(
+            [k for k, _ in self.events],
+            [client.READY, client.ORDER_STARTED, client.ORDER_ENDED],
+        )
+
+    def test_cancel_gets_a_response(self):
+        self.order()
+        self.cancel()
+        sent = self.new()
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0]["id"], "core-1")
+        self.assertEqual(sent[0]["error"]["data"]["code"], "qgis.cancelled")
+        self.assertFalse(self.p.closed)  # le noyau n'est pas tué
+        self.assertFalse(self.c.busy())
+
+    def test_cancel_as_request_is_answered(self):
+        self.order()
+        self.cancel(request_id="core-9")
+        answers = [m for m in self.new() if m["id"] == "core-9"]
+        self.assertEqual(answers[0]["result"], {"cancelled": True})
+
+    def test_cancel_request_with_other_id_answers_false(self):
+        self.order()
+        self.cancel("core-7", request_id="core-9")
+        answers = [m for m in self.new() if m["id"] == "core-9"]
+        self.assertEqual(answers[0]["result"], {"cancelled": False})
+        self.assertEqual(FakeGesture.instances[0].cancelled, 0)
+
+    def test_cancel_unknown_id_ignored(self):
+        self.cancel("core-7")
+        self.assertEqual(self.new(), [])
+        self.order()
+        self.cancel("core-7")
+        self.assertEqual(FakeGesture.instances[0].cancelled, 0)
+        self.assertEqual(self.new(), [])
+
+    def test_unknown_gesture(self):
+        self.order(command="nope")
+        err = self.new()[0]["error"]
+        self.assertEqual(err["code"], -32000)
+        self.assertEqual(err["data"]["code"], "qgis.gesture_unknown")
+        self.assertFalse(self.c.busy())
+
+    def test_gesture_raising_is_reported_not_propagated(self):
+        self.order(command="test.raising")
+        err = self.new()[0]["error"]
+        self.assertEqual(err["code"], -32000)
+        self.assertEqual(err["data"]["code"], "qgis.gesture_failed")
+        self.assertEqual(err["data"]["message"], "boum")
+        self.assertFalse(self.c.busy())
+
+    def test_order_during_order_is_refused(self):
+        self.order("core-1")
+        self.order("core-2")
+        sent = self.new()
+        self.assertEqual(sent[0]["id"], "core-2")
+        self.assertEqual(sent[0]["error"]["data"]["code"], "qgis.busy")
+        self.assertEqual(len(FakeGesture.instances), 1)
+        FakeGesture.instances[0].done(result={"ok": True})
+        self.assertEqual(self.new()[1]["id"], "core-1")
+
+    def test_second_done_is_ignored(self):
+        self.order()
+        g = FakeGesture.instances[0]
+        g.done(result=1)
+        g.done(result=2)
+        self.assertEqual(len(self.new()), 1)
+
+    def test_local_stop_button(self):
+        self.order()
+        self.c.cancel_current()
+        self.assertEqual(self.new()[0]["error"]["data"]["code"], "qgis.cancelled")
+
+    def test_core_death_cancels_gesture_without_answer(self):
+        self.order()
+        self.p.finished.emit(1, 0)
+        self.assertEqual(FakeGesture.instances[0].cancelled, 1)
+        self.assertEqual(self.new(), [])
+        self.assertEqual(self.events[-1][0], client.DIED)
+
+    def test_noisy_stderr_drained_at_each_signal(self):
+        for _ in range(50):
+            self.p.err = b"x" * 65536
+            self.p.readyReadStandardError.emit()
+            self.assertEqual(self.p.err, b"")
+        self.assertEqual(self.p.err_reads, 50)
+        self.order()  # stdout continue d'être lu
+        self.assertTrue(self.c.busy())
+
+    def test_unknown_request_gets_method_not_found(self):
+        m = {"jsonrpc": "2.0", "id": "core-3", "method": "autre", "params": {}}
+        self.p.feed((json.dumps(m) + "\n").encode())
+        self.assertEqual(self.new()[0]["error"]["code"], -32601)
 
 
 class PluginSourceTest(unittest.TestCase):
@@ -226,14 +400,14 @@ def load_plugin():
     mod("qgis")
     mod("qgis.core", QgsApplication=object, QgsProject=StubProject)
     mod("qgis.PyQt")
-    mod("qgis.PyQt.QtCore", QProcess=StubProcess, QSettings=type(
+    mod("qgis.PyQt.QtCore", QProcess=StubProcess, QTimer=object, QSettings=type(
         "S", (), {"value": lambda self, *a: "", "setValue": lambda self, *a: None}), Qt=object)
     mod("qgis.PyQt.QtWidgets", QDockWidget=StubWidget, QFileDialog=StubWidget,
         QLabel=StubWidget, QPushButton=StubWidget, QVBoxLayout=StubWidget, QWidget=StubWidget)
     pkg = types.ModuleType("cassini_stub")
     pkg.__path__ = [PKG]
     sys.modules["cassini_stub"] = pkg
-    for n in ("client", "locator"):
+    for n in ("client", "gestures", "locator"):
         sys.modules["cassini_stub." + n] = sys.modules[n]
     return importlib.import_module("cassini_stub.plugin")
 
@@ -264,7 +438,7 @@ class PluginBehaviourTest(unittest.TestCase):
         StubProject.name = "/a/p.qgz"
         self.mod.locator.locate = lambda s: ("/x/cassini", "PATH")
         self.mod.client.CoreClient = type("C", (), {
-            "__init__": lambda s, proc, cb: None,
+            "__init__": lambda s, proc, cb, reg=None: None,
             "start": lambda s, prog, proj: None,
             "stop": lambda s: None})
         self.p._refresh()

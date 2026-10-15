@@ -6,7 +6,7 @@ Qt uniquement par `qgis.PyQt` (AD-18). Aucune logique métier ici.
 import os
 
 from qgis.core import QgsApplication, QgsProject
-from qgis.PyQt.QtCore import QProcess, QSettings, Qt
+from qgis.PyQt.QtCore import QProcess, QSettings, Qt, QTimer
 from qgis.PyQt.QtWidgets import (
     QDockWidget,
     QFileDialog,
@@ -16,7 +16,7 @@ from qgis.PyQt.QtWidgets import (
     QWidget,
 )
 
-from . import client, locator
+from . import client, gestures, locator
 
 NO_PROJECT = "Ouvrez ou enregistrez un projet QGIS : Cassini se lance avec le projet."
 NOT_FOUND = (
@@ -25,6 +25,43 @@ NOT_FOUND = (
     "Rien n'est téléchargé."
 )
 
+SLOW_TICKS = 100  # 100 x 100 ms : un geste de test de dix secondes
+
+
+class SlowProbe:
+    """Geste de test `test.qgis_probe` : lent, sans appel bloquant.
+
+    Avance par un QTimer de la boucle d'événements, donc QGIS reste réactif.
+    """
+
+    def __init__(self):
+        self._timer = None
+        self._done = None
+        self._ticks = 0
+
+    def start(self, params, done):
+        self._done = done
+        self._timer = QTimer()
+        self._timer.setInterval(100)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start()
+
+    def _tick(self):
+        self._ticks += 1
+        if self._ticks >= SLOW_TICKS:
+            self._finish(result={"ok": True})
+
+    def cancel(self):
+        self._finish(error=gestures.GestureError("qgis.cancelled", "Geste annulé."))
+
+    def _finish(self, result=None, error=None):
+        if self._timer is not None:
+            self._timer.stop()
+            self._timer = None
+        done, self._done = self._done, None
+        if done is not None:
+            done(result=result, error=error)
+
 
 class CassiniPlugin:
     def __init__(self, iface):
@@ -32,6 +69,7 @@ class CassiniPlugin:
         self.dock = None
         self.label = None
         self.button = None
+        self.stop_button = None
         self.client = None
         self.process = None
         self.project_path = None
@@ -47,8 +85,12 @@ class CassiniPlugin:
         self.button = QPushButton("Choisir le noyau à la main…")
         self.button.clicked.connect(self._choose_core)
         self.button.hide()
+        self.stop_button = QPushButton("Arrêter le geste en cours")
+        self.stop_button.clicked.connect(self._cancel_order)
+        self.stop_button.hide()
         layout.addWidget(self.label)
         layout.addWidget(self.button)
+        layout.addWidget(self.stop_button)
         layout.addStretch(1)
         self.dock.setWidget(body)
         self.iface.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock)
@@ -106,11 +148,16 @@ class CassiniPlugin:
         program, origin = found
         self._show("Démarrage du noyau (%s)…" % origin)
         self.process = QProcess()
-        self.client = client.CoreClient(self.process, self._on_event)
+        registry = gestures.GestureRegistry()
+        registry.register("test.qgis_probe", SlowProbe)
+        self.client = client.CoreClient(self.process, self._on_event, registry)
         self.client.start(program, self.project_path)
 
     def _on_event(self, kind, payload):
-        if kind == client.READY:
+        if kind in (client.ORDER_STARTED, client.ORDER_ENDED):
+            if self.stop_button is not None:
+                self.stop_button.setVisible(kind == client.ORDER_STARTED)
+        elif kind == client.READY:
             self._show(
                 "Noyau Cassini %s, protocole %s."
                 % (payload["core_version"], payload["protocol_version"])
@@ -120,6 +167,8 @@ class CassiniPlugin:
             self.client = None
             self.process = None
             self.project_path = None
+            if self.stop_button is not None:
+                self.stop_button.hide()
 
     def _choose_core(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -129,6 +178,10 @@ class CassiniPlugin:
             QSettings().setValue(locator.SETTING_KEY, path)
             self.project_path = None
             self._refresh()
+
+    def _cancel_order(self):
+        if self.client is not None:
+            self.client.cancel_current()
 
     def _stop(self, *_):
         if self.client is not None:
