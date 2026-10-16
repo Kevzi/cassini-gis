@@ -12,6 +12,7 @@ sys.path.insert(0, PKG)
 import client  # noqa: E402
 import gestures  # noqa: E402
 import locator  # noqa: E402
+import texts  # noqa: E402,F401
 
 
 class Signal:
@@ -132,7 +133,7 @@ class ClientTest(unittest.TestCase):
         self.p.feed(reply(2, {"core_version": "0.1.0", "protocol_version": 1}))
         self.assertEqual(
             self.events,
-            [(client.READY, {"core_version": "0.1.0", "protocol_version": 1})],
+            [(client.READY, {"core_version": "0.1.0", "protocol_version": 1, "commands": []})],
         )
 
     def test_mismatch_shown_as_is_and_core_stopped(self):
@@ -333,6 +334,118 @@ class OrderTest(unittest.TestCase):
         self.assertEqual(self.new()[0]["error"]["code"], -32601)
 
 
+class RunTest(unittest.TestCase):
+    CATALOGUE = [
+        {"id": "system.about", "available": True, "cancellable": False,
+         "params_schema": {"type": "object"}},
+        {"id": "test.qgis_probe", "available": True, "cancellable": True},
+    ]
+
+    def setUp(self):
+        self.p = FakeProcess()
+        self.events = []
+        self.c = client.CoreClient(self.p, lambda k, v: self.events.append((k, v)))
+        self.c.start("cassini", "/p.qgz")
+
+    def ready(self):
+        self.p.feed(reply(1, {"protocol_version": 1, "core_version": "0.1",
+                              "commands": self.CATALOGUE}))
+        self.p.feed(reply(2, {"core_version": "0.1.0", "protocol_version": 1}))
+        self.base = len(self.p.written)
+
+    def new(self):
+        return [json.loads(w) for w in self.p.written[self.base:]]
+
+    def kinds(self):
+        return [k for k, _ in self.events]
+
+    def test_catalogue_comes_with_ready(self):
+        self.ready()
+        self.assertEqual(self.events[0][1]["commands"], self.CATALOGUE)
+        self.assertEqual(self.c.catalogue(), self.CATALOGUE)
+
+    def test_run_before_ready_sends_nothing(self):
+        self.assertFalse(self.c.run_command("system.about"))
+        self.assertEqual(len(self.p.written), 1)
+
+    def test_run_done(self):
+        self.ready()
+        self.assertTrue(self.c.run_command("system.about", {}))
+        sent = self.new()[0]
+        self.assertEqual(sent["method"], "command.run")
+        self.assertEqual(sent["params"], {"command": "system.about", "params": {}})
+        self.assertTrue(self.c.run_busy())
+        self.p.feed(reply(sent["id"], {"core_version": "0.1.0"}))
+        self.assertEqual(self.kinds()[-2:], [client.RUN_STARTED, client.RUN_DONE])
+        self.assertEqual(
+            self.events[-1],
+            (client.RUN_DONE, {"command": "system.about", "result": {"core_version": "0.1.0"}}),
+        )
+        self.assertFalse(self.c.run_busy())
+
+    def test_one_command_at_a_time(self):
+        self.ready()
+        self.assertTrue(self.c.run_command("test.qgis_probe"))
+        self.assertFalse(self.c.run_command("system.about"))
+        self.assertEqual(len(self.new()), 1)
+
+    def test_core_error_is_an_event_not_an_exception(self):
+        self.ready()
+        self.c.run_command("system.about", {"x": 1})
+        err = {"code": -32000, "message": "m",
+               "data": {"code": "registry.invalid_params", "message": "Paramètres refusés."}}
+        self.p.feed(reply(self.new()[0]["id"], error=err))
+        kind, payload = self.events[-1]
+        self.assertEqual(kind, client.RUN_FAILED)
+        self.assertEqual(payload["code"], "registry.invalid_params")
+        self.assertEqual(payload["message"], "Paramètres refusés.")
+        self.assertFalse(self.c.run_busy())
+        self.assertFalse(self.p.closed)
+
+    def test_cancel_sends_request_cancel_for_the_run_in_flight(self):
+        self.ready()
+        self.c.run_command("test.qgis_probe")
+        run_id = self.new()[0]["id"]
+        self.assertTrue(self.c.cancel_run())
+        cancel = self.new()[1]
+        self.assertEqual(cancel["method"], "request.cancel")
+        self.assertEqual(cancel["params"], {"id": run_id})
+        self.assertIn("id", cancel)  # une requête, pas une notification
+        self.assertFalse(self.p.closed)  # le noyau n'est pas tué
+        self.p.feed(reply(cancel["id"], {"cancelled": True}))
+        self.assertNotIn(client.RUN_CANCELLED, self.kinds())
+        err = {"code": -32000, "message": "m",
+               "data": {"code": "registry.cancelled", "message": "Annulée."}}
+        self.p.feed(reply(run_id, error=err))
+        self.assertEqual(self.events[-1], (client.RUN_CANCELLED, {"command": "test.qgis_probe"}))
+        self.assertFalse(self.c.run_busy())
+        self.assertTrue(self.c.run_command("system.about"))  # libre aussitôt
+
+    def test_cancel_refused_keeps_the_run(self):
+        self.ready()
+        self.c.run_command("system.about")
+        self.c.cancel_run()
+        cancel = self.new()[1]
+        err = {"code": -32000, "message": "m",
+               "data": {"code": "request.not_cancellable", "message": "Non."}}
+        self.p.feed(reply(cancel["id"], error=err))
+        self.assertTrue(self.c.run_busy())
+        self.assertNotIn(client.RUN_FAILED, self.kinds())
+        self.assertFalse(self.p.closed)
+
+    def test_cancel_without_run_sends_nothing(self):
+        self.ready()
+        self.assertFalse(self.c.cancel_run())
+        self.assertEqual(self.new(), [])
+
+    def test_core_death_fails_the_run(self):
+        self.ready()
+        self.c.run_command("test.qgis_probe")
+        self.p.finished.emit(1, 0)
+        self.assertEqual(self.kinds()[-2:], [client.RUN_FAILED, client.DIED])
+        self.assertEqual(self.events[-2][1]["code"], client.CORE_DIED)
+
+
 class PluginSourceTest(unittest.TestCase):
     def source(self, name):
         with open(os.path.join(PKG, name), encoding="utf-8") as f:
@@ -381,10 +494,24 @@ class StubProcess:
 
 class StubWidget:
     def __init__(self, *a):
-        self.visible = None
+        pass
 
-    def setVisible(self, v):
-        self.visible = v
+
+class FakePanel:
+    def __init__(self, actions):
+        self.lang = "fr"
+        self.banners = []
+        self.ready = None
+        self.events = []
+
+    def set_banner(self, kind):
+        self.banners.append(kind)
+
+    def set_ready(self, catalogue):
+        self.ready = catalogue
+
+    def on_event(self, kind, payload):
+        self.events.append((kind, payload))
 
 
 def load_plugin():
@@ -402,13 +529,13 @@ def load_plugin():
     mod("qgis.PyQt")
     mod("qgis.PyQt.QtCore", QProcess=StubProcess, QTimer=object, QSettings=type(
         "S", (), {"value": lambda self, *a: "", "setValue": lambda self, *a: None}), Qt=object)
-    mod("qgis.PyQt.QtWidgets", QDockWidget=StubWidget, QFileDialog=StubWidget,
-        QLabel=StubWidget, QPushButton=StubWidget, QVBoxLayout=StubWidget, QWidget=StubWidget)
+    mod("qgis.PyQt.QtWidgets", QDockWidget=StubWidget, QFileDialog=StubWidget)
     pkg = types.ModuleType("cassini_stub")
     pkg.__path__ = [PKG]
     sys.modules["cassini_stub"] = pkg
-    for n in ("client", "gestures", "locator"):
+    for n in ("client", "gestures", "locator", "texts"):
         sys.modules["cassini_stub." + n] = sys.modules[n]
+    mod("cassini_stub.panel", CassiniPanel=FakePanel)
     return importlib.import_module("cassini_stub.plugin")
 
 
@@ -416,37 +543,62 @@ class PluginBehaviourTest(unittest.TestCase):
     def setUp(self):
         self.mod = load_plugin()
         self.p = self.mod.CassiniPlugin(None)
-        self.shown = []
-        self.p._show = lambda text, manual=False: self.shown.append((text, manual))
-        self.p.label = object()
+        self.p.panel = FakePanel(self.p)
         StubProcess.created = 0
+        self.addCleanup(setattr, self.mod.locator, 'locate', self.mod.locator.locate)
+
+    def fake_client(self):
+        real = self.mod.client.CoreClient
+        self.addCleanup(setattr, self.mod.client, 'CoreClient', real)
+        self.mod.client.CoreClient = type("C", (), {
+            "__init__": lambda s, proc, cb, reg=None: None,
+            "start": lambda s, prog, proj: None,
+            "stop": lambda s: None})
 
     def test_no_project(self):
         StubProject.name = ""
         self.p._refresh()
-        self.assertEqual(self.shown, [(self.mod.NO_PROJECT, False)])
+        self.assertEqual(self.p.panel.banners, ["no_project"])
         self.assertEqual(StubProcess.created, 0)
 
     def test_core_not_found(self):
         StubProject.name = "/a/p.qgz"
         self.mod.locator.locate = lambda s: None
         self.p._refresh()
-        self.assertEqual(self.shown, [(self.mod.NOT_FOUND, True)])
+        self.assertEqual(self.p.panel.banners, ["not_found"])
         self.assertEqual(StubProcess.created, 0)
 
     def test_died_allows_relaunch(self):
         StubProject.name = "/a/p.qgz"
         self.mod.locator.locate = lambda s: ("/x/cassini", "PATH")
-        self.mod.client.CoreClient = type("C", (), {
-            "__init__": lambda s, proc, cb, reg=None: None,
-            "start": lambda s, prog, proj: None,
-            "stop": lambda s: None})
+        self.fake_client()
         self.p._refresh()
         self.assertEqual(StubProcess.created, 1)
         self.p._on_event(self.mod.client.DIED, "mort")
+        self.assertEqual(self.p.panel.banners[-1], "died")
         self.assertIsNone(self.p.project_path)
-        self.p._refresh()
+        self.p.relaunch()
         self.assertEqual(StubProcess.created, 2)
+
+    def test_protocol_refusal_is_not_a_relaunchable_death(self):
+        StubProject.name = "/a/p.qgz"
+        self.mod.locator.locate = lambda s: ("/x/cassini", "PATH")
+        self.fake_client()
+        self.p._refresh()
+        self.p._on_event(self.mod.client.FAILED, "versions")
+        self.assertEqual(self.p.panel.banners[-1], "refused")
+
+    def test_ready_and_run_events_reach_the_panel(self):
+        self.p._on_event(self.mod.client.READY, {"commands": [{"id": "a"}]})
+        self.assertEqual(self.p.panel.ready, [{"id": "a"}])
+        self.p._on_event(self.mod.client.RUN_DONE, {"command": "a", "result": 1})
+        self.assertEqual(self.p.panel.events[0][0], self.mod.client.RUN_DONE)
+
+    def test_stop_sends_cancel_run(self):
+        calls = []
+        self.p.client = type("C", (), {"cancel_run": lambda s: calls.append(1)})()
+        self.p.stop()
+        self.assertEqual(calls, [1])
 
 
 if __name__ == "__main__":

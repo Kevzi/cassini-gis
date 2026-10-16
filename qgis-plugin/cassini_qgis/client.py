@@ -21,10 +21,16 @@ FAILED = "failed"  # payload : message à afficher tel quel
 DIED = "died"  # payload : message
 ORDER_STARTED = "order_started"  # payload : id de la commande
 ORDER_ENDED = "order_ended"  # payload : id de la commande
+RUN_STARTED = "run_started"  # payload : {"command"}
+RUN_DONE = "run_done"  # payload : {"command", "result"}
+RUN_CANCELLED = "run_cancelled"  # payload : {"command"}
+RUN_FAILED = "run_failed"  # payload : {"command", "code", "message"}
 
 GESTURE_UNKNOWN = "qgis.gesture_unknown"
 GESTURE_FAILED = "qgis.gesture_failed"
 BUSY = "qgis.busy"
+CORE_DIED = "client.core_died"
+CANCELLED = "registry.cancelled"
 
 
 class _NoGestures:
@@ -44,6 +50,9 @@ class CoreClient:
         self._pending = {}  # id -> étape
         self._next_id = 1
         self._current = None  # ordre en cours : {"id", "command", "gesture"}
+        self._catalogue = []  # entrées reçues à session.hello
+        self._ready = False
+        self._run = None  # command.run en vol : {"id", "command"}
         self._closing = False
         self._done = False  # un événement terminal a déjà été rendu
         process.readyReadStandardOutput.connect(self._read)
@@ -73,6 +82,7 @@ class CoreClient:
         """
         self._closing = True
         self._done = True
+        self._run = None
         self._abort_current()
         self._p.closeWriteChannel()
         self._p.waitForFinished(wait_ms)
@@ -88,6 +98,39 @@ class CoreClient:
     def busy(self):
         return self._current is not None
 
+    def catalogue(self):
+        """Catalogue reçu à `session.hello` (liste d'entrées telles que le noyau les décrit)."""
+        return list(self._catalogue)
+
+    def run_busy(self):
+        return self._run is not None
+
+    def run_command(self, command, params=None):
+        """Envoie `command.run` et rend la main aussitôt (AD-5 : une seule à la fois).
+
+        La réponse arrive par le signal de lecture, sous forme d'un événement
+        RUN_DONE, RUN_CANCELLED ou RUN_FAILED. Rend False si rien n'est parti.
+        """
+        if not self._ready or self._run is not None or self._closing:
+            return False
+        ident = self._request(
+            "command.run", {"command": command, "params": params or {}}, "run"
+        )
+        self._run = {"id": ident, "command": command}
+        self._notify(RUN_STARTED, {"command": command})
+        return True
+
+    def cancel_run(self):
+        """Envoie `request.cancel` pour le `command.run` en vol ; ne tue jamais le noyau.
+
+        Le noyau refuse lui-même une commande non annulable (AD-12).
+        """
+        run = self._run
+        if run is None or self._closing:
+            return False
+        self._request("request.cancel", {"id": run["id"]}, "cancel")
+        return True
+
     # -- envoi --------------------------------------------------------
     def _write(self, message):
         if self._closing:
@@ -100,6 +143,7 @@ class CoreClient:
         self._next_id += 1
         self._pending[ident] = step
         self._write({"jsonrpc": "2.0", "id": ident, "method": method, "params": params})
+        return ident
 
     def _respond(self, ident, result=None, error=None):
         message = {"jsonrpc": "2.0", "id": ident}
@@ -144,18 +188,56 @@ class CoreClient:
         step = self._pending.pop(msg.get("id"), None)
         if step is None:
             return
-        if "error" in msg:
+        if step == "cancel":
+            return  # le verdict arrive par la réponse du command.run
+        if step == "run":
+            self._run_answer(msg)
+        elif "error" in msg:
             self._fail(self._error_message(msg["error"]))
         elif step == "hello":
+            result = msg.get("result") or {}
+            commands = result.get("commands")
+            self._catalogue = [c for c in commands if isinstance(c, dict)] if isinstance(commands, list) else []
             self._request("command.run", {"command": "system.about", "params": {}}, "about")
         elif step == "about":
             result = msg.get("result") or {}
+            self._ready = True
             self._finish(
                 READY,
                 {
                     "core_version": result.get("core_version"),
                     "protocol_version": result.get("protocol_version"),
+                    "commands": self.catalogue(),
                 },
+            )
+
+    def _run_answer(self, msg):
+        run, self._run = self._run, None
+        command = run["command"] if run else None
+        if "error" in msg:
+            error = msg["error"]
+            data = error.get("data") if isinstance(error, dict) else None
+            code = data.get("code") if isinstance(data, dict) else None
+            if code == CANCELLED:
+                self._notify(RUN_CANCELLED, {"command": command})
+                return
+            self._notify(
+                RUN_FAILED,
+                {
+                    "command": command,
+                    "code": code if isinstance(code, str) else "core.unknown",
+                    "message": self._error_message(error),
+                },
+            )
+        else:
+            self._notify(RUN_DONE, {"command": command, "result": msg.get("result")})
+
+    def _fail_run(self, message):
+        run, self._run = self._run, None
+        if run is not None:
+            self._notify(
+                RUN_FAILED,
+                {"command": run["command"], "code": CORE_DIED, "message": message},
             )
 
     def _handle_call(self, msg):
@@ -277,9 +359,11 @@ class CoreClient:
     def _finished(self, *_):
         if not self._closing:
             self._abort_current()
+            self._fail_run("Le noyau Cassini s'est arrêté.")
             self._finish(DIED, "Le noyau Cassini s'est arrêté.")
 
     def _error(self, *_):
         if not self._closing:
             self._abort_current()
+            self._fail_run("Le noyau Cassini s'est arrêté.")
             self._finish(DIED, "Le noyau Cassini n'a pas pu démarrer ou s'est arrêté.")

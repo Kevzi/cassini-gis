@@ -15,8 +15,8 @@ Licence GPL, comme QGIS. L'extension ne contient aucun binaire : le noyau
 
 ## Où l'extension cherche le noyau (dans cet ordre)
 
-1. le réglage QGIS `cassini/core_path` (rempli par le bouton « Choisir le noyau
-   à la main » du panneau) ;
+1. le réglage QGIS `cassini/core_path` (rempli par le bouton « Choisir le noyau »
+   du panneau) ;
 2. la variable d'environnement `CASSINI_CORE` ;
 3. l'emplacement d'installation : `%LOCALAPPDATA%\Cassini\bin\cassini.exe`
    (Windows) ou `~/.local/share/cassini/bin/cassini` (Linux) ;
@@ -29,12 +29,18 @@ Sans QGIS : `python -I -m unittest discover -s qgis-plugin/tests`.
 Garde statique (imports réseau et PyQt directs interdits, taille, versions de
 `metadata.txt`) : `python -I qgis-plugin/tests/check_extension.py`.
 
-Recette manuelle « QGIS ne gèle pas pendant un geste lent » : avec un noyau qui
-envoie `command.run` de `test.qgis_probe` (geste de test de dix secondes), le
-panneau affiche le bouton « Arrêter le geste en cours ». Pendant ces dix
-secondes, déplacez la carte et ouvrez des menus : l'interface reste réactive.
-Cliquez sur le bouton : le geste s'arrête, le noyau reçoit une réponse à son
-ordre (sans que le processus soit tué) et le bouton disparaît.
+Recette manuelle du panneau [9.4] (dans QGIS, avec un noyau installé) :
+
+1. Ouvrez un projet : le logo et la saisie grisée (« Disponible avec l'agent. »)
+   sont visibles ; « Démarrage du noyau… » puis le bandeau disparaît.
+2. Dépliez « Mode expert », choisissez `system.about`, cliquez sur Lancer : le
+   résultat dit que le noyau répond, le journal porte une ligne « Terminée ».
+3. Choisissez `test.qgis_probe` (geste lent de dix secondes), cliquez sur Lancer
+   puis sur Arrêter. Pendant l'attente, déplacez la carte et ouvrez des menus :
+   QGIS reste réactif. Le journal note « Annulée » et Lancer réapparaît ; le
+   noyau n'a pas été tué.
+4. Réglages (engrenage) : basculez FR / EN, les textes changent aussitôt.
+5. Sans noyau installé : le bandeau propose « Choisir le noyau ».
 
 Contrôle manuel : charger l'extension, ouvrir un projet, voir les deux versions,
 fermer QGIS et vérifier qu'aucun `cassini` ne reste dans le gestionnaire des

@@ -1,29 +1,16 @@
-"""Panneau ancré minimal du traceur. Pas une interface définitive.
+"""Point d'entrée de l'extension : branche le panneau [9.4] sur le client.
 
-Qt uniquement par `qgis.PyQt` (AD-18). Aucune logique métier ici.
+Qt uniquement par `qgis.PyQt` (AD-18). Aucune logique métier ici : le noyau
+décide, le panneau affiche (AD-4).
 """
 
 import os
 
 from qgis.core import QgsApplication, QgsProject
 from qgis.PyQt.QtCore import QProcess, QSettings, Qt, QTimer
-from qgis.PyQt.QtWidgets import (
-    QDockWidget,
-    QFileDialog,
-    QLabel,
-    QPushButton,
-    QVBoxLayout,
-    QWidget,
-)
+from qgis.PyQt.QtWidgets import QDockWidget, QFileDialog
 
-from . import client, gestures, locator
-
-NO_PROJECT = "Ouvrez ou enregistrez un projet QGIS : Cassini se lance avec le projet."
-NOT_FOUND = (
-    "Le noyau Cassini est introuvable. Installez le paquet Cassini (le noyau "
-    "n'est pas fourni avec l'extension), ou désignez le fichier à la main. "
-    "Rien n'est téléchargé."
-)
+from . import client, gestures, locator, panel, texts
 
 SLOW_TICKS = 100  # 100 x 100 ms : un geste de test de dix secondes
 
@@ -67,9 +54,7 @@ class CassiniPlugin:
     def __init__(self, iface):
         self.iface = iface
         self.dock = None
-        self.label = None
-        self.button = None
-        self.stop_button = None
+        self.panel = None
         self.client = None
         self.process = None
         self.project_path = None
@@ -78,21 +63,8 @@ class CassiniPlugin:
     def initGui(self):
         self.dock = QDockWidget("Cassini", self.iface.mainWindow())
         self.dock.setObjectName("CassiniDock")
-        body = QWidget()
-        layout = QVBoxLayout(body)
-        self.label = QLabel("")
-        self.label.setWordWrap(True)
-        self.button = QPushButton("Choisir le noyau à la main…")
-        self.button.clicked.connect(self._choose_core)
-        self.button.hide()
-        self.stop_button = QPushButton("Arrêter le geste en cours")
-        self.stop_button.clicked.connect(self._cancel_order)
-        self.stop_button.hide()
-        layout.addWidget(self.label)
-        layout.addWidget(self.button)
-        layout.addWidget(self.stop_button)
-        layout.addStretch(1)
-        self.dock.setWidget(body)
+        self.panel = panel.CassiniPanel(self)
+        self.dock.setWidget(self.panel)
         self.iface.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock)
         QgsProject.instance().readProject.connect(self._refresh)
         QgsProject.instance().projectSaved.connect(self._refresh)
@@ -118,19 +90,43 @@ class CassiniPlugin:
             self.iface.removeDockWidget(self.dock)
             self.dock.deleteLater()
             self.dock = None
+            self.panel = None
 
-    # -- logique du panneau --------------------------------------------
-    def _show(self, text, manual=False):
-        if self.label is not None:
-            self.label.setText(text)
-            self.button.setVisible(manual)
+    # -- actions demandées par le panneau --------------------------------
+    def run(self, command, params):
+        if self.client is not None:
+            self.client.run_command(command, params)
+
+    def stop(self):
+        if self.client is not None:
+            self.client.cancel_run()  # request.cancel, jamais la mort du noyau
+
+    def choose_core(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self.iface.mainWindow(),
+            texts.tr(self.panel.lang if self.panel else "fr", "choose_core_title"),
+        )
+        if path:
+            QSettings().setValue(locator.SETTING_KEY, path)
+            self.project_path = None
+            self._refresh()
+
+    def relaunch(self):
+        self._stop()
+        self.project_path = None
+        self._refresh()
+
+    # -- logique du plugin ----------------------------------------------
+    def _banner(self, kind):
+        if self.panel is not None:
+            self.panel.set_banner(kind)
 
     def _refresh(self, *_):
         file_name = QgsProject.instance().fileName()
         if not file_name:
             self._stop()
             self.project_path = None
-            self._show(NO_PROJECT)
+            self._banner("no_project")
             return
         path = os.path.abspath(file_name).replace("\\", "/")
         if path == self.project_path and self.client is not None:
@@ -143,10 +139,11 @@ class CassiniPlugin:
         setting = QSettings().value(locator.SETTING_KEY, "") or ""
         found = locator.locate(str(setting))
         if found is None:
-            self._show(NOT_FOUND, manual=True)
+            self.project_path = None
+            self._banner("not_found")
             return
-        program, origin = found
-        self._show("Démarrage du noyau (%s)…" % origin)
+        program, _origin = found
+        self._banner("starting")
         self.process = QProcess()
         registry = gestures.GestureRegistry()
         registry.register("test.qgis_probe", SlowProbe)
@@ -154,34 +151,23 @@ class CassiniPlugin:
         self.client.start(program, self.project_path)
 
     def _on_event(self, kind, payload):
-        if kind in (client.ORDER_STARTED, client.ORDER_ENDED):
-            if self.stop_button is not None:
-                self.stop_button.setVisible(kind == client.ORDER_STARTED)
-        elif kind == client.READY:
-            self._show(
-                "Noyau Cassini %s, protocole %s."
-                % (payload["core_version"], payload["protocol_version"])
-            )
-        else:
-            self._show(str(payload))
+        if self.panel is None:
+            return
+        if kind == client.READY:
+            self.panel.set_ready(payload.get("commands", []))
+        elif kind in (client.FAILED, client.DIED):
             self.client = None
             self.process = None
             self.project_path = None
-            if self.stop_button is not None:
-                self.stop_button.hide()
-
-    def _choose_core(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self.iface.mainWindow(), "Choisir le noyau Cassini"
-        )
-        if path:
-            QSettings().setValue(locator.SETTING_KEY, path)
-            self.project_path = None
-            self._refresh()
-
-    def _cancel_order(self):
-        if self.client is not None:
-            self.client.cancel_current()
+            # FAILED : le noyau a répondu non (protocole) ; DIED : il s'est arrêté.
+            self._banner("refused" if kind == client.FAILED else "died")
+        elif kind in (
+            client.RUN_STARTED,
+            client.RUN_DONE,
+            client.RUN_CANCELLED,
+            client.RUN_FAILED,
+        ):
+            self.panel.on_event(kind, payload)
 
     def _stop(self, *_):
         if self.client is not None:

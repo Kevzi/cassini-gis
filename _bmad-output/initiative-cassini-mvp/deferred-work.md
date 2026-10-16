@@ -86,3 +86,10 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-facade-qgis/story-garde-hors-ligne-et-recette-du-python-de-l-extension-plan.md`
   summary: Faire couvrir `ai/Cargo.toml` par le test « noyau sans QGIS ».
   evidence: `/ai` est du noyau (CLAUDE.md §10) mais `test_noyau_sans_qgis` ne lit que `core/` et `cli/`.
+
+- source_plan: `epic-facade-qgis/story-panneau-lancer-une-commande-du-registre-voir-son-resultat-l-plan.md`
+  summary: Le bouton local d'arret des gestes (9.1) est retire du panneau ; les gestes lances hors panneau ne sont plus arretables depuis lui.
+  evidence: plugin._on_event ne traite plus ORDER_STARTED/ORDER_ENDED et cancel_current est inutilise ; a trancher avec l'epic agent (5).
+- source_plan: `epic-facade-qgis/story-panneau-lancer-une-commande-du-registre-voir-son-resultat-l-plan.md`
+  summary: runlog.redact ne masque pas un chemin absolu inclus dans le message d'erreur du noyau (AD-9), non verifie.
+  evidence: _render_result affiche le message brut ; a regler si le noyau emet un jour un chemin dans un message.
