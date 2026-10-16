@@ -6,7 +6,7 @@ l'IA locale en tire des plans corrects. Les règles viennent des essais de l'epi
 section « Ce que l'epic 2 en retient »).
 
 Les règles 1 et 2 sont **contrôlées** par `Registry::check_contract()`
-(`core/src/contract.rs`) ; les règles 3 à 10 sont **écrites, pas vérifiées**.
+(`core/src/contract.rs`) ; les règles 3 à 11 sont **écrites, pas vérifiées**.
 
 ## Contrôlé par le registre
 
@@ -41,3 +41,13 @@ Les règles 1 et 2 sont **contrôlées** par `Registry::check_contract()`
     strict. Le harnais de mesure de l'epic 8 ramène m et km en mètres, s et min
     en secondes avant de comparer (`canonical`, entrée 8.3) ; le noyau, lui, ne
     convertit aucune unité : un paramètre garde celle que le modèle a écrite.
+11. **Ergonomie du panneau : jamais de saisie libre pour ce qui existe déjà.**
+    Un paramètre qui désigne quelque chose que l'utilisateur a déjà (une couche,
+    un fichier, un champ, une valeur connue) se choisit, il ne se tape pas.
+    Le panneau reconnaît le **nom** du paramètre (`form.py`) : `layer_id` ou
+    `*_layer_id` donne la liste déroulante des couches du projet, `path` ou
+    `*_path` donne un champ avec bouton Parcourir, une énumération donne une
+    liste. Une commande nouvelle **reprend ces noms** ; si elle introduit une
+    notion nouvelle (champ d'une couche, valeur d'un attribut…), elle ajoute en
+    même temps le composant de choix correspondant, avec son test, dans la même
+    entrée. Un champ JSON brut n'est qu'un dernier recours.

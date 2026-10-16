@@ -31,6 +31,31 @@ from qgis.PyQt.QtWidgets import (
 
 from . import client, form, runlog, texts
 
+
+class LayerCombo(QComboBox):
+    """Liste déroulante des couches du projet, relue à chaque ouverture."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.reload()
+
+    def reload(self):
+        from qgis.core import QgsProject
+
+        keep = self.currentData()
+        self.clear()
+        for node in QgsProject.instance().layerTreeRoot().findLayers():
+            layer = node.layer()
+            if layer is not None:
+                self.addItem(layer.name(), layer.id())
+        index = self.findData(keep)
+        if index >= 0:
+            self.setCurrentIndex(index)
+
+    def showPopup(self):
+        self.reload()
+        super().showPopup()
+
 LANG_KEY = "cassini/lang"
 EXPERT_KEY = "cassini/expert_open"
 ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
@@ -481,6 +506,8 @@ class CassiniPanel(QWidget):
             label = f.name if f.kind != form.JSON else self.t("raw_json", name=f.name)
             if f.kind == form.BOOLEAN:
                 widget = QCheckBox()
+            elif form.is_layer_field(f):
+                widget = LayerCombo()
             elif f.kind == form.ENUM:
                 widget = QComboBox()
                 if not f.required:
@@ -525,7 +552,7 @@ class CassiniPanel(QWidget):
             widget = self._inputs[f.name]
             if f.kind == form.BOOLEAN:
                 values[f.name] = widget.isChecked()
-            elif f.kind == form.ENUM:
+            elif f.kind == form.ENUM or form.is_layer_field(f):
                 values[f.name] = widget.currentData() or ""
             else:
                 values[f.name] = widget.text()

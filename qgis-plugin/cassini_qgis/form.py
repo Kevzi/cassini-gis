@@ -65,6 +65,11 @@ def is_path_field(field):
     return field.kind == TEXT and (field.name == "path" or field.name.endswith("_path"))
 
 
+def is_layer_field(field):
+    """Un champ texte nommé `layer_id` ou `*_layer_id` désigne une couche du projet."""
+    return field.kind == TEXT and (field.name == "layer_id" or field.name.endswith("_layer_id"))
+
+
 def relative_path(chosen, project_file):
     """Chemin de `chosen` relatif au projet, séparateurs `/` ; None si disques différents.
 

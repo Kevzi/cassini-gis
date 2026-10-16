@@ -195,6 +195,15 @@ class BrowsePathTest(unittest.TestCase):
         found = sorted(f.name for f in fields if form.is_path_field(f))
         self.assertEqual(found, ["out_path", "path"])
 
+    def test_layer_fields_are_recognised(self):
+        fields = form.build_fields(
+            {"type": "object", "properties": {
+                "layer_id": {"type": "string"}, "other_layer_id": {"type": "string"},
+                "path": {"type": "string"}, "layer_id_n": {"type": "integer"}}}
+        )
+        found = sorted(f.name for f in fields if form.is_layer_field(f))
+        self.assertEqual(found, ["layer_id", "other_layer_id"])
+
     def test_relative_to_the_project_with_slashes(self):
         project = os.path.abspath(os.path.join("proj", "villeneuve.qgz"))
         chosen = os.path.abspath(os.path.join("proj", "fr", "data.gpkg"))
