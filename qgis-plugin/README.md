@@ -125,6 +125,18 @@ Recette manuelle de `analysis.zonal_statistics` [ticket 10] (jeu `../donnees-tes
 4. Sonde sous le vrai QGIS : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat"
    qgis-plugin/tests/probe_zonal_statistics.py` doit finir par `RÉSULTAT : OK`.
 
+Recette manuelle de `layout.export_pdf` [ticket 12] (jeu `../donnees-test-cassini/`) :
+
+1. Ouvrez `projet-test-villeneuve.qgz`. Choisissez `layout.export_pdf` : le seul champ est
+   `title` (le fichier `out` est nommé par le noyau, le panneau ne l'affiche pas).
+2. Lancez avec un titre : un PDF A4 paysage apparaît dans le dossier de travail ; ouvert
+   dans un lecteur, il montre le titre, la carte des couches visibles, la légende, la barre
+   d'échelle, la flèche du nord et la ligne « Sources » (noms de fichiers, jamais de chemin).
+3. Décochez toutes les couches puis relancez : `layout.empty`, aucun fichier. Un titre blanc
+   donne `layout.bad_params`. Le projet ne gagne aucune mise en page.
+4. Sonde sous le vrai QGIS : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat"
+   qgis-plugin/tests/probe_layout_export.py` doit finir par `RÉSULTAT : OK`.
+
 Contrôle manuel : charger l'extension, ouvrir un projet, voir les deux versions,
 fermer QGIS et vérifier qu'aucun `cassini` ne reste dans le gestionnaire des
 tâches.
