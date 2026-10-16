@@ -13,6 +13,7 @@ from qgis.PyQt.QtGui import QFontDatabase, QIcon
 from qgis.PyQt.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -152,17 +153,17 @@ class CassiniPanel(QWidget):
         self.title = _title(QLabel())
         self.settings_button = QToolButton()
         self.settings_button.setText("⚙")
-        self.settings_button.setCheckable(True)
-        self.settings_button.toggled.connect(self._toggle_settings)
+        self.settings_button.clicked.connect(self._open_settings)
         head.addWidget(self.logo)
         head.addWidget(self.title, 1)
         head.addWidget(self.settings_button)
         col.addLayout(head)
 
         # Réglages : langue, modèle grisé.
-        self.settings_zone = QWidget()
+        # Fenêtre à part : les réglages ne se mêlent pas au panneau.
+        self.settings_zone = QDialog(self)
+        self.settings_zone.setModal(True)
         sl = QVBoxLayout(self.settings_zone)
-        sl.setContentsMargins(0, 0, 0, 0)
         self.lang_label = QLabel()
         self.lang_box = QComboBox()
         self.lang_box.addItem("Français", "fr")
@@ -175,8 +176,6 @@ class CassiniPanel(QWidget):
         sl.addWidget(self.lang_label)
         sl.addWidget(self.lang_box)
         sl.addWidget(self.model_label)
-        self.settings_zone.setVisible(False)
-        col.addWidget(self.settings_zone)
 
         # Bandeau d'état : un seul à la fois.
         self.banner_zone = QWidget()
@@ -337,6 +336,7 @@ class CassiniPanel(QWidget):
         self.title.setText(t("app_title"))
         self.settings_button.setAccessibleName(t("settings"))
         self.settings_button.setToolTip(t("settings"))
+        self.settings_zone.setWindowTitle(t("settings"))
         self.lang_label.setText(t("settings_language"))
         self.lang_box.setAccessibleName(t("settings_language"))
         self.model_label.setText(t("settings_model"))
@@ -533,8 +533,10 @@ class CassiniPanel(QWidget):
         elif action == "relaunch":
             self._actions.relaunch()
 
-    def _toggle_settings(self, opened):
-        self.settings_zone.setVisible(opened)
+    def _open_settings(self):
+        self.settings_zone.setWindowTitle(self.t("settings"))
+        self.settings_zone.exec()
+        self.settings_button.setFocus()
 
     def _expert_toggled(self, opened):
         try:
@@ -548,12 +550,8 @@ class CassiniPanel(QWidget):
         self.render()  # prend effet tout de suite
 
     def keyPressEvent(self, event):
-        # Échap referme la zone Réglages, sinon le repli du mode expert.
+        # Échap referme le repli du mode expert (la fenêtre Réglages gère le sien).
         if event.key() == Qt.Key.Key_Escape:
-            if self.settings_button.isChecked():
-                self.settings_button.setChecked(False)
-                self.settings_button.setFocus()
-                return
             if self.expert.is_open():
                 self.expert.set_open(False)
                 self.expert.button.setFocus()
