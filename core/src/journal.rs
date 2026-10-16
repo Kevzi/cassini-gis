@@ -11,6 +11,7 @@
 //! par une session en lecture seule, y compris sous Windows, où un verrou pris sur
 //! un fichier en interdit la lecture aux autres.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::Write;
@@ -225,9 +226,22 @@ impl<'a> Session<'a> {
         line.insert("inputs".into(), Value::Array(inputs));
         let cancelled = matches!(outcome, Err(RegistryError::Cancelled(_)));
         match &outcome {
-            Ok(value) => line.insert("result".into(), summarize(value)),
-            Err(RegistryError::Cancelled(_)) => line.insert("cancelled".into(), json!(true)),
-            Err(e) => line.insert("error".into(), json!(e.code())),
+            Ok(value) => {
+                // L'id de couche rendu par l'étape : le rejeu le lie à celui qu'il obtient.
+                if let Some(layer_id) = value.get("layer_id").and_then(Value::as_str) {
+                    line.insert("layer_id".into(), json!(layer_id));
+                }
+                line.insert(
+                    "result".into(),
+                    summarize(&relativize(value, &self.work_dir)),
+                );
+            }
+            Err(RegistryError::Cancelled(_)) => {
+                line.insert("cancelled".into(), json!(true));
+            }
+            Err(e) => {
+                line.insert("error".into(), json!(e.code()));
+            }
         };
         line.insert(
             "versions".into(),
@@ -548,6 +562,8 @@ impl<'a> Replay<'a> {
 
     /// Réexécute chaque étape par `router`, dans l'ordre ; s'arrête au premier écart.
     pub fn run(&self, router: &Router) -> Result<ReplayReport, ErrorReport> {
+        // Un rejeu précédent ne doit pas laisser de fichier qu'un autre pourrait reprendre.
+        let _ = fs::remove_dir_all(&self.replay_dir);
         fs::create_dir_all(&self.replay_dir).map_err(io_error)?;
         let resolver = Resolver {
             registry: self.registry,
@@ -555,6 +571,8 @@ impl<'a> Replay<'a> {
             out_dir: &self.replay_dir,
         };
         let mut replayed = 0;
+        // Ids de couche de la session d'origine -> ids obtenus par ce rejeu.
+        let mut bound: HashMap<String, String> = HashMap::new();
         for (i, line) in self.lines.iter().enumerate() {
             let step = i + 1;
             // Une étape annulée n'a ni résultat ni erreur : on la saute (AD-12).
@@ -568,7 +586,8 @@ impl<'a> Replay<'a> {
                 .spec(id)
                 .ok_or_else(|| crate::registry::RegistryError::UnknownCommand(id.to_string()))
                 .map_err(|e| ErrorReport::from(e).at_step(step))?;
-            let params = line.get("params").cloned().unwrap_or_else(|| json!({}));
+            let mut params = line.get("params").cloned().unwrap_or_else(|| json!({}));
+            substitute(&mut params, &bound);
             let resolved = resolver
                 .resolve_call(id, spec, step, params, &self.ids[..i])
                 .map_err(|e| e.at_step(step))?;
@@ -578,7 +597,9 @@ impl<'a> Replay<'a> {
             }
             let diverged = |why: String| ErrorReport::from(JournalError::Diverged { step, why });
             let same = match (&outcome, line.get("result"), line.get("error")) {
-                (Ok(value), Some(kept), None) => summarize(value) == *kept,
+                (Ok(value), Some(kept), None) => {
+                    same_result(&relativize(value, &self.replay_dir), kept)
+                }
                 (Err(e), None, Some(Value::String(code))) => e.code() == code,
                 _ => false,
             };
@@ -587,11 +608,24 @@ impl<'a> Replay<'a> {
                     "la commande {id} ne redonne pas le même résultat ou la même erreur"
                 )));
             }
+            if let (Ok(value), Some(old)) = (&outcome, line.get("layer_id").and_then(Value::as_str))
+            {
+                if let Some(new) = value.get("layer_id").and_then(Value::as_str) {
+                    bound.insert(old.to_string(), new.to_string());
+                }
+            }
             for name in &spec.output_params {
                 let file = output_file(step, id, &spec.output_params, name, &spec.output_ext);
-                let kept = fs::read(self.work_dir.join(&file)).ok();
                 let again = fs::read(self.replay_dir.join(&file)).ok();
-                if kept != again {
+                if spec.runs_in == Some(crate::registry::RunsIn::Qgis) {
+                    // GeoPackage et PDF portent dates et identifiants : la fidélité d'une
+                    // sortie de QGIS tient au résultat typé, pas aux octets.
+                    if again.is_none_or(|bytes| bytes.is_empty()) {
+                        return Err(diverged(format!(
+                            "la sortie « {name} » de la commande {id} est absente ou vide"
+                        )));
+                    }
+                } else if fs::read(self.work_dir.join(&file)).ok() != again {
                     return Err(diverged(format!(
                         "la sortie « {name} » de la commande {id} n'a pas les mêmes octets"
                     )));
@@ -602,6 +636,64 @@ impl<'a> Replay<'a> {
             steps: replayed,
             identical: true,
         })
+    }
+}
+
+/// Remplace, dans toutes les chaînes de `value`, un ancien id de couche par le neuf.
+fn substitute(value: &mut Value, bound: &HashMap<String, String>) {
+    match value {
+        Value::String(s) => {
+            if let Some(new) = bound.get(s.as_str()) {
+                *s = new.clone();
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(|v| substitute(v, bound)),
+        Value::Object(map) => map.values_mut().for_each(|v| substitute(v, bound)),
+        _ => {}
+    }
+}
+
+/// Copie où tout chemin sous `out_dir` devient son nom de fichier : le dossier de sortie
+/// diffère entre l'exécution et le rejeu, et le journal ne garde aucun chemin absolu (AD-9).
+fn relativize(value: &Value, out_dir: &Path) -> Value {
+    match value {
+        Value::String(s) => {
+            let path = Path::new(s);
+            match path
+                .is_absolute()
+                .then(|| path.strip_prefix(out_dir).ok())
+                .flatten()
+            {
+                Some(rest) if !rest.as_os_str().is_empty() => Value::String(posix(rest)),
+                _ => value.clone(),
+            }
+        }
+        Value::Array(items) => Value::Array(items.iter().map(|v| relativize(v, out_dir)).collect()),
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(k, v)| (k.clone(), relativize(v, out_dir)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// Copie sans le `layer_id` de premier niveau : valeur de session, jamais comparée.
+fn without_layer_id(value: &Value) -> Value {
+    let mut copy = value.clone();
+    if let Some(map) = copy.as_object_mut() {
+        map.remove("layer_id");
+    }
+    copy
+}
+
+/// Le résultat rejoué redonne le résultat gardé, au `layer_id` près.
+fn same_result(value: &Value, kept: &Value) -> bool {
+    let again = summarize(value);
+    if again.get("truncated") == Some(&Value::Bool(true)) {
+        again == *kept
+    } else {
+        without_layer_id(&again) == without_layer_id(kept)
     }
 }
 
@@ -940,6 +1032,22 @@ mod tests {
     }
 
     #[test]
+    fn a_result_path_under_the_output_folder_becomes_a_file_name() {
+        let out = std::env::temp_dir().join("sortie");
+        let value = json!({
+            "file": out.join("4-x.pdf").to_string_lossy(),
+            "other": std::env::temp_dir().join("ailleurs").join("y.pdf").to_string_lossy(),
+            "list": [out.join("5-z.gpkg").to_string_lossy()],
+            "n": 3,
+        });
+        let r = relativize(&value, &out);
+        assert_eq!(r["file"], "4-x.pdf");
+        assert_eq!(r["list"], json!(["5-z.gpkg"]));
+        assert_eq!(r["other"], value["other"]);
+        assert_eq!(r["n"], 3);
+    }
+
+    #[test]
     fn a_big_result_is_summarized() {
         let big = json!({"text": "x".repeat(500)});
         let summary = summarize(&big);
@@ -1209,6 +1317,148 @@ mod tests {
         assert_eq!(copied, journal);
         assert!(!copied.contains(&moved_token));
         let _ = fs::remove_dir_all(moved);
+    }
+
+    /// QGIS de test : chaque « session » (`generation`) rend d'autres ids de couche
+    /// et des octets de sortie différents, comme le vrai QGIS.
+    struct SessionQgis {
+        generation: u32,
+        count: std::cell::Cell<u32>,
+        feature_count: u64,
+        empty_output: bool,
+    }
+
+    impl SessionQgis {
+        fn new(generation: u32) -> Self {
+            SessionQgis {
+                generation,
+                count: std::cell::Cell::new(0),
+                feature_count: 4,
+                empty_output: false,
+            }
+        }
+
+        fn layer_id(&self, n: u32) -> String {
+            format!("couche_g{}_{n}", self.generation)
+        }
+    }
+
+    impl Executor for SessionQgis {
+        fn execute(&self, id: &str, p: Value) -> Result<Value, RegistryError> {
+            let n = self.count.get() + 1;
+            self.count.set(n);
+            match id {
+                "layer.add" => Ok(json!({"layer_id": self.layer_id(n), "name": "points"})),
+                "analysis.buffer" => {
+                    // Le paramètre `layer_id` doit être celui de CETTE session.
+                    assert_eq!(p["layer_id"], json!(self.layer_id(1)));
+                    let bytes = if self.empty_output {
+                        String::new()
+                    } else {
+                        format!("gpkg-{}", self.generation)
+                    };
+                    fs::write(p["out"].as_str().unwrap(), bytes).unwrap();
+                    Ok(json!({
+                        "layer_id": self.layer_id(n),
+                        "feature_count": self.feature_count,
+                    }))
+                }
+                other => panic!("commande inattendue : {other}"),
+            }
+        }
+    }
+
+    /// Journal de deux étapes QGIS écrit par la génération 1.
+    fn qgis_journal(project: &Path) {
+        let registry = Registry::standard();
+        let mut s = Session::open(&registry, project)
+            .unwrap()
+            .with_qgis(SessionQgis::new(1));
+        let added = s
+            .call("layer.add", json!({"path": "pts.csv", "crs": "EPSG:2154"}))
+            .unwrap();
+        let first = added["layer_id"].as_str().unwrap().to_string();
+        s.call(
+            "analysis.buffer",
+            json!({"layer_id": first, "distance": {"value": 500, "unit": "m"}}),
+        )
+        .unwrap();
+        let l = lines(&s);
+        assert_eq!(l[0]["layer_id"], json!("couche_g1_1"));
+        assert_eq!(l[1]["layer_id"], json!("couche_g1_2"));
+    }
+
+    #[test]
+    fn a_replay_binds_new_layer_ids_and_accepts_other_qgis_bytes() {
+        let (dir, project, _) = temp_project();
+        let registry = Registry::standard();
+        qgis_journal(&project);
+        let replay = Replay::load(&registry, &project).unwrap();
+        let report = replay
+            .run(&Router::new(&registry).with_qgis(SessionQgis::new(2)))
+            .unwrap();
+        assert_eq!(
+            report,
+            ReplayReport {
+                steps: 2,
+                identical: true
+            }
+        );
+        let work = dir.join("p.cassini");
+        assert_eq!(
+            fs::read_to_string(work.join("replay/2-analysis.buffer.gpkg")).unwrap(),
+            "gpkg-2"
+        );
+        assert_eq!(
+            fs::read_to_string(work.join("2-analysis.buffer.gpkg")).unwrap(),
+            "gpkg-1"
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_qgis_step_with_another_result_stops_the_replay_naming_the_step() {
+        let (dir, project, _) = temp_project();
+        let registry = Registry::standard();
+        qgis_journal(&project);
+        let mut other = SessionQgis::new(2);
+        other.feature_count = 5;
+        let err = Replay::load(&registry, &project)
+            .unwrap()
+            .run(&Router::new(&registry).with_qgis(other))
+            .unwrap_err();
+        assert_eq!(err.code, "replay.diverged");
+        assert_eq!(err.step, Some(2));
+        assert!(err.message.contains("analysis.buffer"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn an_empty_qgis_output_diverges() {
+        let (dir, project, _) = temp_project();
+        let registry = Registry::standard();
+        qgis_journal(&project);
+        let mut other = SessionQgis::new(2);
+        other.empty_output = true;
+        let err = Replay::load(&registry, &project)
+            .unwrap()
+            .run(&Router::new(&registry).with_qgis(other))
+            .unwrap_err();
+        assert_eq!(err.code, "replay.diverged");
+        assert_eq!(err.step, Some(2));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_replay_without_qgis_names_the_missing_command() {
+        let (dir, project, _) = temp_project();
+        let registry = Registry::standard();
+        qgis_journal(&project);
+        let err = replay_of(&registry, &project).unwrap_err();
+        assert_eq!(err.code, "registry.unavailable");
+        assert!(err.message.contains("layer.add"));
+        assert_eq!(err.step, Some(1));
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

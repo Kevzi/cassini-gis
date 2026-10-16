@@ -20,8 +20,8 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Map, Value};
 
 use crate::error::ErrorReport;
-use crate::exec::Executor;
-use crate::journal::Session;
+use crate::exec::{Executor, Router};
+use crate::journal::{Replay, Session};
 use crate::registry::{Registry, RegistryError, RunsIn, PROTOCOL_VERSION};
 
 const PARSE_ERROR: i64 = -32700;
@@ -141,6 +141,8 @@ struct State<'a> {
     link: Rc<Link<'a>>,
     session: Option<Session<'a>>,
     announced: HashSet<String>,
+    /// Chemin du projet de la session, tel que reçu à `session.hello`.
+    project: Option<String>,
 }
 
 /// Sert le canal jusqu'à la fermeture de l'entrée. Rend une erreur si la sortie
@@ -177,6 +179,7 @@ fn serve_with(
             link: link.clone(),
             session: None,
             announced: HashSet::new(),
+            project: None,
         };
         loop {
             let line = match link.rx.recv() {
@@ -334,6 +337,7 @@ fn dispatch(
     match method {
         "session.hello" => hello(state, params),
         "command.run" => command_run(state, params),
+        "journal.replay" => journal_replay(state),
         _ => Err(RpcError::protocol(METHOD_NOT_FOUND, "Méthode inconnue.")),
     }
 }
@@ -413,7 +417,7 @@ impl Channel<'_> {
     ) -> Option<Value> {
         let outcome = match method {
             "request.cancel" => request_cancel(&self.link, params, Some(flight)),
-            "session.hello" | "command.run" => Err(RpcError::coded(
+            "session.hello" | "command.run" | "journal.replay" => Err(RpcError::coded(
                 "session.busy",
                 "Une commande est en cours d'exécution : attendez sa fin ou annulez-la."
                     .to_string(),
@@ -570,6 +574,7 @@ fn hello(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, RpcErro
             link: state.link.clone(),
         });
     state.session = Some(session);
+    state.project = Some(project.to_string());
     state.announced = commands;
     Ok(json!({
         "protocol_version": PROTOCOL_VERSION,
@@ -614,6 +619,37 @@ fn command_run(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, R
     }
     let session = state.session.as_mut().expect("session vérifiée");
     session.call(id, args).map_err(RpcError::business)
+}
+
+/// Exécutant QGIS du rejeu : refuse, en la nommant, une commande que l'extension n'a pas annoncée.
+struct Announced<E> {
+    announced: HashSet<String>,
+    inner: E,
+}
+
+impl<E: Executor> Executor for Announced<E> {
+    fn execute(&self, id: &str, params: Value) -> Result<Value, RegistryError> {
+        if !self.announced.contains(id) {
+            return Err(RegistryError::Unavailable(id.to_string()));
+        }
+        self.inner.execute(id, params)
+    }
+}
+
+/// `journal.replay` : le noyau rejoue le journal du projet par le même routeur et
+/// le même canal que l'exécution d'origine (AD-11). Il n'est pas annulable : aucun
+/// `run_id` n'est posé, donc `request.cancel` répond `request.unknown`.
+fn journal_replay(state: &mut State<'_>) -> Result<Value, RpcError> {
+    let project = state.project.clone().expect("session vérifiée");
+    let replay = Replay::load(state.registry, Path::new(&project)).map_err(RpcError::business)?;
+    let router = Router::new(state.registry).with_qgis(Announced {
+        announced: state.announced.clone(),
+        inner: Channel {
+            link: state.link.clone(),
+        },
+    });
+    let report = replay.run(&router).map_err(RpcError::business)?;
+    Ok(serde_json::to_value(report).expect("un bilan se sérialise"))
 }
 
 #[cfg(test)]
@@ -1294,5 +1330,87 @@ mod tests {
         let report = replay.run(&crate::exec::Router::new(&registry)).unwrap();
         assert_eq!(report.steps, 1);
         assert!(report.identical);
+    }
+
+    #[test]
+    fn journal_replay_runs_the_qgis_steps_through_the_channel() {
+        let mut c = Client::start(CANCEL_GRACE);
+        c.hello();
+        c.run(2, "test.fixed");
+        c.send(reply_ok("core-1"));
+        assert_eq!(c.recv()["result"], json!({"ok": true}));
+        c.send(json!({"jsonrpc":"2.0","id":3,"method":"journal.replay"}));
+        let order = c.recv();
+        assert_eq!(order["method"], "order.execute");
+        assert_eq!(order["id"], "core-2");
+        assert_eq!(order["params"]["command"], "test.fixed");
+        // Pendant le rejeu : une autre requête est refusée, et rien n'est annulable.
+        for (id, method) in [
+            (4, "command.run"),
+            (5, "journal.replay"),
+            (6, "session.hello"),
+        ] {
+            c.send(json!({"jsonrpc":"2.0","id":id,"method":method,
+                "params":{"command":"system.about","params":{}}}));
+            assert_eq!(code_of(&c.recv()), "session.busy");
+        }
+        c.send(json!({"jsonrpc":"2.0","id":7,"method":"request.cancel","params":{"id":3}}));
+        assert_eq!(code_of(&c.recv()), "request.unknown");
+        c.send(reply_ok("core-2"));
+        let done = c.recv();
+        assert_eq!(done["id"], 3);
+        assert_eq!(done["result"], json!({"steps": 1, "identical": true}));
+        // Le rejeu n'écrit pas le journal.
+        assert_eq!(c.journal().len(), 1);
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn journal_replay_stops_at_the_first_difference() {
+        let mut c = Client::start(CANCEL_GRACE);
+        c.hello();
+        c.run(2, "test.fixed");
+        c.send(reply_ok("core-1"));
+        c.recv();
+        c.send(json!({"jsonrpc":"2.0","id":3,"method":"journal.replay"}));
+        c.recv();
+        c.send(json!({"jsonrpc":"2.0","id":"core-2","result":{"ok":false}}));
+        let done = c.recv();
+        assert_eq!(code_of(&done), "replay.diverged");
+        assert_eq!(done["error"]["data"]["step"], 1);
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn journal_replay_without_the_extension_names_the_command() {
+        let mut c = Client::start(CANCEL_GRACE);
+        let work = c.dir.join("p.cassini");
+        std::fs::create_dir_all(&work).unwrap();
+        std::fs::write(
+            work.join("journal.jsonl"),
+            json!({"step":1,"id":"test.fixed","params":{"layer":"l"},"inputs":[],"result":{"ok":true}})
+                .to_string()
+                + "
+",
+        )
+        .unwrap();
+        c.send(json!({"jsonrpc":"2.0","id":1,"method":"session.hello",
+            "params":{"protocol_version":1,"commands":[],"project":c.project}}));
+        assert!(c.recv()["result"].is_object());
+        c.send(json!({"jsonrpc":"2.0","id":2,"method":"journal.replay"}));
+        let done = c.recv();
+        assert_eq!(code_of(&done), "registry.unavailable");
+        assert!(done["error"]["data"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("test.fixed"));
+        c.assert_silent();
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn journal_replay_before_hello_is_refused() {
+        let r = exchange(&[json!({"jsonrpc":"2.0","id":1,"method":"journal.replay"}).to_string()]);
+        assert_eq!(code_of(&r[0]), "session.not_started");
     }
 }

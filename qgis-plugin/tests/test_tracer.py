@@ -601,5 +601,84 @@ class PluginBehaviourTest(unittest.TestCase):
         self.assertEqual(calls, [1])
 
 
+
+
+class ReplayTest(unittest.TestCase):
+    """`replay()` envoie `journal.replay` et rend REPLAY_DONE / REPLAY_FAILED."""
+
+    CATALOGUE = RunTest.CATALOGUE
+    setUp = RunTest.setUp
+    ready = RunTest.ready
+    new = RunTest.new
+    kinds = RunTest.kinds
+
+    def test_replay_before_ready_sends_nothing(self):
+        self.assertFalse(self.c.replay())
+        self.assertEqual(len(self.p.written), 1)
+
+    def test_replay_done(self):
+        self.ready()
+        self.assertTrue(self.c.replay())
+        sent = self.new()[0]
+        self.assertEqual(sent["method"], "journal.replay")
+        self.assertEqual(sent["params"], {})
+        self.assertTrue(self.c.replay_busy())
+        self.assertFalse(self.c.replay())  # un seul rejeu à la fois
+        self.assertFalse(self.c.run_command("system.about"))
+        self.p.feed(reply(sent["id"], {"steps": 3, "identical": True}))
+        self.assertEqual(self.events[-1], (client.REPLAY_DONE, {"steps": 3, "identical": True}))
+        self.assertFalse(self.c.replay_busy())
+        self.assertTrue(self.c.run_command("system.about"))
+
+    def test_replay_refused_while_a_run_is_in_flight(self):
+        self.ready()
+        self.c.run_command("test.qgis_probe")
+        self.assertFalse(self.c.replay())
+        self.assertEqual(len(self.new()), 1)
+
+    def test_replay_failure_names_the_step(self):
+        self.ready()
+        self.c.replay()
+        err = {"code": -32000, "message": "m",
+               "data": {"code": "replay.diverged", "message": "Le rejeu diverge.", "step": 2}}
+        self.p.feed(reply(self.new()[0]["id"], error=err))
+        self.assertEqual(
+            self.events[-1],
+            (client.REPLAY_FAILED,
+             {"code": "replay.diverged", "message": "Le rejeu diverge.", "step": 2}),
+        )
+        self.assertFalse(self.c.replay_busy())
+        self.assertFalse(self.p.closed)
+
+    def test_orders_during_a_replay_are_executed_by_the_gestures(self):
+        class Echo:
+            def start(self, params, done):
+                done(result={"echo": params})
+
+            def cancel(self):
+                pass
+
+        registry = gestures.GestureRegistry()
+        registry.register("layer.add", Echo)
+        self.p = FakeProcess()
+        c = client.CoreClient(self.p, lambda k, v: self.events.append((k, v)), registry)
+        c.start("cassini", "/p.qgz")
+        self.p.feed(reply(1, {"protocol_version": 1, "core_version": "0.1", "commands": []}))
+        self.p.feed(reply(2, {"core_version": "0.1.0", "protocol_version": 1}))
+        base = len(self.p.written)
+        self.assertTrue(c.replay())
+        self.p.feed((json.dumps({"jsonrpc": "2.0", "id": "core-1", "method": "order.execute",
+                                 "params": {"command": "layer.add", "params": {"path": "a"}}}) + "\n").encode())
+        sent = [json.loads(w) for w in self.p.written[base:]]
+        self.assertEqual(sent[1], {"jsonrpc": "2.0", "id": "core-1", "result": {"echo": {"path": "a"}}})
+
+    def test_core_death_during_a_replay_is_reported(self):
+        self.ready()
+        self.c.replay()
+        self.p.finished.emit(1)
+        self.assertIn(client.REPLAY_FAILED, self.kinds())
+        self.assertEqual(self.events[-1][0], client.DIED)
+
+
 if __name__ == "__main__":
     unittest.main()

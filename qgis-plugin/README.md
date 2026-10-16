@@ -29,6 +29,15 @@ Sans QGIS : `python -I -m unittest discover -s qgis-plugin/tests`.
 Sonde d'annulation sous le vrai QGIS (jeu hors dépôt `../donnees-test-cassini/`) :
 `python-qgis-ltr.bat qgis-plugin/tests/probe_cancel.py` -> `RÉSULTAT : OK`.
 
+Sonde de bout en bout sous le vrai QGIS et le vrai binaire (fixture synthétique
+`fixtures/points-2154.csv`, aucune donnée hors dépôt) : `cargo build --release` puis
+`python-qgis-ltr.bat qgis-plugin/tests/probe_end_to_end.py` -> `RÉSULTAT : OK`. Elle
+enchaîne `layer.add`, `analysis.buffer` et `layout.export_pdf`, ferme et rouvre le projet,
+puis `replay()` demande au noyau `journal.replay` : toutes les étapes sont refaites
+(`system.about` du démarrage comprises), le CSV d'origine est inchangé (empreinte), puis
+un résultat du journal est altéré et le rejeu s'arrête en nommant l'étape. Il n'y a pas de
+bouton de rejeu dans le panneau : il viendra avec l'agent (epic 5).
+
 Garde statique (imports réseau et PyQt directs interdits, taille, versions de
 `metadata.txt`) : `python -I qgis-plugin/tests/check_extension.py`.
 

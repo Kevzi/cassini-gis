@@ -210,6 +210,12 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   une seconde session sur le même projet — deux fenêtres de QGIS, donc deux
   noyaux — obtient un accès en lecture seule, le dit explicitement, et peut
   rejouer sans écrire.
+- **Écart assumé (ticket 14) :** `layer.add` n'a pas de sortie fichier, donc pas de
+  repère `out:k.n`. Le journal garde le `layer_id` rendu par l'étape (champ
+  `layer_id` de la ligne) ; le rejeu le lie à celui qu'il obtient et le substitue dans
+  les paramètres suivants, puis l'ignore à la comparaison. Les octets d'une sortie
+  produite par QGIS (GeoPackage, PDF) ne sont pas comparés : elle doit exister et
+  n'être pas vide, la fidélité tient au résultat typé comparé.
 
 ### AD-12 — Toute étape est annulable par message, jamais en tuant le processus
 

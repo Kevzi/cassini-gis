@@ -111,8 +111,8 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `epic-facade-qgis/story-zone-tampon-par-le-cadre-de-traitement-de-qgis-plan.md`
   summary: Le rejeu d'un journal contenant `analysis.buffer` diverge (octets du GeoPackage, `layer_id` de session).
   evidence: `journal.rs` compare les octets des sorties et le résultat résumé ; à traiter avec l'entrée 9.14.
-  status: decision, 2026-10-16, entrée 9.13 (`epic-facade-qgis/story-refactor-sweep-plan.md`)
-  resolution: Report maintenu, traité par l'entrée 9.14 qui porte le rejeu.
+  status: close, 2026-10-16, entrée 9.14 (`epic-facade-qgis/story-suite-de-bout-en-bout-ouvrir-analyser-exporter-rejouer-plan.md`)
+  resolution: `journal.replay` lie les `layer_id` anciens aux neufs, ignore `layer_id` à la comparaison et ne compare pas les octets des sorties QGIS (existence et non-vacuité) ; prouvé par `probe_end_to_end.py` et les tests de `journal.rs`.
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-facade-qgis/story-intersection-et-selection-par-attribut-plan.md`
   summary: Tester `FieldCombo` (rebranchement sur `layer_id`, rechargement, choix conservé) dans un vrai panneau Qt.
@@ -125,3 +125,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
   evidence: non vérifié (medium si vrai) ; à trancher en lançant la commande sous QGIS sur la sortie d'un premier run réutilisée comme zones ; correctif = nom de champ unique ou refus `analysis.bad_params`.
   status: decision, 2026-10-16, entrée 9.13 (`epic-facade-qgis/story-refactor-sweep-plan.md`)
   resolution: Report maintenu : à vérifier sous QGIS avec `probe_zonal_statistics.py` ; sans preuve, le correctif reste hypothétique.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-facade-qgis/story-suite-de-bout-en-bout-ouvrir-analyser-exporter-rejouer-plan.md`
+  summary: `Replay::run` ignore l'échec de `remove_dir_all(replay/)` ; un fichier périmé non vide passerait la règle « sortie QGIS existe et non vide ».
+  evidence: medium non vérifié ; il faudrait un échec de suppression sous Windows (fichier tenu par QGIS) et une étape QGIS qui n'écrit rien ; remède probable : supprimer le fichier attendu avant chaque étape et refuser si la suppression échoue.
