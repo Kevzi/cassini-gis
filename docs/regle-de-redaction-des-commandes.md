@@ -28,8 +28,13 @@ Les règles 1 et 2 sont **contrôlées** par `Registry::check_contract()`
 5. **Aucune mesure nue.** Une distance, une hauteur ou un rayon est
    `{value, unit}` ; une coordonnée est `{x, y, epsg}`. Une coordonnée WGS84 pour
    le terrain se refuse.
-6. **Aucun chemin ni nom de sortie dans les paramètres** (AD-10). Seule
-   `layer.add` reçoit un chemin d'entrée relatif.
+6. **Aucun chemin ni nom de sortie saisi dans les paramètres** (AD-10). Seule
+   `layer.add` reçoit un chemin d'entrée relatif. Une commande qui produit un
+   fichier déclare un paramètre `out` (`#[serde(default)]`, `.output_params(&["out"])`),
+   que **le noyau remplit** : le modèle et l'utilisateur ne le donnent jamais, et le
+   panneau ne l'affiche pas. Une sortie de type couche déclare aussi
+   `.output_ext(".gpkg")` (défaut `.out`), sans quoi QGIS écrirait un autre fichier
+   que celui que le noyau nettoie à l'annulation.
 7. **Une option facultative n'est posée que si la phrase la demande.** Les étapes
    et filtres en trop sont la première cause d'erreur.
 8. **Descriptions en français et en anglais.** La mesure porte sur des phrases

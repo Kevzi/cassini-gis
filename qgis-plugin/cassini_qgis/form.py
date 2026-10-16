@@ -15,6 +15,9 @@ BOOLEAN = "boolean"
 ENUM = "enum"
 JSON = "json"
 
+# Paramètres remplis par le noyau (AD-10) : le formulaire ne les montre pas.
+CORE_FILLED = ("out",)
+
 
 class Field:
     def __init__(self, name, kind, required=False, choices=None, description=""):
@@ -93,6 +96,8 @@ def build_fields(schema):
     required = set(required) if isinstance(required, list) else set()
     fields = []
     for name in sorted(props):
+        if name in CORE_FILLED:
+            continue
         prop = props[name]
         kind, choices = _kind(prop)
         description = prop.get("description", "") if isinstance(prop, dict) else ""

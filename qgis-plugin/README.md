@@ -82,6 +82,17 @@ Recette manuelle de `project.inventory` et `layer.describe` (jeu
    son dossier `<projet>.cassini/` ailleurs ; le journal s'y rejoue à l'identique
    (couvert par `cargo test`, test du journal).
 
+Recette manuelle de `analysis.buffer` [ticket 8] (jeu `../donnees-test-cassini/`) :
+
+1. Ouvrez `gares-2154.csv` avec `layer.add` (`crs` = `EPSG:2154`), puis choisissez
+   `analysis.buffer` : la couche se choisit dans la liste, aucun champ `out` n'apparaît.
+2. `distance` = `{"value": 500, "unit": "m"}` : une couche de 8 entités apparaît autour
+   des gares ; le fichier `.gpkg` est dans `<projet>.cassini/`. `{"value": 0.5, "unit":
+   "km"}` donne le même résultat ; `dissolve` à vrai donne 1 entité.
+3. Une couche en EPSG:4326 donne `analysis.crs_not_metric` (reprojetez-la d'abord) ; un
+   raster donne `layer.not_vector`.
+4. Lancez puis arrêtez : `qgis.cancelled`, aucun fichier ne reste dans `<projet>.cassini/`.
+
 Contrôle manuel : charger l'extension, ouvrir un projet, voir les deux versions,
 fermer QGIS et vérifier qu'aucun `cassini` ne reste dans le gestionnaire des
 tâches.

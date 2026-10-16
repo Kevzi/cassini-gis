@@ -47,6 +47,10 @@ pub struct CommandSpec {
     /// dossier de travail (AD-10). Métadonnée interne : jamais sérialisée.
     #[serde(skip)]
     pub output_params: Vec<String>,
+    /// Extension des fichiers de sortie, point compris (défaut `.out`). Une commande dont la
+    /// sortie est une couche déclare `.gpkg`. Métadonnée interne : jamais sérialisée.
+    #[serde(skip)]
+    pub output_ext: String,
     /// Schéma JSON des paramètres, engendré depuis le type Rust.
     pub params_schema: Value,
     /// Schéma JSON du résultat, engendré depuis le type Rust.
@@ -71,6 +75,7 @@ impl CommandSpec {
             tests: Vec::new(),
             path_params: Vec::new(),
             output_params: Vec::new(),
+            output_ext: ".out".to_string(),
             params_schema: schema_value::<P>(),
             output_schema: schema_value::<O>(),
             examples: Vec::new(),
@@ -104,6 +109,12 @@ impl CommandSpec {
     /// Déclare les paramètres de sortie, remplis par le noyau (AD-10).
     pub fn output_params(mut self, names: &[&str]) -> Self {
         self.output_params = names.iter().map(|n| n.to_string()).collect();
+        self
+    }
+
+    /// Déclare l'extension des fichiers de sortie (point compris, ex. `.gpkg`).
+    pub fn output_ext(mut self, ext: &str) -> Self {
+        self.output_ext = ext.to_string();
         self
     }
 

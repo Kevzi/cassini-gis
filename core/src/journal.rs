@@ -240,7 +240,7 @@ impl<'a> Session<'a> {
         if cancelled {
             // Une étape annulée ne laisse pas de sortie partielle derrière elle (AD-12).
             for name in &spec.output_params {
-                let file = output_file(step, id, &spec.output_params, name);
+                let file = output_file(step, id, &spec.output_params, name, &spec.output_ext);
                 let _ = fs::remove_file(self.work_dir.join(file));
             }
         }
@@ -315,11 +315,11 @@ fn journal_ids(path: &Path) -> Vec<String> {
 }
 
 /// Nom du fichier de sortie `name` de l'étape `step`.
-fn output_file(step: usize, id: &str, outputs: &[String], name: &str) -> String {
+fn output_file(step: usize, id: &str, outputs: &[String], name: &str, ext: &str) -> String {
     if outputs.len() == 1 {
-        format!("{step}-{id}.out")
+        format!("{step}-{id}{ext}")
     } else {
-        format!("{step}-{id}-{name}.out")
+        format!("{step}-{id}-{name}{ext}")
     }
 }
 
@@ -353,7 +353,7 @@ impl Resolver<'_> {
         let mut logged = params.clone();
         let mut exec = params;
         for name in &spec.output_params {
-            let file = output_file(step, id, &spec.output_params, name);
+            let file = output_file(step, id, &spec.output_params, name, &spec.output_ext);
             if let (Some(l), Some(e)) = (logged.as_object_mut(), exec.as_object_mut()) {
                 l.insert(name.clone(), Value::String(file.clone()));
                 e.insert(
@@ -431,9 +431,12 @@ impl Resolver<'_> {
             return Err(bad());
         }
         let id = prior.get(k - 1).ok_or_else(bad)?;
-        let outputs = &self.registry.spec(id).ok_or_else(bad)?.output_params;
+        let spec = self.registry.spec(id).ok_or_else(bad)?;
+        let outputs = &spec.output_params;
         let name = outputs.get(n - 1).ok_or_else(bad)?;
-        Ok(self.out_dir.join(output_file(k, id, outputs, name)))
+        Ok(self
+            .out_dir
+            .join(output_file(k, id, outputs, name, &spec.output_ext)))
     }
 
     /// Forme relative POSIX, forme absolue et portabilité d'un chemin d'entrée.
@@ -585,7 +588,7 @@ impl<'a> Replay<'a> {
                 )));
             }
             for name in &spec.output_params {
-                let file = output_file(step, id, &spec.output_params, name);
+                let file = output_file(step, id, &spec.output_params, name, &spec.output_ext);
                 let kept = fs::read(self.work_dir.join(&file)).ok();
                 let again = fs::read(self.replay_dir.join(&file)).ok();
                 if kept != again {
@@ -721,6 +724,18 @@ mod tests {
 
     use super::*;
     use crate::registry::RegistryError;
+
+    #[test]
+    fn output_file_uses_the_declared_extension() {
+        let one = ["out".to_string()];
+        assert_eq!(
+            output_file(1, "analysis.buffer", &one, "out", ".gpkg"),
+            "1-analysis.buffer.gpkg"
+        );
+        assert_eq!(output_file(2, "x", &one, "out", ".out"), "2-x.out");
+        let two = ["a".to_string(), "b".to_string()];
+        assert_eq!(output_file(3, "x", &two, "b", ".gpkg"), "3-x-b.gpkg");
+    }
 
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
