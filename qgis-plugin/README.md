@@ -66,6 +66,22 @@ Recette manuelle du CSV et du GeoParquet [9.6] (jeu `../donnees-test-cassini/`) 
    dans votre QGIS, `layer.invalid_source`.
 4. Les fichiers restent intacts (taille et date inchangées).
 
+Recette manuelle de `project.inventory` et `layer.describe` (jeu
+`../donnees-test-cassini/`, noyau qui annonce les commandes) :
+
+1. Projet de test à deux couches, enregistré : mode expert, `project.inventory`
+   (aucun paramètre). Le résultat liste les couches dans l'ordre de la légende (haut
+   en bas), le SCR du projet et l'étendue d'ensemble ; chaque source est un nom de
+   fichier, sans dossier.
+2. Projet vide : `layers` est vide et `extent` est `null`, sans erreur.
+3. `layer.describe` avec le `layer_id` d'une couche (celui de `project.inventory` ou
+   de `layer.add`) : champs et types, étendue, SCR, nombre d'objets et géométrie,
+   cohérents avec la table d'attributs. Un id inconnu donne `layer.not_found`, une
+   couche raster `layer.not_vector`.
+4. Aucune couche ni aucun fichier n'est modifié. Portabilité : copiez le projet avec
+   son dossier `<projet>.cassini/` ailleurs ; le journal s'y rejoue à l'identique
+   (couvert par `cargo test`, test du journal).
+
 Contrôle manuel : charger l'extension, ouvrir un projet, voir les deux versions,
 fermer QGIS et vérifier qu'aucun `cassini` ne reste dans le gestionnaire des
 tâches.

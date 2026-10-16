@@ -1126,6 +1126,76 @@ mod tests {
         let _ = fs::remove_dir_all(dir);
     }
 
+    /// QGIS de test : rend un inventaire fixe, sans aucun chemin.
+    struct InventoryQgis;
+    impl Executor for InventoryQgis {
+        fn execute(&self, id: &str, _p: Value) -> Result<Value, RegistryError> {
+            assert_eq!(id, "project.inventory");
+            Ok(json!({
+                "layers": [
+                    {"layer_id": "a_1", "name": "gares", "source": "gares.gpkg", "crs": "EPSG:2154"},
+                    {"layer_id": "b_2", "name": "parcelles", "source": "parcelles.shp", "crs": "EPSG:2154"}
+                ],
+                "project_crs": "EPSG:2154",
+                "extent": {"xmin": 1.0, "ymin": 2.0, "xmax": 3.0, "ymax": 4.0, "crs": "EPSG:2154"}
+            }))
+        }
+    }
+
+    fn copy_dir(from: &Path, to: &Path) {
+        fs::create_dir_all(to).unwrap();
+        for entry in fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let target = to.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy_dir(&entry.path(), &target);
+            } else {
+                fs::copy(entry.path(), target).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn a_project_copied_with_its_journal_folder_replays_identically() {
+        let (dir, project, token) = temp_project();
+        fs::write(&project, "projet").unwrap();
+        fs::write(dir.join("data.txt"), "abc").unwrap();
+        let registry = Registry::standard();
+        let mut s = Session::open(&registry, &project)
+            .unwrap()
+            .with_qgis(InventoryQgis);
+        s.call("test.read_file", json!({"path": "data.txt"}))
+            .unwrap();
+        s.call("project.inventory", json!({})).unwrap();
+        let journal = fs::read_to_string(s.journal_path()).unwrap();
+        drop(s);
+        assert!(!journal.contains(&token));
+
+        // Le projet et son dossier `.cassini` partent ensemble ailleurs.
+        let (moved, moved_project, moved_token) = temp_project();
+        fs::copy(&project, &moved_project).unwrap();
+        fs::copy(dir.join("data.txt"), moved.join("data.txt")).unwrap();
+        copy_dir(&dir.join("p.cassini"), &moved.join("p.cassini"));
+        let _ = fs::remove_dir_all(&dir);
+
+        let replay = Replay::load(&registry, &moved_project).unwrap();
+        assert!(replay.warnings().is_empty());
+        let report = replay
+            .run(&Router::new(&registry).with_qgis(InventoryQgis))
+            .unwrap();
+        assert_eq!(
+            report,
+            ReplayReport {
+                steps: 2,
+                identical: true
+            }
+        );
+        let copied = fs::read_to_string(moved.join("p.cassini").join(JOURNAL_FILE)).unwrap();
+        assert_eq!(copied, journal);
+        assert!(!copied.contains(&moved_token));
+        let _ = fs::remove_dir_all(moved);
+    }
+
     #[test]
     fn lexical_paths_behave() {
         let base = Path::new("/p/proj");
