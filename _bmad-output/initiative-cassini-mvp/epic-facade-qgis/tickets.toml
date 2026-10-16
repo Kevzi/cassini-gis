@@ -124,13 +124,12 @@ risk = "medium"
 id = 11
 type = "story"
 title = "Isochrones a pied et en voiture"
-description = "Ajoute analysis.isochrone sur un reseau routier fourni par l'utilisateur, a pied et en voiture, par le cadre de traitement de QGIS."
+description = "Ajoute analysis.isochrone sur un reseau routier fourni par l'utilisateur, a pied et en voiture, par le cadre de traitement de QGIS. Decision (2026-10-16) : l'utilisateur apporte son reseau routier, une couche de lignes choisie dans une liste deroulante ; sans reseau, la commande refuse par une erreur typee."
 verify = "Sur un petit reseau de test, la commande rend une isochrone dont l'emprise est celle attendue."
 covers = ["CAP-3"]
 after = [8]
 hitl = false
 risk = "high"
-unknown = "L'utilisateur apporte-t-il un reseau routier ? La spec le suppose sans le confirmer, et les isochrones n'ont pas de donnees sans lui : a confirmer avec le proprietaire, sinon l'entree devient un spike ou sort du MVP."
 
 [[entry]]
 id = 12
