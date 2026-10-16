@@ -8,8 +8,8 @@ formulaire par schéma et le journal sont dans des modules sans Qt, testés seul
 import os
 import time
 
-from qgis.PyQt.QtCore import QSettings, Qt
-from qgis.PyQt.QtGui import QFontDatabase, QIcon
+from qgis.PyQt.QtCore import QSettings, Qt, QUrl
+from qgis.PyQt.QtGui import QDesktopServices, QFontDatabase, QIcon
 from qgis.PyQt.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -275,6 +275,8 @@ class CassiniPanel(QWidget):
         self.result_text.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
+        self.open_folder_button = QPushButton()
+        self.open_folder_button.clicked.connect(self._open_folder)
         self.details = _Fold()
         self.details_view = _mono(QPlainTextEdit())
         self.details_view.setReadOnly(True)
@@ -284,6 +286,7 @@ class CassiniPanel(QWidget):
         dl.addWidget(self.details_view)
         col.addWidget(self.result_title)
         col.addWidget(self.result_text)
+        col.addWidget(self.open_folder_button)
         col.addWidget(self.details)
 
         # Journal de la session.
@@ -449,9 +452,17 @@ class CassiniPanel(QWidget):
         self._render_commands()
         self._render_buttons()
 
+    def _open_folder(self):
+        folder = runlog.result_folder((self.last or {}).get("result"))
+        if folder is not None:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
+
     def _render_result(self):
         last = self.last
         self.details.setVisible(False)
+        folder = runlog.result_folder(last.get("result")) if last and last["kind"] == runlog.DONE else None
+        self.open_folder_button.setText(self.t("open_folder"))
+        self.open_folder_button.setVisible(folder is not None)
         if last is None:
             self.result_text.setText(self.t("result_none"))
             return

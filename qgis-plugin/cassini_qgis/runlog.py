@@ -6,6 +6,7 @@ s'efface avec le panneau. Aucun chemin absolu ni code n'est jamais produit ici
 """
 
 import json
+import os
 import re
 
 RUNNING = "running"
@@ -67,6 +68,17 @@ def redact(value):
     if isinstance(value, dict):
         return {k: redact(v) for k, v in value.items()}
     return value
+
+
+def result_folder(result):
+    """Dossier du fichier produit (`file`, chemin absolu rendu par le geste) s'il existe, sinon None.
+
+    Sert au bouton « Ouvrir le dossier » ; le chemin n'est jamais affiché (AD-9).
+    """
+    path = result.get("file") if isinstance(result, dict) else None
+    if not isinstance(path, str) or not _ABSOLUTE.match(path) or not os.path.isfile(path):
+        return None
+    return os.path.dirname(path)
 
 
 def technical_details(result):

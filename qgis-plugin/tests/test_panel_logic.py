@@ -12,6 +12,21 @@ import runlog  # noqa: E402
 import texts  # noqa: E402
 
 
+class ResultFolderTest(unittest.TestCase):
+    def test_folder_of_an_existing_file(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            f = os.path.join(d, "1-layout.export_pdf.pdf")
+            open(f, "w").close()
+            self.assertEqual(runlog.result_folder({"file": f}), d)
+            self.assertIsNone(runlog.result_folder({"file": f + ".absent"}))
+
+    def test_no_folder_without_an_absolute_file(self):
+        for result in (None, {}, {"file": 3}, {"file": "rel.pdf"}, {"layer_id": "x"}, "texte"):
+            self.assertIsNone(runlog.result_folder(result))
+
+
 class TextsTest(unittest.TestCase):
     def test_same_keys_in_both_languages(self):
         self.assertEqual(set(texts.TEXTS["fr"]), set(texts.TEXTS["en"]))
