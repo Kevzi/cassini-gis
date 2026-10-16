@@ -26,6 +26,9 @@ Licence GPL, comme QGIS. L'extension ne contient aucun binaire : le noyau
 
 Sans QGIS : `python -I -m unittest discover -s qgis-plugin/tests`.
 
+Sonde d'annulation sous le vrai QGIS (jeu hors dépôt `../donnees-test-cassini/`) :
+`python-qgis-ltr.bat qgis-plugin/tests/probe_cancel.py` -> `RÉSULTAT : OK`.
+
 Garde statique (imports réseau et PyQt directs interdits, taille, versions de
 `metadata.txt`) : `python -I qgis-plugin/tests/check_extension.py`.
 
