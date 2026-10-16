@@ -155,6 +155,7 @@ class ProcessingGesture:
         self._out = None
         self._handle = None
         self._loaded = False
+        self._cancelling = False
 
     def start(self, params, done):
         self._done = done
@@ -168,6 +169,10 @@ class ProcessingGesture:
         if handle is not None:
             try:
                 handle.cancel()
+                # La tâche tient encore le fichier : on répond et on nettoie quand elle
+                # rend la main (`_on_finished`), pas avant.
+                self._cancelling = True
+                return
             except Exception:  # l'ordre doit tout de même recevoir sa réponse
                 pass
         self._clean()
@@ -213,6 +218,10 @@ class ProcessingGesture:
 
     def _on_finished(self, ok, results):
         if self._done is None:  # annulé entre-temps : le geste a déjà répondu
+            return
+        if self._cancelling:  # la tâche est arrêtée : plus rien ne tient le fichier
+            self._clean()
+            self._finish(error=GestureError(CANCELLED, "Geste annulé."))
             return
         try:
             if not ok:

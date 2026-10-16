@@ -157,9 +157,12 @@ class BufferTest(unittest.TestCase):
         self.assertTrue(os.path.exists(self.out))
         g.cancel()
         self.assertTrue(b.handle.cancelled)
+        self.assertEqual(calls, [])  # la tâche tient encore le fichier : pas de réponse
+        self.assertTrue(os.path.exists(self.out))
+        b.finished(False, {})  # la tâche rend la main : nettoyage puis réponse
         self.assertEqual(calls[0][1].code, "qgis.cancelled")
         self.assertFalse(os.path.exists(self.out))
-        b.finished(False, {})  # le rappel tardif de la tâche ne répond pas deux fois
+        b.finished(False, {})  # un rappel de plus ne répond pas deux fois
         self.assertEqual(len(calls), 1)
 
     def test_cancel_after_the_answer_keeps_the_output(self):

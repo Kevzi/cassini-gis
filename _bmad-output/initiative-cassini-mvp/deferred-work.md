@@ -99,8 +99,5 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
   evidence: QgisBackend.crs_of rend `authid()` sans controle ; a trancher : refuser avec une erreur, ou demander le SCR a l'ouverture (comme le CSV en 9.6).
 
 - source_plan: `epic-facade-qgis/story-zone-tampon-par-le-cadre-de-traitement-de-qgis-plan.md`
-  summary: Annulation de `analysis.buffer` sous Windows : le fichier `.gpkg` peut rester verrouillé par la tâche qui s'arrête.
-  evidence: non vérifié (maybe-false, medium) ; une annulation réelle dans QGIS, fichier présent ou non ensuite, tranche.
-- source_plan: `epic-facade-qgis/story-zone-tampon-par-le-cadre-de-traitement-de-qgis-plan.md`
   summary: Le rejeu d'un journal contenant `analysis.buffer` diverge (octets du GeoPackage, `layer_id` de session).
   evidence: `journal.rs` compare les octets des sorties et le résultat résumé ; à traiter avec l'entrée 9.14.
