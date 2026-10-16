@@ -6,6 +6,7 @@ autre propriété reçoit un champ JSON brut, jamais un formulaire deviné.
 """
 
 import json
+import os
 
 TEXT = "text"
 NUMBER = "number"
@@ -57,6 +58,23 @@ def _kind(prop):
     if kind == "boolean":
         return BOOLEAN, []
     return JSON, []
+
+
+def is_path_field(field):
+    """Un champ texte nommé `path` ou `*_path` désigne un fichier du projet."""
+    return field.kind == TEXT and (field.name == "path" or field.name.endswith("_path"))
+
+
+def relative_path(chosen, project_file):
+    """Chemin de `chosen` relatif au projet, séparateurs `/` ; None si disques différents.
+
+    Le canal ne porte que des chemins relatifs au projet (AD-9).
+    """
+    try:
+        rel = os.path.relpath(chosen, os.path.dirname(project_file))
+    except ValueError:
+        return None
+    return rel.replace("\\", "/")
 
 
 def build_fields(schema):

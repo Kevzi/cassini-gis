@@ -14,6 +14,7 @@ from qgis.PyQt.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -122,6 +123,7 @@ class CassiniPanel(QWidget):
         self.selected = None  # entrée du catalogue choisie
         self._fields = []
         self._inputs = {}
+        self.project_file = None  # fichier du projet ouvert, pour « Parcourir… »
         self._build()
         expert = str(settings.value(EXPERT_KEY, "false")).lower() in ("true", "1")
         self.expert.set_open(expert)
@@ -487,11 +489,35 @@ class CassiniPanel(QWidget):
                     widget.addItem(choice, choice)
             else:
                 widget = QLineEdit()
+            row = widget
+            if form.is_path_field(f):
+                row = QWidget()
+                rl = QHBoxLayout(row)
+                rl.setContentsMargins(0, 0, 0, 0)
+                browse = QPushButton(self.t("browse"))
+                browse.setAccessibleName(self.t("browse"))
+                browse.clicked.connect(lambda _=False, w=widget: self._browse(w))
+                rl.addWidget(widget, 1)
+                rl.addWidget(browse)
             widget.setAccessibleName(label)
             if f.description:
                 widget.setAccessibleDescription(f.description)
             self._inputs[f.name] = widget
-            self.form_layout.addRow(label, widget)
+            self.form_layout.addRow(label, row)
+
+    def _browse(self, widget):
+        if not self.project_file:
+            return
+        start = os.path.dirname(self.project_file)
+        chosen, _ = QFileDialog.getOpenFileName(self, self.t("browse_title"), start)
+        if not chosen:
+            return
+        rel = form.relative_path(chosen, self.project_file)
+        if rel is None:
+            self.form_error.setText(self.t("browse_other_drive"))
+            return
+        self.form_error.setText("")
+        widget.setText(rel)
 
     def _values(self):
         values = {}

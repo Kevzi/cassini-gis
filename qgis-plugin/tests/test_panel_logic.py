@@ -185,5 +185,31 @@ class RunLogTest(unittest.TestCase):
         self.assertFalse(c["run_enabled"])
 
 
+class BrowsePathTest(unittest.TestCase):
+    def test_only_text_fields_named_path(self):
+        fields = form.build_fields(
+            {"type": "object", "properties": {
+                "path": {"type": "string"}, "out_path": {"type": "string"},
+                "name": {"type": "string"}, "flag": {"type": "boolean"}}}
+        )
+        found = sorted(f.name for f in fields if form.is_path_field(f))
+        self.assertEqual(found, ["out_path", "path"])
+
+    def test_relative_to_the_project_with_slashes(self):
+        project = os.path.abspath(os.path.join("proj", "villeneuve.qgz"))
+        chosen = os.path.abspath(os.path.join("proj", "fr", "data.gpkg"))
+        self.assertEqual(form.relative_path(chosen, project), "fr/data.gpkg")
+
+    def test_file_outside_the_project_keeps_dotdot(self):
+        project = os.path.abspath(os.path.join("proj", "p.qgz"))
+        chosen = os.path.abspath(os.path.join("autre", "x.shp"))
+        self.assertEqual(form.relative_path(chosen, project), "../autre/x.shp")
+
+    def test_browse_texts_exist_in_both_languages(self):
+        for lang in ("fr", "en"):
+            for key in ("browse", "browse_title", "browse_other_drive"):
+                self.assertTrue(texts.tr(lang, key))
+
+
 if __name__ == "__main__":
     unittest.main()

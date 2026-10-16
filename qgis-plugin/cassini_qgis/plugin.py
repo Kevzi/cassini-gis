@@ -133,6 +133,8 @@ class CassiniPlugin:
             return
         self._stop()
         self.project_path = path
+        if self.panel is not None:
+            self.panel.project_file = path
         self._launch()
 
     def _launch(self):
