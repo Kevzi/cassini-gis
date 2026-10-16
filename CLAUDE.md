@@ -193,6 +193,11 @@ BAN, IGN BD TOPO, ADMIN EXPRESS) restent la matière première naturelle des
 utilisateurs, mais leur téléchargement est **hors périmètre** : au plus une page
 de documentation indiquant où les trouver, sans code.
 
+Pour les essais à la main, un jeu de données réelles (Villeneuve-le-Roi, Natural Earth,
+modèle d'élévation) vit **hors du dépôt**, dans `../donnees-test-cassini/` : il n'est jamais
+commité ni redistribué, et `LISEZMOI.txt` y donne les sources et les licences. Les tests
+automatiques n'utilisent que des fixtures synthétiques de `/fixtures`.
+
 ## 6. Périmètre du MVP
 
 Ce que **le noyau** porte :
