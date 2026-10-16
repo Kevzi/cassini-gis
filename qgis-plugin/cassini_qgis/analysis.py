@@ -27,6 +27,7 @@ NOT_FOUND = "layer.not_found"
 NOT_VECTOR = "layer.not_vector"
 CRS_NOT_METRIC = "analysis.crs_not_metric"
 BAD_PARAMS = "analysis.bad_params"
+UNKNOWN_FIELD = "analysis.unknown_field"
 FAILED = "analysis.failed"
 CANCELLED = "qgis.cancelled"
 
@@ -57,12 +58,59 @@ def translate_buffer(params, layer):
     }
 
 
+def translate_intersect(params, layer):
+    """Paramètres neutres de `analysis.intersect` -> paramètres de `native:intersection`.
+
+    La couche de recouvrement est ajoutée par le geste (clé `overlay` de la table).
+    """
+    return {
+        "INPUT": layer,
+        "INPUT_FIELDS": [],  # liste vide : tous les champs
+        "OVERLAY_FIELDS": [],
+        "OVERLAY_FIELDS_PREFIX": "",
+    }
+
+
+# Opérateur du noyau -> code de `native:extractbyattribute` (jamais d'expression).
+_OPERATOR_CODES = {
+    "eq": 0,
+    "ne": 1,
+    "gt": 2,
+    "gte": 3,
+    "lt": 4,
+    "lte": 5,
+    "begins_with": 6,
+    "contains": 7,
+}
+
+
+def translate_select_by_attribute(params, layer):
+    """Champ, opérateur et valeur -> paramètres séparés de `native:extractbyattribute`.
+
+    Le texte de l'utilisateur n'entre jamais dans une expression : QGIS reçoit le nom du
+    champ, le code de l'opérateur et la valeur comme trois paramètres distincts.
+    """
+    operator = params.get("operator")
+    value = params.get("value")
+    if operator not in _OPERATOR_CODES or not isinstance(value, str):
+        raise GestureError(BAD_PARAMS, "Le filtre doit avoir un opérateur connu et une valeur en texte.")
+    return {
+        "INPUT": layer,
+        "FIELD": params.get("field"),
+        "OPERATOR": _OPERATOR_CODES[operator],
+        "VALUE": value,
+    }
+
+
 # Table fermée : id de commande -> algorithme et traduction.
 #   algorithm : id de l'algorithme du cadre de traitement ;
 #   translate : (params du noyau, couche d'entrée) -> paramètres de l'algorithme, sans la sortie ;
 #   output    : nom du paramètre de sortie de l'algorithme ;
 #   input     : nom du paramètre du noyau qui désigne la couche d'entrée ;
-#   metric    : l'algorithme mesure en unités de la couche, donc le SCR doit être en mètres.
+#   metric    : l'algorithme mesure en unités de la couche, donc le SCR doit être en mètres ;
+#   overlay   : (facultatif) paramètre du noyau qui désigne une seconde couche, et clé de
+#               l'algorithme qui la reçoit (`overlay_key`) ;
+#   field     : (facultatif) paramètre du noyau qui nomme un champ de la couche d'entrée.
 ALGORITHMS = {
     "analysis.buffer": {
         "algorithm": "native:buffer",
@@ -70,6 +118,21 @@ ALGORITHMS = {
         "output": "OUTPUT",
         "input": "layer_id",
         "metric": True,
+    },
+    "analysis.intersect": {
+        "algorithm": "native:intersection",
+        "translate": translate_intersect,
+        "output": "OUTPUT",
+        "input": "layer_id",
+        "overlay": "overlay_layer_id",
+        "overlay_key": "OVERLAY",
+    },
+    "analysis.select_by_attribute": {
+        "algorithm": "native:extractbyattribute",
+        "translate": translate_select_by_attribute,
+        "output": "OUTPUT",
+        "input": "layer_id",
+        "field": "field",
     },
 }
 
@@ -211,10 +274,40 @@ class ProcessingGesture:
                 "reprojetez-la d'abord dans un système en mètres (par exemple EPSG:2154)."
                 % (backend.name_of(layer), backend.crs_of(layer)),
             )
+        overlay = None
+        if entry.get("overlay"):
+            overlay = self._overlay(params, layer_id)
+        if entry.get("field"):
+            self._check_field(params.get(entry["field"]), layer)
         algorithm_params = entry["translate"](params, layer)
+        if overlay is not None:
+            algorithm_params[entry["overlay_key"]] = overlay
         algorithm_params[entry["output"]] = out
         self._out = out
         return backend.run_algorithm(entry["algorithm"], algorithm_params, self._on_finished)
+
+    def _overlay(self, params, layer_id):
+        """Seconde couche vecteur, distincte de l'entrée."""
+        backend = self._backend
+        overlay_id = params.get(self._entry["overlay"])
+        if overlay_id == layer_id:
+            raise GestureError(BAD_PARAMS, "Les deux couches doivent être différentes.")
+        overlay = backend.layer(overlay_id) if isinstance(overlay_id, str) and overlay_id else None
+        if overlay is None:
+            raise GestureError(NOT_FOUND, "Aucune couche du projet ne porte cet identifiant.")
+        if not backend.is_vector(overlay):
+            raise GestureError(
+                NOT_VECTOR, "La couche « %s » n'est pas une couche vecteur." % backend.name_of(overlay)
+            )
+        return overlay
+
+    def _check_field(self, name, layer):
+        backend = self._backend
+        if not isinstance(name, str) or name not in [n for n, _ in backend.fields_of(layer)]:
+            raise GestureError(
+                UNKNOWN_FIELD,
+                "La couche « %s » n'a pas de champ « %s »." % (backend.name_of(layer), name),
+            )
 
     def _on_finished(self, ok, results):
         if self._done is None:  # annulé entre-temps : le geste a déjà répondu

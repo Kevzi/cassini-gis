@@ -14,8 +14,9 @@ import gestures  # noqa: E402
 
 
 class FakeLayer:
-    def __init__(self, lid, name="gares", crs="EPSG:2154", vector=True, metric=True, count=8):
+    def __init__(self, lid, name="gares", crs="EPSG:2154", vector=True, metric=True, count=8, fields=("zone", "pop")):
         self.lid, self.name, self.crs, self.vector, self.metric, self.count = lid, name, crs, vector, metric, count
+        self.fields = [(f, "String") for f in fields]
 
 
 class FakeHandle:
@@ -54,6 +55,9 @@ class FakeBackend:
 
     def feature_count(self, layer):
         return layer.count
+
+    def fields_of(self, layer):
+        return layer.fields
 
     def run_algorithm(self, algorithm_id, parameters, finished):
         self.calls.append((algorithm_id, dict(parameters)))
@@ -217,6 +221,120 @@ class BufferTest(unittest.TestCase):
         registry = gestures.GestureRegistry()
         analysis.register_all(registry, backend_factory=lambda: self.backend())
         self.assertIn("analysis.buffer", registry.ids())
+        self.assertIn("analysis.intersect", registry.ids())
+        self.assertIn("analysis.select_by_attribute", registry.ids())
+
+
+class IntersectTest(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.out = os.path.join(self.dir.name, "2-analysis.intersect.gpkg")
+        self.entry = analysis.ALGORITHMS["analysis.intersect"]
+        self.backend = FakeBackend([FakeLayer("a"), FakeLayer("b", name="tampon"), FakeLayer("r", vector=False)])
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def params(self, **extra):
+        p = {"layer_id": "a", "overlay_layer_id": "b", "out": self.out}
+        p.update(extra)
+        return p
+
+    def test_two_layers_go_to_the_algorithm(self):
+        g, calls = start(self.entry, self.backend, self.params())
+        algo, p = self.backend.calls[0]
+        self.assertEqual(algo, "native:intersection")
+        self.assertEqual((p["INPUT"].lid, p["OVERLAY"].lid), ("a", "b"))
+        self.assertEqual(p["OUTPUT"], self.out)
+        self.backend.finished(True, {})
+        self.assertIsNone(calls[0][1])
+        self.assertEqual(calls[0][0]["layer_id"], "out_1")
+
+    def test_same_layer_refused(self):
+        _, calls = start(self.entry, self.backend, self.params(overlay_layer_id="a"))
+        self.assertEqual(calls[0][1].code, "analysis.bad_params")
+        self.assertEqual(self.backend.calls, [])
+
+    def test_unknown_or_raster_overlay_refused(self):
+        _, calls = start(self.entry, self.backend, self.params(overlay_layer_id="nope"))
+        self.assertEqual(calls[0][1].code, "layer.not_found")
+        _, calls = start(self.entry, self.backend, self.params(overlay_layer_id="r"))
+        self.assertEqual(calls[0][1].code, "layer.not_vector")
+        self.assertEqual(self.backend.calls, [])
+
+    def test_degrees_are_accepted(self):
+        backend = FakeBackend([FakeLayer("a", metric=False), FakeLayer("b", metric=False)])
+        start(self.entry, backend, self.params())
+        self.assertEqual(len(backend.calls), 1)  # l'intersection ne mesure rien
+
+
+class SelectByAttributeTest(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.out = os.path.join(self.dir.name, "3-analysis.select_by_attribute.gpkg")
+        self.entry = analysis.ALGORITHMS["analysis.select_by_attribute"]
+        self.backend = FakeBackend([FakeLayer("a"), FakeLayer("w", crs="EPSG:4326", metric=False)])
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def params(self, **extra):
+        p = {"layer_id": "a", "field": "zone", "operator": "eq", "value": "U", "out": self.out}
+        p.update(extra)
+        return p
+
+    def test_equal_filter_passes_three_separate_parameters(self):
+        start(self.entry, self.backend, self.params())
+        algo, p = self.backend.calls[0]
+        self.assertEqual(algo, "native:extractbyattribute")
+        self.assertEqual((p["FIELD"], p["OPERATOR"], p["VALUE"]), ("zone", 0, "U"))
+        self.assertNotIn("EXPRESSION", p)
+        self.assertEqual(p["OUTPUT"], self.out)
+
+    def test_every_operator_has_a_distinct_code(self):
+        codes = []
+        for op in ("eq", "ne", "lt", "lte", "gt", "gte", "contains", "begins_with"):
+            backend = FakeBackend([FakeLayer("a")])
+            start(self.entry, backend, self.params(operator=op))
+            codes.append(backend.calls[0][1]["OPERATOR"])
+        self.assertEqual(len(set(codes)), 8)
+
+    def test_numeric_value_stays_text(self):
+        start(self.entry, self.backend, self.params(field="pop", operator="gt", value="1000"))
+        self.assertEqual(self.backend.calls[0][1]["VALUE"], "1000")
+
+    def test_user_text_is_never_interpreted(self):
+        evil = "U\" OR 1=1 --"
+        start(self.entry, self.backend, self.params(value=evil))
+        self.assertEqual(self.backend.calls[0][1]["VALUE"], evil)
+
+    def test_no_feature_retained_gives_an_empty_layer(self):
+        backend = FakeBackend([FakeLayer("a")], loaded_count=0)
+        _, calls = start(self.entry, backend, self.params(value="zzz"))
+        backend.finished(True, {})
+        self.assertEqual(calls[0][0]["feature_count"], 0)
+
+    def test_unknown_field_refused(self):
+        _, calls = start(self.entry, self.backend, self.params(field="absent"))
+        self.assertEqual(calls[0][1].code, "analysis.unknown_field")
+        self.assertEqual(self.backend.calls, [])
+
+    def test_bad_operator_refused_even_if_the_core_let_it_through(self):
+        _, calls = start(self.entry, self.backend, self.params(operator="is_null"))
+        self.assertEqual(calls[0][1].code, "analysis.bad_params")
+
+    def test_unknown_layer_and_cancellation(self):
+        _, calls = start(self.entry, self.backend, self.params(layer_id="nope"))
+        self.assertEqual(calls[0][1].code, "layer.not_found")
+        g, calls = start(self.entry, self.backend, self.params())
+        g.cancel()
+        self.backend.finished(False, {})
+        self.assertEqual(calls[0][1].code, "qgis.cancelled")
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_any_crs_is_accepted(self):
+        start(self.entry, self.backend, self.params(layer_id="w"))
+        self.assertEqual(len(self.backend.calls), 1)
 
 
 class FormHidesCoreFilledTest(unittest.TestCase):

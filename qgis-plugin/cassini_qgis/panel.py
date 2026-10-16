@@ -56,6 +56,40 @@ class LayerCombo(QComboBox):
         self.reload()
         super().showPopup()
 
+
+class FieldCombo(QComboBox):
+    """Liste déroulante des champs de la couche choisie dans une `LayerCombo`, relue quand
+    cette couche change et à chaque ouverture. Reliée après coup (`bind`) : les champs du
+    formulaire sont rangés par ordre alphabétique, `field` vient avant `layer_id`."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._layer_combo = None
+
+    def bind(self, layer_combo):
+        self._layer_combo = layer_combo
+        layer_combo.currentIndexChanged.connect(lambda _=0: self.reload())
+        self.reload()
+
+    def reload(self):
+        from qgis.core import QgsProject
+
+        keep = self.currentData()
+        self.clear()
+        layer_id = self._layer_combo.currentData() if self._layer_combo is not None else None
+        layer = QgsProject.instance().mapLayer(layer_id or "")
+        if layer is not None and hasattr(layer, "fields"):
+            for f in layer.fields():
+                self.addItem(f.name(), f.name())
+        index = self.findData(keep)
+        if index >= 0:
+            self.setCurrentIndex(index)
+
+    def showPopup(self):
+        self.reload()
+        super().showPopup()
+
+
 LANG_KEY = "cassini/lang"
 EXPERT_KEY = "cassini/expert_open"
 ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
@@ -508,6 +542,8 @@ class CassiniPanel(QWidget):
                 widget = QCheckBox()
             elif form.is_layer_field(f):
                 widget = LayerCombo()
+            elif form.is_field_field(f) and any(g.name == "layer_id" for g in self._fields):
+                widget = FieldCombo()
             elif f.kind == form.ENUM:
                 widget = QComboBox()
                 if not f.required:
@@ -531,6 +567,10 @@ class CassiniPanel(QWidget):
                 widget.setAccessibleDescription(f.description)
             self._inputs[f.name] = widget
             self.form_layout.addRow(label, row)
+        layers = self._inputs.get("layer_id")
+        for widget in self._inputs.values():
+            if isinstance(widget, FieldCombo) and layers is not None:
+                widget.bind(layers)
 
     def _browse(self, widget):
         if not self.project_file:
@@ -552,7 +592,7 @@ class CassiniPanel(QWidget):
             widget = self._inputs[f.name]
             if f.kind == form.BOOLEAN:
                 values[f.name] = widget.isChecked()
-            elif f.kind == form.ENUM or form.is_layer_field(f):
+            elif f.kind == form.ENUM or form.is_layer_field(f) or isinstance(widget, FieldCombo):
                 values[f.name] = widget.currentData() or ""
             else:
                 values[f.name] = widget.text()

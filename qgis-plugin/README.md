@@ -96,6 +96,22 @@ Recette manuelle de `analysis.buffer` [ticket 8] (jeu `../donnees-test-cassini/`
    raster donne `layer.not_vector`.
 4. Lancez puis arrêtez : `qgis.cancelled`, aucun fichier ne reste dans `<projet>.cassini/`.
 
+Recette manuelle de `analysis.intersect` et `analysis.select_by_attribute` [ticket 9]
+(jeu `../donnees-test-cassini/`) :
+
+1. `gares-2154.csv` ouvert (`layer.add`, `crs` = `EPSG:2154`) et sa zone tampon de 500 m
+   (`analysis.buffer`). Choisissez `analysis.intersect` : `layer_id` et
+   `overlay_layer_id` sont deux listes de couches. Gares en première, zone tampon en
+   seconde : une couche de 8 entités apparaît. Les deux mêmes couches donnent
+   `analysis.bad_params`.
+2. `analysis.select_by_attribute` : `layer_id` est une liste de couches, `field` la liste
+   des champs de la couche choisie (elle change avec la couche), `operator` une liste
+   (`eq`, `ne`, `lt`, `lte`, `gt`, `gte`, `contains`, `begins_with`). `name` +
+   `begins_with` + `A` rend une couche des gares dont le nom commence par A ; une valeur
+   sans correspondance rend une couche vide (0 entité), sans erreur.
+3. Sonde sous le vrai QGIS : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat"
+   qgis-plugin/tests/probe_intersect_select.py` doit finir par `RÉSULTAT : OK`.
+
 Contrôle manuel : charger l'extension, ouvrir un projet, voir les deux versions,
 fermer QGIS et vérifier qu'aucun `cassini` ne reste dans le gestionnaire des
 tâches.

@@ -101,3 +101,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `epic-facade-qgis/story-zone-tampon-par-le-cadre-de-traitement-de-qgis-plan.md`
   summary: Le rejeu d'un journal contenant `analysis.buffer` diverge (octets du GeoPackage, `layer_id` de session).
   evidence: `journal.rs` compare les octets des sorties et le résultat résumé ; à traiter avec l'entrée 9.14.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-facade-qgis/story-intersection-et-selection-par-attribut-plan.md`
+  summary: Tester `FieldCombo` (rebranchement sur `layer_id`, rechargement, choix conservé) dans un vrai panneau Qt.
+  evidence: Seule la logique sans Qt est testée ; la règle 11 demande un test du composant, aujourd'hui couvert par la recette manuelle.
