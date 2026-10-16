@@ -11,6 +11,7 @@ le seul endroit qui importe `qgis.core`, les tests mettent une doublure.
 """
 
 import os
+import re
 
 try:  # `gestures` est importé à plat par les tests, en paquet par QGIS
     from .gestures import GestureError
@@ -22,7 +23,11 @@ FORMATS = {".gpkg": "ogr", ".shp": "ogr", ".geojson": "ogr"}
 
 UNSUPPORTED = "layer.unsupported_format"
 INVALID = "layer.invalid_source"
+UNKNOWN_CRS = "layer.unknown_crs"
+INVALID_CRS = "layer.invalid_crs"
+CRS_CONFLICT = "layer.crs_conflict"
 CANCELLED = "qgis.cancelled"
+CRS_FORMAT = re.compile(r"^EPSG:[0-9]+$")
 
 
 class QgisBackend:
@@ -42,6 +47,16 @@ class QgisBackend:
         return layer is not None and layer.isValid()
 
     def crs_of(self, layer):
+        return layer.crs().authid()
+
+    def assign_crs(self, layer, authid):
+        """Donne un SCR à la couche en mémoire (le fichier n'est pas touché)."""
+        from qgis.core import QgsCoordinateReferenceSystem
+
+        crs = QgsCoordinateReferenceSystem(authid)
+        if not crs.isValid():
+            return ""
+        layer.setCrs(crs)
         return layer.crs().authid()
 
     def project_crs(self):
@@ -89,6 +104,8 @@ class LayerAddGesture:
             self._finish(result=self._open())
         except GestureError as exc:
             self._finish(error=exc)
+        except Exception:  # un ordre sans réponse bloquerait le noyau
+            self._finish(error=GestureError("qgis.gesture_failed", "Échec inattendu de l'ouverture."))
 
     def _open(self):
         path = (self._params or {}).get("path")
@@ -109,7 +126,7 @@ class LayerAddGesture:
             raise GestureError(INVALID, "Le fichier « %s » n'est pas lisible." % name)
         if self._cancelled:
             raise GestureError(CANCELLED, "Geste annulé.")
-        source_crs = backend.crs_of(layer)
+        source_crs = self._resolve_crs(layer)
         project_crs = backend.project_crs()
         layer_id = backend.add(layer)
         return {
@@ -119,6 +136,30 @@ class LayerAddGesture:
             "project_crs": project_crs,
             "reprojected": source_crs != project_crs,
         }
+
+    def _resolve_crs(self, layer):
+        """SCR explicite de la couche : celui du fichier, ou celui demandé (AD-19)."""
+        asked = (self._params or {}).get("crs")
+        if asked is not None and not (isinstance(asked, str) and CRS_FORMAT.match(asked)):
+            raise GestureError(INVALID_CRS, "SCR invalide : attendu un code comme EPSG:2154.")
+        found = self._backend.crs_of(layer)
+        if found:
+            if asked is not None and asked != found:
+                raise GestureError(
+                    CRS_CONFLICT,
+                    "Le fichier est en %s, pas en %s : retirez le paramètre crs." % (found, asked),
+                )
+            return found
+        if asked is None:
+            raise GestureError(
+                UNKNOWN_CRS,
+                "Le fichier n'indique pas son système de coordonnées : "
+                "ajoutez le paramètre crs (ex. EPSG:2154).",
+            )
+        assigned = self._backend.assign_crs(layer, asked)
+        if not assigned:
+            raise GestureError(INVALID_CRS, "SCR inconnu de QGIS : %s." % asked)
+        return assigned
 
     def _finish(self, result=None, error=None):
         done, self._done = self._done, None

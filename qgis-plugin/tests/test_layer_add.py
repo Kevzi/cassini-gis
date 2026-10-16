@@ -43,6 +43,12 @@ class FakeBackend:
     def project_crs(self):
         return self.project_crs_value
 
+    def assign_crs(self, layer, authid):
+        if authid not in ("EPSG:2154", "EPSG:4326"):
+            return ""
+        layer.crs = authid
+        return authid
+
     def add(self, layer):
         self.added.append(layer)
         return "layer_%d" % len(self.added)
@@ -57,17 +63,18 @@ class Harness:
         self.calls = []
         self.gesture = layer_add.LayerAddGesture(backend, self.queue.append)
 
-    def start(self, path):
-        self.gesture.start({"path": path}, lambda result=None, error=None: self.calls.append((result, error)))
+    def start(self, path, crs=None):
+        params = {"path": path} if crs is None else {"path": path, "crs": crs}
+        self.gesture.start(params, lambda result=None, error=None: self.calls.append((result, error)))
 
     def pump(self):
         while self.queue:
             self.queue.pop(0)()
 
 
-def run(backend, path):
+def run(backend, path, crs=None):
     h = Harness(backend)
-    h.start(path)
+    h.start(path, crs)
     assert h.calls == []  # asynchrone : rien avant l'ordonnanceur
     h.pump()
     assert len(h.calls) == 1
@@ -106,6 +113,48 @@ class LayerAddTest(unittest.TestCase):
                 self.assertIsNone(error, ext)
                 self.assertEqual(result["name"], "x")
                 self.assertEqual(b.loaded[0][2], "ogr")
+
+    def test_file_without_crs_is_refused(self):
+        b = FakeBackend(crs="")
+        result, error = run(b, FIXTURE)
+        self.assertIsNone(result)
+        self.assertEqual(error.code, "layer.unknown_crs")
+        self.assertIn("crs", error.message)
+        self.assertEqual(b.added, [])
+
+    def test_crs_given_when_the_file_has_none(self):
+        b = FakeBackend(crs="")
+        result, error = run(b, FIXTURE, "EPSG:2154")
+        self.assertIsNone(error)
+        self.assertEqual(result["source_crs"], "EPSG:2154")
+        self.assertFalse(result["reprojected"])
+        self.assertEqual(len(b.added), 1)
+
+    def test_crs_that_contradicts_the_file(self):
+        b = FakeBackend(crs="EPSG:4326")
+        result, error = run(b, FIXTURE, "EPSG:2154")
+        self.assertEqual(error.code, "layer.crs_conflict")
+        self.assertEqual(b.added, [])
+
+    def test_crs_same_as_the_file_is_accepted(self):
+        result, error = run(FakeBackend(crs="EPSG:4326"), FIXTURE, "EPSG:4326")
+        self.assertIsNone(error)
+        self.assertEqual(result["source_crs"], "EPSG:4326")
+
+    def test_malformed_or_unknown_crs(self):
+        for bad in ("2154", "epsg:2154", "EPSG:", "EPSG:999999"):
+            result, error = run(FakeBackend(crs=""), FIXTURE, bad)
+            self.assertEqual(error.code, "layer.invalid_crs", bad)
+
+    def test_unexpected_error_still_answers(self):
+        class Boom(FakeBackend):
+            def load(self, path, name, provider):
+                raise RuntimeError("c:/secret/chemin")
+
+        result, error = run(Boom(), FIXTURE)
+        self.assertIsNone(result)
+        self.assertEqual(error.code, "qgis.gesture_failed")
+        self.assertNotIn("secret", error.message)
 
     def test_unsupported_format(self):
         b = FakeBackend()

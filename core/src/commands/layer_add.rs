@@ -13,6 +13,10 @@ use crate::registry::{CommandSpec, Delegated, Registration, RunsIn};
 pub struct LayerAddParams {
     /// Fichier à ouvrir, relatif au projet : `.gpkg`, `.shp` ou `.geojson`.
     pub path: String,
+    /// SCR à donner à la couche quand le fichier n'en indique aucun (ex. `EPSG:2154`) ;
+    /// refusé s'il contredit celui du fichier. Le fichier n'est jamais modifié.
+    #[serde(default)]
+    pub crs: Option<String>,
 }
 
 /// Résultat de `layer.add`.
@@ -47,7 +51,8 @@ impl Delegated for LayerAdd {
         .cancellable(true)
         .path_params(&["path"])
         .example(serde_json::json!({"path": "donnees/parcelles.gpkg"}))
-        .tests(&["layer_add_is_delegated"])
+        .example(serde_json::json!({"path": "donnees/gares.shp", "crs": "EPSG:2154"}))
+        .tests(&["layer_add_is_delegated", "layer_add_takes_an_optional_crs"])
     }
 }
 
@@ -69,5 +74,14 @@ mod tests {
             .call("layer.add", json!({"path": "a.gpkg"}))
             .unwrap_err();
         assert_eq!(err.code(), "registry.unavailable");
+    }
+
+    #[test]
+    fn layer_add_takes_an_optional_crs() {
+        let registry = Registry::standard();
+        let err = registry
+            .call("layer.add", json!({"path": "a.shp", "crs": "EPSG:2154"}))
+            .unwrap_err();
+        assert_eq!(err.code(), "registry.unavailable"); // params valides, exécutant absent
     }
 }

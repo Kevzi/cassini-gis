@@ -52,6 +52,9 @@ commande) :
    donne son SCR et si QGIS la reprojette. Répétez pour chaque format.
 3. Le fichier reste intact (taille et date inchangées). Un `.txt` donne
    `layer.unsupported_format`, un fichier abîmé `layer.invalid_source`.
+4. Un Shapefile sans `.prj` donne `layer.unknown_crs` : relancez avec le champ `crs`
+   (ex. `EPSG:2154`). Le SCR est donné à la couche en mémoire, le fichier reste
+   intact. Un `crs` qui contredit celui du fichier donne `layer.crs_conflict`.
 
 Contrôle manuel : charger l'extension, ouvrir un projet, voir les deux versions,
 fermer QGIS et vérifier qu'aucun `cassini` ne reste dans le gestionnaire des
