@@ -105,3 +105,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-facade-qgis/story-intersection-et-selection-par-attribut-plan.md`
   summary: Tester `FieldCombo` (rebranchement sur `layer_id`, rechargement, choix conservé) dans un vrai panneau Qt.
   evidence: Seule la logique sans Qt est testée ; la règle 11 demande un test du composant, aujourd'hui couvert par la recette manuelle.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-facade-qgis/story-statistiques-par-zone-plan.md`
+  summary: `analysis.zonal_statistics` peut lire un ancien champ `NUMPOINTS` si la couche de zones en a déjà un.
+  evidence: non vérifié (medium si vrai) ; à trancher en lançant la commande sous QGIS sur la sortie d'un premier run réutilisée comme zones ; correctif = nom de champ unique ou refus `analysis.bad_params`.

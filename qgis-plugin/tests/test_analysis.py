@@ -14,9 +14,10 @@ import gestures  # noqa: E402
 
 
 class FakeLayer:
-    def __init__(self, lid, name="gares", crs="EPSG:2154", vector=True, metric=True, count=8, fields=("zone", "pop")):
+    def __init__(self, lid, name="gares", crs="EPSG:2154", vector=True, metric=True, count=8, fields=("zone", "pop"), geometry="Point"):
         self.lid, self.name, self.crs, self.vector, self.metric, self.count = lid, name, crs, vector, metric, count
         self.fields = [(f, "String") for f in fields]
+        self.geometry = geometry
 
 
 class FakeHandle:
@@ -34,6 +35,7 @@ class FakeBackend:
         self.items = {l.lid: l for l in layers}
         self.calls, self.handle, self.finished = [], FakeHandle(), None
         self.write, self.loaded_count, self.loadable = write, loaded_count, loadable
+        self.pairs, self.counts_call = [], None
 
     def layer(self, layer_id):
         return self.items.get(layer_id)
@@ -58,6 +60,14 @@ class FakeBackend:
 
     def fields_of(self, layer):
         return layer.fields
+
+    def geometry_of(self, layer):
+        return layer.geometry
+
+    def counts_of(self, layer, count_field, label_field, limit):
+        self.counts_call = (count_field, label_field, limit)
+        pairs = self.pairs[:limit]
+        return pairs, len(self.pairs) > limit
 
     def run_algorithm(self, algorithm_id, parameters, finished):
         self.calls.append((algorithm_id, dict(parameters)))
@@ -223,6 +233,7 @@ class BufferTest(unittest.TestCase):
         self.assertIn("analysis.buffer", registry.ids())
         self.assertIn("analysis.intersect", registry.ids())
         self.assertIn("analysis.select_by_attribute", registry.ids())
+        self.assertIn("analysis.zonal_statistics", registry.ids())
 
 
 class IntersectTest(unittest.TestCase):
@@ -335,6 +346,99 @@ class SelectByAttributeTest(unittest.TestCase):
     def test_any_crs_is_accepted(self):
         start(self.entry, self.backend, self.params(layer_id="w"))
         self.assertEqual(len(self.backend.calls), 1)
+
+
+class ZonalStatisticsTest(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.out = os.path.join(self.dir.name, "4-analysis.zonal_statistics.gpkg")
+        self.entry = analysis.ALGORITHMS["analysis.zonal_statistics"]
+        self.backend = FakeBackend(
+            [
+                FakeLayer("z", name="communes", geometry="Polygon", fields=("nom", "pop")),
+                FakeLayer("p", name="gares"),
+                FakeLayer("r", vector=False),
+            ],
+            loaded_count=3,
+        )
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def params(self, **extra):
+        p = {"layer_id": "z", "points_layer_id": "p", "label_field": "nom", "out": self.out}
+        p.update(extra)
+        return p
+
+    def test_count_with_a_zone_without_point(self):
+        self.backend.pairs = [("Villeneuve", 5), ("Orly", 3), ("Vide", 0)]
+        _, calls = start(self.entry, self.backend, self.params())
+        algo, p = self.backend.calls[0]
+        self.assertEqual(algo, "native:countpointsinpolygon")
+        self.assertEqual((p["POLYGONS"].lid, p["POINTS"].lid), ("z", "p"))
+        self.assertEqual(p["OUTPUT"], self.out)
+        self.backend.finished(True, {})
+        result, error = calls[0]
+        self.assertIsNone(error)
+        self.assertEqual(result["feature_count"], 3)
+        self.assertEqual(
+            result["zones"],
+            [{"label": "Villeneuve", "count": 5}, {"label": "Orly", "count": 3}, {"label": "Vide", "count": 0}],
+        )
+        self.assertFalse(result["truncated"])
+        self.assertEqual(self.backend.counts_call, (p["FIELD"], "nom", 100))
+
+    def test_label_field_is_optional(self):
+        p = self.params()
+        del p["label_field"]
+        self.backend.pairs = [("1", 2)]
+        _, calls = start(self.entry, self.backend, p)
+        self.backend.finished(True, {})
+        self.assertIsNone(calls[0][1])
+        self.assertIsNone(self.backend.counts_call[1])
+
+    def test_unknown_label_field_refused(self):
+        _, calls = start(self.entry, self.backend, self.params(label_field="absent"))
+        self.assertEqual(calls[0][1].code, "analysis.unknown_field")
+        self.assertEqual(self.backend.calls, [])
+
+    def test_more_than_100_zones_are_truncated(self):
+        self.backend.pairs = [(str(i), i) for i in range(150)]
+        self.backend.loaded_count = 150
+        _, calls = start(self.entry, self.backend, self.params())
+        self.backend.finished(True, {})
+        result = calls[0][0]
+        self.assertEqual(len(result["zones"]), 100)
+        self.assertTrue(result["truncated"])
+        self.assertEqual(result["feature_count"], 150)
+
+    def test_same_layer_refused(self):
+        _, calls = start(self.entry, self.backend, self.params(points_layer_id="z"))
+        self.assertEqual(calls[0][1].code, "analysis.bad_params")
+        self.assertEqual(self.backend.calls, [])
+
+    def test_unknown_or_raster_layers_refused(self):
+        for key, value, code in (
+            ("layer_id", "nope", "layer.not_found"),
+            ("layer_id", "r", "layer.not_vector"),
+            ("points_layer_id", "nope", "layer.not_found"),
+            ("points_layer_id", "r", "layer.not_vector"),
+        ):
+            _, calls = start(self.entry, self.backend, self.params(**{key: value}))
+            self.assertEqual(calls[0][1].code, code)
+        self.assertEqual(self.backend.calls, [])
+
+    def test_zones_must_be_polygons(self):
+        _, calls = start(self.entry, self.backend, self.params(layer_id="p", points_layer_id="z"))
+        self.assertEqual(calls[0][1].code, "analysis.bad_params")
+        self.assertEqual(self.backend.calls, [])
+
+    def test_cancellation_leaves_no_file(self):
+        g, calls = start(self.entry, self.backend, self.params())
+        g.cancel()
+        self.backend.finished(False, {})
+        self.assertEqual(calls[0][1].code, "qgis.cancelled")
+        self.assertFalse(os.path.exists(self.out))
 
 
 class FormHidesCoreFilledTest(unittest.TestCase):

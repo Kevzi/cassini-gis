@@ -102,6 +102,25 @@ def translate_select_by_attribute(params, layer):
     }
 
 
+# Champ de décompte écrit par `native:countpointsinpolygon` ; le noyau ne le connaît pas.
+_COUNT_FIELD = "NUMPOINTS"
+_MAX_ZONES = 100  # borne du schéma de sortie du noyau (AD-8)
+
+
+def translate_zonal_statistics(params, layer):
+    """Paramètres neutres de `analysis.zonal_statistics` -> `native:countpointsinpolygon`.
+
+    La couche de points est ajoutée par le geste (clé `overlay` de la table).
+    """
+    return {"POLYGONS": layer, "WEIGHT": "", "CLASSFIELD": "", "FIELD": _COUNT_FIELD}
+
+
+def summarize_zonal_statistics(backend, layer, params):
+    """Décomptes des 100 premières zones de la couche produite (clé `summary` de la table)."""
+    pairs, truncated = backend.counts_of(layer, _COUNT_FIELD, params.get("label_field") or None, _MAX_ZONES)
+    return {"zones": [{"label": label, "count": count} for label, count in pairs], "truncated": truncated}
+
+
 # Table fermée : id de commande -> algorithme et traduction.
 #   algorithm : id de l'algorithme du cadre de traitement ;
 #   translate : (params du noyau, couche d'entrée) -> paramètres de l'algorithme, sans la sortie ;
@@ -110,7 +129,10 @@ def translate_select_by_attribute(params, layer):
 #   metric    : l'algorithme mesure en unités de la couche, donc le SCR doit être en mètres ;
 #   overlay   : (facultatif) paramètre du noyau qui désigne une seconde couche, et clé de
 #               l'algorithme qui la reçoit (`overlay_key`) ;
-#   field     : (facultatif) paramètre du noyau qui nomme un champ de la couche d'entrée.
+#   field     : (facultatif) paramètre du noyau qui nomme un champ de la couche d'entrée ;
+#               avec `field_optional`, il peut être absent ;
+#   geometry  : (facultatif) type de géométrie exigé de la couche d'entrée (ex. `Polygon`) ;
+#   summary   : (facultatif) (fond, couche produite, params) -> dict qui complète le résultat.
 ALGORITHMS = {
     "analysis.buffer": {
         "algorithm": "native:buffer",
@@ -133,6 +155,18 @@ ALGORITHMS = {
         "output": "OUTPUT",
         "input": "layer_id",
         "field": "field",
+    },
+    "analysis.zonal_statistics": {
+        "algorithm": "native:countpointsinpolygon",
+        "translate": translate_zonal_statistics,
+        "output": "OUTPUT",
+        "input": "layer_id",
+        "overlay": "points_layer_id",
+        "overlay_key": "POINTS",
+        "field": "label_field",
+        "field_optional": True,
+        "geometry": "Polygon",
+        "summary": summarize_zonal_statistics,
     },
 }
 
@@ -170,6 +204,26 @@ class QgisBackend(_ReadBackend):
         task.executed.connect(lambda ok, results: finished(bool(ok), results or {}))
         QgsApplication.taskManager().addTask(task)
         return handle
+
+    def counts_of(self, layer, count_field, label_field, limit):
+        """Couples (étiquette, décompte) des `limit` premières entités, et si la couche en a plus.
+
+        L'étiquette est la valeur de `label_field`, ou le numéro d'entité si le champ est
+        absent, vide ou nul.
+        """
+        from qgis.core import QgsFeatureRequest
+
+        request = QgsFeatureRequest()
+        request.setLimit(limit)
+        pairs = []
+        for feature in layer.getFeatures(request):
+            label = feature[label_field] if label_field else None
+            text = "" if label is None else str(label).strip()
+            if text in ("", "NULL"):
+                text = str(feature.id())
+            count = feature[count_field]
+            pairs.append((text, int(count) if count is not None else 0))
+        return pairs, self.feature_count(layer) > limit
 
     def load_output(self, path, name):
         """Ouvre la couche écrite et l'ajoute au projet ; None si illisible."""
@@ -274,10 +328,15 @@ class ProcessingGesture:
                 "reprojetez-la d'abord dans un système en mètres (par exemple EPSG:2154)."
                 % (backend.name_of(layer), backend.crs_of(layer)),
             )
+        if entry.get("geometry") and backend.geometry_of(layer) != entry["geometry"]:
+            raise GestureError(
+                BAD_PARAMS,
+                "La couche « %s » n'est pas une couche de polygones." % backend.name_of(layer),
+            )
         overlay = None
         if entry.get("overlay"):
             overlay = self._overlay(params, layer_id)
-        if entry.get("field"):
+        if entry.get("field") and not (entry.get("field_optional") and not params.get(entry["field"])):
             self._check_field(params.get(entry["field"]), layer)
         algorithm_params = entry["translate"](params, layer)
         if overlay is not None:
@@ -332,12 +391,16 @@ class ProcessingGesture:
         if layer is None:
             raise GestureError(FAILED, "La couche produite est illisible.")
         self._loaded = True
-        return {
+        result = {
             "layer_id": backend.id_of(layer),
             "name": backend.name_of(layer),
             "feature_count": backend.feature_count(layer),
             "crs": backend.crs_of(layer),
         }
+        summary = self._entry.get("summary")
+        if summary is not None:
+            result.update(summary(backend, layer, self._params or {}))
+        return result
 
     def _fail(self, error):
         # Une couche déjà ajoutée au projet garde son fichier.

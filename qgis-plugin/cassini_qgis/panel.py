@@ -62,9 +62,11 @@ class FieldCombo(QComboBox):
     cette couche change et à chaque ouverture. Reliée après coup (`bind`) : les champs du
     formulaire sont rangés par ordre alphabétique, `field` vient avant `layer_id`."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, optional=False, empty_text=""):
         super().__init__(parent)
         self._layer_combo = None
+        self._optional = optional
+        self._empty_text = empty_text
 
     def bind(self, layer_combo):
         self._layer_combo = layer_combo
@@ -78,6 +80,8 @@ class FieldCombo(QComboBox):
         self.clear()
         layer_id = self._layer_combo.currentData() if self._layer_combo is not None else None
         layer = QgsProject.instance().mapLayer(layer_id or "")
+        if self._optional:
+            self.addItem(self._empty_text, "")
         if layer is not None and hasattr(layer, "fields"):
             for f in layer.fields():
                 self.addItem(f.name(), f.name())
@@ -543,7 +547,7 @@ class CassiniPanel(QWidget):
             elif form.is_layer_field(f):
                 widget = LayerCombo()
             elif form.is_field_field(f) and any(g.name == "layer_id" for g in self._fields):
-                widget = FieldCombo()
+                widget = FieldCombo(optional=not f.required, empty_text=self.t("optional_empty"))
             elif f.kind == form.ENUM:
                 widget = QComboBox()
                 if not f.required:

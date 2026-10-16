@@ -112,6 +112,19 @@ Recette manuelle de `analysis.intersect` et `analysis.select_by_attribute` [tick
 3. Sonde sous le vrai QGIS : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat"
    qgis-plugin/tests/probe_intersect_select.py` doit finir par `RÉSULTAT : OK`.
 
+Recette manuelle de `analysis.zonal_statistics` [ticket 10] (jeu `../donnees-test-cassini/`) :
+
+1. Une couche de polygones (communes ou secteurs) et `gares-2154.csv` ouverts. Choisissez
+   `analysis.zonal_statistics` : `layer_id` (zones) et `points_layer_id` (points) sont deux
+   listes de couches ; `label_field` est une liste des champs de la couche de zones, avec
+   une entrée vide (zone alors nommée par son numéro d'entité).
+2. Lancez : une couche des zones avec un champ `NUMPOINTS` apparaît, et `zones` donne les
+   décomptes (0 pour une zone sans gare). Au-delà de 100 zones, `zones` en garde 100 et
+   `truncated` est vrai, la couche les garde toutes.
+3. Les deux mêmes couches, ou des points donnés comme zones, donnent `analysis.bad_params`.
+4. Sonde sous le vrai QGIS : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat"
+   qgis-plugin/tests/probe_zonal_statistics.py` doit finir par `RÉSULTAT : OK`.
+
 Contrôle manuel : charger l'extension, ouvrir un projet, voir les deux versions,
 fermer QGIS et vérifier qu'aucun `cassini` ne reste dans le gestionnaire des
 tâches.
