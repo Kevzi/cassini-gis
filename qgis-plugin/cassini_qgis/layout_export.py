@@ -49,6 +49,7 @@ class LayoutBackend(QgisBackend):
         """Monte la mise en page, l'exporte dans `out`, rend les éléments posés (clés de
         `EXPECTED_ITEMS`). Lève `RuntimeError` si l'export échoue."""
         from qgis.core import (
+            Qgis,
             QgsCoordinateReferenceSystem,
             QgsLayout,
             QgsLayoutExporter,
@@ -105,6 +106,14 @@ class LayoutBackend(QgisBackend):
         scale = QgsLayoutItemScaleBar(layout)
         scale.setLinkedMap(carte)
         scale.applyDefaultSize()
+        # Graduations en km dès que le segment fait 1 000 m : « 0 1 2 km » ne se chevauche pas.
+        if scale.units() == Qgis.DistanceUnit.Meters and scale.unitsPerSegment() >= 1000:
+            scale.setUnitsPerSegment(scale.unitsPerSegment() / 1000.0)
+            scale.setUnits(Qgis.DistanceUnit.Kilometers)
+            scale.setUnitLabel("km")
+        scale_font = QFont()
+        scale_font.setPointSize(8)
+        scale.setFont(scale_font)
         place(scale, 10, 185, 80, 12)
 
         arrow = QgsLayoutItemPicture(layout)
