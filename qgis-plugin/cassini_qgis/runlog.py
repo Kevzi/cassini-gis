@@ -18,6 +18,9 @@ ERROR = "error"
 ICONS = {RUNNING: "…", DONE: "✔", CANCELLED: "⊘", ERROR: "✖"}
 
 _ABSOLUTE = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\|/)")
+# Chemin absolu au milieu d'un texte : lettre de disque, UNC, ou « / » au début du texte ou
+# après un espace, une quote ou une parenthèse ; il s'arrête à l'espace, la quote ou la fermante.
+_EMBEDDED = re.compile(r"(?:(?<=[\s'\"(\[:=,;])|^)(?:[A-Za-z]:[\\/]|\\\\|/(?=[^\s/]))[^\s'\")\]]*")
 
 
 class Entry:
@@ -56,13 +59,25 @@ def line_text(entry, status_word):
     return "%s %s  %s  %s" % (ICONS[entry.status], status_word, entry.label, entry.when)
 
 
+def _mask(match):
+    path = match.group(0).rstrip(".,;:")
+    tail = re.split(r"[\\/]", path.rstrip("\\/"))[-1]
+    return "…/" + tail + match.group(0)[len(path):]
+
+
 def redact(value):
     """Remplace tout chemin absolu d'un résultat par `…/nom` (AD-9)."""
     if isinstance(value, str):
-        if _ABSOLUTE.match(value) and ("/" in value or "\\" in value):
+        # Un chemin seul (même avec des espaces) devient `…/nom` ; une phrase qui commence par un
+        # chemin (« : » ou « , » suivi d'un blanc) passe par le masquage des chemins inclus.
+        if (
+            _ABSOLUTE.match(value)
+            and ("/" in value or "\\" in value)
+            and not re.search(r"[:;,]\s", value)
+        ):
             tail = re.split(r"[\\/]", value.rstrip("\\/"))[-1]
             return "…/" + tail
-        return value
+        return _EMBEDDED.sub(_mask, value)
     if isinstance(value, list):
         return [redact(v) for v in value]
     if isinstance(value, dict):

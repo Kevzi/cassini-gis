@@ -83,29 +83,45 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-facade-qgis/story-garde-hors-ligne-et-recette-du-python-de-l-extension-plan.md`
   summary: Étendre la garde réseau de l'extension à `qgis.PyQt.QtNetwork`, `ftplib`, `smtplib`, `ssl`, `asyncio` et aux imports dynamiques.
   evidence: La garde 9.3 n'interdit que urllib, requests, socket, http (AD-14) ; `from qgis.PyQt import QtNetwork` ou `__import__("socket")` passeraient. Décision de périmètre à prendre avec le propriétaire.
+  status: close, 2026-10-16, entrée 9.13 (`epic-facade-qgis/story-refactor-sweep-plan.md`)
+  resolution: `check_extension.py` refuse aussi ftplib, smtplib, ssl, asyncio, telnetlib, xmlrpc, `qgis.PyQt.QtNetwork` et `QtWebSockets`, socketserver, selectors, webbrowser, QtWebKit et QtWebChannel, ainsi que les appels directs à `__import__` et `import_module` ; testé dans `test_check_extension.py`. La garde reste statique : un contournement par `getattr` ou un alias n'est pas lu, limite connue.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-facade-qgis/story-garde-hors-ligne-et-recette-du-python-de-l-extension-plan.md`
   summary: Faire couvrir `ai/Cargo.toml` par le test « noyau sans QGIS ».
   evidence: `/ai` est du noyau (CLAUDE.md §10) mais `test_noyau_sans_qgis` ne lit que `core/` et `cli/`.
+  status: close, 2026-10-16, entrée 9.13 (`epic-facade-qgis/story-refactor-sweep-plan.md`)
+  resolution: `test_noyau_sans_qgis` contrôle `ai/Cargo.toml` dès que le crate existe ; il n'existe pas encore (étape 5).
 
 - source_plan: `epic-facade-qgis/story-panneau-lancer-une-commande-du-registre-voir-son-resultat-l-plan.md`
   summary: Le bouton local d'arret des gestes (9.1) est retire du panneau ; les gestes lances hors panneau ne sont plus arretables depuis lui.
   evidence: plugin._on_event ne traite plus ORDER_STARTED/ORDER_ENDED et cancel_current est inutilise ; a trancher avec l'epic agent (5).
+  status: decision, 2026-10-16, entrée 9.13 (`epic-facade-qgis/story-refactor-sweep-plan.md`)
+  resolution: Report maintenu : l'arrêt des gestes lancés hors panneau relève de l'agent (epic 5), qui seul lance des gestes hors panneau.
 - source_plan: `epic-facade-qgis/story-panneau-lancer-une-commande-du-registre-voir-son-resultat-l-plan.md`
   summary: runlog.redact ne masque pas un chemin absolu inclus dans le message d'erreur du noyau (AD-9), non verifie.
   evidence: _render_result affiche le message brut ; a regler si le noyau emet un jour un chemin dans un message.
+  status: close, 2026-10-16, entrée 9.13 (`epic-facade-qgis/story-refactor-sweep-plan.md`)
+  resolution: `redact` masque tout chemin absolu inclus dans une chaîne (lettre de disque, UNC, `/chemin`) ; testé dans `RedactTest`.
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-facade-qgis/story-ouvrir-un-geopackage-un-shapefile-et-un-geojson-par-qgis-plan.md`
   summary: Un Shapefile sans .prj (ou un SCR personnalise) donne un SCR vide dans le resultat de layer.add, alors qu'AD-19 veut un code EPSG explicite.
   evidence: QgisBackend.crs_of rend `authid()` sans controle ; a trancher : refuser avec une erreur, ou demander le SCR a l'ouverture (comme le CSV en 9.6).
+  status: close, 2026-10-16, entrée 9.13 (`epic-facade-qgis/story-refactor-sweep-plan.md`)
+  resolution: Constat périmé : `_resolve_crs` refuse déjà par `layer.unknown_crs`, ou accepte le paramètre `crs` ; couvert par `test_layer_add.py`.
 
 - source_plan: `epic-facade-qgis/story-zone-tampon-par-le-cadre-de-traitement-de-qgis-plan.md`
   summary: Le rejeu d'un journal contenant `analysis.buffer` diverge (octets du GeoPackage, `layer_id` de session).
   evidence: `journal.rs` compare les octets des sorties et le résultat résumé ; à traiter avec l'entrée 9.14.
+  status: decision, 2026-10-16, entrée 9.13 (`epic-facade-qgis/story-refactor-sweep-plan.md`)
+  resolution: Report maintenu, traité par l'entrée 9.14 qui porte le rejeu.
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-facade-qgis/story-intersection-et-selection-par-attribut-plan.md`
   summary: Tester `FieldCombo` (rebranchement sur `layer_id`, rechargement, choix conservé) dans un vrai panneau Qt.
   evidence: Seule la logique sans Qt est testée ; la règle 11 demande un test du composant, aujourd'hui couvert par la recette manuelle.
+  status: decision, 2026-10-16, entrée 9.13 (`epic-facade-qgis/story-refactor-sweep-plan.md`)
+  resolution: Report maintenu : un test de composant exige un QGIS avec écran, absent de la recette automatique ; la recette manuelle le couvre.
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-facade-qgis/story-statistiques-par-zone-plan.md`
   summary: `analysis.zonal_statistics` peut lire un ancien champ `NUMPOINTS` si la couche de zones en a déjà un.
   evidence: non vérifié (medium si vrai) ; à trancher en lançant la commande sous QGIS sur la sortie d'un premier run réutilisée comme zones ; correctif = nom de champ unique ou refus `analysis.bad_params`.
+  status: decision, 2026-10-16, entrée 9.13 (`epic-facade-qgis/story-refactor-sweep-plan.md`)
+  resolution: Report maintenu : à vérifier sous QGIS avec `probe_zonal_statistics.py` ; sans preuve, le correctif reste hypothétique.

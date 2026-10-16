@@ -27,6 +27,32 @@ class ResultFolderTest(unittest.TestCase):
             self.assertIsNone(runlog.result_folder(result))
 
 
+class RedactTest(unittest.TestCase):
+    def test_path_inside_a_message(self):
+        cases = {
+            "Echec sur C:\\Users\\kev\\data\\a.gpkg.": "Echec sur …/a.gpkg.",
+            "ouvre /home/k/x.shp (erreur)": "ouvre …/x.shp (erreur)",
+            "'C:/x/y.tif' absent": "'…/y.tif' absent",
+            "lu dans \\\\srv\\p\\q.gpkg": "lu dans …/q.gpkg",
+            "C:\\d\\f.gpkg: cannot open /x/bad": "…/f.gpkg: cannot open …/bad",
+            "fichier:C:\\x\\a.gpkg": "fichier:…/a.gpkg",
+            "path=/tmp/x.log": "path=…/x.log",
+            "C:\\Users\\kev\\My Data\\a.gpkg": "…/a.gpkg",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(runlog.redact(text), expected)
+
+    def test_text_without_path_is_untouched(self):
+        for text in ("a/b et 1/2", "fichier a.shp non lisible", "", "Le filtre / la valeur"):
+            self.assertEqual(runlog.redact(text), text)
+
+    def test_nested_values(self):
+        self.assertEqual(
+            runlog.redact({"e": ["voir /tmp/z.log"], "n": 3}), {"e": ["voir …/z.log"], "n": 3}
+        )
+
+
 class TextsTest(unittest.TestCase):
     def test_same_keys_in_both_languages(self):
         self.assertEqual(set(texts.TEXTS["fr"]), set(texts.TEXTS["en"]))

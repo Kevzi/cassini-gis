@@ -18,9 +18,24 @@ FORBIDDEN = {
     "requests": "accès réseau interdit (principe 5, hors ligne total)",
     "socket": "accès réseau interdit (principe 5, hors ligne total)",
     "http": "accès réseau interdit (principe 5, hors ligne total)",
+    "ftplib": "accès réseau interdit (principe 5, hors ligne total)",
+    "smtplib": "accès réseau interdit (principe 5, hors ligne total)",
+    "telnetlib": "accès réseau interdit (principe 5, hors ligne total)",
+    "xmlrpc": "accès réseau interdit (principe 5, hors ligne total)",
+    "socketserver": "accès réseau interdit (principe 5, hors ligne total)",
+    "selectors": "accès réseau interdit (principe 5, hors ligne total)",
+    "webbrowser": "accès réseau interdit (principe 5, hors ligne total)",
+    "ssl": "accès réseau interdit (principe 5, hors ligne total)",
+    "asyncio": "accès réseau interdit (principe 5, hors ligne total)",
     "PyQt5": "import direct interdit : passer par qgis.PyQt",
     "PyQt6": "import direct interdit : passer par qgis.PyQt",
 }
+
+# Sous-modules de qgis.PyQt qui ouvrent le réseau.
+FORBIDDEN_QT = {"QtNetwork", "QtWebSockets", "QtWebEngineCore", "QtWebEngineWidgets", "QtWebKit", "QtWebChannel"}
+
+# Appels qui importent par un nom calculé : la garde ne peut plus lire le module.
+DYNAMIC_IMPORTS = {"__import__", "import_module"}
 
 MAX_BYTES = 25 * 1024 * 1024
 EXPECTED_META = {"qgisMinimumVersion": "3.44", "qgisMaximumVersion": "4.99"}
@@ -45,9 +60,25 @@ def check_imports(pkg):
                     mods = [a.name for a in node.names]
                 elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
                     mods = [node.module]
+                if isinstance(node, ast.ImportFrom) and node.module == "qgis.PyQt":
+                    mods += ["qgis.PyQt." + a.name for a in node.names]
+                if isinstance(node, ast.Call):
+                    func = node.func
+                    called = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+                    if called in DYNAMIC_IMPORTS:
+                        errors.append(
+                            f"{path}:{node.lineno} : import dynamique « {called} » refusé, "
+                            "la garde ne peut pas le lire"
+                        )
                 for mod in mods:
-                    root = mod.split(".")[0]
-                    if root in FORBIDDEN:
+                    parts = mod.split(".")
+                    root = parts[0]
+                    if root == "qgis" and len(parts) > 2 and parts[1] == "PyQt" and parts[2] in FORBIDDEN_QT:
+                        errors.append(
+                            f"{path}:{node.lineno} : import du module « {mod} » refusé, "
+                            "accès réseau interdit (principe 5, hors ligne total)"
+                        )
+                    elif root in FORBIDDEN:
                         errors.append(
                             f"{path}:{node.lineno} : import du module « {mod} » refusé, "
                             f"{FORBIDDEN[root]}"

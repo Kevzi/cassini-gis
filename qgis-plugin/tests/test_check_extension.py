@@ -39,6 +39,24 @@ class GardeTest(unittest.TestCase):
                 self.assertIn("mod.py:1", errs[0])
                 self.assertIn(mod, errs[0])
 
+    def test_modules_reseau_etendus(self):
+        for mod in ["ftplib", "smtplib", "ssl", "asyncio", "xmlrpc.client", "telnetlib"]:
+            with self.subTest(mod=mod):
+                self.assertEqual(len(ce.check_imports(self.pkg(f"import {mod}\n"))), 1)
+
+    def test_qtnetwork_refuse(self):
+        for src in ["from qgis.PyQt import QtNetwork\n", "from qgis.PyQt.QtNetwork import QTcpSocket\n",
+                    "import qgis.PyQt.QtWebSockets\n"]:
+            with self.subTest(src=src):
+                self.assertEqual(len(ce.check_imports(self.pkg(src))), 1)
+
+    def test_import_dynamique_refuse(self):
+        for src in ['__import__("socket")\n', 'import importlib\nimportlib.import_module("socket")\n']:
+            with self.subTest(src=src):
+                errs = ce.check_imports(self.pkg(src))
+                self.assertEqual(len(errs), 1)
+                self.assertIn("dynamique", errs[0])
+
     def test_from_import(self):
         errs = ce.check_imports(self.pkg("from http import client\n"))
         self.assertEqual(len(errs), 1)
@@ -73,8 +91,11 @@ class GardeTest(unittest.TestCase):
         self.assertEqual(len(errs), 2)
 
     def test_noyau_sans_qgis(self):
-        for crate in ("core", "cli"):
-            with open(os.path.join(ROOT, crate, "Cargo.toml"), encoding="utf-8") as f:
+        for crate in ("core", "cli", "ai"):
+            path = os.path.join(ROOT, crate, "Cargo.toml")
+            if crate == "ai" and not os.path.isfile(path):
+                continue  # le crate /ai naît à l'étape 5 ; dès qu'il existe, il est contrôlé
+            with open(path, encoding="utf-8") as f:
                 text = f.read().lower()
             for word in ("qgis", "pyqt"):
                 self.assertNotIn(word, text, f"{crate}/Cargo.toml mentionne {word}")
