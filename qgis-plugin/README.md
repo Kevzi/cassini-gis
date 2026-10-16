@@ -42,6 +42,17 @@ Recette manuelle du panneau [9.4] (dans QGIS, avec un noyau installé) :
 4. Réglages (engrenage) : basculez FR / EN, les textes changent aussitôt.
 5. Sans noyau installé : le bandeau propose « Choisir le noyau ».
 
+Recette manuelle de `layer.add` [9.5] (dans QGIS, avec un noyau qui annonce la
+commande) :
+
+1. Enregistrez un projet à côté de trois fichiers : un `.gpkg`, un `.shp` et un
+   `.geojson` (le jeu `fixtures/parcelles-test.geojson` convient).
+2. Panneau, mode expert, commande `layer.add`, champ `path` : le chemin du fichier,
+   relatif au projet. Lancez : la couche apparaît dans le projet et le résultat
+   donne son SCR et si QGIS la reprojette. Répétez pour chaque format.
+3. Le fichier reste intact (taille et date inchangées). Un `.txt` donne
+   `layer.unsupported_format`, un fichier abîmé `layer.invalid_source`.
+
 Contrôle manuel : charger l'extension, ouvrir un projet, voir les deux versions,
 fermer QGIS et vérifier qu'aucun `cassini` ne reste dans le gestionnaire des
 tâches.

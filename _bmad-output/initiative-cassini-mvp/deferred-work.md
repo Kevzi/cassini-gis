@@ -93,3 +93,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `epic-facade-qgis/story-panneau-lancer-une-commande-du-registre-voir-son-resultat-l-plan.md`
   summary: runlog.redact ne masque pas un chemin absolu inclus dans le message d'erreur du noyau (AD-9), non verifie.
   evidence: _render_result affiche le message brut ; a regler si le noyau emet un jour un chemin dans un message.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-facade-qgis/story-ouvrir-un-geopackage-un-shapefile-et-un-geojson-par-qgis-plan.md`
+  summary: Un Shapefile sans .prj (ou un SCR personnalise) donne un SCR vide dans le resultat de layer.add, alors qu'AD-19 veut un code EPSG explicite.
+  evidence: QgisBackend.crs_of rend `authid()` sans controle ; a trancher : refuser avec une erreur, ou demander le SCR a l'ouverture (comme le CSV en 9.6).

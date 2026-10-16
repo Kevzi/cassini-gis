@@ -10,7 +10,7 @@ from qgis.core import QgsApplication, QgsProject
 from qgis.PyQt.QtCore import QProcess, QSettings, Qt, QTimer
 from qgis.PyQt.QtWidgets import QDockWidget, QFileDialog
 
-from . import client, gestures, locator, panel, texts
+from . import client, gestures, layer_add, locator, panel, texts
 
 SLOW_TICKS = 100  # 100 x 100 ms : un geste de test de dix secondes
 
@@ -147,6 +147,7 @@ class CassiniPlugin:
         self.process = QProcess()
         registry = gestures.GestureRegistry()
         registry.register("test.qgis_probe", SlowProbe)
+        registry.register("layer.add", layer_add.LayerAddGesture)
         self.client = client.CoreClient(self.process, self._on_event, registry)
         self.client.start(program, self.project_path)
 
