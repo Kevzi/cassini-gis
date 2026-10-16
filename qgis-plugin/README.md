@@ -35,10 +35,10 @@ Recette manuelle du panneau [9.4] (dans QGIS, avec un noyau installé) :
    sont visibles ; « Démarrage du noyau… » puis le bandeau disparaît.
 2. Dépliez « Mode expert », choisissez `system.about`, cliquez sur Lancer : le
    résultat dit que le noyau répond, le journal porte une ligne « Terminée ».
-3. Choisissez `test.qgis_probe` (geste lent de dix secondes), cliquez sur Lancer
-   puis sur Arrêter. Pendant l'attente, déplacez la carte et ouvrez des menus :
-   QGIS reste réactif. Le journal note « Annulée » et Lancer réapparaît ; le
-   noyau n'a pas été tué.
+3. L'arrêt d'une commande n'est pas testable à la main : le binaire réel ne
+   contient que `system.about`, les commandes `test.*` n'existant qu'aux tests
+   Rust. `request.cancel`, la survie du noyau et le retour de Lancer sont
+   couverts par `qgis-plugin/tests/test_tracer.py`.
 4. Réglages (engrenage) : basculez FR / EN, les textes changent aussitôt.
 5. Sans noyau installé : le bandeau propose « Choisir le noyau ».
 
