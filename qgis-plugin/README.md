@@ -26,6 +26,9 @@ Licence GPL, comme QGIS. L'extension ne contient aucun binaire : le noyau
 
 Sans QGIS : `python -I -m unittest discover -s qgis-plugin/tests`.
 
+Garde statique (imports réseau et PyQt directs interdits, taille, versions de
+`metadata.txt`) : `python -I qgis-plugin/tests/check_extension.py`.
+
 Recette manuelle « QGIS ne gèle pas pendant un geste lent » : avec un noyau qui
 envoie `command.run` de `test.qgis_probe` (geste de test de dix secondes), le
 panneau affiche le bouton « Arrêter le geste en cours ». Pendant ces dix

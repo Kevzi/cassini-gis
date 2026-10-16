@@ -92,16 +92,25 @@ jobs:
           npm run build
           npm run verify:dist
 
-  # Point d'accroche réservé à l'epic 9 : le contrôle du Python de l'extension
-  # QGIS (`qgis-plugin/`), quand elle existera. Il prendra place ici comme un
-  # troisième job, au même titre que les deux précédents.
-  #
-  # extension:
-  #   name: Extension QGIS — Python
-  #   runs-on: ubuntu-latest
-  #   defaults:
-  #     run:
-  #       working-directory: qgis-plugin
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - run: <contrôle du Python, fixé par l'epic 9>
+  # Contrôle du Python de l'extension QGIS : garde statique (imports interdits,
+  # taille, metadata.txt) puis tests sans QGIS. Le noyau sans QGIS est déjà
+  # prouvé par le job `noyau`. La preuve dynamique sur QGIS est une dette connue.
+  extension:
+    name: Extension QGIS — Python (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Garde de l'extension
+        run: python -I qgis-plugin/tests/check_extension.py
+
+      - name: Tests de l'extension
+        run: python -I -m unittest discover -s qgis-plugin/tests

@@ -79,3 +79,10 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
   evidence: Sous Node 24.13 (zlib 1.3.1), `verify-basemap.mjs` échoue « deux générations donnent le même fichier, octet pour octet » : l'archive commitée vient de Node 22 et le fichier régénéré a les mêmes 26360 octets mais d'autres bytes, la compression deflate changeant d'une version à l'autre. Constaté pendant 1.7, antérieur à elle, sans lien avec son diff ; la CI (Node 22) passe vraisemblablement. Ce qui trancherait : lancer la recette sous Node 22 ici, puis choisir entre figer Node ou comparer le contenu décompressé.
   status: close, 2026-10-15, entrée 7 (`epic-socle-et-carte/story-passe-de-nettoyage-plan.md`)
   resolution: `generate-basemap.mjs` n'utilise plus le deflate de Node : un encodeur Huffman fixe, déterministe, écrit l'IDAT des PNG et les deux gzip de l'archive ; `zlib` ne sert plus qu'aux CRC. L'archive est régénérée (50,3 Ko au lieu de 25,7) et `npm run check` passe sous Node 24.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-facade-qgis/story-garde-hors-ligne-et-recette-du-python-de-l-extension-plan.md`
+  summary: Étendre la garde réseau de l'extension à `qgis.PyQt.QtNetwork`, `ftplib`, `smtplib`, `ssl`, `asyncio` et aux imports dynamiques.
+  evidence: La garde 9.3 n'interdit que urllib, requests, socket, http (AD-14) ; `from qgis.PyQt import QtNetwork` ou `__import__("socket")` passeraient. Décision de périmètre à prendre avec le propriétaire.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-facade-qgis/story-garde-hors-ligne-et-recette-du-python-de-l-extension-plan.md`
+  summary: Faire couvrir `ai/Cargo.toml` par le test « noyau sans QGIS ».
+  evidence: `/ai` est du noyau (CLAUDE.md §10) mais `test_noyau_sans_qgis` ne lit que `core/` et `cli/`.
