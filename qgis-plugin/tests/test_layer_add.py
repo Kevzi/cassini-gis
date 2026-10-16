@@ -27,9 +27,12 @@ class FakeBackend:
         self.added = []
         self.loaded = []
 
-    def load(self, path, name, provider):
+    def load(self, path, name, provider, csv=None):
         self.loaded.append((path, name, provider))
-        if self.valid:
+        self.csv = csv
+        if csv is not None:
+            self.crs = csv["crs"]  # le SCR est dans l'URI du fournisseur
+        if self.valid and os.path.exists(path):
             with open(path, "rb") as f:
                 f.read()
         return FakeLayer(self.valid, self.crs, name)
@@ -63,8 +66,9 @@ class Harness:
         self.calls = []
         self.gesture = layer_add.LayerAddGesture(backend, self.queue.append)
 
-    def start(self, path, crs=None):
+    def start(self, path, crs=None, **extra):
         params = {"path": path} if crs is None else {"path": path, "crs": crs}
+        params.update(extra)
         self.gesture.start(params, lambda result=None, error=None: self.calls.append((result, error)))
 
     def pump(self):
@@ -72,9 +76,9 @@ class Harness:
             self.queue.pop(0)()
 
 
-def run(backend, path, crs=None):
+def run(backend, path, crs=None, **extra):
     h = Harness(backend)
-    h.start(path, crs)
+    h.start(path, crs, **extra)
     assert h.calls == []  # asynchrone : rien avant l'ordonnanceur
     h.pump()
     assert len(h.calls) == 1
@@ -148,7 +152,7 @@ class LayerAddTest(unittest.TestCase):
 
     def test_unexpected_error_still_answers(self):
         class Boom(FakeBackend):
-            def load(self, path, name, provider):
+            def load(self, path, name, provider, csv=None):
                 raise RuntimeError("c:/secret/chemin")
 
         result, error = run(Boom(), FIXTURE)
@@ -178,6 +182,54 @@ class LayerAddTest(unittest.TestCase):
         h.gesture.start({}, lambda result=None, error=None: h.calls.append((result, error)))
         h.pump()
         self.assertEqual(h.calls[0][1].code, "layer.invalid_source")
+
+    def test_csv_opens_with_default_columns_and_crs(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "gares.csv")
+            with open(p, "wb") as f:
+                f.write(b"X,Y,name\n656903.3,6845516.7,Vigneux\n")
+            before = os.stat(p)
+            b = FakeBackend(project_crs="EPSG:2154")
+            result, error = run(b, p, "EPSG:2154")
+            self.assertIsNone(error)
+            self.assertEqual(b.loaded[0][2], "delimitedtext")
+            self.assertEqual(b.csv, {"x": "X", "y": "Y", "crs": "EPSG:2154"})
+            self.assertEqual(result["source_crs"], "EPSG:2154")
+            self.assertFalse(result["reprojected"])
+            after = os.stat(p)
+            self.assertEqual((before.st_size, before.st_mtime_ns), (after.st_size, after.st_mtime_ns))
+
+    def test_csv_custom_columns(self):
+        b = FakeBackend()
+        result, error = run(b, "villes.csv", "EPSG:4326", x_field="lon", y_field="lat")
+        self.assertIsNone(error)
+        self.assertEqual(b.csv, {"x": "lon", "y": "lat", "crs": "EPSG:4326"})
+
+    def test_csv_without_crs_is_refused_before_opening(self):
+        b = FakeBackend()
+        result, error = run(b, "gares.csv")
+        self.assertEqual(error.code, "layer.unknown_crs")
+        self.assertEqual(b.loaded, [])
+
+    def test_csv_bad_crs_or_column(self):
+        _, error = run(FakeBackend(), "g.csv", "2154")
+        self.assertEqual(error.code, "layer.invalid_crs")
+        b = FakeBackend()
+        _, error = run(b, "g.csv", "EPSG:2154", x_field="  ")
+        self.assertEqual(error.code, "layer.invalid_column")
+        self.assertEqual(b.loaded, [])
+
+    def test_parquet_goes_through_ogr(self):
+        b = FakeBackend(crs="EPSG:4326")
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "villes.parquet")
+            with open(p, "wb") as f:
+                f.write(b"PAR1")
+            result, error = run(b, p)
+        self.assertIsNone(error)
+        self.assertEqual(b.loaded[0][2], "ogr")
+        self.assertIsNone(b.csv)
+        self.assertEqual(result["source_crs"], "EPSG:4326")
 
     def test_file_untouched(self):
         before = os.stat(FIXTURE)

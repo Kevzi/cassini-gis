@@ -56,6 +56,16 @@ commande) :
    (ex. `EPSG:2154`). Le SCR est donné à la couche en mémoire, le fichier reste
    intact. Un `crs` qui contredit celui du fichier donne `layer.crs_conflict`.
 
+Recette manuelle du CSV et du GeoParquet [9.6] (jeu `../donnees-test-cassini/`) :
+
+1. `gares-2154.csv` avec `crs` = `EPSG:2154` : 8 points apparaissent (colonnes `X`,
+   `Y` par défaut). Sans `crs` : `layer.unknown_crs`, rien n'est ajouté.
+2. `villes.csv` avec `crs` = `EPSG:4326` ; pour d'autres noms de colonnes, remplissez
+   `x_field` et `y_field`.
+3. `villes.parquet` : la couche apparaît avec son SCR. Si le pilote Parquet manque
+   dans votre QGIS, `layer.invalid_source`.
+4. Les fichiers restent intacts (taille et date inchangées).
+
 Contrôle manuel : charger l'extension, ouvrir un projet, voir les deux versions,
 fermer QGIS et vérifier qu'aucun `cassini` ne reste dans le gestionnaire des
 tâches.

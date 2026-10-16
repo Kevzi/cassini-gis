@@ -1,5 +1,5 @@
 //! Commande `layer.add` : ajoute au projet QGIS une couche vectorielle issue d'un
-//! fichier de l'utilisateur (`.gpkg`, `.shp`, `.geojson`). Déclaration seule : le
+//! fichier de l'utilisateur (`.gpkg`, `.shp`, `.geojson`, `.parquet`, `.csv`). Déclaration seule : le
 //! geste vit dans l'extension, QGIS lit le fichier et reprojette (AD-19).
 
 use schemars::JsonSchema;
@@ -11,12 +11,19 @@ use crate::registry::{CommandSpec, Delegated, Registration, RunsIn};
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LayerAddParams {
-    /// Fichier à ouvrir, relatif au projet : `.gpkg`, `.shp` ou `.geojson`.
+    /// Fichier à ouvrir, relatif au projet : `.gpkg`, `.shp`, `.geojson`, `.parquet` ou `.csv`.
     pub path: String,
     /// SCR à donner à la couche quand le fichier n'en indique aucun (ex. `EPSG:2154`) ;
-    /// refusé s'il contredit celui du fichier. Le fichier n'est jamais modifié.
+    /// refusé s'il contredit celui du fichier. **Obligatoire pour un CSV**, qui n'en porte
+    /// jamais. Le fichier n'est jamais modifié.
     #[serde(default)]
     pub crs: Option<String>,
+    /// CSV seulement : colonne des abscisses (défaut `X`).
+    #[serde(default)]
+    pub x_field: Option<String>,
+    /// CSV seulement : colonne des ordonnées (défaut `Y`).
+    #[serde(default)]
+    pub y_field: Option<String>,
 }
 
 /// Résultat de `layer.add`.
@@ -44,15 +51,16 @@ impl Delegated for LayerAdd {
     fn spec() -> CommandSpec {
         CommandSpec::new::<LayerAddParams, LayerAddOutput>(
             "layer.add",
-            "Ajoute au projet une couche issue d'un fichier GeoPackage, Shapefile ou GeoJSON.",
-            "Adds to the project a layer read from a GeoPackage, Shapefile or GeoJSON file.",
+            "Ajoute au projet une couche issue d'un fichier GeoPackage, Shapefile, GeoJSON, GeoParquet ou CSV à coordonnées (crs obligatoire pour un CSV).",
+            "Adds to the project a layer read from a GeoPackage, Shapefile, GeoJSON, GeoParquet or coordinate CSV file (crs required for a CSV).",
         )
         .runs_in(RunsIn::Qgis)
         .cancellable(true)
         .path_params(&["path"])
         .example(serde_json::json!({"path": "donnees/parcelles.gpkg"}))
         .example(serde_json::json!({"path": "donnees/gares.shp", "crs": "EPSG:2154"}))
-        .tests(&["layer_add_is_delegated", "layer_add_takes_an_optional_crs"])
+        .example(serde_json::json!({"path": "donnees/gares.csv", "crs": "EPSG:2154", "x_field": "X", "y_field": "Y"}))
+        .tests(&["layer_add_is_delegated", "layer_add_takes_an_optional_crs", "layer_add_takes_csv_columns"])
     }
 }
 
@@ -83,5 +91,17 @@ mod tests {
             .call("layer.add", json!({"path": "a.shp", "crs": "EPSG:2154"}))
             .unwrap_err();
         assert_eq!(err.code(), "registry.unavailable"); // params valides, exécutant absent
+    }
+
+    #[test]
+    fn layer_add_takes_csv_columns() {
+        let registry = Registry::standard();
+        let err = registry
+            .call(
+                "layer.add",
+                json!({"path": "a.csv", "crs": "EPSG:2154", "x_field": "lon", "y_field": "lat"}),
+            )
+            .unwrap_err();
+        assert_eq!(err.code(), "registry.unavailable");
     }
 }

@@ -19,12 +19,20 @@ except ImportError:  # pragma: no cover
     from gestures import GestureError
 
 # Extension -> fournisseur de données (tous lus par OGR dans QGIS).
-FORMATS = {".gpkg": "ogr", ".shp": "ogr", ".geojson": "ogr"}
+FORMATS = {
+    ".gpkg": "ogr",
+    ".shp": "ogr",
+    ".geojson": "ogr",
+    ".parquet": "ogr",
+    ".csv": "delimitedtext",  # colonnes X/Y, lu par le fournisseur de texte délimité
+}
+DEFAULT_X, DEFAULT_Y = "X", "Y"
 
 UNSUPPORTED = "layer.unsupported_format"
 INVALID = "layer.invalid_source"
 UNKNOWN_CRS = "layer.unknown_crs"
 INVALID_CRS = "layer.invalid_crs"
+INVALID_COLUMN = "layer.invalid_column"
 CRS_CONFLICT = "layer.crs_conflict"
 CANCELLED = "qgis.cancelled"
 CRS_FORMAT = re.compile(r"^EPSG:[0-9]+$")
@@ -33,12 +41,23 @@ CRS_FORMAT = re.compile(r"^EPSG:[0-9]+$")
 class QgisBackend:
     """Accès réel à QGIS. Seul ce type touche `qgis.core`."""
 
-    def load(self, path, name, provider):
+    def load(self, path, name, provider, csv=None):
         from qgis.core import QgsVectorLayer
+        from qgis.PyQt.QtCore import QUrl
 
+        source = path
+        if csv is not None:  # URI du fournisseur delimitedtext (X, Y et SCR explicites)
+            url = QUrl.fromLocalFile(path)
+            # Le fournisseur décode lui-même les noms de colonnes ; le SCR est déjà validé.
+            enc = lambda v: bytes(QUrl.toPercentEncoding(v)).decode("ascii")  # noqa: E731
+            url.setQuery(
+                "type=csv&delimiter=,;&detectTypes=yes&geomType=point"
+                "&xField=%s&yField=%s&crs=%s" % (enc(csv["x"]), enc(csv["y"]), csv["crs"])
+            )
+            source = url.toString()
         options = QgsVectorLayer.LayerOptions()
         options.forceReadOnly = True  # ouverture en lecture seule, pas seulement l'édition
-        layer = QgsVectorLayer(path, name, provider, options)
+        layer = QgsVectorLayer(source, name, provider, options)
         if layer.isValid():
             layer.setReadOnly(True)  # jamais d'édition du fichier d'origine
         return layer
@@ -116,12 +135,15 @@ class LayerAddGesture:
         if provider is None:
             raise GestureError(
                 UNSUPPORTED,
-                "Format non pris en charge : %s (attendu .gpkg, .shp ou .geojson)."
+                "Format non pris en charge : %s (attendu .gpkg, .shp, .geojson, .csv ou .parquet)."
                 % (os.path.splitext(name)[1] or "sans extension"),
             )
         backend = self._backend
+        csv = None
+        if provider == "delimitedtext":  # un CSV ne porte aucun SCR : il doit être donné
+            csv = self._csv_options()
         # Message sans chemin absolu : seul le nom du fichier est cité.
-        layer = backend.load(path, os.path.splitext(name)[0], provider)
+        layer = backend.load(path, os.path.splitext(name)[0], provider, csv)
         if not backend.is_valid(layer):
             raise GestureError(INVALID, "Le fichier « %s » n'est pas lisible." % name)
         if self._cancelled:
@@ -136,6 +158,25 @@ class LayerAddGesture:
             "project_crs": project_crs,
             "reprojected": source_crs != project_crs,
         }
+
+    def _csv_options(self):
+        params = self._params or {}
+        asked = params.get("crs")
+        if asked is None:
+            raise GestureError(
+                UNKNOWN_CRS,
+                "Un CSV n'indique pas son système de coordonnées : "
+                "ajoutez le paramètre crs (ex. EPSG:2154).",
+            )
+        if not (isinstance(asked, str) and CRS_FORMAT.match(asked)):
+            raise GestureError(INVALID_CRS, "SCR invalide : attendu un code comme EPSG:2154.")
+        fields = []
+        for key, default in (("x_field", DEFAULT_X), ("y_field", DEFAULT_Y)):
+            value = params.get(key, default)
+            if not isinstance(value, str) or not value.strip():
+                raise GestureError(INVALID_COLUMN, "Nom de colonne invalide pour %s." % key)
+            fields.append(value)
+        return {"x": fields[0], "y": fields[1], "crs": asked}
 
     def _resolve_crs(self, layer):
         """SCR explicite de la couche : celui du fichier, ou celui demandé (AD-19)."""
