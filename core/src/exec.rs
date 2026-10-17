@@ -109,8 +109,8 @@ mod tests {
                 .cancellable(false)
                 .tests(&["t"])
         }
-        fn run(&self, _p: Path) -> Done {
-            Done { ok: true }
+        fn run(&self, _p: Path) -> Result<Done, crate::registry::CommandFailure> {
+            Ok(Done { ok: true })
         }
     }
 

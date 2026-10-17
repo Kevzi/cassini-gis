@@ -7,7 +7,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::registry::{Command, CommandSpec, Delegated, Registration, RunsIn};
+use crate::registry::{Command, CommandFailure, CommandSpec, Delegated, Registration, RunsIn};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -41,9 +41,9 @@ impl Command for TestReadFile {
         .tests(&["read_file_reports_the_size"])
     }
 
-    fn run(&self, params: ReadFileParams) -> BytesOutput {
+    fn run(&self, params: ReadFileParams) -> Result<BytesOutput, CommandFailure> {
         let bytes = std::fs::metadata(params.path).map(|m| m.len()).unwrap_or(0);
-        BytesOutput { bytes }
+        Ok(BytesOutput { bytes })
     }
 }
 
@@ -77,11 +77,11 @@ impl Command for TestWriteOutput {
         .tests(&["write_output_writes_the_text"])
     }
 
-    fn run(&self, params: WriteOutputParams) -> BytesOutput {
+    fn run(&self, params: WriteOutputParams) -> Result<BytesOutput, CommandFailure> {
         let written = std::fs::write(&params.out, &params.text).is_ok();
-        BytesOutput {
+        Ok(BytesOutput {
             bytes: if written { params.text.len() as u64 } else { 0 },
-        }
+        })
     }
 }
 

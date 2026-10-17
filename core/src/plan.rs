@@ -260,8 +260,8 @@ mod tests {
                 .cancellable(false)
                 .tests(&["t"])
         }
-        fn run(&self, _p: SlopeParams) -> Done {
-            Done { ok: true }
+        fn run(&self, _p: SlopeParams) -> Result<Done, crate::registry::CommandFailure> {
+            Ok(Done { ok: true })
         }
     }
 
@@ -275,8 +275,8 @@ mod tests {
                 .cancellable(false)
                 .tests(&["t"])
         }
-        fn run(&self, _p: NameParams) -> Done {
-            Done { ok: true }
+        fn run(&self, _p: NameParams) -> Result<Done, crate::registry::CommandFailure> {
+            Ok(Done { ok: true })
         }
     }
 

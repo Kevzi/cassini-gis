@@ -20,6 +20,9 @@
 - `regle-de-redaction-des-commandes.md` — comment écrire la description et les
   schémas d'une commande, et ce que le registre contrôle lui-même.
 
+- `dossier-des-modeles.md` — où Cassini cherche les modèles GGUF (`CASSINI_MODELS`,
+  `models/`) et la commande `model.list`.
+
 - `canal-local.md` — le contrat des messages du canal local : ordres du noyau
   vers l'extension (`order.execute`), annulation (`request.cancel`) et erreurs.
 

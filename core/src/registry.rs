@@ -135,7 +135,23 @@ pub trait Command {
     type Output: Serialize + JsonSchema;
 
     fn spec() -> CommandSpec;
-    fn run(&self, params: Self::Params) -> Self::Output;
+    fn run(&self, params: Self::Params) -> Result<Self::Output, CommandFailure>;
+}
+
+/// Échec d'une commande du noyau : un code stable `domaine.cause` (AD-21) et un message français.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandFailure {
+    pub code: String,
+    pub message: String,
+}
+
+impl CommandFailure {
+    pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
 }
 
 /// Erreur du registre, avec un code stable `domaine.cause`.
@@ -154,6 +170,11 @@ pub enum RegistryError {
         code: String,
         message: String,
     },
+    /// La commande du noyau s'est exécutée et a échoué, avec son code typé (AD-21).
+    Failed {
+        code: String,
+        message: String,
+    },
 }
 
 impl RegistryError {
@@ -165,7 +186,7 @@ impl RegistryError {
             RegistryError::ResultNotSerializable(_) => "registry.result_not_serializable",
             RegistryError::Unavailable(_) => "registry.unavailable",
             RegistryError::Cancelled(_) => "registry.cancelled",
-            RegistryError::Delegated { code, .. } => code,
+            RegistryError::Delegated { code, .. } | RegistryError::Failed { code, .. } => code,
         }
     }
 }
@@ -182,7 +203,9 @@ impl fmt::Display for RegistryError {
                 "La commande « {id} » est déléguée à QGIS, qui n'est pas branché : elle ne peut pas s'exécuter."
             ),
             RegistryError::Cancelled(id) => write!(f, "La commande « {id} » a été annulée."),
-            RegistryError::Delegated { message, .. } => write!(f, "{message}"),
+            RegistryError::Delegated { message, .. } | RegistryError::Failed { message, .. } => {
+                write!(f, "{message}")
+            }
             RegistryError::ResultNotSerializable(why) => {
                 write!(
                     f,
@@ -250,7 +273,11 @@ impl Registry {
         let handler: Handler = Box::new(move |json| {
             let params: C::Params = serde_json::from_value(json)
                 .map_err(|e| RegistryError::InvalidParams(e.to_string()))?;
-            serde_json::to_value(command.run(params))
+            let output = command.run(params).map_err(|f| RegistryError::Failed {
+                code: f.code,
+                message: f.message,
+            })?;
+            serde_json::to_value(output)
                 .map_err(|e| RegistryError::ResultNotSerializable(e.to_string()))
         });
         self.entries.insert(

@@ -6,7 +6,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::registry::{Command, CommandSpec, Registration, RunsIn};
+use crate::registry::{Command, CommandFailure, CommandSpec, Registration, RunsIn};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -36,8 +36,8 @@ impl Command for TestEcho {
         .tests(&["a_new_file_registers_its_command"])
     }
 
-    fn run(&self, params: EchoParams) -> EchoOutput {
-        EchoOutput { text: params.text }
+    fn run(&self, params: EchoParams) -> Result<EchoOutput, CommandFailure> {
+        Ok(EchoOutput { text: params.text })
     }
 }
 

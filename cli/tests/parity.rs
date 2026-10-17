@@ -33,6 +33,13 @@ fn canonical(value: &Value) -> String {
     }
 }
 
+/// Dossier de modèles vide, commun aux deux points d'entrée : `model.list` rend le même `folder`.
+fn models_dir() -> String {
+    let dir = std::env::temp_dir().join(format!("cassini-parity-models-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir.to_string_lossy().into_owned()
+}
+
 fn temp_project(label: &str) -> (PathBuf, String) {
     static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let dir = std::env::temp_dir().join(format!(
@@ -49,6 +56,7 @@ fn temp_project(label: &str) -> (PathBuf, String) {
 fn via_run(id: &str, params: &Value, project: &str) -> String {
     let out = Command::new(BIN)
         .args(["run", id, &params.to_string(), "--project", project])
+        .env("CASSINI_MODELS", models_dir())
         .output()
         .expect("le binaire se lance");
     assert!(
@@ -64,6 +72,7 @@ fn via_run(id: &str, params: &Value, project: &str) -> String {
 fn via_serve(id: &str, params: &Value, project: &str) -> String {
     let mut child = Command::new(BIN)
         .arg("serve")
+        .env("CASSINI_MODELS", models_dir())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

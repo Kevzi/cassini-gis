@@ -3,7 +3,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::registry::{Command, CommandSpec, Registration, RunsIn, PROTOCOL_VERSION};
+use crate::registry::{Command, CommandFailure, CommandSpec, Registration, RunsIn, PROTOCOL_VERSION};
 
 /// Paramètres de `system.about` : aucun, et aucun champ inconnu accepté.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -36,11 +36,11 @@ impl Command for SystemAbout {
         .tests(&["system_about_returns_the_versions_through_the_command"])
     }
 
-    fn run(&self, _params: AboutParams) -> AboutOutput {
-        AboutOutput {
+    fn run(&self, _params: AboutParams) -> Result<AboutOutput, CommandFailure> {
+        Ok(AboutOutput {
             core_version: crate::VERSION.to_string(),
             protocol_version: PROTOCOL_VERSION,
-        }
+        })
     }
 }
 

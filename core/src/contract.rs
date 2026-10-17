@@ -353,8 +353,8 @@ mod tests {
                     tweak(good_spec())
                 }
 
-                fn run(&self, _params: Empty) -> Output {
-                    Output {}
+                fn run(&self, _params: Empty) -> Result<Output, crate::registry::CommandFailure> {
+                    Ok(Output {})
                 }
             }
         };
