@@ -118,7 +118,7 @@ title = "Modele de composition ajuste et plus petit (fine-tuning)"
 description = "Remplace le gros modele et son prompt de 5000 jetons par un modele de 1,5 a 4 milliards de parametres ajuste sur « phrase francaise -> plan d'appels du registre », au prompt de quelques centaines de jetons, pour les postes sans bon processeur. Le generateur de donnees synthetiques sort du registre reel, filtre par Registry::check_plan ; un jeu de phrases inedites est tenu a l'ecart ; l'entrainement (LoRA ou QLoRA) tient dans 8 Go de VRAM et se fusionne en GGUF."
 verify = "Sur le jeu de phrases tenu a l'ecart, le score du modele ajuste est au moins egal a celui de Qwen3.5-9B avec le prompt complet, et le temps par phrase sur un processeur modeste baisse d'un ordre de grandeur par rapport aux 3 minutes mesurees (5.3)."
 covers = ["CAP-4"]
-after = [3]
+after = [3, 5]
 hitl = true
 risk = "high"
 notes = [
@@ -129,5 +129,6 @@ notes = [
   "Assumption: chaque nouvelle commande du registre demande de regenerer les donnees et de re-entrainer ; le cout de cette boucle est a mesurer.",
   "hitl : le proprietaire fournit le processeur modeste de mesure et lance l'entrainement sur sa machine.",
   "Check hors criteres (risque high) : le proprietaire rejoue la phrase de demo sur le processeur modeste et confirme que le temps est acceptable.",
+  "Decision: 2026-10-17 — apres 5.5 : le format des plans (variante question) doit etre fige avant d'entrainer, sinon on re-entraine.",
   "Hors de cette story : garder le prefixe fixe du prompt en cache et ne charger le modele qu'une fois (levier sans fine-tuning, deja dans deferred-work.md).",
 ]
