@@ -66,16 +66,46 @@ risk = "high"
 unknown = "Seuil de reussite acceptable de la clarification (taux de questions justifiees et de fausses questions) : a fixer avec le proprietaire avant la story, faute de mesure existante."
 
 [[entry]]
+id = 11
+type = "story"
+title = "Mesure de reference de la duree par phrase sur processeur"
+description = "Ajoute un essai garde par CASSINI_TEST_MODEL qui mesure, phrase par phrase, le chargement du modele, la lecture du prompt et l'ecriture du plan, binaire compile sans CUDA, a 8 coeurs puis bride a 4 coeurs (substitut d'un portable de bureau), sur les 25 phrases de l'epreuve, et consigne les chiffres ; le proprietaire rejoue la meme mesure sur les phrases A a E du scenario Villeneuve-le-Roi avec l'inventaire de son projet de test, hors depot."
+verify = "Sur le Ryzen 7 5800X du proprietaire, carte graphique inutilisee, l'essai rend pour 8 et 4 coeurs un tableau des trois durees par phrase, consigne dans le depot, et le releve A a E est note dans le plan."
+covers = ["CAP-4"]
+after = [5]
+hitl = true
+risk = "medium"
+unknown = "Comment extraire l'inventaire du projet de test Villeneuve-le-Roi pour la mesure hors depot, tant que le panneau (6) n'existe pas : par l'extension et le canal, ou a la main."
+notes = [
+  "Proprietaire, 2026-10-17 : « si l'utilisateur enchaine une longue phrase, Cassini doit pouvoir resoudre ce qu'il demande en moins de 30 secondes ».",
+  "hitl : la mesure tourne sur le poste du proprietaire (Ryzen 7 5800X) ; les essais de justesse restent sur GPU, la mesure de duree se fait sans.",
+  "Scenario A a E : A, phrase de demo complete (parcelles constructibles, zones U, a moins de 500 m d'une gare, carte PDF) ; B1, B2, B3, la meme demande en trois fois, chaque phrase mesuree a part ; C, batiments a moins de 50 m d'une route ; D, parcelles pres des ecoles (aucune couche : une question attendue) ; E, parcelles a 10 minutes a pied de la gare de Villeneuve-le-Roi (coordonnees inconnues du modele : question ou refus attendu).",
+]
+
+[[entry]]
+id = 12
+type = "story"
+title = "Modele charge une fois et partie fixe du prompt gardee en cache"
+description = "Garde le modele charge dans le processus du noyau d'une demande a l'autre et la partie fixe du prompt (consignes, catalogue, exemples) en cache, l'inventaire et la phrase passant apres elle, sans toucher a la validation ni au refus de reparer (AD-15, AD-23) ; regle le constat 6 reporte par 5.3 (le GGUF recharge a chaque tentative), et porte le rechargement quand le selecteur de modele de l'entree 6 change de modele ; s'appuie sur la mesure de l'entree 11."
+verify = "Sur le 5800X bride a 4 coeurs, avec l'inventaire synthetique de l'epreuve, la phrase S17 (parcelles en zone U pres des gares et PDF) rend son plan en moins de 30 s des la deuxieme demande, et le taux de plans conformes de l'epreuve, mesure sur GPU, reste au moins de 22/25."
+covers = ["CAP-4"]
+after = [11]
+hitl = false
+risk = "high"
+unknown = "Si le modele de 9 milliards de parametres n'atteint pas 30 s sur 4 coeurs meme avec le cache, l'ecart est porte par l'entree 10 ; la story le consigne sans abaisser le critere."
+notes = ["Assumption: le budget de 30 s se compte des la deuxieme demande ; le premier chargement du modele est mesure a part et signale dans le panneau par l'indicateur de generation (2026-10-17)."]
+
+[[entry]]
 id = 6
 type = "story"
 title = "Panneau : saisie en langage naturel, plan a valider, selecteur de modele"
 description = "Active la saisie du panneau, affiche le plan en zone lecture seule avec les boutons Valider et Refuser, la question de clarification, un indicateur de generation et le marqueur de l'etape en cours, et active le selecteur de modele, selon ux-panneau-cassini/EXPERIENCE.md ; aucune logique metier dans le Python."
 verify = "Dans QGIS, la phrase de demo sur un projet ouvert affiche un plan, Valider l'execute etape par etape et le journal montre Terminee, et Refuser rend la main."
 covers = ["CAP-4"]
-after = [4, 5, "9.4"]
+after = [4, 5, "9.4", 12]
 hitl = true
 risk = "medium"
-notes = ["hitl : recette manuelle dans QGIS 3.44 par le proprietaire."]
+notes = ["hitl : recette manuelle dans QGIS 3.44 par le proprietaire.", "Le changement de modele par le selecteur passe par le rechargement que porte l'entree 12."]
 
 [[entry]]
 id = 7
@@ -96,7 +126,7 @@ title = "Refactor sweep"
 description = "Nettoie ce que l'epic a laisse : doublons entre ai/, serve.rs et le serveur MCP, constats de revue reportes dans deferred-work.md ; le perimetre est fixe au demarrage d'apres les plans et les constats."
 verify = "cargo test, clippy et fmt propres, les constats reportes de l'epic sont traites ou re-reportes avec leur raison."
 covers = []
-after = [1, 2, 3, 4, 5, 6, 7]
+after = [1, 2, 3, 4, 5, 6, 7, 11, 12]
 hitl = false
 risk = "low"
 
@@ -104,7 +134,7 @@ risk = "low"
 id = 9
 type = "story"
 title = "Suite de bout en bout : phrase, plan valide, execution, rejeu sans l'IA"
-description = "Prouve par un test commite le parcours de la phrase de demo : plan compose, valide, execute par le canal, puis rejoue sans charger le modele avec un resultat identique ; garde reseau sur l'agent et le serveur MCP ; re-mesure du taux sur le registre reel, au processeur."
+description = "Prouve par un test commite le parcours de la phrase de demo : plan compose, valide, execute par le canal, puis rejoue sans charger le modele avec un resultat identique ; garde reseau sur l'agent et le serveur MCP ; re-mesure du taux sur le registre reel (sur GPU) et de la duree par phrase (sur processeur, comme l'entree 11)."
 verify = "La suite passe hors ligne, le rejeu d'un plan s'execute sans que le modele soit charge et rend identical: true, et le taux de plans conformes est consigne."
 covers = ["CAP-4", "CAP-8"]
 after = [8]
@@ -116,9 +146,9 @@ id = 10
 type = "story"
 title = "Modele de composition ajuste et plus petit (fine-tuning)"
 description = "Remplace le gros modele et son prompt de 5000 jetons par un modele de 1,5 a 4 milliards de parametres ajuste sur « phrase francaise -> plan d'appels du registre », au prompt de quelques centaines de jetons, pour les postes sans bon processeur. Le generateur de donnees synthetiques sort du registre reel, filtre par Registry::check_plan ; un jeu de phrases inedites est tenu a l'ecart ; l'entrainement (LoRA ou QLoRA) tient dans 8 Go de VRAM et se fusionne en GGUF."
-verify = "Sur le jeu de phrases tenu a l'ecart, le score du modele ajuste est au moins egal a celui de Qwen3.5-9B avec le prompt complet, et le temps par phrase sur un processeur modeste baisse d'un ordre de grandeur par rapport aux 3 minutes mesurees (5.3)."
+verify = "Sur le jeu de phrases tenu a l'ecart, le score du modele ajuste est au moins egal a celui de Qwen3.5-9B avec le prompt complet, et une longue phrase rend son plan en moins de 30 s sur le 5800X bride a 4 coeurs (mesure de l'entree 11), y compris sur les postes ou l'entree 12 n'y suffit pas."
 covers = ["CAP-4"]
-after = [3, 5]
+after = [3, 5, 11, 12]
 hitl = true
 risk = "high"
 notes = [
@@ -128,7 +158,11 @@ notes = [
   "Assumption: un modele de 1,5 a 4 milliards tient la tache apres ajustement ; la cible de 8 Go de VRAM exclut un entrainement du 9B sans compromis. A confirmer a la mesure.",
   "Assumption: chaque nouvelle commande du registre demande de regenerer les donnees et de re-entrainer ; le cout de cette boucle est a mesurer.",
   "hitl : le proprietaire fournit le processeur modeste de mesure et lance l'entrainement sur sa machine.",
-  "Check hors criteres (risque high) : le proprietaire rejoue la phrase de demo sur le processeur modeste et confirme que le temps est acceptable.",
+  "Check hors criteres (risque high) : le proprietaire rejoue la phrase de demo sur le 5800X bride a 4 coeurs et confirme que le temps est sous 30 s.",
   "Decision: 2026-10-17 — apres 5.5 : le format des plans (variante question) doit etre fige avant d'entrainer, sinon on re-entraine.",
-  "Hors de cette story : garder le prefixe fixe du prompt en cache et ne charger le modele qu'une fois (levier sans fine-tuning, deja dans deferred-work.md).",
+  "Hors de cette story : garder le prefixe fixe du prompt en cache et ne charger le modele qu'une fois — c'est l'entree 12.",
+  "Decision: 2026-10-17 — seuil strict de clarification reporte de 5.5 : au moins 9 des 12 phrases ambigues rendent une question, au plus 1 des 25 phrases claires devient une question (5.5 a accepte 2 pour le modele actuel).",
+  "Decision: 2026-10-17 — l'entrainement est reproductible : exemples engendres depuis le registre, une commande pour re-entrainer et re-mesurer, pour qu'une commande ajoutee coute un re-entrainement et non un projet.",
+  "Decision: 2026-10-17 — critere de duree : moins de 30 s par longue phrase sur le 5800X bride a 4 coeurs, mesure par l'entree 11.",
+  "Decision: 2026-10-17 — graine des exemples : les inventaires de demandes types tires de la recherche sur les pratiques SIG (hors depot), en plus du registre.",
 ]

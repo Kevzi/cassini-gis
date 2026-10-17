@@ -103,6 +103,7 @@ sorti en PDF — il traverse les epics 2, 9 et 5.
 - Open question: la forme du canal local entre l'extension et le noyau porte l'argument juridique de la frontière GPL. À régler par `bmad-architecture` avant l'epic 9.
 - Unknown: la maturité de `whitebox_next_gen` comme bibliothèque réutilisable ; l'epic 4 l'attend et doit la trancher avant de s'engager.
 - Unknown: le chemin de livraison du modèle GGUF sur un poste isolé, le dépôt d'extensions QGIS n'acceptant pas plusieurs Go. Les epics 5 et 7 l'attendent.
+- Decision: ajout de l'epic 10, catalogue étendu par les algorithmes de traitement de QGIS, après la démo (epic 6) : le propriétaire veut à terme un outil complet, sans parité revendiquée ; objectif d'au moins 70 % des demandes réelles couvertes (2026-10-17).
 - Waits on epic 1 because: le registre a besoin du workspace, du verrou hors ligne et de la recette.
 - Waits on epic 8 because: la forme des descriptions de commandes, puis l'agent lui-même, dépendent du verdict de l'épreuve.
 - Waits on epic 2 because: toute commande ajoutée ensuite a besoin du contrat du registre.

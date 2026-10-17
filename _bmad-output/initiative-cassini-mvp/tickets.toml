@@ -69,6 +69,16 @@ title = "Publication : depot d'extensions QGIS, installeurs, video"
 covers = []
 after = [{ epic = 6, needs = "le scenario de demo complet, a filmer et a documenter" }]
 
+[[epic]]
+id = 10
+slug = "epic-catalogue-etendu-qgis"
+title = "Catalogue etendu par les algorithmes de traitement de QGIS"
+covers = ["CAP-3", "CAP-6", "CAP-9"]
+after = [
+  { epic = 6, needs = "le MVP complet et la demo, qui figent le registre et l'agent sur lesquels le catalogue s'etend" },
+  { epic = 7, needs = "la chaine de publication de l'extension et du paquet, par laquelle le catalogue etendu est livre" },
+]
+
 # ---- Retire ----
 # L'epic 3 est retire le 2026-10-14 : CAP-3 part a l'epic 9 (executee par QGIS) et
 # CAP-7 part a l'epic 2. Sa table reste ici pour que l'id 3 ne soit jamais
