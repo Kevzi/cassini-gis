@@ -65,3 +65,7 @@ desktop.ini
 
 __pycache__/
 *.pyc
+
+# Skills BMad installes en local (pas du code Cassini)
+.claude/
+skills-lock.json
