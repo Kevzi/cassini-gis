@@ -62,7 +62,9 @@ impl From<&JournalError> for ErrorReport {
             code: e.code().to_string(),
             message: e.to_string(),
             step: match e {
-                JournalError::Diverged { step, .. } => Some(*step),
+                JournalError::Diverged { step, .. } | JournalError::UnreadableLine { step } => {
+                    Some(*step)
+                }
                 _ => None,
             },
         }

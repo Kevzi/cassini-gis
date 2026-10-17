@@ -127,6 +127,7 @@ fn check_spec(spec: &CommandSpec, out: &mut Vec<ContractViolation>) {
             "au moins un test doit être déclaré pour la commande.",
         ));
     }
+    check_path_params(spec, out);
     for (which, schema) in [
         ("des paramètres", &spec.params_schema),
         ("du résultat", &spec.output_schema),
@@ -141,6 +142,75 @@ fn check_spec(spec: &CommandSpec, out: &mut Vec<ContractViolation>) {
             ));
         }
     }
+}
+
+/// Les paramètres de chemin et de sortie doivent exister dans le schéma des
+/// paramètres et accepter une chaîne : sinon le noyau ne les réécrit pas et un
+/// chemin absolu reste dans le journal (AD-9).
+fn check_path_params(spec: &CommandSpec, out: &mut Vec<ContractViolation>) {
+    let named = [
+        ("contract.path_param", "path_params", &spec.path_params),
+        (
+            "contract.output_param",
+            "output_params",
+            &spec.output_params,
+        ),
+    ];
+    for (code, kind, names) in named {
+        for name in names {
+            let property = spec
+                .params_schema
+                .get("properties")
+                .and_then(|p| p.get(name.as_str()));
+            let message = match property {
+                None => format!(
+                    "`{kind}` nomme « {name} », absent des propriétés du schéma des paramètres."
+                ),
+                Some(p) if !accepts_string(p, &spec.params_schema, 0) => {
+                    format!("`{kind}` nomme « {name} », dont le schéma n'accepte pas une chaîne.")
+                }
+                Some(_) => continue,
+            };
+            out.push(violation(code, &spec.id, &message));
+        }
+    }
+}
+
+/// Le sous-schéma accepte-t-il une chaîne (directement, en tableau de chaînes,
+/// ou par `anyOf`/`oneOf`/`allOf`) ? Suit les `$ref` internes.
+fn accepts_string(schema: &Value, root: &Value, depth: usize) -> bool {
+    if depth > 8 {
+        return false;
+    }
+    let Value::Object(map) = schema else {
+        return false;
+    };
+    let is_string = match map.get("type") {
+        Some(Value::String(t)) => t == "string",
+        Some(Value::Array(ts)) => ts.iter().any(|t| t == "string"),
+        _ => false,
+    };
+    if is_string {
+        return true;
+    }
+    if let Some(Value::String(target)) = map.get("$ref") {
+        if let Some(resolved) = target.strip_prefix('#').and_then(|p| root.pointer(p)) {
+            if accepts_string(resolved, root, depth + 1) {
+                return true;
+            }
+        }
+    }
+    if map
+        .get("items")
+        .is_some_and(|i| accepts_string(i, root, depth + 1))
+    {
+        return true;
+    }
+    ["anyOf", "oneOf", "allOf"].iter().any(|key| {
+        map.get(*key)
+            .and_then(Value::as_array)
+            .is_some_and(|alts| alts.iter().any(|a| accepts_string(a, root, depth + 1)))
+    })
 }
 
 /// `domaine.verbe` : deux segments snake_case, commençant par une lettre minuscule.
@@ -357,6 +427,29 @@ mod tests {
         });
         s
     });
+    command!(PathParamMissing, |s| s.path_params(&["pth"]));
+    command!(OutputParamMissing, |s| s.output_params(&["out"]));
+    command!(PathParamNotString, |mut s| {
+        s.params_schema = json!({
+            "$schema": DIALECT,
+            "type": "object",
+            "properties": {"path": {"type": "integer"}}
+        });
+        s.path_params(&["path"])
+    });
+    command!(PathParamsWellFormed, |mut s| {
+        s.params_schema = json!({
+            "$schema": DIALECT,
+            "type": "object",
+            "properties": {
+                "path": {"type": ["string", "null"]},
+                "inputs": {"type": "array", "items": {"$ref": "#/$defs/Name"}},
+                "out": {"type": "string"}
+            },
+            "$defs": {"Name": {"type": "string"}}
+        });
+        s.path_params(&["path", "inputs"]).output_params(&["out"])
+    });
     command!(FirstOfTwin, |s| s);
     command!(SecondOfTwin, |mut s| {
         s.description_fr = "Une autre description.".into();
@@ -454,6 +547,21 @@ mod tests {
         assert_eq!(violations[0].code, "contract.geometry_unbounded");
         assert_eq!(violations[0].id, "analysis.buffer");
         assert!(violations[0].message.contains("AD-8"));
+    }
+
+    #[test]
+    fn path_and_output_params_must_exist_in_the_schema() {
+        let violations = only(PathParamMissing).check_contract();
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].code, "contract.path_param");
+        assert!(violations[0].message.contains("pth"));
+        assert_eq!(codes(&only(OutputParamMissing)), ["contract.output_param"]);
+    }
+
+    #[test]
+    fn a_path_param_must_accept_a_string() {
+        assert_eq!(codes(&only(PathParamNotString)), ["contract.path_param"]);
+        assert!(only(PathParamsWellFormed).check_contract().is_empty());
     }
 
     #[test]
