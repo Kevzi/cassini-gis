@@ -84,7 +84,7 @@ sorti en PDF — il traverse les epics 2, 9 et 5.
 - constraint — la même spec, section Constraints : hors ligne total, pas de GPL ni LGPL dans le noyau, frontière GPL de l'extension, séparation civil/défense, agent-first
 - change — `_bmad-output/initiative-cassini-mvp/change-facade-qgis-avant-app-autonome/change-facade-qgis-avant-app-autonome.md` : le virage du 2026-10-14 et son analyse d'impact
 - source de vérité — `CLAUDE.md`, §2 principes, §3 architecture, §6 périmètre, §7 étapes, §8 règles de travail, §9 conventions
-- research — `_bmad-output/initiative-cassini-mvp/research-sig-francais-hors-ligne-pour-la-defense/research-sig-francais-hors-ligne-pour-la-defense.md`, sections Recommandations et D4
+- research — dossier de recherche initial, hors de ce dépôt (dépôt privé `cassini-defense-prive`, `recherche/research-sig-francais-hors-ligne-pour-la-defense/`), sections Recommandations et D4
 
 ## Notes
 
@@ -99,7 +99,7 @@ sorti en PDF — il traverse les epics 2, 9 et 5.
 - Decision: le dépôt public reste un noyau civil ; aucune fonction conçue pour l'usage militaire n'y entre (2026-10-09).
 - Decision: tout code et tout test passent par les skills BMad — `bmad-build` par entrée, `bmad-code-review` ou `bmad-walkthrough` pour les revues. Rien n'est codé en direct hors d'un ticket (demande du propriétaire, 2026-10-09).
 - Decision: sur GitHub, on ne pousse que `main` ; les branches d'entrée restent locales (propriétaire, 2026-10-14).
-- Parked: CAP-12, le fonction réservée au module privé, n'est porté par aucun epic d'ici : il appartient au module défense privé et attend la réponse à une demande de classement ([retiré]), au su du propriétaire.
+- Parked: CAP-12 n'est portée par aucun epic d'ici : elle appartient au module privé, hors de ce dépôt, au su du propriétaire.
 - Open question: la forme du canal local entre l'extension et le noyau porte l'argument juridique de la frontière GPL. À régler par `bmad-architecture` avant l'epic 9.
 - Unknown: la maturité de `whitebox_next_gen` comme bibliothèque réutilisable ; l'epic 4 l'attend et doit la trancher avant de s'engager.
 - Unknown: le chemin de livraison du modèle GGUF sur un poste isolé, le dépôt d'extensions QGIS n'acceptant pas plusieurs Go. Les epics 5 et 7 l'attendent.

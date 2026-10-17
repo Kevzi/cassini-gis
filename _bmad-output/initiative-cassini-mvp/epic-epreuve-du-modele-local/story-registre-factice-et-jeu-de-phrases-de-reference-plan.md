@@ -38,7 +38,7 @@ context: ['{project-root}/CLAUDE.md']
 
 **Never:**
 - Écrire les 25 phrases ou le validateur dans cette session.
-- Ajouter une fonction de fonction réservée au module privé ou toute fonction à usage militaire (CLAUDE.md §2.9) : les commandes de terrain restent les trois du MVP.
+- Ajouter toute fonction à usage militaire (CLAUDE.md §2.9) : les commandes de terrain restent les trois du MVP.
 - Employer `oneOf`, `anyOf`, `allOf`, `if/then` ou `$ref` hors `#/$defs/` : le validateur de 8.2 (seconde session) ne les connaîtra pas.
 
 ## I/O & Edge-Case Matrix

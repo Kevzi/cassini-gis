@@ -4,7 +4,8 @@
 > Si une demande contredit ce fichier, signale-le avant d'agir.
 >
 > Contrat machine : `_bmad-output/initiative-cassini-mvp/spec-cassini-mvp/spec-cassini-mvp.md`.
-> Dossier de recherche : `_bmad-output/initiative-cassini-mvp/research-sig-francais-hors-ligne-pour-la-defense/`.
+> Dossier de recherche initial : hors de ce dépôt, dans le dépôt privé `cassini-defense-prive`
+> (`recherche/research-sig-francais-hors-ligne-pour-la-defense/`), à côté de ce dossier.
 > Virage du 2026-10-14, qui explique l'organisation actuelle :
 > `_bmad-output/initiative-cassini-mvp/change-facade-qgis-avant-app-autonome/change-facade-qgis-avant-app-autonome.md`.
 >

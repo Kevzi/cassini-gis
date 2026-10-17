@@ -2,7 +2,7 @@
 id: SPEC-cassini-mvp
 companions:
   - ../../../CLAUDE.md
-  - ../research-sig-francais-hors-ligne-pour-la-defense/research-sig-francais-hors-ligne-pour-la-defense.md
+  - dossier de recherche initial, hors de ce dépôt (dépôt privé)
   - ../architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md
 sources: []
 ---
@@ -23,7 +23,7 @@ Conséquence assumée sur la construction : Cassini ne reconstruit pas ce que QG
 
 ## Capabilities
 
-CAP-2 a été retirée (préparation des données d'une commune par code INSEE) : l'identifiant n'est jamais réattribué. CAP-12 (fonction réservée au module privé) est spécifiée hors de ce dépôt, dans le module défense privé, et n'est pas développée avant réponse écrite à la demande de classement.
+CAP-2 a été retirée (préparation des données d'une commune par code INSEE) : l'identifiant n'est jamais réattribué. CAP-12 est spécifiée hors de ce dépôt, dans le module privé.
 
 - **CAP-1** — Affichage hors ligne vérifié
   - **intent:** l'utilisateur travaille sur ses couches et son fond de carte sans qu'aucune fonction du produit n'accède au réseau.
@@ -76,7 +76,6 @@ CAP-2 a été retirée (préparation des données d'une commune par code INSEE) 
 - Aucune dépendance GPL ou LGPL **dans le noyau**, y compris par liaison statique et y compris transitivement : ni GEOS, ni l'extension `spatial` de DuckDB qui le lie statiquement. Passer par QGIS ne lève pas cette interdiction : QGIS embarque GDAL et GEOS de son côté, l'extension les utilise dans le processus de QGIS, le noyau ne les lie jamais.
 - Le module défense ne peut pas être construit dans l'extension, celle-ci étant en GPL : il s'appuiera sur le noyau Apache-2.0.
 - Le dépôt public ne contient aucune fonction spécialement conçue pour l'usage militaire. Le module défense est un dépôt privé distinct. Fondement : la charnière du contrôle de la liste commune des équipements militaires de l'UE est l'expression *specially designed for military use*.
-- Aucune fonction de fonction réservée au module privé n'est écrite avant réponse écrite à une demande de classement (formulaire [retiré], Bureau de la réglementation, du classement, du double-usage et de la sécurité industrielle).
 - Cassini ne télécharge, ne catalogue et ne redistribue aucune donnée géographique. Cadastre, PLU, BAN, BD TOPO, ADMIN EXPRESS et fonds de carte sont apportés par l'utilisateur.
 - Hors ligne total : aucune fonction du MVP n'utilise le réseau. Le réseau ne sert qu'à brancher une IA externe, en option.
 - Le canal entre l'extension et le noyau ne porte que des messages publics et documentés : identifiants, chemins relatifs, paramètres à schéma JSON, résultats typés, et quelques géométries ponctuelles en GeoJSON. Jamais une couche entière, jamais une structure de données interne : c'est la condition de l'argument de distance de bras, la FAQ de la FSF réservant le cas d'un échange assez intime pour que deux programmes n'en fassent qu'un.
@@ -140,4 +139,3 @@ Sur une machine débranchée du réseau, l'utilisateur ouvre QGIS sur un projet 
 - **Systèmes des modèles d'élévation.** Le noyau lit le MNT dans son propre système et refuse une coordonnée exprimée dans un autre : quels systèmes doit-il savoir lire — Lambert-93 et WGS84 seuls, ou aussi les Lambert zones et NTF (EPSG:27572) des fichiers anciens ?
 - **Jeu de recette.** Avec quelles données la démo et les tests tournent-ils, puisque l'application n'en distribue aucune : des données fabriquées à la main, ou un échantillon réel sous licence ouverte versé dans le dépôt ?
 - **Définition de « parcelle constructible ».** En termes de quels champs du Géoportail de l'Urbanisme ? La couverture du PLU y est partielle et les schémas varient d'une commune à l'autre, alors que la phrase de démo repose sur cette définition.
-- **Classement.** La demande déposée par [retiré] est le préalable à tout développement de CAP-12. Tant qu'elle n'a pas reçu de réponse écrite, le périmètre du module défense reste indéterminé.

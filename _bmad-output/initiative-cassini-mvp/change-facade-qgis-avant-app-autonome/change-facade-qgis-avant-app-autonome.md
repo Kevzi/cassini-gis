@@ -131,7 +131,7 @@ un poste isolé. Les six autres sont reportées sans être abandonnées.
 | CAP-9 Import | Cinq formats à implémenter | Réduire : QGIS ouvre les fichiers nativement ; le registre expose l'ajout et l'inventaire des couches |
 | CAP-10 Projet | Format de projet Cassini sur disque | Réduire : le projet est un projet QGIS ; le noyau écrit son journal à côté |
 | CAP-11 Terrain | Neuf commandes | Réduire à trois (voir 2.4), les six autres en non-objectif reporté |
-| **CAP-13** *(nouveau)* | — | **Façade QGIS** : extension et canal local. Identifiant 13 parce que CAP-12 (fonction réservée) est réservé au module défense et qu'un identifiant n'est jamais réattribué |
+| **CAP-13** *(nouveau)* | — | **Façade QGIS** : extension et canal local. Identifiant 13 parce que CAP-12 est réservé au module privé et qu'un identifiant n'est jamais réattribué |
 | *Constraints* | Rien sur la frontière GPL | Ajouter : l'extension est en GPL et vit séparée ; le noyau reste Apache-2.0, ne lie jamais QGIS, communique à distance de bras par processus séparé, et **doit rester pleinement utilisable sans QGIS** — c'est ce qui fonde l'argument juridique et ce qui rend la V2 possible |
 | *Non-goals* | « Système de plugins » est ambigu | Préciser : Cassini n'héberge pas de plugins, mais Cassini **est** une extension au MVP. Ajouter : application de bureau autonome reportée en V2 ; aucune parité visée avec QGIS |
 | *Success signal* | La démo se déroule dans l'application Cassini | Réécrire : la démo se déroule dans QGIS, panneau Cassini ouvert |
@@ -227,8 +227,7 @@ l'agent et le terrain consomment tous les trois.
   gigaoctets de modèle GGUF. Comment l'extension le trouve-t-elle sur un poste
   isolé, et qui l'installe ?
 - **Dessin du panneau** (voir 3.3).
-- Reste ouverte, inchangée : la demande de classement ([retiré]) pour le module
-  défense.
+- Reste ouverte, inchangée : les autorisations réglementaires du module privé.
 
 ## 6. Classement et passation
 

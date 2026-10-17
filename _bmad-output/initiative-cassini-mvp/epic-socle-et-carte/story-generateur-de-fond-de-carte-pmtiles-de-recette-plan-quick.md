@@ -152,7 +152,7 @@ context: []
 > Si une demande contredit ce fichier, signale-le avant d'agir.
 >
 > Contrat machine : `_bmad-output/initiative-cassini-mvp/spec-cassini-mvp/spec-cassini-mvp.md`.
-> Dossier de recherche : `_bmad-output/initiative-cassini-mvp/research-sig-francais-hors-ligne-pour-la-defense/`.
+> Dossier de recherche initial : hors de ce dépôt (dépôt privé).
 
 ## 1. Vision
 
@@ -198,13 +198,9 @@ un SIG de bureau hors ligne piloté par une IA locale.
    particulier. IA locale par défaut, IA externes via MCP.
 7. **Séparation civil / défense.** Ce dépôt public ne contient **aucune fonction
    spécialement conçue pour l'usage militaire**. Celles-là vivent dans un dépôt
-   privé distinct, et aucune fonction de fonction réservée au module privé n'est écrite
-   avant réponse écrite à une demande de classement (formulaire [retiré],
-   Bureau de la réglementation, du classement, du double-usage et de la sécurité
-   industrielle). Motif : la charnière du contrôle de la liste commune des
+   privé distinct. Motif : la charnière du contrôle de la liste commune des
    équipements militaires de l'UE est l'expression *specially designed for
-   military use*, et l'article L.2332-1 du Code de la défense soumet le commerce
-   de matériels de guerre à une autorisation (AFCI).
+   military use*.
 8. **Petit et solide.** Mieux vaut 5 fonctions fiables que 50 à moitié finies.
 
 ## 3. Architecture

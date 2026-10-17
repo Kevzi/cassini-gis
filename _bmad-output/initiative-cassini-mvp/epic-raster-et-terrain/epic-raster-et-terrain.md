@@ -52,8 +52,8 @@ ligne, avec une provenance de code documentée.
 Frontière par unité livrée : les trois commandes de terrain du noyau et la
 lecture du MNT dont elles ont besoin. **L'ouverture du MNT comme couche du projet
 et son affichage en ombrage appartiennent à QGIS**, donc à l'epic 9. Les six
-autres commandes de terrain sont hors MVP. Aucune fonction de choix
-d'fonction réservée : elle est hors de ce dépôt.
+autres commandes de terrain sont hors MVP. Aucune fonction conçue
+pour l'usage militaire : elles sont hors de ce dépôt.
 
 ## References
 
@@ -61,7 +61,7 @@ d'fonction réservée : elle est hors de ce dépôt.
 - spec — `../spec-cassini-mvp/spec-cassini-mvp.md`, CAP-11 et section Non-goals
 - change — `../change-facade-qgis-avant-app-autonome/change-facade-qgis-avant-app-autonome.md`, section 2.4 : pourquoi trois commandes et pas neuf
 - constraint — `CLAUDE.md` §2.2 pas de GPL ni LGPL dans le noyau, §2.9 séparation civil/défense
-- research — `../research-sig-francais-hors-ligne-pour-la-defense/research-sig-francais-hors-ligne-pour-la-defense.md`, section D4
+- research — dossier de recherche initial, hors de ce dépôt (dépôt privé `cassini-defense-prive`, `recherche/research-sig-francais-hors-ligne-pour-la-defense/`), section D4
 - spine — `../architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md`, AD-1, AD-19, AD-20, AD-22
 
 ## Notes

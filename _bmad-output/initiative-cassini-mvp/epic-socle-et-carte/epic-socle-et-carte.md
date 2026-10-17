@@ -59,7 +59,7 @@ d'extension QGIS — c'est l'epic 9. Pas de terrain — c'est l'epic 4.
 - parent — `_bmad-output/initiative-cassini-mvp/initiative-cassini-mvp.md`, section Requirements
 - spec — `../spec-cassini-mvp/spec-cassini-mvp.md`, CAP-1 et section Constraints
 - constraint — `CLAUDE.md` §2.2 licences, §2.3 hors ligne, §3 architecture, §9 conventions
-- research — `../research-sig-francais-hors-ligne-pour-la-defense/research-sig-francais-hors-ligne-pour-la-defense.md`, section D4 pour les licences des briques
+- research — dossier de recherche initial, hors de ce dépôt (dépôt privé `cassini-defense-prive`, `recherche/research-sig-francais-hors-ligne-pour-la-defense/`), section D4 pour les licences des briques
 
 ## Notes
 
