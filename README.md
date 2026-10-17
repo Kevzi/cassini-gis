@@ -406,8 +406,8 @@ charnière du contrôle à l'exportation des équipements militaires de l'Union
 européenne est précisément l'expression *specially designed for military use*, et
 l'article L.2332-1 du Code de la défense soumet le commerce de matériels de guerre
 à autorisation. Les fonctions de cette nature, si elles voient le jour, vivront
-dans le dépôt privé cité ci-dessus, et aucune ne sera écrite avant réponse écrite
-à une demande de classement.
+dans le dépôt privé cité ci-dessus, et leur diffusion est subordonnée aux
+autorisations que la réglementation impose.
 
 Sont également hors du périmètre de ce dépôt : le téléchargement ou la
 redistribution de données, les formats de projet propriétaires, et les formats et

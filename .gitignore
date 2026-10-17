@@ -69,3 +69,6 @@ __pycache__/
 # Skills BMad installes en local (pas du code Cassini)
 .claude/
 skills-lock.json
+
+# Notes privees locales (jamais versionnees, voir CLAUDE.md §2.9)
+CLAUDE.local.md
