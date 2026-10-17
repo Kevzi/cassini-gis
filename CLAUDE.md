@@ -79,13 +79,17 @@ code existant reste au dépôt comme fondation.
 9. **Séparation civil / défense.** Ce dépôt public ne contient **aucune fonction
    spécialement conçue pour l'usage militaire**. Celles-là vivent dans un dépôt
    privé distinct, qui s'appuiera sur le **noyau** et non sur l'extension, cette
-   dernière étant en GPL. Aucune fonction de fonction réservée au module privé n'est
-   écrite avant réponse écrite à une demande de classement (formulaire
-   [retiré], Bureau de la réglementation, du classement, du double-usage et de la
-   sécurité industrielle). Motif : la charnière du contrôle de la liste commune
-   des équipements militaires de l'UE est l'expression *specially designed for
-   military use*, et l'article L.2332-1 du Code de la défense soumet le commerce
-   de matériels de guerre à une autorisation (AFCI).
+   dernière étant en GPL. **Décision du propriétaire, 2026-10-17 : le module
+   défense, fonctions de fonction réservée au module privé comprises, s'écrit sans
+   attendre la réponse à une demande de classement** (formulaire [retiré],
+   Bureau de la réglementation, du classement, du double-usage et de la sécurité
+   industrielle), qui n'a pas été déposée. Ce code reste dans le dépôt privé,
+   jamais dans ce dépôt public. Le risque est assumé par le propriétaire :
+   la charnière du contrôle de la liste commune des équipements militaires de
+   l'UE est l'expression *specially designed for military use*, et l'article
+   L.2332-1 du Code de la défense soumet le commerce de matériels de guerre à une
+   autorisation (AFCI) ; la commercialisation reste donc à régler avant toute
+   vente ou diffusion.
 10. **Petit et solide.** Mieux vaut 5 fonctions fiables que 50 à moitié finies.
 
 ## 3. Architecture
@@ -308,4 +312,4 @@ autonome doivent pouvoir prendre le registre et le terrain sans l'IA.
   une conséquence.
 - **Module défense**, s'il voit le jour : dépôt privé distinct, construit sur le
   noyau et non sur l'extension. Sa licence et ses conditions de commercialisation
-  dépendent de la réponse au classement (voir §2.9).
+  dépendent de la régularisation du classement, à faire avant toute vente (voir §2.9).
