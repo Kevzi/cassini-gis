@@ -10,4 +10,11 @@ repository.workspace = true
 # Dependance autorisee par le plan 5.1 : llama-cpp-2 (MIT OR Apache-2.0), llama.cpp (MIT).
 # CPU seulement : ni openmp, ni GPU, ni `common` (qui compile cpp-httplib).
 [dependencies]
+# Le registre et le contrat de plan (AD-23) : `ai` peut dependre de `core`, jamais l'inverse.
+cassini-core = { path = "../core" }
+serde_json = "1"
 llama-cpp-2 = { version = "=0.1.159", default-features = false }
+
+# Acceleration GPU facultative, absente par defaut : le produit reste CPU. Sert a mesurer vite.
+[features]
+cuda = ["llama-cpp-2/cuda"]

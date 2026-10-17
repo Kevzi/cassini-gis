@@ -161,3 +161,22 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `epic-registre-projet-import/epic-registre-projet-import-retrospective.md`
   summary: `WriteOutputParams.out` figure au schéma des paramètres alors que la règle 6 interdit un nom de sortie dans les paramètres ; le catalogue le montrerait au modèle.
   evidence: F23 de la rétro de l'epic 2. Aujourd'hui sous `cfg(test)` (commande d'essai), donc sans effet pour l'utilisateur ; à corriger si la commande sort du cadre des tests.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-composer-un-plan-prompt-contraint-validation-sans-reparation-plan.md`
+  summary: AD-23 : verifier que les identifiants de couche et les chemins d'un plan sont connus de la session (inventaire).
+  evidence: la grammaire accepte tout JSON pour params et judge ne compare rien a l'inventaire ; un id invente peut etre rendu comme plan valide.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-composer-un-plan-prompt-contraint-validation-sans-reparation-plan.md`
+  summary: La redemande doit porter la liste des ecarts, pas seulement la premiere erreur de check_plan.
+  evidence: check_plan s'arrete a la premiere erreur ; un plan a plusieurs fautes demande plus d'une redemande.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-composer-un-plan-prompt-contraint-validation-sans-reparation-plan.md`
+  summary: Verifier la taille du prompt (catalogue + inventaire) contre N_CTX 8192 et corriger le message ai.prompt_too_long.
+  evidence: aucun plafond sur l'inventaire ; le message accuse la phrase alors que le catalogue peut etre en cause.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-composer-un-plan-prompt-contraint-validation-sans-reparation-plan.md`
+  summary: Eviter de recharger le GGUF a chaque tentative de composition.
+  evidence: generate charge le modele et cree un contexte a chaque appel ; une redemande double le cout.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-composer-un-plan-prompt-contraint-validation-sans-reparation-plan.md`
+  summary: Tester le chemin de cassini plan sans --model (models.no_folder, ai.no_model).
+  evidence: les tests CLI passent toujours --model absent.gguf.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-composer-un-plan-prompt-contraint-validation-sans-reparation-plan.md`
+  summary: Le critere des 80 % est tenu en comptant les refus attendus : 10/13 plans reels (77 %) ; echecs S16, S17, S19.
+  evidence: mesure GPU 22/25 sur Qwen3.5-9B Q4_K_M, deux fois ; 12 phrases attendent un refus faute de commande dans le registre reel. Mesure CPU non confirmee.

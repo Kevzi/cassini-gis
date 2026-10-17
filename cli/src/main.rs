@@ -14,6 +14,7 @@ const USAGE: &str = "Usage : cassini run <id> [json] [--project <fichier>]
        cassini replay <projet>
        cassini serve
        cassini model-check --model <fichier.gguf> --prompt <phrase>
+       cassini plan <phrase> --inventory <fichier.json> [--model <fichier.gguf>]
 ";
 
 /// Arguments de `run` : id, paramètres JSON facultatifs, projet facultatif.
@@ -70,6 +71,9 @@ pub fn run(
     }
     if args.first().map(String::as_str) == Some("model-check") {
         return model_check(&args[1..], out, err);
+    }
+    if args.first().map(String::as_str) == Some("plan") {
+        return plan(&args[1..], out, err);
     }
     let Some(RunArgs { id, raw, project }) = parse_run(args) else {
         let _ = err.write_all(USAGE.as_bytes());
@@ -230,6 +234,104 @@ fn model_check(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32
             );
             1
         }
+    }
+}
+
+/// Écrit une erreur typée sur `err` et rend le code de sortie 1.
+fn fail(err: &mut dyn Write, code: &str, message: String) -> i32 {
+    let report = ErrorReport {
+        code: code.to_string(),
+        message,
+        step: None,
+    };
+    let _ = writeln!(
+        err,
+        "{}",
+        serde_json::to_string(&report).expect("une erreur se sérialise")
+    );
+    1
+}
+
+/// Modèle choisi quand `--model` manque : le premier de `model.list` (AD-15, le noyau seul
+/// découvre les modèles).
+fn default_model(registry: &Registry) -> Result<std::path::PathBuf, ErrorReport> {
+    let listed = registry
+        .call("model.list", json!({}))
+        .map_err(ErrorReport::from)?;
+    let folder = listed["folder"].as_str().unwrap_or_default();
+    match listed["models"][0]["file"].as_str() {
+        Some(file) => Ok(Path::new(folder).join(file)),
+        None => Err(ErrorReport {
+            code: "ai.no_model".to_string(),
+            message: format!("Aucun modèle GGUF n'a été trouvé dans « {folder} »."),
+            step: None,
+        }),
+    }
+}
+
+/// `cassini plan <phrase> --inventory <fichier.json> [--model <fichier.gguf>]` : compose le
+/// plan d'une demande (AD-23) et l'affiche en JSON. Rien n'est exécuté. Un plan invalide
+/// n'est jamais affiché : l'erreur `agent.plan_invalid` ou `agent.refused` sort sur `err`.
+fn plan(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
+    let (mut inventory, mut model, mut request) = (None, None, None);
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        let slot = match a.as_str() {
+            "--inventory" => &mut inventory,
+            "--model" => &mut model,
+            _ if request.is_none() && !a.starts_with("--") => {
+                request = Some(a.as_str());
+                continue;
+            }
+            _ => {
+                let _ = err.write_all(USAGE.as_bytes());
+                return 2;
+            }
+        };
+        match it.next() {
+            Some(v) if slot.is_none() => *slot = Some(v.as_str()),
+            _ => {
+                let _ = err.write_all(USAGE.as_bytes());
+                return 2;
+            }
+        }
+    }
+    let (Some(request), Some(inventory)) = (request, inventory) else {
+        let _ = err.write_all(USAGE.as_bytes());
+        return 2;
+    };
+    let registry = Registry::standard();
+    let inventory: Value = match std::fs::read_to_string(inventory)
+        .map_err(|e| format!("L'inventaire n'a pas pu être lu : {e}."))
+        .and_then(|t| {
+            serde_json::from_str(&t)
+                .map_err(|e| format!("L'inventaire n'est pas du JSON lisible : {e}."))
+        }) {
+        Ok(v) => v,
+        Err(message) => return fail(err, "agent.bad_inventory", message),
+    };
+    // La phrase vide est refusée avant toute recherche de modèle.
+    if request.trim().is_empty() {
+        let e = cassini_ai::AiError::EmptyPrompt;
+        return fail(err, e.code(), e.to_string());
+    }
+    let model = match model {
+        Some(m) => std::path::PathBuf::from(m),
+        None => match default_model(&registry) {
+            Ok(m) => m,
+            Err(e) => return fail(err, &e.code, e.message),
+        },
+    };
+    let mut generator = cassini_ai::plan::model_generator(model);
+    match cassini_ai::plan::compose_plan(&registry, &inventory, request, &mut generator) {
+        Ok(plan) => {
+            let json = serde_json::to_string(&plan).expect("un plan se sérialise");
+            if writeln!(out, "{json}").is_err() {
+                return 1;
+            }
+            0
+        }
+        Err(e) => fail(err, e.code(), e.to_string()),
     }
 }
 
@@ -501,6 +603,84 @@ mod tests {
             let (code, _, err) = call(args);
             assert_eq!(code, 2, "{args:?}");
             assert!(err.contains("cassini model-check"));
+        }
+    }
+
+    fn inventory_file(dir: &std::path::Path) -> String {
+        let f = dir.join("inventaire.json");
+        std::fs::write(&f, r#"{"layers":[]}"#).unwrap();
+        f.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn plan_with_a_missing_model_is_a_typed_error() {
+        let (dir, _) = temp_project();
+        let inv = inventory_file(&dir);
+        let (code, out, err) = call(&[
+            "plan",
+            "Ouvre les gares.",
+            "--inventory",
+            &inv,
+            "--model",
+            "absent.gguf",
+        ]);
+        assert_eq!((code, out.as_str()), (1, ""));
+        assert_eq!(error_code(&err), "ai.model_not_found");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn plan_with_an_empty_sentence_is_refused_before_loading() {
+        let (dir, _) = temp_project();
+        let inv = inventory_file(&dir);
+        let (code, _, err) = call(&["plan", " ", "--inventory", &inv, "--model", "absent.gguf"]);
+        assert_eq!(code, 1);
+        assert_eq!(error_code(&err), "ai.empty_prompt");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn plan_with_an_unreadable_inventory_is_a_typed_error() {
+        let (code, out, err) = call(&[
+            "plan",
+            "x",
+            "--inventory",
+            "absent.json",
+            "--model",
+            "absent.gguf",
+        ]);
+        assert_eq!((code, out.as_str()), (1, ""));
+        assert_eq!(error_code(&err), "agent.bad_inventory");
+        let (dir, _) = temp_project();
+        let bad = dir.join("mauvais.json");
+        std::fs::write(&bad, "{").unwrap();
+        let (code, _, err) = call(&[
+            "plan",
+            "x",
+            "--inventory",
+            &bad.to_string_lossy(),
+            "--model",
+            "absent.gguf",
+        ]);
+        assert_eq!(code, 1);
+        assert_eq!(error_code(&err), "agent.bad_inventory");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn plan_without_sentence_or_inventory_prints_usage() {
+        for args in [
+            &["plan"][..],
+            &["plan", "x"][..],
+            &["plan", "--inventory", "a.json"][..],
+            &["plan", "x", "y", "--inventory", "a.json"][..],
+            &["plan", "x", "--inventory"][..],
+            &["plan", "x", "--bogus", "a"][..],
+            &["plan", "x", "--inventory", "a", "--inventory", "b"][..],
+        ] {
+            let (code, _, err) = call(args);
+            assert_eq!(code, 2, "{args:?}");
+            assert!(err.contains("cassini plan"));
         }
     }
 }

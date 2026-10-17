@@ -1,8 +1,10 @@
 //! Plan : suite de commandes que l'agent propose, vérifiée avant tout envoi.
 //!
-//! Une étape peut citer la sortie entière d'une étape précédente par la chaîne
-//! exacte `step:<k>` (k à partir de 1), valeur d'un paramètre de premier niveau.
-//! Cette convention est isolée ici pour pouvoir être remplacée.
+//! Une étape peut citer la sortie d'une étape précédente par une chaîne, valeur d'un
+//! paramètre de premier niveau : `step:<k>` (k à partir de 1) pour la sortie entière, ou
+//! `step:<k>.<champ>` pour un champ de premier niveau de cette sortie (le type du paramètre
+//! est alors comparé au schéma de ce champ). Cette convention est isolée ici pour pouvoir
+//! être remplacée.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -41,22 +43,35 @@ fn error(code: &'static str, step: usize, message: String) -> PlanError {
     }
 }
 
+/// Référence lue : numéro d'étape et champ de premier niveau éventuel.
+type Reference = (usize, Option<String>);
+
 /// Lit une valeur de paramètre : `None` si ce n'est pas une référence,
 /// `Some(Err)` si elle commence par `step:` mais est mal formée.
-fn parse_reference(value: &Value) -> Option<Result<usize, String>> {
+fn parse_reference(value: &Value) -> Option<Result<Reference, String>> {
     let text = value.as_str()?.strip_prefix("step:")?;
-    let parsed = text
+    let (number, field) = match text.split_once('.') {
+        Some((n, f)) => (n, Some(f)),
+        None => (text, None),
+    };
+    let bad = || {
+        format!(
+            "la référence « step:{text} » est mal formée : seules les formes `step:<numéro>` et `step:<numéro>.<champ>` (numéro à partir de 1, un seul champ) sont permises."
+        )
+    };
+    let k = number
         .parse::<usize>()
         .ok()
         .filter(|k| {
-            *k >= 1 && !text.starts_with('0') && text.bytes().all(|b| b.is_ascii_digit())
+            *k >= 1 && !number.starts_with('0') && number.bytes().all(|b| b.is_ascii_digit())
         })
-        .ok_or_else(|| {
-            format!(
-                "la référence « step:{text} » est mal formée : seule la forme `step:<numéro>` (à partir de 1) est permise."
-            )
-        });
-    Some(parsed)
+        .ok_or_else(bad);
+    let field = match field {
+        None => Ok(None),
+        Some(f) if f.is_empty() || f.contains('.') => Err(bad()),
+        Some(f) => Ok(Some(f.to_string())),
+    };
+    Some(k.and_then(|k| field.map(|f| (k, f))))
 }
 
 impl Registry {
@@ -84,7 +99,7 @@ impl Registry {
                         continue;
                     };
                     has_reference = true;
-                    let k = parsed.map_err(|m| error("plan.bad_reference", step, m))?;
+                    let (k, field) = parsed.map_err(|m| error("plan.bad_reference", step, m))?;
                     if k >= step {
                         return Err(error(
                             "plan.bad_reference",
@@ -111,7 +126,25 @@ impl Registry {
                             ),
                         )
                     })?;
-                    let given = normalize(&source.output_schema, &source.output_schema, 0);
+                    let given = match &field {
+                        None => normalize(&source.output_schema, &source.output_schema, 0),
+                        Some(f) => {
+                            // Champ de premier niveau, éventuellement derrière un `$ref`.
+                            let root = &source.output_schema;
+                            let top = normalize(root, root, 0);
+                            let Some(prop) = top.get("properties").and_then(|p| p.get(f)) else {
+                                return Err(error(
+                                    "plan.bad_reference",
+                                    step,
+                                    format!(
+                                        "la sortie de l'étape {k} ({}) n'a pas de champ « {f} ».",
+                                        source.id
+                                    ),
+                                ));
+                            };
+                            prop.clone()
+                        }
+                    };
                     if normalize(&expected, &spec.params_schema, 0) != given {
                         return Err(error(
                             "plan.type_mismatch",
@@ -124,18 +157,67 @@ impl Registry {
                     }
                 }
             }
-            if !has_reference {
-                self.validate_params(&call.command, &call.params)
-                    .map_err(|e| {
-                        // `validate_params` ne rend que ces deux causes.
-                        let code = match e {
-                            crate::registry::RegistryError::UnknownCommand(_) => {
-                                "registry.unknown_command"
-                            }
-                            _ => "registry.invalid_params",
-                        };
-                        error(code, step, e.to_string())
-                    })?;
+            self.validate_unreferenced(&call.command, &call.params, spec, has_reference)
+                .map_err(|e| {
+                    // `validate_params` ne rend que ces deux causes.
+                    let code = match e {
+                        crate::registry::RegistryError::UnknownCommand(_) => {
+                            "registry.unknown_command"
+                        }
+                        _ => "registry.invalid_params",
+                    };
+                    error(code, step, e.to_string())
+                })?;
+        }
+        Ok(())
+    }
+}
+
+impl Registry {
+    /// Valide les paramètres d'une étape. Sans référence : tous. Avec références : les
+    /// paramètres littéraux, la valeur d'une référence n'étant connue qu'à l'exécution. Les clés
+    /// de référence sont remplacées par la valeur d'un exemple déclaré de la commande ; faute
+    /// d'exemple, seule l'erreur « champ requis manquant » portant sur une clé de référence est
+    /// tolérée. Champ inconnu, mauvaise valeur ou énumération invalide restent refusés.
+    fn validate_unreferenced(
+        &self,
+        id: &str,
+        params: &Value,
+        spec: &crate::registry::CommandSpec,
+        has_reference: bool,
+    ) -> Result<(), crate::registry::RegistryError> {
+        if !has_reference {
+            return self.validate_params(id, params);
+        }
+        let Value::Object(map) = params else {
+            return self.validate_params(id, params);
+        };
+        let refs: Vec<String> = map
+            .iter()
+            .filter(|(_, v)| parse_reference(v).is_some())
+            .map(|(k, _)| k.clone())
+            .collect();
+        let mut literal = map.clone();
+        for key in &refs {
+            literal.remove(key);
+        }
+        // Une clé de référence manquante à son tour : on la comble par un exemple, au plus une fois.
+        for _ in 0..=refs.len() {
+            let Err(err) = self.validate_params(id, &Value::Object(literal.clone())) else {
+                return Ok(());
+            };
+            let message = err.to_string();
+            let Some(key) = refs
+                .iter()
+                .find(|k| message.contains(&format!("missing field `{k}`")))
+            else {
+                return Err(err);
+            };
+            match spec.examples.iter().find_map(|e| e.get(key)) {
+                Some(placeholder) => {
+                    literal.insert(key.clone(), placeholder.clone());
+                }
+                None => return Ok(()),
             }
         }
         Ok(())
@@ -280,6 +362,46 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Deserialize, JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    #[allow(dead_code)]
+    struct TwoParams {
+        name: String,
+        #[serde(deserialize_with = "non_negative")]
+        n: i64,
+    }
+
+    fn non_negative<'de, D: serde::Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
+        let v = i64::deserialize(d)?;
+        if v >= 0 {
+            Ok(v)
+        } else {
+            Err(serde::de::Error::custom("n doit être positif"))
+        }
+    }
+
+    struct Two;
+    impl Command for Two {
+        type Params = TwoParams;
+        type Output = Done;
+        fn spec() -> CommandSpec {
+            CommandSpec::new::<TwoParams, Done>("terrain.two", "Deux.", "Two.")
+                .runs_in(RunsIn::Core)
+                .cancellable(false)
+                .example(json!({"name": "x", "n": 1}))
+                .tests(&["t"])
+        }
+        fn run(&self, _p: TwoParams) -> Result<Done, crate::registry::CommandFailure> {
+            Ok(Done { ok: true })
+        }
+    }
+
+    fn registry_with_two() -> Registry {
+        let mut r = registry();
+        r.register(Two);
+        r
+    }
+
     fn registry() -> Registry {
         let mut r = Registry::new();
         r.register_delegated::<LayerAdd>();
@@ -310,7 +432,15 @@ mod tests {
         let err = registry().check_plan(&p).unwrap_err();
         assert_eq!((err.code, err.step), ("plan.bad_reference", 2));
         // Pas d'auto-référence, ni step:0, ni champ, ni numéro absent.
-        for bad in ["step:2", "step:0", "step:01", "step:1.id", "step:"] {
+        for bad in [
+            "step:2",
+            "step:0",
+            "step:01",
+            "step:1.",
+            "step:1.a.b",
+            "step:.id",
+            "step:",
+        ] {
             let p = plan(json!([
                 {"command": "layer.add", "params": {"path": "a"}},
                 {"command": "terrain.slope", "params": {"raster": bad}}
@@ -318,6 +448,63 @@ mod tests {
             let err = registry().check_plan(&p).unwrap_err();
             assert_eq!((err.code, err.step), ("plan.bad_reference", 2), "{bad}");
         }
+    }
+
+    #[test]
+    fn a_field_reference_is_checked_against_the_schema_of_that_field() {
+        // `Raster { id: String }` : `step:1.id` est un texte, `step:1` un objet.
+        let ok = plan(json!([
+            {"command": "layer.add", "params": {"path": "a"}},
+            {"command": "terrain.name", "params": {"raster": "step:1.id"}}
+        ]));
+        assert_eq!(registry().check_plan(&ok), Ok(()));
+        // Le paramètre objet n'accepte pas un champ texte.
+        let wrong = plan(json!([
+            {"command": "layer.add", "params": {"path": "a"}},
+            {"command": "terrain.slope", "params": {"raster": "step:1.id"}}
+        ]));
+        let err = registry().check_plan(&wrong).unwrap_err();
+        assert_eq!((err.code, err.step), ("plan.type_mismatch", 2));
+        // Un champ absent est refusé.
+        let missing = plan(json!([
+            {"command": "layer.add", "params": {"path": "a"}},
+            {"command": "terrain.name", "params": {"raster": "step:1.nope"}}
+        ]));
+        let err = registry().check_plan(&missing).unwrap_err();
+        assert_eq!((err.code, err.step), ("plan.bad_reference", 2));
+        assert!(err.message.contains("nope"));
+    }
+
+    #[test]
+    fn a_chained_step_still_validates_its_literal_parameters() {
+        let step = |params: Value| {
+            plan(json!([
+                {"command": "layer.add", "params": {"path": "a"}},
+                {"command": "terrain.two", "params": params}
+            ]))
+        };
+        let reg = registry_with_two();
+        // Valide : la référence tient lieu de `name`, `n` est correct.
+        assert_eq!(
+            reg.check_plan(&step(json!({"name": "step:1.id", "n": 3}))),
+            Ok(())
+        );
+        // Mauvaise valeur d'un paramètre littéral.
+        let err = reg
+            .check_plan(&step(json!({"name": "step:1.id", "n": -3})))
+            .unwrap_err();
+        assert_eq!((err.code, err.step), ("registry.invalid_params", 2));
+        // Champ inconnu.
+        let err = reg
+            .check_plan(&step(json!({"name": "step:1.id", "n": 3, "zzz": 1})))
+            .unwrap_err();
+        assert_eq!(err.code, "registry.invalid_params");
+        // Requis manquant qui n'est pas une référence.
+        let err = reg
+            .check_plan(&step(json!({"name": "step:1.id"})))
+            .unwrap_err();
+        assert_eq!(err.code, "registry.invalid_params");
+        assert!(err.message.contains("`n`"), "{}", err.message);
     }
 
     #[test]

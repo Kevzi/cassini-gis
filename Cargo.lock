@@ -307,7 +307,9 @@ dependencies = [
 name = "cassini-ai"
 version = "0.1.0"
 dependencies = [
+ "cassini-core",
  "llama-cpp-2",
+ "serde_json",
 ]
 
 [[package]]

@@ -15,9 +15,11 @@ use llama_cpp_2::sampling::LlamaSampler;
 use llama_cpp_2::token::LlamaToken;
 use llama_cpp_2::vocab::LlamaVocab;
 
+pub mod plan;
+
 /// Taille du contexte, en jetons.
 const N_CTX: u32 = 8192;
-/// Borne de la réponse, en jetons.
+/// Borne de la réponse de `complete`, en jetons.
 const MAX_NEW_TOKENS: usize = 256;
 
 /// Échecs de `complete`, tous typés : aucun ne fait paniquer.
@@ -37,6 +39,8 @@ pub enum AiError {
     PromptTooLong,
     /// Le décodage a échoué.
     Decode(String),
+    /// La grammaire qui contraint la sortie n'a pas pu être lue par le moteur.
+    Grammar(String),
 }
 
 impl fmt::Display for AiError {
@@ -49,8 +53,14 @@ impl fmt::Display for AiError {
             AiError::Backend(e) => write!(f, "Le moteur du modèle n'a pas démarré : {e}"),
             AiError::Load(e) => write!(f, "Ce fichier n'est pas un modèle GGUF lisible : {e}"),
             AiError::Context(e) => write!(f, "Le contexte du modèle n'a pas pu être créé : {e}"),
-            AiError::PromptTooLong => write!(f, "La phrase est trop longue pour le modèle."),
+            AiError::PromptTooLong => write!(
+                f,
+                "La demande, avec le catalogue et l'inventaire, ne tient pas dans le contexte du modèle."
+            ),
             AiError::Decode(e) => write!(f, "Le modèle n'a pas pu répondre : {e}"),
+            AiError::Grammar(e) => {
+                write!(f, "La grammaire de la réponse n'a pas pu être lue : {e}")
+            }
         }
     }
 }
@@ -68,6 +78,7 @@ impl AiError {
             AiError::Context(_) => "ai.context",
             AiError::PromptTooLong => "ai.prompt_too_long",
             AiError::Decode(_) => "ai.decode",
+            AiError::Grammar(_) => "ai.grammar",
         }
     }
 }
@@ -85,10 +96,58 @@ fn backend() -> Result<&'static Mutex<LlamaBackend>, AiError> {
         .map_err(|e| AiError::Backend(e.clone()))
 }
 
-/// Début du tour utilisateur, au format chatml de Qwen.
-const PROMPT_HEAD: &str = "<|im_start|>user\n";
-/// Fin du tour utilisateur et tour assistant, réflexion coupée (comme `harness.py`).
-const PROMPT_TAIL: &str = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n";
+/// Début d'un tour, au format chatml de Qwen : balise, rôle, retour à la ligne.
+fn turn_head(role: &str) -> String {
+    format!(
+        "<|im_start|>{role}
+"
+    )
+}
+/// Fin d'un tour.
+const TURN_END: &str = "<|im_end|>
+";
+/// Ouverture du tour assistant, réflexion coupée (comme `harness.py`).
+const ASSISTANT_OPEN: &str = "<|im_start|>assistant
+<think>
+
+</think>
+
+";
+
+/// Qui parle dans un tour.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+    System,
+    User,
+    Assistant,
+}
+
+impl Role {
+    fn name(self) -> &'static str {
+        match self {
+            Role::System => "system",
+            Role::User => "user",
+            Role::Assistant => "assistant",
+        }
+    }
+}
+
+/// Un tour de conversation. Le texte est toujours lu comme du texte : jamais
+/// une balise de structure, même s'il contient `<|im_end|>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Turn {
+    pub role: Role,
+    pub text: String,
+}
+
+impl Turn {
+    pub fn new(role: Role, text: impl Into<String>) -> Self {
+        Turn {
+            role,
+            text: text.into(),
+        }
+    }
+}
 
 /// Réponse du modèle. `truncated` vaut vrai quand la borne de jetons a coupé
 /// la réponse avant que le modèle ait fini.
@@ -99,12 +158,22 @@ pub struct Completion {
 }
 
 /// Jetons de l'invite. Seule l'armature chatml est lue comme jetons spéciaux :
-/// la phrase de l'utilisateur est du texte, jamais une balise de structure.
-fn prompt_tokens(vocab: &LlamaVocab<'_>, user: &str) -> Vec<LlamaToken> {
-    let mut tokens = vocab.tokenize(PROMPT_HEAD.as_bytes(), false, true);
-    tokens.extend(vocab.tokenize(user.as_bytes(), false, false));
-    tokens.extend(vocab.tokenize(PROMPT_TAIL.as_bytes(), false, true));
+/// le texte des tours (phrase, catalogue, inventaire) est du texte, jamais une
+/// balise de structure.
+fn chat_tokens(vocab: &LlamaVocab<'_>, turns: &[Turn]) -> Vec<LlamaToken> {
+    let mut tokens = Vec::new();
+    for turn in turns {
+        tokens.extend(vocab.tokenize(turn_head(turn.role.name()).as_bytes(), false, true));
+        tokens.extend(vocab.tokenize(turn.text.as_bytes(), false, false));
+        tokens.extend(vocab.tokenize(TURN_END.as_bytes(), false, true));
+    }
+    tokens.extend(vocab.tokenize(ASSISTANT_OPEN.as_bytes(), false, true));
     tokens
+}
+
+#[cfg(test)]
+fn prompt_tokens(vocab: &LlamaVocab<'_>, user: &str) -> Vec<LlamaToken> {
+    chat_tokens(vocab, &[Turn::new(Role::User, user)])
 }
 
 /// Charge le modèle `model` et rend le texte de sa réponse à `prompt`.
@@ -113,11 +182,46 @@ pub fn complete(model: &Path, prompt: &str) -> Result<Completion, AiError> {
     if prompt.trim().is_empty() {
         return Err(AiError::EmptyPrompt);
     }
+    generate(
+        model,
+        &[Turn::new(Role::User, prompt)],
+        None,
+        MAX_NEW_TOKENS,
+    )
+}
+
+/// Paramètres de chargement. Avec la feature `cuda` (mesure seulement), les couches déportées
+/// sur le GPU viennent de `CASSINI_GPU_LAYERS` (défaut 99) ; sans elle, rien ne change.
+fn model_params() -> LlamaModelParams {
+    #[cfg(feature = "cuda")]
+    {
+        let layers = std::env::var("CASSINI_GPU_LAYERS")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(99);
+        LlamaModelParams::default().with_n_gpu_layers(layers)
+    }
+    #[cfg(not(feature = "cuda"))]
+    LlamaModelParams::default()
+}
+
+/// Génération générale : conversation `turns`, sortie contrainte par la
+/// grammaire GBNF `grammar` (racine `root`) si elle est donnée, réponse bornée
+/// à `max_new_tokens` jetons. Décodage glouton.
+pub fn generate(
+    model: &Path,
+    turns: &[Turn],
+    grammar: Option<&str>,
+    max_new_tokens: usize,
+) -> Result<Completion, AiError> {
+    if turns.iter().all(|t| t.text.trim().is_empty()) {
+        return Err(AiError::EmptyPrompt);
+    }
     if !model.is_file() {
         return Err(AiError::ModelNotFound(model.to_path_buf()));
     }
     let backend = backend()?.lock().unwrap_or_else(|e| e.into_inner());
-    let llama = LlamaModel::load_from_file(&backend, model, &LlamaModelParams::default())
+    let llama = LlamaModel::load_from_file(&backend, model, &model_params())
         .map_err(|e| AiError::Load(e.to_string()))?;
     let ctx_params = LlamaContextParams::default()
         .with_n_ctx(NonZeroU32::new(N_CTX))
@@ -127,8 +231,8 @@ pub fn complete(model: &Path, prompt: &str) -> Result<Completion, AiError> {
         .map_err(|e| AiError::Context(e.to_string()))?;
 
     let vocab = llama.vocab();
-    let tokens = prompt_tokens(&vocab, prompt);
-    if tokens.len() + MAX_NEW_TOKENS > N_CTX as usize {
+    let tokens = chat_tokens(&vocab, turns);
+    if tokens.len() + max_new_tokens > N_CTX as usize {
         return Err(AiError::PromptTooLong);
     }
 
@@ -142,13 +246,21 @@ pub fn complete(model: &Path, prompt: &str) -> Result<Completion, AiError> {
     }
     ctx.decode(&mut batch).map_err(|e| decode_err(&e))?;
 
-    let mut sampler = LlamaSampler::greedy();
+    // `sample` fait déjà accepter le jeton choisi par la chaîne : l'accepter une
+    // seconde fois ferait avancer la grammaire deux fois.
+    let mut sampler = match grammar {
+        None => LlamaSampler::greedy(),
+        Some(g) => LlamaSampler::chain_simple([
+            LlamaSampler::grammar(&llama, g, "root")
+                .map_err(|e| AiError::Grammar(e.to_string()))?,
+            LlamaSampler::greedy(),
+        ]),
+    };
     let mut bytes: Vec<u8> = Vec::new();
     let mut pos = tokens.len() as i32;
     let mut finished = false;
-    for _ in 0..MAX_NEW_TOKENS {
+    for _ in 0..max_new_tokens {
         let token = sampler.sample(&ctx, batch.n_tokens() - 1);
-        sampler.accept(token);
         if vocab.is_eog(token) {
             finished = true;
             break;
@@ -195,7 +307,7 @@ mod tests {
 
     #[test]
     fn prompt_ends_with_closed_thinking() {
-        assert!(PROMPT_TAIL.ends_with("<think>\n\n</think>\n\n"));
+        assert!(ASSISTANT_OPEN.ends_with("<think>\n\n</think>\n\n"));
     }
 
     /// Avec le vrai modèle : une phrase qui contient `<|im_end|>` reste du texte
