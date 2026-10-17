@@ -1,0 +1,112 @@
+# tickets.toml — epic 5, agent en langage naturel et serveur MCP.
+# L'ordre des tables est l'ordre de construction. `id` nomme une entree pour de bon.
+# Deux pistes : l'agent (1 a 6, crate ai/ puis canal puis panneau) et le serveur MCP (7),
+# qui ne depend que du noyau et peut avancer en parallele. Aucune logique metier : l'agent
+# ne compose que des commandes du registre (AD-23).
+# Inception le 2026-10-17, apres les epics 2, 8 et 9. Decisions : le modele est livre dans le
+# paquet Cassini, jamais telecharge (CLAUDE.md §3, AD-17) ; la clarification (critere 5) est
+# une variante de plan `question`, a mesurer ; les entrees a risque high passent en relecture
+# a plusieurs lentilles (CLAUDE.md §8).
+
+[[entry]]
+id = 1
+type = "story"
+title = "Traceur : le noyau charge le modele local et repond a une phrase, sans reseau"
+description = "Cree le crate ai/ (cassini-ai, Apache-2.0) avec llama-cpp-2 lie dans le processus du noyau (AD-15), le branche a cli/ sans que core/ en depende, charge le GGUF Qwen3.5-9B Q4_K_M et rend un texte pour une phrase fixe ; verifie la compilation sous Windows, la licence et cargo-deny (AD-14)."
+verify = "Sur le poste du proprietaire, une commande de test de cassini charge le GGUF et repond a une phrase fixe, sans aucune connexion reseau, et cargo deny et cargo test passent."
+covers = ["CAP-4"]
+after = ["8.6"]
+hitl = true
+risk = "high"
+notes = ["hitl : le proprietaire place le fichier GGUF (5,68 Go) hors du depot. Ce que la story rend visible : une reponse du modele local en ligne de commande."]
+
+[[entry]]
+id = 2
+type = "story"
+title = "Decouverte des modeles et commande de listage"
+description = "Le noyau trouve les modeles dans un dossier a cote de l'installation ou designe par un reglage, et une commande du registre les liste ; l'extension ignore ce qu'est un modele (AD-15)."
+verify = "Avec deux GGUF dans le dossier de modeles, la commande les liste, et sans dossier elle rend une erreur typee, sans rien telecharger."
+covers = ["CAP-4"]
+after = [1]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 3
+type = "story"
+title = "Composer un plan : prompt contraint, validation sans reparation"
+description = "Ajoute la commande de composition d'un plan : prompt de forme F6 (catalogue du registre, inventaire du projet, trois exemples, sortie contrainte par schema, reflexion coupee), validation par Registry::check_plan, rejet et redemande bornee sans jamais reparer le plan (AD-23), refus typé quand le modele refuse."
+verify = "Sur les phrases de l'epreuve contre le registre reel, au moins 80 % des plans sont conformes au plan attendu, aucun plan invalide n'est montre, et un plan invalide est redemande puis rejete apres la borne."
+covers = ["CAP-4"]
+after = [2]
+hitl = false
+risk = "high"
+
+[[entry]]
+id = 4
+type = "story"
+title = "Executer un plan valide etape par etape par le canal"
+description = "Ajoute au canal les methodes pour proposer un plan, le valider et l'executer : le noyau tient la boucle, dicte une etape a la fois, resout les references step:k, journalise chaque etape et arrete les suivantes a la premiere erreur (AD-5, AD-11, AD-12)."
+verify = "Un plan de trois etapes valide s'execute dans l'ordre par le canal, une etape en erreur arrete les suivantes, et l'annulation en cours rend registry.cancelled."
+covers = ["CAP-4"]
+after = [3, "2.11"]
+hitl = false
+risk = "high"
+
+[[entry]]
+id = 5
+type = "story"
+title = "Clarification : poser une question au lieu de deviner"
+description = "Ajoute une variante de plan `question` quand un mot de l'utilisateur ne se relie a aucune couche ou champ de l'inventaire, mesuree sur des phrases ambigues fabriquees ; l'epreuve n'a mesure que le refus."
+verify = "Sur un jeu de phrases ambigues, la plupart rendent une question et non un plan devine, et les phrases claires de l'epreuve ne deviennent pas des questions."
+covers = ["CAP-4"]
+after = [3]
+hitl = false
+risk = "high"
+unknown = "Seuil de reussite acceptable de la clarification (taux de questions justifiees et de fausses questions) : a fixer avec le proprietaire avant la story, faute de mesure existante."
+
+[[entry]]
+id = 6
+type = "story"
+title = "Panneau : saisie en langage naturel, plan a valider, selecteur de modele"
+description = "Active la saisie du panneau, affiche le plan en zone lecture seule avec les boutons Valider et Refuser, la question de clarification, un indicateur de generation et le marqueur de l'etape en cours, et active le selecteur de modele, selon ux-panneau-cassini/EXPERIENCE.md ; aucune logique metier dans le Python."
+verify = "Dans QGIS, la phrase de demo sur un projet ouvert affiche un plan, Valider l'execute etape par etape et le journal montre Terminee, et Refuser rend la main."
+covers = ["CAP-4"]
+after = [4, 5, "9.4"]
+hitl = true
+risk = "medium"
+notes = ["hitl : recette manuelle dans QGIS 3.44 par le proprietaire."]
+
+[[entry]]
+id = 7
+type = "story"
+title = "Serveur MCP : cassini mcp expose le registre a un client tiers"
+description = "Ajoute la sous-commande cassini mcp (rmcp, stdio seul, AD-13, AD-3) qui expose les commandes du registre avec leurs schemas, en execute une a la demande d'un client et ne donne jamais d'ordre au client ; sans IA externe branchee, rien ne change."
+verify = "Un client MCP tiers decouvre les commandes, execute system.about et recoit son resultat, et cassini serve garde toutes ses fonctions sans client MCP."
+covers = ["CAP-8"]
+after = ["2.10"]
+hitl = true
+risk = "high"
+notes = ["hitl : le proprietaire branche un client MCP tiers de son choix pour la recette."]
+
+[[entry]]
+id = 8
+type = "story"
+title = "Refactor sweep"
+description = "Nettoie ce que l'epic a laisse : doublons entre ai/, serve.rs et le serveur MCP, constats de revue reportes dans deferred-work.md ; le perimetre est fixe au demarrage d'apres les plans et les constats."
+verify = "cargo test, clippy et fmt propres, les constats reportes de l'epic sont traites ou re-reportes avec leur raison."
+covers = []
+after = [1, 2, 3, 4, 5, 6, 7]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 9
+type = "story"
+title = "Suite de bout en bout : phrase, plan valide, execution, rejeu sans l'IA"
+description = "Prouve par un test commite le parcours de la phrase de demo : plan compose, valide, execute par le canal, puis rejoue sans charger le modele avec un resultat identique ; garde reseau sur l'agent et le serveur MCP ; re-mesure du taux sur le registre reel, au processeur."
+verify = "La suite passe hors ligne, le rejeu d'un plan s'execute sans que le modele soit charge et rend identical: true, et le taux de plans conformes est consigne."
+covers = ["CAP-4", "CAP-8"]
+after = [8]
+hitl = false
+risk = "medium"
