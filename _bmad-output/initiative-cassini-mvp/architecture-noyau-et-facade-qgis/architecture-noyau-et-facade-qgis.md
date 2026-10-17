@@ -164,14 +164,23 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   déplacement sur un autre poste.
 - **Rule:** une couche se référence par l'identifiant que QGIS lui a donné
   (`QgsMapLayer.id()`), et cet identifiant ne vaut que **pour la session en
-  cours** : il n'est jamais une clé de résolution dans le journal, qui résout par
-  le chemin (AD-11). Rien dans l'architecture ne dépend donc de sa persistance
-  d'une ouverture de projet à l'autre. Tout chemin
-  qui traverse le canal ou entre au journal est relatif au fichier de projet et
-  écrit avec des séparateurs POSIX ; aucun chemin absolu, messages d'erreur
-  compris. Un fichier situé hors de l'arborescence du projet est accepté mais
-  journalisé comme **non portable**, et le rejeu sur un autre poste le signale
-  avant de commencer.
+  cours** : il n'est jamais une clé de résolution d'un fichier ni d'une couche
+  entre deux sessions, et rien ne dépend de sa persistance d'une ouverture de
+  projet à l'autre. Le journal garde pourtant le `layer_id` rendu par chaque
+  étape, et **le rejeu le lie, à l'intérieur d'une même exécution**, à celui qu'il
+  obtient en rejouant l'étape qui l'a produit (comparaison de chaîne entière,
+  `layer_id` de premier niveau des paramètres) ; il ne s'en sert pas pour
+  retrouver un fichier, qui se résout par le chemin (AD-11). Tout chemin qui
+  entre au journal est relatif au fichier de projet et écrit avec des séparateurs
+  POSIX ; aucun chemin absolu, messages d'erreur compris. Un fichier situé hors
+  de l'arborescence du projet est accepté mais journalisé comme **non portable**,
+  et le rejeu sur un autre poste le signale avant de commencer.
+- **Exception volontaire (2026-10-15) :** sur le canal local, et là seulement,
+  `order.execute` porte des chemins absolus décidés par le noyau, et
+  `session.hello` le chemin absolu du projet (AD-7). Le noyau et l'extension
+  sont sur la même machine, et l'extension a besoin du chemin réel pour écrire.
+  Ces chemins ne sont jamais écrits au journal (il garde les chemins relatifs) ni
+  rendus dans un message d'erreur ; le noyau refuse un `project` non absolu.
 
 ### AD-10 — Le noyau décide des chemins et des noms de sortie
 
