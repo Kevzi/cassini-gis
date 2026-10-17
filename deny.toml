@@ -1,0 +1,29 @@
+# Garde AD-14 : licences permissives et aucune porte ouverte sur le reseau.
+# Portee : le noyau (core, ai, cli). La coquille Tauri `app/src-tauri` (V2)
+# est exclue : elle tire une pile web qui n'est pas dans le chemin du MVP.
+
+[graph]
+exclude = ["cassini-app"]
+
+[licenses]
+allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "Unlicense"]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "allow"
+deny = [
+  # clients HTTP
+  { crate = "reqwest" }, { crate = "hyper" }, { crate = "ureq" }, { crate = "curl" },
+  { crate = "isahc" }, { crate = "attohttpc" }, { crate = "surf" },
+  # piles async
+  { crate = "tokio" }, { crate = "async-std" }, { crate = "smol" },
+  # TLS
+  { crate = "openssl" }, { crate = "native-tls" }, { crate = "rustls" },
+  { crate = "schannel" },
+  # le noyau ne depend pas de la couche IA : seul le binaire cassini la tire
+  { crate = "cassini-ai", wrappers = ["cassini"] },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

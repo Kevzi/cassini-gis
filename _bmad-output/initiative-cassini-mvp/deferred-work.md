@@ -161,3 +161,12 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `epic-registre-projet-import/epic-registre-projet-import-retrospective.md`
   summary: `WriteOutputParams.out` figure au schéma des paramètres alors que la règle 6 interdit un nom de sortie dans les paramètres ; le catalogue le montrerait au modèle.
   evidence: F23 de la rétro de l'epic 2. Aujourd'hui sous `cfg(test)` (commande d'essai), donc sans effet pour l'utilisateur ; à corriger si la commande sort du cadre des tests.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-traceur-le-noyau-charge-le-modele-local-et-repond-a-une-phra-plan.md`
+  summary: `complete()` rend une reponse tronquee a 256 jetons comme complete.
+  evidence: la boucle s'arrete a MAX_NEW_TOKENS sans signal ; le plan du 5.3 a besoin de distinguer la fin normale.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-traceur-le-noyau-charge-le-modele-local-et-repond-a-une-phra-plan.md`
+  summary: La phrase utilisateur peut injecter des jetons chatml (`<|im_end|>`) via tokenize(parse_special).
+  evidence: build_prompt interpole la phrase brute ; a traiter avec le prompt F6 du 5.3.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-traceur-le-noyau-charge-le-modele-local-et-repond-a-une-phra-plan.md`
+  summary: Le test hors reseau est une recherche de chaines, Windows seulement, absent de la CI Ubuntu.
+  evidence: verifier la table d'imports PE de la release ou ajouter un job Windows ; sinon la garantie peut regresser en silence.

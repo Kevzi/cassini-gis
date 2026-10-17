@@ -12,5 +12,6 @@ name = "cassini"
 path = "src/main.rs"
 
 [dependencies]
+cassini-ai = { path = "../ai" }
 cassini-core = { path = "../core" }
 serde_json = "1"

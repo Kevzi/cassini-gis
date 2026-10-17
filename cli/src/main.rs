@@ -13,6 +13,7 @@ use serde_json::{json, Value};
 const USAGE: &str = "Usage : cassini run <id> [json] [--project <fichier>]
        cassini replay <projet>
        cassini serve
+       cassini model-check --model <fichier.gguf> --prompt <phrase>
 ";
 
 /// Arguments de `run` : id, paramètres JSON facultatifs, projet facultatif.
@@ -66,6 +67,9 @@ pub fn run(
     }
     if args.first().map(String::as_str) == Some("replay") {
         return replay(&args[1..], out, err);
+    }
+    if args.first().map(String::as_str) == Some("model-check") {
+        return model_check(&args[1..], out, err);
     }
     let Some(RunArgs { id, raw, project }) = parse_run(args) else {
         let _ = err.write_all(USAGE.as_bytes());
@@ -162,6 +166,54 @@ fn replay(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
                 err,
                 "{}",
                 serde_json::to_string(&e).expect("une erreur se sérialise")
+            );
+            1
+        }
+    }
+}
+
+/// `cassini model-check` : charge le modèle local et rend le texte de sa réponse.
+fn model_check(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
+    let (mut model, mut prompt) = (None, None);
+    let mut it = args.iter();
+    while let Some(flag) = it.next() {
+        let slot = match flag.as_str() {
+            "--model" => &mut model,
+            "--prompt" => &mut prompt,
+            _ => {
+                let _ = err.write_all(USAGE.as_bytes());
+                return 2;
+            }
+        };
+        match it.next() {
+            Some(v) if slot.is_none() => *slot = Some(v.as_str()),
+            _ => {
+                let _ = err.write_all(USAGE.as_bytes());
+                return 2;
+            }
+        }
+    }
+    let (Some(model), Some(prompt)) = (model, prompt) else {
+        let _ = err.write_all(USAGE.as_bytes());
+        return 2;
+    };
+    match cassini_ai::complete(Path::new(model), prompt) {
+        Ok(text) => {
+            if writeln!(out, "{text}").is_err() {
+                return 1;
+            }
+            0
+        }
+        Err(e) => {
+            let report = ErrorReport {
+                code: e.code().to_string(),
+                message: e.to_string(),
+                step: None,
+            };
+            let _ = writeln!(
+                err,
+                "{}",
+                serde_json::to_string(&report).expect("une erreur se sérialise")
             );
             1
         }
@@ -399,5 +451,43 @@ mod tests {
         let (code, _, err) = call(&["serve", "extra"]);
         assert_eq!(code, 2);
         assert!(err.contains("cassini serve"));
+    }
+
+    #[test]
+    fn model_check_missing_model_is_a_clear_error() {
+        let (code, out, err) =
+            call(&["model-check", "--model", "absent.gguf", "--prompt", "Salut"]);
+        assert_eq!((code, out.as_str()), (1, ""));
+        assert_eq!(error_code(&err), "ai.model_not_found");
+    }
+
+    #[test]
+    fn model_check_empty_prompt_is_refused_before_loading() {
+        let (code, _, err) = call(&["model-check", "--model", "absent.gguf", "--prompt", ""]);
+        assert_eq!(code, 1);
+        assert_eq!(error_code(&err), "ai.empty_prompt");
+    }
+
+    #[test]
+    fn model_check_without_model_prints_usage() {
+        for args in [
+            &["model-check", "--prompt", "x"][..],
+            &["model-check"][..],
+            &["model-check", "--model"][..],
+            &[
+                "model-check",
+                "--model",
+                "a",
+                "--model",
+                "b",
+                "--prompt",
+                "x",
+            ][..],
+            &["model-check", "--bogus", "a"][..],
+        ] {
+            let (code, _, err) = call(args);
+            assert_eq!(code, 2, "{args:?}");
+            assert!(err.contains("cassini model-check"));
+        }
     }
 }

@@ -3,14 +3,14 @@ title: 'Traceur : le noyau charge le modèle local et répond à une phrase, san
 type: 'feature'
 ticket: '1'
 created: '2026-10-17'
-status: 'ready-for-dev'
+status: 'built'
 baseline_revision: 'efa849f9046ac8430ef6a11607d9fc6948ead2f8'
 route: 'full'
 route_source: 'auto'
 risk: 'high'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'thorough'
+review_source: 'pinned'
+lenses_ran: ['blind-hunter', 'edge-case-hunter', 'verification-gap', 'intent-alignment']
 review_loop_iteration: 0
 context:
   - '{project-root}/docs/regle-de-redaction-des-commandes.md'
@@ -72,6 +72,20 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+| Finding | Verdict | Route | Evidence |
+|---|---|---|---|
+| n_batch par defaut 2048 < prompt jusqu'a ~7900 jetons (ai/src/lib.rs:264) | medium | patch | le prompt entier part en un decode ; corrige par `with_n_batch(N_CTX)` |
+| `core` ne depend pas de `ai`, sans garde automatique | low | patch | `deny.toml` : `cassini-ai` interdit sauf wrapper `cassini` ; `cargo deny` passe |
+| ordre des dependances de cli/Cargo.toml | low | patch | trie |
+| reponse tronquee a 256 jetons rendue comme complete | medium | defer | changer la signature : ticket 5.3 |
+| jetons chatml injectes par la phrase utilisateur | medium | defer | prompt F6 au 5.3 ; outil local mono-utilisateur |
+| test hors reseau : recherche de chaines, Windows seul, pas en CI | medium | defer | import table PE ou job Windows : hors ticket |
+| model_reel passe en silence sans variable | low | rejete | conforme au plan (« ignore sinon ») ; echoue si fichier absent |
+| chemin non UTF-8, course is_file/load, mutex tenu pendant l'inference | low | rejete | rare ou sans appelant concurrent aujourd'hui |
+| nom `cassini-app`, licences, advisories, bans supplementaires | false | rejete | nom verifie ; `cargo deny check` passe ; tokio banni couvre mio/socket2 |
+| `common` / cpp-httplib : commentaire vs plan | false | rejete | `common` est une feature par defaut, exclue par `default-features = false` |
+| lacunes de doc, Cargo.lock hors diff | low | rejete | cosmetique ; Cargo.lock sera commite |
 
 ## Design Notes
 

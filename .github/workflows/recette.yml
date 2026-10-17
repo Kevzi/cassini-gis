@@ -34,13 +34,24 @@ jobs:
       - name: Outils Rust
         run: rustup component add rustfmt clippy
 
+      # llama.cpp se compile avec le crate cassini-ai : cmake et libclang.
+      - name: Dépendances de llama.cpp
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake libclang-dev
+
+      # Garde AD-14 : licences permissives, aucun client HTTP, async ni TLS.
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+
       - name: Mise en forme
         run: cargo fmt --all --check
 
       # Le noyau se teste seul, sans les dépendances système de la coquille
       # (principe 4) : cette étape passe avant leur installation.
       - name: Tests du noyau
-        run: cargo test -p cassini-core -p cassini --locked
+        run: cargo test -p cassini-core -p cassini-ai -p cassini --locked
 
       # En release l'éditeur de liens peut écarter une commande que rien ne
       # référence : le binaire doit toujours connaître les commandes du noyau.

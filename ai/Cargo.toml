@@ -1,0 +1,13 @@
+[package]
+name = "cassini-ai"
+description = "Couche IA locale de Cassini : modele GGUF lie au processus du noyau (AD-15)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Dependance autorisee par le plan 5.1 : llama-cpp-2 (MIT OR Apache-2.0), llama.cpp (MIT).
+# CPU seulement : ni openmp, ni GPU, ni `common` (qui compile cpp-httplib).
+[dependencies]
+llama-cpp-2 = { version = "=0.1.159", default-features = false }

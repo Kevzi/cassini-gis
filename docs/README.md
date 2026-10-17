@@ -14,6 +14,9 @@
   l'application sur un poste Windows, prérequis compris, et preuve du
   fonctionnement réseau coupé.
 
+- `modele-local-sous-windows.md` — compiler llama.cpp, lancer `model-check`, variables
+  et chemin court.
+
 - `regle-de-redaction-des-commandes.md` — comment écrire la description et les
   schémas d'une commande, et ce que le registre contrôle lui-même.
 
