@@ -3,7 +3,7 @@ title: 'Ouvrir un CSV a coordonnees et un GeoParquet'
 type: 'feature'
 ticket: '6'
 created: '2026-10-16'
-status: 'built'
+status: done
 baseline_revision: '2a88c98fc3dfc7cfe166d67c77c9f33108d90382'
 route: 'oneshot'
 route_source: 'auto'

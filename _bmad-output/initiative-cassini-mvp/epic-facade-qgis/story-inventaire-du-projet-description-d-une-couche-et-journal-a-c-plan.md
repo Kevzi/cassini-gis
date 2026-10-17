@@ -3,7 +3,7 @@ title: 'Inventaire du projet, description d une couche et journal a cote du proj
 type: 'feature'
 ticket: '7'
 created: '2026-10-16'
-status: 'built'
+status: done
 baseline_revision: 'cf04edd04d47e0076b59da2c8e25899b573288b0'
 route: 'full'
 route_source: 'auto'

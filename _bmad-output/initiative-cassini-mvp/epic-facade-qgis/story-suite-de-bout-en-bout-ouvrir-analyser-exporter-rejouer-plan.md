@@ -3,7 +3,7 @@ title: 'Suite de bout en bout : ouvrir, analyser, exporter, rejouer'
 type: 'feature'
 ticket: '14'
 created: '2026-10-16'
-status: 'built'
+status: done
 baseline_revision: '5b3e8c47748d4fc8c6dbf460c7c2cace76d1ae98'
 route: 'full'
 route_source: 'auto'

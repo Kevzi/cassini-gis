@@ -3,7 +3,7 @@ title: 'Statistiques par zone'
 type: 'feature'
 ticket: '10'
 created: '2026-10-16'
-status: 'built'
+status: done
 baseline_revision: '40517e95d47c8ee73fd5f52613a93a10bba15d58'
 route: 'full'
 route_source: 'auto'

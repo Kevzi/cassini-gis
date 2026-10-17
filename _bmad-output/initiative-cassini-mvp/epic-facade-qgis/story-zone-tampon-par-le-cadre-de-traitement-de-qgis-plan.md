@@ -3,7 +3,7 @@ title: 'Zone tampon par le cadre de traitement de QGIS'
 type: 'feature'
 ticket: '8'
 created: '2026-10-16'
-status: 'built'
+status: done
 baseline_revision: '57e3351fda428cd1bd374580d98aa607f546db87'
 route: 'full'
 route_source: 'auto'

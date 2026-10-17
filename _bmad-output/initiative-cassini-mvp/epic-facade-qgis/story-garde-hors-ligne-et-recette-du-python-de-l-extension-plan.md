@@ -3,7 +3,7 @@ title: "Garde hors ligne et recette du Python de l'extension"
 type: 'feature'
 ticket: '3'
 created: '2026-10-16'
-status: 'built'
+status: done
 baseline_revision: '99ce30fbf39ade4665f9debb5419956f4d6962cd'
 route: 'full'
 route_source: 'auto'

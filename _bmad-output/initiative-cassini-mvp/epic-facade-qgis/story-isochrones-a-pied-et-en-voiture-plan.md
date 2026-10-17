@@ -3,7 +3,7 @@ title: 'Isochrones à pied et en voiture'
 type: 'feature'
 ticket: '11'
 created: '2026-10-17'
-status: 'built'
+status: done
 baseline_revision: '7829f94f4f969ecdc962efa5206f6cd7868288cd'
 route: 'full'
 route_source: 'auto'

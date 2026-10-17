@@ -3,7 +3,7 @@ title: "Panneau : lancer une commande du registre, voir son resultat, l'arreter"
 type: 'feature'
 ticket: '4'
 created: '2026-10-16'
-status: 'built'
+status: done
 baseline_revision: '7ccad45776400052dec1f0648209336a7ace8700'
 route: 'full'
 route_source: 'auto'

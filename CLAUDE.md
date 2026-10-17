@@ -277,6 +277,8 @@ Ne commence pas une étape tant que la précédente n'est pas testée et commit�
   tête de ce fichier, sous des références stables (`AD-1` à `AD-23`). On les cite,
   on ne les re-décide pas : une décision qui en contredit une se signale avant
   d'agir.
+- Entrées de risque `high` (rejeu, canal, analyses) : relecture à plusieurs lentilles (`thorough`), pas la seule relecture `quick` (rétro de l'epic 9, A6).
+- Ne construire un ticket de fermeture (refactor sweep, suite de bout en bout) qu'une fois construites toutes les entrées qu'il attend dans `after` (rétro de l'epic 9, A1).
 - Si quelque chose ne marche pas après deux essais, s'arrêter et expliquer le
   problème au lieu d'empiler des correctifs.
 

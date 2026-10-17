@@ -3,7 +3,7 @@ title: 'Intersection et sélection par attribut'
 type: 'feature'
 ticket: '9'
 created: '2026-10-16'
-status: 'built'
+status: done
 baseline_revision: 'e5dcb0c54786785ce2077511e6ba7610020e72b1'
 route: 'full'
 route_source: 'auto'

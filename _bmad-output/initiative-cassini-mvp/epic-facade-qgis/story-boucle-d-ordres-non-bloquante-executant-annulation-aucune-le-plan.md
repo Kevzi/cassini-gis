@@ -3,7 +3,7 @@ title: "Boucle d'ordres non bloquante : executant, annulation, aucune lecture bl
 type: 'feature'
 ticket: '2'
 created: '2026-10-15'
-status: 'built'
+status: done
 baseline_revision: '194dab620f7a7f3e1d28dab47b175a55704f2d72'
 route: 'full'
 route_source: 'auto'

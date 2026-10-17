@@ -3,7 +3,7 @@ title: 'Ouvrir un GeoPackage, un Shapefile et un GeoJSON par QGIS'
 type: 'feature'
 ticket: '5'
 created: '2026-10-16'
-status: 'built'
+status: done
 baseline_revision: 'fb76e5b10d70939ca534cdee50506dccf1263c47'
 route: 'full'
 route_source: 'auto'

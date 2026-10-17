@@ -3,7 +3,7 @@ title: 'Export PDF par la mise en page de QGIS'
 type: 'feature'
 ticket: '12'
 created: '2026-10-16'
-status: 'built'
+status: done
 baseline_revision: '97d51dc825a03578d750894c50e146a3959f5507'
 route: 'full'
 route_source: 'auto'
