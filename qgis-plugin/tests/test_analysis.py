@@ -36,6 +36,7 @@ class FakeBackend:
         self.calls, self.handle, self.finished = [], FakeHandle(), None
         self.write, self.loaded_count, self.loadable = write, loaded_count, loadable
         self.pairs, self.counts_call = [], None
+        self.near, self.near_call, self.temporary_count = True, None, 1
 
     def layer(self, layer_id):
         return self.items.get(layer_id)
@@ -69,11 +70,20 @@ class FakeBackend:
         pairs = self.pairs[:limit]
         return pairs, len(self.pairs) > limit
 
-    def run_algorithm(self, algorithm_id, parameters, finished):
+    def has_feature_near(self, layer, x, y, epsg, radius):
+        self.near_call = (layer.lid, x, y, epsg, radius)
+        return self.near
+
+    def temporary_layer(self, handle, reference):
+        return FakeLayer(reference, "temporaire", count=self.temporary_count)
+
+    def run_algorithm(self, algorithm_id, parameters, finished, previous=None):
         self.calls.append((algorithm_id, dict(parameters)))
         self.finished = finished
-        if self.write:
-            with open(parameters["OUTPUT"], "wb") as f:
+        self.handle = FakeHandle()
+        out = parameters.get("OUTPUT", parameters.get("OUTPUT_LINES"))
+        if self.write and out != "TEMPORARY_OUTPUT":
+            with open(out, "wb") as f:
                 f.write(b"x")
         return self.handle
 
@@ -439,6 +449,150 @@ class ZonalStatisticsTest(unittest.TestCase):
         self.backend.finished(False, {})
         self.assertEqual(calls[0][1].code, "qgis.cancelled")
         self.assertFalse(os.path.exists(self.out))
+
+
+class IsochroneTest(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.out = os.path.join(self.dir.name, "5-analysis.isochrone.gpkg")
+        self.entry = analysis.ALGORITHMS["analysis.isochrone"]
+        self.backend = FakeBackend(
+            [
+                FakeLayer("n", name="rues", geometry="Line"),
+                FakeLayer("w", name="rues4326", crs="EPSG:4326", metric=False, geometry="Line"),
+                FakeLayer("p", name="gares"),
+                FakeLayer("g", name="communes", geometry="Polygon"),
+                FakeLayer("r", vector=False),
+            ],
+            loaded_count=1,
+        )
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def params(self, **extra):
+        p = {
+            "layer_id": "n",
+            "origin": {"x": 652500, "y": 6850500, "epsg": 2154},
+            "mode": "walk",
+            "duration": {"value": 3, "unit": "min"},
+            "out": self.out,
+        }
+        p.update(extra)
+        return p
+
+    def test_service_area_then_convex_hull_write_one_file(self):
+        _, calls = start(self.entry, self.backend, self.params())
+        algo, p = self.backend.calls[0]
+        self.assertEqual(algo, "native:serviceareafrompoint")
+        self.assertEqual(p["STRATEGY"], 1)  # plus rapide
+        self.assertEqual(p["DEFAULT_SPEED"], 5.0)
+        self.assertAlmostEqual(p["TRAVEL_COST2"], 180 / 3600.0)  # en heures
+        self.assertEqual(p["START_POINT"], "652500.0,6850500.0 [EPSG:2154]")
+        self.assertEqual(p["OUTPUT_LINES"], "TEMPORARY_OUTPUT")  # jamais de fichier annexe
+        self.assertFalse(os.path.exists(self.out))
+        self.assertEqual(self.backend.near_call, ("n", 652500.0, 6850500.0, 2154, 100.0))
+        self.backend.finished(True, {"OUTPUT_LINES": "tmp_1"})
+        self.assertEqual(calls, [])  # la seconde étape tourne encore
+        algo, p = self.backend.calls[1]
+        self.assertEqual(algo, "native:convexhull")
+        self.assertEqual(p["INPUT"].lid, "tmp_1")
+        self.assertEqual(p["OUTPUT"], self.out)  # la seule sortie écrite
+        self.backend.finished(True, {"OUTPUT": self.out})
+        result, error = calls[0]
+        self.assertIsNone(error)
+        self.assertEqual(
+            result, {"layer_id": "out_1", "name": "5-analysis.isochrone", "feature_count": 1, "crs": "EPSG:2154"}
+        )
+        self.assertTrue(os.path.exists(self.out))
+
+    def test_car_is_faster_than_walking_and_seconds_equal_minutes(self):
+        walk = FakeBackend([FakeLayer("n", geometry="Line")])
+        start(self.entry, walk, self.params())
+        car = FakeBackend([FakeLayer("n", geometry="Line")])
+        start(self.entry, car, self.params(mode="car"))
+        self.assertEqual(car.calls[0][1]["DEFAULT_SPEED"], 50.0)
+        self.assertGreater(car.calls[0][1]["DEFAULT_SPEED"], walk.calls[0][1]["DEFAULT_SPEED"])
+        secs = FakeBackend([FakeLayer("n", geometry="Line")])
+        start(self.entry, secs, self.params(duration={"value": 180, "unit": "s"}))
+        self.assertEqual(secs.calls[0][1]["TRAVEL_COST2"], walk.calls[0][1]["TRAVEL_COST2"])
+
+    def test_no_speed_or_direction_field(self):
+        start(self.entry, self.backend, self.params())
+        p = self.backend.calls[0][1]
+        self.assertEqual((p["SPEED_FIELD"], p["DIRECTION_FIELD"], p["DEFAULT_DIRECTION"]), ("", "", 2))
+
+    def test_unknown_layer(self):
+        _, calls = start(self.entry, self.backend, self.params(layer_id="nope"))
+        self.assertEqual(calls[0][1].code, "layer.not_found")
+        self.assertEqual(self.backend.calls, [])
+
+    def test_non_line_layers_say_to_choose_lines(self):
+        for lid in ("g", "p"):
+            _, calls = start(self.entry, self.backend, self.params(layer_id=lid))
+            self.assertEqual(calls[0][1].code, "analysis.bad_params")
+            self.assertIn("couche de lignes", calls[0][1].message)
+        self.assertEqual(self.backend.calls, [])
+
+    def test_degrees_crs_refused(self):
+        _, calls = start(self.entry, self.backend, self.params(layer_id="w"))
+        self.assertEqual(calls[0][1].code, "analysis.crs_not_metric")
+        self.assertEqual(self.backend.calls, [])
+
+    def test_origin_far_from_the_network_refused_before_launch(self):
+        self.backend.near = False
+        _, calls = start(self.entry, self.backend, self.params())
+        self.assertEqual(calls[0][1].code, "analysis.origin_off_network")
+        self.assertEqual(self.backend.calls, [])
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_nothing_reached_gives_origin_off_network_and_no_file(self):
+        self.backend.temporary_count = 0
+        _, calls = start(self.entry, self.backend, self.params())
+        self.backend.finished(True, {"OUTPUT_LINES": "tmp_1"})
+        self.assertEqual(calls[0][1].code, "analysis.origin_off_network")
+        self.assertEqual(len(self.backend.calls), 1)
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_bad_mode_or_origin_refused_even_if_the_core_let_it_through(self):
+        for extra in ({"mode": "bike"}, {"origin": {"x": 1, "y": 2}}, {"duration": {"value": 0, "unit": "min"}}):
+            backend = FakeBackend([FakeLayer("n", geometry="Line")])
+            _, calls = start(self.entry, backend, self.params(**extra))
+            self.assertEqual(calls[0][1].code, "analysis.bad_params")
+            self.assertEqual(backend.calls, [])
+
+    def test_failure_of_either_step_leaves_no_file(self):
+        _, calls = start(self.entry, self.backend, self.params())
+        self.backend.finished(False, {})
+        self.assertEqual(calls[0][1].code, "analysis.failed")
+        _, calls = start(self.entry, self.backend, self.params())
+        self.backend.finished(True, {"OUTPUT_LINES": "tmp_1"})
+        self.backend.finished(False, {})
+        self.assertEqual(calls[0][1].code, "analysis.failed")
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_cancel_during_the_second_step_leaves_no_file(self):
+        g, calls = start(self.entry, self.backend, self.params())
+        self.backend.finished(True, {"OUTPUT_LINES": "tmp_1"})
+        self.assertTrue(os.path.exists(self.out))  # la seconde étape écrit
+        g.cancel()
+        self.assertTrue(self.backend.handle.cancelled)  # c'est la tâche en cours qui est arrêtée
+        self.assertEqual(calls, [])
+        self.backend.finished(False, {})
+        self.assertEqual(calls[0][1].code, "qgis.cancelled")
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_cancel_during_the_first_step_never_starts_the_second(self):
+        g, calls = start(self.entry, self.backend, self.params())
+        g.cancel()
+        self.backend.finished(True, {"OUTPUT_LINES": "tmp_1"})
+        self.assertEqual(calls[0][1].code, "qgis.cancelled")
+        self.assertEqual(len(self.backend.calls), 1)
+
+    def test_default_table_registers_the_isochrone(self):
+        registry = gestures.GestureRegistry()
+        analysis.register_all(registry, backend_factory=lambda: self.backend)
+        self.assertIn("analysis.isochrone", registry.ids())
 
 
 class FormHidesCoreFilledTest(unittest.TestCase):

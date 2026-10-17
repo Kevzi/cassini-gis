@@ -15,6 +15,7 @@ avec une exception pour ce dossier.
 |---|---|---|---|
 | `basemap-villeneuve-le-roi.pmtiles` | Archive PMTiles v3, tuiles PNG en niveaux de gris, 35 tuiles, 50,3 Ko | **Généré**, aucun téléchargement : `app/scripts/generate-basemap.mjs` | Le fond de carte de l'application, et la recette |
 | `points-2154.csv` | 4 points en Lambert-93 (colonnes `X`, `Y`, `name`), sans SCR dans le fichier | **Synthétique**, écrit à la main (valeurs inventées) | La sonde de bout en bout : `layer.add` avec `crs`, puis `analysis.buffer`, qui exige un SCR métrique |
+| `reseau-grille-2154.geojson` | Grille de rues en Lambert-93 : 220 tronçons de 100 m (11 rues dans chaque sens), carré de 1 km de côté d'origine (652000, 6850000), sans nom de rue réel | **Synthétique**, calculé (aucune donnée réelle) | La sonde `probe_isochrone.py` et la recette de `analysis.isochrone` : origine au centre (652500, 6850500), 3 min à pied donnent un polygone d'emprise 500 m sur 500 m |
 | `parcelles-test.geojson` | Une parcelle carrée en WGS84, 1 entité | **Synthétique**, écrit à la main | Les tests du geste `layer.add` et sa recette |
 
 ## Le fond de carte de recette

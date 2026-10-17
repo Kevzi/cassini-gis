@@ -30,6 +30,7 @@ BAD_PARAMS = "analysis.bad_params"
 UNKNOWN_FIELD = "analysis.unknown_field"
 FAILED = "analysis.failed"
 CANCELLED = "qgis.cancelled"
+ORIGIN_OFF_NETWORK = "analysis.origin_off_network"
 
 _UNIT_TO_METERS = {"m": 1.0, "km": 1000.0}
 
@@ -102,6 +103,58 @@ def translate_select_by_attribute(params, layer):
     }
 
 
+# Vitesses fixes du geste, en km/h (pas de champ de vitesse du réseau).
+_SPEEDS_KMH = {"walk": 5.0, "car": 50.0}
+_UNIT_TO_SECONDS = {"s": 1.0, "min": 60.0}
+_COST_SECONDS_PER_UNIT = 3600.0  # le coût « plus rapide » de l'algorithme est en heures (vérifié par la sonde)
+_ORIGIN_SNAP_METERS = 100.0  # distance maximale entre l'origine et le réseau (contrôlée avant de lancer)
+
+
+def _duration_in_seconds(duration):
+    """Durée `{value, unit}` en secondes ; le noyau a déjà vérifié qu'elle est positive."""
+    try:
+        seconds = float(duration["value"]) * _UNIT_TO_SECONDS[duration["unit"]]
+    except (KeyError, TypeError, ValueError):
+        raise GestureError(BAD_PARAMS, "La durée doit être de la forme {value, unit}, en s ou min.")
+    if not seconds > 0:
+        raise GestureError(BAD_PARAMS, "La durée doit être strictement positive.")
+    return seconds
+
+
+def translate_isochrone(params, layer):
+    """Paramètres neutres de `analysis.isochrone` -> paramètres de `native:serviceareafrompoint`.
+
+    Stratégie « plus rapide », vitesse du mode, coût en secondes ; l'origine porte son SCR,
+    que QGIS reprojette dans celui du réseau. Aucun champ de sens ni de vitesse : tous les
+    tronçons sont parcourus dans les deux sens, à la même vitesse.
+    """
+    origin = params.get("origin")
+    try:
+        x, y, epsg = float(origin["x"]), float(origin["y"]), int(origin["epsg"])
+    except (KeyError, TypeError, ValueError):
+        raise GestureError(BAD_PARAMS, "L'origine doit être de la forme {x, y, epsg}.")
+    speed = _SPEEDS_KMH.get(params.get("mode"))
+    if speed is None:
+        raise GestureError(BAD_PARAMS, "Le mode doit être « walk » (à pied) ou « car » (en voiture).")
+    return {
+        "INPUT": layer,
+        "STRATEGY": 1,  # plus rapide
+        "DIRECTION_FIELD": "",
+        "DEFAULT_DIRECTION": 2,  # deux sens
+        "SPEED_FIELD": "",
+        "DEFAULT_SPEED": speed,
+        "TOLERANCE": 0,
+        "START_POINT": "%r,%r [EPSG:%d]" % (x, y, epsg),
+        "TRAVEL_COST2": _duration_in_seconds(params.get("duration")) / _COST_SECONDS_PER_UNIT,
+        "INCLUDE_BOUNDS": False,
+    }
+
+
+def translate_convex_hull(params, previous):
+    """Étape suivante : enveloppe convexe de la couche temporaire de l'étape précédente."""
+    return {"INPUT": previous}
+
+
 # Champ de décompte écrit par `native:countpointsinpolygon` ; le noyau ne le connaît pas.
 _COUNT_FIELD = "NUMPOINTS"
 _MAX_ZONES = 100  # borne du schéma de sortie du noyau (AD-8)
@@ -132,6 +185,14 @@ def summarize_zonal_statistics(backend, layer, params):
 #   field     : (facultatif) paramètre du noyau qui nomme un champ de la couche d'entrée ;
 #               avec `field_optional`, il peut être absent ;
 #   geometry  : (facultatif) type de géométrie exigé de la couche d'entrée (ex. `Polygon`) ;
+#   origin    : (facultatif) paramètre du noyau `{x, y, epsg}` qui doit tomber à moins de
+#               `_ORIGIN_SNAP_METERS` d'une entité de la couche d'entrée (sinon
+#               `analysis.origin_off_network`, avant tout lancement) ;
+#   then      : (facultatif) étape suivante, sur la sortie temporaire de l'algorithme : dict
+#               {algorithm, translate(params, sortie précédente), output, empty_error} ;
+#               seule cette dernière étape écrit `out`, la première écrit en sortie
+#               temporaire ; `empty_error` (code, message) si la sortie de la première
+#               étape n'a aucune entité ;
 #   summary   : (facultatif) (fond, couche produite, params) -> dict qui complète le résultat.
 ALGORITHMS = {
     "analysis.buffer": {
@@ -168,6 +229,22 @@ ALGORITHMS = {
         "geometry": "Polygon",
         "summary": summarize_zonal_statistics,
     },
+    "analysis.isochrone": {
+        "algorithm": "native:serviceareafrompoint",
+        "translate": translate_isochrone,
+        "output": "OUTPUT_LINES",
+        "input": "layer_id",
+        "metric": True,
+        "geometry": "Line",
+        "origin": "origin",
+        "then": {
+            "algorithm": "native:convexhull",
+            "translate": translate_convex_hull,
+            "output": "OUTPUT",
+            "empty_error": (ORIGIN_OFF_NETWORK, "Aucun tronçon du réseau n'est atteint depuis cette origine : "
+                            "vérifiez qu'elle se trouve sur le réseau choisi."),
+        },
+    },
 }
 
 
@@ -179,11 +256,12 @@ class QgisBackend(_ReadBackend):
 
         return layer.crs().mapUnits() == Qgis.DistanceUnit.Meters
 
-    def run_algorithm(self, algorithm_id, parameters, finished):
+    def run_algorithm(self, algorithm_id, parameters, finished, previous=None):
         """Lance l'algorithme en tâche annulable ; `finished(ok, results)` à la fin.
 
         Rend un objet à `cancel()`, qui garde la tâche, son contexte et son retour
-        référencés tant que le travail dure.
+        référencés tant que le travail dure. `previous` : le retour de l'étape précédente,
+        gardé référencé tant que celle-ci porte la couche temporaire passée en entrée.
         """
         from qgis.core import (
             QgsApplication,
@@ -200,10 +278,39 @@ class QgisBackend(_ReadBackend):
         context.setProject(QgsProject.instance())
         feedback = QgsProcessingFeedback()
         task = QgsProcessingAlgRunnerTask(algorithm, dict(parameters), context, feedback)
-        handle = _TaskHandle(task, context, feedback)
+        handle = _TaskHandle(task, context, feedback, previous)
         task.executed.connect(lambda ok, results: finished(bool(ok), results or {}))
         QgsApplication.taskManager().addTask(task)
         return handle
+
+    def has_feature_near(self, layer, x, y, epsg, radius):
+        """Vrai si une entité de la couche passe à `radius` (unités de la couche) du point."""
+        from qgis.core import (
+            QgsCoordinateReferenceSystem,
+            QgsCoordinateTransform,
+            QgsFeatureRequest,
+            QgsGeometry,
+            QgsPointXY,
+            QgsProject,
+            QgsRectangle,
+        )
+
+        point = QgsPointXY(x, y)
+        source = QgsCoordinateReferenceSystem("EPSG:%d" % epsg)
+        if not source.isValid():
+            raise GestureError(BAD_PARAMS, "Le code EPSG de l'origine est inconnu.")
+        if source != layer.crs():
+            point = QgsCoordinateTransform(source, layer.crs(), QgsProject.instance()).transform(point)
+        around = QgsRectangle(point.x() - radius, point.y() - radius, point.x() + radius, point.y() + radius)
+        target = QgsGeometry.fromPointXY(point)
+        request = QgsFeatureRequest().setFilterRect(around)
+        return any(f.geometry().distance(target) <= radius for f in layer.getFeatures(request))
+
+    def temporary_layer(self, handle, reference):
+        """Couche temporaire écrite par l'étape que `handle` vient de finir ; None si absente."""
+        from qgis.core import QgsProcessingUtils
+
+        return QgsProcessingUtils.mapLayerFromString(reference, handle.context)
 
     def counts_of(self, layer, count_field, label_field, limit):
         """Couples (étiquette, décompte) des `limit` premières entités, et si la couche en a plus.
@@ -237,12 +344,21 @@ class QgisBackend(_ReadBackend):
 
 
 class _TaskHandle:
-    def __init__(self, task, context, feedback):
+    def __init__(self, task, context, feedback, previous=None):
         self._task, self._context, self._feedback = task, context, feedback
+        self._previous = previous  # garde en vie les couches temporaires de l'étape d'avant
+
+    @property
+    def context(self):
+        return self._context
 
     def cancel(self):
         self._feedback.cancel()
         self._task.cancel()
+
+
+_TEMPORARY = "TEMPORARY_OUTPUT"
+_GEOMETRY_LABELS = {"Polygon": "de polygones", "Line": "de lignes", "Point": "de points"}
 
 
 def _remove(path):
@@ -273,6 +389,7 @@ class ProcessingGesture:
         self._handle = None
         self._loaded = False
         self._cancelling = False
+        self._stage = 0  # 0 : première étape ; 1 : étape `then`
 
     def start(self, params, done):
         self._done = done
@@ -331,8 +448,11 @@ class ProcessingGesture:
         if entry.get("geometry") and backend.geometry_of(layer) != entry["geometry"]:
             raise GestureError(
                 BAD_PARAMS,
-                "La couche « %s » n'est pas une couche de polygones." % backend.name_of(layer),
+                "La couche « %s » n'est pas une couche %s : choisissez une couche %s."
+                % (backend.name_of(layer), _GEOMETRY_LABELS[entry["geometry"]], _GEOMETRY_LABELS[entry["geometry"]]),
             )
+        if entry.get("origin"):
+            self._check_origin(params.get(entry["origin"]), layer)
         overlay = None
         if entry.get("overlay"):
             overlay = self._overlay(params, layer_id)
@@ -341,9 +461,23 @@ class ProcessingGesture:
         algorithm_params = entry["translate"](params, layer)
         if overlay is not None:
             algorithm_params[entry["overlay_key"]] = overlay
-        algorithm_params[entry["output"]] = out
+        # Avec une étape suivante, la première écrit en sortie temporaire : un seul fichier, `out`.
+        algorithm_params[entry["output"]] = _TEMPORARY if entry.get("then") else out
         self._out = out
         return backend.run_algorithm(entry["algorithm"], algorithm_params, self._on_finished)
+
+    def _check_origin(self, origin, layer):
+        backend = self._backend
+        try:
+            x, y, epsg = float(origin["x"]), float(origin["y"]), int(origin["epsg"])
+        except (KeyError, TypeError, ValueError):
+            raise GestureError(BAD_PARAMS, "L'origine doit être de la forme {x, y, epsg}.")
+        if not backend.has_feature_near(layer, x, y, epsg, _ORIGIN_SNAP_METERS):
+            raise GestureError(
+                ORIGIN_OFF_NETWORK,
+                "L'origine est à plus de %d m du réseau « %s » : vérifiez ses coordonnées et son système."
+                % (_ORIGIN_SNAP_METERS, backend.name_of(layer)),
+            )
 
     def _overlay(self, params, layer_id):
         """Seconde couche vecteur, distincte de l'entrée."""
@@ -378,11 +512,28 @@ class ProcessingGesture:
         try:
             if not ok:
                 raise GestureError(FAILED, "L'analyse a échoué dans QGIS.")
+            then = self._entry.get("then")
+            if then is not None and self._stage == 0:
+                self._chain(then, results)
+                return
             self._finish(result=self._load())
         except GestureError as exc:
             self._fail(exc)
         except Exception:
             self._fail(GestureError(FAILED, "Échec inattendu de l'analyse."))
+
+    def _chain(self, then, results):
+        """Lance l'étape suivante sur la sortie temporaire de la première."""
+        backend = self._backend
+        reference = results.get(self._entry["output"])
+        temporary = backend.temporary_layer(self._handle, reference) if reference else None
+        if temporary is None or backend.feature_count(temporary) == 0:
+            code, message = then["empty_error"]
+            raise GestureError(code, message)
+        parameters = then["translate"](self._params or {}, temporary)
+        parameters[then["output"]] = self._out
+        self._stage = 1
+        self._handle = backend.run_algorithm(then["algorithm"], parameters, self._on_finished, self._handle)
 
     def _load(self):
         backend = self._backend

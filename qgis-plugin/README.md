@@ -134,6 +134,23 @@ Recette manuelle de `analysis.zonal_statistics` [ticket 10] (jeu `../donnees-tes
 4. Sonde sous le vrai QGIS : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat"
    qgis-plugin/tests/probe_zonal_statistics.py` doit finir par `RÉSULTAT : OK`.
 
+Recette manuelle de `analysis.isochrone` [ticket 11] (réseau apporté par l'utilisateur ;
+`fixtures/reseau-grille-2154.geojson` pour l'essai) :
+
+1. Ouvrez la grille de rues (couche de lignes en Lambert-93). Choisissez `analysis.isochrone` :
+   `layer_id` est une liste de couches, `mode` une liste (`walk`, `car`), `origin` et
+   `duration` se saisissent en `{x, y, epsg}` et `{value, unit}` ; aucun champ `out`.
+2. Origine `{652500, 6850500, 2154}`, `walk`, 3 min : une couche d'un polygone apparaît,
+   losange dont l'emprise fait environ 500 m sur 500 m autour de l'origine. En `car`, le polygone est plus grand
+   (toute la grille). `{180, "s"}` donne le même résultat que 3 min.
+3. Une couche de points ou de polygones : `analysis.bad_params` (choisir une couche de
+   lignes). Un réseau en degrés : `analysis.crs_not_metric`. Une origine à plus de 100 m du
+   réseau : `analysis.origin_off_network`. Aucun fichier dans ces trois cas.
+4. L'enveloppe convexe surestime la zone sur un réseau en étoile ou coupé par une rivière
+   (limite assumée au MVP).
+5. Sonde sous le vrai QGIS : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat"
+   qgis-plugin/tests/probe_isochrone.py` doit finir par `RÉSULTAT : OK`.
+
 Recette manuelle de `layout.export_pdf` [ticket 12] (jeu `../donnees-test-cassini/`) :
 
 1. Ouvrez `projet-test-villeneuve.qgz`. Choisissez `layout.export_pdf` : le seul champ est

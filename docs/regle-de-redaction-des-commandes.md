@@ -60,8 +60,12 @@ Les règles 1 et 2 sont **contrôlées** par `Registry::check_contract()`
     Noms reconnus à ce jour : `layer_id` / `*_layer_id` (couche, liste déroulante),
     `path` / `*_path` (fichier), `field` / `*_field` (champ d'une couche : liste
     déroulante des champs de la couche choisie dans `layer_id`, relue quand cette
-    couche change), énumération plate (liste). Une énumération destinée à une liste ne
+    couche change), énumération plate (liste ; ex. `mode` de `analysis.isochrone`, `walk` ou `car`). Une énumération destinée à une liste ne
     porte **pas** de commentaire par variante dans le code Rust, sinon schemars la rend
     en `oneOf` et le panneau retombe sur un champ JSON brut ; elle est mise en ligne
     avec `#[schemars(inline)]` pour ne pas passer par un `$ref`. Un filtre se compose de
     paramètres séparés (champ, opérateur, valeur), jamais d'une expression (AD-22).
+
+    Reste à faire (suite de l'isochrone) : l'origine d'`analysis.isochrone` se saisit en
+    coordonnées `{x, y, epsg}`, faute de sélecteur de point sur la carte ; ce sélecteur est un
+    composant de choix à ajouter au panneau, avec son test.
