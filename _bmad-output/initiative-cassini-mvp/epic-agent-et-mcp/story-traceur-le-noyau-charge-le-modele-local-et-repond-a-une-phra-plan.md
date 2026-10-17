@@ -78,9 +78,9 @@ context:
 | n_batch par defaut 2048 < prompt jusqu'a ~7900 jetons (ai/src/lib.rs:264) | medium | patch | le prompt entier part en un decode ; corrige par `with_n_batch(N_CTX)` |
 | `core` ne depend pas de `ai`, sans garde automatique | low | patch | `deny.toml` : `cassini-ai` interdit sauf wrapper `cassini` ; `cargo deny` passe |
 | ordre des dependances de cli/Cargo.toml | low | patch | trie |
-| reponse tronquee a 256 jetons rendue comme complete | medium | defer | changer la signature : ticket 5.3 |
-| jetons chatml injectes par la phrase utilisateur | medium | defer | prompt F6 au 5.3 ; outil local mono-utilisateur |
-| test hors reseau : recherche de chaines, Windows seul, pas en CI | medium | defer | import table PE ou job Windows : hors ticket |
+| reponse tronquee a 256 jetons rendue comme complete | medium | patch | corrige : `Completion { text, truncated }`, `model-check` rend `ai.truncated` et un code 1 |
+| jetons chatml injectes par la phrase utilisateur | medium | patch | corrige : la phrase est tokenisee sans jetons speciaux ; test avec le vrai modele |
+| test hors reseau : recherche de chaines, Windows seul, pas en CI | medium | patch | corrige : lecture de la table d'imports PE (`object`, dev) et job Windows dans la recette |
 | model_reel passe en silence sans variable | low | rejete | conforme au plan (« ignore sinon ») ; echoue si fichier absent |
 | chemin non UTF-8, course is_file/load, mutex tenu pendant l'inference | low | rejete | rare ou sans appelant concurrent aujourd'hui |
 | nom `cassini-app`, licences, advisories, bans supplementaires | false | rejete | nom verifie ; `cargo deny check` passe ; tokio banni couvre mio/socket2 |

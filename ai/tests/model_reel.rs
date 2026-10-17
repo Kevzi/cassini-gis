@@ -8,6 +8,7 @@ fn the_real_model_answers_a_sentence() {
         eprintln!("CASSINI_TEST_MODEL absent : essai ignore.");
         return;
     };
-    let text = cassini_ai::complete(&PathBuf::from(model), "Dis bonjour.").unwrap();
-    assert!(!text.trim().is_empty());
+    let done = cassini_ai::complete(&PathBuf::from(model), "Dis bonjour.").unwrap();
+    assert!(!done.text.trim().is_empty());
+    assert!(!done.truncated);
 }

@@ -198,8 +198,21 @@ fn model_check(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32
         return 2;
     };
     match cassini_ai::complete(Path::new(model), prompt) {
-        Ok(text) => {
-            if writeln!(out, "{text}").is_err() {
+        Ok(done) => {
+            if writeln!(out, "{}", done.text).is_err() {
+                return 1;
+            }
+            if done.truncated {
+                let report = ErrorReport {
+                    code: "ai.truncated".to_string(),
+                    message: "La réponse a été coupée avant la fin.".to_string(),
+                    step: None,
+                };
+                let _ = writeln!(
+                    err,
+                    "{}",
+                    serde_json::to_string(&report).expect("une erreur se sérialise")
+                );
                 return 1;
             }
             0

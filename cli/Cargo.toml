@@ -15,3 +15,7 @@ path = "src/main.rs"
 cassini-ai = { path = "../ai" }
 cassini-core = { path = "../core" }
 serde_json = "1"
+
+# Lecture de la table d'imports du binaire (licence Apache-2.0 OR MIT), tests seulement.
+[dev-dependencies]
+object = { version = "0.40", default-features = false, features = ["read_core", "pe"] }

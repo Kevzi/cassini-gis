@@ -41,5 +41,5 @@ cargo test --release -p cassini-ai
 ```
 
 Sans cette variable, l'essai est ignoré. Le test `cli/tests/hors_ligne.rs` vérifie
-que le binaire n'importe ni `ws2_32` ni `winhttp`. La garde AD-14 :
+que la table d'imports du binaire ne nomme aucune DLL réseau (`ws2_32`, `winhttp`...) ; la recette le rejoue sur un poste Windows. La garde AD-14 :
 `cargo install cargo-deny --locked` puis `cargo deny check`.

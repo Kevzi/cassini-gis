@@ -74,6 +74,21 @@ jobs:
       - name: Clippy, zéro avertissement
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+  # Garde hors ligne sous Windows : la table d'imports du binaire ne nomme
+  # aucune bibliothèque réseau (cli/tests/hors_ligne.rs). Chemin de build court :
+  # CMake échoue au-delà de MAX_PATH.
+  hors-ligne-windows:
+    name: Noyau — aucun import réseau (Windows)
+    runs-on: windows-latest
+    env:
+      CARGO_TARGET_DIR: C:\ct
+      LIBCLANG_PATH: C:\Program Files\LLVMin
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Aucun import réseau dans le binaire
+        run: cargo test --release -p cassini --test hors_ligne --locked
+
   interface:
     name: Interface — typage strict, garde hors ligne
     runs-on: ubuntu-latest
