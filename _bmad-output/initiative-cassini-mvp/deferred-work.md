@@ -129,3 +129,35 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-facade-qgis/story-suite-de-bout-en-bout-ouvrir-analyser-exporter-rejouer-plan.md`
   summary: `Replay::run` ignore l'échec de `remove_dir_all(replay/)` ; un fichier périmé non vide passerait la règle « sortie QGIS existe et non vide ».
   evidence: medium non vérifié ; il faudrait un échec de suppression sous Windows (fichier tenu par QGIS) et une étape QGIS qui n'écrit rien ; remède probable : supprimer le fichier attendu avant chaque étape et refuser si la suppression échoue.
+
+- source_plan: `epic-facade-qgis/epic-facade-qgis-retrospective.md`
+  summary: Le rejeu est aveugle à la forme d'une sortie QGIS : seuls `feature_count` et « le GeoPackage existe et n'est pas vide » sont contrôlés.
+  evidence: F7 de la rétro de l'epic 9, vérifié par lecture. L'isochrone rend toujours `feature_count: 1` ; rejouée à pied ou en voiture, ou avec un polygone tout autre, elle serait « identique ». Écart assumé de l'architecture (écrit au commit `7829f94`), pas une faute du 9.11, mais l'isochrone est le verbe où cela compte le plus. Remède possible : une empreinte de géométrie ou une emprise (boîte englobante arrondie) dans le résultat typé, comparée au rejeu. Question de politique avant d'être technique (question ouverte 3 de la rétro) : le résultat typé suffit-il au MVP ?
+
+- source_plan: `epic-facade-qgis/epic-facade-qgis-retrospective.md`
+  summary: Le schéma de `Duration.value` de `analysis.isochrone` s'affiche `range(min = 0.0)`, inclusif, alors que la durée est strictement positive.
+  evidence: F8 de la rétro de l'epic 9. Le noyau refuse 0 à la désérialisation (`positive`), mais le catalogue montrerait au modèle une borne inférieure atteignable. Écarté au triage du 9.11 (même motif que `analysis.buffer`). À reprendre si schemars gagne un minimum exclusif utilisable, ou en précisant « strictement positive » dans le schéma des deux commandes.
+
+- source_plan: `epic-registre-projet-import/epic-registre-projet-import-retrospective.md`
+  summary: Une montée de version du noyau casse sans le dire tout rejeu contenant `system.about` ; `versions` du journal n'est jamais relu au rejeu.
+  evidence: F12 de la rétro de l'epic 2 (action R8, non reportée à la rétro de l'epic 9). `core_version` figure dans le résultat de `system.about`, qui est journalisé à chaque démarrage du client ; au rejeu après une montée de version, la comparaison diverge sur cette étape. Remède possible : ne pas comparer `core_version` (masque, comme `layer_id`), ou lire `versions` et le dire.
+
+- source_plan: `epic-registre-projet-import/epic-registre-projet-import-retrospective.md`
+  summary: `p.qgz` et `p.qgs` côte à côte partagent le même dossier `p.cassini` (journal et verrou) ; un `p.cassini` en lien symbolique écrit hors du dossier de travail (AD-10).
+  evidence: F13 de la rétro de l'epic 2. Le dossier est dérivé du nom du projet sans l'extension, et son existence n'est pas contrôlée comme un vrai dossier. Cas rares mais silencieux.
+
+- source_plan: `epic-registre-projet-import/epic-registre-projet-import-retrospective.md`
+  summary: Deux rejeux simultanés écrasent `replay/` ; la lecture d'une ligne à moitié écrite par une session active n'est pas protégée.
+  evidence: F14 de la rétro de l'epic 2. Le verrou du journal ne couvre pas `replay/`, et un rejeu lit le journal pendant qu'une session peut encore y écrire.
+
+- source_plan: `epic-registre-projet-import/epic-registre-projet-import-retrospective.md`
+  summary: Windows : la comparaison de chemins du journal est sensible à la casse et ne gère pas le préfixe `\?\`.
+  evidence: F18 de la rétro de l'epic 2. Un même fichier désigné avec une autre casse ou en chemin étendu peut être jugé hors du dossier du projet (ou l'inverse).
+
+- source_plan: `epic-registre-projet-import/epic-registre-projet-import-retrospective.md`
+  summary: Les messages d'erreur serde recopient la valeur fautive, donc possiblement un chemin absolu (AD-9).
+  evidence: F19 de la rétro de l'epic 2. `registry.rs` renvoie le message de serde tel quel dans `registry.invalid_params`. À rapprocher du masquage des chemins côté extension (`redact`, 9.13), qui ne couvre pas le journal du noyau.
+
+- source_plan: `epic-registre-projet-import/epic-registre-projet-import-retrospective.md`
+  summary: `WriteOutputParams.out` figure au schéma des paramètres alors que la règle 6 interdit un nom de sortie dans les paramètres ; le catalogue le montrerait au modèle.
+  evidence: F23 de la rétro de l'epic 2. Aujourd'hui sous `cfg(test)` (commande d'essai), donc sans effet pour l'utilisateur ; à corriger si la commande sort du cadre des tests.

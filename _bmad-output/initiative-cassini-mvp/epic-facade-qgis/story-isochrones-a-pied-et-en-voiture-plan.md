@@ -72,6 +72,9 @@ context:
 
 ## Implementation Notes
 
+Balayage 9.13 rejoué sur le diff de `a6a1d58` (2026-10-17) : aucun trou. Les messages de l'isochrone ne portent que le nom de la couche (aucun chemin à masquer par `redact`), les erreurs de lancement et de seconde étape sont rattrapées (`_launch`, `_on_finished`), l'annulation vise la tâche en cours, et `check_extension.py` reste propre (aucun import réseau ni PyQt direct).
+Seul écart relevé, d'ordre documentaire : la distance d'accroche de 100 m n'était pas dite à l'IA ; ajoutée aux descriptions française et anglaise de la commande, avec un test (A3 de la rétro de l'epic 9).
+
 ## Plan Change Log
 
 ## Review Triage Log

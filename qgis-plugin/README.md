@@ -30,11 +30,13 @@ Sonde d'annulation sous le vrai QGIS (jeu hors dépôt `../donnees-test-cassini/
 `python-qgis-ltr.bat qgis-plugin/tests/probe_cancel.py` -> `RÉSULTAT : OK`.
 
 Sonde de bout en bout sous le vrai QGIS et le vrai binaire (fixture synthétique
-`fixtures/points-2154.csv`, aucune donnée hors dépôt) : `cargo build --release` puis
+`fixtures/points-2154.csv` et `fixtures/reseau-grille-2154.geojson`, aucune donnée hors dépôt) : `cargo build --release` puis
 `python-qgis-ltr.bat qgis-plugin/tests/probe_end_to_end.py` -> `RÉSULTAT : OK`. Elle
-enchaîne `layer.add`, `analysis.buffer` et `layout.export_pdf`, ferme et rouvre le projet,
+enchaîne `layer.add` (points et réseau), `analysis.buffer`, `analysis.select_by_attribute`,
+`analysis.intersect`, `analysis.isochrone` (à pied, puis en voiture) et `layout.export_pdf`, ferme et rouvre le projet,
 puis `replay()` demande au noyau `journal.replay` : toutes les étapes sont refaites
-(`system.about` du démarrage comprises), le CSV d'origine est inchangé (empreinte), puis
+(`system.about` du démarrage comprises, sorties des analyses sous `replay/`), le CSV et le
+réseau d'origine sont inchangés (empreinte), puis
 un résultat du journal est altéré et le rejeu s'arrête en nommant l'étape. Il n'y a pas de
 bouton de rejeu dans le panneau : il viendra avec l'agent (epic 5).
 
@@ -150,6 +152,20 @@ Recette manuelle de `analysis.isochrone` [ticket 11] (réseau apporté par l'uti
    (limite assumée au MVP).
 5. Sonde sous le vrai QGIS : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat"
    qgis-plugin/tests/probe_isochrone.py` doit finir par `RÉSULTAT : OK`.
+6. Mesure sur un vrai réseau routier hors dépôt (extrait OpenStreetMap de la commune de
+   Villeneuve-le-Roi, 11 699 tronçons, Lambert-93, `../donnees-test-cassini/`), origine à
+   une gare (13,9 m du réseau), 2026-10-17, QGIS 3.44.15. `walk` 10 min : un polygone,
+   emprise d'environ 1,3 km sur 1,5 km, 1,4 km² (un disque de 833 m ferait 2,2 km²), pour
+   environ 40 km de tronçons atteints. `car` 5 min : un polygone, emprise d'environ 6 km sur
+   6 km, 26 km² pour environ 1 080 km de tronçons atteints. Trois origines (trois gares)
+   donnent des résultats du même ordre. Calcul d'environ 2 s. Une tolérance topologique de 0, 1, 2, 5 ou 10 m change l'aire de
+   l'enveloppe de moins de 2 % pour la gare principale (marche comme voiture) et de 3 % à 9 %
+   pour la gare de triage (marche, 0 m contre 5 m ; zone de voies ferrées où des nœuds ne se
+   rejoignent pas) : aucun écart ne rend le polygone trop petit ni troué, l'enveloppe étant
+   convexe. `TOLERANCE: 0` est conservée ; un gain de quelques pour cent ne justifie pas
+   de lier des tronçons qui ne se touchent pas. Un réseau aux nœuds franchement décalés
+   reste à éprouver. L'origine doit être à moins de 100 m du
+   réseau : les 8 gares de l'extrait en sont à 2 m à 17 m.
 
 Recette manuelle de `layout.export_pdf` [ticket 12] (jeu `../donnees-test-cassini/`) :
 

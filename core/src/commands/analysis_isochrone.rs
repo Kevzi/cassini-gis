@@ -105,8 +105,8 @@ impl Delegated for AnalysisIsochrone {
     fn spec() -> CommandSpec {
         CommandSpec::new::<AnalysisIsochroneParams, AnalysisIsochroneOutput>(
             "analysis.isochrone",
-            "Calcule la zone atteignable en un temps donné, à pied ou en voiture, depuis un point, sur un réseau routier (couche de lignes) apporté par l'utilisateur, et l'ajoute au projet comme une couche d'un polygone. Vitesses fixes (marche 5 km/h, voiture 50 km/h), tronçons parcourus dans les deux sens. Le polygone est l'enveloppe convexe des tronçons atteints : il peut surestimer la zone sur un réseau en étoile ou coupé par une rivière. Le réseau doit être en mètres. Ne modifie pas le réseau.",
-            "Computes the area reachable within a given time, on foot or by car, from a point, on a road network (line layer) provided by the user, and adds it to the project as a one-polygon layer. Fixed speeds (walking 5 km/h, car 50 km/h), segments travelled both ways. The polygon is the convex hull of the reached segments: it may overestimate the area on a star-shaped network or one cut by a river. The network must use a metric coordinate system. Does not modify the network.",
+            "Calcule la zone atteignable en un temps donné, à pied ou en voiture, depuis un point, sur un réseau routier (couche de lignes) apporté par l'utilisateur, et l'ajoute au projet comme une couche d'un polygone. Vitesses fixes (marche 5 km/h, voiture 50 km/h), tronçons parcourus dans les deux sens. Le polygone est l'enveloppe convexe des tronçons atteints : il peut surestimer la zone sur un réseau en étoile ou coupé par une rivière. Le réseau doit être en mètres. L'origine doit être à moins de 100 m du réseau, sinon la commande est refusée. Ne modifie pas le réseau.",
+            "Computes the area reachable within a given time, on foot or by car, from a point, on a road network (line layer) provided by the user, and adds it to the project as a one-polygon layer. Fixed speeds (walking 5 km/h, car 50 km/h), segments travelled both ways. The polygon is the convex hull of the reached segments: it may overestimate the area on a star-shaped network or one cut by a river. The network must use a metric coordinate system. The origin must be within 100 m of the network, otherwise the command is refused. Does not modify the network.",
         )
         .runs_in(RunsIn::Qgis)
         .cancellable(true)
@@ -119,6 +119,7 @@ impl Delegated for AnalysisIsochrone {
             "analysis_isochrone_refuses_a_non_positive_duration",
             "analysis_isochrone_mode_is_closed",
             "analysis_isochrone_output_is_a_gpkg_named_by_the_core",
+            "analysis_isochrone_description_states_the_snap_distance",
         ])
     }
 }
@@ -198,5 +199,15 @@ mod tests {
         let spec = registry.spec("analysis.isochrone").unwrap();
         assert_eq!(spec.output_params, vec!["out".to_string()]);
         assert_eq!(spec.output_ext, ".gpkg");
+    }
+
+    #[test]
+    fn analysis_isochrone_description_states_the_snap_distance() {
+        // L'IA lit la description : elle doit savoir que l'origine est refusée à plus de 100 m
+        // du réseau (`_ORIGIN_SNAP_METERS` de l'extension).
+        let registry = Registry::standard();
+        let spec = registry.spec("analysis.isochrone").unwrap();
+        assert!(spec.description_fr.contains("100 m du réseau"));
+        assert!(spec.description_en.contains("100 m of the network"));
     }
 }
