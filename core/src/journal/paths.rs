@@ -6,7 +6,7 @@ use serde_json::Value;
 
 /// Copie où tout chemin sous `out_dir` devient son nom de fichier : le dossier de sortie
 /// diffère entre l'exécution et le rejeu, et le journal ne garde aucun chemin absolu (AD-9).
-pub(super) fn relativize(value: &Value, out_dir: &Path) -> Value {
+pub(crate) fn relativize(value: &Value, out_dir: &Path) -> Value {
     match value {
         Value::String(s) => {
             let path = Path::new(s);

@@ -7,6 +7,12 @@
 //! commande `qgis` annoncée part en ordre `order.execute` vers l'extension : en
 //! attendant sa réponse, le noyau continue de lire (annulation, requêtes
 //! refusées `session.busy`). `request.cancel` annule la requête en vol.
+//! `plan.propose`, `plan.execute` et `plan.reject` portent les plans de l'agent
+//! (voir le sous-module `plans`).
+
+mod plans;
+
+pub use plans::Composer;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
@@ -143,6 +149,12 @@ struct State<'a> {
     announced: HashSet<String>,
     /// Chemin du projet de la session, tel que reçu à `session.hello`.
     project: Option<String>,
+    /// Compositeur de plans, absent si le noyau n'en a pas (`agent.unavailable`).
+    composer: Option<&'a dyn Composer>,
+    /// Le plan proposé qui attend sa validation ; un seul à la fois.
+    pending: Option<plans::Pending>,
+    /// Compteur des plans proposés, pour les identifiants `plan-<n>`.
+    next_plan: u64,
 }
 
 /// Sert le canal jusqu'à la fermeture de l'entrée. Rend une erreur si la sortie
@@ -152,11 +164,22 @@ pub fn serve(
     input: impl BufRead + Send,
     output: impl Write,
 ) -> io::Result<()> {
-    serve_with(registry, input, output, CANCEL_GRACE)
+    serve_with(registry, None, input, output, CANCEL_GRACE)
 }
 
-fn serve_with(
+/// Comme `serve`, avec un compositeur de plans pour `plan.propose`.
+pub fn serve_with_composer(
     registry: &Registry,
+    composer: &dyn Composer,
+    input: impl BufRead + Send,
+    output: impl Write,
+) -> io::Result<()> {
+    serve_with(registry, Some(composer), input, output, CANCEL_GRACE)
+}
+
+fn serve_with<'a>(
+    registry: &'a Registry,
+    composer: Option<&'a dyn Composer>,
     mut input: impl BufRead + Send,
     mut output: impl Write,
     grace: Duration,
@@ -180,6 +203,9 @@ fn serve_with(
             session: None,
             announced: HashSet::new(),
             project: None,
+            composer,
+            pending: None,
+            next_plan: 0,
         };
         loop {
             let line = match link.rx.recv() {
@@ -305,7 +331,8 @@ fn handle_line(state: &mut State<'_>, line: &str) -> Option<Value> {
         // Une réponse sans ordre en vol : id inconnu ou déjà soldé, ignorée.
         Ok(Incoming::Reply { .. }) => None,
         Ok(Incoming::Call { id, method, params }) => {
-            let is_run = method == "command.run";
+            // `plan.execute` comme `command.run` : `request.cancel` vise l'étape en vol.
+            let is_run = method == "command.run" || method == "plan.execute";
             if is_run {
                 *state.link.run_id.borrow_mut() = id.clone();
             }
@@ -338,6 +365,9 @@ fn dispatch(
         "session.hello" => hello(state, params),
         "command.run" => command_run(state, params),
         "journal.replay" => journal_replay(state),
+        "plan.propose" => plans::propose(state, params),
+        "plan.execute" => plans::execute(state, params),
+        "plan.reject" => plans::reject(state, params),
         _ => Err(RpcError::protocol(METHOD_NOT_FOUND, "Méthode inconnue.")),
     }
 }
@@ -417,7 +447,8 @@ impl Channel<'_> {
     ) -> Option<Value> {
         let outcome = match method {
             "request.cancel" => request_cancel(&self.link, params, Some(flight)),
-            "session.hello" | "command.run" | "journal.replay" => Err(RpcError::coded(
+            "session.hello" | "command.run" | "journal.replay" | "plan.propose"
+            | "plan.execute" | "plan.reject" => Err(RpcError::coded(
                 "session.busy",
                 "Une commande est en cours d'exécution : attendez sa fin ou annulez-la."
                     .to_string(),
@@ -1015,11 +1046,67 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Deserialize, JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    #[allow(dead_code)]
+    struct MakeParams {
+        layer: String,
+    }
+
+    #[derive(Debug, Serialize, JsonSchema)]
+    struct Made {
+        layer_id: String,
+    }
+
+    /// Commande qgis annulable qui rend une couche, sans fichier de sortie.
+    struct Make;
+    impl Delegated for Make {
+        type Params = MakeParams;
+        type Output = Made;
+        fn spec() -> crate::registry::CommandSpec {
+            crate::registry::CommandSpec::new::<MakeParams, Made>("test.make", "Fait.", "Makes.")
+                .runs_in(RunsIn::Qgis)
+                .cancellable(true)
+                .tests(&["t"])
+        }
+    }
+
     fn scripted_registry() -> Registry {
         let mut r = Registry::standard();
         r.register_delegated::<Render>();
         r.register_delegated::<Fixed>();
+        r.register_delegated::<Make>();
         r
+    }
+
+    /// Compositeur de test : demande l'inventaire s'il le doit, puis rend son issue fixe.
+    struct FixedComposer {
+        inventory: bool,
+        outcome: Result<Value, ErrorReport>,
+    }
+
+    impl Composer for FixedComposer {
+        fn compose(
+            &self,
+            _registry: &Registry,
+            _request: &str,
+            inventory: &mut dyn FnMut() -> Result<Value, ErrorReport>,
+        ) -> Result<crate::plan::Plan, ErrorReport> {
+            if self.inventory {
+                let inv = inventory()?;
+                assert!(inv["layers"].is_array());
+            }
+            self.outcome
+                .clone()
+                .map(|v| serde_json::from_value(v).expect("plan de test lisible"))
+        }
+    }
+
+    fn composer(plan: Value) -> Option<FixedComposer> {
+        Some(FixedComposer {
+            inventory: true,
+            outcome: Ok(plan),
+        })
     }
 
     struct Client {
@@ -1034,6 +1121,11 @@ mod tests {
 
     impl Client {
         fn start(grace: Duration) -> Client {
+            Client::start_with(grace, None)
+        }
+
+        /// Démarre le noyau avec un compositeur de test (qui rend un plan fixe).
+        fn start_with(grace: Duration, composer: Option<FixedComposer>) -> Client {
             let dir = temp_dir();
             let project = project_in(&dir);
             let (to, in_rx) = mpsc::channel();
@@ -1049,7 +1141,8 @@ mod tests {
                     tx: out_tx,
                     buf: Vec::new(),
                 };
-                serve_with(&registry, reader, writer, grace)
+                let composer = composer.as_ref().map(|c| c as &dyn Composer);
+                serve_with(&registry, composer, reader, writer, grace)
             });
             Client {
                 to: Some(to),
@@ -1085,6 +1178,47 @@ mod tests {
                 "params":{"protocol_version":1,"commands":["test.render","test.fixed"],
                 "project":self.project}}));
             assert!(self.recv()["result"].is_object());
+        }
+
+        /// Ouvre la session en annonçant `commands`.
+        fn hello_with(&self, commands: &[&str]) {
+            self.send(json!({"jsonrpc":"2.0","id":1,"method":"session.hello",
+                "params":{"protocol_version":1,"commands":commands,"project":self.project}}));
+            assert!(self.recv()["result"].is_object());
+        }
+
+        /// `plan.propose` : répond à l'ordre d'inventaire, rend la réponse du noyau.
+        fn propose(&self, id: u64) -> Value {
+            self.send(json!({"jsonrpc":"2.0","id":id,"method":"plan.propose",
+                "params":{"request":"Fais-le."}}));
+            let first = self.recv();
+            if first["method"] != "order.execute" {
+                return first;
+            }
+            assert_eq!(first["params"]["command"], "project.inventory");
+            self.send(json!({"jsonrpc":"2.0","id":first["id"],
+                "result":{"layers":[],"project_crs":"EPSG:2154","extent":null}}));
+            self.recv()
+        }
+
+        /// Attend la notification `plan.step`, puis l'ordre de l'étape ; rend l'ordre.
+        fn expect_step(&self, plan_id: &str, step: u64, command: &str) -> Value {
+            let notice = self.recv();
+            assert_eq!(notice["method"], "plan.step", "{notice}");
+            assert!(notice.get("id").is_none());
+            assert_eq!(
+                notice["params"],
+                json!({"plan_id": plan_id, "step": step, "command": command})
+            );
+            let order = self.recv();
+            assert_eq!(order["method"], "order.execute");
+            assert_eq!(order["params"]["command"], command);
+            order
+        }
+
+        fn execute(&self, id: u64, plan_id: &str) {
+            self.send(json!({"jsonrpc":"2.0","id":id,"method":"plan.execute",
+                "params":{"plan_id":plan_id}}));
         }
 
         fn run(&self, id: u64, command: &str) -> Value {
@@ -1412,5 +1546,412 @@ mod tests {
     fn journal_replay_before_hello_is_refused() {
         let r = exchange(&[json!({"jsonrpc":"2.0","id":1,"method":"journal.replay"}).to_string()]);
         assert_eq!(code_of(&r[0]), "session.not_started");
+    }
+
+    // ---- Plans : plan.propose, plan.execute, plan.reject ----
+
+    const ALL: [&str; 4] = [
+        "test.make",
+        "test.render",
+        "test.fixed",
+        "project.inventory",
+    ];
+
+    fn three_steps() -> Value {
+        json!({"kind":"calls","calls":[
+            {"command":"test.make","params":{"layer":"src"}},
+            {"command":"test.make","params":{"layer":"step:1.layer_id"}},
+            {"command":"test.fixed","params":{"layer":"step:2.layer_id"}}
+        ]})
+    }
+
+    fn reply(id: &Value, result: Value) -> Value {
+        json!({"jsonrpc":"2.0","id":id,"result":result})
+    }
+
+    #[test]
+    fn a_three_step_plan_runs_one_order_at_a_time_and_replays_identically() {
+        let mut c = Client::start_with(CANCEL_GRACE, composer(three_steps()));
+        c.hello_with(&ALL);
+        let proposed = c.propose(2);
+        assert_eq!(proposed["id"], 2);
+        assert_eq!(proposed["result"]["plan_id"], "plan-1");
+        assert_eq!(proposed["result"]["plan"], three_steps());
+        // L'inventaire demandé pour composer n'est pas journalisé.
+        assert!(c.journal().is_empty());
+        c.execute(3, "plan-1");
+        let order = c.expect_step("plan-1", 1, "test.make");
+        assert_eq!(order["params"]["params"], json!({"layer": "src"}));
+        // Rien ne part avant la réponse à l'ordre en cours.
+        c.assert_silent();
+        c.send(reply(&order["id"], json!({"layer_id": "l_1"})));
+        let order = c.expect_step("plan-1", 2, "test.make");
+        assert_eq!(order["params"]["params"], json!({"layer": "l_1"}));
+        c.assert_silent();
+        c.send(reply(&order["id"], json!({"layer_id": "l_2"})));
+        let order = c.expect_step("plan-1", 3, "test.fixed");
+        assert_eq!(order["params"]["params"], json!({"layer": "l_2"}));
+        c.send(reply(&order["id"], json!({"ok": true})));
+        let done = c.recv();
+        assert_eq!(done["id"], 3);
+        assert_eq!(
+            done["result"],
+            json!({"plan_id": "plan-1", "steps": [
+                {"step": 1, "command": "test.make", "result": {"layer_id": "l_1"}},
+                {"step": 2, "command": "test.make", "result": {"layer_id": "l_2"}},
+                {"step": 3, "command": "test.fixed", "result": {"ok": true}}
+            ]})
+        );
+        // Le journal garde les valeurs résolues, pas `step:k`.
+        let journal = c.journal();
+        assert_eq!(journal.len(), 3);
+        assert_eq!(journal[1]["params"], json!({"layer": "l_1"}));
+        assert_eq!(journal[2]["params"], json!({"layer": "l_2"}));
+        // Un plan exécuté est consommé : rien n'est envoyé.
+        c.execute(4, "plan-1");
+        assert_eq!(code_of(&c.recv()), "plan.unknown");
+        c.assert_silent();
+        // Le rejeu lie les nouveaux `layer_id` et redonne les mêmes résultats.
+        c.send(json!({"jsonrpc":"2.0","id":5,"method":"journal.replay"}));
+        let order = c.recv();
+        assert_eq!(order["params"]["params"], json!({"layer": "src"}));
+        c.send(reply(&order["id"], json!({"layer_id": "r_1"})));
+        let order = c.recv();
+        assert_eq!(order["params"]["params"], json!({"layer": "r_1"}));
+        c.send(reply(&order["id"], json!({"layer_id": "r_2"})));
+        let order = c.recv();
+        assert_eq!(order["params"]["params"], json!({"layer": "r_2"}));
+        c.send(reply(&order["id"], json!({"ok": true})));
+        let replayed = c.recv();
+        assert_eq!(replayed["result"], json!({"steps": 3, "identical": true}));
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn a_failing_step_stops_the_plan_with_its_step_number() {
+        let mut c = Client::start_with(CANCEL_GRACE, composer(three_steps()));
+        c.hello_with(&ALL);
+        c.propose(2);
+        c.execute(3, "plan-1");
+        let order = c.expect_step("plan-1", 1, "test.make");
+        c.send(reply(&order["id"], json!({"layer_id": "l_1"})));
+        let order = c.expect_step("plan-1", 2, "test.make");
+        c.send(
+            json!({"jsonrpc":"2.0","id":order["id"],"error":{"code":-32000,
+            "message":"Couche absente.",
+            "data":{"code":"qgis.layer_missing","message":"La couche est absente."}}}),
+        );
+        let done = c.recv();
+        assert_eq!(done["id"], 3);
+        assert_eq!(code_of(&done), "qgis.layer_missing");
+        assert_eq!(done["error"]["data"]["step"], 2);
+        // L'étape 3 ne part jamais.
+        c.assert_silent();
+        let journal = c.journal();
+        assert_eq!(journal.len(), 2);
+        assert_eq!(journal[1]["error"], "qgis.layer_missing");
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn cancelling_a_plan_stops_at_the_step_in_flight() {
+        let plan = json!({"kind":"calls","calls":[
+            {"command":"test.make","params":{"layer":"src"}},
+            {"command":"test.render","params":{"layer":"step:1.layer_id"}},
+            {"command":"test.fixed","params":{"layer":"x"}}
+        ]});
+        let mut c = Client::start_with(CANCEL_GRACE, composer(plan));
+        c.hello_with(&ALL);
+        c.propose(2);
+        c.execute(3, "plan-1");
+        let order = c.expect_step("plan-1", 1, "test.make");
+        c.send(reply(&order["id"], json!({"layer_id": "l_1"})));
+        let order = c.expect_step("plan-1", 2, "test.render");
+        let out = order["params"]["params"]["out"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        std::fs::write(&out, "partiel").unwrap();
+        c.send(json!({"jsonrpc":"2.0","id":4,"method":"request.cancel","params":{"id":3}}));
+        let mut answers = [c.recv(), c.recv()];
+        answers.sort_by_key(|m| m.get("method").is_none());
+        assert_eq!(answers[0]["method"], "request.cancel");
+        assert_eq!(answers[0]["params"]["id"], order["id"]);
+        assert_eq!(answers[1]["result"], json!({"cancelled": true}));
+        c.send(
+            json!({"jsonrpc":"2.0","id":order["id"],"error":{"code":-32000,
+            "message":"Annulé.","data":{"code":"qgis.cancelled","message":"Annulé."}}}),
+        );
+        let done = c.recv();
+        assert_eq!(done["id"], 3);
+        assert_eq!(code_of(&done), "registry.cancelled");
+        assert_eq!(done["error"]["data"]["step"], 2);
+        assert!(!Path::new(&out).exists());
+        c.assert_silent();
+        let journal = c.journal();
+        assert_eq!(journal.len(), 2);
+        assert_eq!(journal[1]["cancelled"], true);
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn a_non_cancellable_step_of_a_plan_refuses_the_cancel() {
+        let plan =
+            json!({"kind":"calls","calls":[{"command":"test.fixed","params":{"layer":"x"}}]});
+        let mut c = Client::start_with(CANCEL_GRACE, composer(plan));
+        c.hello_with(&ALL);
+        c.propose(2);
+        c.execute(3, "plan-1");
+        let order = c.expect_step("plan-1", 1, "test.fixed");
+        c.send(json!({"jsonrpc":"2.0","id":4,"method":"request.cancel","params":{"id":3}}));
+        assert_eq!(code_of(&c.recv()), "request.not_cancellable");
+        c.send(reply(&order["id"], json!({"ok": true})));
+        assert_eq!(
+            c.recv()["result"]["steps"][0]["result"],
+            json!({"ok": true})
+        );
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn an_unknown_executed_or_rejected_plan_id_runs_nothing() {
+        let plan =
+            json!({"kind":"calls","calls":[{"command":"test.fixed","params":{"layer":"x"}}]});
+        let mut c = Client::start_with(CANCEL_GRACE, composer(plan));
+        c.hello_with(&ALL);
+        c.execute(2, "plan-9");
+        assert_eq!(code_of(&c.recv()), "plan.unknown");
+        assert_eq!(c.propose(3)["result"]["plan_id"], "plan-1");
+        // Un identifiant faux ne consomme pas le plan en attente.
+        c.send(
+            json!({"jsonrpc":"2.0","id":4,"method":"plan.reject","params":{"plan_id":"plan-7"}}),
+        );
+        assert_eq!(code_of(&c.recv()), "plan.unknown");
+        c.send(
+            json!({"jsonrpc":"2.0","id":5,"method":"plan.reject","params":{"plan_id":"plan-1"}}),
+        );
+        assert_eq!(
+            c.recv()["result"],
+            json!({"plan_id": "plan-1", "rejected": true})
+        );
+        c.execute(6, "plan-1");
+        assert_eq!(code_of(&c.recv()), "plan.unknown");
+        c.send(
+            json!({"jsonrpc":"2.0","id":7,"method":"plan.reject","params":{"plan_id":"plan-1"}}),
+        );
+        assert_eq!(code_of(&c.recv()), "plan.unknown");
+        // Une nouvelle proposition remplace l'ancienne.
+        assert_eq!(c.propose(8)["result"]["plan_id"], "plan-2");
+        assert_eq!(c.propose(9)["result"]["plan_id"], "plan-3");
+        c.execute(10, "plan-2");
+        assert_eq!(code_of(&c.recv()), "plan.unknown");
+        c.send(json!({"jsonrpc":"2.0","id":11,"method":"plan.execute","params":{}}));
+        assert_eq!(c.recv()["error"]["code"], -32602);
+        c.assert_silent();
+        assert!(c.journal().is_empty());
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn without_a_composer_propose_is_unavailable_and_the_channel_still_works() {
+        let mut c = Client::start(CANCEL_GRACE);
+        c.hello_with(&ALL);
+        let r = c.propose(2);
+        assert_eq!(code_of(&r), "agent.unavailable");
+        assert!(!r.to_string().contains(&*c.dir.to_string_lossy()));
+        c.execute(3, "plan-1");
+        assert_eq!(code_of(&c.recv()), "plan.unknown");
+        c.send(json!({"jsonrpc":"2.0","id":4,"method":"command.run",
+            "params":{"command":"system.about","params":{}}}));
+        assert_eq!(c.recv()["result"]["protocol_version"], 1);
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn a_composer_error_is_passed_on_and_nothing_is_kept() {
+        for (code, inventory) in [("ai.no_model", false), ("agent.plan_invalid", true)] {
+            let failing = FixedComposer {
+                inventory,
+                outcome: Err(ErrorReport {
+                    code: code.to_string(),
+                    message: "Raté.".to_string(),
+                    step: None,
+                }),
+            };
+            let mut c = Client::start_with(CANCEL_GRACE, Some(failing));
+            c.hello_with(&ALL);
+            assert_eq!(code_of(&c.propose(2)), code);
+            c.execute(3, "plan-1");
+            assert_eq!(code_of(&c.recv()), "plan.unknown");
+            c.close().1.unwrap();
+        }
+    }
+
+    #[test]
+    fn a_refusal_or_an_invalid_plan_is_refused_and_not_kept() {
+        let cases = [
+            (
+                json!({"kind":"refusal","reason":"Hors du catalogue."}),
+                "agent.refused",
+                None,
+            ),
+            (
+                json!({"kind":"calls","calls":[{"command":"test.fixed","params":{"layer":"x"}},
+                    {"command":"no.such","params":{}}]}),
+                "agent.plan_invalid",
+                Some(2),
+            ),
+            (
+                json!({"kind":"calls","calls":[{"command":"test.fixed","params":{"layer":"step:1"}}]}),
+                "agent.plan_invalid",
+                Some(1),
+            ),
+        ];
+        for (plan, code, step) in cases {
+            let mut c = Client::start_with(CANCEL_GRACE, composer(plan));
+            c.hello_with(&ALL);
+            let r = c.propose(2);
+            assert_eq!(code_of(&r), code, "{r}");
+            assert_eq!(r["error"]["data"].get("step").and_then(Value::as_u64), step);
+            c.execute(3, "plan-1");
+            assert_eq!(code_of(&c.recv()), "plan.unknown");
+            c.assert_silent();
+            c.close().1.unwrap();
+        }
+    }
+
+    #[test]
+    fn a_plan_naming_an_unannounced_command_is_refused_naming_the_step() {
+        let plan = json!({"kind":"calls","calls":[
+            {"command":"test.fixed","params":{"layer":"x"}},
+            {"command":"test.render","params":{"layer":"x"}}
+        ]});
+        let mut c = Client::start_with(CANCEL_GRACE, composer(plan));
+        c.hello_with(&["test.fixed", "project.inventory"]);
+        let r = c.propose(2);
+        assert_eq!(code_of(&r), "agent.plan_invalid");
+        assert_eq!(r["error"]["data"]["step"], 2);
+        assert!(r["error"]["data"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("test.render"));
+        c.execute(3, "plan-1");
+        assert_eq!(code_of(&c.recv()), "plan.unknown");
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn an_unannounced_inventory_is_the_error_of_the_command() {
+        let mut c = Client::start_with(CANCEL_GRACE, composer(three_steps()));
+        c.hello_with(&["test.make", "test.fixed"]);
+        let r = c.propose(2);
+        assert_eq!(code_of(&r), "registry.unavailable");
+        assert!(r["error"]["data"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("project.inventory"));
+        c.assert_silent();
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn requests_during_a_plan_step_are_busy() {
+        let mut c = Client::start_with(CANCEL_GRACE, composer(three_steps()));
+        c.hello_with(&ALL);
+        c.propose(2);
+        c.execute(3, "plan-1");
+        let order = c.expect_step("plan-1", 1, "test.make");
+        for (id, method) in [
+            (4, "plan.propose"),
+            (5, "plan.execute"),
+            (6, "plan.reject"),
+            (7, "command.run"),
+            (8, "session.hello"),
+            (9, "journal.replay"),
+        ] {
+            c.send(json!({"jsonrpc":"2.0","id":id,"method":method,
+                "params":{"request":"x","plan_id":"plan-1"}}));
+            let busy = c.recv();
+            assert_eq!(busy["id"], id);
+            assert_eq!(code_of(&busy), "session.busy", "{method}");
+        }
+        // Les refus n'ont rien changé : le plan va à son terme.
+        c.send(reply(&order["id"], json!({"layer_id": "l_1"})));
+        let order = c.expect_step("plan-1", 2, "test.make");
+        c.send(reply(&order["id"], json!({"layer_id": "l_2"})));
+        let order = c.expect_step("plan-1", 3, "test.fixed");
+        c.send(reply(&order["id"], json!({"ok": true})));
+        assert_eq!(c.recv()["id"], 3);
+        assert_eq!(c.journal().len(), 3);
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn requests_during_the_inventory_of_a_proposal_are_busy() {
+        let mut c = Client::start_with(CANCEL_GRACE, composer(three_steps()));
+        c.hello_with(&ALL);
+        c.send(json!({"jsonrpc":"2.0","id":2,"method":"plan.propose","params":{"request":"x"}}));
+        let order = c.recv();
+        assert_eq!(order["params"]["command"], "project.inventory");
+        c.send(
+            json!({"jsonrpc":"2.0","id":3,"method":"plan.execute","params":{"plan_id":"plan-1"}}),
+        );
+        assert_eq!(code_of(&c.recv()), "session.busy");
+        // La composition n'est pas annulable.
+        c.send(json!({"jsonrpc":"2.0","id":4,"method":"request.cancel","params":{"id":2}}));
+        assert_eq!(code_of(&c.recv()), "request.unknown");
+        c.send(reply(&order["id"], json!({"layers": []})));
+        assert_eq!(c.recv()["result"]["plan_id"], "plan-1");
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn plan_methods_before_hello_are_refused() {
+        for method in ["plan.propose", "plan.execute", "plan.reject"] {
+            let r = exchange(&[json!({"jsonrpc":"2.0","id":1,"method":method,
+                "params":{"request":"x","plan_id":"plan-1"}})
+            .to_string()]);
+            assert_eq!(code_of(&r[0]), "session.not_started");
+        }
+    }
+
+    #[test]
+    fn a_plan_result_makes_an_output_path_relative_to_the_work_folder() {
+        let plan =
+            json!({"kind":"calls","calls":[{"command":"test.fixed","params":{"layer":"x"}}]});
+        let mut c = Client::start_with(CANCEL_GRACE, composer(plan));
+        c.hello_with(&ALL);
+        c.propose(2);
+        c.execute(3, "plan-1");
+        let order = c.expect_step("plan-1", 1, "test.fixed");
+        let work = c.dir.join("p.cassini");
+        let file = work.join("1-carte.pdf").to_string_lossy().into_owned();
+        c.send(reply(&order["id"], json!({"ok": true, "file": file})));
+        let done = c.recv();
+        assert_eq!(
+            done["result"]["steps"][0]["result"],
+            json!({"ok": true, "file": "1-carte.pdf"})
+        );
+        let text = done.to_string();
+        let work_text = work.to_string_lossy();
+        assert!(!text.contains(&*work_text) && !text.contains(&work_text.replace('\\', "/")));
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn a_failed_proposal_still_erases_the_pending_plan() {
+        let plan =
+            json!({"kind":"calls","calls":[{"command":"test.fixed","params":{"layer":"x"}}]});
+        let mut c = Client::start_with(CANCEL_GRACE, composer(plan));
+        c.hello_with(&ALL);
+        assert_eq!(c.propose(2)["result"]["plan_id"], "plan-1");
+        // Proposition sans `request` : refusée, mais l'ancien plan est effacé.
+        c.send(json!({"jsonrpc":"2.0","id":3,"method":"plan.propose","params":{}}));
+        assert_eq!(c.recv()["error"]["code"], -32602);
+        c.execute(4, "plan-1");
+        assert_eq!(code_of(&c.recv()), "plan.unknown");
+        c.assert_silent();
+        assert!(c.journal().is_empty());
+        c.close().1.unwrap();
     }
 }

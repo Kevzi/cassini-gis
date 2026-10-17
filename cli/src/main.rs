@@ -125,7 +125,7 @@ fn serve(
         return 2;
     }
     let registry = Registry::standard();
-    match cassini_core::serve::serve(&registry, input, out) {
+    match cassini_core::serve::serve_with_composer(&registry, &ModelComposer, input, out) {
         Ok(()) => 0,
         Err(e) => {
             let report = ErrorReport {
@@ -141,6 +141,72 @@ fn serve(
             1
         }
     }
+}
+
+/// Compositeur du canal : le modèle local, cherché par `model.list` à chaque proposition
+/// (AD-15), puis `compose_plan` (AD-23). Ses messages ne portent aucun chemin absolu (AD-9).
+struct ModelComposer;
+
+impl cassini_core::serve::Composer for ModelComposer {
+    fn compose(
+        &self,
+        registry: &Registry,
+        request: &str,
+        inventory: &mut dyn FnMut() -> Result<Value, ErrorReport>,
+    ) -> Result<cassini_core::plan::Plan, ErrorReport> {
+        // La phrase vide est refusée avant toute recherche de modèle ni demande d'inventaire.
+        if request.trim().is_empty() {
+            let e = cassini_ai::AiError::EmptyPrompt;
+            return Err(report(e.code(), e.to_string()));
+        }
+        // Chemins à masquer dans les messages : le dossier désigné, puis le dossier retenu.
+        const FOLDER: &str = "(dossier des modèles)";
+        let mut hidden: Vec<(String, String)> =
+            std::env::var(cassini_core::commands::model_list::MODELS_ENV)
+                .ok()
+                // Une valeur relative ou courte (« models ») n'est pas masquée : remplacée
+                // partout dans le message, elle le défigurerait.
+                .filter(|s| Path::new(s).is_absolute())
+                .map(|s| (s, FOLDER.to_string()))
+                .into_iter()
+                .collect();
+        let listed = registry
+            .call("model.list", json!({}))
+            .map_err(|e| scrub(ErrorReport::from(e), &hidden))?;
+        let folder = listed["folder"].as_str().unwrap_or_default().to_string();
+        if Path::new(&folder).is_absolute() {
+            hidden.push((folder.clone(), FOLDER.to_string()));
+        }
+        let Some(file) = listed["models"][0]["file"].as_str() else {
+            return Err(report(
+                "ai.no_model",
+                "Aucun modèle GGUF n'a été trouvé dans le dossier des modèles.".to_string(),
+            ));
+        };
+        let model = Path::new(&folder).join(file);
+        hidden.insert(0, (model.to_string_lossy().into_owned(), file.to_string()));
+        let inventory = inventory()?;
+        let mut generator = cassini_ai::plan::model_generator(model);
+        cassini_ai::plan::compose_plan(registry, &inventory, request, &mut generator)
+            .map_err(|e| scrub(report(e.code(), e.to_string()), &hidden))
+    }
+}
+
+fn report(code: &str, message: String) -> ErrorReport {
+    ErrorReport {
+        code: code.to_string(),
+        message,
+        step: None,
+    }
+}
+
+/// Remplace dans le message chaque chemin de `hidden` par son substitut, le plus précis
+/// d'abord : le modèle par son seul nom de fichier, le dossier par une mention neutre.
+fn scrub(mut e: ErrorReport, hidden: &[(String, String)]) -> ErrorReport {
+    for (path, instead) in hidden.iter().filter(|(p, _)| !p.is_empty()) {
+        e.message = e.message.replace(path.as_str(), instead);
+    }
+    e
 }
 
 /// `cassini replay <projet>` : rejoue le journal du projet et rend le bilan.

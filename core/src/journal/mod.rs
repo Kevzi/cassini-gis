@@ -27,7 +27,9 @@ mod summary;
 mod tests;
 
 pub use canonical::{canonical, registry_version};
-use paths::{normalize, posix, relative_to, relativize};
+/// Chemins sous le dossier de travail rendus relatifs (aussi pour la réponse de `plan.execute`).
+pub(crate) use paths::relativize;
+use paths::{normalize, posix, relative_to};
 use summary::{same_result, summarize};
 
 use crate::error::ErrorReport;

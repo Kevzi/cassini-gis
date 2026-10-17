@@ -74,6 +74,52 @@ fn parse_reference(value: &Value) -> Option<Result<Reference, String>> {
     Some(k.and_then(|k| field.map(|f| (k, f))))
 }
 
+/// Remplace, dans les paramètres de l'étape `step`, chaque référence de premier niveau par
+/// la valeur obtenue : `step:<k>` par la sortie entière de l'étape `k`, `step:<k>.<champ>`
+/// par ce champ de sa sortie. `outputs` porte les sorties déjà obtenues, l'étape 1 en
+/// premier. Une valeur qui n'est pas une référence reste intacte. Une référence mal formée,
+/// vers une étape non encore exécutée, ou vers un champ absent de la sortie rend une erreur
+/// typée : rien n'est deviné.
+pub fn resolve_references(
+    params: &Value,
+    outputs: &[Value],
+    step: usize,
+) -> Result<Value, PlanError> {
+    let Value::Object(map) = params else {
+        return Ok(params.clone());
+    };
+    let mut resolved = Map::new();
+    for (name, value) in map {
+        let new_value = match parse_reference(value) {
+            None => value.clone(),
+            Some(parsed) => {
+                let (k, field) = parsed.map_err(|m| error("plan.bad_reference", step, m))?;
+                let output = outputs.get(k - 1).filter(|_| k < step).ok_or_else(|| {
+                    error(
+                        "plan.bad_reference",
+                        step,
+                        format!("« step:{k} » ne désigne pas une étape déjà exécutée."),
+                    )
+                })?;
+                match field {
+                    None => output.clone(),
+                    Some(f) => output.get(&f).cloned().ok_or_else(|| {
+                        error(
+                            "plan.missing_output",
+                            step,
+                            format!(
+                                "La sortie de l'étape {k} n'a pas de champ « {f} » : le paramètre « {name} » ne peut pas être résolu."
+                            ),
+                        )
+                    })?,
+                }
+            }
+        };
+        resolved.insert(name.clone(), new_value);
+    }
+    Ok(Value::Object(resolved))
+}
+
 impl Registry {
     /// Vérifie un plan sans rien exécuter : commandes connues, références vers une
     /// étape précédente existante, types compatibles ; paramètres sans référence
@@ -541,6 +587,52 @@ mod tests {
         assert_eq!(registry().check_plan(&refusal), Ok(()));
         let again: Plan = serde_json::from_value(serde_json::to_value(&refusal).unwrap()).unwrap();
         assert_eq!(again, refusal);
+    }
+
+    #[test]
+    fn a_whole_output_reference_is_replaced_by_the_output() {
+        let outputs = [json!({"layer_id": "l_1", "name": "Gares"})];
+        let params = json!({"raster": "step:1", "n": 3});
+        let resolved = resolve_references(&params, &outputs, 2).unwrap();
+        assert_eq!(
+            resolved,
+            json!({"raster": {"layer_id": "l_1", "name": "Gares"}, "n": 3})
+        );
+    }
+
+    #[test]
+    fn a_field_reference_is_replaced_by_the_field() {
+        let outputs = [json!({"layer_id": "a_1"}), json!({"layer_id": "b_2"})];
+        let params = json!({"layer_id": "step:2.layer_id", "other": "step:1.layer_id"});
+        let resolved = resolve_references(&params, &outputs, 3).unwrap();
+        assert_eq!(resolved, json!({"layer_id": "b_2", "other": "a_1"}));
+    }
+
+    #[test]
+    fn a_missing_field_at_execution_is_a_typed_error() {
+        let outputs = [json!({"layer_id": "a_1"})];
+        let err = resolve_references(&json!({"x": "step:1.nope"}), &outputs, 2).unwrap_err();
+        assert_eq!((err.code, err.step), ("plan.missing_output", 2));
+        assert!(err.message.contains("nope"));
+        // Une sortie qui n'est pas un objet n'a pas de champ.
+        let err = resolve_references(&json!({"x": "step:1.a"}), &[json!(3)], 2).unwrap_err();
+        assert_eq!(err.code, "plan.missing_output");
+        // Une étape pas encore exécutée, ou mal formée.
+        for bad in ["step:2", "step:0", "step:1.a.b"] {
+            let err = resolve_references(&json!({"x": bad}), &outputs, 2).unwrap_err();
+            assert_eq!((err.code, err.step), ("plan.bad_reference", 2), "{bad}");
+        }
+    }
+
+    #[test]
+    fn values_that_are_not_references_are_left_intact() {
+        let params = json!({"path": "gares.gpkg", "nested": {"x": "step:1"}, "list": ["step:1"],
+            "n": 1, "flag": true, "stepless": "step"});
+        assert_eq!(resolve_references(&params, &[], 1).unwrap(), params);
+        assert_eq!(
+            resolve_references(&json!(null), &[], 1).unwrap(),
+            json!(null)
+        );
     }
 
     #[test]

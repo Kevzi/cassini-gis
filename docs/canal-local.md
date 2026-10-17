@@ -92,12 +92,99 @@ et dont le message nomme la commande.
 - Le journal compte tout ce que le noyau a exécuté, `system.about` du démarrage compris :
   il est rejoué comme le reste.
 
+## Plans de l'agent : `plan.propose`, `plan.execute`, `plan.reject`
+
+Le noyau compose, garde et exécute le plan (AD-5, AD-23). L'extension ne renvoie
+jamais un plan, seulement son `plan_id` : le plan montré est le plan exécuté. Un seul
+plan attend à la fois ; une nouvelle proposition efface l'ancienne (même si elle
+échoue), `plan.execute` et `plan.reject` le consomment.
+
+### `plan.propose` (extension vers noyau)
+
+```json
+{"jsonrpc":"2.0","id":5,"method":"plan.propose","params":{"request":"Tampon de 500 m autour des gares."}}
+```
+
+Le noyau cherche son modèle, puis demande l'inventaire à l'extension par un ordre
+`order.execute` de `project.inventory` (non journalisé), compose le plan et le vérifie :
+`check_plan`, puis la disponibilité de chaque commande (AD-7). Un plan non conforme est
+refusé, jamais réparé. Réponse :
+
+```json
+{"jsonrpc":"2.0","id":5,"result":{"plan_id":"plan-1","plan":{"kind":"calls","calls":[
+  {"command":"analysis.buffer","params":{"layer_id":"gares_1","distance":{"value":500,"unit":"m"}}},
+  {"command":"layout.export_pdf","params":{"title":"Gares"}}]}}}
+```
+
+Une étape peut citer la sortie d'une étape précédente : `step:<k>` (sortie entière) ou
+`step:<k>.<champ>` (un champ de premier niveau). L'extension affiche le plan tel quel.
+
+La composition bloque le noyau jusqu'à sa fin et **n'est pas annulable** :
+`request.cancel` sur l'`id` de `plan.propose` répond `request.unknown`. Pendant
+l'ordre d'inventaire, les autres requêtes reçoivent `session.busy`.
+
+### `plan.execute` (extension vers noyau) — la validation de l'utilisateur
+
+```json
+{"jsonrpc":"2.0","id":6,"method":"plan.execute","params":{"plan_id":"plan-1"}}
+```
+
+Le noyau revérifie le plan gardé, puis l'exécute **une étape à la fois**, chacune par
+le même chemin que `command.run` (journal, chemins de sortie, annulation). Les
+références `step:k` sont remplacées par les valeurs déjà obtenues ; le journal garde
+ces valeurs résolues. Avant chaque étape, le noyau envoie à l'extension une
+**notification** `plan.step` (noyau vers extension, sans `id`, donc sans réponse
+attendue) :
+
+```json
+{"jsonrpc":"2.0","method":"plan.step","params":{"plan_id":"plan-1","step":1,"command":"analysis.buffer"}}
+```
+
+suivie, pour une commande QGIS, de l'ordre `order.execute` de l'étape. L'ordre suivant
+ne part qu'après la réponse au précédent. Réponse finale :
+
+```json
+{"jsonrpc":"2.0","id":6,"result":{"plan_id":"plan-1","steps":[
+  {"step":1,"command":"analysis.buffer","result":{"layer_id":"tampon_2","name":"Tampon","feature_count":18,"crs":"EPSG:2154"}},
+  {"step":2,"command":"layout.export_pdf","result":{"file":"2-layout.export_pdf.pdf","page_count":1,"layer_count":2,"sources":[],"truncated":false}}]}}
+```
+
+Un chemin sous le dossier de travail est rendu relatif à lui : aucun chemin absolu.
+
+- **Première erreur** : les étapes suivantes ne partent pas ; l'erreur garde le code
+  de l'étape (celui de l'extension pour une commande QGIS) et porte `step`, le numéro
+  de l'étape **dans le plan** (à partir de 1).
+- **Annulation** : `request.cancel` avec l'`id` du `plan.execute` annule l'étape en vol,
+  selon les règles ci-dessus (une étape non annulable répond `request.not_cancellable`
+  et continue). L'erreur est `registry.cancelled` avec `step`, l'étape est journalisée
+  `cancelled`, ses sorties partielles sont supprimées, la suite ne part pas.
+- **Une seule exécution** : rappeler `plan.execute` avec le même `plan_id` répond
+  `plan.unknown` et n'envoie rien.
+
+### `plan.reject` (extension vers noyau)
+
+```json
+{"jsonrpc":"2.0","id":7,"method":"plan.reject","params":{"plan_id":"plan-1"}}
+```
+
+Réponse `{"plan_id":"plan-1","rejected":true}` ; le plan est oublié. Un `plan_id` qui
+n'est pas celui du plan en attente répond `plan.unknown` et laisse ce plan en attente.
+
 ## Erreurs
 
 | Code | Quand |
 |---|---|
-| `registry.cancelled` | le `command.run` a été annulé, ou l'entrée s'est fermée pendant l'ordre |
-| `session.busy` | un `command.run`, un `journal.replay` ou un `session.hello` arrive pendant un ordre en vol (y compris pendant un rejeu) ; refus immédiat |
+| `registry.cancelled` | le `command.run` ou l'étape en vol d'un `plan.execute` a été annulé, ou l'entrée s'est fermée pendant l'ordre |
+| `session.busy` | un `command.run`, un `journal.replay`, un `session.hello` ou une méthode `plan.*` arrive pendant un ordre en vol (y compris pendant un rejeu, une étape de plan ou l'inventaire d'une proposition) ; refus immédiat |
+| `plan.unknown` | `plan.execute` ou `plan.reject` sur un `plan_id` inconnu, déjà exécuté, rejeté ou remplacé ; rien n'est exécuté |
+| `agent.unavailable` | `plan.propose` : le noyau n'a pas de compositeur de plans |
+| `ai.empty_prompt` | `plan.propose` : la demande est vide ou blanche ; refusée avant toute recherche de modèle et sans ordre d'inventaire |
+| `registry.unavailable` | `plan.propose` : l'extension n'a pas annoncé `project.inventory` ; rien n'est composé |
+| `session.io` | `plan.execute` : la notification `plan.step` n'a pas pu être écrite ; l'étape `step` n'est pas lancée |
+| `ai.no_model`, `models.*`, `ai.*` | `plan.propose` : aucun modèle trouvé, dossier des modèles absent, ou échec du modèle ; le message ne porte aucun chemin absolu |
+| `agent.refused` | `plan.propose` : le modèle refuse la demande, avec sa raison |
+| `agent.plan_invalid` | `plan.propose` (ou `plan.execute` à la revérification) : plan non conforme ou nommant une commande non annoncée ; `step` désigne l'étape fautive |
+| `plan.missing_output`, `plan.bad_reference` | `plan.execute` : une référence `step:k.champ` ne se résout pas sur la sortie obtenue ; `step` désigne l'étape |
 | `replay.diverged` | `journal.replay` : l'étape `step` ne redonne pas le résultat, l'erreur ou la sortie du journal |
 | `registry.unavailable` | `journal.replay` : une commande QGIS du journal n'est pas annoncée par l'extension |
 | `request.not_cancellable` | `request.cancel` sur une commande non annulable ; rien ne change |

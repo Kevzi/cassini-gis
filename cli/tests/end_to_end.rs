@@ -155,3 +155,161 @@ fn a_journal_that_is_not_text_is_refused() {
     assert!(read_journal_as_text(b"{\"step\":2}\n").is_err());
     assert!(read_journal_as_text(b"{\"step\":1}\n").is_ok());
 }
+
+/// `plan.propose` sur le vrai binaire sans modèle : une erreur typée, sans chemin absolu,
+/// aucun ordre envoyé, et le canal sert toujours `command.run` dans la même session.
+#[test]
+fn plan_propose_without_a_model_is_a_typed_error_and_the_session_goes_on() {
+    let (dir, project, journal) = temp_project();
+    let models = dir.join("modeles-vides");
+    std::fs::create_dir_all(&models).unwrap();
+    let mut child = Command::new(BIN)
+        .arg("serve")
+        .env("CASSINI_MODELS", &models)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("le binaire se lance");
+    let mut stdin = child.stdin.take().unwrap();
+    for message in [
+        json!({"jsonrpc":"2.0","id":1,"method":"session.hello",
+            "params":{"protocol_version":1,"commands":["project.inventory"],"project":project}}),
+        json!({"jsonrpc":"2.0","id":2,"method":"plan.propose",
+            "params":{"request":"Ouvre les gares."}}),
+        json!({"jsonrpc":"2.0","id":3,"method":"command.run",
+            "params":{"command":"system.about","params":{}}}),
+        json!({"jsonrpc":"2.0","id":4,"method":"plan.propose",
+            "params":{"request":"  "}}),
+    ] {
+        writeln!(stdin, "{message}").unwrap();
+    }
+    drop(stdin);
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "serve a échoué");
+    let text = String::from_utf8(out.stdout).unwrap();
+    let replies: Vec<Value> = text
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    // Quatre réponses, aucun ordre : l'inventaire n'est demandé ni sans modèle ni pour une
+    // phrase vide.
+    assert_eq!(replies.len(), 4, "{text}");
+    assert!(replies.iter().all(|r| r.get("method").is_none()));
+    assert_eq!(replies[1]["id"], 2);
+    assert_eq!(replies[1]["error"]["data"]["code"], "ai.no_model");
+    let dir_text = dir.to_string_lossy();
+    assert!(!text.contains(&*dir_text) && !text.contains(&dir_text.replace('\\', "/")));
+    assert!(!text.contains("modeles-vides"));
+    assert_eq!(replies[2]["result"]["protocol_version"], 1);
+    assert_eq!(replies[3]["id"], 4);
+    assert_eq!(replies[3]["error"]["data"]["code"], "ai.empty_prompt");
+    // Seul `command.run` est journalisé.
+    assert_eq!(
+        std::fs::read_to_string(&journal).unwrap().lines().count(),
+        1
+    );
+    cleanup(&dir);
+}
+
+/// Un dossier de modèles désigné qui n'existe pas : l'erreur ne le recopie pas.
+#[test]
+fn plan_propose_with_a_missing_models_folder_hides_the_folder() {
+    let (dir, project, _) = temp_project();
+    let models = dir.join("absent");
+    let mut child = Command::new(BIN)
+        .arg("serve")
+        .env("CASSINI_MODELS", &models)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("le binaire se lance");
+    let mut stdin = child.stdin.take().unwrap();
+    writeln!(
+        stdin,
+        "{}",
+        json!({"jsonrpc":"2.0","id":1,"method":"session.hello",
+            "params":{"protocol_version":1,"commands":[],"project":project}})
+    )
+    .unwrap();
+    writeln!(
+        stdin,
+        "{}",
+        json!({"jsonrpc":"2.0","id":2,"method":"plan.propose","params":{"request":"x"}})
+    )
+    .unwrap();
+    drop(stdin);
+    let out = child.wait_with_output().unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+    let reply: Value = serde_json::from_str(text.lines().nth(1).unwrap()).unwrap();
+    assert_eq!(reply["error"]["data"]["code"], "models.no_folder");
+    let dir_text = dir.to_string_lossy();
+    assert!(!text.contains(&*dir_text) && !text.contains(&dir_text.replace('\\', "/")));
+    cleanup(&dir);
+}
+
+/// Un faux modèle (`x.gguf` qui n'est pas un GGUF) : `compose_plan` échoue après
+/// l'inventaire, en `ai.*`, et la réponse ne porte ni le dossier ni le chemin du modèle.
+#[test]
+fn plan_propose_with_an_unreadable_model_hides_its_path() {
+    use std::io::{BufRead, BufReader};
+    let (dir, project, _) = temp_project();
+    let models = dir.join("modeles");
+    std::fs::create_dir_all(&models).unwrap();
+    std::fs::write(models.join("x.gguf"), b"pas un modele").unwrap();
+    let mut child = Command::new(BIN)
+        .arg("serve")
+        .env("CASSINI_MODELS", &models)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("le binaire se lance");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    let mut text = String::new();
+    let mut next = |text: &mut String| -> Value {
+        let line = lines.next().expect("le noyau répond").unwrap();
+        text.push_str(&line);
+        text.push('\n');
+        serde_json::from_str(&line).unwrap()
+    };
+    writeln!(
+        stdin,
+        "{}",
+        json!({"jsonrpc":"2.0","id":1,"method":"session.hello",
+            "params":{"protocol_version":1,"commands":["project.inventory"],"project":project}})
+    )
+    .unwrap();
+    assert!(next(&mut text)["result"].is_object());
+    writeln!(
+        stdin,
+        "{}",
+        json!({"jsonrpc":"2.0","id":2,"method":"plan.propose","params":{"request":"Ouvre les gares."}})
+    )
+    .unwrap();
+    let order = next(&mut text);
+    assert_eq!(order["params"]["command"], "project.inventory");
+    writeln!(
+        stdin,
+        "{}",
+        json!({"jsonrpc":"2.0","id":order["id"],
+            "result":{"layers":[],"project_crs":"EPSG:2154","extent":null}})
+    )
+    .unwrap();
+    let reply = next(&mut text);
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+    assert_eq!(reply["id"], 2);
+    let code = reply["error"]["data"]["code"].as_str().unwrap();
+    assert!(code.starts_with("ai."), "{reply}");
+    for folder in [&dir, &models] {
+        let f = folder.to_string_lossy();
+        assert!(
+            !text.contains(&*f) && !text.contains(&f.replace('\\', "/")),
+            "{text}"
+        );
+    }
+    cleanup(&dir);
+}

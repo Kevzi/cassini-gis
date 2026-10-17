@@ -180,3 +180,12 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-composer-un-plan-prompt-contraint-validation-sans-reparation-plan.md`
   summary: Le critere des 80 % est tenu en comptant les refus attendus : 10/13 plans reels (77 %) ; echecs S16, S17, S19.
   evidence: mesure GPU 22/25 sur Qwen3.5-9B Q4_K_M, deux fois ; 12 phrases attendent un refus faute de commande dans le registre reel. Mesure CPU non confirmee.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-executer-un-plan-valide-etape-par-etape-par-le-canal-plan.md`
+  summary: Rendre la composition d'un plan (`plan.propose`) annulable ; aujourd'hui elle bloque la boucle du noyau jusqu'a sa fin.
+  evidence: le fil lecteur continue, mais les requetes recues pendant l'inference attendent la fin ; `request.cancel` sur l'id de `plan.propose` repond `request.unknown`. Decision prise sans redemander (Design Notes du plan).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-executer-un-plan-valide-etape-par-etape-par-le-canal-plan.md`
+  summary: `command.run` rend encore les chemins absolus d'une sortie QGIS (ex. `file` de `layout.export_pdf`) ; `plan.execute` les rend relatifs au dossier de travail.
+  evidence: AD-9 interdit tout chemin absolu dans un message rendu ; seule la reponse de `plan.execute` est relativisee dans ce ticket.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-executer-un-plan-valide-etape-par-etape-par-le-canal-plan.md`
+  summary: Verifier que le masquage des chemins de `ModelComposer` couvre un message de llama.cpp qui ecrit le chemin du modele sous une autre forme (canonique, separateurs, guillemets).
+  evidence: maybe-false, medium si vrai (AD-9). Le masquage remplace les chaines exactes ; le test au faux `x.gguf` passe, mais un vrai GGUF corrompu sous Windows n'a pas ete essaye. A regler par cet essai.
