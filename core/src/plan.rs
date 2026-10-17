@@ -19,12 +19,16 @@ pub struct PlannedCall {
     pub params: Value,
 }
 
-/// Ce que l'agent rend : des appels à faire, ou un refus motivé.
+/// Ce que l'agent rend : des appels à faire, un refus motivé (aucune commande ne fait la
+/// chose), ou une question (la commande existe, mais un mot de la demande ne désigne rien
+/// de l'inventaire). Une question n'est ni gardée ni exécutée : la réponse de
+/// l'utilisateur est une nouvelle demande.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Plan {
     Calls { calls: Vec<PlannedCall> },
     Refusal { reason: String },
+    Question { question: String },
 }
 
 /// Un plan refusé : code stable, message français, étape fautive (à partir de 1).
@@ -587,6 +591,23 @@ mod tests {
         assert_eq!(registry().check_plan(&refusal), Ok(()));
         let again: Plan = serde_json::from_value(serde_json::to_value(&refusal).unwrap()).unwrap();
         assert_eq!(again, refusal);
+    }
+
+    #[test]
+    fn a_question_is_accepted_and_the_plan_json_round_trips() {
+        let question: Plan = serde_json::from_value(json!({
+            "kind": "question",
+            "question": "Aucune couche de pharmacies : laquelle faut-il utiliser ?"
+        }))
+        .unwrap();
+        assert!(
+            matches!(&question, Plan::Question { question } if question.contains("pharmacies"))
+        );
+        assert_eq!(registry().check_plan(&question), Ok(()));
+        let value = serde_json::to_value(&question).unwrap();
+        assert_eq!(value["kind"], "question");
+        let again: Plan = serde_json::from_value(value).unwrap();
+        assert_eq!(again, question);
     }
 
     #[test]

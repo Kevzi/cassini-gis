@@ -83,7 +83,8 @@ impl From<AiError> for AgentError {
 // -- grammaire -------------------------------------------------------------
 
 /// Grammaire GBNF d'un plan : `{"kind":"calls","calls":[{"command":<id du
-/// registre>,"params":<objet JSON>}, ...]}` ou `{"kind":"refusal","reason":<texte>}`.
+/// registre>,"params":<objet JSON>}, ...]}`, `{"kind":"refusal","reason":<texte>}` ou
+/// `{"kind":"question","question":<texte>}`.
 /// Les identifiants de commande sont ceux du registre ; le contenu des
 /// paramètres est contraint à du JSON bien formé, le reste (types, champs,
 /// références) étant vérifié ensuite par `check_plan`. Format compact, sans
@@ -96,11 +97,12 @@ pub fn plan_grammar(registry: &Registry) -> String {
         .join(" | ");
     let hex = "[0-9a-fA-F]";
     format!(
-        "root ::= calls | refusal\n\
+        "root ::= calls | refusal | question\n\
          calls ::= \"{{\\\"kind\\\":\\\"calls\\\",\\\"calls\\\":[\" step (\",\" step)* \"]}}\"\n\
          step ::= \"{{\\\"command\\\":\" command \",\\\"params\\\":\" object \"}}\"\n\
          command ::= {commands}\n\
          refusal ::= \"{{\\\"kind\\\":\\\"refusal\\\",\\\"reason\\\":\" string \"}}\"\n\
+         question ::= \"{{\\\"kind\\\":\\\"question\\\",\\\"question\\\":\" string \"}}\"\n\
          value ::= object | array | string | number | \"true\" | \"false\" | \"null\"\n\
          object ::= \"{{\" (pair (\",\" pair)*)? \"}}\"\n\
          pair ::= string \":\" value\n\
@@ -117,10 +119,11 @@ une suite d'appels de commandes du catalogue, rien d'autre. Réponds uniquement 
 {\"kind\":\"calls\",\"calls\":[{\"command\":id,\"params\":{...}}]} avec les appels dans l'ordre d'exécution.\n\
 Règles : une couche existante se désigne par son identifiant exact de l'inventaire ; la couche produite par l'étape k (en comptant à partir de 1) se désigne par la chaîne \"step:k.layer_id\" ; un fichier à ouvrir se prend parmi les fichiers de l'inventaire ; une option facultative n'est posée que si la demande la réclame ; n'ajoute aucune étape que la demande ne réclame pas ; n'invente ni commande, ni couche, ni chemin ; \
 n'écris jamais de chemin de sortie : le noyau les décide.\n\
-Les étapes s'enchaînent : une étape peut prendre en entrée la couche produite par une étape précédente (\"step:k.layer_id\"). Une distance (\"à moins de X m de ...\") se traduit par analysis.buffer sur la couche de référence, puis analysis.intersect entre la couche cherchée et le tampon ; un filtre sur un champ (\"de la zone U\", \"de la ligne D\") se traduit par analysis.select_by_attribute, avant le tampon ou l'intersection. Le tampon se fait sur la couche de référence (celle après « de », « d'un », « des »), jamais sur la couche cherchée ni sur celle qu'on a filtrée pour une autre condition. Quand la demande combine plusieurs conditions (un filtre sur la couche cherchée, une distance à une autre couche), chaque condition produit sa couche, puis les couches se croisent par des analysis.intersect successifs, le résultat du premier devenant l'entrée du suivant ; la couche cherchée (ce que l'utilisateur veut trouver) est le layer_id du premier intersect, et le plan n'est complet que si elle y figure. Dans une demande, les espaces au milieu d'un nombre séparent les milliers (\"12 500\" vaut 12500). Un mode de déplacement se traduit par le paramètre mode de la commande. Réponds par un refus {\"kind\":\"refusal\",\"reason\":\"<raison courte>\"} uniquement si AUCUNE combinaison des commandes du catalogue ne répond à la demande. N'invente jamais de contrainte ni de limite que le catalogue ne mentionne pas pour refuser ;.";
+Les étapes s'enchaînent : une étape peut prendre en entrée la couche produite par une étape précédente (\"step:k.layer_id\"). Une distance (\"à moins de X m de ...\") se traduit par analysis.buffer sur la couche de référence, puis analysis.intersect entre la couche cherchée et le tampon ; un filtre sur un champ (\"de la zone U\", \"de la ligne D\") se traduit par analysis.select_by_attribute, avant le tampon ou l'intersection. Le tampon se fait sur la couche de référence (celle après « de », « d'un », « des »), jamais sur la couche cherchée ni sur celle qu'on a filtrée pour une autre condition. Quand la demande combine plusieurs conditions (un filtre sur la couche cherchée, une distance à une autre couche), chaque condition produit sa couche, puis les couches se croisent par des analysis.intersect successifs, le résultat du premier devenant l'entrée du suivant ; la couche cherchée (ce que l'utilisateur veut trouver) est le layer_id du premier intersect, et le plan n'est complet que si elle y figure. Dans une demande, les espaces au milieu d'un nombre séparent les milliers (\"12 500\" vaut 12500). Un mode de déplacement se traduit par le paramètre mode de la commande. Réponds par une question {\"kind\":\"question\",\"question\":\"<question courte>\"} quand les commandes existent mais qu'un mot de la demande ne désigne rien de l'inventaire : une couche dont aucun nom de couche ni aucun fichier ne parle, ou un critère qu'aucun champ ni aucune valeur des couches ne porte. Ne devine jamais une couche ou un champ voisin à la place : demande lequel utiliser. Une couche ou un champ absent de l'inventaire n'est jamais une raison de refus : c'est toujours une question. Quand chaque mot de la demande se retrouve dans l'inventaire, réponds par le plan, jamais par une question.\n\
+Réponds par un refus {\"kind\":\"refusal\",\"reason\":\"<raison courte>\"} uniquement si AUCUNE combinaison des commandes du catalogue ne sait faire l'opération demandée (envoyer, retirer, reprojeter, exporter...), quelles que soient les couches. N'invente jamais de contrainte ni de limite que le catalogue ne mentionne pas pour refuser ;.";
 
 /// Les exemples, chacun avec son petit inventaire : ils montrent la
-/// correspondance phrase, inventaire, plan, y compris un refus.
+/// correspondance phrase, inventaire, plan, y compris une question et un refus.
 fn examples() -> Vec<(Value, &'static str, Value)> {
     vec![
         (
@@ -184,6 +187,12 @@ fn examples() -> Vec<(Value, &'static str, Value)> {
             json!({"kind": "calls", "calls": [{"command": "analysis.isochrone",
                 "params": {"layer_id": "reseau_6e90", "origin": {"x": 512300, "y": 6901450, "epsg": 2154},
                            "mode": "car", "duration": {"value": 20, "unit": "min"}}}]}),
+        ),
+        (
+            json!({"layers": [{"layer_id": "gares_7f3a", "name": "Gares", "geometry": "Point",
+                "fields": [{"name": "ligne", "type": "string", "values": ["A", "D"]}]}]}),
+            "Fais une zone tampon de 100 m autour des pharmacies.",
+            json!({"kind": "question", "question": "Aucune couche de pharmacies dans le projet : laquelle faut-il utiliser ?"}),
         ),
         (
             json!({"layers": [{"layer_id": "ecoles_51be", "name": "Écoles", "geometry": "Point", "fields": []}]}),
@@ -282,6 +291,10 @@ fn judge(registry: &Registry, completion: &Completion) -> Result<Plan, Vec<Strin
             Err(vec!["le refus ne donne aucune raison".to_string()])
         }
         Plan::Refusal { .. } => Ok(plan),
+        Plan::Question { question } if question.trim().is_empty() => {
+            Err(vec!["la question est vide".to_string()])
+        }
+        Plan::Question { .. } => Ok(plan),
         Plan::Calls { calls } if calls.is_empty() => {
             Err(vec!["le plan ne contient aucune étape".to_string()])
         }
@@ -324,8 +337,10 @@ fn judge(registry: &Registry, completion: &Completion) -> Result<Plan, Vec<Strin
 /// `generate` produit la sortie du modèle (injectable pour tester sans modèle).
 /// Au plus deux appels : la première sortie, puis, si elle est rejetée, une
 /// seule redemande qui cite les écarts. Un refus du modèle rend `agent.refused`
-/// sans redemande ; deux sorties rejetées rendent `agent.plan_invalid`. Aucun
-/// plan invalide n'est jamais rendu.
+/// sans redemande ; une question (un mot de la demande ne désigne rien de
+/// l'inventaire) est un résultat, `Ok(Plan::Question)`, rendue sans redemande ;
+/// deux sorties rejetées rendent `agent.plan_invalid`. Aucun plan invalide n'est
+/// jamais rendu.
 pub fn compose_plan(
     registry: &Registry,
     inventory: &Value,
@@ -428,6 +443,38 @@ mod tests {
         assert_eq!(err, AgentError::Refused("Hors catalogue.".to_string()));
         assert_eq!(err.code(), "agent.refused");
         assert_eq!(seen.len(), 1);
+    }
+
+    const QUESTION: &str =
+        r#"{"kind":"question","question":"Aucune couche de pharmacies : laquelle utiliser ?"}"#;
+
+    #[test]
+    fn a_question_is_returned_as_a_result_after_one_call() {
+        let (result, seen) = compose(vec![done(QUESTION)]);
+        assert_eq!(
+            result.unwrap(),
+            Plan::Question {
+                question: "Aucune couche de pharmacies : laquelle utiliser ?".to_string()
+            }
+        );
+        assert_eq!(seen.len(), 1);
+    }
+
+    #[test]
+    fn an_empty_question_is_asked_again_then_the_valid_plan_is_returned() {
+        let empty = r#"{"kind":"question","question":"  "}"#;
+        let (result, seen) = compose(vec![done(empty), done(GOOD)]);
+        let expected: Plan = serde_json::from_str(GOOD).unwrap();
+        assert_eq!(result.unwrap(), expected);
+        assert_eq!(seen.len(), 2);
+        assert!(
+            seen[1][3].text.contains("question est vide"),
+            "{}",
+            seen[1][3].text
+        );
+        let (result, seen) = compose(vec![done(empty), done(empty)]);
+        assert_eq!(result.unwrap_err().code(), "agent.plan_invalid");
+        assert_eq!(seen.len(), 2);
     }
 
     #[test]
@@ -580,6 +627,10 @@ mod tests {
         assert!(buffer["params"]["properties"].get("layer_id").is_some());
         assert!(text.contains("gares_1"), "l'inventaire est fourni");
         assert!(text.contains("\"kind\":\"refusal\""), "un exemple de refus");
+        assert!(
+            text.contains("\"kind\":\"question\""),
+            "un exemple de question"
+        );
     }
 
     #[test]
@@ -618,7 +669,7 @@ mod tests {
     }
 
     #[test]
-    fn the_grammar_lists_every_command_and_the_two_plan_shapes() {
+    fn the_grammar_lists_every_command_and_the_three_plan_shapes() {
         let reg = registry();
         let g = plan_grammar(&reg);
         for spec in reg.specs() {
@@ -628,13 +679,22 @@ mod tests {
                 spec.id
             );
         }
-        assert!(g.starts_with("root ::= calls | refusal\n"));
+        assert!(g.starts_with("root ::= calls | refusal | question\n"));
         assert!(g.contains("{\\\"kind\\\":\\\"calls\\\""));
-        assert!(g.contains("{\\\"kind\\\":\\\"refusal\\\""));
+        // Les règles entières, telles qu'émises : une fermeture cassée ne passe pas.
+        let lines: Vec<&str> = g.lines().collect();
+        assert!(
+            lines.contains(&r#"refusal ::= "{\"kind\":\"refusal\",\"reason\":" string "}""#),
+            "{g}"
+        );
+        assert!(
+            lines.contains(&r#"question ::= "{\"kind\":\"question\",\"question\":" string "}""#),
+            "{g}"
+        );
         // Toute règle citée est définie.
         for rule in [
-            "calls", "step", "command", "refusal", "value", "object", "pair", "array", "string",
-            "number",
+            "calls", "step", "command", "refusal", "question", "value", "object", "pair", "array",
+            "string", "number",
         ] {
             assert!(
                 g.contains(&format!("\n{rule} ::= ")) || g.starts_with(&format!("{rule} ::= ")),

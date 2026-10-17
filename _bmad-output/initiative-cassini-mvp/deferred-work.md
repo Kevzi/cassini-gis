@@ -189,3 +189,6 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-executer-un-plan-valide-etape-par-etape-par-le-canal-plan.md`
   summary: Verifier que le masquage des chemins de `ModelComposer` couvre un message de llama.cpp qui ecrit le chemin du modele sous une autre forme (canonique, separateurs, guillemets).
   evidence: maybe-false, medium si vrai (AD-9). Le masquage remplace les chaines exactes ; le test au faux `x.gguf` passe, mais un vrai GGUF corrompu sous Windows n'a pas ete essaye. A regler par cet essai.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-clarification-poser-une-question-au-lieu-de-deviner-plan.md`
+  summary: Le modele ecrit parfois une question dans un refus (`reason` en forme de question) ; rien ne le detecte, l'utilisateur recoit `agent.refused` formule comme une question.
+  evidence: Essais reels de la 5.5 (essai 3 : Q02, Q03, Q11 ; essai 2 : S21). Comportement du modele, a corriger par les exemples d'entrainement du 5.10 plutot que par une regle de reparation (AD-23).

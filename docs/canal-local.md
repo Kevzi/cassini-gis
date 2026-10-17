@@ -119,6 +119,21 @@ refusé, jamais réparé. Réponse :
 Une étape peut citer la sortie d'une étape précédente : `step:<k>` (sortie entière) ou
 `step:<k>.<champ>` (un champ de premier niveau). L'extension affiche le plan tel quel.
 
+Quand la commande existe mais qu'un mot de la demande ne désigne rien de l'inventaire
+(« les pharmacies » sans couche de pharmacies, « les parcelles chères » sans champ de
+prix), le modèle pose une **question** au lieu de deviner. Elle est rendue comme un
+résultat, pas comme une erreur, et **sans `plan_id`** :
+
+```json
+{"jsonrpc":"2.0","id":5,"result":{"question":"Aucune couche de pharmacies dans le projet : laquelle faut-il utiliser ?"}}
+```
+
+Rien n'est gardé en attente : une question ne s'exécute jamais, et un `plan.execute`
+qui suit répond `plan.unknown`. Comme toute nouvelle proposition, une question efface aussi le plan qui
+attendait : son `plan_id` ne s'exécute plus. La réponse de l'utilisateur est une nouvelle demande,
+envoyée par un nouveau `plan.propose`. Un refus (aucune commande ne fait la chose)
+reste l'erreur `agent.refused`.
+
 La composition bloque le noyau jusqu'à sa fin et **n'est pas annulable** :
 `request.cancel` sur l'`id` de `plan.propose` répond `request.unknown`. Pendant
 l'ordre d'inventaire, les autres requêtes reçoivent `session.busy`.

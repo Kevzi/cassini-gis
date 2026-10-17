@@ -336,8 +336,10 @@ fn default_model(registry: &Registry) -> Result<std::path::PathBuf, ErrorReport>
 }
 
 /// `cassini plan <phrase> --inventory <fichier.json> [--model <fichier.gguf>]` : compose le
-/// plan d'une demande (AD-23) et l'affiche en JSON. Rien n'est exécuté. Un plan invalide
-/// n'est jamais affiché : l'erreur `agent.plan_invalid` ou `agent.refused` sort sur `err`.
+/// plan d'une demande (AD-23) et l'affiche en JSON. Rien n'est exécuté. Une question du
+/// modèle (`{"kind":"question",...}`) est un résultat : affichée sur `out`, code 0. Un plan
+/// invalide n'est jamais affiché : l'erreur `agent.plan_invalid` ou `agent.refused` sort sur
+/// `err`.
 fn plan(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
     let (mut inventory, mut model, mut request) = (None, None, None);
     let mut it = args.iter();
@@ -389,7 +391,18 @@ fn plan(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         },
     };
     let mut generator = cassini_ai::plan::model_generator(model);
-    match cassini_ai::plan::compose_plan(&registry, &inventory, request, &mut generator) {
+    let composed = cassini_ai::plan::compose_plan(&registry, &inventory, request, &mut generator);
+    print_composed(composed, out, err)
+}
+
+/// Affiche le résultat d'une composition : un plan ou une question en JSON sur `out` (code 0),
+/// une erreur typée sur `err`.
+fn print_composed(
+    composed: Result<cassini_core::plan::Plan, cassini_ai::plan::AgentError>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    match composed {
         Ok(plan) => {
             let json = serde_json::to_string(&plan).expect("un plan se sérialise");
             if writeln!(out, "{json}").is_err() {
@@ -693,6 +706,46 @@ mod tests {
         assert_eq!((code, out.as_str()), (1, ""));
         assert_eq!(error_code(&err), "ai.model_not_found");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_question_is_printed_as_json_on_out_with_code_0() {
+        let question = cassini_core::plan::Plan::Question {
+            question: "Aucune couche de pharmacies : laquelle utiliser ?".to_string(),
+        };
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let code = print_composed(Ok(question), &mut out, &mut err);
+        let out = String::from_utf8(out).unwrap();
+        assert_eq!(code, 0);
+        assert!(err.is_empty());
+        let shown: Value = serde_json::from_str(out.trim()).unwrap();
+        assert_eq!(
+            shown,
+            json!({"kind": "question", "question": "Aucune couche de pharmacies : laquelle utiliser ?"})
+        );
+    }
+
+    #[test]
+    fn a_plan_is_printed_on_out_and_a_refusal_is_an_error_on_err() {
+        let plan =
+            json!({"kind": "calls", "calls": [{"command": "project.inventory", "params": {}}]});
+        let calls: cassini_core::plan::Plan = serde_json::from_value(plan.clone()).unwrap();
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let code = print_composed(Ok(calls), &mut out, &mut err);
+        assert_eq!(code, 0);
+        assert!(err.is_empty());
+        let shown: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(shown, plan);
+
+        let refused = cassini_ai::plan::AgentError::Refused("Hors catalogue.".to_string());
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let code = print_composed(Err(refused), &mut out, &mut err);
+        assert_eq!(code, 1);
+        assert!(out.is_empty());
+        assert_eq!(
+            error_code(&String::from_utf8(err).unwrap()),
+            "agent.refused"
+        );
     }
 
     #[test]

@@ -7,7 +7,10 @@
 //! jamais modifiés. Les plans attendus sont réécrits pour le registre réel, chaînes `step:k.champ`
 //! comprises. Là où le registre réel n'a pas la commande (retrait, reprojection, export, cadrage,
 //! terrain, statistiques sur un raster) ou ne sait pas porter une option demandée (papier A3,
-//! couches nommées du PDF), le refus est la réponse attendue, comme pour S20.
+//! couches nommées du PDF), le refus est la réponse attendue, comme pour S20. Une question rendue
+//! sur une de ces phrases claires est un échec, et il en faut au plus deux sur les 25 : concession
+//! du propriétaire (2026-10-17) pour le modèle actuel. Le plafond strict (au plus une, avec au moins
+//! 9 questions sur 12 phrases ambiguës) est porté par le ticket 5.10.
 
 use std::path::PathBuf;
 
@@ -88,7 +91,7 @@ fn plan_reel_at_least_80_percent_of_the_plans_match() {
     let inventory: Value = serde_json::from_str(INVENTORY).unwrap();
     let sentences: Vec<Value> = serde_json::from_str(SENTENCES).unwrap();
     let mut generator = model_generator(PathBuf::from(model));
-    let (mut right, mut total) = (0, 0);
+    let (mut right, mut total, mut questions) = (0, 0, 0);
     for sentence in &sentences {
         let (id, text) = (
             sentence["id"].as_str().unwrap(),
@@ -116,10 +119,18 @@ fn plan_reel_at_least_80_percent_of_the_plans_match() {
             assert_eq!(registry.check_plan(plan), Ok(()), "{id}");
         }
         right += usize::from(ok);
+        // Une phrase claire ne doit pas devenir une question (déjà un échec ci-dessus).
+        questions += usize::from(matches!(&got, Ok(Plan::Question { .. })));
     }
-    eprintln!("SCORE {right}/{total} plans conformes");
+    eprintln!("SCORE {right}/{total} plans conformes, {questions} questions");
     assert!(
         right * 5 >= total * 4,
         "{right}/{total} : sous le seuil de 80 %"
+    );
+    // Concession du propriétaire (2026-10-17) pour le modèle actuel ; le plafond strict (au plus 1,
+    // avec au moins 9/12 questions sur les phrases ambiguës) est porté par le ticket 5.10.
+    assert!(
+        questions <= 2,
+        "{questions} phrases claires sont devenues des questions (au plus 2)"
     );
 }
