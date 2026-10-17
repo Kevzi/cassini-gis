@@ -484,6 +484,18 @@ fn a_project_copied_with_its_journal_folder_replays_identically() {
     let (moved, moved_project, moved_token) = temp_project();
     fs::copy(&project, &moved_project).unwrap();
     fs::copy(dir.join("data.txt"), moved.join("data.txt")).unwrap();
+    // `fs::copy` garde la date de modification sous Windows mais pas sous Linux :
+    // une vraie copie de dossier (explorateur, `cp -p`) la conserve.
+    let modified = fs::metadata(dir.join("data.txt"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    fs::File::options()
+        .write(true)
+        .open(moved.join("data.txt"))
+        .unwrap()
+        .set_modified(modified)
+        .unwrap();
     copy_dir(&dir.join("p.cassini"), &moved.join("p.cassini"));
     let _ = fs::remove_dir_all(&dir);
 
