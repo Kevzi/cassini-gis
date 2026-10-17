@@ -110,3 +110,24 @@ covers = ["CAP-4", "CAP-8"]
 after = [8]
 hitl = false
 risk = "medium"
+
+[[entry]]
+id = 10
+type = "story"
+title = "Modele de composition ajuste et plus petit (fine-tuning)"
+description = "Remplace le gros modele et son prompt de 5000 jetons par un modele de 1,5 a 4 milliards de parametres ajuste sur « phrase francaise -> plan d'appels du registre », au prompt de quelques centaines de jetons, pour les postes sans bon processeur. Le generateur de donnees synthetiques sort du registre reel, filtre par Registry::check_plan ; un jeu de phrases inedites est tenu a l'ecart ; l'entrainement (LoRA ou QLoRA) tient dans 8 Go de VRAM et se fusionne en GGUF."
+verify = "Sur le jeu de phrases tenu a l'ecart, le score du modele ajuste est au moins egal a celui de Qwen3.5-9B avec le prompt complet, et le temps par phrase sur un processeur modeste baisse d'un ordre de grandeur par rapport aux 3 minutes mesurees (5.3)."
+covers = ["CAP-4"]
+after = [3]
+hitl = true
+risk = "high"
+notes = [
+  "Context: 5.3 livre 25/25 sur Qwen3.5-9B Q4_K_M avec un prompt de ~5000 jetons ; 4350 s pour 25 phrases sur le CPU du proprietaire (~3 min par phrase), ~11 s sur RTX 3070 Ti.",
+  "Decision: 2026-10-17 — le jeu de phrases inedites n'est jamais lu en ecrivant le prompt ni les donnees d'entrainement ; sinon le score ne mesure rien.",
+  "Decision: 2026-10-17 — licence du modele de base Apache-2.0 ou MIT ; les donnees d'entrainement sont generees par nous.",
+  "Assumption: un modele de 1,5 a 4 milliards tient la tache apres ajustement ; la cible de 8 Go de VRAM exclut un entrainement du 9B sans compromis. A confirmer a la mesure.",
+  "Assumption: chaque nouvelle commande du registre demande de regenerer les donnees et de re-entrainer ; le cout de cette boucle est a mesurer.",
+  "hitl : le proprietaire fournit le processeur modeste de mesure et lance l'entrainement sur sa machine.",
+  "Check hors criteres (risque high) : le proprietaire rejoue la phrase de demo sur le processeur modeste et confirme que le temps est acceptable.",
+  "Hors de cette story : garder le prefixe fixe du prompt en cache et ne charger le modele qu'une fois (levier sans fine-tuning, deja dans deferred-work.md).",
+]
