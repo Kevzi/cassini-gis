@@ -117,10 +117,9 @@ une suite d'appels de commandes du catalogue, rien d'autre. Réponds uniquement 
 {\"kind\":\"calls\",\"calls\":[{\"command\":id,\"params\":{...}}]} avec les appels dans l'ordre d'exécution.\n\
 Règles : une couche existante se désigne par son identifiant exact de l'inventaire ; la couche produite par l'étape k (en comptant à partir de 1) se désigne par la chaîne \"step:k.layer_id\" ; un fichier à ouvrir se prend parmi les fichiers de l'inventaire ; une option facultative n'est posée que si la demande la réclame ; n'ajoute aucune étape que la demande ne réclame pas ; n'invente ni commande, ni couche, ni chemin ; \
 n'écris jamais de chemin de sortie : le noyau les décide.\n\
-Si la demande ne peut pas être satisfaite avec ces commandes, réponds uniquement \
-{\"kind\":\"refusal\",\"reason\":\"<raison courte>\"} au lieu d'un plan.";
+Les étapes s'enchaînent : une étape peut prendre en entrée la couche produite par une étape précédente (\"step:k.layer_id\"). Une distance (\"à moins de X m de ...\") se traduit par analysis.buffer sur la couche de référence, puis analysis.intersect entre la couche cherchée et le tampon ; un filtre sur un champ (\"de la zone U\", \"de la ligne D\") se traduit par analysis.select_by_attribute, avant le tampon ou l'intersection. Le tampon se fait sur la couche de référence (celle après « de », « d'un », « des »), jamais sur la couche cherchée ni sur celle qu'on a filtrée pour une autre condition. Quand la demande combine plusieurs conditions (un filtre sur la couche cherchée, une distance à une autre couche), chaque condition produit sa couche, puis les couches se croisent par des analysis.intersect successifs, le résultat du premier devenant l'entrée du suivant ; la couche cherchée (ce que l'utilisateur veut trouver) est le layer_id du premier intersect, et le plan n'est complet que si elle y figure. Dans une demande, les espaces au milieu d'un nombre séparent les milliers (\"12 500\" vaut 12500). Un mode de déplacement se traduit par le paramètre mode de la commande. Réponds par un refus {\"kind\":\"refusal\",\"reason\":\"<raison courte>\"} uniquement si AUCUNE combinaison des commandes du catalogue ne répond à la demande. N'invente jamais de contrainte ni de limite que le catalogue ne mentionne pas pour refuser ;.";
 
-/// Trois exemples, chacun avec son petit inventaire : ils montrent la
+/// Les exemples, chacun avec son petit inventaire : ils montrent la
 /// correspondance phrase, inventaire, plan, y compris un refus.
 fn examples() -> Vec<(Value, &'static str, Value)> {
     vec![
@@ -147,6 +146,44 @@ fn examples() -> Vec<(Value, &'static str, Value)> {
                  "params": {"layer_id": "routes_2c91", "field": "classe", "operator": "eq", "value": "nationale"}},
                 {"command": "analysis.buffer",
                  "params": {"layer_id": "step:1.layer_id", "distance": {"value": 200, "unit": "m"}}}]}),
+        ),
+        (
+            json!({"layers": [
+                {"layer_id": "arrets_4d2e", "name": "Arrêts de bus", "geometry": "Point",
+                 "fields": [{"name": "ligne", "type": "string", "values": ["12", "34"]}]},
+                {"layer_id": "commerces_9a07", "name": "Commerces", "geometry": "Point", "fields": []}]}),
+            "Quels commerces sont à moins de 150 m des arrêts de la ligne 12 ?",
+            json!({"kind": "calls", "calls": [
+                {"command": "analysis.select_by_attribute",
+                 "params": {"layer_id": "arrets_4d2e", "field": "ligne", "operator": "eq", "value": "12"}},
+                {"command": "analysis.buffer",
+                 "params": {"layer_id": "step:1.layer_id", "distance": {"value": 150, "unit": "m"}}},
+                {"command": "analysis.intersect",
+                 "params": {"layer_id": "commerces_9a07", "overlay_layer_id": "step:2.layer_id"}}]}),
+        ),
+        (
+            json!({"layers": [
+                {"layer_id": "zonage_8b15", "name": "Zonage", "geometry": "MultiPolygon",
+                 "fields": [{"name": "typezone", "type": "string", "values": ["U", "N"]}]},
+                {"layer_id": "rivieres_20c4", "name": "Rivières", "geometry": "LineString", "fields": []},
+                {"layer_id": "ecoles_51be", "name": "Écoles", "geometry": "Point", "fields": []}]}),
+            "Trouve les écoles en zone N à moins de 300 m d'une rivière.",
+            json!({"kind": "calls", "calls": [
+                {"command": "analysis.select_by_attribute",
+                 "params": {"layer_id": "zonage_8b15", "field": "typezone", "operator": "eq", "value": "N"}},
+                {"command": "analysis.buffer",
+                 "params": {"layer_id": "rivieres_20c4", "distance": {"value": 300, "unit": "m"}}},
+                {"command": "analysis.intersect",
+                 "params": {"layer_id": "ecoles_51be", "overlay_layer_id": "step:1.layer_id"}},
+                {"command": "analysis.intersect",
+                 "params": {"layer_id": "step:3.layer_id", "overlay_layer_id": "step:2.layer_id"}}]}),
+        ),
+        (
+            json!({"layers": [{"layer_id": "reseau_6e90", "name": "Réseau", "geometry": "LineString", "fields": []}]}),
+            "Quelle zone atteint-on en 20 minutes en voiture depuis le point 512 300 / 6 901 450 (Lambert-93) ?",
+            json!({"kind": "calls", "calls": [{"command": "analysis.isochrone",
+                "params": {"layer_id": "reseau_6e90", "origin": {"x": 512300, "y": 6901450, "epsg": 2154},
+                           "mode": "car", "duration": {"value": 20, "unit": "min"}}}]}),
         ),
         (
             json!({"layers": [{"layer_id": "ecoles_51be", "name": "Écoles", "geometry": "Point", "fields": []}]}),
