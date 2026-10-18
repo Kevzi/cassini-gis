@@ -69,6 +69,10 @@ CAP-2 a été retirée (préparation des données d'une commune par code INSEE) 
   - **intent:** l'utilisateur pilote Cassini depuis QGIS, sans quitter l'outil où ses données sont déjà ouvertes.
   - **success:** une extension QGIS installable ouvre un panneau Cassini, se connecte au noyau lancé comme **processus séparé**, et exécute une commande du registre de bout en bout en affichant son résultat dans le projet ; et le noyau se lance, s'exécute et se teste **sans QGIS installé**.
 
+- **CAP-14** — Catalogue étendu *(après le MVP)*
+  - **intent:** l'utilisateur obtient en langage naturel une réponse à la plupart de ses questions SIG courantes, au-delà des cinq analyses de CAP-3 : comptage et somme pondérés dans un polygone, plus proche voisin et matrice de distances, plus court chemin sur réseau, statistiques par catégorie et longueurs, reprojection, conversion de format, atlas PDF, statistiques zonales d'un raster — moyenne, minimum et maximum des altitudes d'un MNT par polygone compris —, préparation d'un réseau d'itinéraires à partir de chemins bruts, et géocodage d'adresses sur un fichier de la Base Adresse Nationale qu'il apporte.
+  - **success:** chaque primitive retenue est une commande du registre **exécutée par le cadre de traitement de QGIS**, avec un test hors ligne, que l'agent compose dans un plan valide ; sur un jeu de phrases réelles d'utilisateurs, au moins 70 % des demandes sont couvertes (un plan valide ou une question justifiée), mesuré et consigné ; la recette hors ligne de CAP-1 reste verte.
+
 ## Constraints
 
 - L'extension QGIS est sous GPL, QGIS l'étant. Elle vit séparée du noyau ; le noyau reste sous Apache-2.0, ne lie jamais QGIS, et communique avec l'extension à distance de bras, par processus séparé.
@@ -92,6 +96,9 @@ CAP-2 a été retirée (préparation des données d'une commune par code INSEE) 
 - Petit et solide : à effort égal, la fiabilité passe avant le nombre de fonctions.
 - Le noyau se compile sur Windows, macOS et Linux ; l'extension cible les plateformes où QGIS tourne.
 - Chaque nouvelle commande est livrée avec au moins un test.
+- Tout seuil d'une commande de CAP-14 (distance réglementaire, pente, surface minimale) est un paramètre, jamais une constante.
+- Les fournisseurs de traitement sous GPL (GRASS, extensions tierces) ne s'exécutent que dans le processus de QGIS, jamais liés au noyau. Le géocodeur intégré de QGIS interroge un service en ligne : il est exclu.
+- Les statistiques zonales d'un raster, MNT compris, sont calculées par QGIS et non par le noyau : le calcul exige les polygones, que le canal ne transporte jamais. CAP-11 reste limitée à ses trois commandes de terrain.
 - Aucune API ni aucun schéma de données n'est supposé : tout est vérifié dans la documentation officielle de la source.
 - Une étape de la feuille de route ne commence pas avant que la précédente soit testée et commitée.
 - Une tâche courte par session de travail ; une tâche qui paraît grosse est découpée avant d'être codée.
@@ -125,7 +132,7 @@ Sur une machine débranchée du réseau, l'utilisateur ouvre QGIS sur un projet 
 - Le projet est un projet QGIS ; le noyau n'invente pas de format de projet et écrit son journal à côté.
 - L'ordre de livraison est la séquence décidée le 2026-10-14 : socle et recette, épreuve du modèle local, registre et journal, façade QGIS, agent et MCP, terrain, démo, publication — celle que porte CLAUDE.md §7.
 - Le dérisquage précède l'engagement : qu'un modèle local quantifié sache composer une suite de commandes typées correcte est vérifié sur un registre factice avant que le registre réel ne soit écrit.
-- « Compléter QGIS pour les usages courants » signifie couvrir CAP-3, CAP-5, CAP-9 à CAP-11 par le registre, sans objectif de parité.
+- « Compléter QGIS pour les usages courants » signifie couvrir par le registre CAP-3, CAP-5, CAP-9 à CAP-11 au MVP, puis CAP-14 après le MVP, sans objectif de parité. Le signal de succès ci-dessus reste celui du MVP ; CAP-14 porte son propre seuil de couverture.
 - Villeneuve-le-Roi reste le territoire de référence de la démo, avec des données apportées par l'utilisateur et non livrées.
 
 ## Open Questions
@@ -138,4 +145,5 @@ Sur une machine débranchée du réseau, l'utilisateur ouvre QGIS sur un projet 
 - **Connaissance des schémas français sans les données.** Garde-t-on la capacité à reconnaître un export cadastre Etalab ou un zonage GPU et à proposer la symbologie et le nommage de champs correspondants ?
 - **Systèmes des modèles d'élévation.** Le noyau lit le MNT dans son propre système et refuse une coordonnée exprimée dans un autre : quels systèmes doit-il savoir lire — Lambert-93 et WGS84 seuls, ou aussi les Lambert zones et NTF (EPSG:27572) des fichiers anciens ?
 - **Jeu de recette.** Avec quelles données la démo et les tests tournent-ils, puisque l'application n'en distribue aucune : des données fabriquées à la main, ou un échantillon réel sous licence ouverte versé dans le dépôt ?
+- **Phrases réelles de mesure de CAP-14.** D'où vient le jeu qui mesure le seuil de 70 % — collecte auprès d'utilisateurs, communauté QGIS ? À fournir par le propriétaire avant l'inception de l'epic 10, au plus tard à la publication (epic 7).
 - **Définition de « parcelle constructible ».** En termes de quels champs du Géoportail de l'Urbanisme ? La couverture du PLU y est partielle et les schémas varient d'une commune à l'autre, alors que la phrase de démo repose sur cette définition.
