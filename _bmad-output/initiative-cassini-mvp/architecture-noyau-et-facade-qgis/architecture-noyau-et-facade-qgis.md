@@ -4,11 +4,11 @@ type: architecture-spine
 purpose: build-substrate
 altitude: initiative
 paradigm: 'hexagonal (ports et adaptateurs), avec un adaptateur sortant distant'
-scope: "Invariants du MVP Cassini : frontière entre le noyau Rust Apache-2.0 et l'extension QGIS GPL, contrat du registre de commandes, journal rejouable, agent local et serveur MCP, moteur de terrain, distribution et recette"
+scope: "Invariants du MVP Cassini : frontière entre le noyau Rust Apache-2.0 et l'extension QGIS GPL, contrat du registre de commandes, journal rejouable, agent local et serveur MCP, moteur de terrain, distribution et recette ; après le MVP, extension du catalogue par le cadre de traitement de QGIS (CAP-14)"
 status: final
 created: '2026-10-14'
-updated: '2026-10-14'
-binds: [CAP-1, CAP-3, CAP-4, CAP-5, CAP-6, CAP-7, CAP-8, CAP-9, CAP-10, CAP-11, CAP-13]
+updated: '2026-10-18'
+binds: [CAP-1, CAP-3, CAP-4, CAP-5, CAP-6, CAP-7, CAP-8, CAP-9, CAP-10, CAP-11, CAP-13, CAP-14]
 sources:
   - ../spec-cassini-mvp/spec-cassini-mvp.md
   - ../change-facade-qgis-avant-app-autonome/change-facade-qgis-avant-app-autonome.md
@@ -119,6 +119,14 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   validés **par le noyau, avant l'envoi de l'ordre** ; l'exécutant a le droit de
   faire confiance à ce qu'il reçoit, et la validation n'est donc écrite qu'une
   fois, du côté qui possède les schémas.
+- **Précision (2026-10-18) :** les méthodes du protocole forment une liste
+  fermée — `session.*`, `command.run`, `plan.*`, `order.execute`,
+  `journal.replay`, `request.cancel`, `agent.models`. Ce ne sont pas des
+  commandes : `command.run` et `order.execute` transportent une commande du
+  registre, journalisée ; les autres ne lisent ni n'écrivent le projet ni les
+  données de l'utilisateur, et aucune n'est offerte au modèle ni à un client MCP.
+  Ajouter une méthode demande d'amender ce contrat ; toute action sur le projet ou
+  sur les données est une commande du registre.
 
 ### AD-7 — Annonce au branchement : refus net sur le protocole, dégradation sur les commandes
 
@@ -225,6 +233,11 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   les paramètres suivants, puis l'ignore à la comparaison. Les octets d'une sortie
   produite par QGIS (GeoPackage, PDF) ne sont pas comparés : elle doit exister et
   n'être pas vide, la fidélité tient au résultat typé comparé.
+- **Resserré (2026-10-18) :** chaque ligne d'une commande déléguée porte aussi la
+  version de QGIS et la version de chaîne de sa ligne de table (AD-24), annoncées
+  à `session.hello` ; le rejeu signale toute différence avant de commencer, sans
+  refuser. Les marqueurs d'un résultat résumé dans le journal vivent sous une clé
+  réservée, qu'aucun résultat de commande ne peut porter.
 
 ### AD-12 — Toute étape est annulable par message, jamais en tuant le processus
 
@@ -278,9 +291,16 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
 - **Rule:** le modèle local est chargé **dans le processus du noyau** par
   `llama-cpp-2` ; ni `llama-server`, ni aucun service HTTP, ni aucun client HTTP.
   Le noyau seul découvre les modèles, dans un dossier connu à côté de son
-  installation ou dans un dossier désigné par réglage, et en expose la liste par
-  une commande du registre. L'extension ignore ce qu'est un modèle : elle affiche
-  la liste qu'on lui rend.
+  installation ou dans un dossier désigné par réglage. L'extension ignore ce
+  qu'est un modèle : elle affiche la liste qu'on lui rend.
+- **Écart assumé (2026-10-18, à construire par le ticket 5.14) :** la liste est
+  rendue à l'extension par la méthode du canal `agent.models`, hors registre et
+  non journalisée, sans dossier ni chemin ; `plan.propose` accepte `model`, un nom
+  de fichier de cette liste (absent : le premier), et un nom inconnu rend
+  `models.unknown`. La commande `model.list` reste au registre pour la ligne de
+  commande, et ne rend aucun chemin absolu (AD-9). Passer par `command.run`
+  journaliserait la liste, et le rejeu divergerait dès qu'un fichier de modèle
+  change.
 
 ### AD-16 — Licences : le noyau reste propre, l'extension est en GPL, et la frontière se tient par ce qui circule
 
@@ -366,7 +386,7 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
 
 ### AD-22 — Les paramètres sont neutres ; le vocabulaire de QGIS reste dans l'extension
 
-- **Binds:** CAP-3, CAP-5, CAP-6, CAP-9, CAP-11
+- **Binds:** CAP-3, CAP-5, CAP-6, CAP-9, CAP-11, CAP-14
 - **Prevents:** un noyau qui connaîtrait le langage d'expression de QGIS ou les
   noms de ses algorithmes, donc un noyau de forme QGIS que le module défense
   privé et la V2 autonome hériteraient — AD-1 contournée en esprit sans être
@@ -393,6 +413,114 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   code, du Python, du SQL ou une expression. Un plan ne peut nommer que des
   commandes disponibles (AD-7) et des chemins déjà connus de la session.
 
+### AD-24 — Une primitive de QGIS est une commande écrite à la main, exécutée par une ligne d'une table fermée
+
+- **Binds:** CAP-14, CAP-6, CAP-3
+- **Prevents:** deux façons d'ajouter une commande déléguée ; une commande
+  passe-partout qui ferait écrire au modèle des noms d'algorithmes ; un catalogue
+  engendré depuis les quelque mille algorithmes de QGIS, dont les schémas ne
+  viendraient plus des types Rust ; un enchaînement codé dans l'extension qui
+  prendrait des décisions.
+- **Rule:** chaque primitive du cadre de traitement de QGIS entre au registre
+  comme une commande écrite à la main, avec ses types Rust et `runs_in: qgis`
+  (AD-6), et du côté de l'extension comme **une ligne** d'une table fermée, qui
+  associe l'`id` de la commande à une **chaîne fixe** d'algorithmes, à la
+  traduction de ses paramètres et à une **version de chaîne**, incrémentée à
+  chaque changement de la ligne (AD-11).
+  - **Genres.** Une entrée est d'un genre fermé — `vector`, `raster`, `layout` —
+    et une sortie aussi — `layer`, `table`, `file`. Un genre s'ajoute une seule
+    fois au geste générique de l'extension, jamais par un geste à part. Le nombre
+    de sorties est fixe et déclaré au registre. Un format de sortie variable est
+    une énumération typée, dont le noyau déduit l'extension du fichier (AD-10).
+    Un raster délégué se désigne par son identifiant de couche (AD-9) ; aucune
+    commande `raster.*` ne refait un calcul de `terrain.*`.
+  - **Chaîne.** Une étape peut porter une garde, qui rend une erreur nommée
+    (AD-21) ; aucune étape ne choisit entre deux suites. Toute valeur vient des
+    paramètres du noyau. Seule la dernière étape écrit la sortie nommée par le
+    noyau ; les intermédiaires sont des temporaires de QGIS, jamais nommés par le
+    noyau ni journalisés — écart explicite à AD-10, qui ne vaut que pour eux.
+    Une commande n'est déclarée annulable (AD-12) que si chaque algorithme de sa
+    chaîne l'est, et un test confronte la table au registre sur ce point.
+  - **Liste blanche.** Aucune ligne ne nomme un algorithme qui accède au réseau
+    ou ouvre une page — au moins `native:filedownloader`, `native:httprequest`,
+    `native:downloadvectortiles`, `native:openurl`,
+    `native:batchnominatimgeocoder` — ni un algorithme qui écrit dans l'une de
+    ses entrées. La recette tient cette liste nommée et refuse la table qui en
+    cite un (AD-14). Les fournisseurs sous GPL (GRASS, extensions tierces) ne
+    s'exécutent que dans le processus de QGIS.
+  - **Seuils.** Un seuil est une valeur métier qu'une phrase peut dire —
+    distance, durée, vitesse, pente, surface — et c'est toujours un paramètre.
+    Sa valeur par défaut, s'il en a une, est déclarée dans le schéma Rust, jamais
+    dans la ligne de table.
+
+### AD-25 — Une commande déléguée n'est annoncée que si toute sa chaîne existe chez l'utilisateur
+
+- **Binds:** CAP-14, CAP-13, CAP-4
+- **Prevents:** une commande annoncée qui échoue à l'exécution faute de GRASS ou
+  d'une extension tierce absente du poste ; un agent qui planifie une étape vouée
+  à l'échec ; une annonce faite avant que QGIS ait chargé ses fournisseurs.
+- **Rule:** l'extension envoie `session.hello` une fois l'initialisation de QGIS
+  terminée, fournisseurs de traitement chargés. Elle n'annonce une commande que
+  si chaque algorithme de sa chaîne existe dans le registre de traitement du
+  QGIS hôte ; sinon la commande est indisponible (AD-7). L'annonce porte aussi la
+  version de QGIS et la version de chaîne de chaque commande annoncée (AD-11).
+  Les noms de paramètres propres à une série de QGIS vivent dans la traduction
+  de la ligne, vérifiée par la recette sur les deux séries (AD-18). Un plan qui
+  nomme une commande indisponible est refusé avant d'être montré (AD-23).
+
+### AD-26 — Le géocodage sur la Base Adresse Nationale est fait par le noyau
+
+- **Binds:** CAP-14, CAP-9
+- **Prevents:** de la logique métier dans l'extension (AD-5) — l'appariement
+  d'adresses est un raisonnement, pas un geste — ; un géocodage limité aux
+  écritures identiques, qu'une simple jointure attributaire de QGIS donnerait ;
+  deux façons de désigner les fichiers d'entrée ou d'ouvrir le résultat.
+- **Rule:** une commande `geocode.*` est `runs_in: core`. Ses entrées — le
+  fichier d'adresses et le fichier de la Base Adresse Nationale, tous deux en CSV
+  — sont des chemins relatifs déjà connus de la session (inventaire ou choix de
+  fichier dans le panneau), jamais un réglage ni une variable d'environnement ;
+  le journal garde leur taille et leur date (AD-11), et le rejeu signale un
+  fichier changé. Le noyau apparie et écrit dans le dossier de travail (AD-10)
+  **un** CSV, déterministe, qui porte les colonnes `lon` et `lat` de la Base
+  Adresse Nationale, en EPSG:4326 partout — ses colonnes `x` et `y` changent de
+  projection outre-mer. Le résultat rend `crs`, `x_field` et `y_field`, que reprend
+  une étape `layer.add` explicite du plan. Le noyau ne reprojette pas (AD-19) et
+  ne lit aucun autre format vectoriel. La commande est non annulable tant que
+  l'annulation n'est pas écrite (AD-12). Toute crate ajoutée pour lire le CSV est
+  validée avec sa licence avant ajout (AD-16).
+- **Écart à la spec (2026-10-18) :** CAP-14 dit chaque primitive « exécutée par
+  le cadre de traitement de QGIS », et l'epic 10 « pas de nouveau calcul dans le
+  noyau ». Le géocodage fait exception, par choix du propriétaire ; la spec et
+  l'epic sont à mettre à jour.
+
+### AD-27 — Un seul gabarit de résumé chiffré, validé par le noyau
+
+- **Binds:** CAP-14, CAP-3, CAP-4
+- **Prevents:** chaque primitive qui invente sa forme de résumé — l'agent et le
+  panneau ne sauraient plus les lire ; une borne écrite deux fois qui diverge ;
+  un résultat mal formé de l'extension accepté et journalisé.
+- **Rule:** tout résumé chiffré rendu par une commande suit un gabarit défini une
+  fois en Rust : `rows`, une liste d'éléments `{label, values}` où `values` associe
+  un nom à `{value, unit}`, et `truncated`, explicite. L'étiquette vient d'un champ
+  désigné ou du rang, jamais de l'identifiant d'entité. La borne est une constante
+  du noyau, transmise dans l'ordre ; la couche produite garde tout (AD-8, AD-21).
+  Le noyau valide tout résultat reçu de l'extension contre le schéma de sortie de
+  la commande, et rejette l'écart en `qgis.bad_result`.
+
+### AD-28 — Un seul contrat de réseau
+
+- **Binds:** CAP-14, CAP-3
+- **Prevents:** un réseau préparé par une commande que les isochrones et le plus
+  court chemin lisent chacun à sa façon — sens de circulation, vitesse,
+  tolérance.
+- **Rule:** les commandes qui lisent un réseau d'itinéraires
+  (`analysis.isochrone`, `network.*`) partagent un même type de paramètres Rust,
+  défini une fois : sens de circulation, vitesse (champ ou valeur), tolérance.
+  La commande de préparation produit une couche de lignes que ces commandes
+  lisent sans autre traitement. Les constantes actuelles de `analysis.isochrone`
+  (vitesses, accrochage de l'origine à 100 m) sont un écart, à résorber avant le
+  premier `network.*`.
+
 ### Direction des dépendances
 
 Qui a le droit de dépendre de qui. Toute flèche en sens inverse est un bug.
@@ -418,7 +546,8 @@ flowchart LR
 
 | Concern | Convention |
 | --- | --- |
-| Nommage des commandes | `domaine.verbe` en anglais, snake_case : `layer.add`, `layer.describe`, `analysis.buffer`, `project.inventory`, `layout.export_pdf`, `terrain.viewshed`, `terrain.line_of_sight`, `terrain.slope`, `agent.plan`, `journal.replay` |
+| Nommage des commandes | `domaine.verbe` en anglais, snake_case : `layer.add`, `layer.describe`, `analysis.buffer`, `project.inventory`, `layout.export_pdf`, `terrain.viewshed`, `terrain.line_of_sight`, `terrain.slope` |
+| Familles de commandes | `layer.*` et `project.*` ouvrir, décrire, inventorier ; `analysis.*` analyses vectorielles ; `network.*` réseau d'itinéraires ; `raster.*` analyses de raster déléguées ; `data.*` reprojection et conversion ; `layout.*` PDF et atlas ; `geocode.*` géocodage, dans le noyau (AD-26) ; `terrain.*` réservé au noyau, jamais délégué. Le comptage de points par polygone s'appelle `analysis.count_points_in_polygon` (ex-`analysis.zonal_statistics`), les statistiques d'un raster par polygone `raster.zonal_statistics` ; `analysis.isochrone` garde son nom |
 | Nommage du code | crates `cassini-core`, `cassini-ai`, `cassini` ; paquet Python `cassini_qgis` — le nom ne répète pas le mot « plugin », le dépôt le demande ; noms de types et de variables en anglais, documentation et commentaires en français (CLAUDE.md §9) |
 | Identifiants | une couche : l'identifiant QGIS, opaque, jamais interprété par le noyau ; une étape : un entier croissant dans le journal ; une requête : l'`id` JSON-RPC |
 | Chemins | relatifs au fichier de projet, séparateurs POSIX, jamais d'absolu (AD-9) |
@@ -428,7 +557,7 @@ flowchart LR
 | Erreurs | l'enveloppe de AD-21 ; énumérations typées par module à l'intérieur du noyau |
 | Mutation d'état | le projet est muté par QGIS seul, sur ordre du noyau ; le journal est écrit par le noyau seul ; aucun état partagé entre les deux moitiés en dehors des messages |
 | Traces | sortie d'erreur standard, jamais la sortie standard (AD-2) ; messages destinés à l'utilisateur en français, traces de mise au point en anglais |
-| Réglages | côté extension, les réglages QGIS sous le préfixe `cassini/` ; côté noyau, un seul fichier de configuration lu au démarrage ; aucun réglage ne peut ouvrir un accès réseau (AD-14) |
+| Réglages | côté extension, les réglages QGIS sous le préfixe `cassini/` ; côté extension aussi la variable `CASSINI_CORE` (AD-17) ; côté noyau, des variables d'environnement lues au démarrage (`CASSINI_MODELS`, et `CASSINI_GPU_LAYERS` pour les mesures sur GPU), sans fichier de configuration ; aucun réglage ne peut ouvrir un accès réseau (AD-14) |
 | Sources et clean-room | aucun code, icône, nom de produit, preset ou asset d'Esri ; aucun format de projet Esri lu ni écrit ; lire un format publié comme le Shapefile reste permis, et c'est QGIS qui le fait (CLAUDE.md §2.1) |
 | Tests | une commande, au moins un test ; le noyau testé sans QGIS (AD-1) ; l'extension testée sur les deux séries de QGIS (AD-18) |
 
@@ -570,6 +699,7 @@ faire.
 | CAP-10 Projet | projet QGIS, journal à côté par `core` | AD-9, AD-10, AD-11 |
 | CAP-11 Analyse de terrain | `core` | AD-1, AD-19, AD-20, AD-22 |
 | CAP-13 Façade QGIS | `qgis-plugin` et le canal | AD-2, AD-3, AD-4, AD-7, AD-17, AD-18 |
+| CAP-14 Catalogue étendu (après le MVP) | registre dans `core`, table fermée dans `qgis-plugin` ; géocodage dans `core` | AD-6, AD-8, AD-10, AD-11, AD-12, AD-22, AD-23, AD-24, AD-25, AD-26, AD-27, AD-28 |
 | Frontière de licence et module défense privé | la frontière elle-même | AD-1, AD-8, AD-16, AD-20 |
 | Enveloppe d'exploitation : installation, recette, plateformes | paquet et recette | AD-14, AD-16, AD-17, AD-18 |
 
@@ -619,3 +749,20 @@ faire.
 - **Isochrones.** QGIS les calcule sur un réseau routier que l'utilisateur
   apporte ; que ce réseau soit disponible chez l'utilisateur visé reste à
   confirmer à l'epic de façade. Sans effet sur la frontière.
+- **Catalogue montré au modèle et taille du prompt.** Aujourd'hui le modèle voit
+  tout le registre, disponible ou non, pour garder le cache de 5.12 ; avec 25 à
+  30 commandes, la partie fixe du prompt menace le budget de 30 s sur processeur.
+  Montrer les seules commandes disponibles (cache par ensemble annoncé) ou un
+  sous-ensemble choisi par demande, et ce qu'une commande ajoutée apporte au
+  prompt et au jeu de 5.10 : à trancher à l'inception de l'epic 10, avant que le
+  catalogue dépasse 20 commandes. AD-7, AD-23 et AD-25 tiennent dans tous les cas.
+- **Couches distantes à l'export.** Un export de mise en page ou d'atlas dessine
+  les couches WMS ou XYZ que l'utilisateur a mises dans son projet, donc QGIS
+  peut toucher le réseau. Préexistant à `layout.export_pdf` ; à trancher avec la
+  commande d'atlas, face à AD-14.
+- **Fichier de la Base Adresse Nationale.** Il est distribué compressé
+  (`.csv.gz`) : décompression par l'utilisateur ou crate à valider avec sa
+  licence ; séparateur et encodage à lire sur un vrai fichier à l'inception d'E4.
+- **Choix des primitives et phrases réelles de mesure.** Quelles primitives de
+  CAP-14 entrent, et dans quel ordre, dépend du jeu de phrases réelles que le
+  propriétaire fournit avant l'inception de l'epic 10 : contenu, pas structure.
