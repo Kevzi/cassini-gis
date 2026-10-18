@@ -594,6 +594,33 @@ class PluginBehaviourTest(unittest.TestCase):
         self.p._on_event(self.mod.client.RUN_DONE, {"command": "a", "result": 1})
         self.assertEqual(self.p.panel.events[0][0], self.mod.client.RUN_DONE)
 
+    def test_every_plan_event_reaches_the_panel(self):
+        client = self.mod.client
+        for kind in client.PLAN_EVENTS:
+            self.p._on_event(kind, {"k": kind})
+        self.assertEqual(self.p.panel.events, [(k, {"k": k}) for k in client.PLAN_EVENTS])
+
+    def test_plan_actions_map_to_the_client(self):
+        for action in ("propose", "approve", "reject"):
+            self.p.client = None
+            self.assertFalse(getattr(self.p, action)("x"), action)
+        calls = []
+
+        def answer(name, value):
+            return lambda s, arg: calls.append((name, arg)) or value
+
+        self.p.client = type("C", (), {
+            "propose": answer("propose", True),
+            "execute_plan": answer("execute_plan", False),
+            "reject_plan": answer("reject_plan", True)})()
+        self.assertIs(self.p.propose("Tampon"), True)
+        self.assertIs(self.p.approve("plan-1"), False)
+        self.assertIs(self.p.reject("plan-1"), True)
+        self.assertEqual(
+            calls,
+            [("propose", "Tampon"), ("execute_plan", "plan-1"), ("reject_plan", "plan-1")],
+        )
+
     def test_stop_sends_cancel_run(self):
         calls = []
         self.p.client = type("C", (), {"cancel_run": lambda s: calls.append(1)})()

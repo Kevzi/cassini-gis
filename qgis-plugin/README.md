@@ -45,8 +45,8 @@ Garde statique (imports réseau et PyQt directs interdits, taille, versions de
 
 Recette manuelle du panneau [9.4] (dans QGIS, avec un noyau installé) :
 
-1. Ouvrez un projet : le logo et la saisie grisée (« Disponible avec l'agent. »)
-   sont visibles ; « Démarrage du noyau… » puis le bandeau disparaît.
+1. Ouvrez un projet : le logo et la saisie grisée sont visibles ; « Démarrage du
+   noyau… » puis le bandeau disparaît et la saisie devient active [ticket 6].
 2. Dépliez « Mode expert », choisissez `system.about`, cliquez sur Lancer : le
    résultat dit que le noyau répond, le journal porte une ligne « Terminée ».
 3. L'arrêt d'une commande n'est pas testable à la main : le binaire réel ne
@@ -178,6 +178,30 @@ Recette manuelle de `layout.export_pdf` [ticket 12] (jeu `../donnees-test-cassin
    donne `layout.bad_params`. Le projet ne gagne aucune mise en page.
 4. Sonde sous le vrai QGIS : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat"
    qgis-plugin/tests/probe_layout_export.py` doit finir par `RÉSULTAT : OK`.
+
+Recette manuelle de la saisie en langage naturel et du plan [ticket 6] (QGIS 3.44, jeu
+`../donnees-test-cassini/`, un modèle GGUF dans le dossier des modèles : le premier
+trouvé est pris, le choix du modèle reste grisé dans Réglages) :
+
+1. Ouvrez `projet-test-villeneuve.qgz` : la saisie est active. Écrivez la phrase de démo
+   « Trouve les parcelles constructibles du PLU à moins de 500 m d'une gare à
+   Villeneuve-le-Roi et sors-moi la carte en PDF. » ; Maj+Entrée saute une ligne, Entrée
+   envoie. Pendant la génération, la barre d'attente et « Je prépare un plan… » s'affichent,
+   la saisie et le mode expert sont grisés, aucun bouton Arrêter (la composition n'est pas
+   annulable). La première demande peut prendre plusieurs minutes.
+2. « Voici ce que je propose. » et les étapes numérotées (description du registre, « En
+   attente ») ; « Détails techniques » montre les paramètres, sans chemin absolu.
+3. Valider le plan : le marqueur ▶ suit l'étape en cours, le journal ajoute une ligne par
+   étape, chacune finit en « Terminée » ; le résultat dit « Plan exécuté : n étapes
+   terminées. » et la saisie est rendue.
+4. Nouvelle demande, puis Refuser : « Plan refusé. Reformulez votre demande. », saisie rendue.
+5. Une demande qui nomme une couche absente (« les pharmacies ») : la question du modèle
+   s'affiche comme une réplique, sans Valider ; on répond par une nouvelle demande.
+6. Arrêter : pendant une étape annulable (une analyse longue), Arrêter envoie
+   `request.cancel` ; l'étape et sa ligne passent à « Annulée ». Pendant une étape non
+   annulable, Arrêter est grisé avec « Arrêt impossible : cette étape ne peut pas être
+   interrompue. »
+7. Sans modèle dans le dossier : « La demande n'a pas abouti (ai.no_model) : … », saisie rendue.
 
 Contrôle manuel : charger l'extension, ouvrir un projet, voir les deux versions,
 fermer QGIS et vérifier qu'aucun `cassini` ne reste dans le gestionnaire des

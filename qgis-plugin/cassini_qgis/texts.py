@@ -10,9 +10,10 @@ _FR = {
     "app_title": "Cassini",
     "settings": "Réglages",
     "settings_language": "Langue",
-    "settings_model": "Modèle : choisi avec l'agent.",
+    "settings_model": "Modèle : le premier du dossier des modèles est utilisé. Le choix viendra plus tard.",
     "input_hint": "Décrivez ce que vous voulez faire sur vos données.",
-    "input_reason": "Disponible avec l'agent.",
+    "input_reason": "Patientez : Cassini traite déjà une demande.",
+    "input_reason_plan": "Validez ou refusez d'abord le plan proposé.",
     "input_name": "Demande en langage naturel",
     "send": "Envoyer",
     "expert_title": "Mode expert : lancer une commande",
@@ -65,15 +66,32 @@ _FR = {
     "live_done": "Commande terminée.",
     "live_cancelled": "Commande annulée.",
     "live_error": "Commande en erreur.",
+    "pending": "En attente",
+    "plan_title": "Voici ce que je propose.",
+    "plan_steps_name": "Étapes du plan",
+    "approve": "Valider le plan",
+    "reject": "Refuser",
+    "plan_rejected": "Plan refusé. Reformulez votre demande.",
+    "generating": (
+        "Je prépare un plan… La première demande charge le modèle et peut "
+        "prendre plusieurs minutes."
+    ),
+    "question_title": "Cassini vous pose une question :",
+    "propose_error": "La demande n'a pas abouti ({code}) : {message}",
+    "plan_done": "Plan exécuté. Étapes terminées : {n}.",
+    "plan_cancelled": "Étape {n} annulée : les étapes suivantes n'ont pas été lancées.",
+    "live_plan": "Un plan est proposé.",
+    "live_question": "Cassini pose une question.",
 }
 
 _EN = {
     "app_title": "Cassini",
     "settings": "Settings",
     "settings_language": "Language",
-    "settings_model": "Model: chosen with the agent.",
+    "settings_model": "Model: the first one in the models folder is used. Choosing will come later.",
     "input_hint": "Describe what you want to do with your data.",
-    "input_reason": "Available with the agent.",
+    "input_reason": "Please wait: Cassini is already handling a request.",
+    "input_reason_plan": "Approve or reject the proposed plan first.",
     "input_name": "Natural language request",
     "send": "Send",
     "expert_title": "Expert mode: run a command",
@@ -126,6 +144,22 @@ _EN = {
     "live_done": "Command done.",
     "live_cancelled": "Command cancelled.",
     "live_error": "Command failed.",
+    "pending": "Pending",
+    "plan_title": "Here is what I propose.",
+    "plan_steps_name": "Plan steps",
+    "approve": "Approve plan",
+    "reject": "Reject",
+    "plan_rejected": "Plan rejected. Rephrase your request.",
+    "generating": (
+        "Preparing a plan… The first request loads the model and can take "
+        "several minutes."
+    ),
+    "question_title": "Cassini asks you a question:",
+    "propose_error": "The request did not succeed ({code}): {message}",
+    "plan_done": "Plan run. Steps done: {n}.",
+    "plan_cancelled": "Step {n} cancelled: the following steps were not started.",
+    "live_plan": "A plan is proposed.",
+    "live_question": "Cassini asks a question.",
 }
 
 TEXTS = {"fr": _FR, "en": _EN}

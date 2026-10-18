@@ -4,6 +4,9 @@ Le client ne contient aucune logique métier. Il lance le noyau (processus
 enfant), envoie `session.hello` puis `command.run` de `system.about`, rend le
 résultat par un rappel, puis sert d'exécutant au noyau : il traite
 `order.execute` en lançant le geste enregistré et relaie `request.cancel`.
+Il porte aussi les plans de l'agent (`plan.propose`, `plan.execute`,
+`plan.reject`, notification `plan.step`) sans jamais les composer ni les
+enchaîner : il n'envoie qu'une demande ou un `plan_id`.
 Tout est piloté par les signaux du processus : aucune lecture bloquante.
 
 Le processus est un objet à l'interface de QProcess, fourni par l'appelant, ce
@@ -27,6 +30,25 @@ RUN_CANCELLED = "run_cancelled"  # payload : {"command"}
 RUN_FAILED = "run_failed"  # payload : {"command", "code", "message"}
 REPLAY_DONE = "replay_done"  # payload : {"steps", "identical"}
 REPLAY_FAILED = "replay_failed"  # payload : {"code", "message", "step"}
+# Plans de l'agent (docs/canal-local.md, « Plans de l'agent »).
+PLAN_PROPOSED = "plan_proposed"  # payload : {"plan_id", "plan"}
+PLAN_QUESTION = "plan_question"  # payload : {"question"}
+PLAN_FAILED = "plan_failed"  # payload : {"code", "message"} (proposition ou refus)
+PLAN_STEP = "plan_step"  # payload : {"step", "command"}
+PLAN_DONE = "plan_done"  # payload : {"steps"}
+PLAN_EXEC_FAILED = "plan_exec_failed"  # payload : {"code", "message", "step"}
+PLAN_CANCELLED = "plan_cancelled"  # payload : {"step"}
+PLAN_REJECTED = "plan_rejected"  # payload : {"plan_id"}
+PLAN_EVENTS = (
+    PLAN_PROPOSED,
+    PLAN_QUESTION,
+    PLAN_FAILED,
+    PLAN_STEP,
+    PLAN_DONE,
+    PLAN_EXEC_FAILED,
+    PLAN_CANCELLED,
+    PLAN_REJECTED,
+)
 
 GESTURE_UNKNOWN = "qgis.gesture_unknown"
 GESTURE_FAILED = "qgis.gesture_failed"
@@ -56,6 +78,7 @@ class CoreClient:
         self._ready = False
         self._run = None  # command.run en vol : {"id", "command"}
         self._replay = None  # journal.replay en vol : id de la requête
+        self._plan = None  # plan.* en vol : {"id", "kind"} (propose, execute, reject)
         self._closing = False
         self._done = False  # un événement terminal a déjà été rendu
         process.readyReadStandardOutput.connect(self._read)
@@ -87,6 +110,7 @@ class CoreClient:
         self._done = True
         self._run = None
         self._replay = None
+        self._plan = None
         self._abort_current()
         self._p.closeWriteChannel()
         self._p.waitForFinished(wait_ms)
@@ -115,7 +139,7 @@ class CoreClient:
         La réponse arrive par le signal de lecture, sous forme d'un événement
         RUN_DONE, RUN_CANCELLED ou RUN_FAILED. Rend False si rien n'est parti.
         """
-        if not self._ready or self._run is not None or self._replay is not None or self._closing:
+        if not self._can_send():
             return False
         ident = self._request(
             "command.run", {"command": command, "params": params or {}}, "run"
@@ -135,20 +159,70 @@ class CoreClient:
         annulable. Le verdict arrive par REPLAY_DONE ou REPLAY_FAILED. Rend False
         si rien n'est parti (noyau pas prêt, commande ou rejeu déjà en vol).
         """
-        if not self._ready or self._run is not None or self._replay is not None or self._closing:
+        if not self._can_send():
             return False
         self._replay = self._request("journal.replay", {}, "replay")
         return True
 
-    def cancel_run(self):
-        """Envoie `request.cancel` pour le `command.run` en vol ; ne tue jamais le noyau.
+    def _can_send(self):
+        """Une seule requête en vol côté client : commande, rejeu ou plan (AD-5)."""
+        return (
+            self._ready
+            and self._run is None
+            and self._replay is None
+            and self._plan is None
+            and not self._closing
+        )
 
-        Le noyau refuse lui-même une commande non annulable (AD-12).
+    def plan_busy(self):
+        return self._plan is not None
+
+    def propose(self, request):
+        """Envoie `plan.propose` avec la demande en langage naturel, telle quelle.
+
+        Le verdict arrive par PLAN_PROPOSED, PLAN_QUESTION ou PLAN_FAILED. La
+        composition n'est pas annulable. Rend False si rien n'est parti.
         """
-        run = self._run
-        if run is None or self._closing:
+        if not self._can_send() or not isinstance(request, str):
             return False
-        self._request("request.cancel", {"id": run["id"]}, "cancel")
+        ident = self._request("plan.propose", {"request": request}, "propose")
+        self._plan = {"id": ident, "kind": "propose"}
+        return True
+
+    def execute_plan(self, plan_id):
+        """Envoie `plan.execute` : seul le `plan_id` part, jamais le plan (AD-5, AD-23).
+
+        Chaque étape s'annonce par PLAN_STEP ; le verdict arrive par PLAN_DONE,
+        PLAN_EXEC_FAILED ou PLAN_CANCELLED. Rend False si rien n'est parti.
+        """
+        if not self._can_send() or not isinstance(plan_id, str):
+            return False
+        ident = self._request("plan.execute", {"plan_id": plan_id}, "execute")
+        self._plan = {"id": ident, "kind": "execute"}
+        return True
+
+    def reject_plan(self, plan_id):
+        """Envoie `plan.reject` ; le verdict arrive par PLAN_REJECTED ou PLAN_FAILED."""
+        if not self._can_send() or not isinstance(plan_id, str):
+            return False
+        ident = self._request("plan.reject", {"plan_id": plan_id}, "reject")
+        self._plan = {"id": ident, "kind": "reject"}
+        return True
+
+    def cancel_run(self):
+        """Envoie `request.cancel` pour le `command.run` ou le `plan.execute` en vol.
+
+        Ne tue jamais le noyau ; il refuse lui-même une étape non annulable (AD-12).
+        """
+        if self._closing:
+            return False
+        if self._run is not None:
+            target = self._run["id"]
+        elif self._plan is not None and self._plan["kind"] == "execute":
+            target = self._plan["id"]
+        else:
+            return False
+        self._request("request.cancel", {"id": target}, "cancel")
         return True
 
     # -- envoi --------------------------------------------------------
@@ -214,6 +288,8 @@ class CoreClient:
             self._run_answer(msg)
         elif step == "replay":
             self._replay_answer(msg)
+        elif step in ("propose", "execute", "reject"):
+            self._plan_answer(step, msg)
         elif "error" in msg:
             self._fail(self._error_message(msg["error"]))
         elif step == "hello":
@@ -277,6 +353,65 @@ class CoreClient:
             {"steps": result.get("steps"), "identical": result.get("identical")},
         )
 
+    @staticmethod
+    def _error_fields(error):
+        """(code, step) portés par `error.data` ; code `core.unknown` à défaut."""
+        data = error.get("data") if isinstance(error, dict) else None
+        code = data.get("code") if isinstance(data, dict) else None
+        step = data.get("step") if isinstance(data, dict) else None
+        return (
+            code if isinstance(code, str) else "core.unknown",
+            step if isinstance(step, int) and not isinstance(step, bool) else None,
+        )
+
+    def _plan_answer(self, kind, msg):
+        self._plan = None
+        result = msg.get("result")
+        if "error" in msg:
+            error = msg["error"]
+            code, step = self._error_fields(error)
+            message = self._error_message(error)
+            if kind == "execute":
+                if code == CANCELLED:
+                    self._notify(PLAN_CANCELLED, {"step": step})
+                else:
+                    self._notify(
+                        PLAN_EXEC_FAILED, {"code": code, "message": message, "step": step}
+                    )
+            else:
+                self._notify(PLAN_FAILED, {"code": code, "message": message})
+            return
+        result = result if isinstance(result, dict) else {}
+        if kind == "propose":
+            question = result.get("question")
+            plan_id = result.get("plan_id")
+            plan = result.get("plan")
+            if isinstance(question, str) and question.strip():
+                self._notify(PLAN_QUESTION, {"question": question})
+            elif isinstance(plan_id, str) and isinstance(plan, dict):
+                self._notify(PLAN_PROPOSED, {"plan_id": plan_id, "plan": plan})
+            else:
+                self._notify(
+                    PLAN_FAILED,
+                    {"code": "core.unknown", "message": "Réponse du noyau illisible."},
+                )
+        elif kind == "execute":
+            steps = result.get("steps")
+            self._notify(PLAN_DONE, {"steps": steps if isinstance(steps, list) else []})
+        else:
+            self._notify(PLAN_REJECTED, {"plan_id": result.get("plan_id")})
+
+    def _fail_plan(self, message):
+        plan, self._plan = self._plan, None
+        if plan is None:
+            return
+        if plan["kind"] == "execute":
+            self._notify(
+                PLAN_EXEC_FAILED, {"code": CORE_DIED, "message": message, "step": None}
+            )
+        else:
+            self._notify(PLAN_FAILED, {"code": CORE_DIED, "message": message})
+
     def _fail_replay(self, message):
         if self._replay is not None:
             self._replay = None
@@ -300,6 +435,21 @@ class CoreClient:
         ident = msg.get("id")
         if method == "order.execute" and ident is not None:
             self._execute(ident, params)
+        elif method == "plan.step":
+            # Notification : jamais de réponse, même si un id l'accompagnait.
+            plan = self._plan
+            step = params.get("step")
+            if (
+                plan is not None
+                and plan["kind"] == "execute"
+                and isinstance(step, int)
+                and not isinstance(step, bool)
+            ):
+                command = params.get("command")
+                self._notify(
+                    PLAN_STEP,
+                    {"step": step, "command": command if isinstance(command, str) else None},
+                )
         elif method == "request.cancel":
             current = self._current
             matches = current is not None and current["id"] == params.get("id")
@@ -413,6 +563,7 @@ class CoreClient:
             self._abort_current()
             self._fail_run("Le noyau Cassini s'est arrêté.")
             self._fail_replay("Le noyau Cassini s'est arrêté.")
+            self._fail_plan("Le noyau Cassini s'est arrêté.")
             self._finish(DIED, "Le noyau Cassini s'est arrêté.")
 
     def _error(self, *_):
@@ -420,4 +571,5 @@ class CoreClient:
             self._abort_current()
             self._fail_run("Le noyau Cassini s'est arrêté.")
             self._fail_replay("Le noyau Cassini s'est arrêté.")
+            self._fail_plan("Le noyau Cassini s'est arrêté.")
             self._finish(DIED, "Le noyau Cassini n'a pas pu démarrer ou s'est arrêté.")

@@ -22,6 +22,7 @@ from qgis.PyQt.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPlainTextEdit,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QToolButton,
@@ -29,7 +30,7 @@ from qgis.PyQt.QtWidgets import (
     QWidget,
 )
 
-from . import client, form, runlog, texts
+from . import agentview, client, form, runlog, texts
 
 
 class LayerCombo(QComboBox):
@@ -92,6 +93,23 @@ class FieldCombo(QComboBox):
     def showPopup(self):
         self.reload()
         super().showPopup()
+
+
+class RequestEdit(QPlainTextEdit):
+    """Saisie principale : Entrée envoie, Maj+Entrée saute une ligne, Tab change de champ."""
+
+    def __init__(self, on_submit, parent=None):
+        super().__init__(parent)
+        self._on_submit = on_submit
+        self.setTabChangesFocus(True)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not (
+            event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+        ):
+            self._on_submit()
+            return
+        super().keyPressEvent(event)
 
 
 LANG_KEY = "cassini/lang"
@@ -174,10 +192,14 @@ class CassiniPanel(QWidget):
 
     def __init__(self, actions):
         super().__init__()
-        self._actions = actions  # run(cmd, params), stop(), choose_core(), relaunch()
+        # run(cmd, params), stop(), choose_core(), relaunch(), propose(text), approve(), reject()
+        self._actions = actions
         settings = QSettings()
         self.lang = texts.normalize(str(settings.value(LANG_KEY, texts.DEFAULT_LANG)))
         self.log = runlog.RunLog()
+        self.agent = agentview.AgentView()
+        self._plan_entry = None  # ligne du journal de l'étape de plan en cours
+        self._last_request = None  # dernière demande envoyée, rendue après un échec
         self.catalogue = []
         self.ready = False
         self.banner = "no_project"
@@ -256,17 +278,61 @@ class CassiniPanel(QWidget):
         bl.addWidget(self.banner_button)
         col.addWidget(self.banner_zone)
 
-        # Saisie principale : visible mais grisée jusqu'à l'agent.
-        self.input = QPlainTextEdit()
-        self.input.setEnabled(False)
+        # Saisie principale en langage naturel [Epic 5].
+        self.input = RequestEdit(self._send)
         self.input.setMaximumHeight(72)
+        self.input.textChanged.connect(self._input_changed)
         self.input_reason = QLabel()
         self.input_reason.setWordWrap(True)
         self.send_button = QPushButton()
-        self.send_button.setEnabled(False)
+        self.send_button.clicked.connect(self._send)
         col.addWidget(self.input)
         col.addWidget(self.input_reason)
         col.addWidget(self.send_button)
+
+        # Plan de l'agent : réplique, indicateur, étapes en lecture seule, verdict.
+        self.plan_zone = QWidget()
+        pl = QVBoxLayout(self.plan_zone)
+        pl.setContentsMargins(0, 0, 0, 0)
+        self.plan_title = _title(QLabel())
+        self.plan_notice = QLabel()
+        self.plan_notice.setWordWrap(True)
+        self.plan_notice.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self.plan_progress = QProgressBar()
+        self.plan_progress.setRange(0, 0)  # indéterminée : la composition ne se mesure pas
+        self.plan_progress.setTextVisible(False)
+        self.plan_list = QListWidget()
+        self.plan_list.setMaximumHeight(130)
+        self.plan_list.setWordWrap(True)
+        self.approve_button = QPushButton()
+        self.approve_button.clicked.connect(self._approve)
+        self.reject_button = QPushButton()
+        self.reject_button.clicked.connect(self._reject)
+        self.plan_stop_button = QPushButton()
+        self.plan_stop_button.clicked.connect(self._stop)
+        self.plan_reason = QLabel()
+        self.plan_reason.setWordWrap(True)
+        self.plan_details = _Fold()
+        self.plan_details_view = _mono(QPlainTextEdit())
+        self.plan_details_view.setReadOnly(True)
+        self.plan_details_view.setMaximumHeight(120)
+        pdl = QVBoxLayout(self.plan_details.body)
+        pdl.setContentsMargins(0, 0, 0, 0)
+        pdl.addWidget(self.plan_details_view)
+        plan_buttons = QHBoxLayout()
+        plan_buttons.addWidget(self.approve_button)
+        plan_buttons.addWidget(self.reject_button)
+        plan_buttons.addWidget(self.plan_stop_button)
+        pl.addWidget(self.plan_notice)
+        pl.addWidget(self.plan_progress)
+        pl.addWidget(self.plan_title)
+        pl.addWidget(self.plan_list)
+        pl.addLayout(plan_buttons)
+        pl.addWidget(self.plan_reason)
+        pl.addWidget(self.plan_details)
+        col.addWidget(self.plan_zone)
 
         # Résultat.
         self.result_title = _title(QLabel())
@@ -340,7 +406,8 @@ class CassiniPanel(QWidget):
         # Ordre de tabulation = ordre vertical.
         order = [
             self.settings_button, self.lang_box, self.banner_button, self.input,
-            self.send_button, self.details.button, self.log_list,
+            self.send_button, self.plan_list, self.approve_button, self.reject_button,
+            self.plan_stop_button, self.plan_details.button, self.details.button, self.log_list,
             self.expert.button, self.command_list, self.run_button, self.stop_button,
         ]
         for a, b in zip(order, order[1:]):
@@ -361,10 +428,16 @@ class CassiniPanel(QWidget):
             _announce(self.banner_text, self.t(BANNERS[kind][0]))
 
     def _drop_stale_run(self):
-        """Le noyau a été fermé : une commande en vol n'existe plus."""
+        """Le noyau a été fermé : une commande ou un plan en vol n'existe plus."""
         if self.running:
             self.running = False
             self.log.finish(runlog.CANCELLED)
+        plan_in_flight = self.agent.phase != agentview.IDLE
+        self._close_plan_entry(runlog.ERROR)
+        self.agent.forget()
+        last = self.last
+        if plan_in_flight and last and last.get("plan") and last["kind"] == runlog.RUNNING:
+            self.last = None  # plus d'« En cours… » d'une étape qui n'existe plus
 
     def set_ready(self, catalogue):
         self._drop_stale_run()
@@ -375,8 +448,60 @@ class CassiniPanel(QWidget):
         self.render()
         _announce(self.title, self.t("live_ready"))
 
+    def _close_plan_entry(self, status):
+        entry, self._plan_entry = self._plan_entry, None
+        if entry is not None and entry.status == runlog.RUNNING:
+            entry.status = status
+
+    def _on_plan_event(self, kind, payload):
+        agent = self.agent
+        if kind == client.PLAN_PROPOSED:
+            agent.proposed(payload.get("plan_id"), payload.get("plan"))
+            _announce(self.plan_title, self.t("live_plan"))
+        elif kind == client.PLAN_QUESTION:
+            agent.question(payload.get("question", ""))
+            _announce(self.plan_notice, self.t("live_question"))
+        elif kind == client.PLAN_FAILED:
+            agent.failed(payload.get("code", ""), payload.get("message", ""))
+            if self._last_request and not self.input.toPlainText().strip():
+                self.input.setPlainText(self._last_request)  # à corriger sans tout retaper
+            _announce(self.plan_notice, self.t("live_error"))
+        elif kind == client.PLAN_REJECTED:
+            agent.rejected()
+        elif kind == client.PLAN_STEP:
+            self._close_plan_entry(runlog.DONE)
+            agent.step(payload.get("step"), payload.get("command"))
+            target = agent.find(payload.get("step"))
+            command = payload.get("command") or (target.command if target else "?")
+            label = (
+                agentview.step_label(target, self.catalogue, self.lang)
+                if target is not None
+                else agentview.describe(command, self.catalogue, self.lang)
+            )
+            self._plan_entry = self.log.start(command, label, time.strftime("%H:%M"))
+            self.last = {"kind": runlog.RUNNING, "plan": True, "command": label}
+        elif kind == client.PLAN_DONE:
+            self._close_plan_entry(runlog.DONE)
+            self.last = agentview.outcome(runlog.DONE, payload, agent)
+            agent.done(payload.get("steps"))
+            _announce(self.result_text, self.t("live_done"))
+        elif kind == client.PLAN_EXEC_FAILED:
+            self.last = agentview.outcome(runlog.ERROR, payload, agent)
+            self._close_plan_entry(runlog.ERROR)
+            agent.exec_failed(self.last["step"])
+            _announce(self.result_text, self.t("live_error"))
+        elif kind == client.PLAN_CANCELLED:
+            self.last = agentview.outcome(runlog.CANCELLED, payload, agent)
+            self._close_plan_entry(runlog.CANCELLED)
+            agent.cancelled(self.last["step"])
+            _announce(self.result_text, self.t("live_cancelled"))
+        self.render()
+
     def on_event(self, kind, payload):
-        """Événements RUN_* du client."""
+        """Événements RUN_* et PLAN_* du client."""
+        if kind in client.PLAN_EVENTS:
+            self._on_plan_event(kind, payload or {})
+            return
         if kind == client.RUN_STARTED:
             self.running = True
             self.log.start(payload["command"], payload["command"], time.strftime("%H:%M"))
@@ -426,9 +551,8 @@ class CassiniPanel(QWidget):
 
         self.input.setPlaceholderText(t("input_hint"))
         self.input.setAccessibleName(t("input_name"))
-        self.input_reason.setText(t("input_reason"))
         self.send_button.setText(t("send"))
-        self.send_button.setAccessibleName("%s, %s" % (t("send"), t("input_reason")))
+        self._render_agent()
 
         self.result_title.setText(t("result_title"))
         self.details.button.setText(t("details"))
@@ -447,7 +571,7 @@ class CassiniPanel(QWidget):
 
         self.expert.button.setText(t("expert_title"))
         self.expert.button.setAccessibleName(t("expert_title"))
-        self.expert.setEnabled(usable)
+        self.expert.setEnabled(usable and self.agent.phase == agentview.IDLE)
         self.footer.setText(t("offline"))
         self._render_commands()
         self._render_buttons()
@@ -470,6 +594,11 @@ class CassiniPanel(QWidget):
         command = last.get("command", "")
         if kind == runlog.RUNNING:
             self.result_text.setText("%s  %s" % (self.t("running"), command))
+        elif last.get("plan"):
+            self.result_text.setText(agentview.outcome_text(last, self.lang))
+            if kind == runlog.DONE:
+                self.details_view.setPlainText(runlog.technical_details(last.get("result")))
+                self.details.setVisible(True)
         elif kind == runlog.DONE:
             if command == "system.about":
                 self.result_text.setText(self.t("about_result"))
@@ -483,6 +612,83 @@ class CassiniPanel(QWidget):
             self.result_text.setText(
                 self.t("step_error", n=1, code=last.get("code", ""), message=last.get("message", ""))
             )
+
+    def _render_agent(self):
+        """Saisie et zone plan, d'après l'état du plan (logique dans `agentview`)."""
+        t = self.t
+        agent = self.agent
+        c = agentview.controls(
+            agent,
+            self.ready and self.banner is None,
+            self.running,
+            bool(self.input.toPlainText().strip()),
+            self.catalogue,
+        )
+        self.input.setEnabled(c["input_enabled"])
+        self.send_button.setEnabled(c["send_enabled"])
+        reason = t(c["input_reason"]) if c["input_reason"] else ""
+        self.input_reason.setText(reason)
+        self.input_reason.setVisible(bool(reason))
+        self.send_button.setAccessibleName("%s, %s" % (t("send"), reason) if reason else t("send"))
+
+        notice = agentview.notice_text(agent, self.lang)
+        if agent.notice is not None and agent.notice[0] == "question":
+            notice = "%s %s" % (t("question_title"), notice)
+        self.plan_notice.setText(notice or "")
+        self.plan_notice.setVisible(bool(notice))
+        self.plan_progress.setVisible(c["progress_visible"])
+        self.plan_progress.setAccessibleName(t("generating"))
+
+        has_steps = bool(agent.steps)
+        self.plan_title.setText(t("plan_title"))
+        self.plan_title.setVisible(
+            has_steps and agent.phase in (agentview.PROPOSED, agentview.EXECUTING)
+        )
+        self.plan_list.setVisible(has_steps)
+        self.plan_list.setAccessibleName(t("plan_steps_name"))
+        self.plan_list.clear()
+        for step in agent.steps:
+            self.plan_list.addItem(
+                agentview.step_line(step, self.catalogue, self.lang, agent.current)
+            )
+        self.plan_details.setVisible(has_steps)
+        self.plan_details.button.setText(t("details"))
+        self.plan_details.button.setAccessibleName(t("details"))
+        self.plan_details_view.setPlainText(
+            runlog.technical_details(agent.plan) if has_steps else ""
+        )
+
+        self.approve_button.setText(t("approve"))
+        self.approve_button.setAccessibleName(t("approve"))
+        self.approve_button.setVisible(c["approve_visible"])
+        self.approve_button.setEnabled(c["approve_enabled"])
+        self.reject_button.setText(t("reject"))
+        self.reject_button.setAccessibleName(t("reject"))
+        self.reject_button.setVisible(c["reject_visible"])
+        self.reject_button.setEnabled(c["reject_enabled"])
+        stop_reason = t(c["stop_reason"]) if c["stop_reason"] else ""
+        self.plan_stop_button.setText(t("stop"))
+        self.plan_stop_button.setAccessibleName(
+            "%s, %s" % (t("stop"), stop_reason) if stop_reason else t("stop")
+        )
+        self.plan_stop_button.setVisible(c["stop_visible"])
+        self.plan_stop_button.setEnabled(c["stop_enabled"])
+        self.plan_reason.setText(stop_reason)
+        self.plan_reason.setVisible(bool(stop_reason))
+        self.plan_zone.setVisible(
+            bool(notice) or has_steps or c["progress_visible"] or c["approve_visible"]
+        )
+
+    def _input_changed(self):
+        """À chaque frappe, seul l'état d'Envoyer change : la zone plan n'est pas refaite."""
+        c = agentview.controls(
+            self.agent,
+            self.ready and self.banner is None,
+            self.running,
+            bool(self.input.toPlainText().strip()),
+            self.catalogue,
+        )
+        self.send_button.setEnabled(c["send_enabled"])
 
     def _render_commands(self):
         current = self.selected["id"] if self.selected else None
@@ -633,6 +839,36 @@ class CassiniPanel(QWidget):
 
     def _stop(self):
         self._actions.stop()
+
+    def _send(self):
+        text = self.input.toPlainText().strip()
+        c = agentview.controls(
+            self.agent, self.ready and self.banner is None, self.running, bool(text), self.catalogue
+        )
+        if not c["send_enabled"]:
+            return
+        if self._actions.propose(text):  # la demande part sans les blancs des bords
+            self._last_request = text
+            self.agent.generating()
+            self.input.clear()
+            self.render()
+            _announce(self.plan_notice, self.t("generating"))
+
+    def _approve(self):
+        plan_id = self.agent.plan_id
+        if self.agent.phase != agentview.PROPOSED or plan_id is None:
+            return
+        if self._actions.approve(plan_id):  # seul le plan_id repart (AD-5, AD-23)
+            self.agent.executing()
+            self.render()
+
+    def _reject(self):
+        plan_id = self.agent.plan_id
+        if self.agent.phase != agentview.PROPOSED or plan_id is None:
+            return
+        if self._actions.reject(plan_id):
+            self.agent.start_rejecting()
+            self.render()
 
     def _banner_action(self):
         action = BANNERS.get(self.banner, (None, None))[1]

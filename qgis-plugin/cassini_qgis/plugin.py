@@ -101,6 +101,17 @@ class CassiniPlugin:
         if self.client is not None:
             self.client.cancel_run()  # request.cancel, jamais la mort du noyau
 
+    def propose(self, text):
+        """Demande en langage naturel -> `plan.propose`. Rend True si elle est partie."""
+        return self.client is not None and self.client.propose(text)
+
+    def approve(self, plan_id):
+        """Validation de l'utilisateur -> `plan.execute` ; seul le `plan_id` repart."""
+        return self.client is not None and self.client.execute_plan(plan_id)
+
+    def reject(self, plan_id):
+        return self.client is not None and self.client.reject_plan(plan_id)
+
     def choose_core(self):
         path, _ = QFileDialog.getOpenFileName(
             self.iface.mainWindow(),
@@ -173,7 +184,7 @@ class CassiniPlugin:
             client.RUN_DONE,
             client.RUN_CANCELLED,
             client.RUN_FAILED,
-        ):
+        ) or kind in client.PLAN_EVENTS:
             self.panel.on_event(kind, payload)
 
     def _stop(self, *_):
