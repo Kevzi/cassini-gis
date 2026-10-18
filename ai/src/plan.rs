@@ -225,14 +225,13 @@ fn catalog_entry(spec: &CommandSpec) -> Value {
     json!({"id": spec.id, "description": spec.description_fr, "params": params})
 }
 
-/// Le message système : consignes, catalogue, inventaire et exemples.
-/// Tout y est du texte (jamais lu comme balise de structure).
-pub fn system_text(registry: &Registry, inventory: &Value) -> String {
+/// La partie fixe du message système : consignes, catalogue et exemples. Elle ne dépend
+/// que du registre : c'est elle que le moteur garde lue d'une demande à l'autre.
+fn fixed_system_text(registry: &Registry) -> String {
     let catalog: Vec<Value> = registry.specs().map(catalog_entry).collect();
     let mut text = format!(
-        "{SYSTEM}\n\nCATALOGUE :\n{}\n\nINVENTAIRE DU PROJET :\n{}\n\nEXEMPLES :\n",
-        Value::Array(catalog),
-        inventory
+        "{SYSTEM}\n\nCATALOGUE :\n{}\n\nEXEMPLES :\n",
+        Value::Array(catalog)
     );
     for (inv, sentence, plan) in examples() {
         text.push_str(&format!(
@@ -242,10 +241,25 @@ pub fn system_text(registry: &Registry, inventory: &Value) -> String {
     text
 }
 
-/// Les tours de la première tentative.
+/// La partie du message système qui suit la partie fixe : l'inventaire du projet.
+fn inventory_text(inventory: &Value) -> String {
+    format!("\nINVENTAIRE DU PROJET :\n{inventory}\n")
+}
+
+/// Le message système : consignes, catalogue, exemples, puis inventaire (la partie fixe
+/// d'abord, ce qui change ensuite). Tout y est du texte (jamais lu comme balise de structure).
+pub fn system_text(registry: &Registry, inventory: &Value) -> String {
+    fixed_system_text(registry) + &inventory_text(inventory)
+}
+
+/// Les tours de la première tentative. La fin de la partie fixe est un point d'instantané.
 fn first_turns(registry: &Registry, inventory: &Value, request: &str) -> Vec<Turn> {
     vec![
-        Turn::new(Role::System, system_text(registry, inventory)),
+        Turn::with_cached_head(
+            Role::System,
+            fixed_system_text(registry),
+            inventory_text(inventory),
+        ),
         Turn::new(Role::User, request),
     ]
 }
@@ -631,6 +645,29 @@ mod tests {
             text.contains("\"kind\":\"question\""),
             "un exemple de question"
         );
+    }
+
+    #[test]
+    fn the_fixed_head_is_the_same_for_two_inventories_and_the_inventory_comes_last() {
+        let other = json!({"layers": [{"layer_id": "routes_9", "name": "Routes"}]});
+        let a = first_turns(&registry(), &inventory(), "x");
+        let b = first_turns(&registry(), &other, "x");
+        assert_eq!(a[0].role, Role::System);
+        assert!(!a[0].cached_head.is_empty());
+        assert_eq!(a[0].cached_head, b[0].cached_head);
+        assert_ne!(a[0].text, b[0].text);
+        assert!(!a[0].cached_head.contains("gares_1"));
+        assert!(a[0].text.contains("gares_1"));
+        // Le tour se lit comme le message système entier.
+        let whole = system_text(&registry(), &inventory());
+        assert_eq!(format!("{}{}", a[0].cached_head, a[0].text), whole);
+        let examples = whole.find("EXEMPLES :").unwrap();
+        let inventory = whole.find("INVENTAIRE DU PROJET :").unwrap();
+        let catalog = whole.find("CATALOGUE :").unwrap();
+        assert!(catalog < examples && examples < inventory, "{whole}");
+        // La redemande garde la même tête.
+        let retry = retry_turns(a.clone(), "{}", &["écart".to_string()]);
+        assert_eq!(retry[0], a[0]);
     }
 
     #[test]

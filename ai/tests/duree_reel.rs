@@ -1,13 +1,15 @@
-//! Mesure de référence de la durée par phrase (ticket 11), avec le vrai modèle.
-//! Ignoré sans `CASSINI_TEST_MODEL` (et marqué `ignore` : il charge le modèle à chaque appel).
+//! Mesure de la durée par phrase (tickets 11 et 12), avec le vrai modèle.
+//! Ignoré sans `CASSINI_TEST_MODEL` (et marqué `ignore` : il charge le vrai modèle).
 //!
 //!   CASSINI_TEST_MODEL=<gguf> CASSINI_TEST_THREADS=8 \
 //!     cargo test -p cassini-ai --release -- --ignored --nocapture duree_reel
 //!
-//! Chaque phrase passe par `compose_plan`, comme dans le produit : modèle rechargé à chaque appel,
-//! redemande comprise. Les durées de chargement, de lecture de l'invite et d'écriture sont
-//! additionnées par phrase, avec le nombre d'appels au modèle. Sans `CASSINI_TEST_THREADS`, le
-//! nombre de fils est celui de llama.cpp par défaut. Avec `CASSINI_TEST_INVENTORY=<json>`, ce sont
+//! Chaque phrase passe par `compose_plan`, comme dans le produit, redemande comprise, et toutes
+//! dans le même processus : le modèle est chargé au premier appel puis gardé, et la lecture de la
+//! partie fixe de l'invite est reprise d'un instantané (ticket 12). Les durées de chargement, de
+//! lecture de l'invite et d'écriture sont additionnées par phrase, avec le nombre d'appels au
+//! modèle et les jetons repris d'un instantané. Sans `CASSINI_TEST_THREADS`, le nombre de fils est
+//! celui du produit par défaut (les cœurs physiques). Avec `CASSINI_TEST_INVENTORY=<json>`, ce sont
 //! les phrases A à E du scénario Villeneuve-le-Roi qui passent, sur cet inventaire (hors dépôt).
 //! Un appel qui échoue (par exemple `PromptTooLong` à la redemande, que `compose_plan` absorbe)
 //! n'est ni compté ni chronométré.
@@ -55,6 +57,7 @@ struct Row {
     load: Duration,
     prompt: Duration,
     prompt_tokens: usize,
+    cached_tokens: usize,
     write: Duration,
     written_tokens: usize,
 }
@@ -65,6 +68,7 @@ impl Row {
         self.load += t.load;
         self.prompt += t.prompt;
         self.prompt_tokens += t.prompt_tokens;
+        self.cached_tokens += t.cached_tokens;
         self.write += t.write;
         self.written_tokens += t.written_tokens;
     }
@@ -136,11 +140,14 @@ fn duree_reel_par_phrase() {
         };
     let registry = Registry::standard();
 
-    let fils = threads.map_or("défaut de llama.cpp".to_string(), |n| n.to_string());
+    let fils = threads.map_or_else(
+        || format!("défaut du produit ({})", cassini_ai::default_threads()),
+        |n| n.to_string(),
+    );
     println!("Fils : {fils}");
     println!();
-    println!("| id | appels | chargement (s) | lecture du prompt (s) | jetons lus | écriture (s) | jetons écrits | total (s) | issue |");
-    println!("|---|---|---|---|---|---|---|---|---|");
+    println!("| id | appels | chargement (s) | lecture du prompt (s) | jetons de l'invite | jetons repris | écriture (s) | jetons écrits | total (s) | issue |");
+    println!("|---|---|---|---|---|---|---|---|---|---|");
     let mut rows = Vec::new();
     for (id, text) in &sentences {
         let mut row = Row::default();
@@ -159,11 +166,12 @@ fn duree_reel_par_phrase() {
             compose_plan(&registry, &inventory, text, &mut generator)
         };
         println!(
-            "| {id} | {} | {} | {} | {} | {} | {} | {} | {} |",
+            "| {id} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
             row.calls,
             secs(row.load),
             secs(row.prompt),
             row.prompt_tokens,
+            row.cached_tokens,
             secs(row.write),
             row.written_tokens,
             secs(row.total()),
@@ -198,6 +206,7 @@ fn call(load: u64, prompt: u64, write: u64, read: usize, written: usize) -> Timi
         load: Duration::from_millis(load),
         prompt: Duration::from_millis(prompt),
         prompt_tokens: read,
+        cached_tokens: read / 2,
         write: Duration::from_millis(write),
         written_tokens: written,
     }
@@ -213,6 +222,7 @@ fn a_retry_adds_both_calls_to_the_row() {
     assert_eq!(row.prompt, Duration::from_millis(194000));
     assert_eq!(row.write, Duration::from_millis(24000));
     assert_eq!((row.prompt_tokens, row.written_tokens), (10430, 100));
+    assert_eq!(row.cached_tokens, 2565 + 2650);
     assert_eq!(row.total(), Duration::from_millis(226100));
     assert_eq!(secs(row.total()), "226,1");
 }

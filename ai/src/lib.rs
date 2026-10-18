@@ -1,11 +1,15 @@
 //! Couche IA locale : un modèle GGUF chargé **dans le processus** (AD-15).
 //! Aucun serveur, aucune socket, aucun réseau.
+//!
+//! Le modèle reste chargé dans le processus d'un appel à l'autre (ticket 12), et la lecture de
+//! la partie fixe de l'invite est gardée en mémoire sous forme d'instantanés de l'état du moteur.
+//! Rien n'est écrit sur disque, et rien d'une demande n'est gardé au-delà du tour système.
 
 use std::fmt;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
@@ -15,6 +19,7 @@ use llama_cpp_2::model::LlamaModel;
 use llama_cpp_2::sampling::LlamaSampler;
 use llama_cpp_2::token::LlamaToken;
 use llama_cpp_2::vocab::LlamaVocab;
+use llama_cpp_2::{LlamaStateSeqFlags, SeqState};
 
 pub mod plan;
 
@@ -84,17 +89,134 @@ impl AiError {
     }
 }
 
+/// Identité d'un fichier de modèle : chemin, taille et date de modification. Une autre clé
+/// fait décharger le modèle gardé et charger le nouveau.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ModelKey {
+    path: PathBuf,
+    len: u64,
+    modified: Option<SystemTime>,
+}
+
+/// Clé du fichier `model` ; un fichier illisible est un modèle introuvable.
+fn model_key(model: &Path) -> Result<ModelKey, AiError> {
+    let meta = std::fs::metadata(model).map_err(|_| AiError::ModelNotFound(model.to_path_buf()))?;
+    let path = std::fs::canonicalize(model).unwrap_or_else(|_| model.to_path_buf());
+    Ok(ModelKey {
+        path,
+        len: meta.len(),
+        modified: meta.modified().ok(),
+    })
+}
+
+/// Un instantané de l'état de la séquence, pris après les jetons `tokens`, au point
+/// d'instantané numéro `slot` de l'invite.
+struct Saved<S> {
+    slot: usize,
+    tokens: Vec<LlamaToken>,
+    state: S,
+}
+
+/// Les instantanés gardés : au plus un par point d'instantané.
+struct Checkpoints<S> {
+    saved: Vec<Saved<S>>,
+}
+
+impl<S> Default for Checkpoints<S> {
+    fn default() -> Self {
+        Checkpoints { saved: Vec::new() }
+    }
+}
+
+impl<S> Checkpoints<S> {
+    /// Le plus profond instantané dont les jetons sont un préfixe strict de `tokens`
+    /// (il reste toujours au moins un jeton à lire, pour avoir la suite de l'invite).
+    fn best(&self, tokens: &[LlamaToken]) -> Option<&Saved<S>> {
+        self.saved
+            .iter()
+            .filter(|s| s.tokens.len() < tokens.len() && tokens.starts_with(&s.tokens))
+            .max_by_key(|s| s.tokens.len())
+    }
+
+    /// Garde `state` pour le point `slot`, à la place de l'instantané qui l'occupait.
+    fn put(&mut self, slot: usize, tokens: Vec<LlamaToken>, state: S) {
+        self.saved.retain(|s| s.slot != slot);
+        self.saved.push(Saved {
+            slot,
+            tokens,
+            state,
+        });
+    }
+
+    fn clear(&mut self) {
+        self.saved.clear();
+    }
+
+    /// Reprend le plus profond instantané utilisable pour `tokens` par `set`, et rend le nombre
+    /// de jetons repris. Une reprise refusée fait oublier tous les instantanés : l'invite est
+    /// alors relue en entier (0 jeton repris).
+    fn restore<E>(
+        &mut self,
+        tokens: &[LlamaToken],
+        set: impl FnOnce(&S) -> Result<(), E>,
+    ) -> usize {
+        let Some(saved) = self.best(tokens) else {
+            return 0;
+        };
+        match set(&saved.state) {
+            Ok(()) => saved.tokens.len(),
+            Err(_) => {
+                self.clear();
+                0
+            }
+        }
+    }
+}
+
+/// Le modèle gardé, avec sa clé et ses instantanés.
+struct Loaded {
+    key: ModelKey,
+    model: LlamaModel,
+    checkpoints: Checkpoints<SeqState>,
+}
+
+/// Le moteur et le modèle gardé : un seul par processus, derrière un verrou.
+struct Engine {
+    backend: LlamaBackend,
+    loaded: Option<Loaded>,
+}
+
 /// Le moteur ne s'initialise qu'une fois par processus ; ses journaux sont coupés.
-fn backend() -> Result<&'static Mutex<LlamaBackend>, AiError> {
-    static BACKEND: OnceLock<Result<Mutex<LlamaBackend>, String>> = OnceLock::new();
-    BACKEND
+fn engine() -> Result<&'static Mutex<Engine>, AiError> {
+    static ENGINE: OnceLock<Result<Mutex<Engine>, String>> = OnceLock::new();
+    ENGINE
         .get_or_init(|| {
-            let mut b = LlamaBackend::init().map_err(|e| e.to_string())?;
-            b.void_logs();
-            Ok(Mutex::new(b))
+            let mut backend = LlamaBackend::init().map_err(|e| e.to_string())?;
+            backend.void_logs();
+            Ok(Mutex::new(Engine {
+                backend,
+                loaded: None,
+            }))
         })
         .as_ref()
         .map_err(|e| AiError::Backend(e.clone()))
+}
+
+/// Nombre de fils par défaut : les cœurs physiques de la machine, sans dépasser les fils que
+/// le processus peut utiliser (affinité, quotas), au moins un.
+pub fn default_threads() -> NonZeroU32 {
+    let usable = std::thread::available_parallelism().map_or(usize::MAX, |n| n.get());
+    u32::try_from(num_cpus::get_physical().min(usable))
+        .ok()
+        .and_then(NonZeroU32::new)
+        .unwrap_or(NonZeroU32::MIN)
+}
+
+/// Libère la valeur gardée `kept` si sa clé n'est pas `key` ; la garde sinon.
+fn drop_if_other_key<T, K: PartialEq>(kept: &mut Option<T>, key: &K, key_of: impl Fn(&T) -> &K) {
+    if kept.as_ref().is_some_and(|k| key_of(k) != key) {
+        *kept = None;
+    }
 }
 
 /// Début d'un tour, au format chatml de Qwen : balise, rôle, retour à la ligne.
@@ -135,9 +257,14 @@ impl Role {
 
 /// Un tour de conversation. Le texte est toujours lu comme du texte : jamais
 /// une balise de structure, même s'il contient `<|im_end|>`.
+///
+/// `cached_head` est une tête qui ne change pas d'une demande à l'autre (consignes,
+/// catalogue, exemples) : elle est lue avant `text`, et l'état du moteur après elle est
+/// gardé pour être repris. Le tour se lit comme `cached_head` suivi de `text`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Turn {
     pub role: Role,
+    pub cached_head: String,
     pub text: String,
 }
 
@@ -145,8 +272,22 @@ impl Turn {
     pub fn new(role: Role, text: impl Into<String>) -> Self {
         Turn {
             role,
+            cached_head: String::new(),
             text: text.into(),
         }
+    }
+
+    /// Un tour dont la tête `head` est mise en cache, suivie de `rest`.
+    pub fn with_cached_head(role: Role, head: impl Into<String>, rest: impl Into<String>) -> Self {
+        Turn {
+            role,
+            cached_head: head.into(),
+            text: rest.into(),
+        }
+    }
+
+    fn is_blank(&self) -> bool {
+        self.cached_head.trim().is_empty() && self.text.trim().is_empty()
     }
 }
 
@@ -158,23 +299,56 @@ pub struct Completion {
     pub truncated: bool,
 }
 
-/// Jetons de l'invite. Seule l'armature chatml est lue comme jetons spéciaux :
-/// le texte des tours (phrase, catalogue, inventaire) est du texte, jamais une
-/// balise de structure.
-fn chat_tokens(vocab: &LlamaVocab<'_>, turns: &[Turn]) -> Vec<LlamaToken> {
+/// Jetons de l'invite, avec les points d'instantané : la fin de chaque tête mise en cache
+/// et la fin de chaque tour système, en nombre de jetons depuis le début, croissants.
+/// Seule l'armature chatml est lue comme jetons spéciaux : le texte des tours (phrase,
+/// catalogue, inventaire) est du texte, jamais une balise de structure. La tête est découpée
+/// à part, pour que ses jetons ne dépendent pas de ce qui la suit.
+fn chat_tokens(vocab: &LlamaVocab<'_>, turns: &[Turn]) -> (Vec<LlamaToken>, Vec<usize>) {
+    chat_tokens_with(turns, |text, special| {
+        vocab.tokenize(text.as_bytes(), false, special)
+    })
+}
+
+/// Le calcul de `chat_tokens`, pour un découpage `tokenize(texte, spécial)` quelconque.
+fn chat_tokens_with<T>(
+    turns: &[Turn],
+    tokenize: impl Fn(&str, bool) -> Vec<T>,
+) -> (Vec<T>, Vec<usize>) {
     let mut tokens = Vec::new();
+    let mut points = Vec::new();
     for turn in turns {
-        tokens.extend(vocab.tokenize(turn_head(turn.role.name()).as_bytes(), false, true));
-        tokens.extend(vocab.tokenize(turn.text.as_bytes(), false, false));
-        tokens.extend(vocab.tokenize(TURN_END.as_bytes(), false, true));
+        tokens.extend(tokenize(&turn_head(turn.role.name()), true));
+        if !turn.cached_head.is_empty() {
+            tokens.extend(tokenize(&turn.cached_head, false));
+            points.push(tokens.len());
+        }
+        tokens.extend(tokenize(&turn.text, false));
+        tokens.extend(tokenize(TURN_END, true));
+        if turn.role == Role::System {
+            points.push(tokens.len());
+        }
     }
-    tokens.extend(vocab.tokenize(ASSISTANT_OPEN.as_bytes(), false, true));
-    tokens
+    tokens.extend(tokenize(ASSISTANT_OPEN, true));
+    points.dedup();
+    (tokens, points)
+}
+
+/// Bornes des segments lus à partir de `start` : les points d'instantané au-delà de
+/// `start`, puis la fin de l'invite. La découpe est la même avec ou sans instantané repris.
+fn segment_ends(points: &[usize], start: usize, len: usize) -> Vec<usize> {
+    let mut ends: Vec<usize> = points
+        .iter()
+        .copied()
+        .filter(|&p| p > start && p < len)
+        .collect();
+    ends.push(len);
+    ends
 }
 
 #[cfg(test)]
 fn prompt_tokens(vocab: &LlamaVocab<'_>, user: &str) -> Vec<LlamaToken> {
-    chat_tokens(vocab, &[Turn::new(Role::User, user)])
+    chat_tokens(vocab, &[Turn::new(Role::User, user)]).0
 }
 
 /// Charge le modèle `model` et rend le texte de sa réponse à `prompt`.
@@ -209,12 +383,16 @@ fn model_params() -> LlamaModelParams {
 /// Durées d'un appel au modèle, en temps réel (ticket 11 : mesure de référence).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Timings {
-    /// Chargement du modèle, création du contexte et découpage de l'invite en jetons.
+    /// Chargement du modèle (nul quand il est gardé), création du contexte et découpage de
+    /// l'invite en jetons.
     pub load: Duration,
-    /// Lecture de l'invite (décodage d'un bloc).
+    /// Lecture de l'invite : reprise d'un instantané, décodage des segments restants et prise
+    /// des nouveaux instantanés.
     pub prompt: Duration,
-    /// Nombre de jetons de l'invite.
+    /// Nombre de jetons de l'invite, repris compris.
     pub prompt_tokens: usize,
+    /// Jetons de l'invite repris d'un instantané, donc non relus.
+    pub cached_tokens: usize,
     /// Écriture de la réponse, jeton par jeton (grammaire comprise).
     pub write: Duration,
     /// Nombre de jetons écrits.
@@ -234,8 +412,13 @@ pub fn generate(
 }
 
 /// Même génération que `generate`, qui rend en plus les durées de ses trois phases.
-/// `threads` règle le nombre de fils du moteur (lecture et écriture) ; `None` garde
-/// celui de llama.cpp par défaut, comme `generate`.
+/// `threads` règle le nombre de fils du moteur (lecture et écriture) ; `None` prend le
+/// nombre de cœurs physiques (`default_threads`), comme `generate`.
+///
+/// Le modèle est gardé d'un appel à l'autre tant que son fichier ne change pas. L'invite est
+/// lue par segments, coupés aux points d'instantané ; après chaque point, l'état du moteur est
+/// gardé, et un appel suivant reprend le plus profond instantané dont les jetons sont un
+/// préfixe des siens.
 pub fn generate_measured(
     model: &Path,
     turns: &[Turn],
@@ -244,43 +427,82 @@ pub fn generate_measured(
     threads: Option<NonZeroU32>,
 ) -> Result<(Completion, Timings), AiError> {
     let start = Instant::now();
-    if turns.iter().all(|t| t.text.trim().is_empty()) {
+    if turns.iter().all(Turn::is_blank) {
         return Err(AiError::EmptyPrompt);
     }
     if !model.is_file() {
         return Err(AiError::ModelNotFound(model.to_path_buf()));
     }
-    let backend = backend()?.lock().unwrap_or_else(|e| e.into_inner());
-    let llama = LlamaModel::load_from_file(&backend, model, &model_params())
-        .map_err(|e| AiError::Load(e.to_string()))?;
-    let mut ctx_params = LlamaContextParams::default()
-        .with_n_ctx(NonZeroU32::new(N_CTX))
-        .with_n_batch(N_CTX);
-    if let Some(n) = threads {
-        let n = i32::try_from(n.get()).unwrap_or(i32::MAX);
-        ctx_params = ctx_params.with_n_threads(n).with_n_threads_batch(n);
+    let key = model_key(model)?;
+    let mut guard = engine()?.lock().unwrap_or_else(|e| e.into_inner());
+    let Engine { backend, loaded } = &mut *guard;
+    // Autre fichier : l'ancien modèle et ses instantanés sont libérés avant le chargement.
+    drop_if_other_key(loaded, &key, |l| &l.key);
+    if loaded.is_none() {
+        let llama = LlamaModel::load_from_file(backend, model, &model_params())
+            .map_err(|e| AiError::Load(e.to_string()))?;
+        *loaded = Some(Loaded {
+            key,
+            model: llama,
+            checkpoints: Checkpoints::default(),
+        });
     }
+    let Some(Loaded {
+        model: llama,
+        checkpoints,
+        ..
+    }) = loaded.as_mut()
+    else {
+        unreachable!("le modèle vient d'être chargé");
+    };
+    let n = i32::try_from(threads.unwrap_or_else(default_threads).get()).unwrap_or(i32::MAX);
+    let ctx_params = LlamaContextParams::default()
+        .with_n_ctx(NonZeroU32::new(N_CTX))
+        .with_n_batch(N_CTX)
+        .with_n_threads(n)
+        .with_n_threads_batch(n);
     let mut ctx = llama
-        .new_context(&backend, ctx_params)
+        .new_context(backend, ctx_params)
         .map_err(|e| AiError::Context(e.to_string()))?;
 
     let vocab = llama.vocab();
-    let tokens = chat_tokens(&vocab, turns);
+    let (tokens, points) = chat_tokens(&vocab, turns);
     if tokens.len() + max_new_tokens > N_CTX as usize {
         return Err(AiError::PromptTooLong);
     }
 
     let load = start.elapsed();
     let prompt_start = Instant::now();
+    // Reprise du plus profond instantané ; s'il est refusé, tout est oublié et relu.
+    let mut refused = false;
+    let cached_tokens = checkpoints.restore(&tokens, |state| {
+        let r = ctx.state_seq_set(state, 0);
+        refused = r.is_err();
+        r
+    });
+    if refused {
+        ctx.clear_kv_cache();
+    }
     let decode_err = |e: &dyn fmt::Display| AiError::Decode(e.to_string());
     let mut batch = LlamaBatch::new(tokens.len().max(512), 1);
     let last = tokens.len() - 1;
-    for (i, t) in tokens.iter().enumerate() {
-        batch
-            .add(*t, i as i32, &[0], i == last)
-            .map_err(|e| decode_err(&e))?;
+    let mut from = cached_tokens;
+    for to in segment_ends(&points, cached_tokens, tokens.len()) {
+        batch.clear();
+        for (i, t) in tokens.iter().enumerate().take(to).skip(from) {
+            batch
+                .add(*t, i as i32, &[0], i == last)
+                .map_err(|e| decode_err(&e))?;
+        }
+        ctx.decode(&mut batch).map_err(|e| decode_err(&e))?;
+        if let Some(slot) = points.iter().position(|&p| p == to) {
+            // Un instantané qui ne se prend pas n'empêche pas de répondre : il manquera, voilà tout.
+            if let Ok(state) = ctx.state_seq_get(0, LlamaStateSeqFlags::empty()) {
+                checkpoints.put(slot, tokens[..to].to_vec(), state);
+            }
+        }
+        from = to;
     }
-    ctx.decode(&mut batch).map_err(|e| decode_err(&e))?;
     let prompt = prompt_start.elapsed();
     let write_start = Instant::now();
 
@@ -289,8 +511,7 @@ pub fn generate_measured(
     let mut sampler = match grammar {
         None => LlamaSampler::greedy(),
         Some(g) => LlamaSampler::chain_simple([
-            LlamaSampler::grammar(&llama, g, "root")
-                .map_err(|e| AiError::Grammar(e.to_string()))?,
+            LlamaSampler::grammar(llama, g, "root").map_err(|e| AiError::Grammar(e.to_string()))?,
             LlamaSampler::greedy(),
         ]),
     };
@@ -321,6 +542,7 @@ pub fn generate_measured(
         load,
         prompt,
         prompt_tokens: tokens.len(),
+        cached_tokens,
         write: write_start.elapsed(),
         written_tokens,
     };
@@ -361,6 +583,161 @@ mod tests {
         let e = complete(&f, "Dis bonjour.").unwrap_err();
         let _ = std::fs::remove_file(&f);
         assert!(matches!(e, AiError::Load(_)), "{e:?}");
+        // Un chargement échoué ne laisse aucun modèle gardé.
+        let guard = engine().unwrap().lock().unwrap_or_else(|e| e.into_inner());
+        assert!(guard.loaded.is_none());
+    }
+
+    fn toks(ids: &[i32]) -> Vec<LlamaToken> {
+        ids.iter().copied().map(LlamaToken::new).collect()
+    }
+
+    #[test]
+    fn the_deepest_checkpoint_that_is_a_prefix_wins() {
+        let mut c: Checkpoints<&str> = Checkpoints::default();
+        assert!(c.best(&toks(&[1, 2, 3])).is_none(), "aucun instantané");
+        c.put(0, toks(&[1, 2]), "fixe");
+        c.put(1, toks(&[1, 2, 3, 4]), "système");
+        // Les deux sont des préfixes : le plus profond gagne.
+        assert_eq!(c.best(&toks(&[1, 2, 3, 4, 5])).unwrap().state, "système");
+        // L'inventaire a changé : seule la partie fixe est un préfixe.
+        assert_eq!(c.best(&toks(&[1, 2, 9, 9, 5])).unwrap().state, "fixe");
+        // Rien en commun.
+        assert!(c.best(&toks(&[7, 2, 3, 4, 5])).is_none());
+        // Un instantané qui couvre toute l'invite ne laisse rien à lire : il n'est pas repris.
+        assert_eq!(c.best(&toks(&[1, 2, 3, 4])).unwrap().state, "fixe");
+    }
+
+    #[test]
+    fn one_checkpoint_per_point_the_new_one_replaces_the_old() {
+        let mut c: Checkpoints<&str> = Checkpoints::default();
+        c.put(0, toks(&[1, 2]), "fixe");
+        c.put(1, toks(&[1, 2, 3]), "inventaire A");
+        c.put(1, toks(&[1, 2, 4]), "inventaire B");
+        assert_eq!(c.saved.len(), 2);
+        assert_eq!(c.best(&toks(&[1, 2, 3, 5])).unwrap().state, "fixe");
+        assert_eq!(c.best(&toks(&[1, 2, 4, 5])).unwrap().state, "inventaire B");
+        c.clear();
+        assert!(c.best(&toks(&[1, 2, 4, 5])).is_none());
+    }
+
+    #[test]
+    fn a_refused_restore_forgets_every_checkpoint_and_reads_everything() {
+        let mut c: Checkpoints<&str> = Checkpoints::default();
+        c.put(0, toks(&[1, 2]), "fixe");
+        c.put(1, toks(&[1, 2, 3]), "système");
+        let mut seen = None;
+        let n = c.restore(&toks(&[1, 2, 3, 4]), |s| {
+            seen = Some(*s);
+            Ok::<(), ()>(())
+        });
+        assert_eq!((n, seen), (3, Some("système")));
+        let n = c.restore(&toks(&[1, 2, 3, 4]), |_| Err("refusé"));
+        assert_eq!(n, 0, "reprise refusée : l'invite est relue en entier");
+        assert!(c.saved.is_empty(), "tous les instantanés sont oubliés");
+        assert_eq!(c.restore(&toks(&[1, 2, 3, 4]), |_| Ok::<(), ()>(())), 0);
+    }
+
+    #[test]
+    fn segments_are_cut_at_the_same_points_with_or_without_a_checkpoint() {
+        let points = [100, 130];
+        assert_eq!(segment_ends(&points, 0, 150), vec![100, 130, 150]);
+        assert_eq!(segment_ends(&points, 100, 150), vec![130, 150]);
+        assert_eq!(segment_ends(&points, 130, 150), vec![150]);
+        assert_eq!(segment_ends(&[], 0, 10), vec![10]);
+    }
+
+    #[test]
+    fn the_model_key_changes_with_path_size_and_date() {
+        let dir = std::env::temp_dir();
+        let pid = std::process::id();
+        let a = dir.join(format!("cassini-key-a-{pid}.gguf"));
+        let b = dir.join(format!("cassini-key-b-{pid}.gguf"));
+        std::fs::write(&a, b"abc").unwrap();
+        std::fs::write(&b, b"abc").unwrap();
+        let ka = model_key(&a).unwrap();
+        assert_eq!(model_key(&a).unwrap(), ka, "même fichier, même clé");
+        assert_ne!(model_key(&b).unwrap().path, ka.path, "autre chemin");
+        std::fs::write(&a, b"abcd").unwrap();
+        let ka2 = model_key(&a).unwrap();
+        assert_ne!(ka2.len, ka.len, "autre taille");
+        let f = std::fs::File::options().write(true).open(&a).unwrap();
+        let old = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        f.set_modified(old).unwrap();
+        drop(f);
+        let ka3 = model_key(&a).unwrap();
+        assert_eq!(ka3.modified, Some(old));
+        assert_ne!(ka3, ka2, "autre date");
+        let _ = std::fs::remove_file(&a);
+        let _ = std::fs::remove_file(&b);
+        assert!(matches!(model_key(&a), Err(AiError::ModelNotFound(_))));
+    }
+
+    #[test]
+    fn default_threads_is_physical_cores_bounded_by_usable_threads() {
+        let usable = std::thread::available_parallelism().map_or(usize::MAX, |n| n.get());
+        let want = num_cpus::get_physical().min(usable).max(1);
+        assert_eq!(default_threads().get() as usize, want);
+    }
+
+    #[test]
+    fn a_kept_model_is_dropped_only_for_another_key() {
+        let key = |p: &str| ModelKey {
+            path: PathBuf::from(p),
+            len: 3,
+            modified: None,
+        };
+        fn key_of<'a>(k: &'a (ModelKey, &str)) -> &'a ModelKey {
+            &k.0
+        }
+        let mut kept = Some((key("a.gguf"), "modèle"));
+        drop_if_other_key(&mut kept, &key("a.gguf"), key_of);
+        assert_eq!(
+            kept.as_ref().map(|k| k.1),
+            Some("modèle"),
+            "même clé : gardé"
+        );
+        drop_if_other_key(&mut kept, &key("b.gguf"), key_of);
+        assert!(kept.is_none(), "autre clé : libéré");
+        drop_if_other_key(&mut kept, &key("a.gguf"), key_of);
+        assert!(kept.is_none(), "rien de gardé : reste vide");
+    }
+
+    /// Faux découpage : un jeton par caractère.
+    fn chars(text: &str, _special: bool) -> Vec<char> {
+        text.chars().collect()
+    }
+
+    #[test]
+    fn snapshot_points_are_the_end_of_the_head_and_of_the_system_turn() {
+        let first = vec![
+            Turn::with_cached_head(Role::System, "CONSIGNES", "INVENTAIRE"),
+            Turn::new(Role::User, "demande"),
+        ];
+        let (tokens, points) = chat_tokens_with(&first, chars);
+        assert_eq!(points.len(), 2, "{points:?}");
+        assert!(points[0] < points[1] && points[1] < tokens.len());
+        let head_end = turn_head("system").chars().count() + "CONSIGNES".len();
+        assert_eq!(points[0], head_end);
+        assert_eq!(points[1], head_end + "INVENTAIRE".len() + TURN_END.len());
+        // La redemande n'ajoute aucun point : mêmes points que la première tentative.
+        let mut retry = first.clone();
+        retry.push(Turn::new(Role::Assistant, "{}"));
+        retry.push(Turn::new(Role::User, "écarts"));
+        let (retry_tokens, retry_points) = chat_tokens_with(&retry, chars);
+        assert_eq!(retry_points, points);
+        assert_eq!(&retry_tokens[..points[1]], &tokens[..points[1]]);
+        // Sans tête mise en cache ni tour système : aucun point.
+        assert!(chat_tokens_with(&[Turn::new(Role::User, "x")], chars)
+            .1
+            .is_empty());
+    }
+
+    #[test]
+    fn a_cached_head_counts_as_text() {
+        assert!(!Turn::with_cached_head(Role::System, "consignes", "").is_blank());
+        assert!(Turn::with_cached_head(Role::System, " ", " ").is_blank());
+        assert_eq!(Turn::new(Role::User, "x").cached_head, "");
     }
 
     #[test]
@@ -375,10 +752,13 @@ mod tests {
         let Some(path) = std::env::var_os("CASSINI_TEST_MODEL") else {
             return;
         };
-        let backend = backend().unwrap().lock().unwrap_or_else(|e| e.into_inner());
-        let llama =
-            LlamaModel::load_from_file(&backend, Path::new(&path), &LlamaModelParams::default())
-                .unwrap();
+        let guard = engine().unwrap().lock().unwrap_or_else(|e| e.into_inner());
+        let llama = LlamaModel::load_from_file(
+            &guard.backend,
+            Path::new(&path),
+            &LlamaModelParams::default(),
+        )
+        .unwrap();
         let vocab = llama.vocab();
         let ends = |user: &str| {
             prompt_tokens(&vocab, user)

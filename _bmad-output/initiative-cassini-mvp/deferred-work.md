@@ -174,6 +174,8 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-composer-un-plan-prompt-contraint-validation-sans-reparation-plan.md`
   summary: Eviter de recharger le GGUF a chaque tentative de composition.
   evidence: generate charge le modele et cree un contexte a chaque appel ; une redemande double le cout.
+  status: close, 2026-10-18, entrée 12 (`epic-agent-et-mcp/story-modele-charge-une-fois-et-partie-fixe-du-prompt-gardee-en-ca-plan.md`)
+  resolution: Le modèle est gardé dans le processus du noyau (clé : chemin, taille, date du fichier) et l'état du moteur après la partie fixe de l'invite et après le tour système est gardé en instantanés ; une redemande reprend l'instantané du tour système et ne relit que la sortie rejetée et les écarts. Seul le contexte est recréé à chaque appel.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-composer-un-plan-prompt-contraint-validation-sans-reparation-plan.md`
   summary: Tester le chemin de cassini plan sans --model (models.no_folder, ai.no_model).
   evidence: les tests CLI passent toujours --model absent.gguf.
@@ -192,3 +194,9 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-clarification-poser-une-question-au-lieu-de-deviner-plan.md`
   summary: Le modele ecrit parfois une question dans un refus (`reason` en forme de question) ; rien ne le detecte, l'utilisateur recoit `agent.refused` formule comme une question.
   evidence: Essais reels de la 5.5 (essai 3 : Q02, Q03, Q11 ; essai 2 : S21). Comportement du modele, a corriger par les exemples d'entrainement du 5.10 plutot que par une regle de reparation (AD-23).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-modele-charge-une-fois-et-partie-fixe-du-prompt-gardee-en-ca-plan.md`
+  summary: Precharger le modele et lire la partie fixe de l'invite au demarrage de cassini serve, pour que la premiere demande d'une session QGIS ne paie pas 173 s.
+  evidence: mesure 12, S01 a 173,4 s sur 4 coeurs (chargement 4,1 s, lecture 163,7 s) ; le budget de 30 s ne compte que des la 2e demande, le premier appel reste visible a l'utilisateur.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-modele-charge-une-fois-et-partie-fixe-du-prompt-gardee-en-ca-plan.md`
+  summary: Prouver avec le vrai modele que cassini serve garde le modele et l'instantane du tour systeme entre deux plan.propose avec l'inventaire envoye par QGIS.
+  evidence: le cache n'est verifie que par appels directs a generate_measured (cache_reel) ; le chemin serve est raisonne, pas teste. A porter par la suite de bout en bout (entree 9).

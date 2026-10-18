@@ -153,3 +153,80 @@ l'écriture, qui dépend surtout de la bande passante mémoire.
 
 Le relevé des phrases A à E du scénario Villeneuve-le-Roi, sur l'inventaire du projet de
 test (hors dépôt), est noté dans le plan du ticket 11.
+
+## Après le cache (ticket 12)
+
+Depuis le ticket 12, le modèle est **chargé une fois** et gardé dans le processus du noyau
+(il n'est rechargé que si le fichier change : chemin, taille ou date), et l'état du moteur
+est gardé en mémoire à deux points de l'invite : après la **partie fixe** (consignes,
+catalogue, exemples — l'inventaire vient désormais après eux) et après le **tour système**
+(partie fixe + inventaire). Une demande reprend le plus profond de ces instantanés dont
+les jetons sont un début des siens et ne lit que la suite. Rien n'est écrit sur disque, et
+rien d'une demande n'est gardé pour la suivante. Le nombre de fils par défaut suit
+désormais le nombre de cœurs physiques de la machine (crate `num_cpus`).
+
+Relevé du 2026-10-18, même poste, même modèle, même binaire sans CUDA, 4 fils sur 4 cœurs
+physiques (`0x55`), les 25 phrases dans **un même processus**. La colonne « jetons
+repris » compte les jetons de l'invite repris d'un instantané, donc non relus ; la
+« lecture du prompt » comprend la reprise de l'instantané et la prise des nouveaux.
+
+| id | appels | chargement (s) | lecture du prompt (s) | jetons de l'invite | jetons repris | écriture (s) | jetons écrits | total (s) | issue |
+|---|---|---|---|---|---|---|---|---|---|
+| S01 | 1 | 4,1 | 163,7 | 5128 | 0 | 5,6 | 23 | 173,4 | plan, 1 étape(s) |
+| S02 | 1 | 0,1 | 1,3 | 5130 | 5109 | 14,2 | 57 | 15,5 | plan, 1 étape(s) |
+| S03 | 1 | 0,1 | 1,3 | 5132 | 5109 | 3,8 | 17 | 5,1 | plan, 1 étape(s) |
+| S04 | 1 | 0,1 | 1,1 | 5130 | 5109 | 5,9 | 24 | 7,1 | refus |
+| S05 | 1 | 0,0 | 1,2 | 5131 | 5109 | 15,1 | 61 | 16,3 | refus |
+| S06 | 1 | 0,1 | 1,2 | 5132 | 5109 | 17,4 | 72 | 18,7 | plan, 1 étape(s) |
+| S07 | 1 | 0,1 | 1,3 | 5138 | 5109 | 16,8 | 69 | 18,2 | plan, 1 étape(s) |
+| S08 | 1 | 0,1 | 1,5 | 5142 | 5109 | 17,9 | 73 | 19,5 | plan, 1 étape(s) |
+| S09 | 1 | 0,1 | 1,1 | 5130 | 5109 | 7,5 | 31 | 8,6 | refus |
+| S10 | 1 | 0,1 | 1,0 | 5129 | 5109 | 5,1 | 23 | 6,2 | plan, 1 étape(s) |
+| S11 | 1 | 0,1 | 1,2 | 5134 | 5109 | 17,9 | 74 | 19,2 | plan, 1 étape(s) |
+| S12 | 1 | 0,1 | 1,0 | 5128 | 5109 | 18,0 | 74 | 19,1 | plan, 1 étape(s) |
+| S13 | 1 | 0,1 | 1,2 | 5134 | 5109 | 25,9 | 104 | 27,2 | plan, 1 étape(s) |
+| S14 | 1 | 0,1 | 1,9 | 5153 | 5109 | 25,6 | 105 | 27,6 | plan, 2 étape(s) |
+| S15 | 1 | 0,1 | 1,2 | 5134 | 5109 | 10,9 | 45 | 12,2 | refus |
+| S16 | 1 | 0,1 | 2,5 | 5170 | 5109 | 23,8 | 102 | 26,4 | plan, 1 étape(s) |
+| S17 | 1 | 0,1 | 2,2 | 5160 | 5109 | 59,1 | 247 | 61,4 | plan, 5 étape(s) |
+| S18 | 1 | 0,1 | 1,6 | 5144 | 5109 | 6,8 | 29 | 8,5 | refus |
+| S19 | 1 | 0,1 | 1,4 | 5139 | 5109 | 39,4 | 164 | 40,8 | plan, 3 étape(s) |
+| S20 | 1 | 0,1 | 2,1 | 5173 | 5109 | 7,0 | 30 | 9,2 | refus |
+| S21 | 1 | 0,1 | 2,6 | 5180 | 5109 | 8,3 | 35 | 11,0 | refus |
+| S22 | 1 | 0,1 | 1,1 | 5131 | 5109 | 5,8 | 25 | 7,0 | refus |
+| S23 | 1 | 0,1 | 1,2 | 5133 | 5109 | 8,6 | 36 | 9,8 | refus |
+| S24 | 1 | 0,1 | 2,5 | 5176 | 5109 | 9,6 | 40 | 12,1 | refus |
+| S25 | 1 | 0,1 | 2,4 | 5165 | 5109 | 8,6 | 34 | 11,0 | refus |
+
+**Premier appel, à part.** S01 paie seul le chargement (4,1 s) et la lecture complète de
+l'invite (163,7 s, contre 159,8 s au ticket 11 : la lecture est découpée en trois segments
+et deux instantanés d'environ 150 Mo sont pris au passage). Ce coût n'est payé qu'une fois
+par session dans un processus qui dure, `cassini serve` (le canal de l'extension). La
+commande ponctuelle `cassini plan` démarre un processus par demande : elle paie le
+chargement et la lecture complète à chaque appel, et ne gagne que sur sa redemande, qui
+reprend l'instantané du tour système.
+
+**Appels suivants (S02 à S25).** Moyennes : chargement 0,1 s, lecture du prompt 1,5 s,
+écriture 15,8 s, **total 17,4 s** (173,8 s au ticket 11). 5 109 jetons sur 5 130 environ
+sont repris : l'inventaire étant le même d'une phrase à l'autre, il ne reste à lire que la
+phrase et l'ouverture du tour assistant. 22 des 24 phrases passent sous 30 s. Quand
+l'inventaire change (une couche ouverte ou fermée), seule la partie fixe est reprise : sur
+l'inventaire de l'épreuve, environ 936 jetons (5 109 − 4 173, relevé de `cache_reel`) sont
+relus, soit environ 28 s au débit de lecture à 4 fils (environ 33 jetons/s). Estimation,
+non mesurée sur CPU.
+
+**Verdict S17 : 61,4 s, au-dessus des 30 s.** La lecture de son invite ne coûte plus que
+2,2 s ; il reste l'écriture des 247 jetons de son plan à cinq étapes, 59,1 s à environ
+4 jetons/s. Ce débit est borné par la mémoire, pas par le nombre de fils, et le cache n'y
+peut rien : il gagne la lecture, pas l'écriture. S19 (164 jetons écrits, 40,8 s) est dans
+le même cas. L'écart est porté par l'entrée 10 ; c'est la longueur du plan écrit qu'il
+faut réduire, ou le débit d'écriture qu'il faut augmenter.
+
+**Justesse.** Sur GPU (`--features cuda`), `plan_reel` donne 23/25 plans conformes avec
+l'ordre nouveau du message système (échecs S10 et S21). `cache_reel` vérifie sur le vrai
+modèle qu'à invite égale la sortie est identique avec ou sans instantané, que le 2ᵉ appel
+reprend 5 109 jetons sans recharger le modèle, et qu'un inventaire changé ne reprend que
+la partie fixe (4 173 jetons). Sur CPU, S05 et S10 n'ont pas la même issue qu'au ticket 11
+(S10 : un plan au lieu d'un refus) : l'invite a changé d'ordre (l'inventaire vient après
+les exemples) et la partie fixe est désormais découpée en jetons à part de l'inventaire, ce
+qui peut changer les jetons à la jonction. Ce n'est pas une mesure de justesse.
