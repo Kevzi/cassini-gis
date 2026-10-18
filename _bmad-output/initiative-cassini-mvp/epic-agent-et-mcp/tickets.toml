@@ -86,7 +86,7 @@ notes = [
 id = 12
 type = "story"
 title = "Modele charge une fois et partie fixe du prompt gardee en cache"
-description = "Garde le modele charge dans le processus du noyau d'une demande a l'autre et la partie fixe du prompt (consignes, catalogue, exemples) en cache, l'inventaire et la phrase passant apres elle, sans toucher a la validation ni au refus de reparer (AD-15, AD-23) ; regle le constat 6 reporte par 5.3 (le GGUF recharge a chaque tentative), et porte le rechargement quand le selecteur de modele de l'entree 6 change de modele ; s'appuie sur la mesure de l'entree 11."
+description = "Garde le modele charge dans le processus du noyau d'une demande a l'autre et la partie fixe du prompt (consignes, catalogue, exemples) en cache, l'inventaire et la phrase passant apres elle, sans toucher a la validation ni au refus de reparer (AD-15, AD-23) ; regle le constat 6 reporte par 5.3 (le GGUF recharge a chaque tentative), et porte le rechargement quand le selecteur de modele de l'entree 14 change de modele ; s'appuie sur la mesure de l'entree 11."
 verify = "Sur le 5800X bride a 4 coeurs, avec l'inventaire synthetique de l'epreuve, la phrase S17 (parcelles en zone U pres des gares et PDF) rend son plan en moins de 30 s des la deuxieme demande, et le taux de plans conformes de l'epreuve, mesure sur GPU, reste au moins de 22/25."
 covers = ["CAP-4"]
 after = [11]
@@ -98,14 +98,40 @@ notes = ["Assumption: le budget de 30 s se compte des la deuxieme demande ; le p
 [[entry]]
 id = 6
 type = "story"
-title = "Panneau : saisie en langage naturel, plan a valider, selecteur de modele"
-description = "Active la saisie du panneau, affiche le plan en zone lecture seule avec les boutons Valider et Refuser, la question de clarification, un indicateur de generation et le marqueur de l'etape en cours, et active le selecteur de modele, selon ux-panneau-cassini/EXPERIENCE.md ; aucune logique metier dans le Python."
+title = "Panneau : saisie en langage naturel, plan a valider"
+description = "Active la saisie du panneau, affiche le plan en zone lecture seule avec les boutons Valider et Refuser, la question de clarification, un indicateur de generation et le marqueur de l'etape en cours, selon ux-panneau-cassini/EXPERIENCE.md ; aucune logique metier dans le Python."
 verify = "Dans QGIS, la phrase de demo sur un projet ouvert affiche un plan, Valider l'execute etape par etape et le journal montre Terminee, et Refuser rend la main."
 covers = ["CAP-4"]
 after = [4, 5, "9.4", 12]
 hitl = true
 risk = "medium"
-notes = ["hitl : recette manuelle dans QGIS 3.44 par le proprietaire.", "Le changement de modele par le selecteur passe par le rechargement que porte l'entree 12."]
+notes = ["hitl : recette manuelle dans QGIS 3.44 par le proprietaire.", "Decision: 2026-10-18 — selecteur de modele sorti de cette entree par le proprietaire (plan trop long), porte par l'entree 14."]
+
+[[entry]]
+id = 13
+type = "story"
+title = "Journal explicite : ce que chaque etape a fait exactement"
+description = "Cliquer sur une ligne du journal de la session, ou sur une etape du plan, affiche ce que l'etape a fait, en une phrase claire propre a chaque commande : couche source, parametres, couche produite et son nombre d'entites, fichier ecrit. Les parametres bruts restent dans Details techniques, sans chemin absolu. Vaut pour les etapes d'un plan et pour les commandes du mode expert. Python seulement : le noyau rend deja les parametres du plan et le resultat de chaque etape. Une couche designee par step:k prend le nom rendu par l'etape k ; un identifiant de couche s'affiche par le nom de la couche dans QGIS (AD-9). Quand un plan s'arrete en erreur, les etapes deja finies montrent le resultat que l'extension a rendu pour leur ordre. Regle la NOTE FOR UX « Formulation exacte des resultats en langage clair par commande » de ux-panneau-cassini/EXPERIENCE.md."
+verify = "Dans QGIS, apres la phrase de demo validee, un clic sur chaque ligne du journal montre une phrase comme « Zone tampon de 500 m autour de Gares : nouvelle couche Tampon, 8 entites », sans code ni chemin absolu, en francais et en anglais ; un clic sur une etape du plan, puis sur une commande lancee en mode expert, montre la meme sorte de phrase."
+covers = ["CAP-4"]
+after = [6]
+hitl = true
+risk = "low"
+references = ["ux — _bmad-output/initiative-cassini-mvp/ux-panneau-cassini/EXPERIENCE.md, Component Patterns (Journal de session, Résultat) et Hors périmètre et trous"]
+notes = ["Demande du proprietaire (2026-10-18) : « faudrait un journal plus explicite qui montre quand on clique sur l'etape qu'est-ce qui a ete fait exactement parce que la c'est trop generique sur le panneau ».", "hitl : recette manuelle dans QGIS 3.44 par le proprietaire.", "Decision: 2026-10-18 — la phrase de chaque commande vit dans l'extension (affichage seul), avec repli sur la description du registre ; le noyau ne change pas.", "Decision: 2026-10-18 — le design ne fixe pas ou s'affiche le detail : le developpeur choisit (par defaut la zone Resultat) ; le proprietaire juge a la recette."]
+
+[[entry]]
+id = 14
+type = "story"
+title = "Selecteur de modele dans les Reglages du panneau"
+description = "Active la ligne Modele des Reglages : le panneau affiche la liste des modeles rendue par le noyau et transmet le nom du fichier choisi a chaque proposition ; le noyau recharge le modele quand la cle change (entree 12). Le noyau seul decouvre les modeles (esprit d'AD-15, ecart note ci-dessous) : nouvelle methode du canal agent.models, liste sans dossier ni chemin et non journalisee, ses chemins masques par le compositeur de cli ; plan.propose accepte model, un nom de fichier de cette liste, absent = premier ; erreur models.unknown. Choix memorise dans les reglages QGIS ; un choix memorise absent de la liste est oublie et le premier modele est pris. docs/canal-local.md decrit agent.models, le parametre model et models.unknown."
+verify = "Avec deux modeles dans le dossier des modeles, choisir le second dans Reglages puis envoyer une demande compose avec ce fichier, le choix survit a la reouverture de QGIS, et aucun chemin absolu n'apparait a l'ecran ni dans les messages du canal."
+covers = ["CAP-4"]
+after = [6, 12, 13]
+hitl = true
+risk = "high"
+references = ["ux — _bmad-output/initiative-cassini-mvp/ux-panneau-cassini/EXPERIENCE.md, Information Architecture (Réglages) et Hors périmètre et trous", "contrat — docs/canal-local.md, Plans de l'agent"]
+notes = ["Decision: 2026-10-18 — sorti de l'entree 6 par le proprietaire ; conception reprise de deferred-work.md (command.run model.list ecarte : il journalise et rend le dossier absolu).", "hitl : recette manuelle dans QGIS 3.44 par le proprietaire.", "Le design ne fixe pas la forme du selecteur : le developpeur choisit (liste deroulante, liste vide, modele inconnu) ; le proprietaire juge a la recette.", "Check hors criteres (risque high) : un essai de cassini serve sur le vrai modele change de modele entre deux plan.propose, constate le rechargement et l'absence de chemin absolu dans les messages du canal.", "Ordre : apres 13, qui touche aussi panel.py et texts.py.", "Decision: 2026-10-18 — ecart assume a AD-15 : la liste des modeles passe par la methode du canal agent.models, hors registre, et non par la commande model.list ; le noyau reste seul a decouvrir les modeles. Raison : par command.run, la liste serait journalisee et le rejeu divergerait des qu'un fichier de modele change. A reporter dans l'architecture (bmad-architecture)."]
 
 [[entry]]
 id = 7
@@ -126,7 +152,7 @@ title = "Refactor sweep"
 description = "Nettoie ce que l'epic a laisse : doublons entre ai/, serve.rs et le serveur MCP, constats de revue reportes dans deferred-work.md ; le perimetre est fixe au demarrage d'apres les plans et les constats."
 verify = "cargo test, clippy et fmt propres, les constats reportes de l'epic sont traites ou re-reportes avec leur raison."
 covers = []
-after = [1, 2, 3, 4, 5, 6, 7, 11, 12]
+after = [1, 2, 3, 4, 5, 6, 7, 11, 12, 13, 14]
 hitl = false
 risk = "low"
 
