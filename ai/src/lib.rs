@@ -5,6 +5,7 @@ use std::fmt;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
@@ -205,6 +206,21 @@ fn model_params() -> LlamaModelParams {
     LlamaModelParams::default()
 }
 
+/// Durées d'un appel au modèle, en temps réel (ticket 11 : mesure de référence).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Timings {
+    /// Chargement du modèle, création du contexte et découpage de l'invite en jetons.
+    pub load: Duration,
+    /// Lecture de l'invite (décodage d'un bloc).
+    pub prompt: Duration,
+    /// Nombre de jetons de l'invite.
+    pub prompt_tokens: usize,
+    /// Écriture de la réponse, jeton par jeton (grammaire comprise).
+    pub write: Duration,
+    /// Nombre de jetons écrits.
+    pub written_tokens: usize,
+}
+
 /// Génération générale : conversation `turns`, sortie contrainte par la
 /// grammaire GBNF `grammar` (racine `root`) si elle est donnée, réponse bornée
 /// à `max_new_tokens` jetons. Décodage glouton.
@@ -214,6 +230,20 @@ pub fn generate(
     grammar: Option<&str>,
     max_new_tokens: usize,
 ) -> Result<Completion, AiError> {
+    generate_measured(model, turns, grammar, max_new_tokens, None).map(|(c, _)| c)
+}
+
+/// Même génération que `generate`, qui rend en plus les durées de ses trois phases.
+/// `threads` règle le nombre de fils du moteur (lecture et écriture) ; `None` garde
+/// celui de llama.cpp par défaut, comme `generate`.
+pub fn generate_measured(
+    model: &Path,
+    turns: &[Turn],
+    grammar: Option<&str>,
+    max_new_tokens: usize,
+    threads: Option<NonZeroU32>,
+) -> Result<(Completion, Timings), AiError> {
+    let start = Instant::now();
     if turns.iter().all(|t| t.text.trim().is_empty()) {
         return Err(AiError::EmptyPrompt);
     }
@@ -223,9 +253,13 @@ pub fn generate(
     let backend = backend()?.lock().unwrap_or_else(|e| e.into_inner());
     let llama = LlamaModel::load_from_file(&backend, model, &model_params())
         .map_err(|e| AiError::Load(e.to_string()))?;
-    let ctx_params = LlamaContextParams::default()
+    let mut ctx_params = LlamaContextParams::default()
         .with_n_ctx(NonZeroU32::new(N_CTX))
         .with_n_batch(N_CTX);
+    if let Some(n) = threads {
+        let n = i32::try_from(n.get()).unwrap_or(i32::MAX);
+        ctx_params = ctx_params.with_n_threads(n).with_n_threads_batch(n);
+    }
     let mut ctx = llama
         .new_context(&backend, ctx_params)
         .map_err(|e| AiError::Context(e.to_string()))?;
@@ -236,6 +270,8 @@ pub fn generate(
         return Err(AiError::PromptTooLong);
     }
 
+    let load = start.elapsed();
+    let prompt_start = Instant::now();
     let decode_err = |e: &dyn fmt::Display| AiError::Decode(e.to_string());
     let mut batch = LlamaBatch::new(tokens.len().max(512), 1);
     let last = tokens.len() - 1;
@@ -245,6 +281,8 @@ pub fn generate(
             .map_err(|e| decode_err(&e))?;
     }
     ctx.decode(&mut batch).map_err(|e| decode_err(&e))?;
+    let prompt = prompt_start.elapsed();
+    let write_start = Instant::now();
 
     // `sample` fait déjà accepter le jeton choisi par la chaîne : l'accepter une
     // seconde fois ferait avancer la grammaire deux fois.
@@ -259,6 +297,7 @@ pub fn generate(
     let mut bytes: Vec<u8> = Vec::new();
     let mut pos = tokens.len() as i32;
     let mut finished = false;
+    let mut written_tokens = 0;
     for _ in 0..max_new_tokens {
         let token = sampler.sample(&ctx, batch.n_tokens() - 1);
         if vocab.is_eog(token) {
@@ -266,6 +305,7 @@ pub fn generate(
             break;
         }
         bytes.extend(vocab.token_to_piece(token, false, None));
+        written_tokens += 1;
         batch.clear();
         batch
             .add(token, pos, &[0], true)
@@ -273,10 +313,18 @@ pub fn generate(
         pos += 1;
         ctx.decode(&mut batch).map_err(|e| decode_err(&e))?;
     }
-    Ok(Completion {
+    let completion = Completion {
         text: String::from_utf8_lossy(&bytes).trim().to_string(),
         truncated: !finished,
-    })
+    };
+    let timings = Timings {
+        load,
+        prompt,
+        prompt_tokens: tokens.len(),
+        write: write_start.elapsed(),
+        written_tokens,
+    };
+    Ok((completion, timings))
 }
 
 #[cfg(test)]
@@ -294,6 +342,16 @@ mod tests {
         let e = complete(Path::new("absent.gguf"), "Dis bonjour.").unwrap_err();
         assert!(matches!(e, AiError::ModelNotFound(_)));
         assert_eq!(e.code(), "ai.model_not_found");
+    }
+
+    #[test]
+    fn missing_model_is_typed_on_the_measured_path_too() {
+        let turns = [Turn::new(Role::User, "Dis bonjour.")];
+        let threads = NonZeroU32::new(4);
+        let e = generate_measured(Path::new("absent.gguf"), &turns, None, 8, threads).unwrap_err();
+        assert!(matches!(e, AiError::ModelNotFound(_)));
+        let e = generate_measured(Path::new("absent.gguf"), &[], None, 8, None).unwrap_err();
+        assert_eq!(e, AiError::EmptyPrompt);
     }
 
     #[test]
