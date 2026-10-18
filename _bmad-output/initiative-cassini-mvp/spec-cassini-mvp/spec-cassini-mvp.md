@@ -71,7 +71,7 @@ CAP-2 a été retirée (préparation des données d'une commune par code INSEE) 
 
 - **CAP-14** — Catalogue étendu *(après le MVP)*
   - **intent:** l'utilisateur obtient en langage naturel une réponse à la plupart de ses questions SIG courantes, au-delà des cinq analyses de CAP-3 : comptage et somme pondérés dans un polygone, plus proche voisin et matrice de distances, plus court chemin sur réseau, statistiques par catégorie et longueurs, reprojection, conversion de format, atlas PDF, statistiques zonales d'un raster — moyenne, minimum et maximum des altitudes d'un MNT par polygone compris —, préparation d'un réseau d'itinéraires à partir de chemins bruts, et géocodage d'adresses sur un fichier de la Base Adresse Nationale qu'il apporte.
-  - **success:** chaque primitive retenue est une commande du registre **exécutée par le cadre de traitement de QGIS**, avec un test hors ligne, que l'agent compose dans un plan valide ; sur un jeu de phrases réelles d'utilisateurs, au moins 70 % des demandes sont couvertes (un plan valide ou une question justifiée), mesuré et consigné ; la recette hors ligne de CAP-1 reste verte.
+  - **success:** chaque primitive retenue est une commande du registre **exécutée par le cadre de traitement de QGIS** — sauf le géocodage, commande du noyau testée sans QGIS —, avec un test hors ligne, que l'agent compose dans un plan valide ; sur un jeu de phrases réelles d'utilisateurs, au moins 70 % des demandes sont couvertes (un plan valide ou une question justifiée), mesuré et consigné ; la recette hors ligne de CAP-1 reste verte.
 
 ## Constraints
 
@@ -98,6 +98,7 @@ CAP-2 a été retirée (préparation des données d'une commune par code INSEE) 
 - Chaque nouvelle commande est livrée avec au moins un test.
 - Tout seuil d'une commande de CAP-14 (distance réglementaire, pente, surface minimale) est un paramètre, jamais une constante.
 - Les fournisseurs de traitement sous GPL (GRASS, extensions tierces) ne s'exécutent que dans le processus de QGIS, jamais liés au noyau. Le géocodeur intégré de QGIS interroge un service en ligne : il est exclu.
+- Le géocodage est calculé par le noyau, l'appariement d'adresses étant un raisonnement et non un geste QGIS. Il ne lit que des CSV (adresses, Base Adresse Nationale) désignés par chemin relatif, écrit un seul CSV de résultat dans le dossier de travail sans toucher aux originaux, et ne reprojette pas : coordonnées `lon`/`lat` de la BAN en EPSG:4326, la couche étant ajoutée ensuite par QGIS.
 - Les statistiques zonales d'un raster, MNT compris, sont calculées par QGIS et non par le noyau : le calcul exige les polygones, que le canal ne transporte jamais. CAP-11 reste limitée à ses trois commandes de terrain.
 - Aucune API ni aucun schéma de données n'est supposé : tout est vérifié dans la documentation officielle de la source.
 - Une étape de la feuille de route ne commence pas avant que la précédente soit testée et commitée.
