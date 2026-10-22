@@ -20,7 +20,8 @@ use serde_json::json;
 use families::{Example, FAMILIES};
 use rng::Rng;
 
-/// Graine par défaut : celle du jeu versionné et du test de recouvrement.
+/// Graine par défaut : celle de la commande documentée et du test de recouvrement (le jeu
+/// engendré n'est pas versionné, il se régénère).
 pub const DEFAULT_SEED: u64 = 1;
 /// Nombre d'exemples par défaut.
 pub const DEFAULT_COUNT: usize = 5000;
@@ -57,7 +58,7 @@ pub fn validate(registry: &Registry, example: &Example) -> Result<(), String> {
         .map_err(|e| format!("{} (étape {}) : {}", e.code, e.step, e.message))?;
     match &plan {
         Plan::Question { question } => {
-            if question.trim().is_empty() || !question.contains('?') {
+            if question.trim().is_empty() || !question.trim_end().ends_with('?') {
                 return Err("question vide ou sans point d'interrogation".into());
             }
         }
@@ -160,11 +161,10 @@ pub fn generate(seed: u64, count: usize) -> (Vec<Example>, Summary) {
     (out, summary)
 }
 
-/// Un enregistrement JSON sur une ligne : `{family, inventory, request, expected}`.
-/// `family` est une étiquette de suivi ; ni le prompt ni le modèle ne la voient.
+/// Un enregistrement JSON sur une ligne : `{inventory, request, expected}`. La famille reste
+/// dans `Example` et le résumé, pas dans le fichier.
 pub fn to_line(example: &Example) -> String {
     json!({
-        "family": example.family,
         "inventory": example.inventory,
         "request": example.request,
         "expected": example.expected,
@@ -215,18 +215,18 @@ mod tests {
 
     #[test]
     fn the_same_seed_gives_the_same_file_and_another_seed_another() {
-        let (a, _) = generate(DEFAULT_SEED, 400);
-        let (b, _) = generate(DEFAULT_SEED, 400);
+        let (a, _) = generate(DEFAULT_SEED, DEFAULT_COUNT);
+        let (b, _) = generate(DEFAULT_SEED, DEFAULT_COUNT);
         assert_eq!(to_jsonl(&a), to_jsonl(&b));
-        let (c, _) = generate(DEFAULT_SEED + 1, 400);
+        let (c, _) = generate(DEFAULT_SEED + 1, DEFAULT_COUNT);
         assert_ne!(to_jsonl(&a), to_jsonl(&c));
     }
 
     #[test]
     fn every_written_example_passes_check_plan_again() {
         let registry = Registry::standard();
-        let (examples, summary) = generate(7, 1500);
-        assert_eq!(examples.len(), 1500, "{:?}", summary.families);
+        let (examples, summary) = generate(DEFAULT_SEED, DEFAULT_COUNT);
+        assert_eq!(examples.len(), DEFAULT_COUNT, "{:?}", summary.families);
         for line in to_jsonl(&examples).lines() {
             let record: Value = serde_json::from_str(line).unwrap();
             let plan: Plan = serde_json::from_value(record["expected"].clone()).unwrap();

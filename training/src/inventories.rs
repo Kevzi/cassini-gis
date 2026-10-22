@@ -254,16 +254,7 @@ pub static THEMES: &[Theme] = &[
                 names: &["typezone", "type_zone"],
                 label: "de type de zone",
                 kind: Kind::Text {
-                    values: &[
-                        v("U"),
-                        v("UA"),
-                        v("UB"),
-                        v("AUc"),
-                        v("AUs"),
-                        v("A"),
-                        v("N"),
-                        v("Nh"),
-                    ],
+                    values: &[v("U"), v("AUc"), v("AUs"), v("A"), v("N"), v("Nh")],
                     phrases: &["de type {v}", "classées {v}"],
                 },
             },

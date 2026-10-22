@@ -219,3 +219,27 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md`
   summary: Mettre le code au niveau d'AD-24, AD-25, AD-27 et AD-28 avant la premiere primitive de l'epic 10 : validation par le noyau du resultat recu (`qgis.bad_result`) ; annulabilite declaree seulement si chaque algorithme porte CanCancel, avec test table/registre ; version de chaine par ligne et version de QGIS annoncees a `session.hello` et journalisees ; annonce apres le chargement des fournisseurs ; constantes de `analysis.isochrone` (vitesses, accrochage 100 m) passees en parametres du contrat de reseau.
   evidence: gate de revue E1 du 2026-10-18 (reviews/review-grille-e1.md H1-H4, M2, M4 ; review-adverse-e1.md) ; aujourd'hui toutes les commandes deleguees sont `cancellable(true)` et le noyau ne valide pas les resultats.
+- source_plan: none
+  summary: 5.10, tache 2 — entrainement reproductible : une commande lance un LoRA ou QLoRA tenant dans 8 Go de VRAM sur un modele de base Apache-2.0 ou MIT de 1,5 a 4 milliards de parametres, sur le jeu engendre, et fusionne en GGUF.
+  evidence: decoupe du ticket 5.10 par le proprietaire (2026-10-22, bmad-build) : quatre livrables fusionnables a part ; celui-ci attend le jeu de donnees (tache 1) et des dependances Python dont la licence est a valider.
+- source_plan: none
+  summary: 5.10, tache 3 — branchement du modele ajuste dans `ai/` : prompt court de quelques centaines de jetons, chargement d'une base avec un adaptateur LoRA, selon le selecteur de 5.14.
+  evidence: decoupe du ticket 5.10 par le proprietaire (2026-10-22, bmad-build) ; independant de l'entrainement cote code, utile seulement une fois un modele ajuste disponible.
+- source_plan: none
+  summary: 5.10, tache 4 — mesures et demo : score du modele ajuste sur le jeu tenu a l'ecart au moins egal au 9B, seuil strict de clarification (>= 9/12, <= 1 fausse question), < 30 s sur le 5800X bride a 4 coeurs, demo de bout en bout dans QGIS avec la phrase de demo exacte.
+  evidence: decoupe du ticket 5.10 par le proprietaire (2026-10-22, bmad-build) ; ferme le ticket, attend les taches 1 a 3.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-modele-de-composition-ajuste-et-plus-petit-fine-tuning-plan.md`
+  summary: Avant l'entrainement (5.10 tache 2) : l'inventaire envoye par l'extension (`qgis-plugin/cassini_qgis/inventory.py` l.211) porte le nom et le type des champs mais pas leurs valeurs, alors que le jeu engendre les porte ; trancher : ajouter les valeurs distinctes a l'inventaire du produit, ou engendrer aussi des inventaires sans valeurs.
+  evidence: constat de la tache 1 (2026-10-22) ; un modele entraine sur des valeurs qu'il ne verra pas en production apprendrait un appui absent (ex. typezone U).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-modele-de-composition-ajuste-et-plus-petit-fine-tuning-plan.md`
+  summary: Le generateur ne met jamais deux couches quasi synonymes cote a cote (« Routes » et « Reseau de voirie ») alors que le jeu tenu a l'ecart et les vrais projets le font ; ajouter une famille ou la phrase tranche, ou ou la sortie attendue est une question.
+  evidence: relecture blind-hunter de la tache 1 ; garde volontaire dans `training/src/inventories.rs` (groupes exclusifs).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-modele-de-composition-ajuste-et-plus-petit-fine-tuning-plan.md`
+  summary: `ai/tests/ecart_reel.rs` : sortir la decision par phrase dans une fonction testee sans modele (refus en Err(Refused), titre seul different, titre absent, question attendue mais plan rendu), et imprimer pour chaque echec une forme de l'ecart (commande, ordre, valeur) sans le texte de la phrase.
+  evidence: relecture verification-gap et blind-hunter ; a fermer quand la tache 4 reutilise le notateur pour le modele ajuste.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-modele-de-composition-ajuste-et-plus-petit-fine-tuning-plan.md`
+  summary: La commande `cassini-training` n'a aucun test d'integration (deux executions identiques, autre graine differente, code non nul sans --out).
+  evidence: relecture verification-gap ; verifie a la main par cmp ; a ajouter avant que la tache 2 depende du fichier.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-modele-de-composition-ajuste-et-plus-petit-fine-tuning-plan.md`
+  summary: CLAUDE.md §9 (structure du depot) ne cite pas le nouveau crate `/training` (chaine d'entrainement) ; a ajouter par le proprietaire.
+  evidence: relecture quick ; un fichier de contexte d'agent ne se modifie pas dans un build.

@@ -180,7 +180,7 @@ fn refusal(text: &str) -> Value {
 // -- texte -----------------------------------------------------------------
 
 /// Communes citées comme simple contexte (« à Orly ») : sans effet sur le plan.
-const COMMUNES: &[&str] = &[
+pub const COMMUNES: &[&str] = &[
     "Orly",
     "Ablon-sur-Seine",
     "Choisy-le-Roi",
@@ -248,6 +248,15 @@ const USER_TITLES: &[&str] = &[
 
 fn pick_str(rng: &mut Rng, items: &[&'static str]) -> &'static str {
     items[rng.below(items.len())]
+}
+
+/// « de Thiais », mais « d'Annecy », « d'Orly ».
+fn de_place(name: &str) -> String {
+    if name.starts_with(['A', 'E', 'É', 'I', 'O', 'U', 'a', 'e', 'é', 'i', 'o', 'u']) {
+        format!("d'{name}")
+    } else {
+        format!("de {name}")
+    }
 }
 
 fn cap(s: &str) -> String {
@@ -664,7 +673,12 @@ fn filtre_different(rng: &mut Rng) -> Option<Example> {
     let phrase = fill(pick_str(rng, phrases), &t.noun, val.v);
     let np = match rng.below(3) {
         0 => format!("les {} qui ne sont pas {phrase}", t.noun.pl),
-        1 => format!("toutes les {} sauf {} {phrase}", t.noun.pl, t.noun.ceux()),
+        1 => format!(
+            "{} les {} sauf {} {phrase}",
+            if t.noun.fem { "toutes" } else { "tous" },
+            t.noun.pl,
+            t.noun.ceux()
+        ),
         _ => format!(
             "les {} dont le champ {} est différent de {}",
             t.noun.pl, field.name, val.v
@@ -1420,18 +1434,9 @@ fn ouverture(rng: &mut Rng) -> Option<Example> {
         0 => format!("Ouvre le fichier {path}"),
         1 => format!("Ajoute {path} au projet"),
         2 => format!("Charge la couche {path}"),
-        3 => format!(
-            "Ajoute la couche {} au projet",
-            t.of_none
-                .replacen("de ", "des ", 1)
-                .replacen("d'", "des ", 1)
-        ),
-        4 => format!(
-            "Ouvre le fichier {}",
-            t.of_none
-                .replacen("de ", "des ", 1)
-                .replacen("d'", "des ", 1)
-        ),
+        // « la couche des captages », « la couche du zonage » : forme déjà accordée.
+        3 => format!("Ajoute {} au projet", t.the_layer),
+        4 => format!("Ouvre le fichier de {}", t.the_layer),
         _ => format!("Importe {path}"),
     };
     let request = finish(rng, &body, false, false);
@@ -1514,7 +1519,7 @@ fn missing_layer_question(rng: &mut Rng, of_none: &str) -> String {
             "Le projet ne contient pas de couche {of_none} : quelle couche faut-il prendre ?"
         ),
         _ => format!(
-            "Quelle couche faut-il utiliser ? Aucune couche {of_none} n'est dans le projet."
+            "Aucune couche {of_none} n'est dans le projet. Quelle couche faut-il utiliser ?"
         ),
     }
 }
@@ -1608,7 +1613,8 @@ fn question_champ_absent(rng: &mut Rng) -> Option<Example> {
     if rng.chance(1, 5) {
         // « Constructible » avec un zonage sans champ de type de zone.
         b.add(rng, "parcelles", &[], &[], &[]);
-        let z = b.add(rng, "zonage", &[], &["zone"], &[]);
+        // Sans libellé non plus : « Zone urbaine » contredirait la question.
+        let z = b.add(rng, "zonage", &[], &["zone", "libelle"], &[]);
         let np = format!(
             "les parcelles {}",
             rng.pick(&[
@@ -1697,7 +1703,7 @@ fn refus(rng: &mut Rng) -> Option<Example> {
         9 => (format!("Renomme la couche « {name} » en « {} »", rng.pick(USER_TITLES)), "Aucune commande du catalogue ne renomme une couche."),
         10 => (format!("Mets les {pl} en rouge sur la carte"), "Aucune commande du catalogue ne change le style d'une couche."),
         11 => (format!("Calcule l'itinéraire le plus court entre deux {pl}"), "Aucune commande du catalogue ne calcule d'itinéraire."),
-        12 => (format!("Télécharge le cadastre de {commune}"), "Aucune commande du catalogue ne télécharge de données : le projet utilise les fichiers de l'utilisateur."),
+        12 => (format!("Télécharge le cadastre {}", de_place(commune)), "Aucune commande du catalogue ne télécharge de données : le projet utilise les fichiers de l'utilisateur."),
         13 => ("Exporte la carte en PDF au format A3".to_string(), "L'export PDF du catalogue produit seulement une page A4 paysage."),
         14 => ("Publie la carte sur internet".to_string(), "Aucune commande du catalogue ne publie de carte en ligne."),
         15 => (format!("Modifie la valeur d'un champ pour toutes les {pl}"), "Aucune commande du catalogue ne modifie les attributs d'une couche."),

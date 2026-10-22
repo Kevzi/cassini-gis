@@ -72,3 +72,7 @@ skills-lock.json
 
 # Notes privees locales (jamais versionnees, voir CLAUDE.md §2.9)
 CLAUDE.local.md
+
+# --- Jeu d'exemples d'entrainement (ticket 5.10) : regenere, jamais versionne ---
+exemples.jsonl
+training/**/*.jsonl
