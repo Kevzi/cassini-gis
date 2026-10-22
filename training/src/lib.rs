@@ -5,10 +5,12 @@
 //! synthétique (`inventories`), puis **gardé seulement s'il passe `Registry::check_plan`** du
 //! registre réel, et quelques gardes de plus (couches citées présentes dans l'inventaire,
 //! fichier ouvert parmi les fichiers non chargés, question et refus non vides). Les
-//! enregistrements sont structurés : la mise en forme en prompt appartient aux tâches 2 et 3.
+//! enregistrements sont structurés ; leur mise en forme en prompt court (tâche 2) vit dans
+//! `prompt`, seul endroit qui décide du texte vu par le modèle.
 
 pub mod families;
 pub mod inventories;
+pub mod prompt;
 pub mod rng;
 
 use std::collections::{BTreeMap, HashSet};
@@ -177,6 +179,28 @@ pub fn to_jsonl(examples: &[Example]) -> String {
     let mut text = String::new();
     for e in examples {
         text.push_str(&to_line(e));
+        text.push('\n');
+    }
+    text
+}
+
+/// Un enregistrement de prompt sur une ligne : `{prompt, completion}`, mis en forme par
+/// `prompt` (tâche 2). C'est ce que lit la chaîne d'entraînement, sans rien reformater.
+pub fn to_chat_line(example: &Example) -> String {
+    let plan: Plan = serde_json::from_value(example.expected.clone())
+        .expect("un exemple écrit a passé `validate`, son plan se relit");
+    json!({
+        "prompt": prompt::render_prompt(&example.inventory, &example.request),
+        "completion": prompt::completion(&plan),
+    })
+    .to_string()
+}
+
+/// Le fichier JSONL de prompts entier, une ligne par exemple, fin de ligne `\n`.
+pub fn to_chat_jsonl(examples: &[Example]) -> String {
+    let mut text = String::new();
+    for e in examples {
+        text.push_str(&to_chat_line(e));
         text.push('\n');
     }
     text

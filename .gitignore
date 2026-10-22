@@ -65,6 +65,8 @@ desktop.ini
 
 __pycache__/
 *.pyc
+# Environnement de la chaine d'entrainement (5.10), recree par `uv` depuis uv.lock.
+.venv/
 
 # Skills BMad installes en local (pas du code Cassini)
 .claude/

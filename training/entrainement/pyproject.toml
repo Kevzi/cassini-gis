@@ -1,0 +1,29 @@
+# Chaîne d'entraînement du modèle de composition (ticket 5.10, tâche 2).
+# Jamais publiée, jamais dans le noyau : elle sort des poids hors du dépôt.
+# Versions épinglées à l'identique, verrouillées par `uv.lock` (reproductible).
+# Licences : torch BSD-3, transformers, peft, accelerate, huggingface-hub Apache-2.0, bitsandbytes MIT,
+# numpy BSD-3, safetensors Apache-2.0, pyyaml MIT, sentencepiece Apache-2.0,
+# protobuf BSD-3. Les scripts de conversion viennent de llama.cpp (MIT), cloné à un
+# commit fixe par `pipeline.py`, avec son paquet `gguf-py`.
+[project]
+name = "cassini-entrainement"
+version = "0.1.0"
+description = "Entrainement reproductible du modele de composition de Cassini (QLoRA, fusion en GGUF)"
+requires-python = "==3.12.*"
+license = "Apache-2.0"
+dependencies = [
+    "torch==2.14.1",
+    "transformers==5.20.2",
+    "peft==0.21.2",
+    "huggingface-hub==2.2.0",
+    "accelerate==1.15.0",
+    "bitsandbytes==0.50.2",
+    "numpy==2.5.4",
+    "safetensors==0.8.0",
+    "pyyaml==6.0.3",
+    "sentencepiece==0.2.2",
+    "protobuf==7.36.2",
+]
+
+[tool.uv]
+package = false

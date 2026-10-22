@@ -1,10 +1,11 @@
 # Entraînement du modèle de composition
 
 Le ticket 5.10 ajuste un petit modèle pour qu'il transforme une phrase française en plan
-de commandes du registre. Ce document décrit la première des quatre tâches : le jeu
-d'exemples engendré, le jeu tenu à l'écart qui le mesure, et le score de référence.
-L'entraînement lui-même, la fusion en GGUF et la mesure du modèle ajusté sont les
-tâches 2 à 4 (voir `deferred-work.md`).
+de commandes du registre. Ce document décrit les deux premières des quatre tâches : le jeu
+d'exemples engendré, le jeu tenu à l'écart qui le mesure et le score de référence
+(tâche 1), puis l'entraînement reproductible et la fusion en GGUF (tâche 2, en fin de
+document). Le branchement dans `ai/` et la mesure du modèle ajusté sont les tâches 3 et 4
+(voir `deferred-work.md`).
 
 ## Régénérer le jeu d'exemples
 
@@ -35,7 +36,8 @@ Chaque ligne du fichier est un enregistrement JSON :
   `{"kind":"calls","calls":[...]}`, `{"kind":"question","question":"..."}` ou
   `{"kind":"refusal","reason":"..."}`.
 
-Aucun texte de prompt n'est écrit : la mise en forme appartient aux tâches suivantes.
+Ce format structuré n'écrit aucun texte de prompt. Le format `--format chat` de la
+tâche 2 (plus bas) écrit, lui, le texte exact vu par le modèle.
 
 ## Comment un exemple est fait
 
@@ -148,3 +150,129 @@ Les sept plans manqués ont tous rendu un plan (jamais une question ni un refus)
 porte sur le contenu du plan. La question manquée a rendu un refus, le défaut déjà noté
 dans `deferred-work.md` (une couche absente lue comme une opération impossible). C'est
 la barre que le modèle ajusté devra atteindre ou dépasser.
+
+## Tâche 2 : entraînement reproductible et fusion en GGUF
+
+### Le prompt court
+
+Le modèle ajusté ne voit plus le long prompt de `ai/src/plan.rs` (catalogue et exemples) :
+il voit un message système de quelques phrases (rôle, trois formes de réponse, chaînage,
+question plutôt que deviner, refus seulement si aucune commande ne sait faire), puis
+l'inventaire du projet et la demande, au format chatml de Qwen, réflexion coupée.
+
+Ce texte est écrit **à un seul endroit** : `training/src/prompt.rs` (`render_prompt`,
+`completion`). La commande l'écrit dans le jeu :
+
+```
+cargo run -p cassini-training --release -- --format chat --seed 1 --count 5000 --out entrainement.jsonl
+```
+
+Chaque ligne est `{"prompt": "...", "completion": "..."}` : `prompt` est le texte exact vu
+par le modèle, jusqu'à l'ouverture du tour assistant comprise ; `completion` est le plan en
+JSON compact, `kind` en tête, suivi de `<|im_end|>`. La chaîne Python lit ces deux champs
+tels quels et ne met rien en forme : un écart d'un espace entre deux mises en forme
+apprendrait au modèle un format qu'il ne verrait jamais. La tâche 3 fera lire ce même
+module à `ai/`.
+
+### Une commande pour ré-entraîner
+
+Sous WSL, avec le GPU de 8 Go, depuis la racine du dépôt, dans un dossier vide **hors du
+dépôt** :
+
+```
+UV_PROJECT_ENVIRONMENT=~/.cache/cassini-entrainement/venv \
+  uv run --project training/entrainement python training/entrainement/pipeline.py --sortie ~/cassini-entrainement/5-10-t2
+```
+
+(`UV_PROJECT_ENVIRONMENT` est facultatif : il place l'environnement Python sur le disque de
+WSL plutôt que dans `training/entrainement/.venv`, sur le disque Windows, plus lent.)
+
+La commande, sans intervention :
+
+1. vérifie le GPU **avant tout téléchargement** et avant de toucher au dossier de sortie
+   (au moins 7 Gio, sinon arrêt avec message) ;
+2. refuse un dossier de sortie déjà rempli (rien n'est écrasé ; `--reprendre` finit un
+   entraînement commencé en sautant les étapes déjà faites) ou situé dans le dépôt ;
+3. engendre les jeux par `cassini-training --format chat` : graine 1 pour l'entraînement
+   (5 000 exemples), graine 2 pour la validation (300), dont elle retire les prompts déjà
+   vus à l'entraînement ;
+4. prend la base `Qwen/Qwen3.5-4B` (Apache-2.0) à la révision épinglée
+   `851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a`, dans le cache de Hugging Face ;
+5. écarte (et compte) tout exemple de plus de 2 048 jetons, sans jamais le tronquer ;
+6. entraîne un adaptateur QLoRA : base en nf4, gradient checkpointing, graine fixe, perte
+   sur la réponse seule, projections du modèle de langue seulement. La graine fixe rend les
+   **jeux** reproductibles à l'octet, pas les **poids** : bitsandbytes et l'implémentation de
+   référence de l'attention linéaire ne sont pas déterministes sur GPU ;
+7. mesure le score exact sur la validation (`scoring.py`), en décodage glouton : règle de
+   `ai/tests/ecart_reel.rs`, avec une exigence de plus, une question ou un refus doit avoir
+   un texte non vide ;
+8. clone llama.cpp au commit `d81235049384534c167caea52b85a694f6103d14` (celui que lie
+   `cassini-ai` par llama-cpp-sys-2 0.1.160) dans `~/.cache/cassini-entrainement/`, construit
+   ses outils sur CPU, convertit la base et l'adaptateur en GGUF, fusionne, puis quantifie ;
+   chaque fichier s'écrit sous un nom temporaire et ne prend son nom final qu'une fois
+   complet. Un test vérifie que `Cargo.lock` tire toujours llama-cpp-sys-2 0.1.160 ;
+9. essaie, avec `llama-completion` (l'outil de llama.cpp qui prend un prompt brut ;
+   `llama-cli` applique son propre gabarit de conversation), la première demande de
+   validation qui attend un plan d'appels, par les deux chemins : la base GGUF avec
+   l'adaptateur GGUF (`--lora`), et le modèle fusionné. Les deux sorties doivent se lire
+   comme un plan JSON, sinon la commande s'arrête ;
+10. écrit `rapport.json`, avec le commit du dépôt, l'état de l'arbre de travail (modifié ou
+   non, chemins modifiés) et l'empreinte de `uv.lock`.
+
+Dépendances épinglées par `training/entrainement/uv.lock` (Python 3.12) : torch (BSD-3),
+transformers, peft, accelerate, huggingface-hub (Apache-2.0), bitsandbytes (MIT). Rien de cela n'entre dans
+la recette : les tests `python3 -I -m unittest discover -s training/entrainement/tests`
+(lecture du jeu, notation, gardes de la chaîne) n'importent pas torch.
+
+### Ce qui sort
+
+| Fichier | Rôle |
+|---|---|
+| `qwen3.5-4b-base-Q4_K_M.gguf` | la base, quantifiée, sur laquelle se charge un adaptateur |
+| `cassini-composition-adaptateur-f16.gguf` | l'adaptateur LoRA de composition (environ 50 Mo) |
+| `cassini-composition-4b-Q4_K_M.gguf` | base et adaptateur fusionnés, quantifiés Q4_K_M |
+| `rapport.json` | révision de la base, commit de llama.cpp, graines, hyperparamètres, versions, perte, score de validation, empreintes SHA-256 |
+| `validation-sorties.jsonl` | chaque sortie de validation, attendue et rendue |
+
+Le dossier `travail/` garde les jeux engendrés et l'adaptateur au format de Hugging Face ;
+les GGUF intermédiaires en f16 (près de 9 Go chacun) sont effacés à la fin.
+
+### Un adaptateur de domaine, plus tard
+
+La méthode garde la base intacte : l'adaptateur GGUF se charge sur la base GGUF. Un autre
+adaptateur de domaine, entraîné ailleurs sur **la même base à la même révision**, avec la
+même commande et le même prompt court, se chargera de la même façon, sans ré-entraîner
+celui-ci. Le choix entre adaptateurs reviendra au sélecteur de 5.14.
+
+### Mesure
+
+Premier entraînement complet, le 2026-10-22, sous WSL sur la RTX 3070 Ti (8 Go), au commit
+`4019c0c` plus une version antérieure des changements de la tâche 2 : avant le renommage en
+anglais, avant l'essai par les deux chemins, avant l'écriture des fichiers sous nom temporaire
+et avant l'arrêt des restes sans pas d'optimiseur, ce qui fait 8 exemples d'écart
+(`rapport.json` de
+`~/cassini-entrainement/5-10-t2/`, hors dépôt) :
+
+| Mesure | Valeur |
+|---|---|
+| Exemples d'entraînement | 5 000 (graine 1), aucun écarté car trop long |
+| Longueur des séquences | 742 jetons en médiane, 1 326 au plus |
+| Paramètres entraînés | 26,3 millions sur 4,57 milliards (rang 16, alpha 32) |
+| Pas d'optimiseur | 312 (lot 1, accumulation 16, une époque, taux 2e-4 en cosinus) |
+| Perte | 0,436 au pas 10, 0,005 en fin d'entraînement |
+| Pic de mémoire vidéo | 6,5 Gio (réservée par torch), sous les 8 Go |
+| Durée de l'entraînement | 2 h 40 |
+| Durée de la validation | 47 min (300 demandes, décodage glouton sur le GPU) |
+| Durée totale de la commande | 3 h 31, conversion et quantification comprises |
+| **Score de validation** | **300 / 300** : plans 250 / 250, questions 37 / 37, refus 13 / 13 |
+| Essai `llama-completion` du modèle fusionné | plan JSON lisible et juste (une question) |
+| Essai des deux chemins (refait à la main avec `try_model`, sur la première demande qui attend un plan d'appels) | base + adaptateur : plan juste ; modèle fusionné : plan juste |
+
+Les noyaux rapides de l'attention linéaire de Qwen3.5 (`flash-linear-attention`,
+`causal_conv1d`) ne sont pas installés : transformers prend son implémentation de
+référence en PyTorch, correcte mais plus lente. C'est elle qui fixe la durée.
+
+Le score de validation mesure ce que le modèle a appris des **familles** : la validation
+est engendrée par le même générateur, avec une autre graine. Un score parfait y est donc
+attendu et ne dit rien de la généralisation à des tournures inédites. La barre honnête
+reste le jeu tenu à l'écart, mesuré à la tâche 4 avec le prompt court branché dans `ai/`.
