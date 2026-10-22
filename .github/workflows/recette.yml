@@ -140,3 +140,8 @@ jobs:
 
       - name: Tests de l'extension
         run: python -I -m unittest discover -s qgis-plugin/tests
+
+      # Chaîne d'entraînement du modèle (5.10) : lecture du jeu, notation, gardes, sans
+      # torch ni GPU. L'entraînement lui-même ne tourne jamais en CI.
+      - name: Tests de la chaîne d'entraînement
+        run: python -I -m unittest discover -s training/entrainement/tests

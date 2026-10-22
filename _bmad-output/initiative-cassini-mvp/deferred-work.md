@@ -240,6 +240,20 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-modele-de-composition-ajuste-et-plus-petit-fine-tuning-plan.md`
   summary: La commande `cassini-training` n'a aucun test d'integration (deux executions identiques, autre graine differente, code non nul sans --out).
   evidence: relecture verification-gap ; verifie a la main par cmp ; a ajouter avant que la tache 2 depende du fichier.
+  status: close, 2026-10-22, 5.10 tache 2 (`plan-5-10-t2-entrainement-reproductible.md`)
+  resolution: `training/tests/commande.rs` lance le binaire : meme graine, memes octets (formats structured et chat) ; autre graine, autre fichier ; --out absent, --format inconnu ou graine illisible, code non nul.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-modele-de-composition-ajuste-et-plus-petit-fine-tuning-plan.md`
   summary: CLAUDE.md §9 (structure du depot) ne cite pas le nouveau crate `/training` (chaine d'entrainement) ; a ajouter par le proprietaire.
   evidence: relecture quick ; un fichier de contexte d'agent ne se modifie pas dans un build.
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t2-entrainement-reproductible.md`
+  summary: L'extension joint a l'inventaire envoye au noyau quelques valeurs distinctes par champ texte (`qgis-plugin/cassini_qgis/inventory.py`), comme le jeu d'entrainement ; a faire avant la mesure du modele ajuste (5.10, tache 4).
+  evidence: decision du proprietaire 2026-10-22 (bmad-build 5.10, tache 2) : « Ajouter les valeurs » plutot qu'entrainer sans valeurs.
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t2-entrainement-reproductible.md`
+  summary: 5.10 tache 3 — parite au jeton entre l'entrainement et `ai/` : `ai` decoupe le prompt par segment (texte des tours en `special=false`), la chaine d'entrainement le decoupe d'un tenant ; et aucun test ne compare l'encadrement chatml de `training/src/prompt.rs` aux constantes de `ai/src/lib.rs` ni `system_text` a `inventory_text`.
+  evidence: relectures verification-gap, edge-case-hunter et intent-alignment de la tache 2 ; un ecart d'un jeton ferait voir au modele ajuste un format qu'il n'a pas appris.
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t2-entrainement-reproductible.md`
+  summary: Au prochain re-entrainement, rendre au `SYSTEM` du prompt court la precision « (en comptant a partir de 1) » pour `step:k.layer_id`, comme `ai/src/plan.rs`.
+  evidence: relecture quick de la tache 2 ; la changer sans re-entrainer decalerait le prompt du modele deja entraine.
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t2-entrainement-reproductible.md`
+  summary: 5.10 tache 4 — mesurer les GGUF livres (base + adaptateur, et fusionne) par `ai/`, le score de validation de la tache 2 etant pris sur l'adaptateur en transformers.
+  evidence: relecture intent-alignment de la tache 2 ; verifie a la main sur un exemple (plan identique), pas sur le jeu.
