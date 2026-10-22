@@ -30,7 +30,7 @@ from qgis.PyQt.QtWidgets import (
     QWidget,
 )
 
-from . import agentview, client, form, runlog, texts
+from . import agentview, client, form, runlog, summary, texts
 
 
 class LayerCombo(QComboBox):
@@ -139,6 +139,17 @@ def _announce(widget, text):
         pass
 
 
+def _layer_name(layer_id):
+    """Nom de la couche dans le projet QGIS, ou None ; jamais d'exception."""
+    try:
+        from qgis.core import QgsProject
+
+        layer = QgsProject.instance().mapLayer(layer_id)
+        return layer.name() if layer is not None else None
+    except Exception:
+        return None
+
+
 def _title(text_label):
     font = text_label.font()
     font.setBold(True)
@@ -199,6 +210,11 @@ class CassiniPanel(QWidget):
         self.log = runlog.RunLog()
         self.agent = agentview.AgentView()
         self._plan_entry = None  # ligne du journal de l'étape de plan en cours
+        self._plan_entries = {}  # numéro d'étape -> ligne du journal, pour le plan en cours
+        self._plan_refs = {}  # {k: résultat de l'étape k} du plan en cours (partagé par ses lignes)
+        self._run_params = None  # paramètres de la commande experte qui part
+        self.focus = None  # ligne du journal ou étape du plan cliquée : ("entry", e) / ("step", s)
+        self._shown_result = None  # résultat affiché, pour « Ouvrir le dossier »
         self._last_request = None  # dernière demande envoyée, rendue après un échec
         self.catalogue = []
         self.ready = False
@@ -306,6 +322,8 @@ class CassiniPanel(QWidget):
         self.plan_list = QListWidget()
         self.plan_list.setMaximumHeight(130)
         self.plan_list.setWordWrap(True)
+        self.plan_list.itemClicked.connect(self._plan_clicked)
+        self.plan_list.itemActivated.connect(self._plan_clicked)
         self.approve_button = QPushButton()
         self.approve_button.clicked.connect(self._approve)
         self.reject_button = QPushButton()
@@ -360,6 +378,8 @@ class CassiniPanel(QWidget):
         self.log_list = QListWidget()
         self.log_list.setMaximumHeight(110)
         self.log_list.setWordWrap(True)
+        self.log_list.itemClicked.connect(self._log_clicked)
+        self.log_list.itemActivated.connect(self._log_clicked)
         self.log_empty = QLabel()
         col.addWidget(self.log_title)
         col.addWidget(self.log_empty)
@@ -420,6 +440,7 @@ class CassiniPanel(QWidget):
     def set_banner(self, kind):
         """`kind` : clé de BANNERS, ou None quand le noyau est prêt."""
         self.banner = kind
+        self.focus = None
         if kind is not None:
             self.ready = False
             self._drop_stale_run()
@@ -448,14 +469,32 @@ class CassiniPanel(QWidget):
         self.render()
         _announce(self.title, self.t("live_ready"))
 
-    def _close_plan_entry(self, status):
+    def _close_plan_entry(self, status, step=None):
+        """Ferme la ligne de l'étape en cours ; si le verdict nomme une autre étape
+        (`step`), la ligne en cours est finie : elle passe en Terminée."""
         entry, self._plan_entry = self._plan_entry, None
+        if step is not None and entry is not None and entry.step != step:
+            status = runlog.DONE
         if entry is not None and entry.status == runlog.RUNNING:
             entry.status = status
 
+    def _keep_plan_results(self, failed=None, error=None):
+        """Range le résultat de chaque étape finie dans sa ligne du journal."""
+        self._plan_refs.update(self.agent.step_results())
+        for step in self.agent.steps:
+            entry = self._plan_entries.get(step.number)
+            if entry is not None and step.result is not None:
+                entry.result = step.result
+        entry = self._plan_entries.get(failed)
+        if entry is not None and error is not None:
+            entry.error = error
+
     def _on_plan_event(self, kind, payload):
         agent = self.agent
+        self.focus = None  # tout nouvel événement efface le détail cliqué
         if kind == client.PLAN_PROPOSED:
+            self._plan_entries = {}
+            self._plan_refs = {}
             agent.proposed(payload.get("plan_id"), payload.get("plan"))
             _announce(self.plan_title, self.t("live_plan"))
         elif kind == client.PLAN_QUESTION:
@@ -478,22 +517,37 @@ class CassiniPanel(QWidget):
                 if target is not None
                 else agentview.describe(command, self.catalogue, self.lang)
             )
-            self._plan_entry = self.log.start(command, label, time.strftime("%H:%M"))
+            self._plan_entry = self.log.start(
+                command,
+                label,
+                time.strftime("%H:%M"),
+                params=target.params if target is not None else None,
+                step=payload.get("step"),
+                refs=self._plan_refs,
+            )
+            self._plan_entries[payload.get("step")] = self._plan_entry
             self.last = {"kind": runlog.RUNNING, "plan": True, "command": label}
         elif kind == client.PLAN_DONE:
             self._close_plan_entry(runlog.DONE)
             self.last = agentview.outcome(runlog.DONE, payload, agent)
             agent.done(payload.get("steps"))
+            self._keep_plan_results()
+            self.last["steps"] = list(agent.steps)
+            self.last["refs"] = self._plan_refs
             _announce(self.result_text, self.t("live_done"))
         elif kind == client.PLAN_EXEC_FAILED:
             self.last = agentview.outcome(runlog.ERROR, payload, agent)
-            self._close_plan_entry(runlog.ERROR)
-            agent.exec_failed(self.last["step"])
+            self._close_plan_entry(runlog.ERROR, self.last["step"])
+            agent.exec_failed(self.last["step"], payload.get("outputs"))
+            self._keep_plan_results(
+                self.last["step"], (self.last.get("code", ""), self.last.get("message", ""))
+            )
             _announce(self.result_text, self.t("live_error"))
         elif kind == client.PLAN_CANCELLED:
             self.last = agentview.outcome(runlog.CANCELLED, payload, agent)
-            self._close_plan_entry(runlog.CANCELLED)
-            agent.cancelled(self.last["step"])
+            self._close_plan_entry(runlog.CANCELLED, self.last["step"])
+            agent.cancelled(self.last["step"], payload.get("outputs"))
+            self._keep_plan_results()
             _announce(self.result_text, self.t("live_cancelled"))
         self.render()
 
@@ -502,14 +556,20 @@ class CassiniPanel(QWidget):
         if kind in client.PLAN_EVENTS:
             self._on_plan_event(kind, payload or {})
             return
+        self.focus = None  # tout nouvel événement efface le détail cliqué
         if kind == client.RUN_STARTED:
             self.running = True
-            self.log.start(payload["command"], payload["command"], time.strftime("%H:%M"))
+            params, self._run_params = self._run_params, None
+            self.log.start(
+                payload["command"], payload["command"], time.strftime("%H:%M"), params=params
+            )
             self.last = {"kind": runlog.RUNNING, "command": payload["command"]}
         elif kind == client.RUN_DONE:
             self.running = False
-            self.log.finish(runlog.DONE)
-            self.last = {"kind": runlog.DONE, **payload}
+            entry = self.log.finish(runlog.DONE)
+            if entry is not None:
+                entry.result = payload.get("result")
+            self.last = {"kind": runlog.DONE, "params": entry.params if entry else None, **payload}
             _announce(self.result_text, self.t("live_done"))
         elif kind == client.RUN_CANCELLED:
             self.running = False
@@ -518,7 +578,9 @@ class CassiniPanel(QWidget):
             _announce(self.result_text, self.t("live_cancelled"))
         elif kind == client.RUN_FAILED:
             self.running = False
-            self.log.finish(runlog.ERROR)
+            entry = self.log.finish(runlog.ERROR)
+            if entry is not None:
+                entry.error = (payload.get("code", ""), payload.get("message", ""))
             self.last = {"kind": runlog.ERROR, **payload}
             _announce(self.result_text, self.t("live_error"))
         self.render()
@@ -577,15 +639,72 @@ class CassiniPanel(QWidget):
         self._render_buttons()
 
     def _open_folder(self):
-        folder = runlog.result_folder((self.last or {}).get("result"))
+        folder = runlog.result_folder(self._shown_result)
         if folder is not None:
             QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
+
+    def _sentence(self, command, params, result, refs=None):
+        """Ce que la commande a fait, en une phrase (logique dans `summary`)."""
+        return summary.sentence(
+            command, params, result, self.lang, _layer_name, refs, self.catalogue
+        )
+
+    def _log_clicked(self, item):
+        row = self.log_list.row(item)
+        if 0 <= row < len(self.log.entries):
+            self.focus = ("entry", self.log.entries[row])
+            self._render_result()  # sans refaire les listes pendant le clic
+            _announce(self.result_text, self.result_text.text())
+
+    def _plan_clicked(self, item):
+        row = self.plan_list.row(item)
+        if 0 <= row < len(self.agent.steps):
+            self.focus = ("step", self.agent.steps[row])
+            self._render_result()
+            _announce(self.result_text, self.result_text.text())
+
+    def _focus_error(self, focus):
+        """Texte d'erreur de la ligne ou de l'étape cliquée, ou None."""
+        kind, item = focus
+        if kind == "step":
+            last = self.last
+            if last and last.get("plan") and last.get("step") == item.number:
+                return agentview.outcome_text(last, self.lang)
+            return None
+        if item.error is None:
+            return None
+        code, message = item.error
+        return self.t("step_error", n=item.step or 1, code=code, message=message)
+
+    def _render_focus(self):
+        """Détail de la ligne du journal ou de l'étape du plan cliquée."""
+        kind, item = self.focus
+        if kind == "step":
+            label = agentview.step_label(item, self.catalogue, self.lang)
+            refs = self.agent.step_results()
+        else:
+            label = item.label
+            refs = item.refs
+        result = item.result if item.status == runlog.DONE else None
+        error = self._focus_error(self.focus) if item.status == runlog.ERROR else None
+        self.result_text.setText(
+            summary.detail(item, label, self.lang, _layer_name, refs, self.catalogue, error)
+        )
+        self._shown_result = result
+        folder = runlog.result_folder(result)
+        self.open_folder_button.setVisible(folder is not None)
+        self.details_view.setPlainText(runlog.step_details(item.params, result))
+        self.details.setVisible(True)
 
     def _render_result(self):
         last = self.last
         self.details.setVisible(False)
-        folder = runlog.result_folder(last.get("result")) if last and last["kind"] == runlog.DONE else None
         self.open_folder_button.setText(self.t("open_folder"))
+        if self.focus is not None:
+            self._render_focus()
+            return
+        self._shown_result = last.get("result") if last and last["kind"] == runlog.DONE else None
+        folder = runlog.result_folder(self._shown_result)
         self.open_folder_button.setVisible(folder is not None)
         if last is None:
             self.result_text.setText(self.t("result_none"))
@@ -595,16 +714,27 @@ class CassiniPanel(QWidget):
         if kind == runlog.RUNNING:
             self.result_text.setText("%s  %s" % (self.t("running"), command))
         elif last.get("plan"):
-            self.result_text.setText(agentview.outcome_text(last, self.lang))
+            lines = [agentview.outcome_text(last, self.lang)]
+            if kind == runlog.DONE:
+                for step in last.get("steps") or []:
+                    lines.append(
+                        "%d. %s"
+                        % (
+                            step.number,
+                            self._sentence(step.command, step.params, step.result, last.get("refs")),
+                        )
+                    )
+            self.result_text.setText("\n".join(lines))
             if kind == runlog.DONE:
                 self.details_view.setPlainText(runlog.technical_details(last.get("result")))
                 self.details.setVisible(True)
         elif kind == runlog.DONE:
-            if command == "system.about":
-                self.result_text.setText(self.t("about_result"))
-            else:
-                self.result_text.setText(self.t("done_generic", command=command))
-            self.details_view.setPlainText(runlog.technical_details(last.get("result")))
+            self.result_text.setText(
+                self._sentence(command, last.get("params"), last.get("result"))
+            )
+            self.details_view.setPlainText(
+                runlog.step_details(last.get("params"), last.get("result"))
+            )
             self.details.setVisible(True)
         elif kind == runlog.CANCELLED:
             self.result_text.setText(self.t("cancelled_generic", command=command))
@@ -835,7 +965,9 @@ class CassiniPanel(QWidget):
             self.form_error.setText(self.t(exc.key, name=exc.name))
             return  # rien n'est envoyé
         self.form_error.setText("")
+        self._run_params = params  # gardés pour la ligne du journal (RUN_STARTED)
         self._actions.run(self.selected["id"], params)
+        self._run_params = None
 
     def _stop(self):
         self._actions.stop()
@@ -851,6 +983,7 @@ class CassiniPanel(QWidget):
             self._last_request = text
             self.agent.generating()
             self.input.clear()
+            self.focus = None  # l'étape cliquée n'existe plus
             self.render()
             _announce(self.plan_notice, self.t("generating"))
 
@@ -860,6 +993,7 @@ class CassiniPanel(QWidget):
             return
         if self._actions.approve(plan_id):  # seul le plan_id repart (AD-5, AD-23)
             self.agent.executing()
+            self.focus = None
             self.render()
 
     def _reject(self):

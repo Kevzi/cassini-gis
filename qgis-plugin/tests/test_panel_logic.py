@@ -53,6 +53,30 @@ class RedactTest(unittest.TestCase):
         )
 
 
+class EntryTest(unittest.TestCase):
+    def test_entry_carries_params_result_and_step(self):
+        log = runlog.RunLog()
+        plain = log.start("system.about", "system.about", "14:02")
+        self.assertEqual((plain.params, plain.result, plain.step, plain.error), (None, None, None, None))
+        self.assertEqual(plain.refs, {})
+        refs = {}
+        step = log.start("analysis.buffer", "1. Tampon", "14:03", params={"layer_id": "g"},
+                         step=1, refs=refs)
+        self.assertEqual((step.params, step.step), ({"layer_id": "g"}, 1))
+        self.assertIs(step.refs, refs)  # partagé par les lignes du même plan
+        entry = log.finish(runlog.DONE)
+        entry.result = {"name": "Tampon"}
+        self.assertIs(entry, step)
+
+    def test_step_details_mask_paths(self):
+        text = runlog.step_details({"path": "C:\\Users\\kev\\gares.gpkg"}, {"file": "/home/k/2.pdf"})
+        self.assertNotIn("Users", text)
+        self.assertNotIn("/home", text)
+        self.assertIn("…/gares.gpkg", text)
+        self.assertIn('"params"', text)
+        self.assertIn('"result"', text)
+
+
 class TextsTest(unittest.TestCase):
     def test_same_keys_in_both_languages(self):
         self.assertEqual(set(texts.TEXTS["fr"]), set(texts.TEXTS["en"]))

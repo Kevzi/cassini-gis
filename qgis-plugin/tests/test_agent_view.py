@@ -254,6 +254,77 @@ class OutcomeTest(unittest.TestCase):
                          "Étape 2 annulée : les étapes suivantes n'ont pas été lancées.")
 
 
+class StepResultsTest(unittest.TestCase):
+    """Résultat porté par chaque étape, pour dire au clic ce qu'elle a fait."""
+
+    BUFFER = {"layer_id": "t_1", "name": "Tampon", "feature_count": 8}
+
+    def setUp(self):
+        self.v = av.AgentView()
+        self.v.proposed("plan-1", PLAN)
+        self.v.executing()
+
+    def test_done_keeps_each_step_result(self):
+        self.v.step(1, "analysis.buffer")
+        self.v.done([{"step": 1, "command": "analysis.buffer", "result": self.BUFFER},
+                     {"step": 2, "command": "layout.export_pdf", "result": {"file": "2.pdf"}}])
+        self.assertEqual([s.result for s in self.v.steps], [self.BUFFER, {"file": "2.pdf"}, None])
+        self.assertEqual(self.v.step_results(), {1: self.BUFFER, 2: {"file": "2.pdf"}})
+
+    def test_failure_keeps_finished_outputs_not_the_failed_step(self):
+        self.v.step(1, "analysis.buffer")
+        self.v.step(2, "layout.export_pdf")
+        self.v.exec_failed(2, {1: self.BUFFER, 2: {"file": "partiel.pdf"}})
+        self.assertEqual(self.v.steps[0].result, self.BUFFER)
+        self.assertIsNone(self.v.steps[1].result)
+        self.assertEqual(self.statuses(), [av.DONE, av.ERROR, av.PENDING])
+
+    def test_failure_without_step_uses_current(self):
+        self.v.step(1, "analysis.buffer")
+        self.v.step(2, "layout.export_pdf")
+        self.v.exec_failed(None, {1: self.BUFFER, 2: {"x": 1}})
+        self.assertIsNone(self.v.steps[1].result)
+
+    def test_cancellation_keeps_finished_outputs(self):
+        self.v.step(1, "analysis.buffer")
+        self.v.step(2, "layout.export_pdf")
+        self.v.cancelled(2, {1: self.BUFFER})
+        self.assertEqual(self.v.step_results(), {1: self.BUFFER})
+        self.assertEqual(self.statuses(), [av.DONE, av.CANCELLED, av.PENDING])
+
+    def test_core_step_without_order_has_no_result(self):
+        self.v.step(1, "analysis.buffer")
+        self.v.step(2, "layout.export_pdf")
+        self.v.exec_failed(2, None)
+        self.assertEqual(self.v.step_results(), {})
+
+    def test_error_naming_a_later_step_finishes_the_current_one(self):
+        # Le noyau résout `step:k` avant d'annoncer l'étape k : l'étape 2 est finie.
+        self.v.step(1, "analysis.buffer")
+        self.v.step(2, "layout.export_pdf")
+        self.v.exec_failed(3, {2: {"file": "2.pdf"}})
+        self.assertEqual(self.statuses(), [av.DONE, av.DONE, av.ERROR])
+        self.assertEqual(self.v.steps[1].result, {"file": "2.pdf"})
+
+    def test_cancel_naming_a_later_step_finishes_the_current_one(self):
+        self.v.step(1, "analysis.buffer")
+        self.v.cancelled(2, {1: self.BUFFER})
+        self.assertEqual(self.statuses(), [av.DONE, av.CANCELLED, av.PENDING])
+
+    def test_error_without_step_still_fails_the_current_one(self):
+        self.v.step(1, "analysis.buffer")
+        self.v.exec_failed(None, None)
+        self.assertEqual(self.statuses(), [av.ERROR, av.PENDING, av.PENDING])
+
+    def test_new_proposal_forgets_results(self):
+        self.v.done([{"step": 1, "result": self.BUFFER}])
+        self.v.proposed("plan-2", PLAN)
+        self.assertEqual(self.v.step_results(), {})
+
+    def statuses(self):
+        return [s.status for s in self.v.steps]
+
+
 class PlanTextsTest(unittest.TestCase):
     def test_plan_keys_exist_in_both_languages(self):
         for key in ("plan_title", "approve", "reject", "plan_rejected", "generating",

@@ -36,6 +36,7 @@ class Step:
         self.command = command
         self.params = params
         self.status = PENDING
+        self.result = None  # résultat rendu par l'étape, une fois finie
 
 
 class AgentView:
@@ -108,17 +109,29 @@ class AgentView:
             number = item.get("step") if isinstance(item, dict) else None
             if isinstance(number, int) and not isinstance(number, bool):
                 reported.add(number)
+                target = self.find(number)
+                if target is not None and "result" in item:
+                    target.result = item.get("result")
         for s in self.steps:
             if s.status == RUNNING or s.number in reported:
                 s.status = DONE
         self._close()
 
-    def exec_failed(self, step=None):
-        """L'étape fautive passe en Erreur ; les suivantes restent non marquées."""
+    def exec_failed(self, step=None, outputs=None):
+        """L'étape fautive passe en Erreur ; les suivantes restent non marquées.
+
+        `outputs` : {étape: résultat} des ordres QGIS déjà soldés par l'extension.
+        """
+        self._keep_outputs(outputs, step)
         self._end_step(step, ERROR)
 
-    def cancelled(self, step=None):
+    def cancelled(self, step=None, outputs=None):
+        self._keep_outputs(outputs, step)
         self._end_step(step, CANCELLED)
+
+    def step_results(self):
+        """{k: résultat de l'étape k}, pour nommer les références `step:k`."""
+        return {s.number: s.result for s in self.steps if s.result is not None}
 
     def forget(self):
         """Le noyau n'est plus là : le plan est oublié, l'étape en cours en Erreur."""
@@ -128,6 +141,15 @@ class AgentView:
             self.reset()
 
     # -- interne ----------------------------------------------------------
+    def _keep_outputs(self, outputs, failed):
+        """Range le résultat des étapes finies ; l'étape fautive n'en reçoit pas."""
+        if failed is None:
+            failed = self.current
+        for number, result in (outputs if isinstance(outputs, dict) else {}).items():
+            target = self.find(number)
+            if target is not None and number != failed:
+                target.result = result
+
     def find(self, number):
         for s in self.steps:
             if s.number == number:
@@ -138,9 +160,12 @@ class AgentView:
         target = self.find(step if step is not None else self.current)
         if target is not None:
             target.status = status
+        # Une étape nommée autre que celle en cours (référence `step:k` non résolue, annonce
+        # impossible) : le noyau tranche avant d'annoncer l'étape k, l'étape en cours est finie.
+        others = DONE if step is not None and step != self.current else status
         for s in self.steps:  # aucune autre étape ne reste « en cours »
             if s is not target and s.status == RUNNING:
-                s.status = status
+                s.status = others
         self._close()
 
     def _close(self):

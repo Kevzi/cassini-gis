@@ -36,8 +36,10 @@ PLAN_QUESTION = "plan_question"  # payload : {"question"}
 PLAN_FAILED = "plan_failed"  # payload : {"code", "message"} (proposition ou refus)
 PLAN_STEP = "plan_step"  # payload : {"step", "command"}
 PLAN_DONE = "plan_done"  # payload : {"steps"}
-PLAN_EXEC_FAILED = "plan_exec_failed"  # payload : {"code", "message", "step"}
-PLAN_CANCELLED = "plan_cancelled"  # payload : {"step"}
+# `outputs` : {étape: résultat} des ordres QGIS soldés avec succès pendant ce plan,
+# gardés côté extension pour dire ce que les étapes finies ont fait (rien sur le fil).
+PLAN_EXEC_FAILED = "plan_exec_failed"  # payload : {"code", "message", "step", "outputs"}
+PLAN_CANCELLED = "plan_cancelled"  # payload : {"step", "outputs"}
 PLAN_REJECTED = "plan_rejected"  # payload : {"plan_id"}
 PLAN_EVENTS = (
     PLAN_PROPOSED,
@@ -78,7 +80,9 @@ class CoreClient:
         self._ready = False
         self._run = None  # command.run en vol : {"id", "command"}
         self._replay = None  # journal.replay en vol : id de la requête
-        self._plan = None  # plan.* en vol : {"id", "kind"} (propose, execute, reject)
+        # plan.* en vol : {"id", "kind"} (propose, execute, reject) ; pour execute, aussi
+        # "step" (étape annoncée par plan.step) et "outputs" ({étape: résultat d'ordre}).
+        self._plan = None
         self._closing = False
         self._done = False  # un événement terminal a déjà été rendu
         process.readyReadStandardOutput.connect(self._read)
@@ -198,7 +202,7 @@ class CoreClient:
         if not self._can_send() or not isinstance(plan_id, str):
             return False
         ident = self._request("plan.execute", {"plan_id": plan_id}, "execute")
-        self._plan = {"id": ident, "kind": "execute"}
+        self._plan = {"id": ident, "kind": "execute", "step": None, "outputs": {}}
         return True
 
     def reject_plan(self, plan_id):
@@ -365,7 +369,8 @@ class CoreClient:
         )
 
     def _plan_answer(self, kind, msg):
-        self._plan = None
+        plan, self._plan = self._plan, None
+        outputs = dict(plan.get("outputs") or {}) if plan is not None else {}
         result = msg.get("result")
         if "error" in msg:
             error = msg["error"]
@@ -373,10 +378,11 @@ class CoreClient:
             message = self._error_message(error)
             if kind == "execute":
                 if code == CANCELLED:
-                    self._notify(PLAN_CANCELLED, {"step": step})
+                    self._notify(PLAN_CANCELLED, {"step": step, "outputs": outputs})
                 else:
                     self._notify(
-                        PLAN_EXEC_FAILED, {"code": code, "message": message, "step": step}
+                        PLAN_EXEC_FAILED,
+                        {"code": code, "message": message, "step": step, "outputs": outputs},
                     )
             else:
                 self._notify(PLAN_FAILED, {"code": code, "message": message})
@@ -407,7 +413,13 @@ class CoreClient:
             return
         if plan["kind"] == "execute":
             self._notify(
-                PLAN_EXEC_FAILED, {"code": CORE_DIED, "message": message, "step": None}
+                PLAN_EXEC_FAILED,
+                {
+                    "code": CORE_DIED,
+                    "message": message,
+                    "step": None,
+                    "outputs": dict(plan.get("outputs") or {}),
+                },
             )
         else:
             self._notify(PLAN_FAILED, {"code": CORE_DIED, "message": message})
@@ -445,6 +457,7 @@ class CoreClient:
                 and isinstance(step, int)
                 and not isinstance(step, bool)
             ):
+                plan["step"] = step  # le résultat du prochain ordre lui revient
                 command = params.get("command")
                 self._notify(
                     PLAN_STEP,
@@ -507,6 +520,9 @@ class CoreClient:
             self._respond(order["id"], error=self._failure(error))
         else:
             self._respond(order["id"], result)
+            plan = self._plan
+            if plan is not None and plan["kind"] == "execute" and plan.get("step") is not None:
+                plan["outputs"][plan["step"]] = result
         self._notify(ORDER_ENDED, order["command"])
 
     def _failure(self, error):

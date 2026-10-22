@@ -203,6 +203,29 @@ trouvé est pris, le choix du modèle reste grisé dans Réglages) :
    interrompue. »
 7. Sans modèle dans le dossier : « La demande n'a pas abouti (ai.no_model) : … », saisie rendue.
 
+Recette manuelle du journal explicite [ticket 13] (QGIS 3.44, même jeu, même modèle) :
+
+1. Phrase de démo, puis Valider le plan. Le résultat dit « Plan exécuté. Étapes
+   terminées : n. », suivi d'une phrase par étape, par exemple « 2. Zone tampon de 500 m
+   autour de Gares : nouvelle couche Tampon, 8 entités. » et, pour l'export, « Carte « … »
+   exportée en PDF : fichier 4-layout.export_pdf.pdf, 1 page. » : des noms de couches,
+   jamais un identifiant QGIS, un code ni un chemin absolu.
+2. Cliquez sur chaque ligne du journal : la zone Résultat affiche la phrase de cette
+   étape ; « Détails techniques » montre ses paramètres et son résultat bruts, chemins
+   masqués (`…/nom`). Une référence à une étape précédente s'affiche par le nom de la
+   couche qu'elle a rendue.
+3. Cliquez sur une étape du plan : même phrase. Entrée sur une ligne choisie au clavier
+   fait de même.
+4. Plan en erreur (par exemple une couche retirée du projet entre la proposition et la
+   validation) : un clic sur une étape finie donne sa phrase, un clic sur l'étape fautive
+   donne « Étape n en erreur (code) : message », une étape jamais lancée donne son libellé
+   et « En attente ».
+5. Mode expert : lancez `analysis.buffer` ; le résultat donne la même phrase qu'au clic
+   sur sa ligne du journal. Tout nouvel événement (une autre commande, une demande)
+   efface le détail cliqué et remet le dernier résultat.
+6. Réglages, English : la phrase affichée passe en anglais (« Buffer of 500 m around
+   Gares: new layer Tampon, 8 features. »), le détail cliqué reste affiché.
+
 Contrôle manuel : charger l'extension, ouvrir un projet, voir les deux versions,
 fermer QGIS et vérifier qu'aucun `cassini` ne reste dans le gestionnaire des
 tâches.
