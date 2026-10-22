@@ -18,6 +18,12 @@ llama-cpp-2 = { version = "=0.1.159", default-features = false }
 # de fils du moteur sur le nombre de coeurs physiques de la machine.
 num_cpus = "1"
 
+# Chaine d'entrainement en dependance de developpement seulement (plan 5.10, tache 3) : un test
+# compare le prompt court de `plan.rs` a celui de l'entrainement, octet par octet. Le binaire du
+# produit n'embarque pas le generateur. Crate du depot, aucune dependance externe ajoutee.
+[dev-dependencies]
+cassini-training = { path = "../training" }
+
 # Acceleration GPU facultative, absente par defaut : le produit reste CPU. Sert a mesurer vite.
 [features]
 cuda = ["llama-cpp-2/cuda"]

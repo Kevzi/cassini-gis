@@ -14,7 +14,7 @@ const USAGE: &str = "Usage : cassini run <id> [json] [--project <fichier>]
        cassini replay <projet>
        cassini serve
        cassini model-check --model <fichier.gguf> --prompt <phrase>
-       cassini plan <phrase> --inventory <fichier.json> [--model <fichier.gguf>]
+       cassini plan <phrase> --inventory <fichier.json> [--model <fichier.gguf|fichier.modele.json>]
 ";
 
 /// Arguments de `run` : id, paramètres JSON facultatifs, projet facultatif.
@@ -183,13 +183,87 @@ impl cassini_core::serve::Composer for ModelComposer {
                 "Aucun modèle GGUF n'a été trouvé dans le dossier des modèles.".to_string(),
             ));
         };
-        let model = Path::new(&folder).join(file);
-        hidden.insert(0, (model.to_string_lossy().into_owned(), file.to_string()));
+        let entry = Path::new(&folder).join(file);
+        hidden.insert(0, (entry.to_string_lossy().into_owned(), file.to_string()));
+        let chosen = resolve_model(&entry).map_err(|e| scrub(e, &hidden))?;
+        // Chaque fichier du modèle (base, adaptateur) se masque par son seul nom, avant le dossier.
+        for pair in chosen.hidden().into_iter().rev() {
+            hidden.insert(0, pair);
+        }
         let inventory = inventory()?;
-        let mut generator = cassini_ai::plan::model_generator(model);
-        cassini_ai::plan::compose_plan(registry, &inventory, request, &mut generator)
+        let mut generator = cassini_ai::plan::model_files_generator(chosen.files.clone());
+        chosen
+            .compose(registry, &inventory, request, &mut generator)
             .map_err(|e| scrub(report(e.code(), e.to_string()), &hidden))
     }
+}
+
+/// Un modèle choisi : ses fichiers, et le prompt qu'il attend.
+#[derive(Debug, PartialEq)]
+struct ChosenModel {
+    files: cassini_ai::ModelFiles,
+    style: cassini_ai::plan::PromptStyle,
+}
+
+impl ChosenModel {
+    /// Compose le plan de `request` dans le prompt que ce modèle attend.
+    fn compose(
+        &self,
+        registry: &Registry,
+        inventory: &Value,
+        request: &str,
+        generate: &mut dyn FnMut(
+            &cassini_ai::plan::GenerationRequest,
+        ) -> Result<cassini_ai::Completion, cassini_ai::AiError>,
+    ) -> Result<cassini_core::plan::Plan, cassini_ai::plan::AgentError> {
+        cassini_ai::plan::compose_plan_with(self.style, registry, inventory, request, generate)
+    }
+
+    /// Chemin de chaque fichier du modèle, avec le seul nom de fichier qui le remplace.
+    fn hidden(&self) -> Vec<(String, String)> {
+        std::iter::once(&self.files.model)
+            .chain(self.files.adapter.as_ref())
+            .map(|p| {
+                let name = p
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                (p.to_string_lossy().into_owned(), name)
+            })
+            .collect()
+    }
+}
+
+/// Résout le fichier `path` d'un modèle : une déclaration `*.modele.json` (lue par le noyau,
+/// qui seul sait ce qu'est un modèle, AD-15) nomme la base, l'adaptateur et le prompt, dans
+/// son propre dossier ; tout autre fichier est un GGUF seul, au long prompt.
+fn resolve_model(path: &Path) -> Result<ChosenModel, ErrorReport> {
+    use cassini_core::commands::model_list::{is_declaration, read_declaration};
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if !is_declaration(&name) {
+        return Ok(ChosenModel {
+            files: cassini_ai::ModelFiles::single(path),
+            style: cassini_ai::plan::PromptStyle::Full,
+        });
+    }
+    // Une déclaration absente est un modèle introuvable, comme un GGUF absent, à son seul nom.
+    if !path.is_file() {
+        let e = cassini_ai::AiError::ModelNotFound(name.into());
+        return Err(report(e.code(), e.to_string()));
+    }
+    let declaration = read_declaration(path)
+        .map_err(|m| report("models.bad_declaration", format!("« {name} » : {m}.")))?;
+    let folder = path.parent().unwrap_or(Path::new(""));
+    Ok(ChosenModel {
+        files: cassini_ai::ModelFiles {
+            model: folder.join(&declaration.model),
+            adapter: declaration.adapter.as_ref().map(|a| folder.join(a)),
+        },
+        style: declaration.prompt.into(),
+    })
 }
 
 fn report(code: &str, message: String) -> ErrorReport {
@@ -335,8 +409,9 @@ fn default_model(registry: &Registry) -> Result<std::path::PathBuf, ErrorReport>
     }
 }
 
-/// `cassini plan <phrase> --inventory <fichier.json> [--model <fichier.gguf>]` : compose le
-/// plan d'une demande (AD-23) et l'affiche en JSON. Rien n'est exécuté. Une question du
+/// `cassini plan <phrase> --inventory <fichier.json> [--model <fichier.gguf|.modele.json>]` :
+/// compose le plan d'une demande (AD-23) et l'affiche en JSON. `--model` prend un GGUF seul ou
+/// une déclaration de modèle (base, adaptateur, prompt). Rien n'est exécuté. Une question du
 /// modèle (`{"kind":"question",...}`) est un résultat : affichée sur `out`, code 0. Un plan
 /// invalide n'est jamais affiché : l'erreur `agent.plan_invalid` ou `agent.refused` sort sur
 /// `err`.
@@ -390,9 +465,19 @@ fn plan(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
             Err(e) => return fail(err, &e.code, e.message),
         },
     };
-    let mut generator = cassini_ai::plan::model_generator(model);
-    let composed = cassini_ai::plan::compose_plan(&registry, &inventory, request, &mut generator);
-    print_composed(composed, out, err)
+    let chosen = match resolve_model(&model) {
+        Ok(c) => c,
+        Err(e) => return fail(err, &e.code, e.message),
+    };
+    let mut generator = cassini_ai::plan::model_files_generator(chosen.files.clone());
+    match chosen.compose(&registry, &inventory, request, &mut generator) {
+        // Les fichiers du modèle ne sont nommés que par leur nom, comme dans le canal.
+        Err(e) => {
+            let e = scrub(report(e.code(), e.to_string()), &chosen.hidden());
+            fail(err, &e.code, e.message)
+        }
+        ok => print_composed(ok, out, err),
+    }
 }
 
 /// Affiche le résultat d'une composition : un plan ou une question en JSON sur `out` (code 0),
@@ -705,6 +790,113 @@ mod tests {
         ]);
         assert_eq!((code, out.as_str()), (1, ""));
         assert_eq!(error_code(&err), "ai.model_not_found");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_declaration_resolves_to_its_files_in_its_folder_with_its_prompt() {
+        use cassini_ai::plan::PromptStyle;
+        use cassini_ai::ModelFiles;
+        let (dir, _) = temp_project();
+        let decl = dir.join("ajuste.modele.json");
+        std::fs::write(
+            &decl,
+            r#"{"model":"base.gguf","adapter":"lora.gguf","prompt":"short"}"#,
+        )
+        .unwrap();
+        let chosen = resolve_model(&decl).unwrap();
+        assert_eq!(
+            chosen,
+            ChosenModel {
+                files: ModelFiles::with_adapter(dir.join("base.gguf"), dir.join("lora.gguf")),
+                style: PromptStyle::Short,
+            }
+        );
+        let hidden = chosen.hidden();
+        assert_eq!(hidden[0].1, "base.gguf");
+        assert_eq!(hidden[1].1, "lora.gguf");
+        assert_eq!(hidden[1].0, dir.join("lora.gguf").to_string_lossy());
+        // Un GGUF seul garde le long prompt.
+        let gguf = dir.join("Qwen3.5-9B-Q4_K_M.gguf");
+        assert_eq!(
+            resolve_model(&gguf).unwrap(),
+            ChosenModel {
+                files: ModelFiles::single(&gguf),
+                style: PromptStyle::Full,
+            }
+        );
+        // Une déclaration absente est un modèle introuvable, nommé par son seul fichier.
+        let absent = dir.join("absente.modele.json");
+        let e = resolve_model(&absent).unwrap_err();
+        assert_eq!(e.code, "ai.model_not_found");
+        assert!(e.message.contains("absente.modele.json"), "{}", e.message);
+        assert!(
+            !e.message.contains(&*dir.to_string_lossy()),
+            "{}",
+            e.message
+        );
+        // Une déclaration qui nomme un chemin est refusée, sans recopier le dossier.
+        std::fs::write(&decl, r#"{"model":"../base.gguf"}"#).unwrap();
+        let e = resolve_model(&decl).unwrap_err();
+        assert_eq!(e.code, "models.bad_declaration");
+        assert!(
+            !e.message.contains(&*dir.to_string_lossy()),
+            "{}",
+            e.message
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn plan_with_a_declaration_naming_a_missing_file_is_model_not_found() {
+        let (dir, _) = temp_project();
+        let inv = inventory_file(&dir);
+        let decl = dir.join("ajuste.modele.json");
+        std::fs::write(&decl, r#"{"model":"absent-base.gguf","prompt":"short"}"#).unwrap();
+        let (code, out, err) = call(&[
+            "plan",
+            "Ouvre les gares.",
+            "--inventory",
+            &inv,
+            "--model",
+            &decl.to_string_lossy(),
+        ]);
+        assert_eq!((code, out.as_str()), (1, ""));
+        assert_eq!(error_code(&err), "ai.model_not_found");
+        assert!(err.contains("absent-base.gguf"), "{err}");
+        let folder = dir.to_string_lossy();
+        assert!(
+            !err.contains(&*folder)
+                && !err.contains(&folder.replace('\\', "/"))
+                && !err.contains(&folder.replace('\\', "\\\\")),
+            "{err}"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_declared_short_prompt_reaches_the_model_and_a_bare_gguf_gets_the_long_one() {
+        let (dir, _) = temp_project();
+        let decl = dir.join("ajuste.modele.json");
+        std::fs::write(&decl, r#"{"model":"base.gguf","prompt":"short"}"#).unwrap();
+        let registry = Registry::standard();
+        let inventory = json!({"layers": []});
+        let first_system = |chosen: &ChosenModel| {
+            let mut seen = None;
+            let _ = chosen.compose(&registry, &inventory, "Ouvre les gares.", &mut |r| {
+                seen.get_or_insert_with(|| r.turns[0].cached_head.clone());
+                Ok(cassini_ai::Completion {
+                    text: r#"{"kind":"question","question":"Laquelle ?"}"#.to_string(),
+                    truncated: false,
+                })
+            });
+            seen.expect("le générateur est appelé")
+        };
+        let short = first_system(&resolve_model(&decl).unwrap());
+        assert!(short.starts_with("Tu es l'agent"), "{short}");
+        assert!(!short.contains("CATALOGUE"), "{short}");
+        let long = first_system(&resolve_model(&dir.join("Qwen.gguf")).unwrap());
+        assert!(long.contains("CATALOGUE"));
         let _ = std::fs::remove_dir_all(dir);
     }
 

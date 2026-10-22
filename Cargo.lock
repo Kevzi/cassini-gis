@@ -308,6 +308,7 @@ name = "cassini-ai"
 version = "0.1.0"
 dependencies = [
  "cassini-core",
+ "cassini-training",
  "llama-cpp-2",
  "num_cpus",
  "serde_json",

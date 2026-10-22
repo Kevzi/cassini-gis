@@ -15,7 +15,7 @@ use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
-use llama_cpp_2::model::LlamaModel;
+use llama_cpp_2::model::{LlamaLoraAdapter, LlamaModel};
 use llama_cpp_2::sampling::LlamaSampler;
 use llama_cpp_2::token::LlamaToken;
 use llama_cpp_2::vocab::LlamaVocab;
@@ -39,6 +39,8 @@ pub enum AiError {
     Backend(String),
     /// Le fichier n'est pas un modèle GGUF lisible.
     Load(String),
+    /// L'adaptateur n'a pas pu être lu ou posé sur ce modèle (pas un adaptateur de cette base).
+    Adapter(String),
     /// Le contexte d'inférence n'a pas pu être créé.
     Context(String),
     /// La phrase ne tient pas dans le contexte.
@@ -58,6 +60,10 @@ impl fmt::Display for AiError {
             }
             AiError::Backend(e) => write!(f, "Le moteur du modèle n'a pas démarré : {e}"),
             AiError::Load(e) => write!(f, "Ce fichier n'est pas un modèle GGUF lisible : {e}"),
+            AiError::Adapter(e) => write!(
+                f,
+                "L'adaptateur n'a pas pu être posé sur ce modèle (est-ce un adaptateur de cette base ?) : {e}"
+            ),
             AiError::Context(e) => write!(f, "Le contexte du modèle n'a pas pu être créé : {e}"),
             AiError::PromptTooLong => write!(
                 f,
@@ -81,6 +87,7 @@ impl AiError {
             AiError::ModelNotFound(_) => "ai.model_not_found",
             AiError::Backend(_) => "ai.backend",
             AiError::Load(_) => "ai.load",
+            AiError::Adapter(_) => "ai.adapter",
             AiError::Context(_) => "ai.context",
             AiError::PromptTooLong => "ai.prompt_too_long",
             AiError::Decode(_) => "ai.decode",
@@ -89,23 +96,68 @@ impl AiError {
     }
 }
 
-/// Identité d'un fichier de modèle : chemin, taille et date de modification. Une autre clé
-/// fait décharger le modèle gardé et charger le nouveau.
+/// Les fichiers d'un modèle : le GGUF du modèle, et l'adaptateur LoRA facultatif qui se pose
+/// sur lui (ticket 5.10, tâche 3). Un seul adaptateur par modèle.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ModelKey {
+pub struct ModelFiles {
+    pub model: PathBuf,
+    pub adapter: Option<PathBuf>,
+}
+
+impl ModelFiles {
+    /// Un modèle d'un seul fichier, sans adaptateur.
+    pub fn single(model: impl Into<PathBuf>) -> Self {
+        ModelFiles {
+            model: model.into(),
+            adapter: None,
+        }
+    }
+
+    /// Le modèle `model` et l'adaptateur `adapter` posé sur lui.
+    pub fn with_adapter(model: impl Into<PathBuf>, adapter: impl Into<PathBuf>) -> Self {
+        ModelFiles {
+            model: model.into(),
+            adapter: Some(adapter.into()),
+        }
+    }
+}
+
+/// Identité d'un fichier : chemin, taille et date de modification.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FileKey {
     path: PathBuf,
     len: u64,
     modified: Option<SystemTime>,
 }
 
-/// Clé du fichier `model` ; un fichier illisible est un modèle introuvable.
-fn model_key(model: &Path) -> Result<ModelKey, AiError> {
-    let meta = std::fs::metadata(model).map_err(|_| AiError::ModelNotFound(model.to_path_buf()))?;
-    let path = std::fs::canonicalize(model).unwrap_or_else(|_| model.to_path_buf());
-    Ok(ModelKey {
+/// Clé du fichier `file` ; un fichier illisible est un modèle introuvable.
+fn file_key(file: &Path) -> Result<FileKey, AiError> {
+    let meta = std::fs::metadata(file).map_err(|_| AiError::ModelNotFound(file.to_path_buf()))?;
+    if !meta.is_file() {
+        return Err(AiError::ModelNotFound(file.to_path_buf()));
+    }
+    let path = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+    Ok(FileKey {
         path,
         len: meta.len(),
         modified: meta.modified().ok(),
+    })
+}
+
+/// Identité d'un modèle : la base **et** l'adaptateur. Une autre clé (autre base, autre
+/// adaptateur, ou l'un des deux fichiers changé) fait décharger le modèle gardé, oublier ses
+/// instantanés et tout recharger.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ModelKey {
+    model: FileKey,
+    adapter: Option<FileKey>,
+}
+
+/// Clé des fichiers `files` ; un fichier absent est un modèle introuvable, à son nom.
+fn model_key(files: &ModelFiles) -> Result<ModelKey, AiError> {
+    Ok(ModelKey {
+        model: file_key(&files.model)?,
+        adapter: files.adapter.as_deref().map(file_key).transpose()?,
     })
 }
 
@@ -173,10 +225,12 @@ impl<S> Checkpoints<S> {
     }
 }
 
-/// Le modèle gardé, avec sa clé et ses instantanés.
+/// Le modèle gardé, avec sa clé, son adaptateur (initialisé une fois, posé sur chaque contexte)
+/// et ses instantanés. L'adaptateur appartient au modèle : llama.cpp le libère avec lui.
 struct Loaded {
     key: ModelKey,
     model: LlamaModel,
+    adapter: Option<LlamaLoraAdapter>,
     checkpoints: Checkpoints<SeqState>,
 }
 
@@ -408,7 +462,17 @@ pub fn generate(
     grammar: Option<&str>,
     max_new_tokens: usize,
 ) -> Result<Completion, AiError> {
-    generate_measured(model, turns, grammar, max_new_tokens, None).map(|(c, _)| c)
+    generate_files(&ModelFiles::single(model), turns, grammar, max_new_tokens)
+}
+
+/// Même génération que `generate`, pour un modèle de plusieurs fichiers (base et adaptateur).
+pub fn generate_files(
+    files: &ModelFiles,
+    turns: &[Turn],
+    grammar: Option<&str>,
+    max_new_tokens: usize,
+) -> Result<Completion, AiError> {
+    generate_files_measured(files, turns, grammar, max_new_tokens, None).map(|(c, _)| c)
 }
 
 /// Même génération que `generate`, qui rend en plus les durées de ses trois phases.
@@ -426,29 +490,57 @@ pub fn generate_measured(
     max_new_tokens: usize,
     threads: Option<NonZeroU32>,
 ) -> Result<(Completion, Timings), AiError> {
+    generate_files_measured(
+        &ModelFiles::single(model),
+        turns,
+        grammar,
+        max_new_tokens,
+        threads,
+    )
+}
+
+/// Même génération que `generate_measured`, pour un modèle de plusieurs fichiers : la base est
+/// chargée, l'adaptateur initialisé une fois, puis posé sur chaque contexte neuf, avant la
+/// reprise d'un instantané. Base et adaptateur sont gardés ensemble, sous une seule clé.
+pub fn generate_files_measured(
+    files: &ModelFiles,
+    turns: &[Turn],
+    grammar: Option<&str>,
+    max_new_tokens: usize,
+    threads: Option<NonZeroU32>,
+) -> Result<(Completion, Timings), AiError> {
     let start = Instant::now();
     if turns.iter().all(Turn::is_blank) {
         return Err(AiError::EmptyPrompt);
     }
-    if !model.is_file() {
-        return Err(AiError::ModelNotFound(model.to_path_buf()));
-    }
-    let key = model_key(model)?;
+    let key = model_key(files)?;
     let mut guard = engine()?.lock().unwrap_or_else(|e| e.into_inner());
     let Engine { backend, loaded } = &mut *guard;
-    // Autre fichier : l'ancien modèle et ses instantanés sont libérés avant le chargement.
+    // Autre base ou autre adaptateur : l'ancien modèle et ses instantanés sont libérés avant
+    // le chargement.
     drop_if_other_key(loaded, &key, |l| &l.key);
     if loaded.is_none() {
-        let llama = LlamaModel::load_from_file(backend, model, &model_params())
+        let mut llama = LlamaModel::load_from_file(backend, &files.model, &model_params())
             .map_err(|e| AiError::Load(e.to_string()))?;
+        // Un adaptateur illisible ne laisse rien de gardé : la base est libérée avec l'erreur.
+        let adapter = match &files.adapter {
+            None => None,
+            Some(path) => Some(
+                llama
+                    .lora_adapter_init(path)
+                    .map_err(|e| AiError::Adapter(e.to_string()))?,
+            ),
+        };
         *loaded = Some(Loaded {
             key,
             model: llama,
+            adapter,
             checkpoints: Checkpoints::default(),
         });
     }
     let Some(Loaded {
         model: llama,
+        adapter,
         checkpoints,
         ..
     }) = loaded.as_mut()
@@ -464,6 +556,15 @@ pub fn generate_measured(
     let mut ctx = llama
         .new_context(backend, ctx_params)
         .map_err(|e| AiError::Context(e.to_string()))?;
+    // L'adaptateur se pose sur chaque contexte neuf, avant toute lecture ou reprise.
+    // S'il est refusé, rien n'est gardé : base et adaptateur sont libérés avec l'erreur.
+    if let Some(adapter) = adapter.as_mut() {
+        if let Err(e) = ctx.lora_adapter_set(adapter, 1.0) {
+            drop(ctx);
+            *loaded = None;
+            return Err(AiError::Adapter(e.to_string()));
+        }
+    }
 
     let vocab = llama.vocab();
     let (tokens, points) = chat_tokens(&vocab, turns);
@@ -648,29 +749,129 @@ mod tests {
     }
 
     #[test]
-    fn the_model_key_changes_with_path_size_and_date() {
+    fn the_file_key_changes_with_path_size_and_date() {
         let dir = std::env::temp_dir();
         let pid = std::process::id();
         let a = dir.join(format!("cassini-key-a-{pid}.gguf"));
         let b = dir.join(format!("cassini-key-b-{pid}.gguf"));
         std::fs::write(&a, b"abc").unwrap();
         std::fs::write(&b, b"abc").unwrap();
-        let ka = model_key(&a).unwrap();
-        assert_eq!(model_key(&a).unwrap(), ka, "même fichier, même clé");
-        assert_ne!(model_key(&b).unwrap().path, ka.path, "autre chemin");
+        let ka = file_key(&a).unwrap();
+        assert_eq!(file_key(&a).unwrap(), ka, "même fichier, même clé");
+        assert_ne!(file_key(&b).unwrap().path, ka.path, "autre chemin");
         std::fs::write(&a, b"abcd").unwrap();
-        let ka2 = model_key(&a).unwrap();
+        let ka2 = file_key(&a).unwrap();
         assert_ne!(ka2.len, ka.len, "autre taille");
         let f = std::fs::File::options().write(true).open(&a).unwrap();
         let old = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
         f.set_modified(old).unwrap();
         drop(f);
-        let ka3 = model_key(&a).unwrap();
+        let ka3 = file_key(&a).unwrap();
         assert_eq!(ka3.modified, Some(old));
         assert_ne!(ka3, ka2, "autre date");
         let _ = std::fs::remove_file(&a);
         let _ = std::fs::remove_file(&b);
-        assert!(matches!(model_key(&a), Err(AiError::ModelNotFound(_))));
+        assert!(matches!(file_key(&a), Err(AiError::ModelNotFound(_))));
+        // Un dossier n'est pas un fichier de modèle.
+        assert!(matches!(file_key(&dir), Err(AiError::ModelNotFound(_))));
+    }
+
+    #[test]
+    fn the_model_key_covers_the_base_and_the_adapter() {
+        let dir = std::env::temp_dir();
+        let pid = std::process::id();
+        let base = dir.join(format!("cassini-key-base-{pid}.gguf"));
+        let one = dir.join(format!("cassini-key-lora1-{pid}.gguf"));
+        let two = dir.join(format!("cassini-key-lora2-{pid}.gguf"));
+        for f in [&base, &one, &two] {
+            std::fs::write(f, b"abc").unwrap();
+        }
+        let alone = model_key(&ModelFiles::single(&base)).unwrap();
+        let with_one = model_key(&ModelFiles::with_adapter(&base, &one)).unwrap();
+        let with_two = model_key(&ModelFiles::with_adapter(&base, &two)).unwrap();
+        assert_eq!(alone.model, with_one.model, "même base");
+        assert_ne!(
+            alone, with_one,
+            "base seule ou avec adaptateur : deux modèles"
+        );
+        assert_ne!(
+            with_one, with_two,
+            "autre adaptateur, même base : un autre modèle"
+        );
+        assert_eq!(
+            model_key(&ModelFiles::with_adapter(&base, &one)).unwrap(),
+            with_one
+        );
+        // L'adaptateur change sur le disque : autre clé, tout est relu.
+        std::fs::write(&one, b"abcd").unwrap();
+        assert_ne!(
+            model_key(&ModelFiles::with_adapter(&base, &one)).unwrap(),
+            with_one
+        );
+        // Un adaptateur absent est introuvable, à son propre nom.
+        let _ = std::fs::remove_file(&two);
+        let e = model_key(&ModelFiles::with_adapter(&base, &two)).unwrap_err();
+        assert_eq!(e, AiError::ModelNotFound(two.clone()));
+        for f in [&base, &one] {
+            let _ = std::fs::remove_file(f);
+        }
+    }
+
+    #[test]
+    fn a_missing_adapter_is_typed_before_loading_and_keeps_nothing() {
+        let dir = std::env::temp_dir();
+        let pid = std::process::id();
+        let base = dir.join(format!("cassini-ai-present-base-{pid}.gguf"));
+        let lora = dir.join(format!("cassini-ai-absent-lora-{pid}.gguf"));
+        std::fs::write(&base, b"une base").unwrap();
+        let _ = std::fs::remove_file(&lora);
+        let turns = [Turn::new(Role::User, "Dis bonjour.")];
+        let e =
+            generate_files(&ModelFiles::with_adapter(&base, &lora), &turns, None, 8).unwrap_err();
+        let _ = std::fs::remove_file(&base);
+        assert_eq!(e, AiError::ModelNotFound(lora.clone()));
+        assert_eq!(e.code(), "ai.model_not_found");
+        assert_eq!(AiError::Adapter(String::new()).code(), "ai.adapter");
+        let guard = engine().unwrap().lock().unwrap_or_else(|e| e.into_inner());
+        assert!(guard.loaded.is_none());
+    }
+
+    #[test]
+    fn an_adapter_on_a_file_that_is_not_gguf_is_a_load_error_and_keeps_nothing() {
+        let dir = std::env::temp_dir();
+        let pid = std::process::id();
+        let base = dir.join(format!("cassini-ai-base-{pid}.gguf"));
+        let lora = dir.join(format!("cassini-ai-lora-{pid}.gguf"));
+        std::fs::write(&base, b"pas un GGUF").unwrap();
+        std::fs::write(&lora, b"pas un GGUF").unwrap();
+        let turns = [Turn::new(Role::User, "Dis bonjour.")];
+        let e =
+            generate_files(&ModelFiles::with_adapter(&base, &lora), &turns, None, 8).unwrap_err();
+        let _ = std::fs::remove_file(&base);
+        let _ = std::fs::remove_file(&lora);
+        assert!(matches!(e, AiError::Load(_)), "{e:?}");
+        let guard = engine().unwrap().lock().unwrap_or_else(|e| e.into_inner());
+        assert!(guard.loaded.is_none());
+    }
+
+    /// Avec le vrai modèle : un fichier qui n'est pas un adaptateur de cette base rend
+    /// `ai.adapter`, et rien n'est gardé. Ignoré sans `CASSINI_TEST_MODEL`.
+    #[test]
+    fn a_file_that_is_not_an_adapter_of_this_base_is_an_adapter_error_and_keeps_nothing() {
+        let Some(base) = std::env::var_os("CASSINI_TEST_MODEL") else {
+            return;
+        };
+        let lora =
+            std::env::temp_dir().join(format!("cassini-ai-pas-lora-{}.gguf", std::process::id()));
+        std::fs::write(&lora, b"pas un adaptateur").unwrap();
+        let turns = [Turn::new(Role::User, "Dis bonjour.")];
+        let e =
+            generate_files(&ModelFiles::with_adapter(&base, &lora), &turns, None, 8).unwrap_err();
+        let _ = std::fs::remove_file(&lora);
+        assert!(matches!(e, AiError::Adapter(_)), "{e:?}");
+        assert_eq!(e.code(), "ai.adapter");
+        let guard = engine().unwrap().lock().unwrap_or_else(|e| e.into_inner());
+        assert!(guard.loaded.is_none());
     }
 
     #[test]
@@ -683,9 +884,12 @@ mod tests {
     #[test]
     fn a_kept_model_is_dropped_only_for_another_key() {
         let key = |p: &str| ModelKey {
-            path: PathBuf::from(p),
-            len: 3,
-            modified: None,
+            model: FileKey {
+                path: PathBuf::from(p),
+                len: 3,
+                modified: None,
+            },
+            adapter: None,
         };
         fn key_of<'a>(k: &'a (ModelKey, &str)) -> &'a ModelKey {
             &k.0

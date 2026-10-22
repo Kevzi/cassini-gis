@@ -192,6 +192,29 @@ class PipelineGuards(unittest.TestCase):
         with self.assertRaises(pipeline.PipelineStop):
             pipeline.first_calls_example([question])
 
+    def test_the_two_declarations_name_the_outputs_by_file_name_with_the_short_prompt(self):
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder)
+            (output / pipeline.ADAPTED_DECLARATION_NAME).write_text("ancienne", encoding="utf-8")
+            names = pipeline.write_declarations(output)
+            again = pipeline.write_declarations(output)  # reprise : réécrites à l'identique
+            self.assertEqual(names, again)
+            self.assertEqual(
+                sorted(p.name for p in output.iterdir()),
+                sorted([pipeline.ADAPTED_DECLARATION_NAME, pipeline.MERGED_DECLARATION_NAME]),
+            )
+            adapted = json.loads((output / pipeline.ADAPTED_DECLARATION_NAME).read_text(encoding="utf-8"))
+            merged = json.loads((output / pipeline.MERGED_DECLARATION_NAME).read_text(encoding="utf-8"))
+        self.assertEqual(adapted, {"model": pipeline.BASE_NAME, "adapter": pipeline.ADAPTER_NAME, "prompt": "short"})
+        self.assertEqual(merged, {"model": pipeline.MERGED_NAME, "prompt": "short"})
+        for name in names:
+            self.assertTrue(name.endswith(".modele.json"), name)
+        for declaration in (adapted, merged):
+            for file in [declaration["model"], declaration.get("adapter")]:
+                if file is not None:
+                    self.assertNotRegex(file, r"[/\\:]|\.\.")
+                    self.assertTrue(file.endswith(".gguf"), file)
+
 
 if __name__ == "__main__":
     unittest.main()

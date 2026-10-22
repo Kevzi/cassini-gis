@@ -251,9 +251,20 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t2-entrainement-reproductible.md`
   summary: 5.10 tache 3 — parite au jeton entre l'entrainement et `ai/` : `ai` decoupe le prompt par segment (texte des tours en `special=false`), la chaine d'entrainement le decoupe d'un tenant ; et aucun test ne compare l'encadrement chatml de `training/src/prompt.rs` aux constantes de `ai/src/lib.rs` ni `system_text` a `inventory_text`.
   evidence: relectures verification-gap, edge-case-hunter et intent-alignment de la tache 2 ; un ecart d'un jeton ferait voir au modele ajuste un format qu'il n'a pas appris.
+  status: close, 2026-10-22, 5.10 tache 3 (`plan-5-10-t3-modele-ajuste-dans-ai.md`)
+  resolution: `ai/src/plan.rs` : `the_short_prompt_is_the_training_prompt_byte_for_byte_on_the_whole_generated_set` (texte des tours assemble par `chat_tokens_with` = `render_prompt`, sur les 5 000 exemples, encadrement chatml compris) et `the_short_prompt_tokens_are_those_of_the_training_prompt_read_in_one_piece` (vrai modele, base Q4_K_M : sur 300 prompts, les jetons lus par segments sont ceux du decoupage d'un tenant, avec `special=true`, du prompt d'entrainement par le decoupeur de llama.cpp du meme GGUF). L'egalite avec le decoupeur de Hugging Face, celui de l'entrainement, n'est pas verifiee par ce test.
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t2-entrainement-reproductible.md`
   summary: Au prochain re-entrainement, rendre au `SYSTEM` du prompt court la precision « (en comptant a partir de 1) » pour `step:k.layer_id`, comme `ai/src/plan.rs`.
   evidence: relecture quick de la tache 2 ; la changer sans re-entrainer decalerait le prompt du modele deja entraine.
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t2-entrainement-reproductible.md`
   summary: 5.10 tache 4 — mesurer les GGUF livres (base + adaptateur, et fusionne) par `ai/`, le score de validation de la tache 2 etant pris sur l'adaptateur en transformers.
   evidence: relecture intent-alignment de la tache 2 ; verifie a la main sur un exemple (plan identique), pas sur le jeu.
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t3-modele-ajuste-dans-ai.md`
+  summary: 5.10 tache 4 — comparer, sur le jeu engendre, les jetons du prompt court decoupe par le tokenizer Hugging Face de l'entrainement (`pipeline.py` `encode`) a ceux de llama.cpp sur le GGUF de base ; seule la parite `ai` / llama.cpp est verifiee.
+  evidence: relectures intent-alignment et quick de la tache 3 ; un ecart entre les deux tokenizers ferait voir au modele un decoupage qu'il n'a pas appris, sans qu'aucun test ne le signale.
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t3-modele-ajuste-dans-ai.md`
+  summary: 5.10 tache 4 — mesurer ce que vaut la redemande (sortie rejetee puis ecarts) pour le modele ajuste, qui n'a jamais appris ce tour ; garder la redemande unique (AD-23), ou l'apprendre au prochain entrainement.
+  evidence: relecture blind-hunter de la tache 3 ; `compose_plan_with` garde `retry_turns` pour le prompt court, hors de la distribution d'entrainement.
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t3-modele-ajuste-dans-ai.md`
+  summary: 5.14 — diagnostic des declarations de modele : une declaration illisible est ecartee sans trace (ses GGUF, adaptateur compris, reviennent nus dans la liste), et une declaration dont un GGUF manque reste listee avec une taille partielle et, premiere par son nom, ferait echouer chaque `plan.propose` ; le selecteur doit les signaler.
+  evidence: relectures blind-hunter, edge-case-hunter et quick de la tache 3 ; comportement voulu par le plan (« ignoree », « reste listee »), sans retour a l'utilisateur.

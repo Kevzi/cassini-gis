@@ -10,11 +10,33 @@
 use std::fmt;
 use std::path::PathBuf;
 
+use cassini_core::commands::model_list::PromptKind;
 use cassini_core::plan::Plan;
 use cassini_core::registry::{CommandSpec, Registry};
 use serde_json::{json, Value};
 
-use crate::{generate, AiError, Completion, Role, Turn};
+use crate::{generate_files, AiError, Completion, ModelFiles, Role, Turn};
+
+/// Le prompt que le modèle attend (ticket 5.10, tâche 3).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PromptStyle {
+    /// Le long prompt : consignes, catalogue tiré du registre et exemples. Celui de tout GGUF
+    /// sans déclaration.
+    #[default]
+    Full,
+    /// Le prompt court appris par le modèle ajusté : quelques consignes, sans catalogue ni
+    /// exemples. Texte identique, à l'octet près, à celui de l'entraînement.
+    Short,
+}
+
+impl From<PromptKind> for PromptStyle {
+    fn from(kind: PromptKind) -> Self {
+        match kind {
+            PromptKind::Full => PromptStyle::Full,
+            PromptKind::Short => PromptStyle::Short,
+        }
+    }
+}
 
 /// Borne de la réponse du modèle, en jetons : de quoi écrire un plan de douze étapes.
 pub const MAX_PLAN_TOKENS: usize = 1024;
@@ -252,16 +274,48 @@ pub fn system_text(registry: &Registry, inventory: &Value) -> String {
     fixed_system_text(registry) + &inventory_text(inventory)
 }
 
-/// Les tours de la première tentative. La fin de la partie fixe est un point d'instantané.
-fn first_turns(registry: &Registry, inventory: &Value, request: &str) -> Vec<Turn> {
-    vec![
-        Turn::with_cached_head(
+/// Consignes du prompt court. Copie, à l'octet près, de `SYSTEM` dans `training/src/prompt.rs`,
+/// le texte sur lequel le modèle ajusté a été entraîné : `cassini-ai` ne dépend pas de la chaîne
+/// d'entraînement, et un test compare les deux textes sur tout le jeu engendré. N'en changer
+/// rien sans ré-entraîner.
+const SHORT_SYSTEM: &str = "Tu es l'agent d'un SIG hors ligne. Tu traduis la demande de l'utilisateur en un plan de commandes du registre. \
+Réponds uniquement par un objet JSON compact, sans texte autour, de l'une de ces trois formes : \
+{\"kind\":\"calls\",\"calls\":[{\"command\":id,\"params\":{...}}]}, \
+{\"kind\":\"question\",\"question\":\"<question courte>\"} ou \
+{\"kind\":\"refusal\",\"reason\":\"<raison courte>\"}.\n\
+Une couche se désigne par son identifiant exact de l'inventaire, la couche produite par l'étape k par \"step:k.layer_id\". \
+Un filtre sur un champ vient avant le tampon ou l'intersection. Une distance se traduit par un tampon sur la couche de référence, \
+puis une intersection dont la couche cherchée est l'entrée ; plusieurs conditions se croisent par intersections successives. \
+N'ajoute ni étape, ni option, ni chemin de sortie que la demande ne réclame pas.\n\
+Si un mot de la demande ne désigne aucune couche ni aucun champ de l'inventaire, pose une question au lieu de deviner. \
+Refuse seulement si aucune commande ne sait faire l'opération demandée.";
+
+/// La suite du message système du prompt court : l'inventaire du projet. La coupe suit la fin
+/// des consignes, comme celle du long prompt : un test avec le vrai modèle vérifie qu'elle ne
+/// change aucun jeton par rapport au prompt d'entraînement lu d'un tenant.
+fn short_inventory_text(inventory: &Value) -> String {
+    format!("\n\nINVENTAIRE DU PROJET :\n{inventory}\n")
+}
+
+/// Les tours de la première tentative, dans le prompt `style`. La fin de la partie fixe est un
+/// point d'instantané, pour les deux prompts.
+fn first_turns(
+    style: PromptStyle,
+    registry: &Registry,
+    inventory: &Value,
+    request: &str,
+) -> Vec<Turn> {
+    let system = match style {
+        PromptStyle::Full => Turn::with_cached_head(
             Role::System,
             fixed_system_text(registry),
             inventory_text(inventory),
         ),
-        Turn::new(Role::User, request),
-    ]
+        PromptStyle::Short => {
+            Turn::with_cached_head(Role::System, SHORT_SYSTEM, short_inventory_text(inventory))
+        }
+    };
+    vec![system, Turn::new(Role::User, request)]
 }
 
 /// Les tours de la redemande : la sortie rejetée, puis la liste des écarts.
@@ -361,11 +415,24 @@ pub fn compose_plan(
     request: &str,
     generate: &mut dyn FnMut(&GenerationRequest) -> Result<Completion, AiError>,
 ) -> Result<Plan, AgentError> {
+    compose_plan_with(PromptStyle::Full, registry, inventory, request, generate)
+}
+
+/// Même composition que `compose_plan`, dans le prompt `style` que le modèle attend. Seuls les
+/// tours de la première tentative changent : même grammaire, même jugement, même redemande
+/// unique (AD-23).
+pub fn compose_plan_with(
+    style: PromptStyle,
+    registry: &Registry,
+    inventory: &Value,
+    request: &str,
+    generate: &mut dyn FnMut(&GenerationRequest) -> Result<Completion, AiError>,
+) -> Result<Plan, AgentError> {
     if request.trim().is_empty() {
         return Err(AiError::EmptyPrompt.into());
     }
     let grammar = plan_grammar(registry);
-    let mut turns = first_turns(registry, inventory, request);
+    let mut turns = first_turns(style, registry, inventory, request);
     let mut last_errors = Vec::new();
     for attempt in 0..2 {
         let completion = match generate(&GenerationRequest {
@@ -396,9 +463,17 @@ pub fn compose_plan(
 pub fn model_generator(
     model: PathBuf,
 ) -> impl FnMut(&GenerationRequest) -> Result<Completion, AiError> {
+    model_files_generator(ModelFiles::single(model))
+}
+
+/// Générateur branché sur le modèle local `files` : une base et son adaptateur, ou un seul
+/// fichier (contraint par la grammaire).
+pub fn model_files_generator(
+    files: ModelFiles,
+) -> impl FnMut(&GenerationRequest) -> Result<Completion, AiError> {
     move |request| {
-        generate(
-            &model,
+        generate_files(
+            &files,
             request.turns,
             Some(request.grammar),
             request.max_new_tokens,
@@ -650,8 +725,8 @@ mod tests {
     #[test]
     fn the_fixed_head_is_the_same_for_two_inventories_and_the_inventory_comes_last() {
         let other = json!({"layers": [{"layer_id": "routes_9", "name": "Routes"}]});
-        let a = first_turns(&registry(), &inventory(), "x");
-        let b = first_turns(&registry(), &other, "x");
+        let a = first_turns(PromptStyle::Full, &registry(), &inventory(), "x");
+        let b = first_turns(PromptStyle::Full, &registry(), &other, "x");
         assert_eq!(a[0].role, Role::System);
         assert!(!a[0].cached_head.is_empty());
         assert_eq!(a[0].cached_head, b[0].cached_head);
@@ -738,5 +813,194 @@ mod tests {
                 "{rule}"
             );
         }
+    }
+    // -- prompt court (ticket 5.10, tâche 3) ---------------------------------
+
+    /// Le texte exact des tours, tel que `chat_tokens` l'assemble (un « jeton » par segment).
+    fn chat_text(turns: &[Turn]) -> String {
+        crate::chat_tokens_with(turns, |text, _special| vec![text.to_string()])
+            .0
+            .concat()
+    }
+
+    #[test]
+    fn the_short_instructions_are_those_of_the_training() {
+        assert_eq!(SHORT_SYSTEM, cassini_training::prompt::SYSTEM);
+    }
+
+    #[test]
+    fn the_short_prompt_is_the_training_prompt_byte_for_byte_on_the_whole_generated_set() {
+        let (examples, _) = cassini_training::generate(
+            cassini_training::DEFAULT_SEED,
+            cassini_training::DEFAULT_COUNT,
+        );
+        assert!(!examples.is_empty());
+        let reg = registry();
+        for e in &examples {
+            let turns = first_turns(PromptStyle::Short, &reg, &e.inventory, &e.request);
+            assert_eq!(
+                chat_text(&turns),
+                cassini_training::prompt::render_prompt(&e.inventory, &e.request),
+                "{}",
+                e.request
+            );
+        }
+    }
+
+    #[test]
+    fn the_short_head_is_fixed_holds_no_catalog_and_the_retry_keeps_it() {
+        let other = json!({"layers": [{"layer_id": "routes_9", "name": "Routes"}]});
+        let a = first_turns(PromptStyle::Short, &registry(), &inventory(), "x");
+        let b = first_turns(PromptStyle::Short, &registry(), &other, "x");
+        assert_eq!(a[0].role, Role::System);
+        assert_eq!(a[0].cached_head, b[0].cached_head);
+        assert_ne!(a[0].text, b[0].text);
+        assert!(a[0].text.contains("gares_1"));
+        assert!(!a[0].cached_head.contains("CATALOGUE") && !a[0].cached_head.contains("EXEMPLES"));
+        assert_eq!(a[1], Turn::new(Role::User, "x"));
+        let full = first_turns(PromptStyle::Full, &registry(), &inventory(), "x");
+        assert!(
+            a[0].cached_head.len() * 5 < full[0].cached_head.len(),
+            "court"
+        );
+        let retry = retry_turns(a.clone(), "{}", &["écart".to_string()]);
+        assert_eq!(retry[0], a[0]);
+        assert_eq!(PromptStyle::default(), PromptStyle::Full);
+        assert_eq!(PromptStyle::from(PromptKind::Short), PromptStyle::Short);
+        assert_eq!(PromptStyle::from(PromptKind::Full), PromptStyle::Full);
+    }
+
+    #[test]
+    fn the_short_prompt_keeps_the_grammar_the_judge_and_the_single_retry() {
+        let mut seen: Vec<(Vec<Turn>, String)> = Vec::new();
+        let mut queue = vec![done(BAD), done(GOOD)].into_iter();
+        let result = compose_plan_with(
+            PromptStyle::Short,
+            &registry(),
+            &inventory(),
+            "Tampon de 300 m.",
+            &mut |r| {
+                seen.push((r.turns.to_vec(), r.grammar.to_string()));
+                Ok(queue.next().expect("plus de sortie scriptée"))
+            },
+        );
+        let expected: Plan = serde_json::from_str(GOOD).unwrap();
+        assert_eq!(result.unwrap(), expected);
+        assert_eq!(seen.len(), 2);
+        assert_eq!(seen[0].1, plan_grammar(&registry()));
+        assert_eq!(seen[1].1, seen[0].1);
+        assert_eq!(
+            seen[0].0,
+            first_turns(
+                PromptStyle::Short,
+                &registry(),
+                &inventory(),
+                "Tampon de 300 m."
+            )
+        );
+        assert_eq!(seen[1].0[2], Turn::new(Role::Assistant, BAD));
+        assert!(seen[1].0[3].text.contains("étape 1"));
+        // Le long prompt reste celui de `compose_plan`.
+        let mut full = Vec::new();
+        let _ = compose_plan(&registry(), &inventory(), "Tampon de 300 m.", &mut |r| {
+            full.push(r.turns.to_vec());
+            Ok(done(GOOD))
+        });
+        assert_eq!(
+            full[0],
+            first_turns(
+                PromptStyle::Full,
+                &registry(),
+                &inventory(),
+                "Tampon de 300 m."
+            )
+        );
+    }
+
+    /// Avec le vrai modèle (la base du modèle ajusté) : les jetons que `ai` lit pour le prompt
+    /// court, découpé par segments, sont ceux du prompt d'entraînement découpé d'un tenant, balises
+    /// comprises. Ignoré sans `CASSINI_TEST_MODEL`.
+    #[test]
+    fn the_short_prompt_tokens_are_those_of_the_training_prompt_read_in_one_piece() {
+        use llama_cpp_2::model::params::LlamaModelParams;
+        use llama_cpp_2::model::LlamaModel;
+        let Some(path) = std::env::var_os("CASSINI_TEST_MODEL") else {
+            return;
+        };
+        let mut guard = crate::engine()
+            .unwrap()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        // Un seul modèle en mémoire : celui que le moteur garde est libéré d'abord.
+        guard.loaded = None;
+        let llama = LlamaModel::load_from_file(
+            &guard.backend,
+            std::path::Path::new(&path),
+            &LlamaModelParams::default(),
+        )
+        .unwrap();
+        let vocab = llama.vocab();
+        let (examples, _) = cassini_training::generate(cassini_training::DEFAULT_SEED, 300);
+        let reg = registry();
+        // Le point d'instantané de la tête fixe : la fin de `turn_head("system")` et des consignes,
+        // découpées comme `chat_tokens` les découpe.
+        let head_end = vocab
+            .tokenize(crate::turn_head("system").as_bytes(), false, true)
+            .len()
+            + vocab.tokenize(SHORT_SYSTEM.as_bytes(), false, false).len();
+        let mut checked = 0;
+        for e in &examples {
+            let turns = first_turns(PromptStyle::Short, &reg, &e.inventory, &e.request);
+            let (ours, points) = crate::chat_tokens(&vocab, &turns);
+            let text = cassini_training::prompt::render_prompt(&e.inventory, &e.request);
+            let theirs = vocab.tokenize(text.as_bytes(), false, true);
+            assert_eq!(ours, theirs, "{}", e.request);
+            // La tête fixe se découpe toujours de même : son point d'instantané est commun.
+            assert_eq!(points[0], head_end, "{}", e.request);
+            checked += 1;
+        }
+        eprintln!("parité au jeton : {checked} prompts identiques");
+    }
+    /// Avec le vrai modèle et le vrai adaptateur : l'adaptateur est bien posé (la base seule
+    /// répond autrement), et une reprise d'instantané rend la même réponse. Ignoré sans
+    /// `CASSINI_TEST_MODEL` (la base) et `CASSINI_TEST_ADAPTER` (l'adaptateur GGUF).
+    #[test]
+    fn a_real_adapter_changes_the_answer_and_a_resumed_checkpoint_keeps_it() {
+        let (Some(base), Some(lora)) = (
+            std::env::var_os("CASSINI_TEST_MODEL"),
+            std::env::var_os("CASSINI_TEST_ADAPTER"),
+        ) else {
+            return;
+        };
+        let (examples, _) = cassini_training::generate(cassini_training::DEFAULT_SEED, 50);
+        let e = examples
+            .iter()
+            .find(|e| e.expected["kind"] == "calls")
+            .expect("un exemple qui attend un plan d'appels");
+        let reg = registry();
+        let turns = first_turns(PromptStyle::Short, &reg, &e.inventory, &e.request);
+        let grammar = plan_grammar(&reg);
+        let run = |files: &ModelFiles| {
+            crate::generate_files_measured(files, &turns, Some(&grammar), MAX_PLAN_TOKENS, None)
+                .unwrap()
+        };
+        let (alone, _) = run(&ModelFiles::single(PathBuf::from(&base)));
+        let adapted = ModelFiles::with_adapter(PathBuf::from(&base), PathBuf::from(&lora));
+        let (first, _) = run(&adapted);
+        let (second, timings) = run(&adapted);
+        // Libère le modèle avant les assertions : un échec ne le laisse pas en mémoire.
+        crate::engine()
+            .unwrap()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .loaded = None;
+        eprintln!("base seule : {}", alone.text);
+        eprintln!("base + adaptateur : {}", first.text);
+        assert_ne!(alone, first, "l'adaptateur change la réponse");
+        assert!(
+            timings.cached_tokens > 0,
+            "la seconde lecture reprend un instantané"
+        );
+        assert_eq!(first, second, "même réponse après la reprise");
     }
 }

@@ -1,11 +1,11 @@
 # Entraînement du modèle de composition
 
 Le ticket 5.10 ajuste un petit modèle pour qu'il transforme une phrase française en plan
-de commandes du registre. Ce document décrit les deux premières des quatre tâches : le jeu
+de commandes du registre. Ce document décrit les trois premières des quatre tâches : le jeu
 d'exemples engendré, le jeu tenu à l'écart qui le mesure et le score de référence
-(tâche 1), puis l'entraînement reproductible et la fusion en GGUF (tâche 2, en fin de
-document). Le branchement dans `ai/` et la mesure du modèle ajusté sont les tâches 3 et 4
-(voir `deferred-work.md`).
+(tâche 1), l'entraînement reproductible et la fusion en GGUF (tâche 2), puis le
+branchement du modèle ajusté dans `ai/` (tâche 3, en fin de document). La mesure du modèle
+ajusté est la tâche 4 (voir `deferred-work.md`).
 
 ## Régénérer le jeu d'exemples
 
@@ -276,3 +276,94 @@ Le score de validation mesure ce que le modèle a appris des **familles** : la v
 est engendrée par le même générateur, avec une autre graine. Un score parfait y est donc
 attendu et ne dit rien de la généralisation à des tournures inédites. La barre honnête
 reste le jeu tenu à l'écart, mesuré à la tâche 4 avec le prompt court branché dans `ai/`.
+
+## Tâche 3 : le modèle ajusté branché dans `ai/`
+
+### La déclaration d'un modèle
+
+Un GGUF seul est un modèle ordinaire : il reçoit le long prompt de `ai/src/plan.rs`, comme
+avant (c'est le cas de Qwen3.5-9B). Un modèle qui attend autre chose se **déclare** par un
+petit fichier `*.modele.json` posé à côté de ses GGUF :
+
+```
+{"model": "qwen3.5-4b-base-Q4_K_M.gguf", "adapter": "cassini-composition-adaptateur-f16.gguf", "prompt": "short"}
+```
+
+- `model` : le GGUF du modèle (la base, quand un adaptateur est nommé) ;
+- `adapter` (facultatif) : l'adaptateur LoRA posé sur cette base, un seul ;
+- `prompt` : `short` pour le prompt court de l'entraînement, `full` (ou absent) pour le long.
+
+Des noms de fichiers seuls, du même dossier que la déclaration : une déclaration qui nomme
+un dossier, un séparateur ou `..`, qui n'est pas du JSON lisible ou qui porte un champ
+inconnu est ignorée par la liste. Une déclaration devient **une** entrée de `model.list`,
+et les GGUF qu'elle nomme n'y figurent plus seuls. Une déclaration qui nomme un GGUF absent
+reste listée : son chargement rend `ai.model_not_found`, avec le seul nom du fichier. Un
+fichier qui n'est pas un adaptateur de cette base rend `ai.adapter`, et rien n'est gardé en
+mémoire.
+
+La chaîne d'entraînement écrit les deux déclarations dans son dossier de sortie, aussi à la
+reprise (`--reprendre`) :
+
+| Déclaration | Modèle |
+|---|---|
+| `cassini-composition-4b-adaptateur.modele.json` | base Q4_K_M + adaptateur, prompt court |
+| `cassini-composition-4b.modele.json` | modèle fusionné, prompt court |
+
+### Le prompt court dans `ai/`
+
+`ai/src/plan.rs` porte une copie du texte des consignes de `training/src/prompt.rs`
+(`SHORT_SYSTEM`) : le produit n'embarque pas la chaîne d'entraînement, qui n'est qu'une
+dépendance de développement de `cassini-ai`. Deux tests tiennent les deux textes ensemble :
+
+- sans modèle, pour chacun des 5 000 exemples engendrés, les tours que `ai` assemble valent
+  `render_prompt`, octet pour octet, encadrement chatml compris ;
+- avec le vrai modèle (`CASSINI_TEST_MODEL`, la base Q4_K_M), pour 300 exemples, les jetons
+  que `ai` lit par segments sont ceux du prompt d'entraînement découpé d'un tenant par le
+  découpeur de llama.cpp du même GGUF (l'égalité avec celui de Hugging Face, qui a servi à
+  l'entraînement, n'est pas vérifiée par ce test).
+
+Le prompt court se coupe au même endroit que le long : la fin des consignes est le point
+d'instantané, l'inventaire vient ensuite, puis la demande. Même grammaire, même jugement
+par `check_plan`, même redemande unique. L'adaptateur est initialisé une fois au chargement
+et posé sur chaque contexte neuf, avant la reprise d'un instantané ; base et adaptateur sont
+gardés ensemble, sous une seule clé : un autre adaptateur sur la même base fait tout
+recharger et oublier les instantanés.
+
+`cassini plan --model` prend un GGUF ou une déclaration ; sans `--model`, et dans le canal
+de l'extension, le noyau prend la première entrée de `model.list`, par ordre de nom. Le
+choix entre modèles reviendra au sélecteur de 5.14.
+
+### Installer le modèle ajusté
+
+Copier le contenu du dossier de sortie (les trois GGUF et les deux déclarations) dans un
+dossier de modèles : celui que désigne `CASSINI_MODELS`, ou `models/` à côté de
+l'exécutable. Vérifier :
+
+```
+cassini run model.list '{}'
+```
+
+La liste rend les deux déclarations et aucun des trois GGUF seul. Attention : sans
+`--model`, la première entrée par ordre de nom l'emporte. Dans un dossier où se trouve
+aussi `Qwen3.5-9B-Q4_K_M.gguf`, c'est lui (la majuscule passe avant les minuscules).
+
+### Démonstration
+
+Le 2026-10-22, binaire `cassini` construit sous Windows avec `--features cassini-ai/cuda`
+(RTX 3070 Ti), inventaire `tests/epreuve-modele-local/inventory.json`, phrase « Trouve les
+parcelles de la zone U à moins de 500 m d'une gare » :
+
+```
+cassini plan "Trouve les parcelles de la zone U à moins de 500 m d'une gare" --inventory tests/epreuve-modele-local/inventory.json --model <dossier>/cassini-composition-4b-adaptateur.modele.json
+```
+
+| Modèle | Prompt | Résultat | Durée (chargement compris) |
+|---|---|---|---|
+| base + adaptateur (déclaration) | court | plan valide : sélection `typezone = U`, tampon de 500 m sur les gares, deux intersections | 32 s |
+| fusionné (déclaration) | court | même plan | 24 s |
+| Qwen3.5-9B (GGUF seul) | long | plan valide, mêmes étapes, intersections dans l'autre ordre | 33 s |
+
+Le dossier de sortie de la tâche 2 a été repris par la chaîne (`--reprendre`, une minute :
+les deux déclarations écrites, l'essai par les deux chemins refait) ; `model.list` sur sa
+copie rend bien deux entrées. Ces durées ne sont pas une mesure : la mesure du jeu tenu à
+l'écart et de la durée sur CPU est la tâche 4.

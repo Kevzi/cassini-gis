@@ -92,6 +92,14 @@ QUANTIZATION = "Q4_K_M"
 BASE_NAME = "qwen3.5-4b-base-Q4_K_M.gguf"
 ADAPTER_NAME = "cassini-composition-adaptateur-f16.gguf"
 MERGED_NAME = "cassini-composition-4b-Q4_K_M.gguf"
+# Déclarations de modèle (tâche 3) : lues par `model.list` du noyau, posées à côté des GGUF.
+# Noms de fichiers seuls, même dossier ; le modèle ajusté attend le prompt court.
+ADAPTED_DECLARATION_NAME = "cassini-composition-4b-adaptateur.modele.json"
+MERGED_DECLARATION_NAME = "cassini-composition-4b.modele.json"
+DECLARATIONS = {
+    ADAPTED_DECLARATION_NAME: {"model": BASE_NAME, "adapter": ADAPTER_NAME, "prompt": "short"},
+    MERGED_DECLARATION_NAME: {"model": MERGED_NAME, "prompt": "short"},
+}
 
 
 class PipelineStop(RuntimeError):
@@ -453,6 +461,16 @@ def read_report(path: Path) -> dict[str, Any]:
     return {}
 
 
+def write_declarations(output: Path) -> list[str]:
+    """Écrit les déclarations de modèle à côté des GGUF (base + adaptateur, fusionné), sous un
+    nom temporaire puis renommées, et rend leurs noms. Réécrites à l'identique à la reprise."""
+    for name, declaration in DECLARATIONS.items():
+        partial = temporary(output / name)
+        partial.write_text(json.dumps(declaration, ensure_ascii=False) + "\n", encoding="utf-8")
+        partial.replace(output / name)
+    return list(DECLARATIONS)
+
+
 def write_report(path: Path, report: dict[str, Any]) -> None:
     partial = path.with_suffix(".tmp")
     partial.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -578,6 +596,8 @@ def launch(args: argparse.Namespace) -> dict[str, Any]:
     report["sorties"][BASE_NAME]["role"] = "base, sur laquelle se charge l'adaptateur"
     report["sorties"][ADAPTER_NAME]["role"] = "adaptateur LoRA de composition"
     report["sorties"][MERGED_NAME]["role"] = "base et adaptateur fusionnés, quantifiés"
+    # Les déclarations : le dossier de sortie, copié dans un dossier de modèles, est prêt.
+    report["declarations"] = write_declarations(output)
     write_report(report_path, report)
 
     # 9. essai, par les deux chemins, sur une demande qui attend un plan d'appels
