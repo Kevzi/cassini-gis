@@ -1,0 +1,249 @@
+# tickets.toml — epic 10, catalogue etendu par les algorithmes de traitement de QGIS.
+# L'ordre des tables est l'ordre de construction ; `id` nomme une entree pour de bon.
+# Les primitives (entrees 9 a 15, et 20) ajoutent chacune une ligne a la meme table fermee
+# de l'extension, des modules au registre et des descriptions au prompt : elles forment
+# une seule voie, chacune apres la precedente.
+
+# ---- Mise a niveau avant la premiere primitive (deferred-work, gate de revue E1) ----
+
+[[entry]]
+id = 1
+type = "story"
+title = "Resultat valide par le noyau et gabarit unique de resume"
+description = "Definit en Rust le gabarit de resume chiffre (rows, values avec unite, truncated) et fait valider par le noyau tout resultat recu de l'extension contre le schema de sortie de sa commande, rejete en qgis.bad_result ; les marqueurs du journal passent sous une cle reservee (bug latent summary.rs:24), et model.list cesse de rendre son dossier en chemin absolu (AD-9)."
+verify = "Tests du noyau sans QGIS : un resultat mal forme est rejete en qgis.bad_result et non journalise, un resultat qui porte lui-meme truncated: true n'est plus confondu avec un resume tronque au rejeu, et aucun resultat de model.list ne porte de chemin absolu."
+covers = ["CAP-6", "CAP-14"]
+after = ["epic-export-et-demo", "epic-publication"]
+hitl = false
+risk = "high"
+references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-27", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-11", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-21"]
+
+[[entry]]
+id = 2
+type = "story"
+title = "Comptage pondere dans un polygone : renommage et somme ponderee"
+description = "Renomme analysis.zonal_statistics en analysis.count_points_in_polygon (module Rust, ligne de table, tests, sonde, README, prompt, jeu de l'epreuve), migre son resultat au gabarit de l'entree 1 et ajoute un champ de ponderation optionnel pour la somme ponderee."
+verify = "Test de l'extension et test du noyau : un comptage simple et un comptage pondere rendent un resume au gabarit valide par le noyau ; l'ancien id n'existe plus nulle part, et les phrases S15, S23, S24 sont attendues en refus jusqu'a l'entree 12, qui les repasse en plan attendu vers raster.zonal_statistics."
+covers = ["CAP-14"]
+after = [1]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 3
+type = "story"
+title = "Geste a chaine fixe et invariants de la table fermee"
+description = "Fait de chaque ligne de la table de l'extension une chaine fixe d'algorithmes avec gardes, temporaires non journalises et version de chaine (AD-24), migre les lignes existantes, declare une commande annulable seulement si chaque algorithme l'est, et fait refuser par la recette toute ligne qui cite un algorithme de la liste noire reseau ; le genre vector et les sorties layer et file sont livres ici, les genres raster et layout et la sortie table par la premiere primitive qui en a besoin, apres le reordonnancement de l'entree 8 (aujourd'hui 10 pour table, 12 pour raster, 15 pour layout)."
+verify = "Tests de l'extension sur les deux series de QGIS : une chaine de deux algorithmes ecrit seulement la sortie nommee par le noyau, un test confronte la table au registre sur l'annulabilite, et la recette echoue sur une ligne de test qui nomme native:filedownloader."
+covers = ["CAP-6", "CAP-14"]
+after = [2]
+hitl = false
+risk = "high"
+references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-24", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-12", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-14"]
+
+[[entry]]
+id = 4
+type = "story"
+title = "Annonce fidele : chaine presente, fournisseurs charges, versions journalisees"
+description = "L'extension envoie session.hello une fois les fournisseurs de traitement charges, n'annonce une commande que si toute sa chaine existe dans le QGIS hote, et porte la version de QGIS et la version de chaine de chaque commande, que le noyau journalise et que le rejeu compare (AD-25, AD-11)."
+verify = "Test de l'extension avec un algorithme retire du registre de traitement : la commande est annoncee indisponible, un plan qui la nomme est refuse avant d'etre montre ; test du noyau : le journal porte les versions et le rejeu signale une version de chaine changee."
+covers = ["CAP-6", "CAP-14"]
+after = [3]
+hitl = false
+risk = "high"
+references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-25", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-7"]
+
+[[entry]]
+id = 5
+type = "story"
+title = "Le modele ne voit que les commandes disponibles"
+description = "La partie fixe du prompt ne decrit que les commandes annoncees disponibles par l'entree 4, et le cache de la 5.12 est garde par ensemble annonce, pour que le catalogue etendu ne fasse pas depasser 30 s par phrase sur processeur."
+verify = "Test du noyau : deux sessions qui annoncent le meme ensemble reutilisent le meme prefixe en cache, une commande indisponible n'apparait pas dans le prompt ; mesure consignee de la duree d'une phrase avec le catalogue complet, a 4 coeurs."
+covers = ["CAP-14"]
+after = [4, "5.12"]
+hitl = false
+risk = "medium"
+references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#deferred"]
+
+[[entry]]
+id = 6
+type = "story"
+title = "Contrat de reseau unique et isochrones parametrees"
+description = "Definit une fois le type Rust du contrat de reseau (sens de circulation, vitesse en champ ou en valeur, tolerance) et fait passer les constantes actuelles de analysis.isochrone (vitesses, accrochage de l'origine a 100 m) en parametres de ce contrat, que liront ensuite les entrees 13 et 14."
+verify = "Tests du noyau et de l'extension : une isochrone avec une vitesse et une tolerance donnees par le plan change de resultat, et les valeurs par defaut vivent dans le schema Rust, pas dans la ligne de table."
+covers = ["CAP-14"]
+after = [5]
+hitl = false
+risk = "medium"
+references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-28"]
+
+# ---- Traceur, puis mesure de depart ----
+
+[[entry]]
+id = 7
+type = "story"
+title = "Traceur : reprojection de bout en bout (data.reproject)"
+description = "Ajoute data.reproject, premiere primitive du catalogue etendu, par le chemin complet mis a niveau : commande Rust et schema, ligne de table avec version de chaine, annonce, prompt, plan compose dans le panneau, execution, journal et rejeu."
+verify = "Dans QGIS, le proprietaire tape « Reprojette la couche des gares en WGS84 », valide le plan, obtient la couche reprojetee, puis la rejoue depuis le journal apres fermeture et reouverture du projet."
+covers = ["CAP-14"]
+after = [5, 6]
+hitl = true
+risk = "medium"
+
+[[entry]]
+id = 8
+type = "story"
+title = "Jeu de phrases reelles et mesure de couverture de depart"
+description = "Le proprietaire fournit le jeu de phrases reelles d'utilisateurs ; un harnais, repris de l'epreuve du modele local, mesure la part couverte (plan valide ou question justifiee) et consigne la mesure de depart, ainsi que le taux de plans conformes de l'epreuve sur le catalogue d'avant l'epic ; la couverture sert a reordonner les primitives suivantes."
+verify = "Le harnais tourne hors ligne sur le jeu fourni et ecrit un rapport consigne de la couverture de depart, phrase par phrase, avec la commande manquante pour chaque phrase non couverte, et le taux de plans conformes de depart."
+covers = ["CAP-14"]
+after = [7]
+hitl = true
+risk = "medium"
+
+# ---- Primitives (E2, E3) : une voie, la table fermee etant partagee ----
+
+[[entry]]
+id = 9
+type = "story"
+title = "Conversion de format (data.convert)"
+description = "Ajoute data.convert, dont le format de sortie est une enumeration typee dont le noyau deduit l'extension du fichier (AD-10, AD-24)."
+verify = "Test de l'extension : une couche GeoJSON convertie en GeoPackage et en Shapefile ecrit exactement le fichier nomme par le noyau, l'original intact ; l'agent la compose dans un plan valide."
+covers = ["CAP-14"]
+after = [8]
+hitl = false
+risk = "low"
+references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-24", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-10"]
+
+[[entry]]
+id = 10
+type = "story"
+title = "Plus proche voisin et matrice de distances"
+description = "Ajoute analysis.nearest (jointure au plus proche, distance en parametre) et analysis.distance_matrix, qui livre la sortie table du geste generique."
+verify = "Tests de l'extension sur fixtures synthetiques : chaque entite recoit son plus proche voisin et sa distance avec unite, la matrice rend un resume au gabarit valide par le noyau ; l'agent la compose dans un plan valide."
+covers = ["CAP-14"]
+after = [9]
+hitl = false
+risk = "medium"
+references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-24", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-27"]
+
+[[entry]]
+id = 11
+type = "story"
+title = "Statistiques par categorie et longueurs de lignes"
+description = "Ajoute analysis.statistics_by_category et analysis.sum_line_lengths, au gabarit de resume de l'entree 1."
+verify = "Tests de l'extension sur fixtures synthetiques : les sommes et comptes par categorie et les longueurs par polygone sont exacts, avec unite, et valides par le noyau ; l'agent la compose dans un plan valide."
+covers = ["CAP-14"]
+after = [10]
+hitl = false
+risk = "low"
+references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-24", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-27"]
+
+[[entry]]
+id = 20
+type = "story"
+title = "Couches raster : ouverture et inventaire d'un MNT"
+description = "Elargit layer.add et project.inventory aux rasters (GeoTIFF), designes par leur identifiant de couche QGIS (AD-9), et verse un petit MNT synthetique dans /fixtures, que lit ensuite raster.zonal_statistics (entree 12)."
+verify = "Test de l'extension : un GeoTIFF synthetique s'ouvre par layer.add, apparait dans project.inventory avec son systeme et ses dimensions, l'original intact ; l'agent compose son ouverture dans un plan valide."
+covers = ["CAP-14"]
+after = [11]
+hitl = false
+risk = "medium"
+references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-9", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-19"]
+
+[[entry]]
+id = 12
+type = "story"
+title = "Statistiques zonales d'un raster, altitudes d'un MNT par polygone"
+description = "Ajoute raster.zonal_statistics (moyenne, minimum, maximum d'un raster par polygone, MNT compris) et livre le genre raster du geste generique ; le raster se designe par son identifiant de couche et aucun calcul de terrain.* n'est refait."
+verify = "Test de l'extension sur le MNT synthetique de l'entree 20 : les altitudes par polygone sont exactes, avec unite ; le noyau valide le resume au gabarit ; l'agent la compose dans un plan valide."
+covers = ["CAP-14"]
+after = [20]
+hitl = false
+risk = "medium"
+references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-24", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-27", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-9"]
+
+[[entry]]
+id = 13
+type = "story"
+title = "Plus court chemin sur reseau (network.shortest_path)"
+description = "Ajoute network.shortest_path entre deux points, sur le contrat de reseau de l'entree 6 (sens, vitesse, tolerance en parametres) ; chaque point est une geometrie ponctuelle GeoJSON avec son systeme (AD-8), donnee par le plan ou reprise d'une etape precedente par step:k."
+verify = "Test de l'extension sur un reseau synthetique : le chemin rendu est le plus court attendu, sa longueur et sa duree portent leur unite, et un point trop loin du reseau rend une erreur nommee ; l'agent la compose dans un plan valide."
+covers = ["CAP-14"]
+after = [6, 12]
+hitl = false
+risk = "medium"
+references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-24", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-28", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-8"]
+
+[[entry]]
+id = 14
+type = "story"
+title = "Preparation d'un reseau a partir de chemins bruts (network.prepare)"
+description = "Ajoute network.prepare, chaine fixe d'algorithmes native: seuls, sans GRASS (native:snapgeometries en accrochage des extremites, native:splitwithlines de la couche sur elle-meme pour la decoupe aux croisements, puis suppression des geometries nulles et en double ; tolerance en parametre ; aucun mode de modification sur place) qui produit une couche de lignes que analysis.isochrone et network.shortest_path lisent sans autre traitement (AD-28)."
+verify = "Test de l'extension : sur une couche de chemins bruts synthetique aux extremites disjointes, une isochrone et un plus court chemin rendent un resultat incomplet ou analysis.origin_off_network avant preparation, et le resultat attendu apres ; l'agent la compose dans un plan valide."
+covers = ["CAP-14"]
+after = [13]
+hitl = false
+risk = "high"
+references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-24", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-28", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-25"]
+
+[[entry]]
+id = 15
+type = "story"
+title = "Atlas PDF (layout.export_atlas)"
+description = "Ajoute layout.export_atlas, une page par entite d'une couche de couverture, avec titre, legende, echelle, fleche du nord et sources comme layout.export_pdf, et livre le genre layout du geste generique ; l'export ne dessine que les couches locales, passees au parametre LAYERS de native:atlaslayouttopdf, les couches distantes du projet (WMS, WMTS, XYZ, tuiles vectorielles distantes) sont ecartees et nommees dans le resultat (skipped_layers) et dans le plan, et la meme regle s'applique a layout.export_pdf (native:printlayouttopdf) ; aucune expression de filtre ou de tri n'est emise (AD-23)."
+verify = "Test de l'extension : un atlas sur trois entites synthetiques ecrit un seul PDF de trois pages au chemin nomme par le noyau, et un projet avec une couche XYZ l'ecarte et la nomme dans le resultat, sans aucune requete reseau ; la recette hors ligne reste verte ; l'agent la compose dans un plan valide."
+covers = ["CAP-14"]
+after = [14]
+hitl = false
+risk = "medium"
+references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-24", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-10", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-14"]
+
+# ---- Geocodage (E4), dans le noyau : dans la meme voie (registre et prompt partages) ----
+
+[[entry]]
+id = 16
+type = "story"
+title = "Geocodage sur la Base Adresse Nationale, dans le noyau"
+description = "Ajoute geocode.ban, runs_in core : apparie un CSV d'adresses a un CSV de la BAN (chemins relatifs connus de la session), ecrit un seul CSV deterministe avec lon et lat en EPSG:4326 dans le dossier de travail et rend path, crs, x_field et y_field, que reprend une etape layer.add du plan par step:k.path, step:k.x_field et step:k.y_field ; le journal garde taille et date des deux CSV d'entree et le rejeu signale un fichier change, la commande est declaree non annulable, et toute crate de lecture CSV est soumise au proprietaire avec sa licence avant ajout ; le proprietaire depose d'abord le CSV decompresse d'un departement dans ../donnees-test-cassini/ pour lire separateur et encodage."
+verify = "Tests du noyau sans QGIS sur une fixture BAN synthetique de /fixtures : adresses exactes, adresses ecrites autrement et adresses introuvables donnent le resultat attendu, deux executions donnent le meme fichier, l'original n'est pas modifie, et un rejeu apres modification d'un CSV d'entree le signale ; l'agent la compose dans un plan valide."
+covers = ["CAP-14"]
+after = [15]
+hitl = true
+risk = "high"
+references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-26", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-19"]
+
+# ---- Mesure finale, nettoyage, livraison ----
+
+[[entry]]
+id = 17
+type = "story"
+title = "Modele re-eprouve et couverture mesuree sur le catalogue etendu"
+description = "Re-entraine le modele par la chaine reproductible du 5.10 (ou le re-eprouve s'il suffit) sur le catalogue etendu, puis mesure avec le harnais de l'entree 8 la couverture des phrases reelles et le taux de plans conformes."
+verify = "Rapport consigne : au moins 70 % des phrases reelles couvertes, et un taux de plans conformes au moins egal a celui consigne par l'entree 8."
+covers = ["CAP-14"]
+after = [8, 16, "5.10"]
+hitl = false
+risk = "high"
+
+[[entry]]
+id = 18
+type = "story"
+title = "Refactor sweep"
+description = "Nettoyage seulement, dont la portee se fixe au demarrage a partir des plans et des constats de revue reportes pendant l'epic."
+verify = "Tests du noyau et de l'extension verts, cargo fmt et clippy sans avertissement, recette hors ligne verte."
+covers = ["CAP-6", "CAP-14"]
+after = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 20, 12, 13, 14, 15, 16, 17]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 19
+type = "story"
+title = "Livraison du catalogue etendu dans une version publiee"
+description = "Publie une version de l'extension et du paquet du noyau portant le catalogue etendu, par la chaine de l'epic 7, apres la recette sur QGIS 3.44 et 4.x et la recette hors ligne."
+verify = "Le proprietaire installe la version publiee depuis une cle USB sur un poste debranche et execute une phrase de chaque famille nouvelle (data, analysis, raster, network, layout, geocode)."
+covers = ["CAP-14"]
+after = [18]
+hitl = true
+risk = "medium"
