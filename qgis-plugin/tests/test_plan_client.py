@@ -11,7 +11,8 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "cassini_qgis"))
 
 import client  # noqa: E402
-from test_tracer import FakeProcess, reply  # noqa: E402
+import gestures  # noqa: E402
+from test_tracer import FakeGesture, FakeProcess, reply  # noqa: E402
 
 PLAN = {
     "kind": "calls",
@@ -174,7 +175,8 @@ class PlanClientTest(unittest.TestCase):
         self.assertEqual(
             self.events,
             [(client.PLAN_EXEC_FAILED,
-              {"code": "qgis.layer_missing", "message": "La couche est absente.", "step": 2})],
+              {"code": "qgis.layer_missing", "message": "La couche est absente.", "step": 2,
+               "outputs": {}})],
         )
 
     def test_cancel_targets_the_plan_execute(self):
@@ -188,7 +190,7 @@ class PlanClientTest(unittest.TestCase):
         self.p.feed(reply(cancel["id"], {"cancelled": True}))
         self.assertEqual(self.events, [])
         self.p.feed(reply(ident, error=error("registry.cancelled", "Annulée.", step=1)))
-        self.assertEqual(self.events, [(client.PLAN_CANCELLED, {"step": 1})])
+        self.assertEqual(self.events, [(client.PLAN_CANCELLED, {"step": 1, "outputs": {}})])
 
     def test_no_cancel_during_proposal(self):
         self.propose()
@@ -229,7 +231,8 @@ class PlanClientTest(unittest.TestCase):
         self.assertEqual(
             self.events[0],
             (client.PLAN_EXEC_FAILED, {"code": client.CORE_DIED,
-                                        "message": "Le noyau Cassini s'est arrêté.", "step": None}),
+                                        "message": "Le noyau Cassini s'est arrêté.", "step": None,
+                                        "outputs": {}}),
         )
         self.assertEqual(self.events[1][0], client.DIED)
 
@@ -239,6 +242,78 @@ class PlanClientTest(unittest.TestCase):
         self.assertFalse(self.c.plan_busy())
         self.p.finished.emit(0)
         self.assertEqual(self.events, [])
+
+
+
+class PlanOutputsTest(unittest.TestCase):
+    """Résultats des ordres soldés pendant un plan, rendus sur erreur et annulation.
+
+    Rien ne change sur le fil : l'extension garde ce qu'elle a elle-même répondu."""
+
+    def setUp(self):
+        FakeGesture.instances = []
+        reg = gestures.GestureRegistry()
+        reg.register("analysis.buffer", FakeGesture)
+        reg.register("layout.export_pdf", FakeGesture)
+        self.p = FakeProcess()
+        self.events = []
+        self.c = client.CoreClient(self.p, lambda k, v: self.events.append((k, v)), reg)
+        self.c.start("cassini", "/p.qgz")
+        self.p.feed(reply(1, {"protocol_version": 1, "core_version": "0.1", "commands": []}))
+        self.p.feed(reply(2, {"core_version": "0.1", "protocol_version": 1}))
+        self.c.propose("x")
+        self.p.feed(reply(3, {"plan_id": "plan-1", "plan": PLAN}))
+        self.c.execute_plan("plan-1")
+        self.execute = json.loads(self.p.written[-1])["id"]
+        self.events.clear()
+
+    def order(self, ident, command):
+        m = {"jsonrpc": "2.0", "id": ident, "method": "order.execute",
+             "params": {"command": command, "params": {}}}
+        self.p.feed((json.dumps(m) + "\n").encode())
+
+    def run_step(self, step, command, ident, result=None, error_=None):
+        self.p.feed(notification("plan.step", {"plan_id": "plan-1", "step": step, "command": command}))
+        self.order(ident, command)
+        FakeGesture.instances[-1].done(result=result, error=error_)
+
+    def test_finished_steps_travel_with_the_failure(self):
+        buffer = {"layer_id": "t_1", "name": "Tampon", "feature_count": 8, "crs": "EPSG:2154"}
+        self.run_step(1, "analysis.buffer", "core-1", result=buffer)
+        written = len(self.p.written)
+        self.run_step(2, "layout.export_pdf", "core-2",
+                      error_=gestures.GestureError("qgis.layout_failed", "Échec."))
+        self.p.feed(reply(self.execute, error=error("qgis.layout_failed", "Échec.", step=2)))
+        kind, payload = self.events[-1]
+        self.assertEqual(kind, client.PLAN_EXEC_FAILED)
+        self.assertEqual(payload["outputs"], {1: buffer})  # l'étape en erreur n'a rien rendu
+        # Le fil n'a porté que la réponse de l'ordre, rien de plus.
+        self.assertEqual(len(self.p.written), written + 1)
+
+    def test_finished_steps_travel_with_the_cancellation(self):
+        self.run_step(1, "analysis.buffer", "core-1", result={"name": "Tampon"})
+        self.p.feed(notification("plan.step", {"plan_id": "plan-1", "step": 2, "command": "layout.export_pdf"}))
+        self.order("core-2", "layout.export_pdf")
+        FakeGesture.instances[-1].cancel()
+        self.p.feed(reply(self.execute, error=error("registry.cancelled", "Annulée.", step=2)))
+        self.assertEqual(self.events[-1], (client.PLAN_CANCELLED,
+                                           {"step": 2, "outputs": {1: {"name": "Tampon"}}}))
+
+    def test_finished_steps_travel_with_core_death(self):
+        self.run_step(1, "analysis.buffer", "core-1", result={"name": "Tampon"})
+        self.events.clear()
+        self.p.finished.emit(0)
+        self.assertEqual(self.events[0][1]["outputs"], {1: {"name": "Tampon"}})
+
+    def test_outputs_do_not_leak_into_the_next_plan(self):
+        self.run_step(1, "analysis.buffer", "core-1", result={"name": "Tampon"})
+        self.p.feed(reply(self.execute, {"plan_id": "plan-1", "steps": []}))
+        self.c.propose("y")
+        self.p.feed(reply(json.loads(self.p.written[-1])["id"], {"plan_id": "plan-2", "plan": PLAN}))
+        self.c.execute_plan("plan-2")
+        ident = json.loads(self.p.written[-1])["id"]
+        self.p.feed(reply(ident, error=error("plan.bad_reference", "Référence.", step=1)))
+        self.assertEqual(self.events[-1][1]["outputs"], {})
 
 
 if __name__ == "__main__":

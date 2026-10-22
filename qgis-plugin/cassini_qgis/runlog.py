@@ -24,19 +24,32 @@ _EMBEDDED = re.compile(r"(?:(?<=[\s'\"(\[:=,;])|^)(?:[A-Za-z]:[\\/]|\\\\|/(?=[^\
 
 
 class Entry:
-    def __init__(self, command, label, when):
+    """Une ligne du journal : de quoi rendre, au clic, ce que l'étape a fait exactement.
+
+    `params` : paramètres envoyés (ou ceux du plan) ; `result` : résultat rendu, ou None ;
+    `step` : numéro de l'étape dans le plan, None hors plan ; `refs` : {k: résultat de
+    l'étape k} du même plan, pour nommer les références `step:k` ; `error` : (code,
+    message) d'une ligne en erreur, ou None.
+    """
+
+    def __init__(self, command, label, when, params=None, result=None, step=None, refs=None):
         self.command = command
         self.label = label
         self.when = when
         self.status = RUNNING
+        self.params = params
+        self.result = result
+        self.step = step
+        self.refs = refs if refs is not None else {}
+        self.error = None
 
 
 class RunLog:
     def __init__(self):
         self.entries = []
 
-    def start(self, command, label, when):
-        entry = Entry(command, label, when)
+    def start(self, command, label, when, params=None, result=None, step=None, refs=None):
+        entry = Entry(command, label, when, params, result, step, refs)
         self.entries.append(entry)
         return entry
 
@@ -98,6 +111,11 @@ def result_folder(result):
 
 def technical_details(result):
     return json.dumps(redact(result), ensure_ascii=False, indent=2, sort_keys=True)
+
+
+def step_details(params, result):
+    """Détails techniques d'une étape : paramètres et résultat bruts, chemins masqués."""
+    return technical_details({"params": params, "result": result})
 
 
 def controls(ready, available, running, cancellable):
