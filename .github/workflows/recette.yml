@@ -51,7 +51,7 @@ jobs:
       # Le noyau se teste seul, sans les dépendances système de la coquille
       # (principe 4) : cette étape passe avant leur installation.
       - name: Tests du noyau
-        run: cargo test -p cassini-core -p cassini-ai -p cassini --locked
+        run: cargo test -p cassini-core -p cassini-ai -p cassini -p cassini-training --locked
 
       # En release l'éditeur de liens peut écarter une commande que rien ne
       # référence : le binaire doit toujours connaître les commandes du noyau.

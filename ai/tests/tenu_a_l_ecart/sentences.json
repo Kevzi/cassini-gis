@@ -1,0 +1,785 @@
+[
+  {
+    "id": "H01",
+    "text": "Trouve les parcelles constructibles du PLU à moins de 500 m d'une gare à Villeneuve-le-Roi et sors-moi la carte en PDF.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "zonage_plu_4c8e19a3_d7b2_4f10_a6e5_92b13c0f7d48",
+            "field": "typezone",
+            "operator": "eq",
+            "value": "U"
+          }
+        },
+        {
+          "command": "analysis.buffer",
+          "params": {
+            "layer_id": "gares_rer_b93d0f12_6e48_4a7c_95d1_e07f2b8c3a64",
+            "distance": {
+              "value": 500,
+              "unit": "m"
+            }
+          }
+        },
+        {
+          "command": "analysis.intersect",
+          "params": {
+            "layer_id": "parcelles_cad_7e21b4c9_0a53_4f6e_b812_3d94c5a07e16",
+            "overlay_layer_id": "step:1.layer_id"
+          }
+        },
+        {
+          "command": "analysis.intersect",
+          "params": {
+            "layer_id": "step:3.layer_id",
+            "overlay_layer_id": "step:2.layer_id"
+          }
+        },
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "title": "Parcelles constructibles à moins de 500 m d'une gare"
+          }
+        }
+      ]
+    },
+    "family": "démo exacte"
+  },
+  {
+    "id": "H02",
+    "text": "Ouvre-moi le fichier des pistes cyclables, je voudrais le voir sur la carte.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layer.add",
+          "params": {
+            "path": "donnees/pistes_cyclables.shp"
+          }
+        }
+      ]
+    },
+    "family": "ouverture de fichier"
+  },
+  {
+    "id": "H03",
+    "text": "C'est quoi les champs disponibles dans la couche des équipements publics ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layer.describe",
+          "params": {
+            "layer_id": "equipements_3a5f60d2_8e19_4c7b_a640_2d97f1b5e083"
+          }
+        }
+      ]
+    },
+    "family": "description de couche"
+  },
+  {
+    "id": "H04",
+    "text": "Fais-moi le point sur tout ce qui est chargé dans le projet.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "project.inventory",
+          "params": {}
+        }
+      ]
+    },
+    "family": "inventaire du projet"
+  },
+  {
+    "id": "H05",
+    "text": "Ne garde que les bâtiments de plus de 15 mètres de haut.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "batiments_6d1e83b7_2f05_4b9a_8c36_d41a7e902c58",
+            "field": "hauteur_m",
+            "operator": "gt",
+            "value": "15"
+          }
+        }
+      ]
+    },
+    "family": "filtre « ne garde que »"
+  },
+  {
+    "id": "H06",
+    "text": "Isole les parcelles de la section AH, j'en ai besoin pour la commission d'urbanisme.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "parcelles_cad_7e21b4c9_0a53_4f6e_b812_3d94c5a07e16",
+            "field": "section",
+            "operator": "eq",
+            "value": "AH"
+          }
+        }
+      ]
+    },
+    "family": "filtre « isole »"
+  },
+  {
+    "id": "H07",
+    "text": "Conserve seulment les routes limitées à 30 km/h ou moins.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "routes_bdt_25af7c60_9b14_4d83_a2e7_6c0d58f1b935",
+            "field": "vitesse_kmh",
+            "operator": "lte",
+            "value": "30"
+          }
+        }
+      ]
+    },
+    "family": "filtre « conserve », faute de frappe"
+  },
+  {
+    "id": "H08",
+    "text": "Affiche-moi les terres agricoles du PLU.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "zonage_plu_4c8e19a3_d7b2_4f10_a6e5_92b13c0f7d48",
+            "field": "typezone",
+            "operator": "eq",
+            "value": "A"
+          }
+        }
+      ]
+    },
+    "family": "vocabulaire d'urbanisme non littéral"
+  },
+  {
+    "id": "H09",
+    "text": "Trace une bande de 250 mètres de part et d'autre des cours d'eau.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.buffer",
+          "params": {
+            "layer_id": "cours_eau_91c7d5e8_4a2b_4e06_8f93_b65d0c1e7a24",
+            "distance": {
+              "value": 250,
+              "unit": "m"
+            }
+          }
+        }
+      ]
+    },
+    "family": "tampon simple"
+  },
+  {
+    "id": "H10",
+    "text": "Fais un tampon de 800 m autour des gares et fusionne le tout en une seule zone.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.buffer",
+          "params": {
+            "layer_id": "gares_rer_b93d0f12_6e48_4a7c_95d1_e07f2b8c3a64",
+            "distance": {
+              "value": 800,
+              "unit": "m"
+            },
+            "dissolve": true
+          }
+        }
+      ]
+    },
+    "family": "option facultative demandée (fusion)"
+  },
+  {
+    "id": "H11",
+    "text": "Jusqu'où peut-on aller à pied en 15 minutes depuis la mairie, au point 655 820 / 6 845 310 en Lambert-93, en passant par le réseau de voirie ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.isochrone",
+          "params": {
+            "layer_id": "reseau_voirie_e40b2a95_7c61_4f28_b3d0_19e6a85c4f72",
+            "origin": {
+              "x": 655820,
+              "y": 6845310,
+              "epsg": 2154
+            },
+            "mode": "walk",
+            "duration": {
+              "value": 15,
+              "unit": "min"
+            }
+          }
+        }
+      ]
+    },
+    "family": "isochrone à pied"
+  },
+  {
+    "id": "H12",
+    "text": "Calcule l'isochrone voiture de 8 min sur le réseau de voirie, départ X = 656 140, Y = 6 846 020 (Lambert-93).",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.isochrone",
+          "params": {
+            "layer_id": "reseau_voirie_e40b2a95_7c61_4f28_b3d0_19e6a85c4f72",
+            "origin": {
+              "x": 656140,
+              "y": 6846020,
+              "epsg": 2154
+            },
+            "mode": "car",
+            "duration": {
+              "value": 8,
+              "unit": "min"
+            }
+          }
+        }
+      ]
+    },
+    "family": "isochrone en voiture"
+  },
+  {
+    "id": "H13",
+    "text": "Combien d'équipements publics y a-t-il dans chaque quartier IRIS ? Affiche le nom du quartier en face du chiffre.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.zonal_statistics",
+          "params": {
+            "layer_id": "quartiers_iris_8b2c47e1_0f6d_4a93_b528_c13e9d7a6f40",
+            "points_layer_id": "equipements_3a5f60d2_8e19_4c7b_a640_2d97f1b5e083",
+            "label_field": "nom_iris"
+          }
+        }
+      ]
+    },
+    "family": "statistiques par zone avec libellé"
+  },
+  {
+    "id": "H14",
+    "text": "Compte les gares par quartier IRIS.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.zonal_statistics",
+          "params": {
+            "layer_id": "quartiers_iris_8b2c47e1_0f6d_4a93_b528_c13e9d7a6f40",
+            "points_layer_id": "gares_rer_b93d0f12_6e48_4a7c_95d1_e07f2b8c3a64"
+          }
+        }
+      ]
+    },
+    "family": "statistiques par zone"
+  },
+  {
+    "id": "H15",
+    "text": "Quelles parcelles sont touchées par une zone humide ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.intersect",
+          "params": {
+            "layer_id": "parcelles_cad_7e21b4c9_0a53_4f6e_b812_3d94c5a07e16",
+            "overlay_layer_id": "zones_humides_5f38a0c1_d6e7_4b42_9a15_7e2c40b8d903"
+          }
+        }
+      ]
+    },
+    "family": "intersection simple"
+  },
+  {
+    "id": "H16",
+    "text": "Quels bâtiments se trouvent dans la zone C du plan d'exposition au bruit d'Orly ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "peb_orly_c7d94e26_3b80_4f1a_9e57_a20f6b3d8c11",
+            "field": "zone",
+            "operator": "eq",
+            "value": "C"
+          }
+        },
+        {
+          "command": "analysis.intersect",
+          "params": {
+            "layer_id": "batiments_6d1e83b7_2f05_4b9a_8c36_d41a7e902c58",
+            "overlay_layer_id": "step:1.layer_id"
+          }
+        }
+      ]
+    },
+    "family": "filtre puis intersection"
+  },
+  {
+    "id": "H17",
+    "text": "Quelles écoles sont à moins de 300 m d'une route départementale ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "equipements_3a5f60d2_8e19_4c7b_a640_2d97f1b5e083",
+            "field": "type",
+            "operator": "eq",
+            "value": "école"
+          }
+        },
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "routes_bdt_25af7c60_9b14_4d83_a2e7_6c0d58f1b935",
+            "field": "classe",
+            "operator": "eq",
+            "value": "départementale"
+          }
+        },
+        {
+          "command": "analysis.buffer",
+          "params": {
+            "layer_id": "step:2.layer_id",
+            "distance": {
+              "value": 300,
+              "unit": "m"
+            }
+          }
+        },
+        {
+          "command": "analysis.intersect",
+          "params": {
+            "layer_id": "step:1.layer_id",
+            "overlay_layer_id": "step:3.layer_id"
+          }
+        }
+      ]
+    },
+    "family": "deux filtres et une distance"
+  },
+  {
+    "id": "H18",
+    "text": "Liste les bâtiments résidentiels situés à moins de 100 m de la Seine.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "batiments_6d1e83b7_2f05_4b9a_8c36_d41a7e902c58",
+            "field": "usage",
+            "operator": "eq",
+            "value": "résidentiel"
+          }
+        },
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "cours_eau_91c7d5e8_4a2b_4e06_8f93_b65d0c1e7a24",
+            "field": "nom",
+            "operator": "eq",
+            "value": "La Seine"
+          }
+        },
+        {
+          "command": "analysis.buffer",
+          "params": {
+            "layer_id": "step:2.layer_id",
+            "distance": {
+              "value": 100,
+              "unit": "m"
+            }
+          }
+        },
+        {
+          "command": "analysis.intersect",
+          "params": {
+            "layer_id": "step:1.layer_id",
+            "overlay_layer_id": "step:3.layer_id"
+          }
+        }
+      ]
+    },
+    "family": "deux filtres et une distance"
+  },
+  {
+    "id": "H19",
+    "text": "Repère les parcelles en zone à urbaniser, toutes catégories confondues, à moins de 1 km d'une gare de la ligne C, puis exporte la carte en PDF.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "zonage_plu_4c8e19a3_d7b2_4f10_a6e5_92b13c0f7d48",
+            "field": "typezone",
+            "operator": "begins_with",
+            "value": "AU"
+          }
+        },
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "gares_rer_b93d0f12_6e48_4a7c_95d1_e07f2b8c3a64",
+            "field": "ligne",
+            "operator": "eq",
+            "value": "C"
+          }
+        },
+        {
+          "command": "analysis.buffer",
+          "params": {
+            "layer_id": "step:2.layer_id",
+            "distance": {
+              "value": 1,
+              "unit": "km"
+            }
+          }
+        },
+        {
+          "command": "analysis.intersect",
+          "params": {
+            "layer_id": "parcelles_cad_7e21b4c9_0a53_4f6e_b812_3d94c5a07e16",
+            "overlay_layer_id": "step:1.layer_id"
+          }
+        },
+        {
+          "command": "analysis.intersect",
+          "params": {
+            "layer_id": "step:4.layer_id",
+            "overlay_layer_id": "step:3.layer_id"
+          }
+        },
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "title": "Parcelles en zone à urbaniser à moins de 1 km d'une gare de la ligne C"
+          }
+        }
+      ]
+    },
+    "family": "vocabulaire d'urbanisme, six étapes"
+  },
+  {
+    "id": "H20",
+    "text": "Donne-moi les parcelles qui sont à la fois en zone urbaine et dans une zone humide.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "zonage_plu_4c8e19a3_d7b2_4f10_a6e5_92b13c0f7d48",
+            "field": "typezone",
+            "operator": "eq",
+            "value": "U"
+          }
+        },
+        {
+          "command": "analysis.intersect",
+          "params": {
+            "layer_id": "parcelles_cad_7e21b4c9_0a53_4f6e_b812_3d94c5a07e16",
+            "overlay_layer_id": "step:1.layer_id"
+          }
+        },
+        {
+          "command": "analysis.intersect",
+          "params": {
+            "layer_id": "step:2.layer_id",
+            "overlay_layer_id": "zones_humides_5f38a0c1_d6e7_4b42_9a15_7e2c40b8d903"
+          }
+        }
+      ]
+    },
+    "family": "vocabulaire d'urbanisme, deux conditions"
+  },
+  {
+    "id": "H21",
+    "text": "Quels équipements publics sont exposés au bruit, toutes zones du PEB confondues ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.intersect",
+          "params": {
+            "layer_id": "equipements_3a5f60d2_8e19_4c7b_a640_2d97f1b5e083",
+            "overlay_layer_id": "peb_orly_c7d94e26_3b80_4f1a_9e57_a20f6b3d8c11"
+          }
+        }
+      ]
+    },
+    "family": "intersection simple"
+  },
+  {
+    "id": "H22",
+    "text": "Garde seulement les bâtiments de 20 logements et plus qui sont en zone urbaine.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "batiments_6d1e83b7_2f05_4b9a_8c36_d41a7e902c58",
+            "field": "nb_logements",
+            "operator": "gte",
+            "value": "20"
+          }
+        },
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "zonage_plu_4c8e19a3_d7b2_4f10_a6e5_92b13c0f7d48",
+            "field": "typezone",
+            "operator": "eq",
+            "value": "U"
+          }
+        },
+        {
+          "command": "analysis.intersect",
+          "params": {
+            "layer_id": "step:1.layer_id",
+            "overlay_layer_id": "step:2.layer_id"
+          }
+        }
+      ]
+    },
+    "family": "filtre « garde seulement », deux conditions"
+  },
+  {
+    "id": "H23",
+    "text": "Selectione les routes dont le nom commence par « Avenue ».",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "routes_bdt_25af7c60_9b14_4d83_a2e7_6c0d58f1b935",
+            "field": "nom",
+            "operator": "begins_with",
+            "value": "Avenue"
+          }
+        }
+      ]
+    },
+    "family": "filtre « commence par », faute de frappe"
+  },
+  {
+    "id": "H24",
+    "text": "Montre les gares dont le nom contient « Villeneuve ».",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "gares_rer_b93d0f12_6e48_4a7c_95d1_e07f2b8c3a64",
+            "field": "nom",
+            "operator": "contains",
+            "value": "Villeneuve"
+          }
+        }
+      ]
+    },
+    "family": "filtre « contient »"
+  },
+  {
+    "id": "H25",
+    "text": "Tampon de 50 m autour des routes nationales, récupère les bâtiments qui tombent dedans et sors une carte PDF intitulée « Bâtiments exposés au bruit routier ».",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "routes_bdt_25af7c60_9b14_4d83_a2e7_6c0d58f1b935",
+            "field": "classe",
+            "operator": "eq",
+            "value": "nationale"
+          }
+        },
+        {
+          "command": "analysis.buffer",
+          "params": {
+            "layer_id": "step:1.layer_id",
+            "distance": {
+              "value": 50,
+              "unit": "m"
+            }
+          }
+        },
+        {
+          "command": "analysis.intersect",
+          "params": {
+            "layer_id": "batiments_6d1e83b7_2f05_4b9a_8c36_d41a7e902c58",
+            "overlay_layer_id": "step:2.layer_id"
+          }
+        },
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "title": "Bâtiments exposés au bruit routier"
+          }
+        }
+      ]
+    },
+    "family": "chaîne avec export"
+  },
+  {
+    "id": "H26",
+    "text": "Exporte la carte actuelle en PDF avec le titre « Zonage du PLU 2026 ».",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "title": "Zonage du PLU 2026"
+          }
+        }
+      ]
+    },
+    "family": "export seul"
+  },
+  {
+    "id": "H27",
+    "text": "Fais une zone tampon de 200 m autour des arrêts de bus.",
+    "expected": {
+      "kind": "question"
+    },
+    "family": "couche absente"
+  },
+  {
+    "id": "H28",
+    "text": "Garde les parcelles dont le propriétaire est une personne publique.",
+    "expected": {
+      "kind": "question"
+    },
+    "family": "champ absent"
+  },
+  {
+    "id": "H29",
+    "text": "Quels batiments ont été construits avant 1950 ?",
+    "expected": {
+      "kind": "question"
+    },
+    "family": "champ absent, faute de frappe"
+  },
+  {
+    "id": "H30",
+    "text": "Trouve les logements sociaux à moins de 400 m d'une gare.",
+    "expected": {
+      "kind": "question"
+    },
+    "family": "couche absente"
+  },
+  {
+    "id": "H31",
+    "text": "Combien d'arbres d'alignement y a-t-il dans chaque quartier IRIS ?",
+    "expected": {
+      "kind": "question"
+    },
+    "family": "couche absente"
+  },
+  {
+    "id": "H32",
+    "text": "Isole les tronçons de route dont le revêtement est en mauvais état.",
+    "expected": {
+      "kind": "question"
+    },
+    "family": "champ absent"
+  },
+  {
+    "id": "H33",
+    "text": "Sélectionne les zones du PLU où le coefficient d'emprise au sol dépasse 0,6.",
+    "expected": {
+      "kind": "question"
+    },
+    "family": "champ absent"
+  },
+  {
+    "id": "H34",
+    "text": "Quelles parcelles sont à moins de 150 m d'une ligne à haute tension ?",
+    "expected": {
+      "kind": "question"
+    },
+    "family": "couche absente"
+  },
+  {
+    "id": "H35",
+    "text": "Supprime la couche des routes du projet, elle ne sert plus.",
+    "expected": {
+      "kind": "refusal"
+    },
+    "family": "retrait de couche"
+  },
+  {
+    "id": "H36",
+    "text": "Reprojette les bâtiments en WGS84 et enregistre-les.",
+    "expected": {
+      "kind": "refusal"
+    },
+    "family": "reprojection"
+  },
+  {
+    "id": "H37",
+    "text": "Passe la hauteur de tous les bâtiments industriels à 12 m.",
+    "expected": {
+      "kind": "refusal"
+    },
+    "family": "modification d'entités"
+  },
+  {
+    "id": "H38",
+    "text": "Envoie la carte des parcelles par mail à l'adjoint à l'urbanisme.",
+    "expected": {
+      "kind": "refusal"
+    },
+    "family": "envoi"
+  },
+  {
+    "id": "H39",
+    "text": "Fais-moi une vue en 3D des bâtiments du centre ancien.",
+    "expected": {
+      "kind": "refusal"
+    },
+    "family": "vue 3D"
+  },
+  {
+    "id": "H40",
+    "text": "Exporte les parcelles de la section AK en fichier CSV pour le notaire.",
+    "expected": {
+      "kind": "refusal"
+    },
+    "family": "export de données"
+  }
+]

@@ -1,0 +1,174 @@
+{
+  "project": {
+    "name": "villeneuve-le-roi-revision-plu",
+    "epsg": 2154
+  },
+  "layers": [
+    {
+      "layer_id": "parcelles_cad_7e21b4c9_0a53_4f6e_b812_3d94c5a07e16",
+      "name": "Parcelles cadastrales",
+      "kind": "vector",
+      "geometry": "MultiPolygon",
+      "epsg": 2154,
+      "feature_count": 5384,
+      "source": "donnees/cadastre_parcelles.gpkg",
+      "fields": [
+        { "name": "idu", "type": "string" },
+        { "name": "section", "type": "string", "values": ["AB", "AC", "AH", "AK", "AL", "AN"] },
+        { "name": "contenance_m2", "type": "number" }
+      ]
+    },
+    {
+      "layer_id": "zonage_plu_4c8e19a3_d7b2_4f10_a6e5_92b13c0f7d48",
+      "name": "Zonage du PLU",
+      "kind": "vector",
+      "geometry": "MultiPolygon",
+      "epsg": 2154,
+      "feature_count": 61,
+      "source": "donnees/plu_zone_urba.gpkg",
+      "fields": [
+        { "name": "typezone", "type": "string", "values": ["U", "AUc", "AUs", "A", "N", "Nh"] },
+        {
+          "name": "libelle",
+          "type": "string",
+          "values": [
+            "Centre ancien",
+            "Habitat pavillonnaire",
+            "Zone d'activités",
+            "Extension à court terme",
+            "Réserve foncière",
+            "Grandes cultures",
+            "Maraîchage",
+            "Bords de Seine",
+            "Bois et coteaux",
+            "Hameau habité"
+          ]
+        }
+      ]
+    },
+    {
+      "layer_id": "gares_rer_b93d0f12_6e48_4a7c_95d1_e07f2b8c3a64",
+      "name": "Gares",
+      "kind": "vector",
+      "geometry": "Point",
+      "epsg": 2154,
+      "feature_count": 4,
+      "source": "donnees/gares.gpkg",
+      "fields": [
+        { "name": "nom", "type": "string", "values": ["Villeneuve-le-Roi", "Ablon", "Villeneuve-Triage", "Orly-Ville"] },
+        { "name": "ligne", "type": "string", "values": ["C", "D"] }
+      ]
+    },
+    {
+      "layer_id": "routes_bdt_25af7c60_9b14_4d83_a2e7_6c0d58f1b935",
+      "name": "Routes",
+      "kind": "vector",
+      "geometry": "LineString",
+      "epsg": 2154,
+      "feature_count": 2687,
+      "source": "donnees/bdtopo_troncons_routes.gpkg",
+      "fields": [
+        { "name": "nom", "type": "string" },
+        { "name": "classe", "type": "string", "values": ["autoroute", "nationale", "départementale", "communale", "chemin"] },
+        { "name": "vitesse_kmh", "type": "number" }
+      ]
+    },
+    {
+      "layer_id": "batiments_6d1e83b7_2f05_4b9a_8c36_d41a7e902c58",
+      "name": "Bâtiments",
+      "kind": "vector",
+      "geometry": "Polygon",
+      "epsg": 2154,
+      "feature_count": 8212,
+      "source": "donnees/bdtopo_batiments.gpkg",
+      "fields": [
+        { "name": "usage", "type": "string", "values": ["résidentiel", "commercial", "industriel", "équipement public", "annexe"] },
+        { "name": "hauteur_m", "type": "number" },
+        { "name": "nb_logements", "type": "number" }
+      ]
+    },
+    {
+      "layer_id": "reseau_voirie_e40b2a95_7c61_4f28_b3d0_19e6a85c4f72",
+      "name": "Réseau de voirie",
+      "kind": "vector",
+      "geometry": "LineString",
+      "epsg": 2154,
+      "feature_count": 3105,
+      "source": "donnees/graphe_voirie.gpkg",
+      "fields": [
+        { "name": "id_troncon", "type": "string" },
+        { "name": "longueur_m", "type": "number" }
+      ]
+    },
+    {
+      "layer_id": "cours_eau_91c7d5e8_4a2b_4e06_8f93_b65d0c1e7a24",
+      "name": "Cours d'eau",
+      "kind": "vector",
+      "geometry": "LineString",
+      "epsg": 2154,
+      "feature_count": 9,
+      "source": "donnees/cours_eau.shp",
+      "fields": [
+        { "name": "nom", "type": "string", "values": ["La Seine", "Ru des Marais", "Canal de dérivation"] },
+        { "name": "regime", "type": "string", "values": ["permanent", "intermittent"] }
+      ]
+    },
+    {
+      "layer_id": "zones_humides_5f38a0c1_d6e7_4b42_9a15_7e2c40b8d903",
+      "name": "Zones humides",
+      "kind": "vector",
+      "geometry": "MultiPolygon",
+      "epsg": 2154,
+      "feature_count": 17,
+      "source": "donnees/zones_humides.gpkg",
+      "fields": [
+        { "name": "classe", "type": "string", "values": ["avérée", "probable"] },
+        { "name": "surface_ha", "type": "number" }
+      ]
+    },
+    {
+      "layer_id": "equipements_3a5f60d2_8e19_4c7b_a640_2d97f1b5e083",
+      "name": "Équipements publics",
+      "kind": "vector",
+      "geometry": "Point",
+      "epsg": 2154,
+      "feature_count": 46,
+      "source": "donnees/equipements_publics.geojson",
+      "fields": [
+        { "name": "nom", "type": "string" },
+        { "name": "type", "type": "string", "values": ["école", "collège", "crèche", "mairie", "gymnase", "médiathèque", "salle polyvalente"] }
+      ]
+    },
+    {
+      "layer_id": "quartiers_iris_8b2c47e1_0f6d_4a93_b528_c13e9d7a6f40",
+      "name": "Quartiers IRIS",
+      "kind": "vector",
+      "geometry": "MultiPolygon",
+      "epsg": 2154,
+      "feature_count": 9,
+      "source": "donnees/iris.gpkg",
+      "fields": [
+        { "name": "code_iris", "type": "string" },
+        { "name": "nom_iris", "type": "string" },
+        { "name": "population", "type": "number" }
+      ]
+    },
+    {
+      "layer_id": "peb_orly_c7d94e26_3b80_4f1a_9e57_a20f6b3d8c11",
+      "name": "Plan d'exposition au bruit d'Orly",
+      "kind": "vector",
+      "geometry": "MultiPolygon",
+      "epsg": 2154,
+      "feature_count": 4,
+      "source": "donnees/peb_orly.gpkg",
+      "fields": [
+        { "name": "zone", "type": "string", "values": ["A", "B", "C", "D"] }
+      ]
+    }
+  ],
+  "unloaded_files": [
+    { "path": "donnees/espaces_verts.gpkg", "kind": "vector" },
+    { "path": "donnees/pistes_cyclables.shp", "kind": "vector" },
+    { "path": "donnees/lidar_mnt_1m.tif", "kind": "raster" }
+  ]
+}

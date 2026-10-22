@@ -26,5 +26,9 @@
 - `canal-local.md` — le contrat des messages du canal local : ordres du noyau
   vers l'extension (`order.execute`), annulation (`request.cancel`) et erreurs.
 
+- `entrainement-du-modele.md` — le jeu d'exemples d'entraînement engendré depuis le
+  registre (commande de génération, familles, règle du jeu tenu à l'écart) et le score
+  de référence de Qwen3.5-9B sur ce jeu.
+
 À remplir au fil des étapes : parité fonctionnelle visée et décisions
 d'architecture courtes (ADR).

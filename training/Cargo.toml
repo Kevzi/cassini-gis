@@ -1,0 +1,20 @@
+[package]
+name = "cassini-training"
+description = "Chaine d'entrainement du modele de composition de Cassini : jeu d'exemples engendre depuis le registre reel"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "cassini-training"
+path = "src/main.rs"
+
+# Aucune nouvelle dependance (plan 5.10, tache 1) : le registre et le contrat de plan viennent
+# de cassini-core, serde_json est deja dans l'arbre. Le hasard vient de `rng.rs`, ecrit a la main.
+# cassini-ai n'est pas tire : la chaine d'entrainement prend le registre sans la couche IA.
+[dependencies]
+cassini-core = { path = "../core" }
+serde_json = "1"
