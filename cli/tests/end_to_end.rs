@@ -249,18 +249,13 @@ fn plan_propose_with_a_missing_models_folder_hides_the_folder() {
     cleanup(&dir);
 }
 
-/// Un faux modèle (`x.gguf` qui n'est pas un GGUF) : `compose_plan` échoue après
-/// l'inventaire, en `ai.*`, et la réponse ne porte ni le dossier ni le chemin du modèle.
-#[test]
-fn plan_propose_with_an_unreadable_model_hides_its_path() {
+/// Lance `serve` sur le dossier de modèles `models`, propose « Ouvre les gares. », répond à la
+/// demande d'inventaire, et rend la réponse à la proposition avec tout le texte reçu.
+fn propose_with_models(project: &str, models: &Path) -> (Value, String) {
     use std::io::{BufRead, BufReader};
-    let (dir, project, _) = temp_project();
-    let models = dir.join("modeles");
-    std::fs::create_dir_all(&models).unwrap();
-    std::fs::write(models.join("x.gguf"), b"pas un modele").unwrap();
     let mut child = Command::new(BIN)
         .arg("serve")
-        .env("CASSINI_MODELS", &models)
+        .env("CASSINI_MODELS", models)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -302,14 +297,54 @@ fn plan_propose_with_an_unreadable_model_hides_its_path() {
     drop(stdin);
     assert!(child.wait().unwrap().success());
     assert_eq!(reply["id"], 2);
-    let code = reply["error"]["data"]["code"].as_str().unwrap();
-    assert!(code.starts_with("ai."), "{reply}");
-    for folder in [&dir, &models] {
+    (reply, text)
+}
+
+/// Le texte reçu ne porte aucun des dossiers `folders`.
+fn assert_hides(text: &str, folders: &[&Path]) {
+    for folder in folders {
         let f = folder.to_string_lossy();
         assert!(
             !text.contains(&*f) && !text.contains(&f.replace('\\', "/")),
             "{text}"
         );
     }
+}
+
+/// Un faux modèle (`x.gguf` qui n'est pas un GGUF) : `compose_plan` échoue après
+/// l'inventaire, en `ai.*`, et la réponse ne porte ni le dossier ni le chemin du modèle.
+#[test]
+fn plan_propose_with_an_unreadable_model_hides_its_path() {
+    let (dir, project, _) = temp_project();
+    let models = dir.join("modeles");
+    std::fs::create_dir_all(&models).unwrap();
+    std::fs::write(models.join("x.gguf"), b"pas un modele").unwrap();
+    let (reply, text) = propose_with_models(&project, &models);
+    let code = reply["error"]["data"]["code"].as_str().unwrap();
+    assert!(code.starts_with("ai."), "{reply}");
+    assert_hides(&text, &[&dir, &models]);
+    cleanup(&dir);
+}
+
+/// Une déclaration de modèle (ticket 5.10, tâche 3) qui nomme une base absente : le modèle est
+/// introuvable, nommé par son seul fichier, sans le dossier.
+#[test]
+fn plan_propose_with_a_declaration_naming_a_missing_base_names_the_file_only() {
+    let (dir, project, _) = temp_project();
+    let models = dir.join("modeles");
+    std::fs::create_dir_all(&models).unwrap();
+    std::fs::write(models.join("lora.gguf"), b"pas un adaptateur").unwrap();
+    std::fs::write(
+        models.join("ajuste.modele.json"),
+        r#"{"model":"base-absente.gguf","adapter":"lora.gguf","prompt":"short"}"#,
+    )
+    .unwrap();
+    let (reply, text) = propose_with_models(&project, &models);
+    assert_eq!(
+        reply["error"]["data"]["code"], "ai.model_not_found",
+        "{reply}"
+    );
+    assert!(text.contains("base-absente.gguf"), "{text}");
+    assert_hides(&text, &[&dir, &models]);
     cleanup(&dir);
 }
