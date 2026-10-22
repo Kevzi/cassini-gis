@@ -75,6 +75,7 @@ context: ['{project-root}/_bmad-output/initiative-cassini-mvp/ux-panneau-cassini
 - Le clic (`itemClicked`, et `itemActivated` pour le clavier) ne refait que la zone Résultat, jamais les listes, pour ne pas détruire l'élément cliqué pendant son signal.
 - `panel.py` n'est pas testé sans QGIS (aucun PyQt local) : compilé seulement ; la recette manuelle du README (ticket 13) reste à passer par le propriétaire.
 - Audit de la matrice : le choix du texte au clic (lignes 4 en erreur, 6, 7) vivait dans la classe Qt, non testé. Sorti dans `summary.detail`, testé (`DetailTest`) ; 265 tests.
+- Vérifié aussi par une sonde jetable hors dépôt sous QGIS 3.44.15 (plateforme offscreen, couches mémoire « Gares » et « Parcelles ») : plan réussi, plan arrêté par `plan.bad_reference` à l'étape 3 (étapes 1-2 gardent leur phrase), mode expert, bascule FR/EN ; clics sur le journal et le plan, aucun chemin absolu à l'écran.
 
 ## Plan Change Log
 
