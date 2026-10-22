@@ -191,4 +191,7 @@ notes = [
   "Decision: 2026-10-17 — l'entrainement est reproductible : exemples engendres depuis le registre, une commande pour re-entrainer et re-mesurer, pour qu'une commande ajoutee coute un re-entrainement et non un projet.",
   "Decision: 2026-10-17 — critere de duree : moins de 30 s par longue phrase sur le 5800X bride a 4 coeurs, mesure par l'entree 11.",
   "Decision: 2026-10-17 — graine des exemples : les inventaires de demandes types tires de la recherche sur les pratiques SIG (hors depot), en plus du registre.",
+  "Decision: 2026-10-22 — le but est un modele qui comprend le vocabulaire metier (urbanisme, environnement, SIG general), pas un correctif par phrase : une phrase mal comprise devient une famille d'exemples d'entrainement, jamais une regle de prompt. Constat : la phrase de demo de CLAUDE.md, sans « (zones U) », rend une question sur Qwen3.5-9B (« Aucune couche de parcelles constructibles »).",
+  "Decision: 2026-10-22 — la phrase de demo exacte de CLAUDE.md (sans « (zones U) ») entre dans le jeu tenu a l'ecart et ferme la story par une demo de bout en bout dans QGIS, faite par Claude avant la recette du proprietaire.",
+  "Decision: 2026-10-22 — le modele ajuste de ce depot reste civil et generaliste. La methode d'entrainement doit permettre d'ajouter plus tard un adaptateur LoRA de domaine, entraine hors de ce depot sur la meme base, sans re-entrainer la base : base et adaptateur se chargent ensemble, le choix passe par le selecteur de 5.14.",
 ]
