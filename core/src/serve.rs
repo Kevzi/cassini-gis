@@ -1085,6 +1085,8 @@ mod tests {
         inventory: bool,
         outcome: Result<Value, ErrorReport>,
         first: std::cell::RefCell<std::collections::VecDeque<Value>>,
+        /// Inventaires reçus par le compositeur, dans l'ordre.
+        seen: std::sync::Arc<std::sync::Mutex<Vec<Value>>>,
     }
 
     impl Composer for FixedComposer {
@@ -1097,6 +1099,7 @@ mod tests {
             if self.inventory {
                 let inv = inventory()?;
                 assert!(inv["layers"].is_array());
+                self.seen.lock().unwrap().push(inv);
             }
             let next = self.first.borrow_mut().pop_front();
             next.map(Ok)
@@ -1110,6 +1113,7 @@ mod tests {
             inventory: true,
             outcome: Ok(plan),
             first: Default::default(),
+            seen: Default::default(),
         })
     }
 
@@ -1782,6 +1786,7 @@ mod tests {
                     step: None,
                 }),
                 first: Default::default(),
+                seen: Default::default(),
             };
             let mut c = Client::start_with(CANCEL_GRACE, Some(failing));
             c.hello_with(&ALL);
@@ -1924,6 +1929,52 @@ mod tests {
         c.send(reply(&order["id"], json!({"ok": true})));
         assert_eq!(c.recv()["id"], 3);
         assert_eq!(c.journal().len(), 3);
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn the_composer_sees_the_inventory_in_the_learned_shape() {
+        let composer = composer(three_steps()).unwrap();
+        let seen = composer.seen.clone();
+        let mut c = Client::start_with(CANCEL_GRACE, Some(composer));
+        c.hello_with(&ALL);
+        c.send(json!({"jsonrpc":"2.0","id":2,"method":"plan.propose","params":{"request":"x"}}));
+        let order = c.recv();
+        assert_eq!(order["params"]["command"], "project.inventory");
+        c.send(reply(
+            &order["id"],
+            json!({
+                "project_name": "projet-test",
+                "project_crs": "EPSG:2154",
+                "extent": null,
+                "layers": [
+                    {"layer_id": "plu_1", "name": "Zonage du PLU", "source": "plu.gpkg",
+                     "crs": "EPSG:2154", "kind": "vector", "geometry": "MultiPolygon",
+                     "feature_count": 3, "fields": [
+                        {"name": "typezone", "type": "String", "values": ["U", "N", "Nh"]},
+                        {"name": "surface", "type": "Real"}]},
+                    {"layer_id": "mnt_1", "name": "MNT", "source": "mnt.tif",
+                     "crs": "IGNF:LAMB93", "kind": "raster", "geometry": null, "fields": []}
+                ]
+            }),
+        ));
+        assert!(c.recv()["result"]["plan_id"].is_string());
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec![json!({
+                "project": {"name": "projet-test", "epsg": 2154},
+                "layers": [
+                    {"layer_id": "plu_1", "name": "Zonage du PLU", "source": "plu.gpkg",
+                     "epsg": 2154, "kind": "vector", "geometry": "MultiPolygon",
+                     "feature_count": 3, "fields": [
+                        {"name": "typezone", "type": "string", "values": ["N", "Nh", "U"]},
+                        {"name": "surface", "type": "number"}]},
+                    {"layer_id": "mnt_1", "name": "MNT", "source": "mnt.tif",
+                     "kind": "raster", "geometry": null, "fields": []}
+                ],
+                "unloaded_files": []
+            })]
+        );
         c.close().1.unwrap();
     }
 
