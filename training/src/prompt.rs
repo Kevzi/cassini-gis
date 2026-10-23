@@ -19,7 +19,7 @@ Réponds uniquement par un objet JSON compact, sans texte autour, de l'une de ce
 {\"kind\":\"calls\",\"calls\":[{\"command\":id,\"params\":{...}}]}, \
 {\"kind\":\"question\",\"question\":\"<question courte>\"} ou \
 {\"kind\":\"refusal\",\"reason\":\"<raison courte>\"}.\n\
-Une couche se désigne par son identifiant exact de l'inventaire, la couche produite par l'étape k par \"step:k.layer_id\". \
+Une couche se désigne par son identifiant exact de l'inventaire, la couche produite par l'étape k (en comptant à partir de 1) par \"step:k.layer_id\". \
 Un filtre sur un champ vient avant le tampon ou l'intersection. Une distance se traduit par un tampon sur la couche de référence, \
 puis une intersection dont la couche cherchée est l'entrée ; plusieurs conditions se croisent par intersections successives. \
 N'ajoute ni étape, ni option, ni chemin de sortie que la demande ne réclame pas.\n\
@@ -47,11 +47,54 @@ pub fn system_text(inventory: &Value) -> String {
 /// Le texte exact vu par le modèle avant sa réponse : tour système, tour utilisateur, puis
 /// ouverture du tour assistant.
 pub fn render_prompt(inventory: &Value, request: &str) -> String {
+    format!("{}{ASSISTANT_OPEN}", first_turns(inventory, request))
+}
+
+/// Tours du premier essai, sans l'ouverture du tour assistant.
+fn first_turns(inventory: &Value, request: &str) -> String {
     format!(
-        "{}{}{TURN_END}{}{request}{TURN_END}{ASSISTANT_OPEN}",
+        "{}{}{TURN_END}{}{request}{TURN_END}",
         turn_head("system"),
         system_text(inventory),
         turn_head("user"),
+    )
+}
+
+/// Longueur gardée de la sortie rejetée, en caractères (`MAX_ECHO_CHARS` de `ai/src/plan.rs`).
+pub const MAX_ECHO_CHARS: usize = 1500;
+/// Nombre d'écarts cités dans la redemande (`MAX_REPORTED` de `ai/src/plan.rs`).
+pub const MAX_REPORTED: usize = 8;
+
+/// Le tour utilisateur de la redemande, au texte exact de `retry_turns` (`ai/src/plan.rs`).
+pub fn retry_text(errors: &[String]) -> String {
+    let shown: Vec<&str> = errors
+        .iter()
+        .take(MAX_REPORTED)
+        .map(String::as_str)
+        .collect();
+    format!(
+        "Ta réponse n'est pas conforme : {}. Redonne le plan corrigé, uniquement le JSON.",
+        shown.join(" ; ")
+    )
+}
+
+/// Le texte exact vu par le modèle à la redemande : les tours du premier essai, sa sortie
+/// rejetée en tour assistant (bornée comme dans `cassini-ai`, sans bloc de réflexion : c'est
+/// ainsi que `ai` relit un tour assistant), le tour des écarts, puis l'ouverture du tour
+/// assistant. La perte ne porte que sur la réponse finale.
+pub fn render_retry_prompt(
+    inventory: &Value,
+    request: &str,
+    rejected: &str,
+    errors: &[String],
+) -> String {
+    let echoed: String = rejected.chars().take(MAX_ECHO_CHARS).collect();
+    format!(
+        "{}{}{echoed}{TURN_END}{}{}{TURN_END}{ASSISTANT_OPEN}",
+        first_turns(inventory, request),
+        turn_head("assistant"),
+        turn_head("user"),
+        retry_text(errors),
     )
 }
 
@@ -93,6 +136,34 @@ mod tests {
              <|im_start|>assistant\n<think>\n\n</think>\n\n"
         ));
         assert_eq!(prompt.matches("<|im_start|>").count(), 3);
+    }
+
+    #[test]
+    fn the_retry_prompt_echoes_the_rejected_output_then_the_deviations() {
+        let inventory = json!({"layers": [{"layer_id": "gares_1"}]});
+        let rejected = "{\"kind\":\"calls\",\"calls\":[]}";
+        let errors = vec!["étape 1 : écart".to_string()];
+        let prompt = render_retry_prompt(&inventory, "Tampon.", rejected, &errors);
+        let first = render_prompt(&inventory, "Tampon.");
+        let head = first.strip_suffix(ASSISTANT_OPEN).unwrap();
+        assert!(prompt.starts_with(head));
+        assert!(prompt.ends_with(&format!(
+            "<|im_start|>assistant\n{rejected}<|im_end|>\n\
+             <|im_start|>user\nTa réponse n'est pas conforme : étape 1 : écart. \
+             Redonne le plan corrigé, uniquement le JSON.<|im_end|>\n{ASSISTANT_OPEN}"
+        )));
+        // Sortie rejetée bornée, écarts plafonnés.
+        let long = "x".repeat(MAX_ECHO_CHARS + 10);
+        let many: Vec<String> = (0..20).map(|i| format!("e{i}")).collect();
+        let prompt = render_retry_prompt(&inventory, "Tampon.", &long, &many);
+        assert!(prompt.contains(&format!("{}<|im_end|>", "x".repeat(MAX_ECHO_CHARS))));
+        assert!(!prompt.contains(&"x".repeat(MAX_ECHO_CHARS + 1)));
+        assert!(prompt.contains("e7.") && !prompt.contains("e8"));
+    }
+
+    #[test]
+    fn the_steps_are_counted_from_one() {
+        assert!(SYSTEM.contains("l'étape k (en comptant à partir de 1) par \"step:k.layer_id\""));
     }
 
     #[test]

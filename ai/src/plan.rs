@@ -283,7 +283,7 @@ Réponds uniquement par un objet JSON compact, sans texte autour, de l'une de ce
 {\"kind\":\"calls\",\"calls\":[{\"command\":id,\"params\":{...}}]}, \
 {\"kind\":\"question\",\"question\":\"<question courte>\"} ou \
 {\"kind\":\"refusal\",\"reason\":\"<raison courte>\"}.\n\
-Une couche se désigne par son identifiant exact de l'inventaire, la couche produite par l'étape k par \"step:k.layer_id\". \
+Une couche se désigne par son identifiant exact de l'inventaire, la couche produite par l'étape k (en comptant à partir de 1) par \"step:k.layer_id\". \
 Un filtre sur un champ vient avant le tampon ou l'intersection. Une distance se traduit par un tampon sur la couche de référence, \
 puis une intersection dont la couche cherchée est l'entrée ; plusieurs conditions se croisent par intersections successives. \
 N'ajoute ni étape, ni option, ni chemin de sortie que la demande ne réclame pas.\n\
@@ -876,6 +876,51 @@ mod tests {
                 e.request
             );
         }
+    }
+
+    /// La redemande vue à l'entraînement est celle de `ai` : pour chaque exemple de redemande du
+    /// jeu engendré, la sortie rejetée est jugée ici avec les mêmes écarts, et les tours de
+    /// `retry_turns` valent le prompt d'entraînement, octet pour octet.
+    #[test]
+    fn the_retry_prompt_is_the_training_retry_prompt_byte_for_byte() {
+        let (examples, _) = cassini_training::generate(
+            cassini_training::DEFAULT_SEED,
+            cassini_training::DEFAULT_COUNT,
+        );
+        let reg = registry();
+        let mut checked = 0;
+        for e in &examples {
+            let Some(retry) = &e.retry else {
+                continue;
+            };
+            let errors = judge(&reg, &done(&retry.rejected)).unwrap_err();
+            assert_eq!(errors, retry.errors, "{}", e.request);
+            let first = first_turns(PromptStyle::Short, &reg, &e.inventory, &e.request);
+            let turns = retry_turns(first, &retry.rejected, &errors);
+            assert_eq!(
+                chat_text(&turns),
+                cassini_training::prompt_text(e),
+                "{}",
+                e.request
+            );
+            checked += 1;
+        }
+        assert!(checked * 25 >= examples.len(), "{checked} redemandes");
+        assert_eq!(cassini_training::prompt::MAX_ECHO_CHARS, MAX_ECHO_CHARS);
+        assert_eq!(cassini_training::prompt::MAX_REPORTED, MAX_REPORTED);
+        // Bornes et plafond : le texte de redemande des deux côtés, sur des écarts nombreux.
+        let many: Vec<String> = (0..20).map(|i| format!("étape {i} : écart")).collect();
+        let long = "x".repeat(MAX_ECHO_CHARS + 50);
+        let inv = inventory();
+        let turns = retry_turns(
+            first_turns(PromptStyle::Short, &reg, &inv, "x"),
+            &long,
+            &many,
+        );
+        assert_eq!(
+            chat_text(&turns),
+            cassini_training::prompt::render_retry_prompt(&inv, "x", &long, &many)
+        );
     }
 
     #[test]

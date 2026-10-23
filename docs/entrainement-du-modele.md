@@ -12,12 +12,12 @@ document).
 Une seule commande, depuis la racine du dépôt :
 
 ```
-cargo run -p cassini-training --release -- --seed 1 --count 5000 --out exemples.jsonl
+cargo run -p cassini-training --release -- --seed 1 --count 8000 --out exemples.jsonl
 ```
 
 - `--seed` (par défaut 1) : la graine. Même graine, même fichier, à l'octet près, sous
   Windows comme sous Linux.
-- `--count` (par défaut 5000) : le nombre d'exemples.
+- `--count` (par défaut 8000 depuis 5.15, 5000 avant) : le nombre d'exemples.
 - `--out` : le fichier écrit. Le jeu n'est pas versionné : il se régénère.
 
 Le résumé par famille (exemples gardés, écartés, doublons) s'imprime sur la sortie
@@ -35,6 +35,8 @@ Chaque ligne du fichier est un enregistrement JSON :
 - `expected` : le plan attendu, sous la forme exacte que rend l'agent —
   `{"kind":"calls","calls":[...]}`, `{"kind":"question","question":"..."}` ou
   `{"kind":"refusal","reason":"..."}`.
+- `retry` (exemples de redemande seulement, depuis 5.15) : `{"rejected": "...", "errors": [...]}`,
+  la sortie rejetée et ses écarts (voir « La redemande » plus bas).
 
 Ce format structuré n'écrit aucun texte de prompt. Le format `--format chat` de la
 tâche 2 (plus bas) écrit, lui, le texte exact vu par le modèle.
@@ -52,7 +54,7 @@ n'a été ajoutée.
    deviendrait ambigu.
 2. Elle écrit la demande à partir de gabarits à emplacements : tournure d'ouverture,
    distance, valeur de champ, accord des participes, ponctuation, politesse, et parfois
-   une commune citée comme simple contexte.
+   une commune citée comme simple contexte (« à Orly », seule forme depuis 5.15).
 3. Elle construit le plan attendu en suivant les règles de chaînage du prompt : le filtre
    sur un champ avant le tampon ou l'intersection, le tampon sur la couche de référence,
    puis des intersections successives dont la première porte la couche cherchée.
@@ -92,7 +94,40 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `description` | décrire une couche, inventaire du projet, version, modèles installés |
 | `question_couche_absente` | une couche dont rien ne parle dans l'inventaire → question |
 | `question_champ_absent` | un critère qu'aucun champ ne porte → question, jamais un champ voisin deviné |
-| `refus` | courriel, suppression, reprojection, export de couche, style, itinéraire, téléchargement, A3, 3D → refus affirmatif |
+| `refus` | courriel, suppression, reprojection, export de couche, style, itinéraire, téléchargement, 3D → refus affirmatif |
+| `refus_hors_registre` | champ de vision, ligne de vue, pente, cadrage ou zoom de la carte, PDF en A3, A0 ou portrait, altitude moyenne par zone (statistiques sur un raster), MNT présent pour le terrain → refus affirmatif, jamais un plan de substitution |
+| `appartenance_commune` | « qui appartiennent à la commune de X », « sur le territoire de X » → sélection de la commune par son nom, puis intersection ; sans couche de communes, ou sans nom de commune, une question. Une commune citée seule (« à Orly ») reste un contexte sans effet |
+| `question_isochrone` | isochrone depuis un lieu nommé (« depuis la mairie de X »), sans coordonnées → question qui demande le point en X et Y avec son système |
+| `etape_unique` | une seule opération demandée, une autre couche citée pour le contexte (« je m'occuperai des écoles plus tard ») → une étape |
+| `redemande` | environ 5 % du jeu : un exemple d'une autre famille vu au tour de redemande (voir plus bas) |
+
+Depuis 5.15, `conditions_multiples` porte aussi les plans à **trois conditions** (cible
+filtrée, zone et distance ; zone et deux distances), quatre à six étapes, jamais plus de six.
+L'export PDF s'y ajoute une fois sur quatre, et seulement aux plans de cinq étapes ou moins
+(jamais à « zone et deux distances », qui en a déjà six).
+
+### Les inventaires de QGIS (5.15)
+
+Les valeurs d'un champ texte sont triées, comme le produit les rend. `unloaded_files` est
+vide sauf quand la famille ouvre un fichier (`ouverture`, avec parfois un second fichier à ne
+pas ouvrir) : dans QGIS, l'extension ne parcourt pas le disque. Un inventaire sur trois prend
+les formes que rend `core/src/agent_inventory.rs` depuis QGIS : raster sans `feature_count`,
+couche temporaire sans `source`, SCR qui n'est pas EPSG (couche ou projet sans `epsg`), table
+de distraction sans géométrie (`geometry: null` sur un vecteur), projet non enregistré (sans
+`name`). `training/tests/forme_inventaire.rs` vérifie que chacune de ces formes, rendue par
+le produit, est vue à l'entraînement.
+
+### La redemande (5.15)
+
+Un exemple `redemande` part d'un exemple valide d'une autre famille dont la réponse est un
+plan d'appels, et corrompt ce plan comme un modèle le corromprait : identifiant de couche
+inconnu, référence `step:k` vers l'étape elle-même ou une suivante, étape retirée qui casse
+une référence. La corruption n'est gardée que si `check_plan` la rejette (un identifiant
+inconnu ne l'est jamais : `check_plan` ne voit pas l'inventaire, l'exemple est laissé). Le
+prompt est alors celui que `cassini-ai` assemble à la redemande (`retry_turns`) : le prompt
+du premier essai, la sortie rejetée en tour assistant, puis le tour « Ta réponse n'est pas
+conforme : étape k : message. Redonne le plan corrigé, uniquement le JSON. » ; la réponse
+attendue est le plan juste. La perte ne porte que sur cette réponse, `data.py` n'a pas changé.
 
 Une phrase mal comprise par le modèle devient une famille ou une tournure de plus ici,
 jamais une règle de prompt.
@@ -115,8 +150,14 @@ deux fichiers le lisent :
 
 - `training/tests/recouvrement.rs` engendre le jeu avec la graine par défaut et vérifie
   qu'aucune phrase tenue à l'écart n'y figure telle quelle (texte normalisé : minuscules,
-  sans accents ni ponctuation). S'il échoue, on retire la tournure fautive du générateur
-  et on le signale ; on ne retouche jamais une famille pour coller au jeu tenu à l'écart.
+  sans accents ni ponctuation), ni à un nombre ou une commune près. S'il échoue, on retire
+  la tournure fautive du générateur et on le signale ; on ne retouche jamais une famille
+  pour coller au jeu tenu à l'écart. Depuis 5.15, le même test couvre les phrases des
+  essais réels `plan_reel`, `question_reel` et `duree_reel` (qui, eux, ne sont pas tenus à
+  l'écart). Il a fait retirer trois tournures : « Fais une zone tampon de N m autour des
+  ... » devient « Fais-moi une zone tampon ... », « Décris la couche des ... » devient
+  « Décris-moi la couche des ... », et « de la section AB » sort des tournures des parcelles
+  (« en section AB », « de section AB » restent).
 - `ai/tests/ecart_reel.rs` mesure le vrai modèle sur ce jeu, sans jamais imprimer le texte
   des phrases.
 
@@ -160,11 +201,16 @@ il voit un message système de quelques phrases (rôle, trois formes de réponse
 question plutôt que deviner, refus seulement si aucune commande ne sait faire), puis
 l'inventaire du projet et la demande, au format chatml de Qwen, réflexion coupée.
 
+Depuis 5.15, les consignes disent que les étapes se comptent à partir de 1, comme le long
+prompt (« la couche produite par l'étape k (en comptant à partir de 1) par
+"step:k.layer_id" »). Le modèle livré par 5.10 a été entraîné sur l'ancien texte : il faut le
+ré-entraîner (tâche B de 5.15) avant de le mesurer avec ce prompt.
+
 Ce texte est écrit **à un seul endroit** : `training/src/prompt.rs` (`render_prompt`,
 `completion`). La commande l'écrit dans le jeu :
 
 ```
-cargo run -p cassini-training --release -- --format chat --seed 1 --count 5000 --out entrainement.jsonl
+cargo run -p cassini-training --release -- --format chat --seed 1 --count 8000 --out entrainement.jsonl
 ```
 
 Chaque ligne est `{"prompt": "...", "completion": "..."}` : `prompt` est le texte exact vu
@@ -194,7 +240,7 @@ La commande, sans intervention :
 2. refuse un dossier de sortie déjà rempli (rien n'est écrasé ; `--reprendre` finit un
    entraînement commencé en sautant les étapes déjà faites) ou situé dans le dépôt ;
 3. engendre les jeux par `cassini-training --format chat` : graine 1 pour l'entraînement
-   (5 000 exemples), graine 2 pour la validation (300), dont elle retire les prompts déjà
+   (8 000 exemples depuis 5.15, 5 000 avant), graine 2 pour la validation (300), dont elle retire les prompts déjà
    vus à l'entraînement ;
 4. prend la base `Qwen/Qwen3.5-4B` (Apache-2.0) à la révision épinglée
    `851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a`, dans le cache de Hugging Face ;
@@ -315,8 +361,10 @@ reprise (`--reprendre`) :
 (`SHORT_SYSTEM`) : le produit n'embarque pas la chaîne d'entraînement, qui n'est qu'une
 dépendance de développement de `cassini-ai`. Deux tests tiennent les deux textes ensemble :
 
-- sans modèle, pour chacun des 5 000 exemples engendrés, les tours que `ai` assemble valent
-  `render_prompt`, octet pour octet, encadrement chatml compris ;
+- sans modèle, pour chacun des 8 000 exemples engendrés, les tours que `ai` assemble valent
+  `render_prompt`, octet pour octet, encadrement chatml compris ; et pour chaque exemple de
+  redemande, la sortie rejetée jugée par `ai` donne les mêmes écarts, et les tours de
+  `retry_turns` valent le prompt de redemande de l'entraînement (`render_retry_prompt`) ;
 - avec le vrai modèle (`CASSINI_TEST_MODEL`, la base Q4_K_M), pour 300 exemples, les jetons
   que `ai` lit par segments sont ceux du prompt d'entraînement découpé d'un tenant par le
   découpeur de llama.cpp du même GGUF (l'égalité avec celui de Hugging Face, qui a servi à

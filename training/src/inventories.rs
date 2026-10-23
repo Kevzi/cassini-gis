@@ -207,12 +207,9 @@ pub static THEMES: &[Theme] = &[
                         v("ZA"),
                         v("ZB"),
                     ],
-                    phrases: &[
-                        "de la section {v}",
-                        "situées en section {v}",
-                        "en section {v}",
-                        "de section {v}",
-                    ],
+                    // Pas « de la section {v} » : « Garde seulement les parcelles de la section AB »
+                    // est une phrase des essais réels (`training/tests/recouvrement.rs`, 5.15).
+                    phrases: &["situées en section {v}", "en section {v}", "de section {v}"],
                 },
             },
             FieldDef {
@@ -1278,6 +1275,8 @@ pub struct Builder {
     layers: Vec<Layer>,
     files: Vec<File>,
     excluded: Vec<&'static str>,
+    /// Rang des couches de distraction dans `layers` : aucun plan ne les cite.
+    distractors: Vec<usize>,
 }
 
 impl Builder {
@@ -1346,7 +1345,9 @@ impl Builder {
                             chosen.push(i);
                         }
                     }
-                    chosen.sort_unstable();
+                    // Valeurs triées comme le produit les rend (`core/src/agent_inventory.rs`,
+                    // `sort_unstable` sur les chaînes) : QGIS n'a pas d'ordre canonique.
+                    chosen.sort_unstable_by(|a, b| values[*a].v.cmp(values[*b].v));
                     chosen.into_iter().map(|i| &values[i]).collect()
                 }
                 _ => Vec::new(),
@@ -1388,28 +1389,32 @@ impl Builder {
                 return;
             }
             let t = *rng.pick(&free);
+            self.distractors.push(self.layers.len());
             self.add(rng, t.key, &[], &[], &[]);
         }
     }
 
-    /// Termine l'inventaire : distractions par défaut, fichiers non ouverts, ordre mélangé.
+    /// Termine l'inventaire : distractions par défaut, ordre mélangé. Les fichiers non ouverts
+    /// sont ceux que la famille a posés (`add_file`), et seulement eux : dans QGIS, l'extension
+    /// ne parcourt pas le disque et `unloaded_files` est toujours vide.
+    ///
+    /// Une part des inventaires prend les formes que rend le produit depuis QGIS
+    /// (`core/src/agent_inventory.rs`, clé absente plutôt que `null`) : raster sans nombre
+    /// d'objets, couche temporaire sans `source`, SCR qui n'est pas EPSG (sans `epsg`), table
+    /// sans géométrie (`geometry: null` sur un vecteur), projet non enregistré (sans `name`).
     pub fn finish(mut self, rng: &mut Rng) -> Value {
         let n = rng.range(1, 4) as usize;
         self.distract(rng, n, |t| t.geom != Geom::Raster);
         if rng.chance(1, 4) {
             self.distract(rng, 1, |t| t.geom == Geom::Raster);
         }
-        for _ in 0..rng.range(0, 2) {
-            let free = self.free(|t| t.geom != Geom::Raster);
-            if free.is_empty() {
-                break;
-            }
-            let t = *rng.pick(&free);
-            self.add_file(rng, t.key, None);
-        }
         let mut layers: Vec<Value> = self.layers.iter().map(Layer::to_json).collect();
+        let mut project = json!({"name": rng.pick(PROJECTS), "epsg": 2154});
+        if rng.chance(1, 3) {
+            qgis_shapes(rng, &mut layers, &self.distractors, &mut project);
+        }
         rng.shuffle(&mut layers);
-        let files: Vec<Value> = self
+        let mut files: Vec<Value> = self
             .files
             .iter()
             .map(|f| {
@@ -1421,11 +1426,48 @@ impl Builder {
                 json!({"path": f.path, "kind": kind})
             })
             .collect();
+        rng.shuffle(&mut files);
         json!({
-            "project": {"name": rng.pick(PROJECTS), "epsg": 2154},
+            "project": project,
             "layers": layers,
             "unloaded_files": files,
         })
+    }
+}
+
+/// Formes d'inventaire que rend le produit depuis QGIS, posées sur un inventaire du jeu.
+/// Seule une couche de distraction perd sa géométrie : une couche citée par le plan doit en
+/// avoir une pour être tamponnée ou croisée.
+fn qgis_shapes(rng: &mut Rng, layers: &mut [Value], distractors: &[usize], project: &mut Value) {
+    let project = project.as_object_mut().expect("projet objet");
+    if rng.chance(1, 4) {
+        project.remove("name");
+    }
+    if rng.chance(1, 8) {
+        project.remove("epsg");
+    }
+    for layer in layers.iter_mut() {
+        let layer = layer.as_object_mut().expect("couche objet");
+        if layer["kind"] == "raster" {
+            // QGIS ne compte pas les objets d'un raster : la clé manque.
+            layer.remove("feature_count");
+        }
+        if rng.chance(1, 8) {
+            // Sortie temporaire d'une étape précédente : aucun fichier derrière.
+            layer.remove("source");
+        }
+        if rng.chance(1, 12) {
+            layer.remove("epsg");
+        }
+    }
+    let tables: Vec<usize> = distractors
+        .iter()
+        .copied()
+        .filter(|&i| layers[i]["kind"] == "vector")
+        .collect();
+    if !tables.is_empty() && rng.chance(1, 4) {
+        let i = *rng.pick(&tables);
+        layers[i]["geometry"] = Value::Null;
     }
 }
 
@@ -1467,6 +1509,58 @@ mod tests {
             let text = inv.to_string();
             assert!(!text.contains("rivieres"), "{text}");
         }
+    }
+
+    #[test]
+    fn values_are_sorted_and_no_file_is_listed_unless_the_family_adds_one() {
+        let mut rng = Rng::new(9);
+        for _ in 0..200 {
+            let mut b = Builder::new();
+            b.add(&mut rng, "zonage", &["zone"], &[], &[]);
+            let inv = b.finish(&mut rng);
+            assert_eq!(inv["unloaded_files"], json!([]));
+            for layer in inv["layers"].as_array().unwrap() {
+                for f in layer["fields"].as_array().unwrap() {
+                    if let Some(values) = f["values"].as_array() {
+                        let v: Vec<&str> = values.iter().map(|v| v.as_str().unwrap()).collect();
+                        assert!(v.is_sorted(), "{v:?}");
+                    }
+                }
+            }
+        }
+        let mut b = Builder::new();
+        let path = b.add_file(&mut rng, "ecoles", None);
+        let inv = b.finish(&mut rng);
+        assert_eq!(inv["unloaded_files"][0]["path"], path.as_str());
+    }
+
+    #[test]
+    fn some_inventories_take_the_shapes_qgis_gives() {
+        let mut rng = Rng::new(4);
+        let (mut no_name, mut no_source, mut no_epsg, mut table, mut raster_count) =
+            (0, 0, 0, 0, 0);
+        for _ in 0..600 {
+            let mut b = Builder::new();
+            let kept = b.add(&mut rng, "gares", &[], &[], &[]);
+            b.add(&mut rng, "mnt", &[], &[], &[]);
+            let inv = b.finish(&mut rng);
+            no_name += usize::from(inv["project"].get("name").is_none());
+            for l in inv["layers"].as_array().unwrap() {
+                no_source += usize::from(l.get("source").is_none());
+                no_epsg += usize::from(l.get("epsg").is_none());
+                if l["kind"] == "vector" && l["geometry"].is_null() {
+                    table += 1;
+                    // Seule une couche de distraction perd sa géométrie.
+                    assert_ne!(l["layer_id"], kept.id.as_str());
+                }
+                if l["kind"] == "raster" && l.get("feature_count").is_some() {
+                    raster_count += 1;
+                }
+            }
+        }
+        assert!(no_name > 0 && no_source > 0 && no_epsg > 0 && table > 0);
+        // La forme nominale reste majoritaire.
+        assert!(raster_count > 300, "{raster_count}");
     }
 
     #[test]

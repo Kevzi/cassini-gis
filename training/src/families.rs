@@ -19,6 +19,17 @@ pub struct Example {
     pub inventory: Value,
     pub request: String,
     pub expected: Value,
+    /// Exemple de redemande : la sortie rejetée et ses écarts, que le prompt montre avant la
+    /// réponse attendue. `None` pour un premier essai.
+    pub retry: Option<Retry>,
+}
+
+/// Le tour de redemande d'un exemple : la sortie rejetée par `check_plan`, telle que le
+/// modèle l'aurait écrite, et les écarts au texte exact du jugement de `cassini-ai`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Retry {
+    pub rejected: String,
+    pub errors: Vec<String>,
 }
 
 /// Une famille : nom stable, poids de tirage, fabrique.
@@ -134,6 +145,34 @@ pub static FAMILIES: &[Family] = &[
         name: "refus",
         weight: 7,
         make: refus,
+    },
+    Family {
+        name: "refus_hors_registre",
+        weight: 7,
+        make: refus_hors_registre,
+    },
+    Family {
+        name: "appartenance_commune",
+        weight: 5,
+        make: appartenance_commune,
+    },
+    Family {
+        name: "question_isochrone",
+        weight: 4,
+        make: question_isochrone,
+    },
+    Family {
+        name: "etape_unique",
+        weight: 5,
+        make: etape_unique,
+    },
+    // Environ 5 % du jeu : un exemple d'une autre famille, vu au tour de redemande. Le poids
+    // compte les tirages laissés (corruption acceptée par `check_plan`, premier essai qui
+    // n'est pas un plan d'appels) : un sur deux environ.
+    Family {
+        name: "redemande",
+        weight: 20,
+        make: redemande,
     },
 ];
 
@@ -281,8 +320,9 @@ fn fill(template: &str, noun: &Noun, v: &str) -> String {
 fn finish(rng: &mut Rng, body: &str, interrogative: bool, place: bool) -> String {
     let mut s = body.to_string();
     if place && rng.chance(1, 8) {
-        let prep = *rng.pick(&["à", "sur la commune de", "dans la commune de"]);
-        s.push_str(&format!(" {prep} {}", rng.pick(COMMUNES)));
+        // Seulement « à X » : « sur le territoire de X » est une tournure d'appartenance, qui
+        // crée une étape (`appartenance_commune`) ; un quasi-synonyme sans étape la brouillerait.
+        s.push_str(&format!(" à {}", rng.pick(COMMUNES)));
     }
     if rng.chance(1, 12) {
         s.push_str(pick_str(
@@ -507,6 +547,7 @@ fn example(
         inventory,
         request,
         expected,
+        retry: None,
     }
 }
 
@@ -701,7 +742,9 @@ const DISSOLVE: &[&str] = &[
 
 fn tampon_head(rng: &mut Rng, d: &Dist, around: &str) -> String {
     match rng.below(6) {
-        0 => format!("Fais une zone tampon {} autour {around}", d.de()),
+        // « Fais-moi », pas « Fais une zone tampon ... autour des ... » : cette tournure nue est
+        // celle de phrases des essais réels (`training/tests/recouvrement.rs`).
+        0 => format!("Fais-moi une zone tampon {} autour {around}", d.de()),
         1 => format!("Crée un tampon {} autour {around}", d.de()),
         2 => format!("Trace un périmètre {} autour {around}", d.de()),
         3 => format!("Génère une zone {} autour {around}", d.de()),
@@ -991,7 +1034,7 @@ fn intersection(rng: &mut Rng) -> Option<Example> {
 
 fn draft_multi(rng: &mut Rng) -> Option<Draft> {
     let mut b = Builder::new();
-    match rng.below(4) {
+    match rng.below(6) {
         // Zone puis distance : select(zone), buffer(réf), intersect(cible, 1), intersect(3, 2).
         0 => {
             let t = pick_theme(rng, &b, |t| {
@@ -1073,7 +1116,7 @@ fn draft_multi(rng: &mut Rng) -> Option<Draft> {
             })
         }
         // Deux distances : buffer(r1), buffer(r2), intersect(cible, 1), intersect(3, 2).
-        _ => {
+        3 => {
             let (target, r1) = pair(rng, &mut b)?;
             let r = pick_theme(rng, &b, ordinary)?;
             let r2 = b.add(rng, r.key, &[], &[], &[]);
@@ -1094,13 +1137,84 @@ fn draft_multi(rng: &mut Rng) -> Option<Draft> {
                 np,
             })
         }
+        // Trois conditions, cible filtrée, zone et distance, dans l'ordre de la phrase :
+        // select(cible), select(zone), buffer(réf), intersect(1, 2), intersect(4, 3).
+        4 => {
+            let t = pick_theme(rng, &b, |t| {
+                ordinary(t) && !text_fields(t).is_empty() && !AREAS.iter().any(|a| a.key == t.key)
+            })?;
+            let def = *rng.pick(&text_fields(t));
+            let target = b.add(rng, t.key, &[def.role], &[], &[]);
+            let field = target.field(def.role)?;
+            let val = *rng.pick(&field.values);
+            let head = qualified(rng, &t.noun, def, val, Det::Les);
+            let (zone, sel_zone) = area(rng, &mut b, &t.noun)?;
+            let r = pick_theme(rng, &b, ordinary)?;
+            let reference = b.add(rng, r.key, &[], &[], &[]);
+            let d = dist(rng);
+            let rr = de_ref(rng, &r.noun);
+            let link = *rng.pick(&[" ", ", ", " et "]);
+            let np = format!("{head} {zone}{link}{}", near(rng, &t.noun, &d, &rr));
+            Some(Draft {
+                calls: vec![
+                    select(&target.id, &field.name, "eq", val.v),
+                    sel_zone,
+                    buffer(&reference.id, &d, false),
+                    intersect(&step(1), &step(2)),
+                    intersect(&step(4), &step(3)),
+                ],
+                b,
+                noun: &t.noun,
+                np,
+            })
+        }
+        // Trois conditions, une zone et deux distances : select(zone), buffer(r1), buffer(r2),
+        // intersect(cible, 1), intersect(4, 2), intersect(5, 3).
+        _ => {
+            let t = pick_theme(rng, &b, |t| {
+                ordinary(t) && !AREAS.iter().any(|a| a.key == t.key)
+            })?;
+            let target = b.add(rng, t.key, &[], &[], &[]);
+            let (zone, sel) = area(rng, &mut b, &t.noun)?;
+            let r = pick_theme(rng, &b, ordinary)?;
+            let r1 = b.add(rng, r.key, &[], &[], &[]);
+            let r = pick_theme(rng, &b, ordinary)?;
+            let r2 = b.add(rng, r.key, &[], &[], &[]);
+            let (d1, d2) = (dist(rng), dist(rng));
+            let first = format!("à moins {} {}", d1.de(), de_ref(rng, &r1.theme.noun));
+            let second = format!("à moins {} {}", d2.de(), de_ref(rng, &r2.theme.noun));
+            let np = format!("les {} {zone}, {first} et {second}", t.noun.pl);
+            Some(Draft {
+                calls: vec![
+                    sel,
+                    buffer(&r1.id, &d1, false),
+                    buffer(&r2.id, &d2, false),
+                    intersect(&target.id, &step(1)),
+                    intersect(&step(4), &step(2)),
+                    intersect(&step(5), &step(3)),
+                ],
+                b,
+                noun: &t.noun,
+                np,
+            })
+        }
     }
 }
 
+/// Plafond d'étapes d'un plan engendré, PDF compris : trois conditions et l'export tiennent
+/// en six étapes.
+const MAX_DRAFT_STEPS: usize = 6;
+
 fn conditions_multiples(rng: &mut Rng) -> Option<Example> {
-    let d = draft_multi(rng)?;
-    let (head, q) = open_find(rng, d.noun, &d.np, true);
-    let request = finish(rng, &head, q, true);
+    let mut d = draft_multi(rng)?;
+    let with_pdf = d.calls.len() < MAX_DRAFT_STEPS && rng.chance(1, 4);
+    let (mut head, q) = open_find(rng, d.noun, &d.np, !with_pdf);
+    if with_pdf {
+        let (clause, title) = pdf_clause(rng, &d);
+        head.push_str(&clause);
+        d.calls.push(pdf(&title));
+    }
+    let request = finish(rng, &head, q, !with_pdf);
     Some(example(
         "conditions_multiples",
         d.b,
@@ -1245,6 +1359,9 @@ fn export_pdf(rng: &mut Rng) -> Option<Example> {
         3 => draft_distance_ref(rng)?,
         _ => draft_multi(rng)?,
     };
+    if d.calls.len() >= MAX_DRAFT_STEPS {
+        return None;
+    }
     let (mut body, _) = open_find(rng, d.noun, &d.np, false);
     let (clause, title) = pdf_clause(rng, &d);
     body.push_str(&clause);
@@ -1426,6 +1543,7 @@ fn ouverture(rng: &mut Rng) -> Option<Example> {
         let request = finish(rng, &body, false, false);
         let expected = calls(vec![json!({"command": "layer.add",
             "params": {"path": path, "crs": crs, "x_field": xf, "y_field": yf}})]);
+        other_file(rng, &mut b);
         return Some(example("ouverture", b, rng, request, expected));
     }
     let t = pick_theme(rng, &b, vector)?;
@@ -1443,7 +1561,20 @@ fn ouverture(rng: &mut Rng) -> Option<Example> {
     let expected = calls(vec![
         json!({"command": "layer.add", "params": {"path": path}}),
     ]);
+    other_file(rng, &mut b);
     Some(example("ouverture", b, rng, request, expected))
+}
+
+/// Parfois un second fichier non ouvert, d'un autre thème, que la demande ne nomme pas : seul
+/// le fichier demandé s'ouvre.
+fn other_file(rng: &mut Rng, b: &mut Builder) {
+    if rng.chance(1, 3) {
+        let free = b.free(|t| t.geom != Geom::Raster);
+        if !free.is_empty() {
+            let t = *rng.pick(&free);
+            b.add_file(rng, t.key, None);
+        }
+    }
 }
 
 fn description(rng: &mut Rng) -> Option<Example> {
@@ -1459,7 +1590,8 @@ fn description(rng: &mut Rng) -> Option<Example> {
         };
         let (body, q) = match rng.below(5) {
             0 => (format!("Quels sont les champs de {which}"), true),
-            1 => (format!("Décris {which}"), false),
+            // « Décris la couche des ... » nu est une phrase des essais réels : « Décris-moi ».
+            1 => (format!("Décris-moi {which}"), false),
             2 => (format!("Donne-moi les caractéristiques de {which}"), false),
             3 => (format!("Combien d'objets contient {which}"), true),
             _ => (
@@ -1592,9 +1724,9 @@ fn question_couche_absente(rng: &mut Rng) -> Option<Example> {
                 let np = qualified(rng, a, def, val, Det::Les);
                 open_find(rng, a, &np, true)
             }
-            None => (format!("Décris {}", absent.the_layer), false),
+            None => (format!("Décris-moi {}", absent.the_layer), false),
         },
-        _ => (format!("Décris {}", absent.the_layer), false),
+        _ => (format!("Décris-moi {}", absent.the_layer), false),
     };
     let request = finish(rng, &body, q, false);
     let expected = question(missing_layer_question(rng, absent.of_none));
@@ -1677,7 +1809,7 @@ fn refus(rng: &mut Rng) -> Option<Example> {
         "à mes collègues",
     ]);
     let commune = *rng.pick(COMMUNES);
-    let (body, reason): (String, &str) = match rng.below(17) {
+    let (body, reason): (String, &str) = match rng.below(16) {
         0 => (format!("Envoie la couche « {name} » par courriel {who}"), "Aucune commande du catalogue n'envoie de courriel."),
         1 => (format!("Envoie le résultat par mail {who}"), "Aucune commande du catalogue n'envoie de courriel."),
         2 => (format!("Supprime la couche « {name} » du projet"), "Aucune commande du catalogue ne retire de couche du projet."),
@@ -1704,13 +1836,503 @@ fn refus(rng: &mut Rng) -> Option<Example> {
         10 => (format!("Mets les {pl} en rouge sur la carte"), "Aucune commande du catalogue ne change le style d'une couche."),
         11 => (format!("Calcule l'itinéraire le plus court entre deux {pl}"), "Aucune commande du catalogue ne calcule d'itinéraire."),
         12 => (format!("Télécharge le cadastre {}", de_place(commune)), "Aucune commande du catalogue ne télécharge de données : le projet utilise les fichiers de l'utilisateur."),
-        13 => ("Exporte la carte en PDF au format A3".to_string(), "L'export PDF du catalogue produit seulement une page A4 paysage."),
-        14 => ("Publie la carte sur internet".to_string(), "Aucune commande du catalogue ne publie de carte en ligne."),
-        15 => (format!("Modifie la valeur d'un champ pour toutes les {pl}"), "Aucune commande du catalogue ne modifie les attributs d'une couche."),
+        // Le papier A3 vit dans `refus_hors_registre`, avec ses variantes.
+        13 => ("Publie la carte sur internet".to_string(), "Aucune commande du catalogue ne publie de carte en ligne."),
+        14 => (format!("Modifie la valeur d'un champ pour toutes les {pl}"), "Aucune commande du catalogue ne modifie les attributs d'une couche."),
         _ => ("Affiche la carte en 3D".to_string(), "Aucune commande du catalogue n'affiche de vue en 3D."),
     };
     let request = finish(rng, &body, false, false);
     Some(example("refus", b, rng, request, refusal(reason)))
+}
+
+// -- hors registre ---------------------------------------------------------
+
+/// Un point en Lambert-93, écrit comme un utilisateur l'écrirait.
+fn lambert_point(rng: &mut Rng) -> String {
+    let x = rng.range(60_000, 70_000) * 10;
+    let y = rng.range(678_000, 690_000) * 10;
+    let (xs, ys) = if rng.chance(1, 2) {
+        (thousands(x), thousands(y))
+    } else {
+        (x.to_string(), y.to_string())
+    };
+    // Pas « le point X / Y (Lambert-93) » : c'est la forme des phrases de terrain des essais
+    // réels (`training/tests/recouvrement.rs`).
+    match rng.below(2) {
+        0 => format!("le point X = {xs}, Y = {ys} en EPSG:2154"),
+        _ => format!("le point ({xs} ; {ys}) en Lambert 93"),
+    }
+}
+
+const NO_VIEWSHED: &str = "Aucune commande du catalogue ne calcule de champ de vision.";
+const NO_LINE_OF_SIGHT: &str =
+    "Aucune commande du catalogue ne calcule de ligne de vue entre deux points.";
+const NO_SLOPE: &str = "Aucune commande du catalogue ne calcule de pente.";
+const NO_FRAMING: &str = "Aucune commande du catalogue ne cadre ni ne zoome la carte.";
+const ONLY_A4: &str = "L'export PDF du catalogue produit seulement une page A4 paysage.";
+const NO_RASTER_STATS: &str = "Aucune commande du catalogue ne calcule de statistiques sur un raster : le décompte par zone ne compte que des points.";
+
+/// Ce que le registre ne sait pas encore faire, quoi que l'inventaire contienne (un MNT pour
+/// le terrain) : un refus affirmatif, jamais un plan de substitution (un tampon à la place d'un
+/// champ de vision, un décompte à la place d'une moyenne d'altitude).
+fn refus_hors_registre(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let roll = rng.below(6);
+    // Le terrain et les statistiques portent sur un MNT : il est là, ce n'est pas lui qui manque.
+    if roll != 3 && roll != 4 {
+        b.add(rng, "mnt", &[], &[], &[]);
+    }
+    let (body, q, reason): (String, bool, &str) = match roll {
+        0 => {
+            let pt = lambert_point(rng);
+            let h = *rng.pick(&[1u64, 2, 5, 10, 15, 30]);
+            let (body, q) = match rng.below(5) {
+                0 => (format!("Détermine la zone visible depuis {pt}"), false),
+                1 => (format!("Quelles zones sont visibles depuis {pt}"), true),
+                2 => (
+                    format!(
+                        "Fais une analyse de visibilité depuis {pt}, observateur à {h} m du sol"
+                    ),
+                    false,
+                ),
+                3 => (
+                    format!("Montre tout ce qu'on aperçoit depuis le clocher, {pt}"),
+                    false,
+                ),
+                _ => (
+                    format!("Jusqu'où porte la vue depuis {pt}, à {h} m de hauteur"),
+                    true,
+                ),
+            };
+            (body, q, NO_VIEWSHED)
+        }
+        1 => {
+            let (a, c) = (lambert_point(rng), lambert_point(rng));
+            let (body, q) = match rng.below(4) {
+                0 => (format!("Y a-t-il une ligne de vue entre {a} et {c}"), true),
+                1 => (format!("Vérifie si {a} est visible depuis {c}"), false),
+                2 => (
+                    format!(
+                        "Calcule la ligne de vue {} vers {c}",
+                        a.replacen("le point", "du point", 1)
+                    ),
+                    false,
+                ),
+                _ => (
+                    format!("Est-ce que {a} et {c} se voient l'un l'autre"),
+                    true,
+                ),
+            };
+            (body, q, NO_LINE_OF_SIGHT)
+        }
+        2 => {
+            let (body, q) = match rng.below(5) {
+                0 => (
+                    "Fais une carte des pentes à partir du MNT".to_string(),
+                    false,
+                ),
+                1 => ("Calcule les pentes du terrain en degrés".to_string(), false),
+                2 => (
+                    "Où la pente du terrain dépasse-t-elle 15 %".to_string(),
+                    true,
+                ),
+                3 => ("Génère la carte des pentes".to_string(), false),
+                _ => (
+                    "Calcule l'inclinaison du terrain à partir du modèle numérique".to_string(),
+                    false,
+                ),
+            };
+            (body, q, NO_SLOPE)
+        }
+        3 => {
+            let t = pick_theme(rng, &b, ordinary)?;
+            let layer = b.add(rng, t.key, &[], &[], &[]);
+            let body = match rng.below(5) {
+                0 => format!("Zoome sur {}", t.the_layer),
+                1 => format!("Place {} au milieu de l'écran", t.noun.les()),
+                2 => format!("Recadre la vue sur la couche « {} »", layer.name),
+                3 => format!("Fais un zoom sur l'emprise des {}", t.noun.pl),
+                _ => format!(
+                    "Ajuste l'affichage pour voir {} les {}",
+                    if t.noun.fem { "toutes" } else { "tous" },
+                    t.noun.pl
+                ),
+            };
+            (body, false, NO_FRAMING)
+        }
+        4 => {
+            b.distract(rng, 1, vector);
+            let body = match rng.below(6) {
+                0 => "Exporte la carte en PDF au format A3".to_string(),
+                1 => "Sors la carte en A3".to_string(),
+                2 => "Fais un PDF de la carte sur une feuille A3".to_string(),
+                3 => "Exporte la carte en PDF, en portrait".to_string(),
+                4 => format!(
+                    "Produis la carte en PDF A0, titre « {} »",
+                    rng.pick(USER_TITLES)
+                ),
+                _ => "Génère un PDF de la carte au format A3 paysage".to_string(),
+            };
+            (body, false, ONLY_A4)
+        }
+        _ => {
+            let zkey = *rng.pick(&["communes", "quartiers", "parcelles"]);
+            let zones = b.add(rng, zkey, &[], &[], &[]);
+            let z = &zones.theme.noun;
+            let stat = *rng.pick(&["moyenne", "maximale", "minimale", "médiane"]);
+            let (body, q) = match rng.below(4) {
+                0 => (
+                    format!("Calcule l'altitude {stat} de chaque {}", z.sg),
+                    false,
+                ),
+                1 => (
+                    format!("Quelle est l'altitude {stat} de chaque {}", z.sg),
+                    true,
+                ),
+                2 => (
+                    format!("Fais les statistiques du MNT pour chaque {}", z.sg),
+                    false,
+                ),
+                _ => (
+                    format!("Donne l'altitude {stat} du terrain dans {}", z.les()),
+                    false,
+                ),
+            };
+            (body, q, NO_RASTER_STATS)
+        }
+    };
+    let request = finish(rng, &body, q, false);
+    Some(example(
+        "refus_hors_registre",
+        b,
+        rng,
+        request,
+        refusal(reason),
+    ))
+}
+
+// -- appartenance à une commune --------------------------------------------
+
+/// Tournure explicite d'appartenance à une commune nommée : seule elle crée une étape. Une
+/// commune citée seule (« à Orly », ajoutée par `finish`) reste un contexte, sans effet.
+fn belonging(rng: &mut Rng, noun: &Noun, commune: &str) -> String {
+    let t = match rng.below(5) {
+        0 | 1 => format!("qui appartiennent à la commune {}", de_place(commune)),
+        2 => format!("{{situé}} sur le territoire {}", de_place(commune)),
+        3 => format!("sur le territoire communal {}", de_place(commune)),
+        _ => format!(
+            "qui se trouvent sur le territoire de la commune {}",
+            de_place(commune)
+        ),
+    };
+    fill(&t, noun, "")
+}
+
+/// « Les écoles qui appartiennent à la commune de Thiais » : avec une couche de communes,
+/// sélection de la commune par son nom, puis intersection ; sans elle, une question ; sans
+/// nom de commune, une question aussi.
+fn appartenance_commune(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let roll = rng.below(10);
+    let t = pick_theme(rng, &b, |t| {
+        ordinary(t) && t.key != "communes" && t.key != "quartiers"
+    })?;
+    let target = b.add(rng, t.key, &[], &[], &[]);
+    let commune = *rng.pick(COMMUNES);
+    if roll < 6 {
+        // La couche de communes est là, avec un champ de nom.
+        let communes = b.add(rng, "communes", &["nom"], &[], &[]);
+        let name = communes.field("nom")?.name.clone();
+        let np = format!("les {} {}", t.noun.pl, belonging(rng, &t.noun, commune));
+        let mut steps = vec![
+            select(&communes.id, &name, "eq", commune),
+            intersect(&target.id, &step(1)),
+        ];
+        let with_pdf = rng.chance(1, 5);
+        let (mut head, q) = open_find(rng, &t.noun, &np, !with_pdf);
+        if with_pdf {
+            let draft = Draft {
+                b: Builder::new(),
+                noun: &t.noun,
+                np: np.clone(),
+                calls: Vec::new(),
+            };
+            let (clause, title) = pdf_clause(rng, &draft);
+            head.push_str(&clause);
+            steps.push(pdf(&title));
+        }
+        let request = finish(rng, &head, q, false);
+        return Some(example(
+            "appartenance_commune",
+            b,
+            rng,
+            request,
+            calls(steps),
+        ));
+    }
+    if roll < 9 {
+        // Aucune couche de communes : rien ne dit où passe la limite.
+        b.exclude("communes");
+        let np = format!("les {} {}", t.noun.pl, belonging(rng, &t.noun, commune));
+        let (head, q) = open_find(rng, &t.noun, &np, true);
+        let request = finish(rng, &head, q, false);
+        let expected = question(missing_layer_question(rng, theme("communes").of_none));
+        return Some(example("appartenance_commune", b, rng, request, expected));
+    }
+    // La couche est là, mais la demande ne dit pas quelle commune.
+    let communes = b.add(rng, "communes", &["nom"], &[], &[]);
+    let words = match rng.below(3) {
+        0 => "qui appartiennent à la commune",
+        1 => "{situé} sur le territoire communal",
+        _ => "qui se trouvent sur le territoire de la commune",
+    };
+    let np = format!("les {} {}", t.noun.pl, fill(words, &t.noun, ""));
+    let (head, q) = open_find(rng, &t.noun, &np, true);
+    let request = finish(rng, &head, q, false);
+    let expected = question(match rng.below(2) {
+        0 => format!(
+            "Quelle commune faut-il retenir, sous le nom qu'elle porte dans la couche « {} » ?",
+            communes.name
+        ),
+        _ => "Quelle commune faut-il retenir ?".to_string(),
+    });
+    Some(example("appartenance_commune", b, rng, request, expected))
+}
+
+// -- isochrone sans coordonnées --------------------------------------------
+
+/// Une isochrone dont l'origine est un lieu nommé, sans coordonnées : aucune commande ne
+/// trouve un point à partir d'un nom, la réponse est une question qui demande le point.
+fn question_isochrone(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let key = *rng.pick(&["routes", "reseau"]);
+    b.add(rng, key, &[], &[], &[]);
+    for other in ["pistes", "lignes_elec", "canalisations", "rivieres"] {
+        b.exclude(other);
+    }
+    let commune = *rng.pick(COMMUNES);
+    // L'origine : un lieu, parfois présent comme couche (la couche ne donne pas le point).
+    let (origin, theme_key): (String, Option<&str>) = match rng.below(6) {
+        0 => (format!("la gare {}", de_place(commune)), Some("gares")),
+        1 => (format!("la mairie {}", de_place(commune)), None),
+        2 => ("l'école Jean Moulin".to_string(), Some("ecoles")),
+        3 => ("l'hôpital".to_string(), Some("hopitaux")),
+        4 => ("la place du marché".to_string(), None),
+        _ => (format!("l'église {}", de_place(commune)), None),
+    };
+    if let Some(k) = theme_key {
+        if rng.chance(1, 2) && b.free(|t| t.key == k).len() == 1 {
+            b.add(rng, k, &[], &[], &[]);
+        }
+    }
+    let mode = *rng.pick(&["à pied", "en marchant", "en voiture", "en auto"]);
+    let m = *rng.pick(&[5u64, 10, 12, 15, 20, 30]);
+    let duration = if rng.chance(1, 3) {
+        format!("{m} min")
+    } else {
+        format!("{m} minutes")
+    };
+    let (body, q) = match rng.below(5) {
+        0 => (
+            format!("Calcule l'isochrone de {duration} {mode} depuis {origin}"),
+            false,
+        ),
+        1 => (
+            format!("Quelle zone atteint-on en {duration} {mode} depuis {origin}"),
+            true,
+        ),
+        2 => (
+            format!("Montre la zone accessible {mode} en {duration} depuis {origin}"),
+            false,
+        ),
+        3 => {
+            let t = pick_theme(rng, &b, |t| ordinary(t) && t.geom != Geom::Line)?;
+            b.add(rng, t.key, &[], &[], &[]);
+            let np = format!(
+                "les {} accessibles en moins de {duration} {mode} depuis {origin}",
+                t.noun.pl
+            );
+            open_find(rng, &t.noun, &np, false)
+        }
+        _ => (
+            format!("Jusqu'où peut-on aller {mode} en {duration} en partant de {origin}"),
+            true,
+        ),
+    };
+    let request = finish(rng, &body, q, false);
+    let expected = question(match rng.below(3) {
+        0 => format!(
+            "Je n'ai pas les coordonnées de {origin} : peux-tu donner le point de départ en X et Y, avec son système de coordonnées ?"
+        ),
+        1 => "Quelles sont les coordonnées du point de départ (X, Y et système, par exemple Lambert-93) ?".to_string(),
+        _ => format!(
+            "Depuis quel point exact faut-il partir : quelles sont les coordonnées de {origin} et leur système (Lambert-93 ou WGS84) ?"
+        ),
+    });
+    Some(example("question_isochrone", b, rng, request, expected))
+}
+
+// -- une seule étape -------------------------------------------------------
+
+/// Met en minuscule la première lettre.
+fn uncap(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) => c.to_lowercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
+/// Une seule opération demandée ; une autre couche est citée pour le contexte, sans étape.
+fn etape_unique(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let (op, step_call) = match rng.below(3) {
+        0 => {
+            let t = pick_theme(rng, &b, vector)?;
+            let layer = b.add(rng, t.key, &[], &[], &[]);
+            let d = dist(rng);
+            (
+                tampon_head(rng, &d, &t.noun.des()),
+                buffer(&layer.id, &d, false),
+            )
+        }
+        1 => {
+            let t = pick_theme(rng, &b, |t| ordinary(t) && !text_fields(t).is_empty())?;
+            let def = *rng.pick(&text_fields(t));
+            let layer = b.add(rng, t.key, &[def.role], &[], &[]);
+            let field = layer.field(def.role)?;
+            let val = *rng.pick(&field.values);
+            let np = qualified(rng, &t.noun, def, val, Det::Les);
+            let head = rng.pick(KEEP).replace("{np}", &np);
+            (head, select(&layer.id, &field.name, "eq", val.v))
+        }
+        _ => {
+            let t = pick_theme(rng, &b, vector)?;
+            let layer = b.add(rng, t.key, &[], &[], &[]);
+            (
+                format!("Décris la couche « {} »", layer.name),
+                json!({"command": "layer.describe", "params": {"layer_id": layer.id}}),
+            )
+        }
+    };
+    let o = pick_theme(rng, &b, ordinary)?;
+    b.add(rng, o.key, &[], &[], &[]);
+    let other = o.noun.pl;
+    let body = match rng.below(6) {
+        0 => format!("{op}, je m'occuperai des {other} plus tard"),
+        1 => format!("Pour mon étude sur les {other}, {}", uncap(&op)),
+        2 => format!("Avant de regarder les {other}, {}", uncap(&op)),
+        3 => format!("{op} ; ne touche pas aux {other} pour l'instant"),
+        4 => format!("{op}, sans t'occuper des {other}"),
+        _ => format!(
+            "Pour commencer, {} ; on verra les {other} après",
+            uncap(&op)
+        ),
+    };
+    let request = finish(rng, &body, false, false);
+    Some(example(
+        "etape_unique",
+        b,
+        rng,
+        request,
+        calls(vec![step_call]),
+    ))
+}
+
+// -- redemande -------------------------------------------------------------
+
+thread_local! {
+    static REGISTRY: cassini_core::registry::Registry = cassini_core::registry::Registry::standard();
+}
+
+/// Paramètres qui désignent une couche (ou une étape précédente).
+const LAYER_KEYS: [&str; 3] = ["layer_id", "overlay_layer_id", "points_layer_id"];
+
+/// Un exemple d'une autre famille vu au tour de redemande : son plan corrompu comme un modèle
+/// le corromprait, rejeté par `check_plan`, puis les écarts au texte exact du jugement de
+/// `cassini-ai` (`judge` : « étape k : message »). La réponse attendue reste le plan juste.
+/// Une corruption que `check_plan` accepte (un identifiant de couche inconnu, que le
+/// registre ne peut pas voir) n'apprend rien : l'exemple est laissé, pas écrit.
+fn redemande(rng: &mut Rng) -> Option<Example> {
+    let bases: Vec<&Family> = FAMILIES.iter().filter(|f| f.name != "redemande").collect();
+    let total: u64 = bases.iter().map(|f| f.weight).sum();
+    let mut roll = rng.below(total as usize) as u64;
+    let family = bases.iter().find(|f| {
+        if roll < f.weight {
+            true
+        } else {
+            roll -= f.weight;
+            false
+        }
+    })?;
+    let base = (family.make)(rng)?;
+    let calls = base.expected["calls"].as_array()?.clone();
+    let corrupted = corrupt(rng, &calls)?;
+    let plan: cassini_core::plan::Plan =
+        serde_json::from_value(json!({"kind": "calls", "calls": corrupted})).ok()?;
+    let error = REGISTRY.with(|r| r.check_plan(&plan)).err()?;
+    let rejected = serde_json::to_string(&plan).ok()?;
+    Some(Example {
+        family: "redemande",
+        retry: Some(Retry {
+            rejected,
+            errors: vec![format!("étape {} : {}", error.step, error.message)],
+        }),
+        ..base
+    })
+}
+
+/// Corrompt un plan juste d'une des trois façons d'un modèle : identifiant de couche inconnu,
+/// référence `step:k` hors plage, étape retirée qui casse une référence.
+fn corrupt(rng: &mut Rng, calls: &[Value]) -> Option<Vec<Value>> {
+    let mut out = calls.to_vec();
+    match rng.below(3) {
+        0 => {
+            let (i, key) = layer_param(rng, &out, |v| !v.starts_with("step:"))?;
+            let id = out[i]["params"][key].as_str()?.to_string();
+            let cut = id.find('_').map_or(id.len(), |p| p + 1);
+            out[i]["params"][key] = json!(format!("{}{}", &id[..cut], rng.hex(4)));
+        }
+        1 => {
+            let (i, key) = layer_param(rng, &out, |_| true)?;
+            // `step:0` (on compte à partir de 1), l'étape elle-même ou une suivante : jamais une
+            // étape déjà exécutée.
+            let k = match rng.below(3) {
+                0 => 0,
+                n => i + n,
+            };
+            out[i]["params"][key] = json!(step(k));
+        }
+        _ => {
+            if out.len() < 2 {
+                return None;
+            }
+            let j = rng.below(out.len() - 1);
+            out.remove(j);
+        }
+    }
+    Some(out)
+}
+
+/// Une étape et un de ses paramètres de couche dont la valeur vérifie `pred`.
+fn layer_param(
+    rng: &mut Rng,
+    calls: &[Value],
+    pred: impl Fn(&str) -> bool,
+) -> Option<(usize, &'static str)> {
+    let mut found = Vec::new();
+    for (i, call) in calls.iter().enumerate() {
+        for key in LAYER_KEYS {
+            if call["params"][key].as_str().is_some_and(&pred) {
+                found.push((i, key));
+            }
+        }
+    }
+    if found.is_empty() {
+        None
+    } else {
+        Some(*rng.pick(&found))
+    }
 }
 
 #[cfg(test)]
@@ -1740,6 +2362,184 @@ mod tests {
         };
         assert_eq!(m.de(), "de 500 m");
         assert_eq!(m.json(), json!({"value": 500, "unit": "m"}));
+    }
+
+    /// Exemples valides d'une famille, sur `n` tirages.
+    fn valid(make: fn(&mut Rng) -> Option<Example>, n: usize) -> Vec<Example> {
+        let registry = cassini_core::registry::Registry::standard();
+        let mut rng = Rng::new(7);
+        let out: Vec<Example> = (0..n)
+            .filter_map(|_| make(&mut rng))
+            .inspect(|e| assert_eq!(crate::validate(&registry, e), Ok(()), "{}", e.request))
+            .collect();
+        assert!(!out.is_empty());
+        out
+    }
+
+    fn commands(e: &Example) -> Vec<&str> {
+        e.expected["calls"]
+            .as_array()
+            .map(|c| c.iter().map(|s| s["command"].as_str().unwrap()).collect())
+            .unwrap_or_default()
+    }
+
+    fn has_theme(e: &Example, slug_of: &str) -> bool {
+        let t = theme(slug_of);
+        e.inventory["layers"].as_array().unwrap().iter().any(|l| {
+            let id = l["layer_id"].as_str().unwrap();
+            t.slugs.iter().any(|s| id.starts_with(&format!("{s}_")))
+        })
+    }
+
+    #[test]
+    fn out_of_registry_requests_are_refused_never_planned() {
+        for e in valid(refus_hors_registre, 300) {
+            assert_eq!(e.expected["kind"], "refusal", "{}", e.request);
+            let reason = e.expected["reason"].as_str().unwrap();
+            if [NO_VIEWSHED, NO_LINE_OF_SIGHT, NO_SLOPE, NO_RASTER_STATS].contains(&reason) {
+                assert!(has_theme(&e, "mnt"), "MNT présent : {}", e.request);
+            }
+        }
+    }
+
+    #[test]
+    fn belonging_to_a_commune_selects_it_or_asks() {
+        let examples = valid(appartenance_commune, 300);
+        let (mut planned, mut asked) = (0, 0);
+        for e in &examples {
+            if e.expected["kind"] == "calls" {
+                planned += 1;
+                let calls = e.expected["calls"].as_array().unwrap();
+                assert_eq!(calls[0]["command"], "analysis.select_by_attribute");
+                let commune = calls[0]["params"]["value"].as_str().unwrap();
+                assert!(COMMUNES.contains(&commune) && e.request.contains(commune));
+                assert_eq!(
+                    calls[1],
+                    intersect(calls[1]["params"]["layer_id"].as_str().unwrap(), &step(1))
+                );
+                assert!(has_theme(e, "communes"));
+            } else {
+                asked += 1;
+                assert_eq!(e.expected["kind"], "question", "{}", e.request);
+            }
+        }
+        assert!(planned > 0 && asked > 0);
+        // Sans couche de communes, toujours une question.
+        assert!(examples
+            .iter()
+            .filter(|e| !has_theme(e, "communes"))
+            .all(|e| e.expected["kind"] == "question"));
+    }
+
+    #[test]
+    fn an_isochrone_without_coordinates_asks_for_the_point() {
+        for e in valid(question_isochrone, 200) {
+            assert_eq!(e.expected["kind"], "question", "{}", e.request);
+            assert!(e.expected["question"]
+                .as_str()
+                .unwrap()
+                .contains("coordonnées"));
+            assert!(!e.request.contains("Lambert") && !e.request.contains("EPSG"));
+        }
+    }
+
+    #[test]
+    fn a_single_operation_with_another_layer_in_context_is_one_step() {
+        for e in valid(etape_unique, 200) {
+            assert_eq!(commands(&e).len(), 1, "{}", e.request);
+            assert!(e.inventory["layers"].as_array().unwrap().len() >= 2);
+        }
+    }
+
+    #[test]
+    fn three_conditions_keep_every_step_and_never_pass_six() {
+        let examples = valid(conditions_multiples, 600);
+        let mut lengths: Vec<usize> = examples.iter().map(|e| commands(e).len()).collect();
+        lengths.sort_unstable();
+        lengths.dedup();
+        assert!(lengths.contains(&5) && lengths.contains(&6), "{lengths:?}");
+        assert!(
+            lengths.iter().all(|n| (3..=MAX_DRAFT_STEPS).contains(n)),
+            "{lengths:?}"
+        );
+        assert!(examples
+            .iter()
+            .any(|e| commands(e).contains(&"layout.export_pdf")));
+        // Cible filtrée, zone, distance : deux sélections, un tampon, deux intersections.
+        assert!(examples.iter().any(|e| {
+            let c = commands(e);
+            c.iter()
+                .filter(|s| **s == "analysis.select_by_attribute")
+                .count()
+                == 2
+                && c.iter().filter(|s| **s == "analysis.intersect").count() == 2
+                && c.contains(&"analysis.buffer")
+        }));
+    }
+
+    #[test]
+    fn a_retry_example_shows_a_rejected_output_and_answers_the_right_plan() {
+        let registry = cassini_core::registry::Registry::standard();
+        for e in valid(redemande, 300) {
+            let retry = e.retry.as_ref().expect("redemande");
+            let rejected: cassini_core::plan::Plan = serde_json::from_str(&retry.rejected).unwrap();
+            let err = registry.check_plan(&rejected).unwrap_err();
+            assert_eq!(
+                retry.errors,
+                [format!("étape {} : {}", err.step, err.message)]
+            );
+            assert_eq!(e.expected["kind"], "calls");
+        }
+    }
+
+    #[test]
+    fn a_corruption_that_check_plan_accepts_is_left_out() {
+        // Un identifiant de couche inconnu : `check_plan` ne voit pas l'inventaire.
+        let calls = vec![buffer(
+            "gares_1",
+            &Dist {
+                value: json!(300),
+                unit: "m",
+                bare: "300 m".into(),
+            },
+            false,
+        )];
+        let registry = cassini_core::registry::Registry::standard();
+        let mut rng = Rng::new(1);
+        loop {
+            let out = corrupt(&mut rng, &calls);
+            let Some(out) = out else { continue };
+            if out[0]["params"]["layer_id"] != "step:1.layer_id"
+                && out[0]["params"]["layer_id"] != "step:2.layer_id"
+            {
+                let plan: cassini_core::plan::Plan =
+                    serde_json::from_value(json!({"kind": "calls", "calls": out})).unwrap();
+                assert_eq!(registry.check_plan(&plan), Ok(()));
+                break;
+            }
+        }
+    }
+
+    #[test]
+    fn what_is_refused_out_of_registry_is_still_missing_from_the_registry() {
+        // Le jour où une de ces commandes arrive, ce test échoue : le refus devient faux.
+        let registry = cassini_core::registry::Registry::standard();
+        for spec in registry.specs() {
+            let id = spec.id.as_str();
+            assert!(!id.starts_with("terrain."), "{id}");
+            for word in ["zoom", "frame", "extent", "pan", "center", "centre", "cadr"] {
+                assert!(!id.contains(word), "{id}");
+            }
+        }
+        let pdf = registry.spec("layout.export_pdf").expect("export PDF");
+        let props = pdf.params_schema["properties"]
+            .as_object()
+            .expect("propriétés");
+        for name in props.keys() {
+            for word in ["paper", "format", "size", "orientation", "page"] {
+                assert!(!name.contains(word), "{name}");
+            }
+        }
     }
 
     #[test]

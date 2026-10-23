@@ -19,14 +19,14 @@ use cassini_core::plan::Plan;
 use cassini_core::registry::Registry;
 use serde_json::json;
 
-use families::{Example, FAMILIES};
+use families::{Example, Retry, FAMILIES};
 use rng::Rng;
 
 /// Graine par défaut : celle de la commande documentée et du test de recouvrement (le jeu
 /// engendré n'est pas versionné, il se régénère).
 pub const DEFAULT_SEED: u64 = 1;
-/// Nombre d'exemples par défaut.
-pub const DEFAULT_COUNT: usize = 5000;
+/// Nombre d'exemples par défaut : celui de l'entraînement (décision du propriétaire, 5.15).
+pub const DEFAULT_COUNT: usize = 8000;
 /// Plafond d'étapes d'un plan, celui de `cassini-ai` (`MAX_STEPS`).
 const MAX_STEPS: usize = 12;
 
@@ -105,7 +105,29 @@ pub fn validate(registry: &Registry, example: &Example) -> Result<(), String> {
     if example.request.trim().is_empty() {
         return Err("demande vide".into());
     }
+    if let Some(retry) = &example.retry {
+        validate_retry(registry, &plan, retry)?;
+    }
     Ok(())
+}
+
+/// Un exemple de redemande : la sortie rejetée se relit comme un plan d'appels, `check_plan`
+/// la rejette, les écarts sont ceux du jugement de `cassini-ai`, et la réponse attendue est un
+/// plan d'appels qui diffère de la sortie rejetée.
+fn validate_retry(registry: &Registry, expected: &Plan, retry: &Retry) -> Result<(), String> {
+    let rejected: Plan = serde_json::from_str(&retry.rejected)
+        .map_err(|e| format!("sortie rejetée illisible : {e}"))?;
+    if !matches!(rejected, Plan::Calls { .. }) || !matches!(expected, Plan::Calls { .. }) {
+        return Err("redemande hors d'un plan d'appels".into());
+    }
+    if rejected == *expected {
+        return Err("sortie rejetée identique au plan attendu".into());
+    }
+    match registry.check_plan(&rejected) {
+        Ok(()) => Err("corruption acceptée par check_plan".into()),
+        Err(e) if retry.errors == [format!("étape {} : {}", e.step, e.message)] => Ok(()),
+        Err(_) => Err("écarts différents de ceux du jugement".into()),
+    }
 }
 
 /// Engendre `count` exemples valides et distincts avec la graine `seed`. Même graine, même
@@ -166,12 +188,30 @@ pub fn generate(seed: u64, count: usize) -> (Vec<Example>, Summary) {
 /// Un enregistrement JSON sur une ligne : `{inventory, request, expected}`. La famille reste
 /// dans `Example` et le résumé, pas dans le fichier.
 pub fn to_line(example: &Example) -> String {
-    json!({
+    let mut line = json!({
         "inventory": example.inventory,
         "request": example.request,
         "expected": example.expected,
-    })
-    .to_string()
+    });
+    // Un exemple de redemande porte aussi sa sortie rejetée et ses écarts.
+    if let Some(retry) = &example.retry {
+        line["retry"] = json!({"rejected": retry.rejected, "errors": retry.errors});
+    }
+    line.to_string()
+}
+
+/// Le texte exact vu par le modèle pour cet exemple : le prompt du premier essai, ou celui de
+/// la redemande.
+pub fn prompt_text(example: &Example) -> String {
+    match &example.retry {
+        None => prompt::render_prompt(&example.inventory, &example.request),
+        Some(retry) => prompt::render_retry_prompt(
+            &example.inventory,
+            &example.request,
+            &retry.rejected,
+            &retry.errors,
+        ),
+    }
 }
 
 /// Le fichier JSONL entier, une ligne par exemple, fin de ligne `\n`.
@@ -190,7 +230,7 @@ pub fn to_chat_line(example: &Example) -> String {
     let plan: Plan = serde_json::from_value(example.expected.clone())
         .expect("un exemple écrit a passé `validate`, son plan se relit");
     json!({
-        "prompt": prompt::render_prompt(&example.inventory, &example.request),
+        "prompt": prompt_text(example),
         "completion": prompt::completion(&plan),
     })
     .to_string()
@@ -269,6 +309,7 @@ mod tests {
             inventory: inventory.clone(),
             request: "Tampon de 300 m autour des gares.".into(),
             expected,
+            retry: None,
         };
         // Référence vers une étape qui n'existe pas : refusée par `check_plan`.
         let bad = make(json!({"kind": "calls", "calls": [
@@ -311,7 +352,7 @@ mod tests {
     #[test]
     fn no_family_produces_rejected_examples() {
         // Un écart signale une famille mal écrite : le filtre est un garde-fou, pas un tamis.
-        let (_, summary) = generate(DEFAULT_SEED, 3000);
+        let (_, summary) = generate(DEFAULT_SEED, DEFAULT_COUNT);
         let rejected: usize = summary.families.values().map(|t| t.rejected).sum();
         assert_eq!(rejected, 0, "{:#?}", summary.reasons);
     }
@@ -334,6 +375,12 @@ mod tests {
         ] {
             assert!(requests.iter().any(|r| r.contains(needle)), "{needle}");
         }
+        // Environ 5 % de redemandes (au moins 4 %, jamais plus de 7 %).
+        let retries = examples.iter().filter(|e| e.retry.is_some()).count();
+        assert!(
+            retries * 25 >= examples.len() && retries * 100 <= examples.len() * 7,
+            "{retries} redemandes"
+        );
         let kinds = |k: &str| examples.iter().filter(|e| e.expected["kind"] == k).count();
         assert!(kinds("question") > 0 && kinds("refusal") > 0 && kinds("calls") > 0);
         // Chaînes à plusieurs conditions : au moins deux intersections successives.
@@ -345,6 +392,61 @@ mod tests {
                     >= 2
             })
         }));
+    }
+
+    #[test]
+    fn a_commune_named_only_as_context_adds_no_step() {
+        // « … à Orly » : sans tournure d'appartenance, la commune ne crée aucune sélection.
+        let (examples, _) = generate(DEFAULT_SEED, DEFAULT_COUNT);
+        let mut seen = 0;
+        for e in &examples {
+            let r = e.request.to_lowercase();
+            if r.contains("appartien") || r.contains("territoire") {
+                continue;
+            }
+            let Some(calls) = e.expected["calls"].as_array() else {
+                continue;
+            };
+            for commune in families::COMMUNES {
+                if !e.request.contains(&format!(" à {commune}")) {
+                    continue;
+                }
+                seen += 1;
+                assert!(
+                    calls.iter().all(|c| c["params"]["value"] != *commune),
+                    "{}",
+                    e.request
+                );
+            }
+        }
+        assert!(seen > 100, "{seen} demandes avec une commune de contexte");
+    }
+
+    #[test]
+    fn the_chat_line_of_a_retry_example_carries_the_retry_prompt() {
+        let (examples, _) = generate(DEFAULT_SEED, DEFAULT_COUNT);
+        let mut retries = 0;
+        for e in &examples {
+            let line: Value = serde_json::from_str(&to_chat_line(e)).unwrap();
+            let want = match &e.retry {
+                Some(r) => {
+                    retries += 1;
+                    prompt::render_retry_prompt(&e.inventory, &e.request, &r.rejected, &r.errors)
+                }
+                None => prompt::render_prompt(&e.inventory, &e.request),
+            };
+            assert_eq!(line["prompt"], want, "{}", e.request);
+        }
+        assert!(retries > 0);
+    }
+
+    #[test]
+    fn no_plan_of_the_generated_set_passes_six_steps() {
+        let (examples, _) = generate(DEFAULT_SEED, DEFAULT_COUNT);
+        for e in &examples {
+            let n = e.expected["calls"].as_array().map_or(0, Vec::len);
+            assert!(n <= 6, "{n} étapes : {}", e.request);
+        }
     }
 
     #[test]

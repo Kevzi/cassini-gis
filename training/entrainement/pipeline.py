@@ -58,7 +58,7 @@ LLAMA_CPP_SYS_VERSION = "0.1.160"
 TRAINING_SEED = 1
 VALIDATION_SEED = 2
 TORCH_SEED = 1
-TRAINING_COUNT = 5000
+TRAINING_COUNT = 8000  # décision du propriétaire, 5.15
 VALIDATION_COUNT = 300
 # Une séquence mesurée fait moins de 1 400 jetons : 2 048 laisse de la marge sans tronquer.
 MAX_LENGTH = 2048

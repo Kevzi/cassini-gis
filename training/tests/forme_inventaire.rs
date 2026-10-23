@@ -1,7 +1,11 @@
-//! Garde-fou de la forme de l'inventaire (ticket 5.10, tâche 4a) : une sortie représentative
-//! de `project.inventory`, traduite par `agent_inventory` du noyau, doit avoir les clés et les
-//! sortes de valeurs du jeu engendré (graine 1). Si le générateur change de forme, ce test
-//! échoue, et la traduction du noyau se met à jour avec le ré-entraînement.
+//! Garde-fou de la forme de l'inventaire (ticket 5.10, tâche 4a ; 5.15) : chaque forme que rend
+//! le produit, sorties de `project.inventory` traduites par `agent_inventory` du noyau, doit être
+//! vue à l'entraînement (graine 1, jeu par défaut) : jeu de clés de l'inventaire, du projet et
+//! de chaque sorte de couche, sortes de valeurs, géométries, types et valeurs de champ. Le cas
+//! nominal comme les formes de QGIS : projet non enregistré, SCR qui n'est pas EPSG, couche
+//! temporaire sans fichier, table sans géométrie, raster sans nombre d'objets. Si le
+//! générateur change de forme, ce test échoue, et la traduction du noyau se met à jour avec le
+//! ré-entraînement.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -32,22 +36,32 @@ struct Learned {
     top: BTreeSet<BTreeSet<String>>,
     project: BTreeSet<BTreeSet<String>>,
     project_sorts: HashMap<String, BTreeSet<&'static str>>,
-    layer: BTreeSet<BTreeSet<String>>,
-    layer_sorts: HashMap<String, BTreeSet<&'static str>>,
-    kinds: BTreeSet<String>,
+    /// Jeux de clés des couches, par sorte (`vector`, `raster`).
+    layer: HashMap<String, BTreeSet<BTreeSet<String>>>,
+    /// Sortes de valeurs des clés de couche, par sorte de couche.
+    layer_sorts: HashMap<(String, String), BTreeSet<&'static str>>,
     geometries: BTreeSet<String>,
     field: BTreeSet<BTreeSet<String>>,
     types: BTreeSet<String>,
     valued_types: BTreeSet<String>,
     max_values: usize,
+    unsorted_values: usize,
+    empty_files: usize,
+    total: usize,
 }
 
 fn learned() -> Learned {
     let (examples, _) = generate(DEFAULT_SEED, DEFAULT_COUNT);
-    let mut l = Learned::default();
+    let mut l = Learned {
+        total: examples.len(),
+        ..Learned::default()
+    };
     for e in &examples {
         let inv = e.inventory.as_object().expect("inventaire objet");
         l.top.insert(keys(inv));
+        if inv["unloaded_files"] == json!([]) {
+            l.empty_files += 1;
+        }
         let project = inv["project"].as_object().expect("projet objet");
         l.project.insert(keys(project));
         for (k, v) in project {
@@ -58,14 +72,14 @@ fn learned() -> Learned {
         }
         for layer in inv["layers"].as_array().expect("couches") {
             let layer = layer.as_object().expect("couche objet");
-            l.layer.insert(keys(layer));
+            let kind = layer["kind"].as_str().unwrap().to_string();
+            l.layer.entry(kind.clone()).or_default().insert(keys(layer));
             for (k, v) in layer {
                 l.layer_sorts
-                    .entry(k.clone())
+                    .entry((kind.clone(), k.clone()))
                     .or_default()
                     .insert(sort_of(v));
             }
-            l.kinds.insert(layer["kind"].as_str().unwrap().to_string());
             if let Some(g) = layer["geometry"].as_str() {
                 l.geometries.insert(g.to_string());
             }
@@ -74,9 +88,14 @@ fn learned() -> Learned {
                 l.field.insert(keys(f));
                 let ty = f["type"].as_str().unwrap().to_string();
                 if let Some(values) = f.get("values") {
-                    let values = values.as_array().unwrap();
-                    assert!(values.iter().all(Value::is_string));
+                    let values: Vec<&str> = values
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|v| v.as_str().expect("valeur texte"))
+                        .collect();
                     l.max_values = l.max_values.max(values.len());
+                    l.unsorted_values += usize::from(!values.is_sorted());
                     l.valued_types.insert(ty.clone());
                 }
                 l.types.insert(ty);
@@ -116,14 +135,44 @@ fn representative() -> Value {
     })
 }
 
+/// Les formes de QGIS hors du cas nominal : projet non enregistré dans un SCR qui n'est pas
+/// EPSG, couche temporaire sans fichier (sortie d'une étape précédente), couche dans un SCR
+/// IGNF, table sans géométrie, raster sans fichier.
+fn qgis_edges() -> Value {
+    json!({
+        "project_name": null,
+        "project_crs": "IGNF:LAMB93",
+        "layers": [
+            {"layer_id": "tampon_5e1", "name": "Zone tampon", "crs": "EPSG:2154",
+             "kind": "vector", "geometry": "MultiPolygon", "feature_count": 3,
+             "fields": [{"name": "nom", "type": "String", "values": ["Gare B", "Gare A"]}]},
+            {"layer_id": "routes_ign", "name": "Routes", "source": "routes.shp",
+             "crs": "IGNF:LAMB93", "kind": "vector", "geometry": "MultiLineString",
+             "feature_count": 120, "fields": [{"name": "classe", "type": "String"}]},
+            {"layer_id": "table_7", "name": "Propriétaires", "source": "proprietaires.csv",
+             "crs": "EPSG:2154", "kind": "vector", "geometry": "NoGeometry", "feature_count": 40,
+             "fields": [{"name": "nom", "type": "String"}]},
+            {"layer_id": "mnt_tmp", "name": "MNT", "crs": "EPSG:2154", "kind": "raster",
+             "geometry": null, "fields": []}
+        ]
+    })
+}
+
+/// Un projet enregistré dans un SCR qui n'est pas EPSG, et un projet nommé sans SCR.
+fn project_edges() -> Vec<Value> {
+    vec![
+        json!({"project_name": "etude", "project_crs": "IGNF:LAMB93", "layers": []}),
+        json!({"project_name": null, "project_crs": "EPSG:2154", "layers": []}),
+    ]
+}
+
 fn assert_sorts(
     what: &str,
     map: &Map<String, Value>,
-    learned: &HashMap<String, BTreeSet<&'static str>>,
+    learned: impl Fn(&str) -> Option<BTreeSet<&'static str>>,
 ) {
     for (k, v) in map {
-        let seen = learned
-            .get(k)
+        let seen = learned(k)
             .unwrap_or_else(|| panic!("{what} : clé « {k} » jamais vue à l'entraînement"));
         assert!(
             seen.contains(sort_of(v)),
@@ -133,44 +182,39 @@ fn assert_sorts(
     }
 }
 
-#[test]
-fn the_translated_inventory_has_the_shape_of_the_generated_set() {
-    let l = learned();
-    // Le jeu engendré n'a qu'une forme de couche, de projet et d'inventaire.
-    assert_eq!(l.top.len(), 1, "{:?}", l.top);
-    assert_eq!(l.project.len(), 1, "{:?}", l.project);
-    assert_eq!(l.layer.len(), 1, "{:?}", l.layer);
-    assert!(l.max_values <= MAX_VALUES);
-    let layer_keys = l.layer.first().unwrap();
-
-    let out = agent_inventory(&representative());
+/// Vérifie qu'une sortie traduite n'a que des formes vues à l'entraînement.
+fn assert_seen(l: &Learned, out: &Value) {
     let out = out.as_object().unwrap();
-    assert_eq!(&keys(out), l.top.first().unwrap());
+    assert!(l.top.contains(&keys(out)), "inventaire : {:?}", keys(out));
     assert_eq!(out["unloaded_files"], json!([]));
     let project = out["project"].as_object().unwrap();
-    assert_eq!(&keys(project), l.project.first().unwrap());
-    assert_sorts("projet", project, &l.project_sorts);
-
-    let layers = out["layers"].as_array().unwrap();
-    assert_eq!(layers.len(), 4);
-    for layer in layers {
+    assert!(
+        l.project.contains(&keys(project)),
+        "projet : {:?} ; vus : {:?}",
+        keys(project),
+        l.project
+    );
+    assert_sorts("projet", project, |k| l.project_sorts.get(k).cloned());
+    for layer in out["layers"].as_array().unwrap() {
         let layer = layer.as_object().unwrap();
         let name = layer["name"].as_str().unwrap();
-        assert!(l.kinds.contains(layer["kind"].as_str().unwrap()), "{name}");
-        assert_sorts(name, layer, &l.layer_sorts);
-        if layer["kind"] == "vector" {
-            assert_eq!(&keys(layer), layer_keys, "{name}");
-            assert!(
-                l.geometries.contains(layer["geometry"].as_str().unwrap()),
-                "{name}"
-            );
-        } else {
-            // Un raster n'a pas de nombre d'objets dans QGIS : la clé manque, rien d'autre.
-            let mut expected = layer_keys.clone();
-            expected.remove("feature_count");
-            assert_eq!(keys(layer), expected, "{name}");
-            assert_eq!(layer["geometry"], Value::Null);
-            assert_eq!(layer["fields"], json!([]));
+        let kind = layer["kind"].as_str().unwrap();
+        let seen = l
+            .layer
+            .get(kind)
+            .unwrap_or_else(|| panic!("{name} : sorte {kind} jamais vue"));
+        assert!(
+            seen.contains(&keys(layer)),
+            "{name} : {:?} ; vus pour {kind} : {seen:?}",
+            keys(layer)
+        );
+        assert_sorts(name, layer, |k| {
+            l.layer_sorts
+                .get(&(kind.to_string(), k.to_string()))
+                .cloned()
+        });
+        if let Some(g) = layer["geometry"].as_str() {
+            assert!(l.geometries.contains(g), "{name} : {g}");
         }
         for f in layer["fields"].as_array().unwrap() {
             let f = f.as_object().unwrap();
@@ -183,11 +227,48 @@ fn the_translated_inventory_has_the_shape_of_the_generated_set() {
             }
         }
     }
+}
+
+#[test]
+fn every_shape_the_product_renders_is_seen_in_the_generated_set() {
+    let l = learned();
+    assert!(l.max_values <= MAX_VALUES);
+    // Valeurs triées comme le produit les trie.
+    assert_eq!(l.unsorted_values, 0);
+    // `unloaded_files` vide, comme dans QGIS, sauf quand la famille ouvre un fichier.
+    assert!(
+        l.empty_files * 10 > l.total * 9,
+        "{} / {}",
+        l.empty_files,
+        l.total
+    );
+
+    let nominal = agent_inventory(&representative());
+    assert_seen(&l, &nominal);
+    let edges = agent_inventory(&qgis_edges());
+    assert_seen(&l, &edges);
+    for raw in project_edges() {
+        assert_seen(&l, &agent_inventory(&raw));
+    }
+
     // La matrice du plan, vue d'ici : valeurs triées, champ trop varié sans valeurs.
+    let layers = nominal["layers"].as_array().unwrap();
+    assert_eq!(layers.len(), 4);
     assert_eq!(
         layers[0]["fields"][0]["values"],
         json!(["AUc", "N", "Nh", "U"])
     );
     assert!(layers[1]["fields"][0].get("values").is_none());
     assert_eq!(layers[2]["geometry"], "Point");
+    // Un raster n'a pas de nombre d'objets dans QGIS : la clé manque.
+    assert!(layers[3].get("feature_count").is_none());
+    // Les formes de QGIS sont bien celles que le test croit couvrir.
+    assert_eq!(edges["project"], json!({}));
+    let edges = edges["layers"].as_array().unwrap();
+    assert!(edges[0].get("source").is_none());
+    assert_eq!(edges[0]["fields"][0]["values"], json!(["Gare A", "Gare B"]));
+    assert!(edges[1].get("epsg").is_none());
+    assert_eq!(edges[2]["geometry"], Value::Null);
+    assert_eq!(edges[2]["kind"], "vector");
+    assert!(edges[3].get("source").is_none() && edges[3].get("feature_count").is_none());
 }
