@@ -1,8 +1,19 @@
 //! Mesure de la durée par phrase (tickets 11 et 12), avec le vrai modèle.
 //! Ignoré sans `CASSINI_TEST_MODEL` (et marqué `ignore` : il charge le vrai modèle).
 //!
-//!   CASSINI_TEST_MODEL=<gguf> CASSINI_TEST_THREADS=8 \
+//!   CASSINI_TEST_MODEL=<gguf ou déclaration *.modele.json> CASSINI_TEST_THREADS=4 \
 //!     cargo test -p cassini-ai --release -- --ignored --nocapture duree_reel
+//!
+//! Jamais `--features cuda`. Mesure de la tâche 5.10 4b, sous PowerShell, le binaire d'essai épinglé
+//! sur 4 cœurs physiques du 5800X par le masque d'affinité `0x55` :
+//!
+//!   $env:CASSINI_TEST_THREADS = "4"; $env:CASSINI_TEST_MODEL = "<déclaration>"
+//!   $env:CASSINI_TEST_INVENTORY = "<inventaire traduit>"
+//!   $p = Start-Process C:\ct\release\deps\duree_reel-<empreinte>.exe `
+//!          -ArgumentList "--ignored","--nocapture","duree_reel" -NoNewWindow -PassThru `
+//!          -RedirectStandardOutput duree.txt -RedirectStandardError duree.err
+//!   $p.ProcessorAffinity = [IntPtr]0x55
+//!   $p.WaitForExit()
 //!
 //! Chaque phrase passe par `compose_plan`, comme dans le produit, redemande comprise, et toutes
 //! dans le même processus : le modèle est chargé au premier appel puis gardé, et la lecture de la
@@ -10,18 +21,24 @@
 //! lecture de l'invite et d'écriture sont additionnées par phrase, avec le nombre d'appels au
 //! modèle et les jetons repris d'un instantané. Sans `CASSINI_TEST_THREADS`, le nombre de fils est
 //! celui du produit par défaut (les cœurs physiques). Avec `CASSINI_TEST_INVENTORY=<json>`, ce sont
-//! les phrases A à E du scénario Villeneuve-le-Roi qui passent, sur cet inventaire (hors dépôt).
+//! les phrases A0 à E du scénario Villeneuve-le-Roi qui passent, sur cet inventaire (hors dépôt) ;
+//! A0 est la phrase de démo exacte de `CLAUDE.md`. Elles sont précédées d'une amorce (`WARMUP`),
+//! qui paie seule le chargement du modèle et la lecture complète de l'invite jusqu'à l'instantané
+//! du tour système, comme le premier appel d'une session de `cassini serve` : la ligne de A0 mesure
+//! donc sa demande seule, chargement et instantané à part. L'amorce n'entre pas dans les moyennes.
 //! Un appel qui échoue (par exemple `PromptTooLong` à la redemande, que `compose_plan` absorbe)
 //! n'est ni compté ni chronométré.
 //!
 //! Aucune assertion sur une durée : c'est une mesure. La justesse reste portée par `plan_reel`.
 
+mod common;
+
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use cassini_ai::generate_measured;
-use cassini_ai::plan::{compose_plan, AgentError};
+use cassini_ai::generate_files_measured;
+use cassini_ai::plan::{compose_plan_with, AgentError};
 use cassini_ai::Timings;
 use cassini_core::plan::Plan;
 use cassini_core::registry::Registry;
@@ -31,7 +48,11 @@ const INVENTORY: &str = include_str!("../../tests/epreuve-modele-local/inventory
 const SENTENCES: &str = include_str!("../../tests/epreuve-modele-local/sentences.json");
 
 /// Phrases du scénario de démo, mesurées chacune à part (pas encore de mémoire entre demandes).
-const SCENARIO: [(&str, &str); 7] = [
+const SCENARIO: [(&str, &str); 8] = [
+    (
+        "A0",
+        "Trouve les parcelles constructibles du PLU à moins de 500 m d'une gare à Villeneuve-le-Roi et sors-moi la carte en PDF.",
+    ),
     (
         "A",
         "Trouve les parcelles constructibles du PLU (zones U) à moins de 500 m d'une gare à Villeneuve-le-Roi et sors-moi la carte en PDF.",
@@ -49,6 +70,9 @@ const SCENARIO: [(&str, &str); 7] = [
         "Trouve les parcelles à 10 minutes à pied de la gare de Villeneuve-le-Roi.",
     ),
 ];
+
+/// Amorce du scénario : une demande courte, sur le même inventaire, passée avant A0.
+const WARMUP: (&str, &str) = ("amorce", "Décris le projet.");
 
 /// Durées d'une phrase : somme des appels au modèle.
 #[derive(Default)]
@@ -104,11 +128,10 @@ fn secs(d: Duration) -> String {
 #[test]
 #[ignore = "charge le vrai modèle ; lancer avec CASSINI_TEST_MODEL et --ignored"]
 fn duree_reel_par_phrase() {
-    let Some(model) = std::env::var_os("CASSINI_TEST_MODEL") else {
+    let Some((files, style)) = common::test_model() else {
         eprintln!("CASSINI_TEST_MODEL absent : essai ignore.");
         return;
     };
-    let model = PathBuf::from(model);
     let threads = std::env::var("CASSINI_TEST_THREADS").ok().map(|v| {
         v.trim()
             .parse::<NonZeroU32>()
@@ -118,8 +141,8 @@ fn duree_reel_par_phrase() {
         match std::env::var_os("CASSINI_TEST_INVENTORY") {
             Some(path) => {
                 let inventory = read_inventory(&PathBuf::from(path));
-                let sentences = SCENARIO
-                    .iter()
+                let sentences = std::iter::once(&WARMUP)
+                    .chain(&SCENARIO)
                     .map(|(id, text)| (id.to_string(), text.to_string()))
                     .collect();
                 (inventory, sentences)
@@ -153,8 +176,8 @@ fn duree_reel_par_phrase() {
         let mut row = Row::default();
         let got = {
             let mut generator = |request: &cassini_ai::plan::GenerationRequest| {
-                let (completion, timings) = generate_measured(
-                    &model,
+                let (completion, timings) = generate_files_measured(
+                    &files,
                     request.turns,
                     Some(request.grammar),
                     request.max_new_tokens,
@@ -163,7 +186,7 @@ fn duree_reel_par_phrase() {
                 row.add(&timings);
                 Ok(completion)
             };
-            compose_plan(&registry, &inventory, text, &mut generator)
+            compose_plan_with(style, &registry, &inventory, text, &mut generator)
         };
         println!(
             "| {id} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
@@ -177,15 +200,29 @@ fn duree_reel_par_phrase() {
             secs(row.total()),
             outcome(&got)
         );
+        // Une amorce sans appel laisserait le chargement et l'instantané dans la ligne de A0.
+        if id == WARMUP.0 && row.calls == 0 {
+            panic!(
+                "l'amorce n'a fait aucun appel au modèle : la ligne de A0 ne serait pas à chaud"
+            );
+        }
         rows.push(row);
     }
-    let n = rows.len().max(1) as u32;
-    let sum = |f: fn(&Row) -> Duration| rows.iter().map(f).sum::<Duration>() / n;
-    let calls: usize = rows.iter().map(|r| r.calls).sum();
+    let warmed = sentences.iter().any(|(id, _)| id == WARMUP.0);
+    let measured: Vec<&Row> = sentences
+        .iter()
+        .zip(&rows)
+        .filter(|((id, _), _)| id != WARMUP.0)
+        .map(|(_, r)| r)
+        .collect();
+    let n = measured.len().max(1) as u32;
+    let sum = |f: fn(&Row) -> Duration| measured.iter().map(|r| f(r)).sum::<Duration>() / n;
+    let calls: usize = measured.iter().map(|r| r.calls).sum();
     println!();
     println!(
-        "Moyennes sur {} phrases ({calls} appels) : chargement {} s, lecture du prompt {} s, écriture {} s, total {} s",
-        rows.len(),
+        "Moyennes sur {} phrases ({calls} appels{}) : chargement {} s, lecture du prompt {} s, écriture {} s, total {} s",
+        measured.len(),
+        if warmed { ", amorce exclue" } else { "" },
         secs(sum(|r| r.load)),
         secs(sum(|r| r.prompt)),
         secs(sum(|r| r.write)),

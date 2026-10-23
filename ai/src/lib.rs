@@ -49,6 +49,9 @@ pub enum AiError {
     Decode(String),
     /// La grammaire qui contraint la sortie n'a pas pu être lue par le moteur.
     Grammar(String),
+    /// La déclaration `*.modele.json` n'est pas lisible : message complet, qui ne nomme la
+    /// déclaration que par son seul nom de fichier.
+    BadDeclaration(String),
 }
 
 impl fmt::Display for AiError {
@@ -73,6 +76,7 @@ impl fmt::Display for AiError {
             AiError::Grammar(e) => {
                 write!(f, "La grammaire de la réponse n'a pas pu être lue : {e}")
             }
+            AiError::BadDeclaration(e) => write!(f, "{e}"),
         }
     }
 }
@@ -92,6 +96,7 @@ impl AiError {
             AiError::PromptTooLong => "ai.prompt_too_long",
             AiError::Decode(_) => "ai.decode",
             AiError::Grammar(_) => "ai.grammar",
+            AiError::BadDeclaration(_) => "models.bad_declaration",
         }
     }
 }

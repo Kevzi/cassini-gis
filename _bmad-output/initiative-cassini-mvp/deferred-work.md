@@ -261,21 +261,31 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t2-entrainement-reproductible.md`
   summary: 5.10 tache 4 — mesurer les GGUF livres (base + adaptateur, et fusionne) par `ai/`, le score de validation de la tache 2 etant pris sur l'adaptateur en transformers.
   evidence: relecture intent-alignment de la tache 2 ; verifie a la main sur un exemple (plan identique), pas sur le jeu.
+  status: close, 2026-10-23, 5.10 tache 4b (`plan-5-10-t4b-mesures-et-demo.md`)
+  resolution: mesures par `ai/` sur GPU (`ecart_reel`, `question_reel`, `plan_reel`) des deux declarations : base + adaptateur 32/40, fusionne 33/40 sur le jeu tenu a l'ecart ; 11/12 questions ; 16/25 plans conformes, 0 fausse question (`docs/entrainement-du-modele.md`, « Tache 4 : mesures »).
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t3-modele-ajuste-dans-ai.md`
   summary: 5.10 tache 4 — comparer, sur le jeu engendre, les jetons du prompt court decoupe par le tokenizer Hugging Face de l'entrainement (`pipeline.py` `encode`) a ceux de llama.cpp sur le GGUF de base ; seule la parite `ai` / llama.cpp est verifiee.
   evidence: relectures intent-alignment et quick de la tache 3 ; un ecart entre les deux tokenizers ferait voir au modele un decoupage qu'il n'a pas appris, sans qu'aucun test ne le signale.
+  status: close, 2026-10-23, 5.10 tache 4b (`plan-5-10-t4b-mesures-et-demo.md`)
+  resolution: `training/entrainement/parite_decoupeurs.py` (lancee a la main, comparaison testee sans torch) : 300/300 prompts de validation identiques, 205 803 jetons, entre le decoupeur Hugging Face de la base epinglee et `llama-tokenize` du GGUF de base.
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t3-modele-ajuste-dans-ai.md`
   summary: 5.10 tache 4 — mesurer ce que vaut la redemande (sortie rejetee puis ecarts) pour le modele ajuste, qui n'a jamais appris ce tour ; garder la redemande unique (AD-23), ou l'apprendre au prochain entrainement.
   evidence: relecture blind-hunter de la tache 3 ; `compose_plan_with` garde `retry_turns` pour le prompt court, hors de la distribution d'entrainement.
+  status: close, 2026-10-23, 5.10 tache 4b (`plan-5-10-t4b-mesures-et-demo.md`)
+  resolution: mesure : 1 (adaptateur) et 2 (fusionne) phrases sur 40 passent par la redemande, aucune n'est sauvee (le 9B en sauve 1). Redemande gardee (AD-23) ; l'apprendre est porte par l'entree de re-entrainement ci-dessous.
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t3-modele-ajuste-dans-ai.md`
   summary: 5.14 — diagnostic des declarations de modele : une declaration illisible est ecartee sans trace (ses GGUF, adaptateur compris, reviennent nus dans la liste), et une declaration dont un GGUF manque reste listee avec une taille partielle et, premiere par son nom, ferait echouer chaque `plan.propose` ; le selecteur doit les signaler.
   evidence: relectures blind-hunter, edge-case-hunter et quick de la tache 3 ; comportement voulu par le plan (« ignoree », « reste listee »), sans retour a l'utilisateur.
 - source_plan: none
   summary: 5.10, tache 4b — mesures et demo du modele ajuste : essais reels qui acceptent une declaration `*.modele.json`, notateur de `ecart_reel` teste sans modele, score sur le jeu tenu a l'ecart (base + adaptateur et fusionne) au moins egal a 32/40, seuil strict de clarification (>= 9/12, <= 1 fausse question sur 25), < 30 s sur le 5800X bride a 4 coeurs, parite des decoupeurs Hugging Face et llama.cpp, valeur de la redemande, demo de bout en bout dans QGIS avec la phrase de demo exacte.
   evidence: decoupe de la tache 4 par le proprietaire (2026-10-22, bmad-build) : l'inventaire du produit (`project.inventory`) ne porte ni champs ni geometrie, alors que le modele ajuste a appris sur des inventaires qui les portent ; la tache 4a l'aligne d'abord, la demo QGIS en depend.
+  status: close, 2026-10-23, 5.10 tache 4b (`plan-5-10-t4b-mesures-et-demo.md`)
+  resolution: 4b fermee comme « mesuree » (decision du proprietaire, 2026-10-23) : jeu tenu a l'ecart 32/40 et 33/40, 11/12 questions, 0 fausse question, parite des decoupeurs 300/300, demo QGIS reussie ; sous la barre : `plan_reel` 16/25 et A0 en 41,4 s sur CPU 4 fils. Re-entrainement propose ci-dessous ; 5.10 reste ouvert.
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t4a-inventaire-au-format-appris.md`
   summary: 5.10 tache 4b — l'inventaire traduit du projet reel `projet-test-villeneuve.qgz` fait 2 439 jetons du GGUF de base, plus que la plus longue sequence entiere de l'entrainement (1 326 jetons) : mesurer l'effet sur le modele ajuste ; si besoin, apprendre des inventaires plus longs au prochain entrainement (champs nombreux, valeurs longues) plutot que tronquer l'inventaire.
   evidence: sonde de la tache 4a sous QGIS 3.44.15 ; la couche `plu_zones` seule fait 2 890 caracteres (24 champs, empreintes `gpu_doc_id`, libelles longs).
+  status: close, 2026-10-23, 5.10 tache 4b (`plan-5-10-t4b-mesures-et-demo.md`)
+  resolution: mesure par le noyau et l'extension actuels : 4 007 caracteres, 1 458 jetons ; l'ecart avec le chiffre de 4a (pris avant les correctifs de la relecture de 4a) n'est pas explique par un filtre de longueur, `core/src/agent_inventory.rs` n'en a pas ; l'invite entiere du prompt court 1 737 jetons. Le modele fusionne compose la phrase de demo juste sur cet inventaire, dans QGIS et dans `duree_reel`.
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t4a-inventaire-au-format-appris.md`
   summary: Au prochain entrainement, le generateur ecrit les valeurs d'un champ triees, comme le produit (`core/src/agent_inventory.rs`), au lieu de l'ordre de definition du theme.
   evidence: relecture intent-alignment et blind-hunter de la tache 4a ; `training/src/inventories.rs` l.1349 trie des indices ; QGIS (`uniqueValues`) n'a pas d'ordre canonique, le produit trie.
@@ -285,6 +295,22 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t4a-inventaire-au-format-appris.md`
   summary: 5.10 tache 4b — chronometrer `project.inventory` sur le vrai projet : un `uniqueValues` par champ texte de chaque couche vecteur, sur le fil de QGIS, a chaque `plan.propose`, non interruptible ; si c'est long, garder les valeurs en cache par session.
   evidence: relectures blind-hunter, edge-case-hunter et quick de la tache 4a ; gravite non verifiee (maybe-false) : la sonde a compte les jetons, pas la duree.
+  status: close, 2026-10-23, 5.10 tache 4b (`plan-5-10-t4b-mesures-et-demo.md`)
+  resolution: chronometre dans la demo de bout en bout : 0,05 s sur le vrai projet (6 couches). Pas de cache necessaire.
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t4a-inventaire-au-format-appris.md`
   summary: 5.10 tache 4b — verifier par toute la chaine (`cassini serve`, canal, `plan.propose`, vrai modele) que le composeur recoit l'inventaire traduit du vrai projet ; la sonde de 4a a appele le geste puis `agent_inventory` directement.
   evidence: relecture quick de la tache 4a (critere 1 partiellement tenu).
+  status: close, 2026-10-23, 5.10 tache 4b (`plan-5-10-t4b-mesures-et-demo.md`)
+  resolution: demo de bout en bout : `cassini serve` lance par `client.py`, `plan.propose` demande `project.inventory` a l'extension ; l'inventaire brut recu, traduit, est identique octet pour octet a celui de la mesure CPU ; plan valide, execute, PDF ecrit.
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t4b-mesures-et-demo.md`
+  summary: Ticket de re-entrainement propose (5.10 reste ouvert) — familles a ajouter au generateur, jamais des regles de prompt : refus des demandes que le registre n'a pas encore (champ de vision, ligne de vue, pente, cadrage de la carte, PDF en A3, statistiques sur un raster), auxquelles le modele ajuste rend un plan de substitution ou un plan invalide (`plan_reel` 16/25, sous les 80 %) ; plans a plusieurs conditions qui perdent ou gagnent une etape (H08, H17 a H20, H22) ; « qui appartiennent a la commune » doit devenir une question (Q11) ; le tour de redemande (aucune phrase sauvee) ; un refus attendu (H40) rendu en plan.
+  evidence: mesures GPU de la tache 4b (`docs/entrainement-du-modele.md`, « Tache 4 : mesures ») ; decision du proprietaire 2026-10-23 : sous la barre, chiffres consignes tels quels et re-entrainement propose.
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t4b-mesures-et-demo.md`
+  summary: La phrase de demo (A0) prend 41,4 s sur CPU 4 fils (fusionne ; 43,2 s base + adaptateur), au-dessus des 30 s : la lecture de l'invite est reglee (1 s par demande apres l'instantane), il reste l'ecriture des 248 jetons du plan a environ 6 jetons/s. Raccourcir le plan ecrit (identifiants de couche longs recopies a chaque etape, titre du PDF) au prochain entrainement, ou augmenter le debit d'ecriture.
+  evidence: `duree_reel` de la tache 4b, binaire sans CUDA, masque 0x55, inventaire traduit du projet reel.
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t4b-mesures-et-demo.md`
+  summary: La phrase E du scenario (« a 10 minutes a pied de la gare de Villeneuve-le-Roi ») rend `agent.plan_invalid` deux fois avec le modele ajuste sur l'inventaire reel (aucune origine en coordonnees n'est donnee) ; elle devrait rendre une question. Famille a ajouter : isochrone sans coordonnees → question.
+  evidence: `duree_reel` de la tache 4b, deux chemins.
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t4b-mesures-et-demo.md`
+  summary: `ai/tests/duree_reel.rs` et `ecart_reel.rs` : sortir l'agregation des moyennes (amorce exclue, A0 compte) et le compte des redemandes (phrases passees par la redemande, sauvees) dans des fonctions testees sans modele.
+  evidence: relecture verification-gap de la tache 4b ; une inversion du filtre ou un decalage des lignes fausserait la mesure consignee sans faire echouer aucun test.
