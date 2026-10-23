@@ -125,7 +125,12 @@ fn serve(
         return 2;
     }
     let registry = Registry::standard();
-    match cassini_core::serve::serve_with_composer(&registry, &ModelComposer, input, out) {
+    match cassini_core::serve::serve_with_composer(
+        &registry,
+        &ModelComposer::from_env(),
+        input,
+        out,
+    ) {
         Ok(()) => 0,
         Err(e) => {
             let report = ErrorReport {
@@ -143,15 +148,120 @@ fn serve(
     }
 }
 
-/// Compositeur du canal : le modèle local, cherché par `model.list` à chaque proposition
-/// (AD-15), puis `compose_plan` (AD-23). Ses messages ne portent aucun chemin absolu (AD-9).
-struct ModelComposer;
+/// Mention neutre qui remplace le dossier des modèles dans les messages (AD-9).
+const FOLDER: &str = "(dossier des modèles)";
+
+/// Compositeur du canal : le modèle local, cherché dans le dossier des modèles à chaque
+/// proposition, puis `compose_plan` (AD-23). Ses messages ne portent aucun chemin absolu
+/// (AD-9). Le noyau seul découvre les modèles ; écart assumé à AD-15 (2026-10-18) : il passe
+/// par le diagnostic de `model_list` (le même parcours que `model.list`), hors registre.
+struct ModelComposer {
+    /// Valeur de `CASSINI_MODELS`, si elle est posée.
+    setting: Option<String>,
+    /// Dossier de l'exécutable, à côté duquel se cherche `models/`.
+    exe_dir: Option<std::path::PathBuf>,
+}
+
+impl ModelComposer {
+    fn from_env() -> Self {
+        ModelComposer {
+            setting: std::env::var(cassini_core::commands::model_list::MODELS_ENV).ok(),
+            exe_dir: std::env::current_exe()
+                .ok()
+                .and_then(|e| e.parent().map(Path::to_path_buf)),
+        }
+    }
+
+    /// Le diagnostic du dossier des modèles, et les chemins à masquer dans les messages : le
+    /// dossier désigné, puis le dossier retenu. Une erreur de découverte est déjà masquée.
+    fn discover(
+        &self,
+    ) -> Result<
+        (
+            cassini_core::commands::model_list::ModelDiagnosis,
+            Vec<(String, String)>,
+        ),
+        ErrorReport,
+    > {
+        let mut hidden: Vec<(String, String)> = self
+            .setting
+            .clone()
+            // Une valeur relative ou courte (« models ») n'est pas masquée : remplacée
+            // partout dans le message, elle le défigurerait.
+            .filter(|s| Path::new(s).is_absolute())
+            .map(|s| (s, FOLDER.to_string()))
+            .into_iter()
+            .collect();
+        let diagnosis = cassini_core::commands::model_list::diagnose(
+            self.setting.as_deref(),
+            self.exe_dir.as_deref(),
+        )
+        .map_err(|f| scrub(report(&f.code, f.message), &hidden))?;
+        if diagnosis.folder.is_absolute() {
+            hidden.push((diagnosis.folder.display().to_string(), FOLDER.to_string()));
+        }
+        Ok((diagnosis, hidden))
+    }
+
+    /// Choisit le modèle : `model` (un nom de la liste, comparé tel quel), sinon le premier
+    /// sans problème. Rend aussi les chemins à masquer, le modèle d'abord. Rien n'est chargé.
+    fn choose(
+        &self,
+        model: Option<&str>,
+    ) -> Result<(ChosenModel, Vec<(String, String)>), ErrorReport> {
+        let (diagnosis, mut hidden) = self.discover()?;
+        let entry = match model {
+            None => diagnosis
+                .models
+                .iter()
+                .find(|m| m.problem.is_none())
+                .ok_or_else(|| {
+                    report(
+                        "ai.no_model",
+                        "Aucun modèle utilisable n'a été trouvé dans le dossier des modèles."
+                            .to_string(),
+                    )
+                })?,
+            Some(name) => {
+                let found = diagnosis.models.iter().find(|m| m.file == name);
+                let Some(found) = found else {
+                    return Err(scrub(
+                        report(
+                            "models.unknown",
+                            format!("Le modèle « {name} » n'est pas dans le dossier des modèles."),
+                        ),
+                        &hidden,
+                    ));
+                };
+                if let Some(problem) = &found.problem {
+                    return Err(scrub(
+                        report(
+                            "models.unusable",
+                            format!("Le modèle « {name} » ne peut pas servir : {problem}."),
+                        ),
+                        &hidden,
+                    ));
+                }
+                found
+            }
+        };
+        let path = diagnosis.folder.join(&entry.file);
+        hidden.insert(0, (path.to_string_lossy().into_owned(), entry.file.clone()));
+        let chosen = resolve_model(&path).map_err(|e| scrub(e, &hidden))?;
+        // Chaque fichier du modèle (base, adaptateur) se masque par son seul nom, avant le dossier.
+        for pair in chosen.hidden().into_iter().rev() {
+            hidden.insert(0, pair);
+        }
+        Ok((chosen, hidden))
+    }
+}
 
 impl cassini_core::serve::Composer for ModelComposer {
     fn compose(
         &self,
         registry: &Registry,
         request: &str,
+        model: Option<&str>,
         inventory: &mut dyn FnMut() -> Result<Value, ErrorReport>,
     ) -> Result<cassini_core::plan::Plan, ErrorReport> {
         // La phrase vide est refusée avant toute recherche de modèle ni demande d'inventaire.
@@ -159,42 +269,25 @@ impl cassini_core::serve::Composer for ModelComposer {
             let e = cassini_ai::AiError::EmptyPrompt;
             return Err(report(e.code(), e.to_string()));
         }
-        // Chemins à masquer dans les messages : le dossier désigné, puis le dossier retenu.
-        const FOLDER: &str = "(dossier des modèles)";
-        let mut hidden: Vec<(String, String)> =
-            std::env::var(cassini_core::commands::model_list::MODELS_ENV)
-                .ok()
-                // Une valeur relative ou courte (« models ») n'est pas masquée : remplacée
-                // partout dans le message, elle le défigurerait.
-                .filter(|s| Path::new(s).is_absolute())
-                .map(|s| (s, FOLDER.to_string()))
-                .into_iter()
-                .collect();
-        let listed = registry
-            .call("model.list", json!({}))
-            .map_err(|e| scrub(ErrorReport::from(e), &hidden))?;
-        let folder = listed["folder"].as_str().unwrap_or_default().to_string();
-        if Path::new(&folder).is_absolute() {
-            hidden.push((folder.clone(), FOLDER.to_string()));
-        }
-        let Some(file) = listed["models"][0]["file"].as_str() else {
-            return Err(report(
-                "ai.no_model",
-                "Aucun modèle GGUF n'a été trouvé dans le dossier des modèles.".to_string(),
-            ));
-        };
-        let entry = Path::new(&folder).join(file);
-        hidden.insert(0, (entry.to_string_lossy().into_owned(), file.to_string()));
-        let chosen = resolve_model(&entry).map_err(|e| scrub(e, &hidden))?;
-        // Chaque fichier du modèle (base, adaptateur) se masque par son seul nom, avant le dossier.
-        for pair in chosen.hidden().into_iter().rev() {
-            hidden.insert(0, pair);
-        }
+        // Modèle inconnu ou inutilisable : refusé avant tout inventaire.
+        let (chosen, hidden) = self.choose(model)?;
         let inventory = inventory()?;
         let mut generator = cassini_ai::plan::model_files_generator(chosen.files.clone());
         chosen
             .compose(registry, &inventory, request, &mut generator)
             .map_err(|e| scrub(report(e.code(), e.to_string()), &hidden))
+    }
+
+    fn models(&self, _registry: &Registry) -> Result<Vec<Value>, ErrorReport> {
+        let (diagnosis, hidden) = self.discover()?;
+        Ok(diagnosis
+            .models
+            .into_iter()
+            .map(|mut m| {
+                m.problem = m.problem.map(|p| hide(&p, &hidden));
+                serde_json::to_value(m).expect("un modèle se sérialise")
+            })
+            .collect())
     }
 }
 
@@ -253,10 +346,17 @@ fn report(code: &str, message: String) -> ErrorReport {
 /// Remplace dans le message chaque chemin de `hidden` par son substitut, le plus précis
 /// d'abord : le modèle par son seul nom de fichier, le dossier par une mention neutre.
 fn scrub(mut e: ErrorReport, hidden: &[(String, String)]) -> ErrorReport {
-    for (path, instead) in hidden.iter().filter(|(p, _)| !p.is_empty()) {
-        e.message = e.message.replace(path.as_str(), instead);
-    }
+    e.message = hide(&e.message, hidden);
     e
+}
+
+/// Remplace dans `text` chaque chemin de `hidden` par son substitut, dans l'ordre.
+fn hide(text: &str, hidden: &[(String, String)]) -> String {
+    let mut text = text.to_string();
+    for (path, instead) in hidden.iter().filter(|(p, _)| !p.is_empty()) {
+        text = text.replace(path.as_str(), instead);
+    }
+    text
 }
 
 /// `cassini replay <projet>` : rejoue le journal du projet et rend le bilan.
@@ -969,5 +1069,112 @@ mod tests {
             assert_eq!(code, 2, "{args:?}");
             assert!(err.contains("cassini plan"));
         }
+    }
+
+    /// Dossier de modèles de test : deux GGUF (`a.gguf`, `b.gguf`), une déclaration illisible
+    /// et une déclaration dont un GGUF manque.
+    fn models_folder() -> (std::path::PathBuf, ModelComposer) {
+        let (dir, _) = temp_project();
+        std::fs::write(dir.join("a.gguf"), b"12345").unwrap();
+        std::fs::write(dir.join("b.gguf"), b"123").unwrap();
+        std::fs::write(dir.join("casse.modele.json"), "pas du json").unwrap();
+        std::fs::write(dir.join("manque.modele.json"), r#"{"model":"absent.gguf"}"#).unwrap();
+        let composer = ModelComposer {
+            setting: Some(dir.to_string_lossy().into_owned()),
+            exe_dir: None,
+        };
+        (dir, composer)
+    }
+
+    fn shows_no_folder(text: &str, dir: &std::path::Path) -> bool {
+        let folder = dir.to_string_lossy();
+        !text.contains(&*folder)
+            && !text.contains(&folder.replace('\\', "/"))
+            && !text.contains(&folder.replace('\\', "\\\\"))
+    }
+
+    #[test]
+    fn the_composer_lists_its_models_by_name_with_their_problems() {
+        use cassini_core::serve::Composer;
+        let (dir, composer) = models_folder();
+        let models = composer.models(&Registry::standard()).unwrap();
+        let text = Value::Array(models.clone()).to_string();
+        assert!(shows_no_folder(&text, &dir), "{text}");
+        assert_eq!(models[0], json!({"file": "a.gguf", "size_bytes": 5}));
+        assert_eq!(models[1], json!({"file": "b.gguf", "size_bytes": 3}));
+        assert_eq!(models[2]["file"], "casse.modele.json");
+        assert!(models[2]["problem"].is_string());
+        assert_eq!(models[3]["problem"], "fichier manquant : absent.gguf");
+        assert_eq!(models.len(), 4);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_composer_takes_the_chosen_model_or_the_first_usable_one() {
+        let (dir, composer) = models_folder();
+        let (chosen, _) = composer.choose(Some("b.gguf")).unwrap();
+        assert_eq!(
+            chosen.files,
+            cassini_ai::ModelFiles::single(dir.join("b.gguf"))
+        );
+        let (first, _) = composer.choose(None).unwrap();
+        assert_eq!(
+            first.files,
+            cassini_ai::ModelFiles::single(dir.join("a.gguf"))
+        );
+        // Sans GGUF utilisable, le premier sans problème manque : `ai.no_model`.
+        for f in ["a.gguf", "b.gguf"] {
+            std::fs::remove_file(dir.join(f)).unwrap();
+        }
+        assert_eq!(composer.choose(None).unwrap_err().code, "ai.no_model");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn an_unknown_or_unusable_model_is_refused_before_any_inventory() {
+        use cassini_core::serve::Composer;
+        let (dir, composer) = models_folder();
+        let registry = Registry::standard();
+        for (model, code) in [
+            ("x.gguf", "models.unknown"),
+            // Comparé tel quel : une autre casse n'est pas le même nom.
+            ("A.gguf", "models.unknown"),
+            ("manque.modele.json", "models.unusable"),
+            ("casse.modele.json", "models.unusable"),
+        ] {
+            let mut asked = false;
+            let e = composer
+                .compose(&registry, "Ouvre les gares.", Some(model), &mut || {
+                    asked = true;
+                    Ok(json!({}))
+                })
+                .unwrap_err();
+            assert_eq!(e.code, code, "{model}");
+            assert!(e.message.contains(model), "{}", e.message);
+            assert!(shows_no_folder(&e.message, &dir), "{}", e.message);
+            assert!(!asked, "aucun inventaire pour {model}");
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_missing_models_folder_is_masked_and_an_empty_one_lists_nothing() {
+        use cassini_core::serve::Composer;
+        let (dir, _) = temp_project();
+        let absent = ModelComposer {
+            setting: Some(dir.join("absent").to_string_lossy().into_owned()),
+            exe_dir: None,
+        };
+        let e = absent.models(&Registry::standard()).unwrap_err();
+        assert_eq!(e.code, "models.no_folder");
+        assert!(e.message.contains(FOLDER), "{}", e.message);
+        assert!(shows_no_folder(&e.message, &dir), "{}", e.message);
+        let empty = ModelComposer {
+            setting: Some(dir.to_string_lossy().into_owned()),
+            exe_dir: None,
+        };
+        assert!(empty.models(&Registry::standard()).unwrap().is_empty());
+        assert_eq!(empty.choose(None).unwrap_err().code, "ai.no_model");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

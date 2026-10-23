@@ -1,5 +1,5 @@
 //! Plans de l'agent sur le canal (AD-5, AD-23) : `plan.propose`, `plan.execute`,
-//! `plan.reject`, et la notification `plan.step`.
+//! `plan.reject`, la notification `plan.step`, et la liste des modèles `agent.models`.
 //!
 //! Le noyau garde le plan : l'extension ne renvoie que son `plan_id`, si bien que le plan
 //! montré est le plan exécuté. Un seul plan attend à la fois ; une nouvelle proposition
@@ -25,13 +25,39 @@ pub trait Composer {
     /// composer, pour qu'un modèle absent ne coûte aucun ordre. Le plan rendu est vérifié
     /// ensuite par le noyau ; un refus du modèle se rend en erreur `agent.refused`, une
     /// question (`Plan::Question`) en résultat `{"question"}`, sans `plan_id` : elle n'est
-    /// jamais gardée, donc jamais exécutable.
+    /// jamais gardée, donc jamais exécutable. `model` est un nom de la liste de `models`
+    /// (comparé tel quel) ; absent, le premier modèle sans problème.
     fn compose(
         &self,
         registry: &Registry,
         request: &str,
+        model: Option<&str>,
         inventory: &mut dyn FnMut() -> Result<Value, ErrorReport>,
     ) -> Result<Plan, ErrorReport>;
+
+    /// Les modèles que l'utilisateur peut choisir, triés par nom : chacun
+    /// `{"file", "size_bytes"}` et un `problem` facultatif. Ni dossier ni chemin (AD-9).
+    /// Écart assumé à AD-15 (2026-10-18) : rendu hors registre, jamais journalisé.
+    fn models(&self, registry: &Registry) -> Result<Vec<Value>, ErrorReport>;
+}
+
+fn unavailable() -> RpcError {
+    RpcError::coded(
+        "agent.unavailable",
+        "L'agent n'est pas disponible dans ce noyau : aucune composition de plan n'y est branchée."
+            .to_string(),
+    )
+}
+
+/// `agent.models` : les modèles du dossier des modèles, sans chemin, hors journal.
+pub(super) fn models(state: &State<'_>) -> Result<Value, RpcError> {
+    let Some(composer) = state.composer else {
+        return Err(unavailable());
+    };
+    let models = composer
+        .models(state.registry)
+        .map_err(RpcError::business)?;
+    Ok(json!({"models": models}))
 }
 
 /// Le plan en attente de validation.
@@ -87,7 +113,7 @@ fn verify(state: &State<'_>, plan: &Plan) -> Result<(), ErrorReport> {
     Ok(())
 }
 
-/// `plan.propose {request}` : inventaire, composition, vérification ; le plan est gardé.
+/// `plan.propose {request, model?}` : inventaire, composition, vérification ; le plan est gardé.
 /// Une question du modèle est rendue telle quelle (`{"question"}`) et rien n'attend.
 pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, RpcError> {
     // Une nouvelle proposition remplace l'ancienne, même si elle échoue (paramètres compris).
@@ -96,12 +122,13 @@ pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<V
         .and_then(|p| p.get("request"))
         .and_then(Value::as_str)
         .ok_or_else(|| invalid_params("request doit être un texte."))?;
+    let model = match params.and_then(|p| p.get("model")) {
+        None | Some(Value::Null) => None,
+        Some(Value::String(name)) => Some(name.as_str()),
+        Some(_) => return Err(invalid_params("model doit être un nom de modèle.")),
+    };
     let Some(composer) = state.composer else {
-        return Err(RpcError::coded(
-            "agent.unavailable",
-            "L'agent n'est pas disponible dans ce noyau : aucune composition de plan n'y est branchée."
-                .to_string(),
-        ));
+        return Err(unavailable());
     };
     let plan = {
         let link = state.link.clone();
@@ -120,7 +147,7 @@ pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<V
                 .map_err(ErrorReport::from)
         };
         composer
-            .compose(state.registry, request, &mut inventory)
+            .compose(state.registry, request, model, &mut inventory)
             .map_err(RpcError::business)?
     };
     if let Plan::Refusal { reason } = &plan {

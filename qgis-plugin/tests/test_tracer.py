@@ -610,16 +610,31 @@ class PluginBehaviourTest(unittest.TestCase):
             return lambda s, arg: calls.append((name, arg)) or value
 
         self.p.client = type("C", (), {
-            "propose": answer("propose", True),
+            "propose": lambda s, text, model=None: calls.append(("propose", text, model)) or True,
             "execute_plan": answer("execute_plan", False),
             "reject_plan": answer("reject_plan", True)})()
         self.assertIs(self.p.propose("Tampon"), True)
+        self.assertIs(self.p.propose("Tampon", "b.gguf"), True)
         self.assertIs(self.p.approve("plan-1"), False)
         self.assertIs(self.p.reject("plan-1"), True)
         self.assertEqual(
             calls,
-            [("propose", "Tampon"), ("execute_plan", "plan-1"), ("reject_plan", "plan-1")],
+            [("propose", "Tampon", None), ("propose", "Tampon", "b.gguf"),
+             ("execute_plan", "plan-1"), ("reject_plan", "plan-1")],
         )
+
+    def test_models_are_asked_at_ready_and_their_events_reach_the_panel(self):
+        client = self.mod.client
+        asked = []
+        self.p.client = type("C", (), {"list_models": lambda s: asked.append(1) or True})()
+        self.p._on_event(client.READY, {"commands": []})
+        self.assertEqual(asked, [1])
+        self.assertIs(self.p.list_models(), True)
+        for kind in client.MODEL_EVENTS:
+            self.p._on_event(kind, {"k": kind})
+        self.assertEqual(self.p.panel.events, [(k, {"k": k}) for k in client.MODEL_EVENTS])
+        self.p.client = None
+        self.assertFalse(self.p.list_models())
 
     def test_stop_sends_cancel_run(self):
         calls = []

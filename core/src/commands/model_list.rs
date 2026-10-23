@@ -9,7 +9,8 @@
 //! GGUF (ticket 5.10, tâche 3) : il nomme le GGUF du modèle, l'adaptateur LoRA facultatif qui
 //! se pose sur lui, et le prompt qu'il attend. Une déclaration devient une entrée de la liste,
 //! et les GGUF qu'elle nomme n'y figurent plus seuls. Une déclaration illisible, ou qui nomme
-//! autre chose qu'un nom de fichier du même dossier, est ignorée.
+//! autre chose qu'un nom de fichier du même dossier, est ignorée par `model.list` ; le
+//! diagnostic `diagnose` (sélecteur du panneau, ticket 5.14) la garde avec son problème.
 
 use std::path::{Path, PathBuf};
 
@@ -94,12 +95,25 @@ pub fn read_declaration(path: &Path) -> Result<ModelDeclaration, String> {
     }
     let text = std::fs::read_to_string(path)
         .map_err(|_| "la déclaration de modèle n'a pas pu être lue".to_string())?;
-    let declaration: ModelDeclaration = serde_json::from_str(&text)
-        .map_err(|e| format!("la déclaration de modèle n'est pas lisible ({e})"))?;
+    // Seules la ligne et la colonne de l'erreur sont gardées : le texte de serde (en anglais)
+    // peut citer une valeur du fichier, un chemin par exemple (AD-9).
+    let declaration: ModelDeclaration = serde_json::from_str(&text).map_err(|e| {
+        format!(
+            "la déclaration de modèle n'est pas lisible (ligne {}, colonne {})",
+            e.line(),
+            e.column()
+        )
+    })?;
     if let Some(bad) = declaration.files().find(|f| !is_plain_gguf_name(f)) {
-        return Err(format!(
-            "la déclaration de modèle nomme « {bad} », qui n'est pas un nom de fichier GGUF du même dossier"
-        ));
+        // Un nom qui porte un séparateur peut être un chemin : il n'est pas recopié.
+        return Err(if bad.contains(['/', '\\', ':']) {
+            "la déclaration de modèle nomme un chemin au lieu d'un nom de fichier GGUF du même dossier"
+                .to_string()
+        } else {
+            format!(
+                "la déclaration de modèle nomme « {bad} », qui n'est pas un nom de fichier GGUF du même dossier"
+            )
+        });
     }
     Ok(declaration)
 }
@@ -139,13 +153,10 @@ fn no_folder(detail: &str) -> CommandFailure {
     )
 }
 
-/// Choisit le dossier de modèles puis le parcourt (un seul niveau).
-/// Les entrées sont des arguments pour tester sans toucher l'environnement.
-fn discover(
-    setting: Option<&str>,
-    exe_dir: Option<&Path>,
-) -> Result<ModelListOutput, CommandFailure> {
-    let folder: PathBuf = match setting.filter(|s| !s.is_empty()) {
+/// Choisit le dossier de modèles : `setting` (la valeur de `CASSINI_MODELS`), sinon `models/`
+/// à côté de `exe_dir`. Un dossier désigné absent est une erreur, jamais un repli.
+fn choose_folder(setting: Option<&str>, exe_dir: Option<&Path>) -> Result<PathBuf, CommandFailure> {
+    match setting.filter(|s| !s.is_empty()) {
         Some(designated) => {
             let p = PathBuf::from(designated);
             if !p.is_dir() {
@@ -153,16 +164,28 @@ fn discover(
                     "Le dossier désigné par {MODELS_ENV} n'existe pas : « {designated} »."
                 )));
             }
-            p
+            Ok(p)
         }
-        None => {
-            let candidate = exe_dir.map(|d| d.join("models"));
-            match candidate {
-                Some(p) if p.is_dir() => p,
-                _ => return Err(no_folder("Aucun dossier de modèles n'a été trouvé.")),
-            }
-        }
-    };
+        None => match exe_dir.map(|d| d.join("models")) {
+            Some(p) if p.is_dir() => Ok(p),
+            _ => Err(no_folder("Aucun dossier de modèles n'a été trouvé.")),
+        },
+    }
+}
+
+/// Une entrée trouvée par le parcours, avant mise en forme.
+struct Scanned {
+    file: String,
+    size_bytes: u64,
+    /// `None` pour un GGUF seul ; pour une déclaration, sa lecture.
+    declaration: Option<Result<ModelDeclaration, String>>,
+    /// GGUF nommés par la déclaration et absents du dossier.
+    missing: Vec<String>,
+}
+
+/// Parcourt le dossier (un seul niveau) : les GGUF seuls et les déclarations, lisibles ou
+/// non, triés par nom. Aucun GGUF n'est encore caché : voir `hide_named`.
+fn scan(folder: &Path) -> Result<Vec<Scanned>, CommandFailure> {
     let unreadable = |e: std::io::Error| {
         CommandFailure::new(
             "models.unreadable",
@@ -174,15 +197,12 @@ fn discover(
     };
     let mut ggufs = Vec::new();
     let mut declared = Vec::new();
-    for entry in std::fs::read_dir(&folder).map_err(unreadable)? {
+    for entry in std::fs::read_dir(folder).map_err(unreadable)? {
         let entry = entry.map_err(unreadable)?;
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().into_owned();
         if is_declaration(&name) {
-            // Une déclaration illisible est ignorée, pas la liste.
-            if let Ok(declaration) = read_declaration(&path) {
-                declared.push((name, declaration));
-            }
+            declared.push((name, read_declaration(&path)));
             continue;
         }
         let is_gguf = path
@@ -199,38 +219,136 @@ fn discover(
         if !meta.is_file() {
             continue;
         }
-        ggufs.push(ModelEntry {
+        ggufs.push(Scanned {
             file: name,
             size_bytes: meta.len(),
             declaration: None,
+            missing: Vec::new(),
         });
     }
-    // Un GGUF nommé par une déclaration n'est plus listé seul.
-    ggufs.retain(|g| {
-        !declared
-            .iter()
-            .any(|(_, d)| d.files().any(|f| f.eq_ignore_ascii_case(&g.file)))
-    });
     let mut models = ggufs;
     for (name, declaration) in declared {
-        // Un GGUF nommé absent ne compte pour rien : son chargement dira qu'il manque.
-        let size_bytes = declaration
-            .files()
-            .filter_map(|f| std::fs::metadata(folder.join(f)).ok())
-            .filter(|m| m.is_file())
-            .map(|m| m.len())
-            .sum();
-        models.push(ModelEntry {
+        let (mut size_bytes, mut missing) = (0, Vec::new());
+        if let Ok(d) = &declaration {
+            for f in d.files() {
+                match std::fs::metadata(folder.join(f)) {
+                    Ok(m) if m.is_file() => size_bytes += m.len(),
+                    _ => missing.push(f.to_string()),
+                }
+            }
+        }
+        models.push(Scanned {
             file: name,
             size_bytes,
             declaration: Some(declaration),
+            missing,
         });
     }
     models.sort_by(|a, b| a.file.cmp(&b.file));
+    Ok(models)
+}
+
+/// Retire les GGUF seuls nommés par une déclaration lisible : tous ceux qu'elle nomme si
+/// `hides` la retient, sinon son seul adaptateur (un adaptateur n'est jamais un modèle seul).
+fn hide_named(models: Vec<Scanned>, hides: impl Fn(&Scanned) -> bool) -> Vec<Scanned> {
+    let named: Vec<String> = models
+        .iter()
+        .filter_map(|m| {
+            let d = m.declaration.as_ref()?.as_ref().ok()?;
+            Some(if hides(m) {
+                d.files().map(str::to_string).collect::<Vec<_>>()
+            } else {
+                d.adapter.iter().cloned().collect()
+            })
+        })
+        .flatten()
+        .collect();
+    models
+        .into_iter()
+        .filter(|m| {
+            m.declaration.is_some() || !named.iter().any(|f| f.eq_ignore_ascii_case(&m.file))
+        })
+        .collect()
+}
+
+/// Choisit le dossier de modèles puis le parcourt (un seul niveau).
+/// Les entrées sont des arguments pour tester sans toucher l'environnement.
+fn discover(
+    setting: Option<&str>,
+    exe_dir: Option<&Path>,
+) -> Result<ModelListOutput, CommandFailure> {
+    let folder = choose_folder(setting, exe_dir)?;
+    // Un GGUF nommé par une déclaration lisible n'est plus listé seul.
+    let models = hide_named(scan(&folder)?, |_| true)
+        .into_iter()
+        // Une déclaration illisible est ignorée, pas la liste. Un GGUF nommé absent ne
+        // compte pour rien : son chargement dira qu'il manque.
+        .filter_map(|m| match m.declaration {
+            Some(Err(_)) => None,
+            declaration => Some(ModelEntry {
+                file: m.file,
+                size_bytes: m.size_bytes,
+                declaration: declaration.and_then(Result::ok),
+            }),
+        })
+        .collect();
     Ok(ModelListOutput {
         folder: folder.display().to_string(),
         models,
     })
+}
+
+/// Un modèle tel que le sélecteur le montre : nom, taille, et ce qui l'empêche de servir.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DiagnosedModel {
+    /// Nom du fichier seul, sans dossier : le GGUF, ou la déclaration.
+    pub file: String,
+    /// Taille du GGUF ; pour une déclaration, celle des GGUF nommés présents.
+    pub size_bytes: u64,
+    /// Ce qui empêche ce modèle de servir (déclaration illisible, fichier manquant), en
+    /// français et sans chemin ; absent si rien.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub problem: Option<String>,
+}
+
+/// Le diagnostic du dossier de modèles : le dossier retenu, et chaque modèle avec son problème.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelDiagnosis {
+    /// Dossier de modèles retenu.
+    pub folder: PathBuf,
+    /// Modèles triés par nom ; une déclaration illisible y reste, avec son problème.
+    pub models: Vec<DiagnosedModel>,
+}
+
+/// Diagnostic des modèles (ticket 5.14) : même choix de dossier et même parcours que
+/// `model.list`, mais une déclaration illisible reste listée avec son problème, et un GGUF
+/// nommé absent devient un problème. `model.list` ne s'en sert pas. Aucun GGUF n'est ouvert.
+pub fn diagnose(
+    setting: Option<&str>,
+    exe_dir: Option<&Path>,
+) -> Result<ModelDiagnosis, CommandFailure> {
+    let folder = choose_folder(setting, exe_dir)?;
+    // Un GGUF reste listé seul, sauf si une déclaration sans problème le nomme, ou si une
+    // déclaration lisible le nomme comme adaptateur : la base d'une déclaration à laquelle il
+    // manque un fichier reste choisissable, son adaptateur jamais.
+    let models = hide_named(scan(&folder)?, |m| m.missing.is_empty())
+        .into_iter()
+        .map(|m| {
+            let problem = match m.declaration {
+                Some(Err(e)) => Some(e),
+                _ if !m.missing.is_empty() => {
+                    Some(format!("fichier manquant : {}", m.missing.join(", ")))
+                }
+                _ => None,
+            };
+            DiagnosedModel {
+                file: m.file,
+                size_bytes: m.size_bytes,
+                problem,
+            }
+        })
+        .collect();
+    Ok(ModelDiagnosis { folder, models })
 }
 
 impl Command for ModelList {
@@ -486,6 +604,97 @@ mod tests {
             .unwrap_err();
         assert_eq!(err.code(), "models.no_folder");
         std::env::remove_var(MODELS_ENV);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn diagnose_keeps_a_broken_declaration_with_its_problem() {
+        let dir = scratch("diagnose");
+        std::fs::write(dir.join("a.modele.json"), "pas du json").unwrap();
+        std::fs::write(
+            dir.join("b.modele.json"),
+            r#"{"model":"present.gguf","adapter":"absent.gguf"}"#,
+        )
+        .unwrap();
+        std::fs::write(dir.join("present.gguf"), b"123").unwrap();
+        std::fs::write(dir.join("c.gguf"), b"12").unwrap();
+        let d = diagnose(dir.to_str(), None).unwrap();
+        assert_eq!(d.folder, dir);
+        let got: Vec<_> = d
+            .models
+            .iter()
+            .map(|m| (m.file.as_str(), m.size_bytes, m.problem.as_deref()))
+            .collect();
+        // La base présente d'une déclaration à problème reste choisissable seule.
+        assert_eq!(got[1..], [
+            ("b.modele.json", 3, Some("fichier manquant : absent.gguf")),
+            ("c.gguf", 2, None),
+            ("present.gguf", 3, None),
+        ]);
+        assert_eq!((got.len(), got[0].0), (4, "a.modele.json"));
+        let problem = got[0].2.unwrap();
+        assert_eq!(
+            problem,
+            "la déclaration de modèle n'est pas lisible (ligne 1, colonne 1)"
+        );
+        // Le GGUF seul ne porte pas de champ `problem`.
+        let json = serde_json::to_value(&d.models[2]).unwrap();
+        assert_eq!(json, json!({"file": "c.gguf", "size_bytes": 2}));
+        // `model.list` reste inchangé : la déclaration illisible n'y figure pas, et la
+        // déclaration lisible cache les GGUF qu'elle nomme.
+        let listed = discover(dir.to_str(), None).unwrap();
+        let names: Vec<_> = listed.models.iter().map(|m| m.file.as_str()).collect();
+        assert_eq!(names, vec!["b.modele.json", "c.gguf"]);
+        std::fs::write(dir.join("ok.modele.json"), r#"{"model":"present.gguf"}"#).unwrap();
+        let d = diagnose(dir.to_str(), None).unwrap();
+        assert!(d.models.iter().all(|m| m.file != "present.gguf"), "{d:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_declaration_never_echoes_a_path_or_serde_text() {
+        let dir = scratch("decl-path");
+        let f = dir.join("x.modele.json");
+        for text in [
+            r#"{"model":"C:\\Users\\kev\\m.gguf"}"#,
+            r#"{"model":"/home/kev/m.gguf"}"#,
+            r#"{"model":"m.gguf","x":"/home/kev/secret"}"#,
+            r#"{"model":"m.gguf","prompt":"/home/kev/secret"}"#,
+        ] {
+            std::fs::write(&f, text).unwrap();
+            let e = read_declaration(&f).unwrap_err();
+            assert!(!e.contains("kev") && !e.contains("Users"), "{e}");
+        }
+        std::fs::write(&f, r#"{"model":"m.bin"}"#).unwrap();
+        assert!(read_declaration(&f).unwrap_err().contains("« m.bin »"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn diagnose_names_every_missing_file_and_shares_the_folder_errors() {
+        let dir = scratch("diagnose-missing");
+        std::fs::write(
+            dir.join("d.modele.json"),
+            r#"{"model":"x.gguf","adapter":"y.gguf"}"#,
+        )
+        .unwrap();
+        let d = diagnose(dir.to_str(), None).unwrap();
+        assert_eq!(
+            d.models[0].problem.as_deref(),
+            Some("fichier manquant : x.gguf, y.gguf")
+        );
+        // Un adaptateur présent reste caché, même quand sa déclaration a un problème.
+        std::fs::write(dir.join("y.gguf"), b"12").unwrap();
+        let d = diagnose(dir.to_str(), None).unwrap();
+        let got: Vec<_> = d
+            .models
+            .iter()
+            .map(|m| (m.file.as_str(), m.size_bytes, m.problem.as_deref()))
+            .collect();
+        assert_eq!(got, vec![("d.modele.json", 2, Some("fichier manquant : x.gguf"))]);
+        let err = diagnose(dir.join("absent").to_str(), None).unwrap_err();
+        assert_eq!(err.code, "models.no_folder");
+        assert!(diagnose(None, None).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

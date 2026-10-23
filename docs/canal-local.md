@@ -92,18 +92,55 @@ et dont le message nomme la commande.
 - Le journal compte tout ce que le noyau a exécuté, `system.about` du démarrage compris :
   il est rejoué comme le reste.
 
-## Plans de l'agent : `plan.propose`, `plan.execute`, `plan.reject`
+## Plans de l'agent : `agent.models`, `plan.propose`, `plan.execute`, `plan.reject`
 
 Le noyau compose, garde et exécute le plan (AD-5, AD-23). L'extension ne renvoie
 jamais un plan, seulement son `plan_id` : le plan montré est le plan exécuté. Un seul
 plan attend à la fois ; une nouvelle proposition efface l'ancienne (même si elle
 échoue), `plan.execute` et `plan.reject` le consomment.
 
+### `agent.models` (extension vers noyau)
+
+Le noyau seul découvre les modèles (dossier désigné par `CASSINI_MODELS`, sinon `models/` à
+côté de l'exécutable) et rend ceux que l'utilisateur peut choisir. Aucun paramètre :
+
+```json
+{"jsonrpc":"2.0","id":4,"method":"agent.models"}
+```
+
+Réponse, triée par nom ; chaque entrée porte le **nom de fichier seul** (un GGUF, ou une
+déclaration `*.modele.json`) et sa taille en octets, jamais un dossier ni un chemin (AD-9) :
+
+```json
+{"jsonrpc":"2.0","id":4,"result":{"models":[
+  {"file":"Qwen3.5-9B-Q4_K_M.gguf","size_bytes":5680000000},
+  {"file":"ajuste.modele.json","size_bytes":2700000000},
+  {"file":"casse.modele.json","size_bytes":0,"problem":"la déclaration de modèle n'est pas lisible (expected value at line 1 column 1)"},
+  {"file":"manque.modele.json","size_bytes":0,"problem":"fichier manquant : base.gguf"}]}}
+```
+
+`problem` (facultatif) dit pourquoi un modèle ne peut pas servir : déclaration illisible,
+ou GGUF nommé absent du dossier. Une telle entrée reste listée pour que l'utilisateur voie
+la raison ; elle n'est jamais prise par défaut. Aucun GGUF n'est ouvert pour lister.
+
+- C'est un **écart assumé à AD-15** (décision du 2026-10-18) : la liste ne passe pas par
+  `command.run model.list` et **n'est pas journalisée**. `model.list` reste inchangé.
+- Il faut une session ouverte (`session.not_started` sinon) ; sans compositeur, l'erreur est
+  `agent.unavailable` ; pendant un ordre en vol, `session.busy`.
+- Une erreur de découverte (`models.no_folder`, `models.unreadable`) remplace le dossier par
+  « (dossier des modèles) ».
+
 ### `plan.propose` (extension vers noyau)
 
 ```json
-{"jsonrpc":"2.0","id":5,"method":"plan.propose","params":{"request":"Tampon de 500 m autour des gares."}}
+{"jsonrpc":"2.0","id":5,"method":"plan.propose","params":{"request":"Tampon de 500 m autour des gares.","model":"ajuste.modele.json"}}
 ```
+
+`model` est facultatif : un nom de la liste d'`agent.models`, comparé tel quel. Absent (ou
+`null`), le noyau prend le **premier modèle sans problème**. Un nom absent de la liste répond
+`models.unknown`, un modèle à problème `models.unusable` avec la raison ; dans les deux cas
+avant tout ordre d'inventaire. Un `model` qui n'est pas un texte répond `-32602`. Changer de
+modèle d'une proposition à l'autre recharge le modèle (le noyau garde un seul modèle à la fois).
 
 Le noyau cherche son modèle, puis demande l'inventaire à l'extension par un ordre
 `order.execute` de `project.inventory` (non journalisé), compose le plan et le vérifie :
@@ -190,13 +227,15 @@ n'est pas celui du plan en attente répond `plan.unknown` et laisse ce plan en a
 | Code | Quand |
 |---|---|
 | `registry.cancelled` | le `command.run` ou l'étape en vol d'un `plan.execute` a été annulé, ou l'entrée s'est fermée pendant l'ordre |
-| `session.busy` | un `command.run`, un `journal.replay`, un `session.hello` ou une méthode `plan.*` arrive pendant un ordre en vol (y compris pendant un rejeu, une étape de plan ou l'inventaire d'une proposition) ; refus immédiat |
+| `session.busy` | un `command.run`, un `journal.replay`, un `session.hello`, un `agent.models` ou une méthode `plan.*` arrive pendant un ordre en vol (y compris pendant un rejeu, une étape de plan ou l'inventaire d'une proposition) ; refus immédiat |
 | `plan.unknown` | `plan.execute` ou `plan.reject` sur un `plan_id` inconnu, déjà exécuté, rejeté ou remplacé ; rien n'est exécuté |
-| `agent.unavailable` | `plan.propose` : le noyau n'a pas de compositeur de plans |
+| `agent.unavailable` | `plan.propose` ou `agent.models` : le noyau n'a pas de compositeur de plans |
+| `models.unknown` | `plan.propose` : `model` n'est pas dans la liste d'`agent.models` ; rien n'est composé, aucun ordre d'inventaire |
+| `models.unusable` | `plan.propose` : `model` désigne un modèle à problème ; le message porte la raison ; aucun ordre d'inventaire |
 | `ai.empty_prompt` | `plan.propose` : la demande est vide ou blanche ; refusée avant toute recherche de modèle et sans ordre d'inventaire |
 | `registry.unavailable` | `plan.propose` : l'extension n'a pas annoncé `project.inventory` ; rien n'est composé |
 | `session.io` | `plan.execute` : la notification `plan.step` n'a pas pu être écrite ; l'étape `step` n'est pas lancée |
-| `ai.no_model`, `models.*`, `ai.*` | `plan.propose` : aucun modèle trouvé, dossier des modèles absent, ou échec du modèle ; le message ne porte aucun chemin absolu |
+| `ai.no_model`, `models.*`, `ai.*` | `plan.propose` (et `agent.models` pour `models.*`) : aucun modèle utilisable, dossier des modèles absent, ou échec du modèle ; le message ne porte aucun chemin absolu |
 | `agent.refused` | `plan.propose` : le modèle refuse la demande, avec sa raison |
 | `agent.plan_invalid` | `plan.propose` (ou `plan.execute` à la revérification) : plan non conforme ou nommant une commande non annoncée ; `step` désigne l'étape fautive |
 | `plan.missing_output`, `plan.bad_reference` | `plan.execute` : une référence `step:k.champ` ne se résout pas sur la sortie obtenue ; `step` désigne l'étape |
