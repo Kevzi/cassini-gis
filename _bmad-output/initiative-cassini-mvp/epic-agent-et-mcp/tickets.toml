@@ -152,7 +152,7 @@ title = "Refactor sweep"
 description = "Nettoie ce que l'epic a laisse : doublons entre ai/, serve.rs et le serveur MCP, constats de revue reportes dans deferred-work.md ; le perimetre est fixe au demarrage d'apres les plans et les constats."
 verify = "cargo test, clippy et fmt propres, les constats reportes de l'epic sont traites ou re-reportes avec leur raison."
 covers = []
-after = [1, 2, 3, 4, 5, 6, 7, 11, 12, 13, 14]
+after = [1, 2, 3, 4, 5, 6, 7, 11, 12, 13, 14, 16]
 hitl = false
 risk = "low"
 
@@ -215,4 +215,47 @@ notes = [
   "Changer le prompt court (precision « en comptant a partir de 1 ») oblige a garder la parite des decoupeurs et l'egalite octet pour octet du prompt entre l'entrainement et ai/.",
   "hitl : le proprietaire fait la recette dans QGIS apres la demo de Claude ; l'entrainement tourne sur sa carte graphique.",
   "Check hors criteres (risque high) : le proprietaire rejoue la phrase de demo et deux phrases de refus dans QGIS et confirme le comportement.",
+]
+
+[[entry]]
+id = 16
+type = "story"
+title = "Garde-fou : une coordonnee du plan vient de la demande, jamais du modele"
+description = "Ajoute au noyau une regle generale, valable pour toute commande qui prend un point : une coordonnee d'un plan compose doit figurer dans la demande de l'utilisateur ou venir du resultat d'une etape precedente. Sinon le noyau ne montre pas le plan et rend lui-meme une question qui demande le point en coordonnees (x, y et systeme), sous la forme de question de 5.5. Le signal du declenchement est journalise, pour que les mesures sachent si la question vient du modele ou du garde-fou. Corrige la phrase E du scenario, a laquelle le modele de 5.15 rend une isochrone d'origine inventee (EPSG:4326, 2,458 / 48,658) acceptee sans alerte."
+verify = "La phrase E sur l'inventaire de Villeneuve-le-Roi rend une question et aucun plan, avec le modele de 5.15 ; un test sans modele montre qu'un plan a coordonnees absentes de la demande devient cette question, et qu'un plan dont les coordonnees sont dans la demande passe inchange ; plan_reel, question_reel et ecart_reel sur GPU ne baissent pas par rapport a 5.15 ; la demo de bout en bout dans QGIS est rejouee avec la phrase de demo exacte et avec la phrase E."
+covers = ["CAP-4"]
+after = [15]
+hitl = true
+risk = "high"
+unknown = "AD-23 ne couvre pas encore les coordonnees : le contrat d'architecture est etendu par bmad-architecture avant le build ; retirer cette ligne une fois fait."
+references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-23"]
+notes = [
+  "Decision: 2026-10-23 — le proprietaire veut que le probleme de la phrase E soit resolu a coup sur : un garde-fou du noyau, regle generale sur la provenance des coordonnees, et non une regle de prompt ni un correctif par phrase.",
+  "Decision: 2026-10-23 — quand le garde-fou se declenche, le noyau rend une question (le point de depart en coordonnees), ni redemande au modele ni simple erreur.",
+  "Decision: 2026-10-23 — cette regle etend AD-23 (un plan ne nomme que des chemins deja connus de la session) aux coordonnees. Le contrat d'architecture est mis a jour par bmad-architecture avant le build de ce ticket.",
+  "Decision: 2026-10-23 — 5.15 reste sur sa branche et n'est fusionnee dans main qu'apres ce ticket et la recette du proprietaire dans QGIS ; ce ticket part de cette branche.",
+  "Assumption: le garde-fou s'applique apres judge et retry_turns, sans changer le prompt, judge ni le tour de redemande ; la parite au jeton avec l'entrainement reste intacte.",
+  "Open question: comment reconnaitre une coordonnee de la demande (ecritures 2,458 et 2.458, ordre x/y, tolerance) ; a trancher avec le proprietaire au debut du build.",
+  "hitl : le proprietaire fait la recette dans QGIS avec la phrase E et la phrase de demo.",
+  "Check hors criteres (risque high) : le proprietaire rejoue dans QGIS la phrase E et une phrase avec des coordonnees donnees, et confirme le comportement.",
+]
+
+[[entry]]
+id = 17
+type = "story"
+title = "Nouvelle passe sur le generateur : isochrone depuis un lieu de l'inventaire, plans a plusieurs conditions"
+description = "Ajoute au generateur les familles que les mesures de 5.15 ont montrees manquantes, puis re-entraine par la commande unique (meme base, meme methode, adaptateur de domaine toujours possible), fusionne en GGUF et re-mesure par ai/. Familles : isochrone dont l'origine est un lieu present comme couche de points (une gare de l'inventaire) sans point choisi en coordonnees, qui rend une question ; plans a plusieurs conditions sans etape perdue (H17, H18, H20) ni commande ou parametre faux (H19, H22) ; question rendue a tort au lieu d'un plan (H08, H23) ; refus attendu rendu comme tel (H40)."
+verify = "Sur GPU, par ai/ et la declaration du modele livre : plan_reel au moins 20/25 avec au plus 1 fausse question, jeu tenu a l'ecart au moins 32/40, question_reel au moins 9/12, la phrase E rend une question composee par le modele sans que le garde-fou de l'entree 16 se declenche ; la demo de bout en bout dans QGIS est rejouee avec la phrase de demo exacte ; les chiffres sont consignes dans docs/entrainement-du-modele.md."
+covers = ["CAP-4"]
+after = [16]
+hitl = true
+risk = "high"
+notes = [
+  "Decision: 2026-10-23 — decoupe du proprietaire : le garde-fou (16) regle la phrase E a coup sur ; ce ticket apprend au modele a poser la question de lui-meme.",
+  "Decision: 2026-10-22 (reprise de 5.10) — une phrase mal comprise devient une famille d'exemples, jamais une regle de prompt ni un correctif par phrase.",
+  "Decision: 2026-10-17 (reprise de 5.10) — le jeu tenu a l'ecart n'est jamais lu pour ecrire les familles : les identifiants H et Q nomment des constats.",
+  "Decision: 2026-10-22 (reprise de 5.10) — le modele de ce depot reste civil et generaliste.",
+  "hitl : l'entrainement tourne sur la carte graphique du proprietaire (environ 4 h), qui fait ensuite la recette dans QGIS.",
+  "Check hors criteres (risque high) : le proprietaire rejoue la phrase de demo et la phrase E dans QGIS et confirme le comportement.",
+  "Viser des familles sur des ecarts nommes du jeu tenu a l'ecart (H08, H17 a H23, H40) affaiblit ecart_reel comme mesure aveugle : le consigner avec les chiffres.",
 ]
