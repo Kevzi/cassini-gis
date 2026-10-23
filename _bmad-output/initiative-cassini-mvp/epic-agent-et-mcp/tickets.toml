@@ -195,3 +195,24 @@ notes = [
   "Decision: 2026-10-22 — la phrase de demo exacte de CLAUDE.md (sans « (zones U) ») entre dans le jeu tenu a l'ecart et ferme la story par une demo de bout en bout dans QGIS, faite par Claude avant la recette du proprietaire.",
   "Decision: 2026-10-22 — le modele ajuste de ce depot reste civil et generaliste. La methode d'entrainement doit permettre d'ajouter plus tard un adaptateur LoRA de domaine, entraine hors de ce depot sur la meme base, sans re-entrainer la base : base et adaptateur se chargent ensemble, le choix passe par le selecteur de 5.14.",
 ]
+
+[[entry]]
+id = 15
+type = "story"
+title = "Re-entrainement du modele ajuste sur les familles manquantes"
+description = "Ajoute au generateur les familles d'exemples que les mesures de la tache 4b de 5.10 ont montrees manquantes, regenere le jeu, re-entraine par la commande unique de 5.10 (meme base, meme methode, adaptateur de domaine toujours possible), fusionne en GGUF et re-mesure par ai/. Familles : refus des demandes que le registre n'a pas encore (champ de vision, ligne de vue, pente, cadrage de la carte, PDF en A3, statistiques sur un raster), au lieu d'un plan de substitution ou invalide ; plans a plusieurs conditions sans etape perdue ni ajoutee (H08, H17 a H20, H22) ; question quand l'appartenance a la commune n'a pas de couche (Q11) ; question pour une isochrone sans origine en coordonnees (phrase E du scenario) ; refus attendu rendu comme tel (H40) ; le tour de redemande, pour qu'une sortie rejetee puisse etre sauvee. Dettes du generateur reportees par 5.10 : valeurs d'un champ triees comme le produit, formes d'inventaire vues dans QGIS (couche sans fichier, projet non enregistre, SCR non EPSG, table sans geometrie, unloaded_files vide), precision « (en comptant a partir de 1) » rendue au prompt court."
+verify = "Sur GPU, par ai/ et la declaration du modele livre : plan_reel au moins 20/25, jeu tenu a l'ecart au moins 32/40, au moins 9 des 12 phrases ambigues rendent une question et au plus 1 des 25 phrases claires, la phrase E rend une question ; la demo de bout en bout dans QGIS avec la phrase de demo exacte est rejouee ; les chiffres sont consignes dans docs/entrainement-du-modele.md."
+covers = ["CAP-4"]
+after = [10]
+hitl = true
+risk = "high"
+notes = [
+  "Decision: 2026-10-23 — perimetre fixe par le proprietaire : justesse seule. La duree de la phrase de demo (41,4 s sur 4 coeurs, plan ecrit de 248 jetons) reste dans deferred-work.md et n'est pas un critere de ce ticket.",
+  "Decision: 2026-10-23 — la barre est celle de 5.10 ; atteinte, elle ferme 5.10, reste ouvert apres la tache 4b.",
+  "Decision: 2026-10-22 (reprise de 5.10) — une phrase mal comprise devient une famille d'exemples, jamais une regle de prompt ni un correctif par phrase.",
+  "Decision: 2026-10-17 (reprise de 5.10) — le jeu tenu a l'ecart n'est jamais lu pour ecrire les familles : les identifiants H et Q nomment des constats, les exemples s'ecrivent sans recopier ces phrases.",
+  "Decision: 2026-10-22 (reprise de 5.10) — le modele de ce depot reste civil et generaliste.",
+  "Changer le prompt court (precision « en comptant a partir de 1 ») oblige a garder la parite des decoupeurs et l'egalite octet pour octet du prompt entre l'entrainement et ai/.",
+  "hitl : le proprietaire fait la recette dans QGIS apres la demo de Claude ; l'entrainement tourne sur sa carte graphique.",
+  "Check hors criteres (risque high) : le proprietaire rejoue la phrase de demo et deux phrases de refus dans QGIS et confirme le comportement.",
+]
