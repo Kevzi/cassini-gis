@@ -87,6 +87,12 @@ context: ['{project-root}/_bmad-output/initiative-cassini-mvp/architecture-noyau
 - GPU, déclaration de 5.15 : `plan_reel` 25/25, 0 question ; `question_reel` 12/12 ; `ecart_reel` 32/40 (plans 19/26, questions 8/8, refus 5/6), 0 question du garde-fou — identiques à 5.15. `cassini plan` (cuda, inventaire de Villeneuve) : phrase E → question `guard` ; phrase de démo → plan inchangé ; phrase avec `x 652 000, y 6 850 000 en EPSG:2154` → isochrone.
 - Reste à faire : démo dans QGIS et recette du propriétaire (critère 3), non jouées ici.
 
+Démo de bout en bout (2026-10-23, Claude) : noyau CPU installé (`cassini.exe.avant-5-16` gardé), extension copiée, lien du modèle du dossier des modèles basculé sur `ajuste-5-15`. Sonde sous le Python de QGIS 3.44.15, projet réel de Villeneuve-le-Roi, noyau GPU et modèle de 5.15 :
+- phrase de démo exacte : plan de 5 étapes exécuté, PDF lisible (composition 21 s) ;
+- phrase E : question `guard`, aucun plan ; la phrase revient à la saisie (`request_to_restore`) ;
+- « … depuis x 655 700, y 6 849 023 en Lambert-93 ? » : isochrone depuis ce point, exécutée. Un point hors réseau (652 000 / 6 850 000) passe le garde-fou puis est refusé par `analysis.origin_off_network`, comme attendu.
+Reste : recette du propriétaire dans QGIS.
+
 ## Plan Change Log
 
 ## Review Triage Log
