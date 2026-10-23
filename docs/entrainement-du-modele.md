@@ -85,19 +85,20 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `distance_reference_filtree` | distance à une référence filtrée (« des gares de la ligne D ») |
 | `dans_une_zone` | « en zone N », « en zone inondable d'aléa fort » → sélection de la zone, puis intersection |
 | `intersection` | « situés dans une zone humide », « croise la couche A avec la couche B » |
-| `conditions_multiples` | zone et distance, cible filtrée et distance, deux distances : intersections successives |
+| `conditions_multiples` | zone et distance, cible filtrée et distance, deux distances, inclusion dans une couche entière : intersections successives |
 | `constructible` | vocabulaire d'urbanisme : « parcelles constructibles », avec ou sans distance et PDF |
 | `export_pdf` | « sors-moi la carte en PDF », titre donné par l'utilisateur ou déduit de la demande |
 | `isochrone` | « zone atteinte en 10 minutes à pied depuis le point ... (Lambert-93) » |
+| `isochrone_vers_cible` | « les écoles à 10 min à pied du point ... (Lambert-93) » → isochrone, puis intersection de la cible avec l'étape 1 ; la couche du lieu (gares, écoles...) est souvent dans l'inventaire, seules les coordonnées donnent l'origine ; une fois sur trois, le lieu est nommé avec ses coordonnées (« de la gare de X (652 000 / 6 862 000, Lambert-93) ») et reste un plan |
 | `decompte_par_zone` | « nombre d'écoles par commune », nom des zones sur demande seulement |
 | `ouverture` | ouvrir un fichier non chargé, CSV à coordonnées compris |
 | `description` | décrire une couche, inventaire du projet, version, modèles installés |
 | `question_couche_absente` | une couche dont rien ne parle dans l'inventaire → question |
 | `question_champ_absent` | un critère qu'aucun champ ne porte → question, jamais un champ voisin deviné |
 | `refus` | courriel, suppression, reprojection, export de couche, style, itinéraire, téléchargement, 3D → refus affirmatif |
-| `refus_hors_registre` | champ de vision, ligne de vue, pente, cadrage ou zoom de la carte, PDF en A3, A0 ou portrait, altitude moyenne par zone (statistiques sur un raster), MNT présent pour le terrain → refus affirmatif, jamais un plan de substitution |
+| `refus_hors_registre` | champ de vision, ligne de vue, pente, cadrage ou zoom de la carte, PDF en A3, A0 ou portrait, altitude moyenne par zone (statistiques sur un raster), MNT présent pour le terrain, trajet depuis plusieurs lieux (« de chaque gare », « de toutes les gares », « des gares ») → refus affirmatif, jamais un plan de substitution |
 | `appartenance_commune` | « qui appartiennent à la commune de X », « sur le territoire de X » → sélection de la commune par son nom, puis intersection ; sans couche de communes, ou sans nom de commune, une question. Une commune citée seule (« à Orly ») reste un contexte sans effet |
-| `question_isochrone` | isochrone depuis un lieu nommé (« depuis la mairie de X »), sans coordonnées → question qui demande le point en X et Y avec son système |
+| `question_isochrone` | isochrone ou cible à une durée de trajet d'un lieu nommé (« depuis la mairie de X », « les parcelles à 10 min à pied de la gare de X »), sans coordonnées → question qui demande le point en X et Y avec son système ; « d'une gare » → question qui demande laquelle |
 | `etape_unique` | une seule opération demandée, une autre couche citée pour le contexte (« je m'occuperai des écoles plus tard ») → une étape |
 | `redemande` | environ 5 % du jeu : un exemple d'une autre famille vu au tour de redemande (voir plus bas) |
 
@@ -105,6 +106,37 @@ Depuis 5.15, `conditions_multiples` porte aussi les plans à **trois conditions*
 filtrée, zone et distance ; zone et deux distances), quatre à six étapes, jamais plus de six.
 L'export PDF s'y ajoute une fois sur quatre, et seulement aux plans de cinq étapes ou moins
 (jamais à « zone et deux distances », qui en a déjà six).
+
+### Nouvelle passe de 5.17 (tâche A)
+
+Les constats de 5.15 sur le jeu tenu à l'écart et sur la phrase E de `duree_reel` deviennent
+des familles, jamais des règles de prompt :
+
+- **Trajet depuis un lieu de l'inventaire.** La même tournure de trajet (« à N minutes à pied
+  de ... », « situées à », « à moins de », « accessibles en ... depuis », « qu'on rejoint
+  en ») rend une question quand l'origine est un lieu sans coordonnées (`question_isochrone`,
+  couche du lieu présente le plus souvent, cible souvent citée, la question du
+  garde-fou de 5.16 parmi les réponses), et un plan quand l'origine est un point en
+  coordonnées (`isochrone_vers_cible` : `analysis.isochrone`, puis `analysis.intersect` de la
+  cible avec `step:1`). Une distance en mètres reste un plan (`distance`). « À N minutes à
+  pied de » nu passe par « situées à » : c'est la tournure de la phrase E.
+- **Origines multiples** (décision du propriétaire, 2026-10-23, option a) : « de chaque
+  gare », « de toutes les gares », « des gares » → refus affirmatif (`refus_hors_registre`) :
+  l'isochrone du catalogue part d'un seul point. « D'une gare » → question (laquelle, en
+  coordonnées) ; « de la gare de X » → question.
+- **Plans à plusieurs conditions.** La cible filtrée l'est aussi par un nombre (`gt`, `lt`,
+  `gte`, `lte`), une différence (`ne`) ou un nom (`contains`, `begins_with`), plus seulement
+  par égalité. Deux formes s'ajoutent : cible filtrée et deux distances (cinq étapes :
+  sélection, deux tampons, deux intersections), et distance avec inclusion dans une couche
+  entière (« situées dans une zone humide », la couche prise telle quelle, intersections dans
+  l'ordre de la phrase). Le poids de `conditions_multiples` passe de 9 à 13. Un test vérifie
+  qu'aucune étape n'est perdue : chacune sert à une étape suivante.
+
+**Limite de la mesure.** Ces familles visent des écarts nommés par le jeu tenu à l'écart
+(H08, H17 à H23, H40), sans en lire les phrases. Viser des écarts nommés affaiblit
+pourtant `ecart_reel` comme mesure aveugle : le score qui suivra mesure en partie ce qu'on a
+cherché à corriger. Il faudra le lire avec cette réserve, et un jeu neuf, écrit par un autre
+auteur, redonnera une mesure aveugle.
 
 ### Les inventaires de QGIS (5.15)
 

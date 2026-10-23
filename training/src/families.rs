@@ -98,7 +98,8 @@ pub static FAMILIES: &[Family] = &[
     },
     Family {
         name: "conditions_multiples",
-        weight: 9,
+        // Relevé en 5.17 : les plans à plusieurs conditions perdaient des étapes.
+        weight: 13,
         make: conditions_multiples,
     },
     Family {
@@ -115,6 +116,11 @@ pub static FAMILIES: &[Family] = &[
         name: "isochrone",
         weight: 4,
         make: isochrone,
+    },
+    Family {
+        name: "isochrone_vers_cible",
+        weight: 5,
+        make: isochrone_vers_cible,
     },
     Family {
         name: "decompte_par_zone",
@@ -678,7 +684,17 @@ fn filtre_texte(rng: &mut Rng) -> Option<Example> {
     let fragment = *rng.pick(fragments);
     let layer = b.add(rng, t.key, &[def.role], &[], &[]);
     let field = layer.field(def.role)?;
-    let (op, phrase) = if rng.chance(1, 2) {
+    let (op, phrase) = name_phrase(rng, fragment);
+    let np = format!("les {} {phrase}", t.noun.pl);
+    let (head, q) = open_find(rng, &t.noun, &np, true);
+    let request = finish(rng, &head, q, false);
+    let expected = calls(vec![select(&layer.id, &field.name, op, fragment)]);
+    Some(example("filtre_texte", b, rng, request, expected))
+}
+
+/// Un filtre sur le nom : (opérateur, tournure) avec le fragment placé.
+fn name_phrase(rng: &mut Rng, fragment: &str) -> (&'static str, String) {
+    let (op, p) = if rng.chance(1, 2) {
         let p = *rng.pick(&[
             "dont le nom contient « {f} »",
             "dont le nom comporte {f}",
@@ -694,11 +710,35 @@ fn filtre_texte(rng: &mut Rng) -> Option<Example> {
         ]);
         ("begins_with", p)
     };
-    let np = format!("les {} {}", t.noun.pl, phrase.replace("{f}", fragment));
-    let (head, q) = open_find(rng, &t.noun, &np, true);
-    let request = finish(rng, &head, q, false);
-    let expected = calls(vec![select(&layer.id, &field.name, op, fragment)]);
-    Some(example("filtre_texte", b, rng, request, expected))
+    (op, p.replace("{f}", fragment))
+}
+
+/// « Les parcelles qui ne sont pas en section AB » : groupe nominal d'un filtre `ne`.
+/// `chained` : la phrase porte une autre condition après, la tournure en « sauf celles ... »
+/// la rattacherait à l'exception ; elle est laissée.
+fn different_np(
+    rng: &mut Rng,
+    noun: &Noun,
+    field: &str,
+    v: &str,
+    phrase: &str,
+    chained: bool,
+) -> String {
+    let roll = if chained {
+        *rng.pick(&[0, 2])
+    } else {
+        rng.below(3)
+    };
+    match roll {
+        0 => format!("les {} qui ne sont pas {phrase}", noun.pl),
+        1 => format!(
+            "{} les {} sauf {} {phrase}",
+            if noun.fem { "toutes" } else { "tous" },
+            noun.pl,
+            noun.ceux()
+        ),
+        _ => format!("les {} dont le champ {field} est différent de {v}", noun.pl),
+    }
 }
 
 fn filtre_different(rng: &mut Rng) -> Option<Example> {
@@ -712,19 +752,7 @@ fn filtre_different(rng: &mut Rng) -> Option<Example> {
         return None;
     };
     let phrase = fill(pick_str(rng, phrases), &t.noun, val.v);
-    let np = match rng.below(3) {
-        0 => format!("les {} qui ne sont pas {phrase}", t.noun.pl),
-        1 => format!(
-            "{} les {} sauf {} {phrase}",
-            if t.noun.fem { "toutes" } else { "tous" },
-            t.noun.pl,
-            t.noun.ceux()
-        ),
-        _ => format!(
-            "les {} dont le champ {} est différent de {}",
-            t.noun.pl, field.name, val.v
-        ),
-    };
+    let np = different_np(rng, &t.noun, &field.name, val.v, &phrase, false);
     let (head, q) = open_find(rng, &t.noun, &np, false);
     let request = finish(rng, &head, q, true);
     let expected = calls(vec![select(&layer.id, &field.name, "ne", val.v)]);
@@ -1032,9 +1060,73 @@ fn intersection(rng: &mut Rng) -> Option<Example> {
 
 // -- conditions multiples --------------------------------------------------
 
+/// La cible filtrée d'un plan à conditions, par égalité, nombre (`gt`, `lt`, `gte`, `lte`),
+/// différence (`ne`) ou nom (`contains`, `begins_with`). Rend la couche, le groupe nominal
+/// (« les bâtiments de plus de 12 m de haut »), la sélection, et le lien vers la condition
+/// suivante : une virgule après une différence ou un nom, que la distance ne s'y rattache pas.
+fn filtered_target(
+    rng: &mut Rng,
+    b: &mut Builder,
+    pred: impl Fn(&Theme) -> bool,
+) -> Option<(Layer, String, Value, &'static str)> {
+    match rng.below(6) {
+        0 | 1 => {
+            let t = pick_theme(rng, b, |t| pred(t) && !text_fields(t).is_empty())?;
+            let def = *rng.pick(&text_fields(t));
+            let target = b.add(rng, t.key, &[def.role], &[], &[]);
+            let field = target.field(def.role)?;
+            let val = *rng.pick(&field.values);
+            let sel = select(&target.id, &field.name, "eq", val.v);
+            let head = qualified(rng, &t.noun, def, val, Det::Les);
+            Some((target, head, sel, " "))
+        }
+        2 | 3 => {
+            let t = pick_theme(rng, b, |t| pred(t) && !number_fields(t).is_empty())?;
+            let def = *rng.pick(&number_fields(t));
+            let target = b.add(rng, t.key, &[def.role], &[], &[]);
+            let field = target.field(def.role)?;
+            let (op, value, phrase) = numeric(rng, def);
+            let sel = select(&target.id, &field.name, op, &value);
+            Some((target, format!("les {} {phrase}", t.noun.pl), sel, " "))
+        }
+        4 => {
+            let t = pick_theme(rng, b, |t| pred(t) && !text_fields(t).is_empty())?;
+            let def = *rng.pick(&text_fields(t));
+            let Kind::Text { phrases, .. } = &def.kind else {
+                return None;
+            };
+            let target = b.add(rng, t.key, &[def.role], &[], &[]);
+            let field = target.field(def.role)?;
+            let val = *rng.pick(&field.values);
+            let phrase = fill(pick_str(rng, phrases), &t.noun, val.v);
+            let head = different_np(rng, &t.noun, &field.name, val.v, &phrase, true);
+            let sel = select(&target.id, &field.name, "ne", val.v);
+            Some((target, head, sel, ", "))
+        }
+        _ => {
+            let t = pick_theme(rng, b, |t| {
+                pred(t) && t.fields.iter().any(|f| matches!(f.kind, Kind::Name { .. }))
+            })?;
+            let def = t
+                .fields
+                .iter()
+                .find(|f| matches!(f.kind, Kind::Name { .. }))?;
+            let Kind::Name { fragments } = &def.kind else {
+                return None;
+            };
+            let fragment = *rng.pick(fragments);
+            let target = b.add(rng, t.key, &[def.role], &[], &[]);
+            let field = target.field(def.role)?;
+            let (op, phrase) = name_phrase(rng, fragment);
+            let sel = select(&target.id, &field.name, op, fragment);
+            Some((target, format!("les {} {phrase}", t.noun.pl), sel, ", "))
+        }
+    }
+}
+
 fn draft_multi(rng: &mut Rng) -> Option<Draft> {
     let mut b = Builder::new();
-    match rng.below(6) {
+    match rng.below(9) {
         // Zone puis distance : select(zone), buffer(réf), intersect(cible, 1), intersect(3, 2).
         0 => {
             let t = pick_theme(rng, &b, |t| {
@@ -1066,20 +1158,16 @@ fn draft_multi(rng: &mut Rng) -> Option<Draft> {
         }
         // Cible filtrée puis distance : select(cible), buffer(réf), intersect(1, 2).
         1 => {
-            let t = pick_theme(rng, &b, |t| ordinary(t) && !text_fields(t).is_empty())?;
-            let def = *rng.pick(&text_fields(t));
-            let target = b.add(rng, t.key, &[def.role], &[], &[]);
-            let field = target.field(def.role)?;
-            let val = *rng.pick(&field.values);
-            let head = qualified(rng, &t.noun, def, val, Det::Les);
+            let (target, head, sel, sep) = filtered_target(rng, &mut b, ordinary)?;
+            let t = target.theme;
             let r = pick_theme(rng, &b, ordinary)?;
             let reference = b.add(rng, r.key, &[], &[], &[]);
             let d = dist(rng);
             let rr = de_ref(rng, &r.noun);
-            let np = format!("{head} {}", near(rng, &t.noun, &d, &rr));
+            let np = format!("{head}{sep}{}", near(rng, &t.noun, &d, &rr));
             Some(Draft {
                 calls: vec![
-                    select(&target.id, &field.name, "eq", val.v),
+                    sel,
                     buffer(&reference.id, &d, false),
                     intersect(&step(1), &step(2)),
                 ],
@@ -1140,24 +1228,20 @@ fn draft_multi(rng: &mut Rng) -> Option<Draft> {
         // Trois conditions, cible filtrée, zone et distance, dans l'ordre de la phrase :
         // select(cible), select(zone), buffer(réf), intersect(1, 2), intersect(4, 3).
         4 => {
-            let t = pick_theme(rng, &b, |t| {
-                ordinary(t) && !text_fields(t).is_empty() && !AREAS.iter().any(|a| a.key == t.key)
+            let (target, head, sel, sep) = filtered_target(rng, &mut b, |t| {
+                ordinary(t) && !AREAS.iter().any(|a| a.key == t.key)
             })?;
-            let def = *rng.pick(&text_fields(t));
-            let target = b.add(rng, t.key, &[def.role], &[], &[]);
-            let field = target.field(def.role)?;
-            let val = *rng.pick(&field.values);
-            let head = qualified(rng, &t.noun, def, val, Det::Les);
+            let t = target.theme;
             let (zone, sel_zone) = area(rng, &mut b, &t.noun)?;
             let r = pick_theme(rng, &b, ordinary)?;
             let reference = b.add(rng, r.key, &[], &[], &[]);
             let d = dist(rng);
             let rr = de_ref(rng, &r.noun);
             let link = *rng.pick(&[" ", ", ", " et "]);
-            let np = format!("{head} {zone}{link}{}", near(rng, &t.noun, &d, &rr));
+            let np = format!("{head}{sep}{zone}{link}{}", near(rng, &t.noun, &d, &rr));
             Some(Draft {
                 calls: vec![
-                    select(&target.id, &field.name, "eq", val.v),
+                    sel,
                     sel_zone,
                     buffer(&reference.id, &d, false),
                     intersect(&step(1), &step(2)),
@@ -1170,7 +1254,7 @@ fn draft_multi(rng: &mut Rng) -> Option<Draft> {
         }
         // Trois conditions, une zone et deux distances : select(zone), buffer(r1), buffer(r2),
         // intersect(cible, 1), intersect(4, 2), intersect(5, 3).
-        _ => {
+        5 => {
             let t = pick_theme(rng, &b, |t| {
                 ordinary(t) && !AREAS.iter().any(|a| a.key == t.key)
             })?;
@@ -1195,6 +1279,90 @@ fn draft_multi(rng: &mut Rng) -> Option<Draft> {
                 ],
                 b,
                 noun: &t.noun,
+                np,
+            })
+        }
+        // Cible filtrée et deux distances : select(cible), buffer(r1), buffer(r2),
+        // intersect(1, 2), intersect(4, 3).
+        6 => {
+            let (target, head, sel, sep) = filtered_target(rng, &mut b, ordinary)?;
+            let t = target.theme;
+            let r = pick_theme(rng, &b, ordinary)?;
+            let r1 = b.add(rng, r.key, &[], &[], &[]);
+            let r = pick_theme(rng, &b, ordinary)?;
+            let r2 = b.add(rng, r.key, &[], &[], &[]);
+            let (d1, d2) = (dist(rng), dist(rng));
+            let rr1 = de_ref(rng, &r1.theme.noun);
+            let first = near(rng, &t.noun, &d1, &rr1);
+            let second = format!("à moins {} {}", d2.de(), de_ref(rng, &r2.theme.noun));
+            let np = format!("{head}{sep}{first} et {second}");
+            Some(Draft {
+                calls: vec![
+                    sel,
+                    buffer(&r1.id, &d1, false),
+                    buffer(&r2.id, &d2, false),
+                    intersect(&step(1), &step(2)),
+                    intersect(&step(4), &step(3)),
+                ],
+                b,
+                noun: &t.noun,
+                np,
+            })
+        }
+        // Distance et inclusion dans une couche entière (« situées dans une zone humide »),
+        // cible parfois filtrée : [select(cible)], buffer(réf), puis les intersections dans
+        // l'ordre de la phrase, la couche entière prise telle quelle.
+        _ => {
+            let pred = |t: &Theme| ordinary(t) && !PERIMETERS.contains(&t.key);
+            let (target_ref, head, mut steps, sep, noun): (
+                String,
+                String,
+                Vec<Value>,
+                &str,
+                &'static Noun,
+            ) = if rng.chance(1, 2) {
+                let (target, head, sel, sep) = filtered_target(rng, &mut b, pred)?;
+                (step(1), head, vec![sel], sep, &target.theme.noun)
+            } else {
+                let t = pick_theme(rng, &b, pred)?;
+                let target = b.add(rng, t.key, &[], &[], &[]);
+                (
+                    target.id,
+                    format!("les {}", t.noun.pl),
+                    Vec::new(),
+                    " ",
+                    &t.noun,
+                )
+            };
+            let p = pick_theme(rng, &b, |t| PERIMETERS.contains(&t.key))?;
+            let perimeter = b.add(rng, p.key, &[], &[], &[]);
+            let r = pick_theme(rng, &b, ordinary)?;
+            let reference = b.add(rng, r.key, &[], &[], &[]);
+            let d = dist(rng);
+            let inside = match rng.below(3) {
+                0 => format!("dans {}", p.noun.un()),
+                1 => format!("{} dans {}", noun.agree("situé"), p.noun.un()),
+                _ => format!("{} dans {}", noun.agree("localisé"), p.noun.les()),
+            };
+            let rr = de_ref(rng, &r.noun);
+            let close = near(rng, noun, &d, &rr);
+            steps.push(buffer(&reference.id, &d, false));
+            let buf = step(steps.len());
+            let np = if rng.chance(1, 2) {
+                steps.push(intersect(&target_ref, &perimeter.id));
+                let k = steps.len();
+                steps.push(intersect(&step(k), &buf));
+                format!("{head}{sep}{inside} et {close}")
+            } else {
+                steps.push(intersect(&target_ref, &buf));
+                let k = steps.len();
+                steps.push(intersect(&step(k), &perimeter.id));
+                format!("{head}{sep}{close} et {inside}")
+            };
+            Some(Draft {
+                calls: steps,
+                b,
+                noun,
                 np,
             })
         }
@@ -1372,14 +1540,32 @@ fn export_pdf(rng: &mut Rng) -> Option<Example> {
 
 // -- isochrone, décompte ---------------------------------------------------
 
-fn isochrone(rng: &mut Rng) -> Option<Example> {
-    let mut b = Builder::new();
-    let key = *rng.pick(&["routes", "reseau"]);
-    let network = b.add(rng, key, &[], &[], &[]);
-    // Une seule couche de lignes : le réseau ne doit pas être ambigu.
-    for other in ["pistes", "lignes_elec", "canalisations", "rivieres"] {
-        b.exclude(other);
+/// Un trajet : mode et durée, tels qu'écrits et tels qu'attendus.
+struct Travel {
+    walk: bool,
+    mode: &'static str,
+    value: u64,
+    unit: &'static str,
+    duration: String,
+}
+
+impl Travel {
+    /// « de 10 minutes », « d'un quart d'heure ».
+    fn de(&self) -> String {
+        de_word(&self.duration)
     }
+}
+
+/// « de 10 minutes », « d'une gare », « d'un quart d'heure ».
+fn de_word(s: &str) -> String {
+    if s.starts_with("un ") || s.starts_with("une ") {
+        format!("d'{s}")
+    } else {
+        format!("de {s}")
+    }
+}
+
+fn travel(rng: &mut Rng) -> Travel {
     let walk = rng.chance(1, 2);
     let mode = if walk {
         *rng.pick(&["à pied", "en marchant", "à la marche"])
@@ -1404,7 +1590,26 @@ fn isochrone(rng: &mut Rng) -> Option<Example> {
         };
         (m, "min", text)
     };
-    let (x, y, epsg, place): (Value, Value, u32, String) = if rng.chance(1, 5) {
+    Travel {
+        walk,
+        mode,
+        value,
+        unit,
+        duration,
+    }
+}
+
+/// Un point de départ donné en coordonnées : le point attendu, et « le point ... ».
+struct Origin {
+    point: Value,
+    place: String,
+    /// Les mêmes coordonnées, à accoler à un lieu nommé : « la gare de X (652 000 /
+    /// 6 862 000, Lambert-93) », « l'école Jean Moulin, X = ..., Y = ... en EPSG:2154 ».
+    coords: String,
+}
+
+fn origin_point(rng: &mut Rng) -> Option<Origin> {
+    if rng.chance(1, 5) {
         let lon = rng.range(22_000, 26_000);
         let lat = rng.range(486_000, 489_000);
         let (xs, ys) = (
@@ -1414,28 +1619,90 @@ fn isochrone(rng: &mut Rng) -> Option<Example> {
         let x: f64 = xs.parse().ok()?;
         let y: f64 = ys.parse().ok()?;
         let crs = *rng.pick(&["WGS84", "EPSG:4326", "WGS 84"]);
-        (
-            json!(x),
-            json!(y),
-            4326,
-            format!("le point de longitude {xs} et de latitude {ys} ({crs})"),
-        )
+        return Some(Origin {
+            point: json!({"x": x, "y": y, "epsg": 4326}),
+            place: format!("le point de longitude {xs} et de latitude {ys} ({crs})"),
+            coords: format!(" (longitude {xs}, latitude {ys}, {crs})"),
+        });
+    }
+    let x = rng.range(60_000, 70_000) * 10;
+    let y = rng.range(678_000, 690_000) * 10;
+    let (xs, ys) = if rng.chance(1, 2) {
+        (thousands(x), thousands(y))
     } else {
-        let x = rng.range(60_000, 70_000) * 10;
-        let y = rng.range(678_000, 690_000) * 10;
-        let (xs, ys) = if rng.chance(1, 2) {
-            (thousands(x), thousands(y))
-        } else {
-            (x.to_string(), y.to_string())
-        };
-        let crs = *rng.pick(&["Lambert-93", "Lambert 93", "EPSG:2154"]);
-        let place = match rng.below(3) {
-            0 => format!("le point {xs} / {ys} ({crs})"),
-            1 => format!("le point X = {xs}, Y = {ys} en {crs}"),
-            _ => format!("le point ({xs} ; {ys}), {crs}"),
-        };
-        (json!(x), json!(y), 2154, place)
+        (x.to_string(), y.to_string())
     };
+    let crs = *rng.pick(&["Lambert-93", "Lambert 93", "EPSG:2154"]);
+    let roll = rng.below(3);
+    let place = match roll {
+        0 => format!("le point {xs} / {ys} ({crs})"),
+        1 => format!("le point X = {xs}, Y = {ys} en {crs}"),
+        _ => format!("le point ({xs} ; {ys}), {crs}"),
+    };
+    let coords = if roll == 1 {
+        format!(", X = {xs}, Y = {ys} en {crs}")
+    } else {
+        format!(" ({xs} / {ys}, {crs})")
+    };
+    Some(Origin {
+        point: json!({"x": x, "y": y, "epsg": 2154}),
+        place,
+        coords,
+    })
+}
+
+/// Le réseau d'une isochrone : une seule couche de lignes, qu'il ne soit pas ambigu.
+fn network(rng: &mut Rng, b: &mut Builder) -> Layer {
+    let key = *rng.pick(&["routes", "reseau"]);
+    let layer = b.add(rng, key, &[], &[], &[]);
+    for other in ["pistes", "lignes_elec", "canalisations", "rivieres"] {
+        b.exclude(other);
+    }
+    layer
+}
+
+fn isochrone_call(network: &str, origin: &Value, tr: &Travel) -> Value {
+    json!({"command": "analysis.isochrone", "params": {
+        "layer_id": network, "origin": origin,
+        "mode": if tr.walk { "walk" } else { "car" },
+        "duration": {"value": tr.value, "unit": tr.unit}}})
+}
+
+/// Une cible définie par un trajet : « à 10 min à pied de la gare de X », « accessibles en
+/// 10 min à pied depuis le point ... ». `from` est le lieu tel qu'après « depuis » (« la gare
+/// de X », « le point ... », « chaque gare »).
+fn travel_clause(rng: &mut Rng, noun: &Noun, tr: &Travel, from: &str) -> String {
+    let de_from = if let Some(rest) = from.strip_prefix("le ") {
+        format!("du {rest}")
+    } else if let Some(rest) = from.strip_prefix("les ") {
+        format!("des {rest}")
+    } else {
+        de_word(from)
+    };
+    let (d, mode) = (&tr.duration, tr.mode);
+    let mut roll = rng.below(6);
+    // « à N minutes à pied de ... » nu est la tournure d'une phrase des essais réels
+    // (`training/tests/recouvrement.rs`) : il passe alors par « situées à ».
+    if roll < 2 && d.ends_with("minutes") && mode == "à pied" {
+        roll = 2;
+    }
+    let t = match roll {
+        0 | 1 => format!("à {d} {mode} {de_from}"),
+        2 => format!("{{situé}} à {d} {mode} {de_from}"),
+        3 => format!("à moins {} {mode} {de_from}", tr.de()),
+        4 => format!("accessibles en {d} {mode} depuis {from}"),
+        _ => format!("qu'on rejoint en {d} {mode} depuis {from}"),
+    };
+    fill(&t, noun, "")
+}
+
+fn isochrone(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let network = network(rng, &mut b);
+    let tr = travel(rng);
+    let origin = origin_point(rng)?;
+    let place = &origin.place;
+    let (duration, mode) = (&tr.duration, tr.mode);
     let via = if rng.chance(1, 3) {
         format!(" sur la couche « {} »", network.name)
     } else {
@@ -1446,17 +1713,10 @@ fn isochrone(rng: &mut Rng) -> Option<Example> {
             format!("Quelle zone atteint-on en {duration} {mode} depuis {place}{via}"),
             true,
         ),
-        1 => {
-            let de = if duration.starts_with("un") {
-                "d'"
-            } else {
-                "de "
-            };
-            (
-                format!("Calcule l'isochrone {de}{duration} {mode} depuis {place}{via}"),
-                false,
-            )
-        }
+        1 => (
+            format!("Calcule l'isochrone {} {mode} depuis {place}{via}", tr.de()),
+            false,
+        ),
         2 => (
             format!(
                 "Jusqu'où peut-on aller {mode} en {duration} en partant {}{via}",
@@ -1470,11 +1730,79 @@ fn isochrone(rng: &mut Rng) -> Option<Example> {
         ),
     };
     let request = finish(rng, &body, q, false);
-    let mode = if walk { "walk" } else { "car" };
-    let expected = calls(vec![json!({"command": "analysis.isochrone", "params": {
-        "layer_id": network.id, "origin": {"x": x, "y": y, "epsg": epsg},
-        "mode": mode, "duration": {"value": value, "unit": unit}}})]);
+    let expected = calls(vec![isochrone_call(&network.id, &origin.point, &tr)]);
     Some(example("isochrone", b, rng, request, expected))
+}
+
+/// Lieux qui sont aussi des couches de points : l'origine d'un trajet, et le thème de sa
+/// couche. La couche ne donne pas le point : seules des coordonnées le donnent.
+fn place_with_layer(rng: &mut Rng) -> (String, &'static str) {
+    let commune = *rng.pick(COMMUNES);
+    match rng.below(8) {
+        0..=3 => (format!("la gare {}", de_place(commune)), "gares"),
+        4 => ("l'école Jean Moulin".to_string(), "ecoles"),
+        5 => (format!("l'hôpital {}", de_place(commune)), "hopitaux"),
+        6 => ("l'arrêt Mairie".to_string(), "arrets"),
+        _ => ("la pharmacie du centre".to_string(), "pharmacies"),
+    }
+}
+
+/// « Les parcelles à 10 min à pied du point ... (Lambert-93) » : le point est donné, la cible
+/// est croisée avec l'isochrone. C'est le contraire de la question de `question_isochrone` :
+/// la couche du lieu est souvent là aussi, mais seules les coordonnées donnent l'origine.
+fn isochrone_vers_cible(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let network = network(rng, &mut b);
+    // Une fois sur trois, le lieu est nommé et ses coordonnées données (« de la gare de X
+    // (652 000 / 6 862 000, Lambert-93) ») : ce sont les coordonnées qui font le plan, pas
+    // l'absence de nom.
+    let named = rng.chance(1, 3);
+    let (place, key) = place_with_layer(rng);
+    if (named || rng.chance(2, 3)) && b.free(|t| t.key == key).len() == 1 {
+        b.add(rng, key, &[], &[], &[]);
+    }
+    let t = pick_theme(rng, &b, |t| ordinary(t) && t.geom != Geom::Line)?;
+    let target = b.add(rng, t.key, &[], &[], &[]);
+    let tr = travel(rng);
+    let origin = origin_point(rng)?;
+    let from = if named {
+        format!("{place}{}", origin.coords)
+    } else {
+        origin.place.clone()
+    };
+    let np = format!(
+        "les {} {}",
+        t.noun.pl,
+        travel_clause(rng, &t.noun, &tr, &from)
+    );
+    let mut steps = vec![
+        isochrone_call(&network.id, &origin.point, &tr),
+        intersect(&target.id, &step(1)),
+    ];
+    let with_pdf = rng.chance(1, 6);
+    let (mut head, q) = open_find(rng, &t.noun, &np, !with_pdf);
+    if rng.chance(1, 4) {
+        head.push_str(&format!(", sur la couche « {} »", network.name));
+    }
+    if with_pdf {
+        let draft = Draft {
+            b: Builder::new(),
+            noun: &t.noun,
+            np: np.clone(),
+            calls: Vec::new(),
+        };
+        let (clause, title) = pdf_clause(rng, &draft);
+        head.push_str(&clause);
+        steps.push(pdf(&title));
+    }
+    let request = finish(rng, &head, q, false);
+    Some(example(
+        "isochrone_vers_cible",
+        b,
+        rng,
+        request,
+        calls(steps),
+    ))
 }
 
 fn decompte_par_zone(rng: &mut Rng) -> Option<Example> {
@@ -1871,15 +2199,18 @@ const NO_SLOPE: &str = "Aucune commande du catalogue ne calcule de pente.";
 const NO_FRAMING: &str = "Aucune commande du catalogue ne cadre ni ne zoome la carte.";
 const ONLY_A4: &str = "L'export PDF du catalogue produit seulement une page A4 paysage.";
 const NO_RASTER_STATS: &str = "Aucune commande du catalogue ne calcule de statistiques sur un raster : le décompte par zone ne compte que des points.";
+/// Décision du propriétaire (2026-10-23, option a) : « de chaque gare », « de toutes les
+/// gares », « des gares » ; l'isochrone du catalogue part d'un seul point en coordonnées.
+pub const NO_MULTI_ORIGIN: &str = "L'isochrone du catalogue part d'un seul point donné en coordonnées : elle ne se calcule pas depuis plusieurs lieux à la fois.";
 
 /// Ce que le registre ne sait pas encore faire, quoi que l'inventaire contienne (un MNT pour
 /// le terrain) : un refus affirmatif, jamais un plan de substitution (un tampon à la place d'un
 /// champ de vision, un décompte à la place d'une moyenne d'altitude).
 fn refus_hors_registre(rng: &mut Rng) -> Option<Example> {
     let mut b = Builder::new();
-    let roll = rng.below(6);
+    let roll = rng.below(7);
     // Le terrain et les statistiques portent sur un MNT : il est là, ce n'est pas lui qui manque.
-    if roll != 3 && roll != 4 {
+    if matches!(roll, 0 | 1 | 2 | 5) {
         b.add(rng, "mnt", &[], &[], &[]);
     }
     let (body, q, reason): (String, bool, &str) = match roll {
@@ -1974,6 +2305,41 @@ fn refus_hors_registre(rng: &mut Rng) -> Option<Example> {
                 _ => "Génère un PDF de la carte au format A3 paysage".to_string(),
             };
             (body, false, ONLY_A4)
+        }
+        // Un trajet depuis plusieurs lieux : refus, jamais un plan ni une question.
+        6 => {
+            network(rng, &mut b);
+            let p = pick_theme(rng, &b, |t| ordinary(t) && t.geom == Geom::Point)?;
+            b.add(rng, p.key, &[], &[], &[]);
+            let n = &p.noun;
+            let from = match rng.below(3) {
+                0 => format!("chaque {}", n.sg),
+                1 => format!("{} les {}", if n.fem { "toutes" } else { "tous" }, n.pl),
+                _ => n.les(),
+            };
+            let tr = travel(rng);
+            let (duration, mode) = (&tr.duration, tr.mode);
+            let (body, q) = match rng.below(4) {
+                0 => (
+                    format!("Calcule l'isochrone {} {mode} depuis {from}", tr.de()),
+                    false,
+                ),
+                1 => (
+                    format!("Montre la zone accessible {mode} en {duration} depuis {from}"),
+                    false,
+                ),
+                _ => {
+                    let t = pick_theme(rng, &b, |t| ordinary(t) && t.geom != Geom::Line)?;
+                    b.add(rng, t.key, &[], &[], &[]);
+                    let np = format!(
+                        "les {} {}",
+                        t.noun.pl,
+                        travel_clause(rng, &t.noun, &tr, &from)
+                    );
+                    open_find(rng, &t.noun, &np, true)
+                }
+            };
+            (body, q, NO_MULTI_ORIGIN)
         }
         _ => {
             let zkey = *rng.pick(&["communes", "quartiers", "parcelles"]);
@@ -2102,39 +2468,44 @@ fn appartenance_commune(rng: &mut Rng) -> Option<Example> {
 // -- isochrone sans coordonnées --------------------------------------------
 
 /// Une isochrone dont l'origine est un lieu nommé, sans coordonnées : aucune commande ne
-/// trouve un point à partir d'un nom, la réponse est une question qui demande le point.
+/// trouve un point à partir d'un nom, la réponse est une question qui demande le point. La
+/// couche du lieu est le plus souvent dans l'inventaire (depuis 5.17) : c'est là que le modèle
+/// inventait l'origine. « D'une gare », sans dire laquelle, est une question aussi.
 fn question_isochrone(rng: &mut Rng) -> Option<Example> {
     let mut b = Builder::new();
-    let key = *rng.pick(&["routes", "reseau"]);
-    b.add(rng, key, &[], &[], &[]);
-    for other in ["pistes", "lignes_elec", "canalisations", "rivieres"] {
-        b.exclude(other);
-    }
+    network(rng, &mut b);
     let commune = *rng.pick(COMMUNES);
-    // L'origine : un lieu, parfois présent comme couche (la couche ne donne pas le point).
-    let (origin, theme_key): (String, Option<&str>) = match rng.below(6) {
-        0 => (format!("la gare {}", de_place(commune)), Some("gares")),
-        1 => (format!("la mairie {}", de_place(commune)), None),
-        2 => ("l'école Jean Moulin".to_string(), Some("ecoles")),
-        3 => ("l'hôpital".to_string(), Some("hopitaux")),
-        4 => ("la place du marché".to_string(), None),
-        _ => (format!("l'église {}", de_place(commune)), None),
+    // L'origine : un lieu, le plus souvent présent comme couche (la couche ne donne pas le
+    // point), parfois un lieu sans couche.
+    let (origin, theme_key) = if rng.chance(5, 6) {
+        let (origin, key) = place_with_layer(rng);
+        (origin, Some(key))
+    } else {
+        let origin = match rng.below(3) {
+            0 => format!("la mairie {}", de_place(commune)),
+            1 => "la place du marché".to_string(),
+            _ => format!("l'église {}", de_place(commune)),
+        };
+        (origin, None)
     };
+    let mut present = None;
     if let Some(k) = theme_key {
-        if rng.chance(1, 2) && b.free(|t| t.key == k).len() == 1 {
+        if rng.chance(5, 6) && b.free(|t| t.key == k).len() == 1 {
             b.add(rng, k, &[], &[], &[]);
+            present = Some(theme(k));
         }
     }
-    let mode = *rng.pick(&["à pied", "en marchant", "en voiture", "en auto"]);
-    let m = *rng.pick(&[5u64, 10, 12, 15, 20, 30]);
-    let duration = if rng.chance(1, 3) {
-        format!("{m} min")
-    } else {
-        format!("{m} minutes")
+    // « D'une gare » : la couche est là, la demande ne dit pas laquelle.
+    let indefinite = present.filter(|_| rng.chance(1, 5));
+    let origin = match indefinite {
+        Some(t) => t.noun.un(),
+        None => origin,
     };
-    let (body, q) = match rng.below(5) {
+    let tr = travel(rng);
+    let (duration, mode) = (&tr.duration, tr.mode);
+    let (body, q) = match rng.below(8) {
         0 => (
-            format!("Calcule l'isochrone de {duration} {mode} depuis {origin}"),
+            format!("Calcule l'isochrone {} {mode} depuis {origin}", tr.de()),
             false,
         ),
         1 => (
@@ -2145,29 +2516,49 @@ fn question_isochrone(rng: &mut Rng) -> Option<Example> {
             format!("Montre la zone accessible {mode} en {duration} depuis {origin}"),
             false,
         ),
-        3 => {
+        3 => (
+            format!(
+                "Jusqu'où peut-on aller {mode} en {duration} en partant {}",
+                de_word(&origin)
+            ),
+            true,
+        ),
+        // La cible citée : « les parcelles à 10 min à pied de la gare de X ».
+        _ => {
             let t = pick_theme(rng, &b, |t| ordinary(t) && t.geom != Geom::Line)?;
             b.add(rng, t.key, &[], &[], &[]);
             let np = format!(
-                "les {} accessibles en moins de {duration} {mode} depuis {origin}",
-                t.noun.pl
+                "les {} {}",
+                t.noun.pl,
+                travel_clause(rng, &t.noun, &tr, &origin)
             );
-            open_find(rng, &t.noun, &np, false)
+            open_find(rng, &t.noun, &np, true)
         }
-        _ => (
-            format!("Jusqu'où peut-on aller {mode} en {duration} en partant de {origin}"),
-            true,
-        ),
     };
     let request = finish(rng, &body, q, false);
-    let expected = question(match rng.below(3) {
-        0 => format!(
-            "Je n'ai pas les coordonnées de {origin} : peux-tu donner le point de départ en X et Y, avec son système de coordonnées ?"
-        ),
-        1 => "Quelles sont les coordonnées du point de départ (X, Y et système, par exemple Lambert-93) ?".to_string(),
-        _ => format!(
-            "Depuis quel point exact faut-il partir : quelles sont les coordonnées de {origin} et leur système (Lambert-93 ou WGS84) ?"
-        ),
+    let expected = question(match indefinite {
+        Some(t) => match rng.below(2) {
+            0 => format!(
+                "Depuis {} {} faut-il partir : quelles sont ses coordonnées X et Y, avec leur système ?",
+                if t.noun.fem { "quelle" } else { "quel" },
+                t.noun.sg
+            ),
+            _ => format!(
+                "{} {} faut-il prendre pour départ, et quelles sont ses coordonnées (X, Y et système) ?",
+                if t.noun.fem { "Quelle" } else { "Quel" },
+                t.noun.sg
+            ),
+        },
+        None => match rng.below(4) {
+            0 => format!(
+                "Je n'ai pas les coordonnées de {origin} : peux-tu donner le point de départ en X et Y, avec son système de coordonnées ?"
+            ),
+            1 => "Quelles sont les coordonnées du point de départ (X, Y et système, par exemple Lambert-93) ?".to_string(),
+            2 => format!(
+                "Depuis quel point exact faut-il partir : quelles sont les coordonnées de {origin} et leur système (Lambert-93 ou WGS84) ?"
+            ),
+            _ => cassini_core::point::GUARD_QUESTION.to_string(),
+        },
     });
     Some(example("question_isochrone", b, rng, request, expected))
 }
@@ -2364,6 +2755,22 @@ mod tests {
         assert_eq!(m.json(), json!({"value": 500, "unit": "m"}));
     }
 
+    #[test]
+    fn a_distance_in_meters_stays_a_buffer_then_an_intersection() {
+        // Le contraire d'un trajet : « à moins de 500 m d'une gare » reste un plan, jamais une
+        // question de coordonnées, même quand la couche des gares est là.
+        let examples = valid(distance, 300);
+        for e in &examples {
+            assert_eq!(
+                commands(e),
+                ["analysis.buffer", "analysis.intersect"],
+                "{}",
+                e.request
+            );
+        }
+        assert!(examples.iter().any(|e| has_theme(e, "gares")));
+    }
+
     /// Exemples valides d'une famille, sur `n` tirages.
     fn valid(make: fn(&mut Rng) -> Option<Example>, n: usize) -> Vec<Example> {
         let registry = cassini_core::registry::Registry::standard();
@@ -2441,6 +2848,229 @@ mod tests {
                 .contains("coordonnées"));
             assert!(!e.request.contains("Lambert") && !e.request.contains("EPSG"));
         }
+    }
+
+    /// Thèmes des lieux qui sont aussi des couches de points (`place_with_layer`).
+    const PLACE_THEMES: [&str; 5] = ["gares", "ecoles", "hopitaux", "arrets", "pharmacies"];
+
+    #[test]
+    fn a_travel_time_from_a_place_layer_asks_for_the_point() {
+        // Phrase E (constat de 5.15) : la couche des gares est là, la demande ne donne pas de
+        // coordonnées ; la réponse est une question, jamais une origine inventée.
+        let examples = valid(question_isochrone, 600);
+        let with_layer = examples
+            .iter()
+            .filter(|e| PLACE_THEMES.iter().any(|t| has_theme(e, t)))
+            .count();
+        // Taux attendu 25/36 : une marge sous lui, que le tirage ne la franchisse pas.
+        assert!(with_layer * 5 >= examples.len() * 3, "{with_layer}");
+        let mut targeted = 0;
+        for e in &examples {
+            assert_eq!(e.expected["kind"], "question", "{}", e.request);
+            let r = e.request.to_lowercase();
+            if (r.contains(" de la gare ") || r.contains(" d'une gare"))
+                && (r.contains(" min") || r.contains("heure") || r.contains("seconde"))
+                && has_theme(e, "gares")
+            {
+                targeted += 1;
+            }
+        }
+        assert!(targeted > 0);
+        assert!(examples
+            .iter()
+            .any(|e| e.expected["question"] == cassini_core::point::GUARD_QUESTION));
+        // « D'une gare » : on demande laquelle.
+        assert!(examples.iter().any(|e| e.request.contains(" d'une gare")
+            && e.expected["question"]
+                .as_str()
+                .unwrap()
+                .contains("quelle gare")
+            || e.request.contains(" d'une gare")
+                && e.expected["question"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("Quelle gare")));
+    }
+
+    #[test]
+    fn a_travel_time_from_a_given_point_is_an_isochrone_crossed_with_the_target() {
+        // Le contraire de la phrase E : même tournure, point donné ; isochrone, puis la cible
+        // croisée avec l'étape 1. Le garde-fou de 5.16 laisse le plan tel quel.
+        let registry = cassini_core::registry::Registry::standard();
+        let examples = valid(isochrone_vers_cible, 400);
+        for e in &examples {
+            let c = commands(e);
+            assert_eq!(
+                c[..2],
+                ["analysis.isochrone", "analysis.intersect"],
+                "{}",
+                e.request
+            );
+            assert!(c.len() == 2 || c[2] == "layout.export_pdf");
+            let calls = e.expected["calls"].as_array().unwrap();
+            assert_eq!(calls[1]["params"]["overlay_layer_id"], step(1).as_str());
+            assert!(!calls[1]["params"]["layer_id"]
+                .as_str()
+                .unwrap()
+                .starts_with("step:"));
+            let plan: cassini_core::plan::Plan =
+                serde_json::from_value(e.expected.clone()).unwrap();
+            let guarded =
+                cassini_core::point::guard_coordinates(&registry, plan.clone(), &e.request);
+            assert_eq!(guarded, plan, "{}", e.request);
+        }
+        assert!(examples.iter().any(|e| has_theme(e, "gares")));
+        assert!(examples
+            .iter()
+            .any(|e| e.request.contains(" à pied du point ")));
+        // Un lieu nommé avec ses coordonnées : c'est encore un plan.
+        assert!(examples.iter().any(|e| {
+            (e.request.contains("la gare ") || e.request.contains("l'école Jean Moulin"))
+                && !e.request.contains(" point ")
+        }));
+    }
+
+    #[test]
+    fn the_travel_mode_and_duration_are_mapped_as_written() {
+        let mut examples = valid(isochrone, 400);
+        examples.extend(valid(isochrone_vers_cible, 400));
+        for e in &examples {
+            let calls = e.expected["calls"].as_array().unwrap();
+            let p = &calls[0]["params"];
+            let r = &e.request;
+            let walk = ["à pied", "en marchant", "à la marche"]
+                .iter()
+                .any(|m| r.contains(m));
+            assert_eq!(p["mode"] == "walk", walk, "{r}");
+            assert_eq!(p["mode"] == "car", !walk, "{r}");
+            let chars: Vec<char> = r.chars().collect();
+            let seconds = r.contains("seconde")
+                || (0..chars.len().saturating_sub(2)).any(|i| {
+                    chars[i].is_ascii_digit()
+                        && chars[i + 1] == ' '
+                        && chars[i + 2] == 's'
+                        && !chars
+                            .get(i + 3)
+                            .is_some_and(|c| c.is_alphabetic() || *c == '\'')
+                });
+            assert_eq!(p["duration"]["unit"] == "s", seconds, "{r}");
+            if r.contains("un quart d'heure") {
+                assert_eq!(p["duration"], json!({"value": 15, "unit": "min"}), "{r}");
+            }
+            if r.contains("une demi-heure") {
+                assert_eq!(p["duration"], json!({"value": 30, "unit": "min"}), "{r}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_travel_time_from_several_places_is_refused() {
+        // Décision a : « de chaque gare », « de toutes les gares », « des gares » → refus.
+        let examples: Vec<Example> = valid(refus_hors_registre, 1500)
+            .into_iter()
+            .filter(|e| e.expected["reason"] == NO_MULTI_ORIGIN)
+            .collect();
+        assert!(!examples.is_empty());
+        for e in &examples {
+            let r = e.request.to_lowercase();
+            // L'origine, au pluriel, juste après « depuis » ou le mode.
+            let modes = [
+                "à pied",
+                "en marchant",
+                "à la marche",
+                "en voiture",
+                "en auto",
+                "en véhicule",
+            ];
+            let plural = [
+                "depuis les ",
+                "depuis chaque ",
+                "depuis toutes les ",
+                "depuis tous les ",
+            ]
+            .iter()
+            .any(|p| r.contains(p))
+                || modes.iter().any(|m| {
+                    ["des ", "de chaque ", "de toutes les ", "de tous les "]
+                        .iter()
+                        .any(|p| r.contains(&format!("{m} {p}")))
+                });
+            assert!(plural, "{}", e.request);
+            assert!(
+                !r.contains("depuis une ") && !r.contains("depuis un "),
+                "{}",
+                e.request
+            );
+        }
+    }
+
+    #[test]
+    fn several_conditions_vary_operators_and_lose_no_step() {
+        // Constats H17 à H22 : étapes perdues, mauvais opérateur, mauvaise commande.
+        let examples = valid(conditions_multiples, 3000);
+        let mut ops = std::collections::BTreeSet::new();
+        let (mut five, mut whole_layer) = (0, 0);
+        for e in &examples {
+            let calls = e.expected["calls"].as_array().unwrap();
+            let chain: Vec<&Value> = calls
+                .iter()
+                .filter(|c| c["command"] != "layout.export_pdf")
+                .collect();
+            for c in &chain {
+                if c["command"] == "analysis.select_by_attribute" {
+                    ops.insert(c["params"]["operator"].as_str().unwrap().to_string());
+                }
+                if c["command"] == "analysis.intersect"
+                    && !c["params"]["overlay_layer_id"]
+                        .as_str()
+                        .unwrap()
+                        .starts_with("step:")
+                {
+                    whole_layer += 1;
+                }
+            }
+            // Aucune étape perdue : chaque étape sauf la dernière sert à une étape suivante.
+            for k in 1..chain.len() {
+                let r = step(k);
+                assert!(
+                    chain[k..]
+                        .iter()
+                        .any(|c| LAYER_KEYS.iter().any(|key| c["params"][*key] == r.as_str())),
+                    "étape {k} perdue : {}",
+                    e.request
+                );
+            }
+            assert_eq!(chain.last().unwrap()["command"], "analysis.intersect");
+            let names: Vec<&str> = chain
+                .iter()
+                .map(|c| c["command"].as_str().unwrap())
+                .collect();
+            if names
+                == [
+                    "analysis.select_by_attribute",
+                    "analysis.buffer",
+                    "analysis.buffer",
+                    "analysis.intersect",
+                    "analysis.intersect",
+                ]
+            {
+                five += 1;
+                assert_eq!(chain[3]["params"]["layer_id"], step(1).as_str());
+            }
+        }
+        for op in [
+            "eq",
+            "gt",
+            "lt",
+            "gte",
+            "lte",
+            "ne",
+            "contains",
+            "begins_with",
+        ] {
+            assert!(ops.contains(op), "{op} : {ops:?}");
+        }
+        assert!(five > 0 && whole_layer > 0, "{five} {whole_layer}");
     }
 
     #[test]
