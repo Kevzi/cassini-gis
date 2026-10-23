@@ -11,20 +11,45 @@ import inventory  # noqa: E402
 
 
 class FakeLayer:
-    def __init__(self, lid, name, source, crs, box, vector=True, fields=(), count=0, geom="Polygon"):
+    def __init__(
+        self, lid, name, source, crs, box, vector=True, fields=(), count=0, geom="Polygon",
+        kind=None, wkb="MultiPolygon", values=None,
+    ):
         self.lid, self.name, self.source, self.crs, self.box = lid, name, source, crs, box
         self.vector, self.fields, self.count, self.geom = vector, list(fields), count, geom
+        self.kind = kind or ("vector" if vector else "raster")
+        self.wkb = wkb
+        self.values = dict(values or {})  # champ texte -> valeurs distinctes brutes (None, "" compris)
 
 
 class FakeBackend:
     """Rend les couches dans l'ordre donné ; l'étendue est déjà « reprojetée »."""
 
-    def __init__(self, layers=(), project_crs="EPSG:2154"):
+    def __init__(self, layers=(), project_crs="EPSG:2154", project_name="projet"):
         self.items = list(layers)
         self.project_crs_value = project_crs
+        self.project_name_value = project_name
+        self.value_reads = []  # (champ, plafond) de chaque lecture de valeurs
 
     def project_crs(self):
         return self.project_crs_value
+
+    def project_name(self):
+        return self.project_name_value
+
+    def kind_of(self, layer):
+        return layer.kind
+
+    def wkb_name(self, layer):
+        return layer.wkb
+
+    def text_values(self, layer, name, limit):
+        self.value_reads.append((name, limit))
+        if name not in layer.values:
+            return None
+        # Comme `uniqueValues(idx, limit + 2)` : des valeurs distinctes, au plus limit + 2.
+        found = set(list(dict.fromkeys(layer.values[name]))[: limit + 2])
+        return inventory._distinct_texts(found, limit)
 
     def layers(self):
         return list(self.items)
@@ -114,6 +139,83 @@ class InventoryTest(unittest.TestCase):
         for remote in ("dbname='x' host=h user=u password=p table=t", "Point?crs=epsg:4326", "type=xyz&url=https://a/b/c.png", "https://h/wms"):
             self.assertIsNone(inventory.source_name(remote))
         self.assertIsNone(inventory.source_name(None))
+
+    def test_vector_layer_reports_its_raw_qgis_facts(self):
+        plu = FakeLayer(
+            "plu_1", "Zonage du PLU", "plu.gpkg", "EPSG:2154", (0, 0, 1, 1),
+            fields=[("typezone", "String"), ("surface", "Real")], count=3,
+            values={"typezone": ["U", "N", "Nh"]},
+        )
+        backend = FakeBackend([plu], project_name="projet-test-villeneuve")
+        result, error = run(inventory.ProjectInventoryGesture, backend, {})
+        self.assertIsNone(error)
+        self.assertEqual(result["project_name"], "projet-test-villeneuve")
+        layer = result["layers"][0]
+        self.assertEqual(layer["kind"], "vector")
+        self.assertEqual(layer["geometry"], "MultiPolygon")
+        self.assertEqual(layer["feature_count"], 3)
+        self.assertEqual(
+            layer["fields"],
+            [
+                {"name": "typezone", "type": "String", "values": ["N", "Nh", "U"]},
+                {"name": "surface", "type": "Real"},
+            ],
+        )
+        # Les clés d'avant restent, avec le même sens.
+        for key in ("layer_id", "name", "source", "crs"):
+            self.assertIn(key, layer)
+        self.assertIn("extent", result)
+        self.assertEqual(result["project_crs"], "EPSG:2154")
+
+    def test_values_are_read_with_a_ceiling(self):
+        many = ["P%04d" % i for i in range(5000)]
+        parcelles = FakeLayer(
+            "p", "Parcelles", "p.gpkg", "EPSG:2154", None,
+            fields=[("id_parcelle", "String")], values={"id_parcelle": many},
+        )
+        backend = FakeBackend([parcelles])
+        result, _ = run(inventory.ProjectInventoryGesture, backend, {})
+        self.assertEqual(backend.value_reads, [("id_parcelle", inventory.VALUES_LIMIT)])
+        self.assertEqual(len(result["layers"][0]["fields"][0]["values"]), inventory.VALUES_LIMIT)
+        self.assertEqual(inventory.VALUES_LIMIT, 11)  # une de plus que le plafond du noyau
+
+    def test_raster_has_no_geometry_no_fields_no_reads(self):
+        mnt = FakeLayer("r", "MNT", "mnt.tif", "EPSG:2154", (0, 0, 1, 1), vector=False,
+                        fields=[("x", "String")], count=9)
+        backend = FakeBackend([mnt])
+        result, _ = run(inventory.ProjectInventoryGesture, backend, {})
+        layer = result["layers"][0]
+        self.assertEqual(layer["kind"], "raster")
+        self.assertIsNone(layer["geometry"])
+        self.assertEqual(layer["fields"], [])
+        self.assertNotIn("feature_count", layer)
+        self.assertEqual(backend.value_reads, [])
+
+    def test_a_failed_value_read_keeps_the_field_without_values(self):
+        class Flaky(FakeBackend):
+            def text_values(self, layer, name, limit):
+                raise RuntimeError("boom")
+
+        layer = FakeLayer("a", "a", "a.gpkg", "EPSG:2154", None, fields=[("nom", "String")])
+        result, error = run(inventory.ProjectInventoryGesture, Flaky([layer]), {})
+        self.assertIsNone(error)
+        self.assertEqual(result["layers"][0]["fields"], [{"name": "nom", "type": "String"}])
+
+    def test_null_and_empty_text_do_not_hide_an_overflow(self):
+        found = {None, ""} | {"V%02d" % i for i in range(11)}
+        texts = inventory._distinct_texts(found, inventory.VALUES_LIMIT)
+        self.assertEqual(texts, ["V%02d" % i for i in range(11)])  # le noyau voit le trop-plein
+
+    def test_a_boolean_only_field_has_no_values(self):
+        self.assertIsNone(inventory._distinct_texts({True, False, None}, inventory.VALUES_LIMIT))
+        layer = FakeLayer("a", "a", "a.gpkg", "EPSG:2154", None, fields=[("ok", "Boolean")],
+                          values={"ok": [True, False, None]})
+        result, _ = run(inventory.ProjectInventoryGesture, FakeBackend([layer]), {})
+        self.assertEqual(result["layers"][0]["fields"], [{"name": "ok", "type": "Boolean"}])
+
+    def test_unsaved_project_has_no_name(self):
+        result, _ = run(inventory.ProjectInventoryGesture, FakeBackend(project_name=""), {})
+        self.assertIsNone(result["project_name"])
 
     def test_unexpected_failure_still_answers(self):
         class Broken(FakeBackend):

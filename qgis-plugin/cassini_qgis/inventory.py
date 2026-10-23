@@ -6,6 +6,11 @@ Aucune couche et aucun fichier n'est modifié. Une source de couche est rendue p
 son nom de fichier, jamais par un chemin absolu. Une couche se désigne par son id
 QGIS, valable pour la session seulement (AD-9).
 
+L'inventaire rapporte aussi des faits bruts (sorte de couche, géométrie WKB, nombre
+d'objets, champs avec leur type QGIS, quelques valeurs des champs texte, nom du
+projet) : c'est le noyau qui les met dans la forme vue par le modèle et qui décide du
+plafond de valeurs.
+
 Le travail avance par un ordonnanceur (par défaut `QTimer.singleShot`). L'accès à
 QGIS passe par un « fond » injectable : `QgisBackend` est le seul endroit qui
 importe `qgis.core`, les tests mettent une doublure.
@@ -22,6 +27,10 @@ NOT_FOUND = "layer.not_found"
 NOT_VECTOR = "layer.not_vector"
 CANCELLED = "qgis.cancelled"
 
+# Valeurs lues par champ texte : une de plus que le plafond du noyau (10), pour qu'il sache
+# qu'un champ en a trop. La lecture s'arrête là, quelle que soit la taille de la couche.
+VALUES_LIMIT = 11
+
 
 class QgisBackend:
     """Accès réel à QGIS. Seul ce type touche `qgis.core`."""
@@ -30,6 +39,12 @@ class QgisBackend:
         from qgis.core import QgsProject
 
         return QgsProject.instance().crs().authid()
+
+    def project_name(self):
+        """Nom du projet : nom de son fichier sans extension ; vide s'il n'est pas enregistré."""
+        from qgis.core import QgsProject
+
+        return QgsProject.instance().baseName()
 
     def layers(self):
         """Couches dans l'ordre de la légende, de haut en bas."""
@@ -79,6 +94,34 @@ class QgisBackend:
 
         return layer.type() == QgsMapLayerType.VectorLayer
 
+    def kind_of(self, layer):
+        """`vector`, `raster` ou `other` (maillage, nuage de points, tuiles...)."""
+        from qgis.core import QgsMapLayerType
+
+        if layer.type() == QgsMapLayerType.VectorLayer:
+            return "vector"
+        if layer.type() == QgsMapLayerType.RasterLayer:
+            return "raster"
+        return "other"
+
+    def wkb_name(self, layer):
+        """Nom WKB de la géométrie (ex. `MultiPolygon`, `PointZ`, `NoGeometry`)."""
+        from qgis.core import QgsWkbTypes
+
+        return QgsWkbTypes.displayString(layer.wkbType())
+
+    def text_values(self, layer, name, limit):
+        """Valeurs distinctes non nulles d'un champ texte, au plus `limit` ; None sinon."""
+        idx = layer.fields().indexOf(name)
+        if idx < 0:
+            return None
+        field = layer.fields().at(idx)
+        if field.isNumeric() or field.isDateOrTime():
+            return None
+        # Deux places de plus : la valeur nulle et le texte vide, que `uniqueValues` compte
+        # aussi et que `_distinct_texts` écarte.
+        return _distinct_texts(layer.uniqueValues(idx, limit + 2), limit)
+
     def fields_of(self, layer):
         return [(f.name(), f.typeName()) for f in layer.fields()]
 
@@ -103,6 +146,13 @@ def source_name(raw):
     text = text.replace("\\", "/").rstrip("/")
     name = os.path.basename(text)
     return name if name and os.path.splitext(name)[1] else None
+
+
+def _distinct_texts(found, limit):
+    """Textes non vides de `found`, sans doublon, triés, au plus `limit` ; None s'il n'en
+    reste aucun (champ booléen, champ tout nul)."""
+    texts = sorted({v for v in found if isinstance(v, str) and v})[:limit]
+    return texts or None
 
 
 def _extent(box, crs):
@@ -176,19 +226,43 @@ class ProjectInventoryGesture(_ReadGesture):
         layers = []
         boxes = []
         for layer in backend.layers():
-            layers.append(
-                {
-                    "layer_id": backend.id_of(layer),
-                    "name": backend.name_of(layer),
-                    "source": source_name(backend.source_of(layer)),
-                    "crs": backend.crs_of(layer),
-                }
-            )
+            entry = {
+                "layer_id": backend.id_of(layer),
+                "name": backend.name_of(layer),
+                "source": source_name(backend.source_of(layer)),
+                "crs": backend.crs_of(layer),
+            }
+            entry.update(self._facts(layer))
+            layers.append(entry)
             boxes.append(backend.extent_of(layer, project_crs))
         return {
+            "project_name": backend.project_name() or None,
             "layers": layers,
             "project_crs": project_crs,
             "extent": _extent(_union(boxes), project_crs),
+        }
+
+    def _facts(self, layer):
+        """Faits bruts d'une couche : sorte, géométrie, nombre d'objets, champs."""
+        backend = self._backend
+        kind = backend.kind_of(layer)
+        if kind != "vector":
+            return {"kind": kind, "geometry": None, "fields": []}
+        fields = []
+        for name, qgis_type in backend.fields_of(layer):
+            field = {"name": name, "type": qgis_type}
+            try:
+                values = backend.text_values(layer, name, VALUES_LIMIT)
+            except Exception:  # une lecture ratée ne prive pas le noyau de l'inventaire
+                values = None
+            if values is not None:
+                field["values"] = list(values)
+            fields.append(field)
+        return {
+            "kind": kind,
+            "geometry": backend.wkb_name(layer),
+            "feature_count": backend.feature_count(layer),
+            "fields": fields,
         }
 
 

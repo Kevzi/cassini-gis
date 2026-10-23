@@ -10,6 +10,7 @@
 use serde_json::{json, Value};
 
 use super::{invalid_params, is_available, Channel, RpcError, State};
+use crate::agent_inventory::agent_inventory;
 use crate::error::ErrorReport;
 use crate::exec::Executor;
 use crate::journal::relativize;
@@ -112,8 +113,10 @@ pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<V
                 )));
             }
             // Directement par le canal, hors `Session` : l'inventaire n'est pas journalisé.
+            // Le modèle voit la forme de son entraînement, traduite ici (ticket 5.10, t. 4a).
             Channel { link: link.clone() }
                 .execute("project.inventory", json!({}))
+                .map(|raw| agent_inventory(&raw))
                 .map_err(ErrorReport::from)
         };
         composer

@@ -367,3 +367,55 @@ Le dossier de sortie de la tâche 2 a été repris par la chaîne (`--reprendre`
 les deux déclarations écrites, l'essai par les deux chemins refait) ; `model.list` sur sa
 copie rend bien deux entrées. Ces durées ne sont pas une mesure : la mesure du jeu tenu à
 l'écart et de la durée sur CPU est la tâche 4.
+
+## L'inventaire vu par le modèle dans QGIS
+
+Tâche 4a du ticket 5.10. Dans QGIS, le modèle ne reçoit pas la sortie de
+`project.inventory` telle quelle : le noyau la traduit d'abord dans la forme exacte des
+inventaires de l'entraînement (`core/src/agent_inventory.rs`, appelée par `plan.propose`
+avant la composition).
+
+**Ce que rapporte l'extension** (faits bruts de QGIS, tous facultatifs : une extension plus
+ancienne ne les rend pas, et les clés d'avant gardent leur sens) :
+
+| Clé | Contenu |
+|---|---|
+| `project_name` | nom du fichier du projet, sans extension ; `null` si le projet n'est pas enregistré |
+| `layers[].kind` | `vector`, `raster` ou `other` |
+| `layers[].geometry` | nom WKB de QGIS (`MultiPolygon`, `PointZ`, `NoGeometry`…) ; `null` hors vecteur |
+| `layers[].feature_count` | nombre d'objets d'une couche vecteur |
+| `layers[].fields` | `{name, type, values?}` : type tel que QGIS le nomme ; pour un champ ni numérique ni date, au plus 11 valeurs distinctes non nulles, triées |
+
+L'extension ne décide rien : elle lit au plus 11 valeurs par champ (une de plus que le
+plafond du noyau, pour qu'il sache qu'il y en a trop), ne parcourt pas le disque et ne modifie
+aucun fichier.
+
+**Ce que décide le noyau** :
+
+- forme `{"project": {name, epsg}, "layers": [...], "unloaded_files": []}` ; par couche,
+  `layer_id`, `name`, `kind`, `geometry`, `epsg`, `feature_count`, `source`, `fields` ;
+- SCR : `EPSG:2154` devient `2154` ; un SCR qui n'est pas EPSG (`IGNF:LAMB93`) n'a pas de clé
+  `epsg` ;
+- types : `Integer`, `Integer64` et leurs voisins deviennent `integer` ; `Real`, `Double` et
+  leurs voisins `number` ; tout le reste (`String`, `Date`, type inconnu) `string` ;
+- valeurs : seulement sur un champ texte, 10 au plus (le jeu tenu à l'écart en montre 10 au
+  plus, l'entraînement 9) ; au-delà, ou sans valeur, le champ n'a pas de clé `values` ;
+- géométrie : ramenée aux six de l'entraînement (`PointZ` devient `Point`, `MultiSurface`
+  `MultiPolygon`) ; sans géométrie ou inconnue, `null` ;
+- raster : `geometry: null`, `fields: []`, et pas de `feature_count`, que QGIS n'a pas pour un
+  raster (c'est le seul écart de forme avec le générateur, qui en tire un au hasard) ;
+- `unloaded_files` vaut toujours `[]`.
+
+`training/tests/forme_inventaire.rs` traduit une sortie représentative de `project.inventory`
+et la confronte au jeu engendré (graine 1) : mêmes clés, mêmes sortes de valeurs, types et
+géométries déjà vus. Si le générateur change de forme, ce test échoue et la traduction se met
+à jour avec le ré-entraînement. `cassini plan --inventory` prend toujours un inventaire déjà
+dans la forme apprise : il n'est pas traduit.
+
+**Mesure sur le projet réel** (2026-10-23, QGIS 3.44.15, `projet-test-villeneuve.qgz`, sonde
+jetable hors dépôt) : six couches ; la couche `plu_zones` porte `typezone` avec ses valeurs
+`["N", "Nh", "U"]`. L'inventaire traduit fait 5 289 caractères, soit **2 439 jetons** du GGUF
+de base (`qwen3.5-4b-base-Q4_K_M.gguf`, découpeur de llama.cpp), contre 3 196 pour la sortie
+brute. C'est plus que la plus longue séquence entière vue à l'entraînement (1 326 jetons) : le
+PLU réel porte 24 champs, dont des empreintes et des libellés longs. L'effet sur le modèle
+ajusté se mesure à la tâche 4b.

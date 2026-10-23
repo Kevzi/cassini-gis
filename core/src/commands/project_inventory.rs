@@ -1,6 +1,11 @@
 //! Commande `project.inventory` : dresse l'inventaire du projet QGIS ouvert (couches
 //! dans l'ordre de la légende, SCR du projet, étendue d'ensemble). Déclaration seule :
 //! le geste vit dans l'extension, en lecture seule (AD-19 : SCR en code explicite).
+//!
+//! Depuis la tâche 4a du ticket 5.10, l'extension rapporte aussi des faits bruts de QGIS
+//! (sorte de couche, géométrie, nombre d'objets, champs, nom du projet), tous facultatifs :
+//! une extension plus ancienne ne les rend pas. C'est le noyau qui les met dans la forme
+//! vue par le modèle (`crate::agent_inventory`).
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -34,11 +39,41 @@ pub struct InventoryLayer {
     pub source: Option<String>,
     /// SCR de la couche, en code explicite.
     pub crs: String,
+    /// Sorte de couche : `vector`, `raster`, ou `other` pour une autre sorte de QGIS.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// Géométrie d'une couche vecteur, nom WKB de QGIS (ex. `MultiPolygon`, `PointZ`) ;
+    /// `null` pour une couche qui n'est pas vecteur.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geometry: Option<Option<String>>,
+    /// Nombre d'objets d'une couche vecteur (0 si le fournisseur ne sait pas compter).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feature_count: Option<u64>,
+    /// Champs d'une couche vecteur, dans l'ordre de la couche ; vide pour un raster.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fields: Option<Vec<InventoryField>>,
+}
+
+/// Un champ d'une couche vecteur.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct InventoryField {
+    /// Nom du champ.
+    pub name: String,
+    /// Type du champ tel que QGIS le nomme (ex. `String`, `Integer64`, `Real`).
+    #[serde(rename = "type")]
+    pub field_type: String,
+    /// Pour un champ texte : quelques valeurs distinctes non nulles, triées, lues avec un
+    /// plafond ; absent pour un autre champ.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub values: Option<Vec<String>>,
 }
 
 /// Résultat de `project.inventory`.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ProjectInventoryOutput {
+    /// Nom du projet (nom du fichier sans extension) ; absent d'une extension antérieure.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_name: Option<String>,
     /// Couches dans l'ordre de la légende, de haut en bas.
     pub layers: Vec<InventoryLayer>,
     /// SCR du projet, en code explicite.

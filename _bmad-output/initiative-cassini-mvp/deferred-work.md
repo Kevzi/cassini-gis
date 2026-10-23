@@ -248,6 +248,8 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t2-entrainement-reproductible.md`
   summary: L'extension joint a l'inventaire envoye au noyau quelques valeurs distinctes par champ texte (`qgis-plugin/cassini_qgis/inventory.py`), comme le jeu d'entrainement ; a faire avant la mesure du modele ajuste (5.10, tache 4).
   evidence: decision du proprietaire 2026-10-22 (bmad-build 5.10, tache 2) : « Ajouter les valeurs » plutot qu'entrainer sans valeurs.
+  status: close, 2026-10-23, 5.10 tache 4a (`plan-5-10-t4a-inventaire-au-format-appris.md`)
+  resolution: l'extension rapporte jusqu'a 11 valeurs par champ texte, le noyau (`core/src/agent_inventory.rs`) en garde 10 au plus, triees, et met l'inventaire dans la forme de l'entrainement avant la composition.
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t2-entrainement-reproductible.md`
   summary: 5.10 tache 3 — parite au jeton entre l'entrainement et `ai/` : `ai` decoupe le prompt par segment (texte des tours en `special=false`), la chaine d'entrainement le decoupe d'un tenant ; et aucun test ne compare l'encadrement chatml de `training/src/prompt.rs` aux constantes de `ai/src/lib.rs` ni `system_text` a `inventory_text`.
   evidence: relectures verification-gap, edge-case-hunter et intent-alignment de la tache 2 ; un ecart d'un jeton ferait voir au modele ajuste un format qu'il n'a pas appris.
@@ -268,3 +270,21 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t3-modele-ajuste-dans-ai.md`
   summary: 5.14 — diagnostic des declarations de modele : une declaration illisible est ecartee sans trace (ses GGUF, adaptateur compris, reviennent nus dans la liste), et une declaration dont un GGUF manque reste listee avec une taille partielle et, premiere par son nom, ferait echouer chaque `plan.propose` ; le selecteur doit les signaler.
   evidence: relectures blind-hunter, edge-case-hunter et quick de la tache 3 ; comportement voulu par le plan (« ignoree », « reste listee »), sans retour a l'utilisateur.
+- source_plan: none
+  summary: 5.10, tache 4b — mesures et demo du modele ajuste : essais reels qui acceptent une declaration `*.modele.json`, notateur de `ecart_reel` teste sans modele, score sur le jeu tenu a l'ecart (base + adaptateur et fusionne) au moins egal a 32/40, seuil strict de clarification (>= 9/12, <= 1 fausse question sur 25), < 30 s sur le 5800X bride a 4 coeurs, parite des decoupeurs Hugging Face et llama.cpp, valeur de la redemande, demo de bout en bout dans QGIS avec la phrase de demo exacte.
+  evidence: decoupe de la tache 4 par le proprietaire (2026-10-22, bmad-build) : l'inventaire du produit (`project.inventory`) ne porte ni champs ni geometrie, alors que le modele ajuste a appris sur des inventaires qui les portent ; la tache 4a l'aligne d'abord, la demo QGIS en depend.
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t4a-inventaire-au-format-appris.md`
+  summary: 5.10 tache 4b — l'inventaire traduit du projet reel `projet-test-villeneuve.qgz` fait 2 439 jetons du GGUF de base, plus que la plus longue sequence entiere de l'entrainement (1 326 jetons) : mesurer l'effet sur le modele ajuste ; si besoin, apprendre des inventaires plus longs au prochain entrainement (champs nombreux, valeurs longues) plutot que tronquer l'inventaire.
+  evidence: sonde de la tache 4a sous QGIS 3.44.15 ; la couche `plu_zones` seule fait 2 890 caracteres (24 champs, empreintes `gpu_doc_id`, libelles longs).
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t4a-inventaire-au-format-appris.md`
+  summary: Au prochain entrainement, le generateur ecrit les valeurs d'un champ triees, comme le produit (`core/src/agent_inventory.rs`), au lieu de l'ordre de definition du theme.
+  evidence: relecture intent-alignment et blind-hunter de la tache 4a ; `training/src/inventories.rs` l.1349 trie des indices ; QGIS (`uniqueValues`) n'a pas d'ordre canonique, le produit trie.
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t4a-inventaire-au-format-appris.md`
+  summary: Formes d'inventaire jamais vues a l'entrainement : couche sans fichier (sorties temporaires des etapes precedentes, sans cle `source`), projet non enregistre (sans `project.name`), SCR non EPSG (sans `epsg`), table sans geometrie (`geometry: null` sur un vecteur), `unloaded_files` toujours vide dans QGIS (68 % des exemples en ont) ; mesurer en 4b, les apprendre au prochain entrainement.
+  evidence: relectures edge-case-hunter, blind-hunter et quick de la tache 4a ; `forme_inventaire.rs` ne couvre que le cas nominal.
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t4a-inventaire-au-format-appris.md`
+  summary: 5.10 tache 4b — chronometrer `project.inventory` sur le vrai projet : un `uniqueValues` par champ texte de chaque couche vecteur, sur le fil de QGIS, a chaque `plan.propose`, non interruptible ; si c'est long, garder les valeurs en cache par session.
+  evidence: relectures blind-hunter, edge-case-hunter et quick de la tache 4a ; gravite non verifiee (maybe-false) : la sonde a compte les jetons, pas la duree.
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t4a-inventaire-au-format-appris.md`
+  summary: 5.10 tache 4b — verifier par toute la chaine (`cassini serve`, canal, `plan.propose`, vrai modele) que le composeur recoit l'inventaire traduit du vrai projet ; la sonde de 4a a appele le geste puis `agent_inventory` directement.
+  evidence: relecture quick de la tache 4a (critere 1 partiellement tenu).
