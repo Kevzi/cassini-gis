@@ -646,3 +646,95 @@ cache des valeurs par session n'est pas nécessaire. Le chemin complet (`serve`,
 Déclaration retenue : le **modèle fusionné** (`cassini-composition-4b.modele.json`), meilleur
 d'une phrase et un peu plus rapide. Un ticket de ré-entraînement est proposé (voir
 `deferred-work.md`).
+
+## Tâche B de 5.15 : ré-entraînement et mesures
+
+Le générateur de la tâche A (nouvelles familles, redemande, inventaires de QGIS, prompt court
+« en comptant à partir de 1 ») a été entraîné par la commande unique, sans autre changement :
+8 000 exemples, même base, même méthode, même révision de llama.cpp.
+
+### Entraînement
+
+| Mesure | Valeur |
+|---|---|
+| Exemples | 8 000 d'entraînement, 300 de validation, aucun écarté car trop long |
+| Jetons par séquence | médiane 735, maximum 1 521 (la limite de 2 048 suffit, redemandes comprises) |
+| Validation (graine 2, glouton) | 299 / 300 : plans 231 / 232, questions 37 / 37, refus 31 / 31 |
+| Durée totale | 241 min (RTX 3070 Ti, WSL) |
+| Essai `llama-completion` | base + adaptateur et fusionné rendent le plan attendu |
+
+### Parité des découpeurs
+
+- `parite_decoupeurs.py` (Hugging Face contre llama.cpp, d'un tenant) : **300 / 300**, 0 écart.
+- Test de `ai` sur le vrai modèle (la base `qwen3.5-4b-base-Q4_K_M.gguf` sortie par cet
+  entraînement), étendu depuis 5.15 au tour de redemande : 300 premiers essais et
+  **349 redemandes** du jeu de 8 000, mêmes écarts que le jugement de `ai`, même point
+  d'instantané de la tête fixe, jetons de `ai` (par segments) égaux à ceux du
+  prompt d'entraînement lu d'un tenant.
+
+### Essais réels (GPU, modèle fusionné, prompt court)
+
+| Essai | 5.10 (fusionné) | 5.15 |
+|---|---|---|
+| `plan_reel` | 16 / 25 | **25 / 25**, 0 question |
+| `question_reel` | 11 / 12 | **12 / 12** |
+| `ecart_reel` | 33 / 40 | **32 / 40** (plans 19 / 26, questions 8 / 8, refus 5 / 6), 316 s |
+| redemandes sur `ecart_reel` | 2 (0 sauvée) | 1 (0 sauvée) |
+
+Formes des écarts du jeu tenu à l'écart :
+
+| Phrase | Écart |
+|---|---|
+| H08, H23 | une question au lieu d'un plan |
+| H17, H18, H20 | une étape de moins |
+| H19 | paramètre `operator` de l'étape 1 |
+| H22 | commande de l'étape 2 |
+| H40 | un plan au lieu du refus attendu |
+
+Sur le jeu tenu à l'écart, le modèle de 5.15 rend **une phrase juste de moins** que le
+fusionné de 5.10 (32 contre 33). Les plans à plusieurs conditions restent sa faiblesse, alors que les
+phrases de l'épreuve sont désormais toutes justes. Ces formes nomment des constats ; elles
+ne disent rien du texte des phrases, qui n'est jamais lu.
+
+### Durée sur processeur (4 fils, 4 cœurs physiques)
+
+Même recette qu'en 5.10 (affinité `0x55`, `CASSINI_TEST_THREADS=4`, inventaire de
+Villeneuve-le-Roi traduit) :
+
+| id | appels | lecture du prompt (s) | écriture (s) | jetons écrits | total (s) | issue |
+|---|---|---|---|---|---|---|
+| amorce | 1 | 26,7 (+ chargement 2,5) | 2,0 | 17 | 31,2 | plan, 1 étape |
+| A0 | 1 | 1,0 | 36,7 | 248 | 37,7 | plan, 5 étapes |
+| A | 1 | 1,1 | 39,4 | 252 | 40,5 | plan, 5 étapes |
+| B1 | 1 | 0,5 | 10,3 | 71 | 10,8 | plan, 1 étape |
+| B2 | 1 | 0,6 | 26,4 | 180 | 27,1 | plan, 3 étapes |
+| B3 | 1 | 0,5 | 2,9 | 23 | 3,5 | plan, 1 étape |
+| C | 1 | 0,6 | 18,2 | 124 | 18,8 | plan, 2 étapes |
+| D | 1 | 0,5 | 3,9 | 27 | 4,4 | question |
+| E | 2 | 4,7 | 44,7 | 304 | 49,5 | plan, 2 étapes |
+
+Moyennes hors amorce : 24,0 s. A0 passe de 41,4 s à 37,7 s ; la durée n'est pas un critère
+de 5.15. L'exigence produit (une longue phrase en moins de 30 s sur processeur) reste
+manquée par A0, A et E ; elle est suivie dans `deferred-work.md`.
+
+**Phrase E** (« … à 10 minutes à pied de la gare de Villeneuve-le-Roi. ») : un plan valide
+après redemande, au lieu de la question attendue. Le modèle **invente l'origine** de
+l'isochrone (`origin` en EPSG:4326, x = 2,458, y = 48,658, à peu près Villeneuve-le-Roi) et
+croise les parcelles avec la zone obtenue. La couche des gares est dans l'inventaire, mais
+rien n'y donne le point en coordonnées. En 5.10, la même phrase finissait en plan invalide.
+
+### Bilan contre la barre du ticket
+
+| Barre | Mesure | |
+|---|---|---|
+| `plan_reel` ≥ 20 / 25 | 25 / 25 | tenue |
+| ≤ 1 fausse question sur 25 | 0 | tenue |
+| `ecart_reel` ≥ 32 / 40 | 32 / 40 | tenue, de justesse |
+| `question_reel` ≥ 9 / 12 | 12 / 12 | tenue |
+| phrase E rendue en question | un plan, origine inventée | **sous la barre** |
+
+Barre manquée sur la phrase E seulement. Décision du propriétaire pour ce cas : consigner et
+s'arrêter. La démo QGIS n'est pas rejouée, le modèle n'est pas installé dans `models/` ; les
+sorties restent hors du dépôt, dans le dossier des modèles de la machine (`ajuste-5-15`). Une nouvelle passe sur
+le générateur (isochrone dont l'origine est une couche de points présente sans le point
+choisi, et plans à plusieurs conditions) fera l'objet d'un autre ticket.

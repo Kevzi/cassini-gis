@@ -995,7 +995,8 @@ mod tests {
 
     /// Avec le vrai modèle (la base du modèle ajusté) : les jetons que `ai` lit pour le prompt
     /// court, découpé par segments, sont ceux du prompt d'entraînement découpé d'un tenant, balises
-    /// comprises. Ignoré sans `CASSINI_TEST_MODEL`.
+    /// comprises : pour 300 premiers essais, puis (depuis 5.15) pour chaque redemande du jeu
+    /// entier (`DEFAULT_COUNT`). Ignoré sans `CASSINI_TEST_MODEL`.
     #[test]
     fn the_short_prompt_tokens_are_those_of_the_training_prompt_read_in_one_piece() {
         use llama_cpp_2::model::params::LlamaModelParams;
@@ -1036,6 +1037,31 @@ mod tests {
             checked += 1;
         }
         eprintln!("parité au jeton : {checked} prompts identiques");
+        // La redemande : chaque exemple de redemande du jeu entier, tours de `retry_turns`
+        // découpés par segments contre le prompt de redemande d'entraînement lu d'un tenant.
+        let (all, _) = cassini_training::generate(
+            cassini_training::DEFAULT_SEED,
+            cassini_training::DEFAULT_COUNT,
+        );
+        let mut retries = 0;
+        for e in &all {
+            let Some(retry) = &e.retry else {
+                continue;
+            };
+            let errors = judge(&reg, &done(&retry.rejected)).expect_err(&e.request);
+            assert_eq!(errors, retry.errors, "{}", e.request);
+            let first = first_turns(PromptStyle::Short, &reg, &e.inventory, &e.request);
+            let turns = retry_turns(first, &retry.rejected, &errors);
+            let (ours, points) = crate::chat_tokens(&vocab, &turns);
+            let text = cassini_training::prompt_text(e);
+            let theirs = vocab.tokenize(text.as_bytes(), false, true);
+            assert_eq!(ours, theirs, "{}", e.request);
+            // La redemande garde la tête fixe : même point d'instantané qu'au premier essai.
+            assert_eq!(points[0], head_end, "{}", e.request);
+            retries += 1;
+        }
+        assert!(retries * 25 >= all.len(), "{retries} redemandes");
+        eprintln!("parité au jeton : {retries} redemandes identiques");
     }
     /// Avec le vrai modèle et le vrai adaptateur : l'adaptateur est bien posé (la base seule
     /// répond autrement), et une reprise d'instantané rend la même réponse. Ignoré sans
