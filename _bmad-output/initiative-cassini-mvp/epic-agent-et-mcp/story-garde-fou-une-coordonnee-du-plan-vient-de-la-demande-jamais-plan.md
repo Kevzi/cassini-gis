@@ -27,7 +27,7 @@ context: ['{project-root}/_bmad-output/initiative-cassini-mvp/architecture-noyau
 
 **Always:** Fonction pure dans `core`, sans IA ni QGIS. Appliquée une seule fois, après `judge` et la redemande, sur tout plan `calls`. Tous les chemins y passent (canal, `cassini plan`, essais réels). Le système absent de la demande n'est jamais pris au projet. La provenance reste hors de la grammaire. Le sens d'erreur sûr : en cas de doute, une question.
 
-**Décision (propriétaire, 2026-10-23) — nombres de la demande :** `2.458` et `2,458` (virgule suivie d'un chiffre = décimale) ; groupes de trois chiffres séparés par une espace, une espace insécable ou une espace fine (`652 000`, `6 850 000`) lus comme un seul nombre ; signe moins accepté. Toute autre forme (`652.000`, `652'000`, degrés-minutes) n'est pas reconnue et mène à la question. Plan gardé entier malgré sa taille (un seul livrable). Systèmes nommés (décision du propriétaire après implémentation, 2026-10-23) : liste fermée, « Lambert-93 » / « Lambert 93 » valent 2154, « WGS84 » / « WGS 84 » valent 4326 ; tout autre nom ne compte pas.
+**Décision (propriétaire, 2026-10-23) — nombres de la demande :** `2.458` et `2,458` (virgule suivie d'un chiffre = décimale) ; groupes de trois chiffres séparés par une espace, une espace insécable ou une espace fine (`652 000`, `6 850 000`) lus comme un seul nombre ; signe moins accepté. Toute autre forme (`652.000`, `652'000`, degrés-minutes) n'est pas reconnue et mène à la question. Plan gardé entier malgré sa taille (un seul livrable). Systèmes nommés (décision du propriétaire après implémentation, 2026-10-23) : liste fermée, « Lambert-93 » / « Lambert 93 » valent 2154, « WGS84 » / « WGS 84 » valent 4326 ; tout autre nom ne compte pas. Recette du propriétaire (2026-10-23) : dans QGIS, la phrase E a rendu `agent.plan_invalid` (origine inventée sans `epsg`, rejetée deux fois avant le garde-fou) ; décision : le garde-fou s'applique aussi à une sortie rejetée, et rend la question sans redemande quand elle porte un point qui ne vient pas de la demande.
 
 **Never:** Toucher le prompt, `SHORT_SYSTEM`, `judge`, `retry_turns`, la grammaire, `training/` ou le jeu tenu à l'écart. Écrire la provenance au journal (AD-11). Appliquer le garde-fou au serveur MCP. Faire un correctif par phrase. Changer le comportement d'`analysis.isochrone` envers QGIS.
 
@@ -92,6 +92,8 @@ Démo de bout en bout (2026-10-23, Claude) : noyau CPU installé (`cassini.exe.a
 - phrase E : question `guard`, aucun plan ; la phrase revient à la saisie (`request_to_restore`) ;
 - « … depuis x 655 700, y 6 849 023 en Lambert-93 ? » : isochrone depuis ce point, exécutée. Un point hors réseau (652 000 / 6 850 000) passe le garde-fou puis est refusé par `analysis.origin_off_network`, comme attendu.
 Reste : recette du propriétaire dans QGIS.
+
+Correctif de recette : `guard_rejected` (core/src/point.rs) appelé dans `compose_plan_with` sur une sortie rejetée lisible ; une commande inconnue ou un point donné laissent la redemande. Tests : cas de la recette dans `point::` et dans `ai` (un seul appel au modèle).
 
 ## Plan Change Log
 

@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use cassini_core::commands::model_list::PromptKind;
 use cassini_core::plan::Plan;
-use cassini_core::point::guard_coordinates;
+use cassini_core::point::{guard_coordinates, guard_rejected};
 use cassini_core::registry::{CommandSpec, Registry};
 use serde_json::{json, Value};
 
@@ -464,11 +464,19 @@ pub fn compose_plan_with(
         };
         match judge(registry, &completion) {
             Ok(Plan::Refusal { reason }) => return Err(AgentError::Refused(reason)),
-            // Garde-fou de AD-23 sur les coordonnées, une seule fois, après le jugement et la
-            // redemande : un point qui ne vient ni de la demande ni d'une étape devient une
-            // question à provenance `guard`.
+            // Garde-fou de AD-23 sur les coordonnées, sur le plan validé : un point qui ne vient
+            // ni de la demande ni d'une étape devient une question à provenance `guard`.
             Ok(plan) => return Ok(guard_coordinates(registry, plan, request)),
             Err(errors) => {
+                // Garde-fou de AD-23 sur une sortie rejetée : un point inventé, même mal formé,
+                // rend la question tout de suite, sans redemande.
+                if !completion.truncated {
+                    if let Ok(rejected) = serde_json::from_str::<Plan>(&completion.text) {
+                        if let Some(question) = guard_rejected(registry, &rejected, request) {
+                            return Ok(question);
+                        }
+                    }
+                }
                 if attempt == 0 {
                     turns = retry_turns(turns, &completion.text, &errors);
                 }
@@ -619,6 +627,23 @@ mod tests {
         let got = compose_request("Zone à 10 min à pied depuis la mairie.", ISOCHRONE).unwrap();
         assert_eq!(
             got,
+            Plan::Question {
+                question: cassini_core::point::GUARD_QUESTION.to_string(),
+                source: cassini_core::plan::QuestionSource::Guard,
+            }
+        );
+    }
+
+    #[test]
+    fn a_rejected_output_with_an_invented_point_is_guarded_without_a_retry() {
+        // Le cas de la recette dans QGIS : une origine inventée sans `epsg`.
+        let partial = r#"{"kind":"calls","calls":[{"command":"analysis.isochrone","params":{"layer_id":"routes_1","origin":{"x":2.458,"y":48.658},"mode":"walk","duration":{"value":10,"unit":"min"}}}]}"#;
+        let got = compose_request(
+            "Trouve les parcelles à 10 minutes à pied de la gare.",
+            partial,
+        );
+        assert_eq!(
+            got.unwrap(),
             Plan::Question {
                 question: cassini_core::point::GUARD_QUESTION.to_string(),
                 source: cassini_core::plan::QuestionSource::Guard,

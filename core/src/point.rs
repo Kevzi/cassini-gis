@@ -366,14 +366,44 @@ fn reference_is_a_point(
 /// pour chaque `Point`, x, y et epsg retirent chacun une occurrence distincte. S'il en manque
 /// une, c'est la question. Le système n'est jamais pris au projet.
 pub fn guard_coordinates(registry: &Registry, plan: Plan, request: &str) -> Plan {
-    let Plan::Calls { calls } = &plan else {
-        return plan;
-    };
+    match &plan {
+        Plan::Calls { calls } if invents_a_point(registry, calls, request, true) => {
+            guard_question()
+        }
+        _ => plan,
+    }
+}
+
+/// Le même garde-fou sur une sortie du modèle que la validation a rejetée (décision du
+/// propriétaire, 2026-10-23) : si elle porte un point qui ne vient ni de `request` ni d'une
+/// étape (point incomplet compris, par exemple sans `epsg`), la question du garde-fou est
+/// rendue tout de suite, sans redemande. Sinon `None` : le rejet suit son cours. Une commande
+/// inconnue n'est pas une affaire de coordonnées : elle est laissée à la redemande.
+pub fn guard_rejected(registry: &Registry, plan: &Plan, request: &str) -> Option<Plan> {
+    match plan {
+        Plan::Calls { calls } if invents_a_point(registry, calls, request, false) => {
+            Some(guard_question())
+        }
+        _ => None,
+    }
+}
+
+/// Vrai si un point de `calls` ne vient ni de `request` ni d'une étape. `strict` : une
+/// commande inconnue compte comme un doute (plan validé) ; sinon elle est ignorée.
+fn invents_a_point(
+    registry: &Registry,
+    calls: &[PlannedCall],
+    request: &str,
+    strict: bool,
+) -> bool {
     let mut found = Found::default();
     for (index, call) in calls.iter().enumerate() {
         let step = index + 1;
         let Some(spec) = registry.spec(&call.command) else {
-            return guard_question();
+            if strict {
+                return true;
+            }
+            continue;
         };
         let root = &spec.params_schema;
         let Value::Object(params) = &call.params else {
@@ -390,7 +420,7 @@ pub fn guard_coordinates(registry: &Registry, plan: Plan, request: &str) -> Plan
                         reference_is_a_point(registry, calls, step, s, root, value)
                     })
                 {
-                    return guard_question();
+                    return true;
                 }
                 continue;
             }
@@ -398,24 +428,18 @@ pub fn guard_coordinates(registry: &Registry, plan: Plan, request: &str) -> Plan
         }
     }
     if found.doubtful {
-        return guard_question();
-    }
-    if found.points.is_empty() {
-        return plan;
+        return true;
     }
     let mut pool = request_numbers(request);
     for number in &found.numbers {
         take(&mut pool, *number);
     }
-    for point in &found.points {
-        for key in ["x", "y", "epsg"] {
-            let given = point.get(key).and_then(Value::as_f64);
-            if !given.is_some_and(|v| take(&mut pool, v)) {
-                return guard_question();
-            }
-        }
-    }
-    plan
+    found.points.iter().any(|point| {
+        ["x", "y", "epsg"].iter().any(|key| {
+            let given = point.get(*key).and_then(Value::as_f64);
+            !given.is_some_and(|v| take(&mut pool, v))
+        })
+    })
 }
 
 /// La question du garde-fou.
@@ -740,6 +764,36 @@ mod tests {
             reason: "Hors catalogue.".into(),
         };
         assert_eq!(guard_coordinates(&registry, refusal.clone(), ""), refusal);
+    }
+
+    #[test]
+    fn a_rejected_output_with_an_invented_point_is_guarded_at_once() {
+        let registry = Registry::standard();
+        let request = "Trouve les parcelles à 10 minutes à pied de la gare de Villeneuve-le-Roi.";
+        // Le cas de la recette : une origine inventée sans système, rejetée par `check_plan`.
+        let partial = isochrone(json!({"x": 2.458, "y": 48.658}), json!(10));
+        assert!(registry.check_plan(&partial).is_err());
+        assert!(guard_rejected(&registry, &partial, request).is_some_and(|q| is_guard(&q)));
+        // Un rejet sans affaire de coordonnées suit son cours : commande inconnue, point donné.
+        let unknown = calls(json!([{"command": "no.such", "params": {}}]));
+        assert_eq!(guard_rejected(&registry, &unknown, request), None);
+        let given = calls(json!([{"command": "analysis.isochrone", "params": {
+            "layer_id": ROUTES, "origin": {"x": 652000, "y": 6850000, "epsg": 2154},
+            "mode": "walk", "duration": {"value": 10, "unit": "min"}, "out": "x.gpkg"}}]));
+        assert_eq!(
+            guard_rejected(
+                &registry,
+                &given,
+                "10 min depuis 652 000 / 6 850 000 (EPSG:2154)"
+            ),
+            None
+        );
+        // Une question ou un refus rejetés ne sont pas des points.
+        let empty = Plan::Question {
+            question: " ".into(),
+            source: QuestionSource::Model,
+        };
+        assert_eq!(guard_rejected(&registry, &empty, request), None);
     }
 
     #[test]

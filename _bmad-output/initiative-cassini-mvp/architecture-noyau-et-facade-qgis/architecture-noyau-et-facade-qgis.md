@@ -431,10 +431,13 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
     - **D'une étape.** Le paramètre entier est une référence `step:` vers un
       champ que le schéma de sortie de cette étape déclare `Point`. Une
       coordonnée lue dans l'inventaire du projet ne compte pas.
-    - **Où.** Une fonction pure du noyau, appliquée une fois à la fin de la
-      composition, après la validation et la redemande, sans changer le prompt
-      ni le tour de redemande ; tous les chemins de composition y passent
-      (canal, ligne de commande, mesures).
+    - **Où.** Une fonction pure du noyau, appliquée au plan validé, sans changer
+      le prompt ni le tour de redemande ; tous les chemins de composition y
+      passent (canal, ligne de commande, mesures). Une sortie rejetée par la
+      validation passe aussi par elle (décision du propriétaire, 2026-10-23,
+      recette de 5.16) : si elle porte un point qui ne vient ni de la demande ni
+      d'une étape, même incomplet, la question est rendue tout de suite, sans
+      redemande ; sinon le rejet suit son cours.
     - **Trace.** La question rendue porte sa provenance, `model` ou `guard`,
       hors de la grammaire du modèle. Le journal (AD-11) n'en porte rien : il ne
       tient que des étapes exécutées, et le rejeu ne compose pas.
