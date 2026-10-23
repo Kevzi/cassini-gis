@@ -3,7 +3,7 @@ title: 'Selecteur de modele dans les Reglages du panneau'
 type: 'feature'
 ticket: '14'
 created: '2026-10-23'
-status: 'built'
+status: done
 baseline_revision: '467b2ceded260479e4860b9c844fe9872823fd33'
 route: 'full'
 route_source: 'auto'
