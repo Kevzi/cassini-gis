@@ -1109,7 +1109,20 @@ mod tests {
             let next = self.first.borrow_mut().pop_front();
             next.map(Ok)
                 .unwrap_or_else(|| self.outcome.clone())
-                .map(|v| serde_json::from_value(v).expect("plan de test lisible"))
+                .map(|v| {
+                    let guard = v.get("source").and_then(Value::as_str) == Some("guard");
+                    let plan = serde_json::from_value(v).expect("plan de test lisible");
+                    // La provenance ne se lit pas d'un JSON : le test la pose à la main.
+                    match plan {
+                        crate::plan::Plan::Question { question, .. } if guard => {
+                            crate::plan::Plan::Question {
+                                question,
+                                source: crate::plan::QuestionSource::Guard,
+                            }
+                        }
+                        other => other,
+                    }
+                })
         }
 
         fn models(&self, _registry: &Registry) -> Result<Vec<Value>, ErrorReport> {
@@ -1853,8 +1866,28 @@ mod tests {
         c.hello_with(&ALL);
         let r = c.propose(2);
         assert!(r.get("error").is_none(), "{r}");
-        assert_eq!(r["result"], json!({"question": question}));
+        assert_eq!(
+            r["result"],
+            json!({"question": question, "source": "model"})
+        );
         assert!(r["result"].get("plan_id").is_none());
+        c.execute(3, "plan-1");
+        assert_eq!(code_of(&c.recv()), "plan.unknown");
+        c.assert_silent();
+        assert!(c.journal().is_empty());
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn a_guard_question_carries_its_source_and_is_never_executed() {
+        let plan = json!({"kind":"question","question":"Quel point ?","source":"guard"});
+        let mut c = Client::start_with(CANCEL_GRACE, composer(plan));
+        c.hello_with(&ALL);
+        let r = c.propose(2);
+        assert_eq!(
+            r["result"],
+            json!({"question": "Quel point ?", "source": "guard"})
+        );
         c.execute(3, "plan-1");
         assert_eq!(code_of(&c.recv()), "plan.unknown");
         c.assert_silent();
@@ -1873,7 +1906,10 @@ mod tests {
         c.hello_with(&ALL);
         assert_eq!(c.propose(2)["result"]["plan_id"], "plan-1");
         let r = c.propose(3);
-        assert_eq!(r["result"], json!({"question": "Quelle couche utiliser ?"}));
+        assert_eq!(
+            r["result"],
+            json!({"question": "Quelle couche utiliser ?", "source": "model"})
+        );
         c.execute(4, "plan-1");
         assert_eq!(code_of(&c.recv()), "plan.unknown");
         c.assert_silent();

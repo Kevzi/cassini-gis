@@ -59,7 +59,7 @@ pub fn validate(registry: &Registry, example: &Example) -> Result<(), String> {
         .check_plan(&plan)
         .map_err(|e| format!("{} (étape {}) : {}", e.code, e.step, e.message))?;
     match &plan {
-        Plan::Question { question } => {
+        Plan::Question { question, .. } => {
             if question.trim().is_empty() || !question.trim_end().ends_with('?') {
                 return Err("question vide ou sans point d'interrogation".into());
             }

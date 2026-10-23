@@ -132,8 +132,20 @@ class PlanClientTest(unittest.TestCase):
 
     def test_question_is_a_result_without_plan_id(self):
         ident = self.propose()
-        self.p.feed(reply(ident, {"question": "Laquelle ?"}))
-        self.assertEqual(self.events, [(client.PLAN_QUESTION, {"question": "Laquelle ?"})])
+        self.p.feed(reply(ident, {"question": "Laquelle ?", "source": "model"}))
+        self.assertEqual(self.events, [(client.PLAN_QUESTION,
+                                        {"question": "Laquelle ?", "source": "model"})])
+
+    def test_question_carries_its_source_and_defaults_to_model(self):
+        for given, expected in (("guard", "guard"), (None, "model"), ("autre", "model")):
+            self.events.clear()
+            ident = self.propose()
+            result = {"question": "Quel point ?"}
+            if given is not None:
+                result["source"] = given
+            self.p.feed(reply(ident, result))
+            self.assertEqual(self.events, [(client.PLAN_QUESTION,
+                                            {"question": "Quel point ?", "source": expected})])
 
     def test_propose_failure_keeps_code_and_french_message(self):
         for code in ("agent.refused", "ai.no_model", "agent.plan_invalid"):

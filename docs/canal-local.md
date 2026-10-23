@@ -162,8 +162,22 @@ prix), le modèle pose une **question** au lieu de deviner. Elle est rendue comm
 résultat, pas comme une erreur, et **sans `plan_id`** :
 
 ```json
-{"jsonrpc":"2.0","id":5,"result":{"question":"Aucune couche de pharmacies dans le projet : laquelle faut-il utiliser ?"}}
+{"jsonrpc":"2.0","id":5,"result":{"question":"Aucune couche de pharmacies dans le projet : laquelle faut-il utiliser ?","source":"model"}}
 ```
+
+Le champ `source`, toujours présent, dit d'où vient la question : `model` (le modèle l'a
+posée) ou `guard` (le garde-fou du noyau, AD-23). Le garde-fou s'applique à tout plan composé
+par le modèle local : une coordonnée du plan (un `Point` : x, y et code EPSG) doit venir de
+la demande — x, y et le système y figurent tous trois, comme nombres, ou le système par son
+nom (Lambert-93, WGS84) — ou d'une étape précédente (`step:<k>.<champ>` vers un champ déclaré
+`Point`). Sinon le plan n'est pas montré et le noyau rend sa question :
+
+```json
+{"jsonrpc":"2.0","id":5,"result":{"question":"Il manque à la demande un point en coordonnées : quels sont x, y et le système (code EPSG, par exemple 2154 pour le Lambert-93) ?","source":"guard"}}
+```
+
+Sur une question `guard`, l'extension remet la phrase d'origine dans la zone de saisie,
+pour que l'utilisateur la complète par le point. La provenance n'est jamais écrite au journal.
 
 Rien n'est gardé en attente : une question ne s'exécute jamais, et un `plan.execute`
 qui suit répond `plan.unknown`. Comme toute nouvelle proposition, une question efface aussi le plan qui

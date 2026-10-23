@@ -21,14 +21,55 @@ pub struct PlannedCall {
 
 /// Ce que l'agent rend : des appels à faire, un refus motivé (aucune commande ne fait la
 /// chose), ou une question (la commande existe, mais un mot de la demande ne désigne rien
-/// de l'inventaire). Une question n'est ni gardée ni exécutée : la réponse de
-/// l'utilisateur est une nouvelle demande.
+/// de l'inventaire, ou un point du plan ne vient pas de la demande). Une question n'est ni
+/// gardée ni exécutée : la réponse de l'utilisateur est une nouvelle demande.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Plan {
-    Calls { calls: Vec<PlannedCall> },
-    Refusal { reason: String },
-    Question { question: String },
+    Calls {
+        calls: Vec<PlannedCall>,
+    },
+    Refusal {
+        reason: String,
+    },
+    Question {
+        question: String,
+        /// Provenance de la question (AD-23), hors de la grammaire du modèle : jamais lue
+        /// d'un JSON, donc toujours `model` pour une sortie du modèle ; omise à l'écriture
+        /// quand elle vaut `model`, pour que les complétions d'entraînement restent
+        /// identiques à l'octet.
+        #[serde(
+            default,
+            skip_deserializing,
+            skip_serializing_if = "QuestionSource::is_model"
+        )]
+        source: QuestionSource,
+    },
+}
+
+/// D'où vient une question : du modèle, ou du garde-fou sur les coordonnées du noyau
+/// (`point::guard_coordinates`). Jamais écrite au journal (AD-11).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QuestionSource {
+    #[default]
+    Model,
+    Guard,
+}
+
+impl QuestionSource {
+    /// Vrai pour une question du modèle.
+    pub fn is_model(&self) -> bool {
+        *self == QuestionSource::Model
+    }
+
+    /// Nom stable de la provenance : `model` ou `guard`.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            QuestionSource::Model => "model",
+            QuestionSource::Guard => "guard",
+        }
+    }
 }
 
 /// Un plan refusé : code stable, message français, étape fautive (à partir de 1).
@@ -48,11 +89,11 @@ fn error(code: &'static str, step: usize, message: String) -> PlanError {
 }
 
 /// Référence lue : numéro d'étape et champ de premier niveau éventuel.
-type Reference = (usize, Option<String>);
+pub(crate) type Reference = (usize, Option<String>);
 
 /// Lit une valeur de paramètre : `None` si ce n'est pas une référence,
 /// `Some(Err)` si elle commence par `step:` mais est mal formée.
-fn parse_reference(value: &Value) -> Option<Result<Reference, String>> {
+pub(crate) fn parse_reference(value: &Value) -> Option<Result<Reference, String>> {
     let text = value.as_str()?.strip_prefix("step:")?;
     let (number, field) = match text.split_once('.') {
         Some((n, f)) => (n, Some(f)),
@@ -601,13 +642,52 @@ mod tests {
         }))
         .unwrap();
         assert!(
-            matches!(&question, Plan::Question { question } if question.contains("pharmacies"))
+            matches!(&question, Plan::Question { question, source: QuestionSource::Model }
+                if question.contains("pharmacies"))
         );
         assert_eq!(registry().check_plan(&question), Ok(()));
         let value = serde_json::to_value(&question).unwrap();
         assert_eq!(value["kind"], "question");
         let again: Plan = serde_json::from_value(value).unwrap();
         assert_eq!(again, question);
+    }
+
+    #[test]
+    fn the_model_cannot_write_the_guard_source() {
+        // Le modèle écrit `source` : le champ est ignoré, la question reste `model`.
+        let written: Plan = serde_json::from_value(json!({
+            "kind": "question", "question": "Laquelle ?", "source": "guard"
+        }))
+        .unwrap();
+        assert!(matches!(
+            &written,
+            Plan::Question {
+                source: QuestionSource::Model,
+                ..
+            }
+        ));
+        // Une question du modèle s'écrit sans `source`, comme avant (octet pour octet).
+        assert_eq!(
+            serde_json::to_string(&written).unwrap(),
+            r#"{"kind":"question","question":"Laquelle ?"}"#
+        );
+        // Celle du garde-fou porte sa provenance, mais ne se relit pas comme telle.
+        let guard = Plan::Question {
+            question: "Quel point ?".into(),
+            source: QuestionSource::Guard,
+        };
+        let value = serde_json::to_value(&guard).unwrap();
+        assert_eq!(value["source"], "guard");
+        let again: Plan = serde_json::from_value(value).unwrap();
+        assert!(matches!(
+            again,
+            Plan::Question {
+                source: QuestionSource::Model,
+                ..
+            }
+        ));
+        assert_eq!(QuestionSource::Guard.as_str(), "guard");
+        assert_eq!(QuestionSource::Model.as_str(), "model");
     }
 
     #[test]

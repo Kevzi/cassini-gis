@@ -33,7 +33,10 @@ REPLAY_DONE = "replay_done"  # payload : {"steps", "identical"}
 REPLAY_FAILED = "replay_failed"  # payload : {"code", "message", "step"}
 # Plans de l'agent (docs/canal-local.md, « Plans de l'agent »).
 PLAN_PROPOSED = "plan_proposed"  # payload : {"plan_id", "plan"}
-PLAN_QUESTION = "plan_question"  # payload : {"question"}
+PLAN_QUESTION = "plan_question"  # payload : {"question", "source"}
+# Provenance d'une question : le modèle, ou le garde-fou du noyau sur les coordonnées.
+SOURCE_MODEL = "model"
+SOURCE_GUARD = "guard"
 PLAN_FAILED = "plan_failed"  # payload : {"code", "message"} (proposition ou refus)
 PLAN_STEP = "plan_step"  # payload : {"step", "command"}
 PLAN_DONE = "plan_done"  # payload : {"steps"}
@@ -422,7 +425,10 @@ class CoreClient:
             plan_id = result.get("plan_id")
             plan = result.get("plan")
             if isinstance(question, str) and question.strip():
-                self._notify(PLAN_QUESTION, {"question": question})
+                # Provenance : `model`, ou `guard` (garde-fou du noyau sur les coordonnées).
+                source = result.get("source")
+                source = source if source in (SOURCE_MODEL, SOURCE_GUARD) else SOURCE_MODEL
+                self._notify(PLAN_QUESTION, {"question": question, "source": source})
             elif isinstance(plan_id, str) and isinstance(plan, dict):
                 self._notify(PLAN_PROPOSED, {"plan_id": plan_id, "plan": plan})
             else:

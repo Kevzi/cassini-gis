@@ -9,6 +9,7 @@ use std::fmt;
 
 use serde_json::Value;
 
+use crate::point::is_point;
 use crate::registry::{CommandSpec, Registry, RunsIn};
 
 /// Dialecte JSON Schema que doivent déclarer les schémas engendrés.
@@ -132,6 +133,15 @@ fn check_spec(spec: &CommandSpec, out: &mut Vec<ContractViolation>) {
         ("des paramètres", &spec.params_schema),
         ("du résultat", &spec.output_schema),
     ] {
+        if has_bare_coordinate(schema) {
+            out.push(violation(
+                "contract.bare_coordinate",
+                id,
+                &format!(
+                    "le schéma {which} déclare un champ numérique `x` ou `y` hors du type `Point` partagé (AD-23)."
+                ),
+            ));
+        }
         if has_unbounded_geometries(schema) {
             out.push(violation(
                 "contract.geometry_unbounded",
@@ -225,6 +235,65 @@ fn is_valid_id(id: &str) -> bool {
         (Some(domain), Some(verb), None) => segment_ok(domain) && segment_ok(verb),
         _ => false,
     }
+}
+
+/// Vrai si un objet du schéma, autre qu'un `Point`, déclare un champ `x` ou `y` numérique :
+/// toute coordonnée du registre est le `Point` partagé (AD-23). Une emprise (`xmin`, `ymax`…)
+/// n'est pas concernée.
+fn has_bare_coordinate(root: &Value) -> bool {
+    fn walk(node: &Value, root: &Value) -> bool {
+        match node {
+            Value::Object(map) => {
+                if is_point(node, root) {
+                    return false;
+                }
+                let bare = map
+                    .get("properties")
+                    .and_then(Value::as_object)
+                    .is_some_and(|props| {
+                        ["x", "y"]
+                            .iter()
+                            .any(|name| props.get(*name).is_some_and(|p| is_numeric(p, root, 0)))
+                    });
+                bare || map.values().any(|v| walk(v, root))
+            }
+            Value::Array(items) => items.iter().any(|v| walk(v, root)),
+            _ => false,
+        }
+    }
+    walk(root, root)
+}
+
+/// Le sous-schéma accepte-t-il un nombre (directement ou par une alternative) ? Suit les
+/// `$ref` internes.
+fn is_numeric(schema: &Value, root: &Value, depth: usize) -> bool {
+    if depth > 8 {
+        return false;
+    }
+    let Value::Object(map) = schema else {
+        return false;
+    };
+    let numeric = |t: &Value| t == "number" || t == "integer";
+    let typed = match map.get("type") {
+        Some(Value::Array(ts)) => ts.iter().any(numeric),
+        Some(t) => numeric(t),
+        None => false,
+    };
+    if typed {
+        return true;
+    }
+    if let Some(Value::String(target)) = map.get("$ref") {
+        if let Some(resolved) = target.strip_prefix('#').and_then(|p| root.pointer(p)) {
+            if is_numeric(resolved, root, depth + 1) {
+                return true;
+            }
+        }
+    }
+    ["anyOf", "oneOf", "allOf"].iter().any(|key| {
+        map.get(*key)
+            .and_then(Value::as_array)
+            .is_some_and(|alts| alts.iter().any(|a| is_numeric(a, root, depth + 1)))
+    })
 }
 
 /// Vrai si un tableau de géométries, sans `maxItems`, apparaît quelque part dans le schéma.
@@ -427,6 +496,64 @@ mod tests {
         });
         s
     });
+    command!(BareCoordinate, |mut s| {
+        s.params_schema = json!({
+            "$schema": DIALECT,
+            "type": "object",
+            "properties": {
+                "observer": {"$ref": "#/$defs/Observer"}
+            },
+            "$defs": {
+                "Observer": {
+                    "type": "object",
+                    "properties": {
+                        "x": {"type": "number"},
+                        "y": {"type": "number"},
+                        "epsg": {"type": "integer"}
+                    }
+                }
+            }
+        });
+        s
+    });
+    command!(NestedBareCoordinate, |mut s| {
+        s.output_schema = json!({
+            "$schema": DIALECT,
+            "type": "object",
+            "properties": {
+                "vertices": {"type": "array", "maxItems": 4, "items": {
+                    "type": "object",
+                    "properties": {"x": {"type": ["number", "null"]}, "y": {"type": "number"}}
+                }}
+            }
+        });
+        s
+    });
+    command!(MarkedPointAndExtent, |mut s| {
+        s.params_schema = json!({
+            "$schema": DIALECT,
+            "type": "object",
+            "properties": {
+                "from": {"$ref": "#/$defs/Point"},
+                "to": {"anyOf": [{"$ref": "#/$defs/Point"}, {"type": "null"}]},
+                "extent": {"type": "object", "properties": {
+                    "xmin": {"type": "number"}, "ymax": {"type": "number"}}},
+                "label": {"type": "object", "properties": {"x": {"type": "string"}}}
+            },
+            "$defs": {
+                "Point": {
+                    "type": "object",
+                    "x-cassini": "point",
+                    "properties": {
+                        "x": {"type": "number"},
+                        "y": {"type": "number"},
+                        "epsg": {"type": "integer"}
+                    }
+                }
+            }
+        });
+        s
+    });
     command!(PathParamMissing, |s| s.path_params(&["pth"]));
     command!(OutputParamMissing, |s| s.output_params(&["out"]));
     command!(PathParamNotString, |mut s| {
@@ -547,6 +674,23 @@ mod tests {
         assert_eq!(violations[0].code, "contract.geometry_unbounded");
         assert_eq!(violations[0].id, "analysis.buffer");
         assert!(violations[0].message.contains("AD-8"));
+    }
+
+    #[test]
+    fn a_bare_coordinate_outside_point_is_refused() {
+        let violations = only(BareCoordinate).check_contract();
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].code, "contract.bare_coordinate");
+        assert!(violations[0].message.contains("AD-23"));
+        assert!(violations[0].message.contains("des paramètres"));
+        let nested = only(NestedBareCoordinate).check_contract();
+        assert_eq!(
+            codes(&only(NestedBareCoordinate)),
+            ["contract.bare_coordinate"]
+        );
+        assert!(nested[0].message.contains("du résultat"));
+        // Le `Point` marqué, une emprise et un `x` texte passent.
+        assert!(only(MarkedPointAndExtent).check_contract().is_empty());
     }
 
     #[test]

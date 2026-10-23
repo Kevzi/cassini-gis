@@ -426,7 +426,8 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
     - **Dans la demande.** x, y et le système y figurent tous trois, comparés
       comme nombres, x et y distincts l'un de l'autre et des autres nombres
       déjà pris par le plan (distance, durée). Un système absent de la demande
-      n'est pas pris au projet : c'est la question.
+      n'est pas pris au projet : c'est la question. Un système nommé compte pour
+      son code, sur une liste fermée : Lambert-93 (2154) et WGS84 (4326).
     - **D'une étape.** Le paramètre entier est une référence `step:` vers un
       champ que le schéma de sortie de cette étape déclare `Point`. Une
       coordonnée lue dans l'inventaire du projet ne compte pas.

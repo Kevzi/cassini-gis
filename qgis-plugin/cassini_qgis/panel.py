@@ -512,7 +512,12 @@ class CassiniPanel(QWidget):
             agent.proposed(payload.get("plan_id"), payload.get("plan"))
             _announce(self.plan_title, self.t("live_plan"))
         elif kind == client.PLAN_QUESTION:
-            agent.question(payload.get("question", ""))
+            agent.question(payload.get("question", ""), payload.get("source", "model"))
+            restored = agentview.request_to_restore(
+                agent, self._last_request, self.input.toPlainText()
+            )
+            if restored is not None:
+                self.input.setPlainText(restored)  # à compléter par le point
             _announce(self.plan_notice, self.t("live_question"))
         elif kind == client.PLAN_FAILED:
             agent.failed(payload.get("code", ""), payload.get("message", ""))

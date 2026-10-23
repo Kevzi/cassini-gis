@@ -169,6 +169,23 @@ class AgentViewTest(unittest.TestCase):
         self.assertFalse(c["approve_visible"])
         self.assertTrue(c["input_enabled"])
         self.assertEqual(av.notice_text(self.v, "en"), "Laquelle ?")
+        self.assertFalse(self.v.restore_request)  # question du modèle : la saisie reste vide
+        self.assertIsNone(av.request_to_restore(self.v, "Tampon autour des pharmacies.", ""))
+
+    def test_guard_question_asks_to_restore_the_request(self):
+        self.v.generating()
+        self.v.question("Il manque un point.", "guard")
+        self.assertTrue(self.v.restore_request)
+        self.assertEqual(av.notice_text(self.v, "fr"), "Il manque un point.")
+        self.assertTrue(ctl(self.v)["input_enabled"])
+        self.assertEqual(av.request_to_restore(self.v, "10 min à pied", ""), "10 min à pied")
+        self.assertEqual(av.request_to_restore(self.v, "10 min à pied", "  "), "10 min à pied")
+        # Une saisie déjà commencée n'est pas écrasée ; sans phrase, rien à rendre.
+        self.assertIsNone(av.request_to_restore(self.v, "10 min à pied", "x 652000"))
+        self.assertIsNone(av.request_to_restore(self.v, None, ""))
+        # Tout nouvel événement l'oublie.
+        self.v.generating()
+        self.assertFalse(self.v.restore_request)
 
     def test_proposal_failure(self):
         self.v.generating()

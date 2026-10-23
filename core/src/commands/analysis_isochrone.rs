@@ -5,6 +5,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::point::Point;
 use crate::registry::{CommandSpec, Delegated, Registration, RunsIn};
 
 // Pas de commentaire par variante : schemars en ferait une liste de `oneOf`, alors que le
@@ -51,18 +52,6 @@ fn positive<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
     }
 }
 
-/// Point d'origine, en coordonnées avec son système (jamais de coordonnée nue).
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct Origin {
-    /// Abscisse (X, ou longitude).
-    pub x: f64,
-    /// Ordonnée (Y, ou latitude).
-    pub y: f64,
-    /// Code EPSG du système des coordonnées (ex. 2154 pour le Lambert-93).
-    pub epsg: u32,
-}
-
 /// Paramètres de `analysis.isochrone`.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -72,7 +61,7 @@ pub struct AnalysisIsochroneParams {
     /// l'utilisateur et doit être dans un système métrique.
     pub layer_id: String,
     /// Point de départ, avec son système de coordonnées.
-    pub origin: Origin,
+    pub origin: Point,
     /// Mode de déplacement : `walk` à pied (5 km/h) ou `car` en voiture (50 km/h).
     pub mode: TravelMode,
     /// Durée maximale du trajet.

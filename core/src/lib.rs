@@ -11,6 +11,7 @@ pub mod error;
 pub mod exec;
 pub mod journal;
 pub mod plan;
+pub mod point;
 pub mod registry;
 pub mod serve;
 

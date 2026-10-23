@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 use cassini_core::commands::model_list::PromptKind;
 use cassini_core::plan::Plan;
+use cassini_core::point::guard_coordinates;
 use cassini_core::registry::{CommandSpec, Registry};
 use serde_json::{json, Value};
 
@@ -244,7 +245,21 @@ fn catalog_entry(spec: &CommandSpec) -> Value {
             });
         }
     }
+    strip_marks(&mut params);
     json!({"id": spec.id, "description": spec.description_fr, "params": params})
+}
+
+/// Ôte du schéma montré au modèle toute marque `x-cassini` (`$defs` compris) : la marque sert
+/// au noyau (garde-fou de AD-23), le long prompt reste celui d'avant.
+fn strip_marks(node: &mut Value) {
+    match node {
+        Value::Object(map) => {
+            map.remove(cassini_core::point::MARK_KEY);
+            map.values_mut().for_each(strip_marks);
+        }
+        Value::Array(items) => items.iter_mut().for_each(strip_marks),
+        _ => {}
+    }
 }
 
 /// La partie fixe du message système : consignes, catalogue et exemples. Elle ne dépend
@@ -359,7 +374,7 @@ fn judge(registry: &Registry, completion: &Completion) -> Result<Plan, Vec<Strin
             Err(vec!["le refus ne donne aucune raison".to_string()])
         }
         Plan::Refusal { .. } => Ok(plan),
-        Plan::Question { question } if question.trim().is_empty() => {
+        Plan::Question { question, .. } if question.trim().is_empty() => {
             Err(vec!["la question est vide".to_string()])
         }
         Plan::Question { .. } => Ok(plan),
@@ -406,7 +421,9 @@ fn judge(registry: &Registry, completion: &Completion) -> Result<Plan, Vec<Strin
 /// Au plus deux appels : la première sortie, puis, si elle est rejetée, une
 /// seule redemande qui cite les écarts. Un refus du modèle rend `agent.refused`
 /// sans redemande ; une question (un mot de la demande ne désigne rien de
-/// l'inventaire) est un résultat, `Ok(Plan::Question)`, rendue sans redemande ;
+/// l'inventaire) est un résultat, `Ok(Plan::Question)`, rendue sans redemande ; un plan dont
+/// un point ne vient ni de `request` ni d'une étape devient la question du garde-fou
+/// (`cassini_core::point::guard_coordinates`) ;
 /// deux sorties rejetées rendent `agent.plan_invalid`. Aucun plan invalide n'est
 /// jamais rendu.
 pub fn compose_plan(
@@ -447,7 +464,10 @@ pub fn compose_plan_with(
         };
         match judge(registry, &completion) {
             Ok(Plan::Refusal { reason }) => return Err(AgentError::Refused(reason)),
-            Ok(plan) => return Ok(plan),
+            // Garde-fou de AD-23 sur les coordonnées, une seule fois, après le jugement et la
+            // redemande : un point qui ne vient ni de la demande ni d'une étape devient une
+            // question à provenance `guard`.
+            Ok(plan) => return Ok(guard_coordinates(registry, plan, request)),
             Err(errors) => {
                 if attempt == 0 {
                     turns = retry_turns(turns, &completion.text, &errors);
@@ -574,10 +594,43 @@ mod tests {
         assert_eq!(
             result.unwrap(),
             Plan::Question {
-                question: "Aucune couche de pharmacies : laquelle utiliser ?".to_string()
+                question: "Aucune couche de pharmacies : laquelle utiliser ?".to_string(),
+                source: cassini_core::plan::QuestionSource::Model,
             }
         );
         assert_eq!(seen.len(), 1);
+    }
+
+    const ISOCHRONE: &str = r#"{"kind":"calls","calls":[{"command":"analysis.isochrone","params":{"layer_id":"routes_1","origin":{"x":652000,"y":6850000,"epsg":2154},"mode":"walk","duration":{"value":10,"unit":"min"}}}]}"#;
+
+    /// Compose `request` sur un réseau, avec une sortie scriptée du modèle.
+    fn compose_request(request: &str, output: &str) -> Result<Plan, AgentError> {
+        let inventory = json!({"layers": [{"layer_id": "routes_1", "name": "Routes"}]});
+        let mut calls = 0;
+        compose_plan(&registry(), &inventory, request, &mut |_| {
+            calls += 1;
+            assert_eq!(calls, 1, "le garde-fou ne redemande pas");
+            Ok(done(output))
+        })
+    }
+
+    #[test]
+    fn a_point_absent_from_the_request_becomes_the_guard_question() {
+        let got = compose_request("Zone à 10 min à pied depuis la mairie.", ISOCHRONE).unwrap();
+        assert_eq!(
+            got,
+            Plan::Question {
+                question: cassini_core::point::GUARD_QUESTION.to_string(),
+                source: cassini_core::plan::QuestionSource::Guard,
+            }
+        );
+    }
+
+    #[test]
+    fn a_point_given_in_the_request_leaves_the_plan_unchanged() {
+        let request = "Zone à 10 min à pied depuis x 652 000, y 6 850 000 en EPSG:2154.";
+        let got = compose_request(request, ISOCHRONE).unwrap();
+        assert_eq!(got, serde_json::from_str::<Plan>(ISOCHRONE).unwrap());
     }
 
     #[test]
@@ -745,6 +798,11 @@ mod tests {
         let buffer = catalog_entry(reg.spec("analysis.buffer").unwrap());
         assert!(buffer["params"]["properties"].get("out").is_none());
         assert!(buffer["params"]["properties"].get("layer_id").is_some());
+        // La marque du `Point` reste au noyau : le modèle ne la voit pas.
+        assert!(!text.contains("x-cassini"));
+        let isochrone = catalog_entry(reg.spec("analysis.isochrone").unwrap());
+        assert!(isochrone["params"]["$defs"]["Point"].is_object());
+        assert!(!isochrone.to_string().contains("x-cassini"));
         assert!(text.contains("gares_1"), "l'inventaire est fourni");
         assert!(text.contains("\"kind\":\"refusal\""), "un exemple de refus");
         assert!(

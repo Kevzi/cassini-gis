@@ -272,6 +272,7 @@ fn each_outcome_is_named_and_an_agent_error_still_gives_a_line() {
     assert_eq!(outcome(&Ok(calls)), "plan, 1 étape(s)");
     let question = Plan::Question {
         question: "Quelle couche ?".into(),
+        source: cassini_core::plan::QuestionSource::Model,
     };
     assert_eq!(outcome(&Ok(question)), "question");
     assert_eq!(outcome(&Err(AgentError::Refused("non".into()))), "refus");

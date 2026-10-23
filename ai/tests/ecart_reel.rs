@@ -20,7 +20,7 @@ mod common;
 use std::fmt;
 
 use cassini_ai::plan::{compose_plan_with, model_files_generator, AgentError};
-use cassini_core::plan::Plan;
+use cassini_core::plan::{Plan, QuestionSource};
 use cassini_core::registry::Registry;
 use serde_json::{json, Value};
 
@@ -386,7 +386,7 @@ fn ecart_reel_score_on_the_held_out_set() {
     // (justes, total) par sorte attendue.
     let mut score = [("calls", 0, 0), ("question", 0, 0), ("refusal", 0, 0)];
     let mut invalid = Vec::new();
-    let (mut retried, mut saved) = (0, 0);
+    let (mut retried, mut saved, mut guarded) = (0, 0, 0);
     let started = std::time::Instant::now();
     for sentence in &sentences {
         let id = sentence["id"].as_str().unwrap();
@@ -403,6 +403,13 @@ fn ecart_reel_score_on_the_held_out_set() {
             compose_plan_with(style, &registry, &inventory, text, &mut generator)
         };
         let graded = grade(expected, &got);
+        guarded += usize::from(matches!(
+            &got,
+            Ok(Plan::Question {
+                source: QuestionSource::Guard,
+                ..
+            })
+        ));
         // Aucun plan invalide n'est jamais rendu : un `Ok` qui échoue à `check_plan` est faux,
         // et l'essai échoue après la ligne `SCORE`.
         let valid = got
@@ -435,7 +442,7 @@ fn ecart_reel_score_on_the_held_out_set() {
     }
     let right: usize = score.iter().map(|r| r.1).sum();
     eprintln!(
-        "SCORE {right}/{} : plans {}/{}, questions {}/{}, refus {}/{} ({style:?}, {} s)",
+        "SCORE {right}/{} : plans {}/{}, questions {}/{}, refus {}/{}, dont {guarded} question(s) du garde-fou ({style:?}, {} s)",
         sentences.len(),
         score[0].1,
         score[0].2,
@@ -512,6 +519,7 @@ fn an_expected_question_answered_by_a_plan_is_a_kind_gap() {
     );
     let question = Ok(Plan::Question {
         question: "Laquelle ?".into(),
+        source: QuestionSource::Model,
     });
     assert_eq!(grade(&expected, &question), Ok(()));
     let invalid = Err(AgentError::PlanInvalid(vec!["écart".into()]));

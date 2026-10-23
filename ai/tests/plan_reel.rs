@@ -16,7 +16,7 @@
 mod common;
 
 use cassini_ai::plan::{compose_plan_with, model_files_generator, AgentError, PromptStyle};
-use cassini_core::plan::Plan;
+use cassini_core::plan::{Plan, QuestionSource};
 use cassini_core::registry::Registry;
 use serde_json::{json, Value};
 
@@ -92,7 +92,7 @@ fn plan_reel_at_least_80_percent_of_the_plans_match() {
     let inventory: Value = serde_json::from_str(INVENTORY).unwrap();
     let sentences: Vec<Value> = serde_json::from_str(SENTENCES).unwrap();
     let mut generator = model_files_generator(files);
-    let (mut right, mut total, mut questions) = (0, 0, 0);
+    let (mut right, mut total, mut questions, mut guarded) = (0, 0, 0, 0);
     for sentence in &sentences {
         let (id, text) = (
             sentence["id"].as_str().unwrap(),
@@ -122,8 +122,17 @@ fn plan_reel_at_least_80_percent_of_the_plans_match() {
         right += usize::from(ok);
         // Une phrase claire ne doit pas devenir une question (déjà un échec ci-dessus).
         questions += usize::from(matches!(&got, Ok(Plan::Question { .. })));
+        guarded += usize::from(matches!(
+            &got,
+            Ok(Plan::Question {
+                source: QuestionSource::Guard,
+                ..
+            })
+        ));
     }
-    eprintln!("SCORE {right}/{total} plans conformes, {questions} questions");
+    eprintln!(
+        "SCORE {right}/{total} plans conformes, {questions} questions, dont {guarded} du garde-fou"
+    );
     // Les deux seuils sont jugés ensemble : un score sous la barre ne cache pas le plafond.
     let cap = question_cap(style);
     let failures: Vec<String> = [

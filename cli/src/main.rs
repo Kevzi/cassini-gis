@@ -488,7 +488,8 @@ fn default_model(registry: &Registry) -> Result<std::path::PathBuf, ErrorReport>
 /// `cassini plan <phrase> --inventory <fichier.json> [--model <fichier.gguf|.modele.json>]` :
 /// compose le plan d'une demande (AD-23) et l'affiche en JSON. `--model` prend un GGUF seul ou
 /// une déclaration de modèle (base, adaptateur, prompt). Rien n'est exécuté. Une question du
-/// modèle (`{"kind":"question",...}`) est un résultat : affichée sur `out`, code 0. Un plan
+/// modèle ou du garde-fou sur les coordonnées (`{"kind":"question",...}`, `"source":"guard"`
+/// pour le second) est un résultat : affichée sur `out`, code 0. Un plan
 /// invalide n'est jamais affiché : l'erreur `agent.plan_invalid` ou `agent.refused` sort sur
 /// `err`.
 fn plan(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
@@ -557,7 +558,8 @@ fn plan(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
 }
 
 /// Affiche le résultat d'une composition : un plan ou une question en JSON sur `out` (code 0),
-/// une erreur typée sur `err`.
+/// une erreur typée sur `err`. La provenance d'une question n'est écrite que pour le garde-fou
+/// (`"source":"guard"`) : une question du modèle garde sa forme d'avant.
 fn print_composed(
     composed: Result<cassini_core::plan::Plan, cassini_ai::plan::AgentError>,
     out: &mut dyn Write,
@@ -980,6 +982,7 @@ mod tests {
     fn a_question_is_printed_as_json_on_out_with_code_0() {
         let question = cassini_core::plan::Plan::Question {
             question: "Aucune couche de pharmacies : laquelle utiliser ?".to_string(),
+            source: cassini_core::plan::QuestionSource::Model,
         };
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let code = print_composed(Ok(question), &mut out, &mut err);
@@ -990,6 +993,23 @@ mod tests {
         assert_eq!(
             shown,
             json!({"kind": "question", "question": "Aucune couche de pharmacies : laquelle utiliser ?"})
+        );
+    }
+
+    #[test]
+    fn a_guard_question_is_printed_with_its_source() {
+        let question = cassini_core::plan::Plan::Question {
+            question: cassini_core::point::GUARD_QUESTION.to_string(),
+            source: cassini_core::plan::QuestionSource::Guard,
+        };
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        assert_eq!(print_composed(Ok(question), &mut out, &mut err), 0);
+        assert!(err.is_empty());
+        let shown: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(
+            shown,
+            json!({"kind": "question", "question": cassini_core::point::GUARD_QUESTION,
+                "source": "guard"})
         );
     }
 

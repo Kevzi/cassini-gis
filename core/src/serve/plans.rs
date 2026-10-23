@@ -24,7 +24,7 @@ pub trait Composer {
     /// l'extension (`project.inventory`, hors journal) : à appeler seulement une fois prêt à
     /// composer, pour qu'un modèle absent ne coûte aucun ordre. Le plan rendu est vérifié
     /// ensuite par le noyau ; un refus du modèle se rend en erreur `agent.refused`, une
-    /// question (`Plan::Question`) en résultat `{"question"}`, sans `plan_id` : elle n'est
+    /// question (`Plan::Question`) en résultat `{"question", "source"}`, sans `plan_id` : elle n'est
     /// jamais gardée, donc jamais exécutable. `model` est un nom de la liste de `models`
     /// (comparé tel quel) ; absent, le premier modèle sans problème.
     fn compose(
@@ -114,7 +114,8 @@ fn verify(state: &State<'_>, plan: &Plan) -> Result<(), ErrorReport> {
 }
 
 /// `plan.propose {request, model?}` : inventaire, composition, vérification ; le plan est gardé.
-/// Une question du modèle est rendue telle quelle (`{"question"}`) et rien n'attend.
+/// Une question (du modèle ou du garde-fou) est rendue telle quelle (`{"question", "source"}`)
+/// et rien n'attend.
 pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, RpcError> {
     // Une nouvelle proposition remplace l'ancienne, même si elle échoue (paramètres compris).
     state.pending = None;
@@ -157,8 +158,9 @@ pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<V
         ));
     }
     // Une question est une réplique, pas un plan : rien n'est gardé, aucun `plan_id`.
-    if let Plan::Question { question } = &plan {
-        return Ok(json!({"question": question}));
+    // Sa provenance est toujours explicite : `model`, ou `guard` (AD-23, coordonnées).
+    if let Plan::Question { question, source } = &plan {
+        return Ok(json!({"question": question, "source": source.as_str()}));
     }
     verify(state, &plan).map_err(RpcError::business)?;
     state.next_plan += 1;

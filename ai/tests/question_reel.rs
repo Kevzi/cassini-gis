@@ -13,7 +13,7 @@
 mod common;
 
 use cassini_ai::plan::{compose_plan_with, model_files_generator};
-use cassini_core::plan::Plan;
+use cassini_core::plan::{Plan, QuestionSource};
 use cassini_core::registry::Registry;
 use serde_json::Value;
 
@@ -59,7 +59,7 @@ fn question_reel_at_least_9_of_12_ambiguous_requests_get_a_question() {
     let registry = Registry::standard();
     let inventory: Value = serde_json::from_str(INVENTORY).unwrap();
     let mut generator = model_files_generator(files);
-    let mut questions = 0;
+    let (mut questions, mut guarded) = (0, 0);
     for (id, text) in AMBIGUOUS {
         let got = compose_plan_with(style, &registry, &inventory, text, &mut generator);
         let ok = matches!(&got, Ok(Plan::Question { .. }));
@@ -74,9 +74,16 @@ fn question_reel_at_least_9_of_12_ambiguous_requests_get_a_question() {
             assert_eq!(registry.check_plan(plan), Ok(()), "{id}");
         }
         questions += usize::from(ok);
+        guarded += usize::from(matches!(
+            &got,
+            Ok(Plan::Question {
+                source: QuestionSource::Guard,
+                ..
+            })
+        ));
     }
     let total = AMBIGUOUS.len();
-    eprintln!("SCORE {questions}/{total} questions posées");
+    eprintln!("SCORE {questions}/{total} questions posées, dont {guarded} du garde-fou");
     assert!(
         questions >= 9,
         "{questions}/{total} : sous le seuil de 9 questions"

@@ -51,6 +51,8 @@ class AgentView:
         self.current = None  # numéro de l'étape en cours
         self.notice = None  # (clé de texts, valeurs) ou None
         self.rejecting = False
+        # Vrai après une question du garde-fou : la phrase d'origine revient à la saisie.
+        self.restore_request = False
 
     # -- événements -----------------------------------------------------
     def generating(self):
@@ -72,10 +74,15 @@ class AgentView:
         self.plan_id = plan_id
         self.plan = plan
 
-    def question(self, text):
-        """La question est une réplique : rien n'attend, la saisie est rendue."""
+    def question(self, text, source="model"):
+        """La question est une réplique : rien n'attend, la saisie est rendue.
+
+        Une question du garde-fou (`source` « guard » : un point du plan ne venait pas de la
+        demande) demande de compléter la phrase : le panneau la remet dans la saisie.
+        """
         self.reset()
         self.notice = ("question", {"text": text})
+        self.restore_request = source == "guard"
 
     def failed(self, code, message):
         """Échec de proposition (ou de refus) : le plan est oublié."""
@@ -204,6 +211,19 @@ def step_line(step, catalogue, lang, current=None):
         texts.tr(lang, step.status),
         step_label(step, catalogue, lang),
     )
+
+
+def request_to_restore(view, last_request, current_input):
+    """Texte à remettre dans la saisie après une question, ou None.
+
+    Seule une question du garde-fou (`view.restore_request`) rend la phrase d'origine, et
+    seulement si la saisie est vide : ce que l'utilisateur a déjà tapé n'est pas écrasé.
+    """
+    if not view.restore_request or not last_request:
+        return None
+    if current_input and current_input.strip():
+        return None
+    return last_request
 
 
 def notice_text(view, lang):
