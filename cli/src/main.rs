@@ -234,36 +234,12 @@ impl ChosenModel {
     }
 }
 
-/// Résout le fichier `path` d'un modèle : une déclaration `*.modele.json` (lue par le noyau,
-/// qui seul sait ce qu'est un modèle, AD-15) nomme la base, l'adaptateur et le prompt, dans
-/// son propre dossier ; tout autre fichier est un GGUF seul, au long prompt.
+/// Résout le fichier `path` d'un modèle par `cassini_ai::plan::resolve_model`, seule façon
+/// de lire une déclaration ; la CLI n'en garde que la mise en forme de l'erreur.
 fn resolve_model(path: &Path) -> Result<ChosenModel, ErrorReport> {
-    use cassini_core::commands::model_list::{is_declaration, read_declaration};
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    if !is_declaration(&name) {
-        return Ok(ChosenModel {
-            files: cassini_ai::ModelFiles::single(path),
-            style: cassini_ai::plan::PromptStyle::Full,
-        });
-    }
-    // Une déclaration absente est un modèle introuvable, comme un GGUF absent, à son seul nom.
-    if !path.is_file() {
-        let e = cassini_ai::AiError::ModelNotFound(name.into());
-        return Err(report(e.code(), e.to_string()));
-    }
-    let declaration = read_declaration(path)
-        .map_err(|m| report("models.bad_declaration", format!("« {name} » : {m}.")))?;
-    let folder = path.parent().unwrap_or(Path::new(""));
-    Ok(ChosenModel {
-        files: cassini_ai::ModelFiles {
-            model: folder.join(&declaration.model),
-            adapter: declaration.adapter.as_ref().map(|a| folder.join(a)),
-        },
-        style: declaration.prompt.into(),
-    })
+    let (files, style) =
+        cassini_ai::plan::resolve_model(path).map_err(|e| report(e.code(), e.to_string()))?;
+    Ok(ChosenModel { files, style })
 }
 
 fn report(code: &str, message: String) -> ErrorReport {

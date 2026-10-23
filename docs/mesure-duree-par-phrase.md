@@ -230,3 +230,11 @@ la partie fixe (4 173 jetons). Sur CPU, S05 et S10 n'ont pas la même issue qu'a
 (S10 : un plan au lieu d'un refus) : l'invite a changé d'ordre (l'inventaire vient après
 les exemples) et la partie fixe est désormais découpée en jetons à part de l'inventaire, ce
 qui peut changer les jetons à la jonction. Ce n'est pas une mesure de justesse.
+
+## Modèle ajusté (ticket 5.10, tâche 4b)
+
+`CASSINI_TEST_MODEL` prend aussi une déclaration `*.modele.json` (base + adaptateur ou modèle
+fusionné, prompt court). Avec `CASSINI_TEST_INVENTORY`, le scénario commence par `A0`, la phrase
+de démo exacte de `CLAUDE.md`, précédée d'une amorce exclue des moyennes. Relevé du 2026-10-23
+(4 fils, `0x55`) : A0 en 41,4 s avec le modèle fusionné, invite de 1 737 jetons ; détail dans
+`entrainement-du-modele.md`, « Tâche 4 : mesures ».

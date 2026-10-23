@@ -1,11 +1,11 @@
 # Entraînement du modèle de composition
 
 Le ticket 5.10 ajuste un petit modèle pour qu'il transforme une phrase française en plan
-de commandes du registre. Ce document décrit les trois premières des quatre tâches : le jeu
-d'exemples engendré, le jeu tenu à l'écart qui le mesure et le score de référence
-(tâche 1), l'entraînement reproductible et la fusion en GGUF (tâche 2), puis le
-branchement du modèle ajusté dans `ai/` (tâche 3, en fin de document). La mesure du modèle
-ajusté est la tâche 4 (voir `deferred-work.md`).
+de commandes du registre. Ce document décrit ses quatre tâches : le jeu d'exemples engendré,
+le jeu tenu à l'écart qui le mesure et le score de référence (tâche 1), l'entraînement
+reproductible et la fusion en GGUF (tâche 2), le branchement du modèle ajusté dans `ai/`
+(tâche 3), puis l'inventaire vu par le modèle dans QGIS et les mesures (tâche 4, en fin de
+document).
 
 ## Régénérer le jeu d'exemples
 
@@ -419,3 +419,182 @@ de base (`qwen3.5-4b-base-Q4_K_M.gguf`, découpeur de llama.cpp), contre 3 196 p
 brute. C'est plus que la plus longue séquence entière vue à l'entraînement (1 326 jetons) : le
 PLU réel porte 24 champs, dont des empreintes et des libellés longs. L'effet sur le modèle
 ajusté se mesure à la tâche 4b.
+
+## Tâche 4 : mesures
+
+Tâche 4b du ticket 5.10, le 2026-10-23, au commit `540f59c` plus les changements de la tâche :
+les deux déclarations de la tâche 2 (`C:\Users\kevin\cassini-modeles\ajuste-5-10-t2\`, prompt
+court) et, pour comparaison, Qwen3.5-9B Q4_K_M seul (long prompt). Décision du propriétaire
+(2026-10-23) : un chiffre sous la barre est consigné tel quel, la tâche se ferme comme
+« mesurée » et un ré-entraînement est proposé ; le ticket 5.10 reste ouvert.
+
+### Ce qui a changé pour mesurer
+
+- `cassini_ai::plan::resolve_model` lit un modèle d'une seule façon (GGUF seul → long prompt ;
+  déclaration → base, adaptateur et prompt qu'elle nomme), pour la CLI et pour les essais. Une
+  déclaration absente rend `ai.model_not_found`, une déclaration illisible
+  `models.bad_declaration`, sans recopier son dossier.
+- Les essais réels `ecart_reel`, `question_reel`, `plan_reel` et `duree_reel` prennent dans
+  `CASSINI_TEST_MODEL` un GGUF ou une déclaration (`ai/tests/common/mod.rs`).
+- `plan_reel` : au plus 2 fausses questions sur 25 pour le long prompt (concession du
+  2026-10-17), au plus 1 pour le prompt court (plafond strict du ticket).
+- `ecart_reel` : le notateur est une fonction (`grade`) testée sans modèle. Pour chaque phrase
+  manquée, il imprime la forme de l'écart (sorte, nombre d'étapes, ordre, commande ou nom du
+  paramètre à l'étape k), jamais une valeur ni le texte ; la ligne `REDEMANDES` compte les
+  phrases passées par la redemande et celles qu'elle a sauvées. Les étapes « dans un autre
+  ordre » se reconnaissent en remplaçant chaque `step:k` par l'étape k elle-même.
+- `duree_reel` : le scénario commence par `A0`, la phrase de démo exacte de `CLAUDE.md`, et
+  passe d'abord une amorce (« Décris le projet. ») qui paie seule le chargement et la lecture
+  de l'invite jusqu'à l'instantané : la ligne de `A0` ne mesure que sa demande, comme une
+  demande dans une session de `cassini serve` déjà ouverte.
+
+### Parité des découpeurs
+
+`training/entrainement/parite_decoupeurs.py` (lancée à la main, dans l'environnement `uv` de
+la chaîne) découpe les prompts d'un jeu `--format chat` par le découpeur de Hugging Face de
+la base (révision épinglée, `add_special_tokens=False`, comme l'entraînement) et par
+`llama-tokenize` du llama.cpp du cache (`--ids --no-bos`) sur le GGUF de base :
+
+```
+UV_PROJECT_ENVIRONMENT=~/.cache/cassini-entrainement/venv \
+  uv run --project training/entrainement python training/entrainement/parite_decoupeurs.py \
+  --gguf ~/cassini-entrainement/5-10-t2/qwen3.5-4b-base-Q4_K_M.gguf \
+  --jeu ~/cassini-entrainement/5-10-t2/travail/donnees/validation.jsonl
+```
+
+Résultat : **300 / 300 prompts identiques** (205 803 jetons), aucun écart. Avec le test de la
+tâche 3 (jetons de `ai` lus par segments = découpage d'un tenant par llama.cpp), le modèle voit
+dans le produit le découpage de son entraînement.
+
+### Jeu tenu à l'écart (GPU)
+
+`cargo test -p cassini-ai --release --features cuda -- --ignored --nocapture ecart_reel`,
+RTX 3070 Ti, décodage glouton :
+
+| Modèle | Prompt | Plans | Questions | Refus | **Total** | Redemandes (sauvées) | Durée |
+|---|---|---|---|---|---|---|---|
+| base + adaptateur | court | 19 / 26 | 8 / 8 | 5 / 6 | **32 / 40** | 1 (0) | 414 s |
+| fusionné | court | 20 / 26 | 8 / 8 | 5 / 6 | **33 / 40** | 2 (0) | 595 s |
+| Qwen3.5-9B (référence) | long | 19 / 26 | 7 / 8 | 6 / 6 | **32 / 40** | 1 (1) | 389 s |
+
+La référence de la tâche 1 (32/40) se retrouve à l'identique. Le modèle ajusté l'**égale**
+(base + adaptateur) ou la **dépasse d'une phrase** (fusionné), avec un modèle deux fois plus
+petit et un prompt bien plus court. La phrase de démo (H01) est juste pour les deux chemins ;
+le 9B la manque (opérateur de la sélection).
+
+Formes des écarts du modèle ajusté (les mêmes pour les deux chemins, à H11 et H20 près) :
+
+| Phrase | Écart |
+|---|---|
+| H08 | une étape de trop (2 au lieu de 1) |
+| H17, H18 | une étape de moins (3 au lieu de 4) |
+| H19 | une étape de moins (5 au lieu de 6) |
+| H20 | une étape de moins (adaptateur) ; plan invalide deux fois (fusionné) |
+| H22 | une étape de trop (4 au lieu de 3) |
+| H11 | paramètre `origin` de l'isochrone (adaptateur seulement) |
+| H40 | refus attendu : un plan après redemande (adaptateur), un plan invalide deux fois (fusionné) |
+
+Les plans de plusieurs conditions (intersections successives) sont la faiblesse : quatre
+plans sur sept manqués perdent une étape. Les questions sont parfaites (8/8), là où le 9B
+transforme H32 en refus.
+
+**Valeur de la redemande** : 1 à 2 phrases sur 40 y passent, aucune n'est sauvée par le
+modèle ajusté (le 9B en sauve une). Le modèle ajusté n'a jamais appris ce tour : il est gardé
+(AD-23, une seule redemande), mais ne rapporte rien aujourd'hui.
+
+### Seuil de clarification (GPU)
+
+| Essai | base + adaptateur | fusionné | Seuil |
+|---|---|---|---|
+| `question_reel` (12 phrases ambiguës) | **11 / 12** questions | **11 / 12** | au moins 9 : tenu |
+| `plan_reel` : fausses questions sur 25 phrases claires | **0** | **0** | au plus 1 : tenu |
+| `plan_reel` : plans conformes | **16 / 25** | **16 / 25** | 80 % (20) : **sous la barre** |
+
+`plan_reel` **échoue** donc son assertion des 80 % avec les deux déclarations (16/25) ; son
+plafond de fausses questions (0, au plus 1) est tenu.
+
+Q11 (« qui appartiennent à la commune ») rend un plan d'intersection au lieu d'une question.
+Les neuf phrases manquées de `plan_reel` (S10, S15, S18, S20 à S25) attendent toutes un
+**refus** : cadrage de la carte, altitude par commune (statistiques sur un raster), PDF en A3,
+et six demandes de terrain (champ de vision, ligne de vue, pente) que le registre n'a pas
+encore. Le modèle ajusté y rend un plan de substitution (tampon, sélection, statistiques,
+isochrone) ou un plan invalide, jamais une question. Le générateur n'a aucune famille de refus
+pour ces demandes : c'est à apprendre, pas à corriger dans le prompt.
+
+### Durée sur processeur (4 fils, 4 cœurs physiques)
+
+`duree_reel`, binaire **sans CUDA**, `CASSINI_TEST_THREADS=4`, masque d'affinité `0x55` sur le
+Ryzen 7 5800X, inventaire traduit du projet réel
+(`../donnees-test-cassini/inventaire-villeneuve-traduit-4b.json`, hors dépôt : 4 007 caractères,
+1 458 jetons du GGUF de base, par le noyau et l'extension actuels ; la tâche 4a en comptait
+2 439, chiffre pris avant les correctifs de sa relecture, et aucun filtre de longueur n'explique
+l'écart). Modèle fusionné :
+
+| id | appels | chargement (s) | lecture du prompt (s) | jetons de l'invite | jetons repris | écriture (s) | jetons écrits | total (s) | issue |
+|---|---|---|---|---|---|---|---|---|---|
+| amorce | 1 | 2,5 | 28,5 | 1737 | 0 | 2,3 | 17 | 33,4 | plan, 1 étape(s) |
+| **A0** | 1 | 0,0 | 1,0 | 1768 | 1719 | 40,4 | 248 | **41,4** | plan, 5 étape(s) |
+| A | 1 | 0,0 | 1,1 | 1772 | 1719 | 40,9 | 252 | 42,0 | plan, 5 étape(s) |
+| B1 | 1 | 0,0 | 0,5 | 1740 | 1719 | 11,4 | 71 | 11,9 | plan, 1 étape(s) |
+| B2 | 1 | 0,0 | 0,7 | 1751 | 1719 | 19,6 | 120 | 20,3 | plan, 2 étape(s) |
+| B3 | 1 | 0,0 | 0,5 | 1740 | 1719 | 3,3 | 23 | 3,9 | plan, 1 étape(s) |
+| C | 1 | 0,0 | 0,6 | 1746 | 1719 | 20,6 | 124 | 21,3 | plan, 2 étape(s) |
+| D | 1 | 0,0 | 0,5 | 1740 | 1719 | 4,3 | 27 | 4,8 | question |
+| E | 2 | 0,1 | 4,4 | 3685 | 3438 | 39,4 | 242 | 43,8 | erreur : agent.plan_invalid |
+
+Moyennes hors amorce : 23,7 s. Base + adaptateur : A0 en **43,2 s** (écriture 42,0 s),
+moyenne 26,8 s.
+
+**Verdict A0 : 41,4 s, au-dessus des 30 s.** La lecture de l'invite est réglée : l'invite
+entière ne fait plus que 1 737 jetons (contre 5 130 au long prompt), lue en 28,5 s une fois par
+session, puis 1 s par demande. Il reste l'écriture des 248 jetons du plan à cinq étapes, à
+environ 6 jetons/s, bornée par la mémoire (Qwen3.5-9B : environ 4 jetons/s au même réglage,
+relevé du 2026-10-18 de `mesure-duree-par-phrase.md`, « Après le cache »). C'est la longueur du plan
+écrit qu'il faut réduire (identifiants de couche longs recopiés à chaque étape, titre du PDF),
+ou le débit d'écriture qu'il faut augmenter.
+
+### Démo de bout en bout dans QGIS
+
+Le 2026-10-23, QGIS 3.44.15 (Python de QGIS, plateforme offscreen), projet
+`projet-test-villeneuve.qgz`, sonde `qgis-plugin/tests/probe_demo.py` (lancée à la main sous
+`python-qgis-ltr.bat`, `CASSINI_CORE` et `CASSINI_MODELS` posés, projet en argument ; refaite après
+son versionnement : même plan, PDF lisible, inventaire 0,05 s) : vrai `cassini serve` lancé par
+`qgis-plugin/cassini_qgis/client.py`, avec les vrais gestes de l'extension. Noyau construit
+avec `--features cassini-ai/cuda` ; `CASSINI_MODELS` sur un dossier qui ne contient que le
+modèle fusionné et sa déclaration (liens durs), le dossier des modèles du poste n'est pas
+touché. Phrase exacte de `CLAUDE.md` :
+
+> Trouve les parcelles constructibles du PLU à moins de 500 m d'une gare à Villeneuve-le-Roi
+> et sors-moi la carte en PDF.
+
+| Étape | Résultat | Durée |
+|---|---|---|
+| `project.inventory` (geste QGIS, demandé par `plan.propose`) | 6 couches ; traduit par le noyau, identique octet pour octet à l'inventaire de la mesure CPU | **0,05 s** |
+| Composition (`plan.propose`, chargement du modèle compris) | plan de 5 étapes, validé | 24,8 s |
+| 1. `analysis.select_by_attribute` `typezone = U` sur `plu_zones` | 137 zones | 0,17 s |
+| 2. `analysis.buffer` 500 m autour des gares | 8 objets | 0,03 s |
+| 3. `analysis.intersect` parcelles × zones U | 6 792 objets | 3,7 s |
+| 4. `analysis.intersect` (étape 3) × tampon (étape 2) | 2 429 objets | 1,8 s |
+| 5. `layout.export_pdf`, titre « Parcelles constructibles du PLU à moins de 500 m d'une gare à Villeneuve-le-Roi » | `30-layout.export_pdf.pdf`, 1 page, 3,2 Mo | 1,3 s |
+
+**Réussite** : le plan enchaîne sélection de la zone U, tampon de 500 m sur les gares, deux
+intersections et PDF titré, il s'exécute sans erreur, le PDF est écrit à côté du projet (`projet-test-villeneuve.cassini/`) et les cinq
+étapes sont au journal. `project.inventory` ne coûte que 0,05 s sur ce projet : la mise en
+cache des valeurs par session n'est pas nécessaire. Le chemin complet (`serve`, canal,
+`plan.propose`, inventaire traduit, vrai modèle) est vérifié.
+
+### Bilan contre la barre du ticket
+
+| Barre | Mesure | |
+|---|---|---|
+| ≥ 32/40 sur le jeu tenu à l'écart | 32/40 (adaptateur), 33/40 (fusionné) | tenue |
+| ≥ 9/12 questions | 11/12 | tenue |
+| ≤ 1 fausse question sur 25 | 0 | tenue |
+| `plan_reel` ≥ 80 % | 16/25, l'essai échoue | **sous la barre** (refus de terrain, cadrage, A3, raster jamais appris) |
+| < 30 s par longue phrase, CPU 4 fils, à chaud | A0 : 41,4 s | **sous la barre** (écriture du plan) |
+| première demande d'une session, CPU 4 fils | chargement 2,5 s + lecture complète de l'invite 28,5 s (amorce), puis A0 41,4 s : environ 72 s (somme des deux lignes, non mesurée d'un seul appel) | **sous la barre** |
+| démo QGIS, phrase exacte | plan juste, exécuté, PDF | tenue |
+
+Déclaration retenue : le **modèle fusionné** (`cassini-composition-4b.modele.json`), meilleur
+d'une phrase et un peu plus rapide. Un ticket de ré-entraînement est proposé (voir
+`deferred-work.md`).

@@ -1,7 +1,7 @@
 //! Essai avec le vrai modèle : phrases de l'épreuve du modèle local contre le registre réel.
 //! Ignoré sans `CASSINI_TEST_MODEL` (et marqué `ignore` : il charge le modèle une fois par phrase).
 //!
-//!   CASSINI_TEST_MODEL=<gguf> cargo test -p cassini-ai --release -- --ignored plan_reel
+//!   CASSINI_TEST_MODEL=<gguf ou déclaration *.modele.json> cargo test -p cassini-ai --release --features cuda -- --ignored plan_reel
 //!
 //! Les 25 phrases de l'épreuve (`sentences.json`) et l'inventaire de l'épreuve sont lus tels quels,
 //! jamais modifiés. Les plans attendus sont réécrits pour le registre réel, chaînes `step:k.champ`
@@ -9,12 +9,13 @@
 //! terrain, statistiques sur un raster) ou ne sait pas porter une option demandée (papier A3,
 //! couches nommées du PDF), le refus est la réponse attendue, comme pour S20. Une question rendue
 //! sur une de ces phrases claires est un échec, et il en faut au plus deux sur les 25 : concession
-//! du propriétaire (2026-10-17) pour le modèle actuel. Le plafond strict (au plus une, avec au moins
-//! 9 questions sur 12 phrases ambiguës) est porté par le ticket 5.10.
+//! du propriétaire (2026-10-17) pour un GGUF seul au long prompt. Un modèle au prompt court (le
+//! modèle ajusté du ticket 5.10, déclaré par `*.modele.json`) tient le plafond strict : au plus
+//! une, avec au moins 9 questions sur 12 phrases ambiguës (`question_reel`).
 
-use std::path::PathBuf;
+mod common;
 
-use cassini_ai::plan::{compose_plan, model_generator, AgentError};
+use cassini_ai::plan::{compose_plan_with, model_files_generator, AgentError, PromptStyle};
 use cassini_core::plan::Plan;
 use cassini_core::registry::Registry;
 use serde_json::{json, Value};
@@ -83,14 +84,14 @@ fn expected(id: &str) -> Option<Value> {
 #[test]
 #[ignore = "charge le vrai modèle ; lancer avec CASSINI_TEST_MODEL et --ignored"]
 fn plan_reel_at_least_80_percent_of_the_plans_match() {
-    let Some(model) = std::env::var_os("CASSINI_TEST_MODEL") else {
+    let Some((files, style)) = common::test_model() else {
         eprintln!("CASSINI_TEST_MODEL absent : essai ignore.");
         return;
     };
     let registry = Registry::standard();
     let inventory: Value = serde_json::from_str(INVENTORY).unwrap();
     let sentences: Vec<Value> = serde_json::from_str(SENTENCES).unwrap();
-    let mut generator = model_generator(PathBuf::from(model));
+    let mut generator = model_files_generator(files);
     let (mut right, mut total, mut questions) = (0, 0, 0);
     for sentence in &sentences {
         let (id, text) = (
@@ -99,7 +100,7 @@ fn plan_reel_at_least_80_percent_of_the_plans_match() {
         );
         let want = expected(id);
         total += 1;
-        let got = compose_plan(&registry, &inventory, text, &mut generator);
+        let got = compose_plan_with(style, &registry, &inventory, text, &mut generator);
         let ok = match (&got, &want) {
             (Ok(Plan::Calls { calls }), Some(plan)) => {
                 serde_json::to_value(calls).unwrap() == *plan
@@ -123,14 +124,31 @@ fn plan_reel_at_least_80_percent_of_the_plans_match() {
         questions += usize::from(matches!(&got, Ok(Plan::Question { .. })));
     }
     eprintln!("SCORE {right}/{total} plans conformes, {questions} questions");
-    assert!(
-        right * 5 >= total * 4,
-        "{right}/{total} : sous le seuil de 80 %"
-    );
-    // Concession du propriétaire (2026-10-17) pour le modèle actuel ; le plafond strict (au plus 1,
-    // avec au moins 9/12 questions sur les phrases ambiguës) est porté par le ticket 5.10.
-    assert!(
-        questions <= 2,
-        "{questions} phrases claires sont devenues des questions (au plus 2)"
-    );
+    // Les deux seuils sont jugés ensemble : un score sous la barre ne cache pas le plafond.
+    let cap = question_cap(style);
+    let failures: Vec<String> = [
+        (right * 5 < total * 4).then(|| format!("{right}/{total} : sous le seuil de 80 %")),
+        (questions > cap).then(|| {
+            format!("{questions} phrases claires sont devenues des questions (au plus {cap})")
+        }),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    assert!(failures.is_empty(), "{}", failures.join(" ; "));
+}
+
+/// Plafond de fausses questions sur les 25 phrases claires : la concession du propriétaire
+/// (2026-10-17) pour le long prompt, le plafond strict du ticket 5.10 pour le prompt court.
+fn question_cap(style: PromptStyle) -> usize {
+    match style {
+        PromptStyle::Full => 2,
+        PromptStyle::Short => 1,
+    }
+}
+
+#[test]
+fn the_short_prompt_gets_the_strict_question_cap() {
+    assert_eq!(question_cap(PromptStyle::Short), 1);
+    assert_eq!(question_cap(PromptStyle::Full), 2);
 }

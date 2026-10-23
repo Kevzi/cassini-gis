@@ -377,7 +377,8 @@ def prepare_llama_cpp() -> Path:
         run(["git", "fetch", "-q", "--depth", "1", "origin", LLAMA_CPP_COMMIT], cwd=folder)
         run(["git", "checkout", "-q", "--detach", LLAMA_CPP_COMMIT], cwd=folder)
         shutil.rmtree(folder / "build", ignore_errors=True)
-    tools = ["llama-quantize", "llama-export-lora", "llama-completion"]
+    # llama-tokenize sert à `parite_decoupeurs.py` (tâche 4b).
+    tools = ["llama-quantize", "llama-export-lora", "llama-completion", "llama-tokenize"]
     if not all((folder / "build" / "bin" / t).exists() for t in tools):
         run(["cmake", "-S", ".", "-B", "build", "-DGGML_CUDA=OFF", "-DLLAMA_CURL=OFF",
              "-DLLAMA_BUILD_TESTS=OFF", "-DCMAKE_BUILD_TYPE=Release"], cwd=folder)

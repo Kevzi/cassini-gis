@@ -2,7 +2,7 @@
 //! l'inventaire de l'épreuve. Le modèle doit poser une question au lieu de deviner.
 //! Ignoré sans `CASSINI_TEST_MODEL` (et marqué `ignore` : il charge le modèle une fois par phrase).
 //!
-//!   CASSINI_TEST_MODEL=<gguf> cargo test -p cassini-ai --release -- --ignored question_reel
+//!   CASSINI_TEST_MODEL=<gguf ou déclaration *.modele.json> cargo test -p cassini-ai --release --features cuda -- --ignored question_reel
 //!
 //! L'inventaire de l'épreuve est lu tel quel, jamais modifié. Les phrases sont fabriquées ici, pas
 //! dans `tests/epreuve-modele-local/` (gelé). Aucune ne nomme un fichier de l'inventaire non ouvert
@@ -10,9 +10,9 @@
 //! légitimement. Seuil (décision du propriétaire, 2026-10-17) : au moins 9 questions sur 12 ; un
 //! refus ou un plan compte comme un échec.
 
-use std::path::PathBuf;
+mod common;
 
-use cassini_ai::plan::{compose_plan, model_generator};
+use cassini_ai::plan::{compose_plan_with, model_files_generator};
 use cassini_core::plan::Plan;
 use cassini_core::registry::Registry;
 use serde_json::Value;
@@ -52,16 +52,16 @@ const AMBIGUOUS: [(&str, &str); 12] = [
 #[test]
 #[ignore = "charge le vrai modèle ; lancer avec CASSINI_TEST_MODEL et --ignored"]
 fn question_reel_at_least_9_of_12_ambiguous_requests_get_a_question() {
-    let Some(model) = std::env::var_os("CASSINI_TEST_MODEL") else {
+    let Some((files, style)) = common::test_model() else {
         eprintln!("CASSINI_TEST_MODEL absent : essai ignore.");
         return;
     };
     let registry = Registry::standard();
     let inventory: Value = serde_json::from_str(INVENTORY).unwrap();
-    let mut generator = model_generator(PathBuf::from(model));
+    let mut generator = model_files_generator(files);
     let mut questions = 0;
     for (id, text) in AMBIGUOUS {
-        let got = compose_plan(&registry, &inventory, text, &mut generator);
+        let got = compose_plan_with(style, &registry, &inventory, text, &mut generator);
         let ok = matches!(&got, Ok(Plan::Question { .. }));
         // Score exact, phrase par phrase : jamais filtré.
         eprintln!(

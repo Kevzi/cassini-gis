@@ -8,7 +8,7 @@
 //! puis on rejette. Rien n'est montré ni exécuté avant cette validation.
 
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use cassini_core::commands::model_list::PromptKind;
 use cassini_core::plan::Plan;
@@ -457,6 +457,37 @@ pub fn compose_plan_with(
         }
     }
     Err(AgentError::PlanInvalid(last_errors))
+}
+
+/// Résout le fichier `path` d'un modèle : une déclaration `*.modele.json` (lue par le noyau,
+/// qui seul sait ce qu'est un modèle, AD-15) nomme la base, l'adaptateur et le prompt, dans
+/// son propre dossier ; tout autre fichier est un GGUF seul, au long prompt. Seule façon de
+/// lire un modèle, partagée par la CLI et les essais réels.
+///
+/// Une déclaration absente rend `ModelNotFound` à son seul nom de fichier, comme un GGUF
+/// absent ; une déclaration illisible rend `BadDeclaration`, sans recopier son dossier.
+pub fn resolve_model(path: &Path) -> Result<(ModelFiles, PromptStyle), AiError> {
+    use cassini_core::commands::model_list::{is_declaration, read_declaration};
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if !is_declaration(&name) {
+        return Ok((ModelFiles::single(path), PromptStyle::Full));
+    }
+    if !path.is_file() {
+        return Err(AiError::ModelNotFound(name.into()));
+    }
+    let declaration = read_declaration(path)
+        .map_err(|m| AiError::BadDeclaration(format!("« {name} » : {m}.")))?;
+    let folder = path.parent().unwrap_or(Path::new(""));
+    Ok((
+        ModelFiles {
+            model: folder.join(&declaration.model),
+            adapter: declaration.adapter.as_ref().map(|a| folder.join(a)),
+        },
+        declaration.prompt.into(),
+    ))
 }
 
 /// Générateur branché sur le modèle local `model` (contraint par la grammaire).
@@ -1002,5 +1033,61 @@ mod tests {
             "la seconde lecture reprend un instantané"
         );
         assert_eq!(first, second, "même réponse après la reprise");
+    }
+
+    #[test]
+    fn a_declaration_resolves_to_its_files_in_its_folder_with_its_prompt() {
+        let dir = std::env::temp_dir().join(format!("cassini-ai-decl-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let decl = dir.join("ajuste.modele.json");
+        std::fs::write(
+            &decl,
+            r#"{"model":"base.gguf","adapter":"lora.gguf","prompt":"short"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            resolve_model(&decl).unwrap(),
+            (
+                ModelFiles::with_adapter(dir.join("base.gguf"), dir.join("lora.gguf")),
+                PromptStyle::Short
+            )
+        );
+        // Un modèle fusionné : un seul fichier, prompt court ; sans `prompt`, le long.
+        std::fs::write(&decl, r#"{"model":"fusion.gguf","prompt":"short"}"#).unwrap();
+        assert_eq!(
+            resolve_model(&decl).unwrap(),
+            (
+                ModelFiles::single(dir.join("fusion.gguf")),
+                PromptStyle::Short
+            )
+        );
+        std::fs::write(&decl, r#"{"model":"fusion.gguf"}"#).unwrap();
+        assert_eq!(resolve_model(&decl).unwrap().1, PromptStyle::Full);
+        // Un GGUF seul (même absent : son chargement le dira) garde le long prompt.
+        let gguf = dir.join("Qwen3.5-9B-Q4_K_M.gguf");
+        assert_eq!(
+            resolve_model(&gguf).unwrap(),
+            (ModelFiles::single(&gguf), PromptStyle::Full)
+        );
+        // Une déclaration absente est un modèle introuvable, nommé par son seul fichier.
+        let e = resolve_model(&dir.join("absente.modele.json")).unwrap_err();
+        assert_eq!(
+            e,
+            AiError::ModelNotFound(PathBuf::from("absente.modele.json"))
+        );
+        // Une déclaration illisible ou qui nomme un chemin est refusée, sans recopier le dossier.
+        for bad in [
+            r#"{"model":"../base.gguf"}"#,
+            "pas du json",
+            r#"{"model":"a.gguf","x":1}"#,
+        ] {
+            std::fs::write(&decl, bad).unwrap();
+            let e = resolve_model(&decl).unwrap_err();
+            assert_eq!(e.code(), "models.bad_declaration", "{bad}");
+            let message = e.to_string();
+            assert!(message.contains("ajuste.modele.json"), "{message}");
+            assert!(!message.contains(&*dir.to_string_lossy()), "{message}");
+        }
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
