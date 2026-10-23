@@ -8,7 +8,7 @@
 //! attendant sa réponse, le noyau continue de lire (annulation, requêtes
 //! refusées `session.busy`). `request.cancel` annule la requête en vol.
 //! `plan.propose`, `plan.execute` et `plan.reject` portent les plans de l'agent
-//! (voir le sous-module `plans`).
+//! (voir le sous-module `plans`) ; `agent.models` rend les modèles que l'agent peut prendre.
 
 mod plans;
 
@@ -368,6 +368,7 @@ fn dispatch(
         "plan.propose" => plans::propose(state, params),
         "plan.execute" => plans::execute(state, params),
         "plan.reject" => plans::reject(state, params),
+        "agent.models" => plans::models(state),
         _ => Err(RpcError::protocol(METHOD_NOT_FOUND, "Méthode inconnue.")),
     }
 }
@@ -448,7 +449,7 @@ impl Channel<'_> {
         let outcome = match method {
             "request.cancel" => request_cancel(&self.link, params, Some(flight)),
             "session.hello" | "command.run" | "journal.replay" | "plan.propose"
-            | "plan.execute" | "plan.reject" => Err(RpcError::coded(
+            | "plan.execute" | "plan.reject" | "agent.models" => Err(RpcError::coded(
                 "session.busy",
                 "Une commande est en cours d'exécution : attendez sa fin ou annulez-la."
                     .to_string(),
@@ -1087,6 +1088,8 @@ mod tests {
         first: std::cell::RefCell<std::collections::VecDeque<Value>>,
         /// Inventaires reçus par le compositeur, dans l'ordre.
         seen: std::sync::Arc<std::sync::Mutex<Vec<Value>>>,
+        /// Modèle demandé à chaque composition, dans l'ordre.
+        chosen: std::sync::Arc<std::sync::Mutex<Vec<Option<String>>>>,
     }
 
     impl Composer for FixedComposer {
@@ -1094,8 +1097,10 @@ mod tests {
             &self,
             _registry: &Registry,
             _request: &str,
+            model: Option<&str>,
             inventory: &mut dyn FnMut() -> Result<Value, ErrorReport>,
         ) -> Result<crate::plan::Plan, ErrorReport> {
+            self.chosen.lock().unwrap().push(model.map(str::to_string));
             if self.inventory {
                 let inv = inventory()?;
                 assert!(inv["layers"].is_array());
@@ -1106,6 +1111,14 @@ mod tests {
                 .unwrap_or_else(|| self.outcome.clone())
                 .map(|v| serde_json::from_value(v).expect("plan de test lisible"))
         }
+
+        fn models(&self, _registry: &Registry) -> Result<Vec<Value>, ErrorReport> {
+            Ok(vec![
+                json!({"file": "a.gguf", "size_bytes": 5}),
+                json!({"file": "b.modele.json", "size_bytes": 0,
+                    "problem": "fichier manquant : absent.gguf"}),
+            ])
+        }
     }
 
     fn composer(plan: Value) -> Option<FixedComposer> {
@@ -1114,6 +1127,7 @@ mod tests {
             outcome: Ok(plan),
             first: Default::default(),
             seen: Default::default(),
+            chosen: Default::default(),
         })
     }
 
@@ -1787,6 +1801,7 @@ mod tests {
                 }),
                 first: Default::default(),
                 seen: Default::default(),
+                chosen: Default::default(),
             };
             let mut c = Client::start_with(CANCEL_GRACE, Some(failing));
             c.hello_with(&ALL);
@@ -2044,6 +2059,92 @@ mod tests {
         assert_eq!(code_of(&c.recv()), "plan.unknown");
         c.assert_silent();
         assert!(c.journal().is_empty());
+        c.close().1.unwrap();
+    }
+
+    // ---- agent.models et le choix du modèle ----
+
+    #[test]
+    fn agent_models_lists_the_composer_models_without_journal_or_pending_change() {
+        let mut c = Client::start_with(CANCEL_GRACE, composer(three_steps()));
+        c.hello_with(&ALL);
+        assert_eq!(c.propose(2)["result"]["plan_id"], "plan-1");
+        c.send(json!({"jsonrpc":"2.0","id":3,"method":"agent.models"}));
+        let r = c.recv();
+        assert_eq!(r["id"], 3);
+        assert_eq!(
+            r["result"]["models"][0],
+            json!({"file": "a.gguf", "size_bytes": 5})
+        );
+        assert_eq!(
+            r["result"]["models"][1]["problem"],
+            "fichier manquant : absent.gguf"
+        );
+        // Aucun ordre, rien au journal, et le plan en attente reste exécutable.
+        c.assert_silent();
+        assert!(c.journal().is_empty());
+        c.send(
+            json!({"jsonrpc":"2.0","id":4,"method":"plan.reject","params":{"plan_id":"plan-1"}}),
+        );
+        assert_eq!(c.recv()["result"]["rejected"], true);
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn agent_models_without_a_composer_is_unavailable_and_needs_a_session() {
+        let mut c = Client::start(CANCEL_GRACE);
+        c.hello_with(&ALL);
+        c.send(json!({"jsonrpc":"2.0","id":2,"method":"agent.models"}));
+        assert_eq!(code_of(&c.recv()), "agent.unavailable");
+        c.close().1.unwrap();
+        let r = exchange(&[json!({"jsonrpc":"2.0","id":1,"method":"agent.models"}).to_string()]);
+        assert_eq!(code_of(&r[0]), "session.not_started");
+    }
+
+    #[test]
+    fn agent_models_during_an_order_is_busy() {
+        let mut c = Client::start_with(CANCEL_GRACE, composer(three_steps()));
+        c.hello_with(&ALL);
+        c.send(json!({"jsonrpc":"2.0","id":2,"method":"plan.propose","params":{"request":"x"}}));
+        let order = c.recv();
+        assert_eq!(order["params"]["command"], "project.inventory");
+        c.send(json!({"jsonrpc":"2.0","id":3,"method":"agent.models"}));
+        let busy = c.recv();
+        assert_eq!(busy["id"], 3);
+        assert_eq!(code_of(&busy), "session.busy");
+        c.send(reply(&order["id"], json!({"layers": []})));
+        assert_eq!(c.recv()["result"]["plan_id"], "plan-1");
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn propose_passes_the_model_to_the_composer_and_refuses_a_bad_type() {
+        let composer = composer(three_steps()).unwrap();
+        let chosen = composer.chosen.clone();
+        let mut c = Client::start_with(CANCEL_GRACE, Some(composer));
+        c.hello_with(&ALL);
+        assert_eq!(c.propose(2)["result"]["plan_id"], "plan-1");
+        c.send(json!({"jsonrpc":"2.0","id":3,"method":"plan.propose",
+            "params":{"request":"x","model":"b.gguf"}}));
+        let order = c.recv();
+        c.send(reply(&order["id"], json!({"layers": []})));
+        assert_eq!(c.recv()["result"]["plan_id"], "plan-2");
+        // `model: null` vaut absent.
+        c.send(json!({"jsonrpc":"2.0","id":6,"method":"plan.propose",
+            "params":{"request":"x","model":null}}));
+        let order = c.recv();
+        c.send(reply(&order["id"], json!({"layers": []})));
+        assert_eq!(c.recv()["result"]["plan_id"], "plan-3");
+        c.send(json!({"jsonrpc":"2.0","id":4,"method":"plan.propose",
+            "params":{"request":"x","model":3}}));
+        assert_eq!(c.recv()["error"]["code"], -32602);
+        // La proposition refusée a effacé le plan 3, sans rien demander au compositeur.
+        c.execute(5, "plan-3");
+        assert_eq!(code_of(&c.recv()), "plan.unknown");
+        assert_eq!(
+            *chosen.lock().unwrap(),
+            vec![None, Some("b.gguf".to_string()), None]
+        );
         c.close().1.unwrap();
     }
 }

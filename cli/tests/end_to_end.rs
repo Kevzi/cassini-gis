@@ -326,25 +326,113 @@ fn plan_propose_with_an_unreadable_model_hides_its_path() {
     cleanup(&dir);
 }
 
-/// Une déclaration de modèle (ticket 5.10, tâche 3) qui nomme une base absente : le modèle est
-/// introuvable, nommé par son seul fichier, sans le dossier.
+/// Lance `serve` sur le dossier de modèles `models`, ouvre la session, envoie `messages`,
+/// ferme l'entrée et rend tout le texte reçu après `session.hello`.
+fn serve_with_models(project: &str, models: &Path, messages: &[Value]) -> String {
+    let mut child = Command::new(BIN)
+        .arg("serve")
+        .env("CASSINI_MODELS", models)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("le binaire se lance");
+    let mut stdin = child.stdin.take().unwrap();
+    let hello = json!({"jsonrpc":"2.0","id":1,"method":"session.hello",
+        "params":{"protocol_version":1,"commands":["project.inventory"],"project":project}});
+    for message in std::iter::once(&hello).chain(messages) {
+        writeln!(stdin, "{message}").unwrap();
+    }
+    drop(stdin);
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "serve a échoué");
+    let text = String::from_utf8(out.stdout).unwrap();
+    text.lines().skip(1).map(|l| format!("{l}\n")).collect()
+}
+
+/// Une déclaration de modèle (ticket 5.10, tâche 3) qui nomme une base absente : `agent.models`
+/// la montre avec son problème, sans chemin ; sans choix, le noyau ne la prend pas ; choisie,
+/// elle est refusée `models.unusable`, nommée par son seul fichier, avant tout inventaire.
 #[test]
 fn plan_propose_with_a_declaration_naming_a_missing_base_names_the_file_only() {
     let (dir, project, _) = temp_project();
     let models = dir.join("modeles");
     std::fs::create_dir_all(&models).unwrap();
+    // L'adaptateur présent n'est jamais listé seul.
     std::fs::write(models.join("lora.gguf"), b"pas un adaptateur").unwrap();
     std::fs::write(
         models.join("ajuste.modele.json"),
         r#"{"model":"base-absente.gguf","adapter":"lora.gguf","prompt":"short"}"#,
     )
     .unwrap();
-    let (reply, text) = propose_with_models(&project, &models);
+    let text = serve_with_models(
+        &project,
+        &models,
+        &[
+            json!({"jsonrpc":"2.0","id":2,"method":"agent.models"}),
+            json!({"jsonrpc":"2.0","id":3,"method":"plan.propose",
+                "params":{"request":"Ouvre les gares."}}),
+            json!({"jsonrpc":"2.0","id":4,"method":"plan.propose",
+                "params":{"request":"Ouvre les gares.","model":"ajuste.modele.json"}}),
+        ],
+    );
+    let replies: Vec<Value> = text
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    // Trois réponses, aucun ordre d'inventaire.
+    assert_eq!(replies.len(), 3, "{text}");
+    assert!(replies.iter().all(|r| r.get("method").is_none()), "{text}");
     assert_eq!(
-        reply["error"]["data"]["code"], "ai.model_not_found",
-        "{reply}"
+        replies[0]["result"]["models"],
+        json!([{"file": "ajuste.modele.json", "size_bytes": 17,
+            "problem": "fichier manquant : base-absente.gguf"}])
+    );
+    assert_eq!(replies[1]["error"]["data"]["code"], "ai.no_model", "{text}");
+    assert_eq!(
+        replies[2]["error"]["data"]["code"], "models.unusable",
+        "{text}"
     );
     assert!(text.contains("base-absente.gguf"), "{text}");
     assert_hides(&text, &[&dir, &models]);
+    cleanup(&dir);
+}
+
+/// `agent.models` sur deux GGUF : la liste par nom et taille, rien au journal ; un modèle
+/// inconnu est refusé `models.unknown` sans ordre d'inventaire.
+#[test]
+fn agent_models_lists_two_models_and_an_unknown_choice_is_refused() {
+    let (dir, project, journal) = temp_project();
+    let models = dir.join("modeles");
+    std::fs::create_dir_all(&models).unwrap();
+    std::fs::write(models.join("a.gguf"), b"12345").unwrap();
+    std::fs::write(models.join("b.gguf"), b"123").unwrap();
+    let text = serve_with_models(
+        &project,
+        &models,
+        &[
+            json!({"jsonrpc":"2.0","id":2,"method":"agent.models"}),
+            json!({"jsonrpc":"2.0","id":3,"method":"plan.propose",
+                "params":{"request":"Ouvre les gares.","model":"x.gguf"}}),
+        ],
+    );
+    let replies: Vec<Value> = text
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(replies.len(), 2, "{text}");
+    assert_eq!(
+        replies[0]["result"],
+        json!({"models": [{"file": "a.gguf", "size_bytes": 5}, {"file": "b.gguf", "size_bytes": 3}]})
+    );
+    assert_eq!(
+        replies[1]["error"]["data"]["code"], "models.unknown",
+        "{text}"
+    );
+    assert_hides(&text, &[&dir, &models]);
+    // Rien n'est journalisé.
+    assert!(std::fs::read_to_string(&journal)
+        .unwrap_or_default()
+        .is_empty());
     cleanup(&dir);
 }

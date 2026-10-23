@@ -6,7 +6,8 @@ résultat par un rappel, puis sert d'exécutant au noyau : il traite
 `order.execute` en lançant le geste enregistré et relaie `request.cancel`.
 Il porte aussi les plans de l'agent (`plan.propose`, `plan.execute`,
 `plan.reject`, notification `plan.step`) sans jamais les composer ni les
-enchaîner : il n'envoie qu'une demande ou un `plan_id`.
+enchaîner : il n'envoie qu'une demande, le nom du modèle choisi ou un `plan_id`.
+La liste des modèles vient du noyau par `agent.models` (noms et tailles seuls).
 Tout est piloté par les signaux du processus : aucune lecture bloquante.
 
 Le processus est un objet à l'interface de QProcess, fourni par l'appelant, ce
@@ -41,6 +42,10 @@ PLAN_DONE = "plan_done"  # payload : {"steps"}
 PLAN_EXEC_FAILED = "plan_exec_failed"  # payload : {"code", "message", "step", "outputs"}
 PLAN_CANCELLED = "plan_cancelled"  # payload : {"step", "outputs"}
 PLAN_REJECTED = "plan_rejected"  # payload : {"plan_id"}
+# Modèles de l'agent (`agent.models`) : noms de fichiers et tailles, jamais de chemin.
+MODELS = "models"  # payload : {"models": [{"file", "size_bytes", "problem"?}, ...]}
+MODELS_FAILED = "models_failed"  # payload : {"code", "message"}
+MODEL_EVENTS = (MODELS, MODELS_FAILED)
 PLAN_EVENTS = (
     PLAN_PROPOSED,
     PLAN_QUESTION,
@@ -83,6 +88,7 @@ class CoreClient:
         # plan.* en vol : {"id", "kind"} (propose, execute, reject) ; pour execute, aussi
         # "step" (étape annoncée par plan.step) et "outputs" ({étape: résultat d'ordre}).
         self._plan = None
+        self._models = None  # agent.models en vol : id de la requête
         self._closing = False
         self._done = False  # un événement terminal a déjà été rendu
         process.readyReadStandardOutput.connect(self._read)
@@ -115,6 +121,7 @@ class CoreClient:
         self._run = None
         self._replay = None
         self._plan = None
+        self._models = None
         self._abort_current()
         self._p.closeWriteChannel()
         self._p.waitForFinished(wait_ms)
@@ -175,21 +182,41 @@ class CoreClient:
             and self._run is None
             and self._replay is None
             and self._plan is None
+            and self._models is None
             and not self._closing
         )
 
     def plan_busy(self):
         return self._plan is not None
 
-    def propose(self, request):
+    def models_busy(self):
+        return self._models is not None
+
+    def list_models(self):
+        """Demande au noyau la liste des modèles (`agent.models`, hors journal).
+
+        La liste arrive par MODELS, l'échec par MODELS_FAILED. Rend False si rien
+        n'est parti (noyau pas prêt, ou une autre requête en vol).
+        """
+        if not self._can_send():
+            return False
+        self._models = self._request("agent.models", {}, "models")
+        return True
+
+    def propose(self, request, model=None):
         """Envoie `plan.propose` avec la demande en langage naturel, telle quelle.
 
-        Le verdict arrive par PLAN_PROPOSED, PLAN_QUESTION ou PLAN_FAILED. La
-        composition n'est pas annulable. Rend False si rien n'est parti.
+        `model` : nom d'un modèle de la liste, envoyé seulement s'il est un texte ;
+        sinon le noyau prend le premier. Le verdict arrive par PLAN_PROPOSED,
+        PLAN_QUESTION ou PLAN_FAILED. La composition n'est pas annulable. Rend False
+        si rien n'est parti.
         """
         if not self._can_send() or not isinstance(request, str):
             return False
-        ident = self._request("plan.propose", {"request": request}, "propose")
+        params = {"request": request}
+        if isinstance(model, str) and model:
+            params["model"] = model
+        ident = self._request("plan.propose", params, "propose")
         self._plan = {"id": ident, "kind": "propose"}
         return True
 
@@ -294,6 +321,8 @@ class CoreClient:
             self._replay_answer(msg)
         elif step in ("propose", "execute", "reject"):
             self._plan_answer(step, msg)
+        elif step == "models":
+            self._models_answer(msg)
         elif "error" in msg:
             self._fail(self._error_message(msg["error"]))
         elif step == "hello":
@@ -406,6 +435,28 @@ class CoreClient:
             self._notify(PLAN_DONE, {"steps": steps if isinstance(steps, list) else []})
         else:
             self._notify(PLAN_REJECTED, {"plan_id": result.get("plan_id")})
+
+    def _models_answer(self, msg):
+        self._models = None
+        if "error" in msg:
+            code, _step = self._error_fields(msg["error"])
+            self._notify(
+                MODELS_FAILED, {"code": code, "message": self._error_message(msg["error"])}
+            )
+            return
+        result = msg.get("result")
+        listed = result.get("models") if isinstance(result, dict) else None
+        if not isinstance(listed, list):
+            self._notify(
+                MODELS_FAILED, {"code": "core.unknown", "message": "Réponse du noyau illisible."}
+            )
+            return
+        self._notify(MODELS, {"models": [m for m in listed if isinstance(m, dict)]})
+
+    def _fail_models(self, message):
+        if self._models is not None:
+            self._models = None
+            self._notify(MODELS_FAILED, {"code": CORE_DIED, "message": message})
 
     def _fail_plan(self, message):
         plan, self._plan = self._plan, None
@@ -580,6 +631,7 @@ class CoreClient:
             self._fail_run("Le noyau Cassini s'est arrêté.")
             self._fail_replay("Le noyau Cassini s'est arrêté.")
             self._fail_plan("Le noyau Cassini s'est arrêté.")
+            self._fail_models("Le noyau Cassini s'est arrêté.")
             self._finish(DIED, "Le noyau Cassini s'est arrêté.")
 
     def _error(self, *_):
@@ -588,4 +640,5 @@ class CoreClient:
             self._fail_run("Le noyau Cassini s'est arrêté.")
             self._fail_replay("Le noyau Cassini s'est arrêté.")
             self._fail_plan("Le noyau Cassini s'est arrêté.")
+            self._fail_models("Le noyau Cassini s'est arrêté.")
             self._finish(DIED, "Le noyau Cassini n'a pas pu démarrer ou s'est arrêté.")

@@ -101,9 +101,14 @@ class CassiniPlugin:
         if self.client is not None:
             self.client.cancel_run()  # request.cancel, jamais la mort du noyau
 
-    def propose(self, text):
-        """Demande en langage naturel -> `plan.propose`. Rend True si elle est partie."""
-        return self.client is not None and self.client.propose(text)
+    def propose(self, text, model=None):
+        """Demande en langage naturel -> `plan.propose`, avec le nom du modèle choisi
+        (ou None : le noyau prend le premier). Rend True si elle est partie."""
+        return self.client is not None and self.client.propose(text, model)
+
+    def list_models(self):
+        """Liste des modèles -> `agent.models`. Rend True si la demande est partie."""
+        return self.client is not None and self.client.list_models()
 
     def approve(self, plan_id):
         """Validation de l'utilisateur -> `plan.execute` ; seul le `plan_id` repart."""
@@ -173,6 +178,7 @@ class CassiniPlugin:
             return
         if kind == client.READY:
             self.panel.set_ready(payload.get("commands", []))
+            self.list_models()  # la liste des Réglages, dès que le noyau est prêt
         elif kind in (client.FAILED, client.DIED):
             self.client = None
             self.process = None
@@ -184,7 +190,7 @@ class CassiniPlugin:
             client.RUN_DONE,
             client.RUN_CANCELLED,
             client.RUN_FAILED,
-        ) or kind in client.PLAN_EVENTS:
+        ) or kind in client.PLAN_EVENTS or kind in client.MODEL_EVENTS:
             self.panel.on_event(kind, payload)
 
     def _stop(self, *_):

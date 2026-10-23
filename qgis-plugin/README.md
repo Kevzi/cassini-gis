@@ -180,8 +180,8 @@ Recette manuelle de `layout.export_pdf` [ticket 12] (jeu `../donnees-test-cassin
    qgis-plugin/tests/probe_layout_export.py` doit finir par `RÉSULTAT : OK`.
 
 Recette manuelle de la saisie en langage naturel et du plan [ticket 6] (QGIS 3.44, jeu
-`../donnees-test-cassini/`, un modèle GGUF dans le dossier des modèles : le premier
-trouvé est pris, le choix du modèle reste grisé dans Réglages) :
+`../donnees-test-cassini/`, un modèle GGUF dans le dossier des modèles : sans choix
+dans Réglages, le premier utilisable est pris) :
 
 1. Ouvrez `projet-test-villeneuve.qgz` : la saisie est active. Écrivez la phrase de démo
    « Trouve les parcelles constructibles du PLU à moins de 500 m d'une gare à
@@ -202,6 +202,25 @@ trouvé est pris, le choix du modèle reste grisé dans Réglages) :
    annulable, Arrêter est grisé avec « Arrêt impossible : cette étape ne peut pas être
    interrompue. »
 7. Sans modèle dans le dossier : « La demande n'a pas abouti (ai.no_model) : … », saisie rendue.
+
+Recette manuelle du choix du modèle [ticket 14] (QGIS 3.44, même jeu, deux modèles dans
+le dossier des modèles, par exemple `Qwen3.5-9B-Q4_K_M.gguf` et `ajuste.modele.json`) :
+
+1. Réglages (engrenage) : sous « Modèle », la liste montre chaque modèle par son nom de
+   fichier et sa taille (« Qwen3.5-9B-Q4_K_M.gguf (5,6 Go) »), jamais un dossier ni un
+   chemin. Sans choix mémorisé, le premier utilisable est sélectionné.
+2. Choisissez le second, fermez les Réglages, envoyez une demande : le plan est composé par
+   ce modèle (la première demande après un changement recharge le modèle, donc plus lente).
+3. Fermez puis rouvrez QGIS : Réglages montre toujours le second modèle, et la demande part
+   avec lui.
+4. Retirez le modèle choisi du dossier, puis ouvrez Réglages : le choix est oublié, le premier
+   modèle restant est sélectionné.
+5. Une déclaration illisible ou qui nomme un GGUF absent est listée grisée, avec sa raison
+   (« … — indisponible : fichier manquant : base.gguf ») ; on ne peut pas la choisir.
+6. Dossier des modèles vide : liste grisée, « Aucun modèle utilisable dans le dossier des
+   modèles. » ; `CASSINI_MODELS` vers un dossier absent : liste grisée, message du noyau et
+   code `models.no_folder`, le dossier remplacé par « (dossier des modèles) ».
+7. Réglages, English : le libellé devient « Model », les tailles « 5.6 GB ».
 
 Recette manuelle du journal explicite [ticket 13] (QGIS 3.44, même jeu, même modèle) :
 

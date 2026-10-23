@@ -71,6 +71,65 @@ class PlanClientTest(unittest.TestCase):
         self.assertEqual(self.events, [(client.PLAN_PROPOSED, {"plan_id": "plan-1", "plan": PLAN})])
         self.assertFalse(self.c.plan_busy())
 
+    def test_propose_sends_the_model_only_when_it_is_a_text(self):
+        for model, params in (
+            ("b.gguf", {"request": "x", "model": "b.gguf"}),
+            (None, {"request": "x"}),
+            ("", {"request": "x"}),
+            (3, {"request": "x"}),
+        ):
+            self.assertTrue(self.c.propose("x", model))
+            msg = self.last_sent()
+            self.assertEqual(msg["params"], params, model)
+            self.p.feed(reply(msg["id"], {"question": "?"}))
+
+    # -- modèles ----------------------------------------------------------
+    def test_list_models_sends_agent_models_and_returns_the_list(self):
+        self.assertTrue(self.c.list_models())
+        msg = self.last_sent()
+        self.assertEqual((msg["method"], msg["params"]), ("agent.models", {}))
+        self.assertTrue(self.c.models_busy())
+        # Une seule requête en vol : rien d'autre ne part pendant la liste.
+        self.assertFalse(self.c.propose("x"))
+        self.assertFalse(self.c.list_models())
+        listed = [{"file": "a.gguf", "size_bytes": 5}, "pas un modèle",
+                  {"file": "b.modele.json", "size_bytes": 0, "problem": "fichier manquant : c.gguf"}]
+        self.p.feed(reply(msg["id"], {"models": listed}))
+        self.assertEqual(
+            self.events,
+            [(client.MODELS, {"models": [listed[0], listed[2]]})],
+        )
+        self.assertFalse(self.c.models_busy())
+        self.assertTrue(self.c.propose("x"))
+
+    def test_list_models_failure_keeps_code_and_message(self):
+        for code in ("models.no_folder", "agent.unavailable", "session.busy"):
+            self.events.clear()
+            self.assertTrue(self.c.list_models())
+            self.p.feed(reply(self.last_sent()["id"], error=error(code, "Message français.")))
+            self.assertEqual(
+                self.events,
+                [(client.MODELS_FAILED, {"code": code, "message": "Message français."})],
+            )
+        self.events.clear()
+        self.assertTrue(self.c.list_models())
+        self.p.feed(reply(self.last_sent()["id"], {"autre": 1}))
+        self.assertEqual(self.events[0][0], client.MODELS_FAILED)
+        self.assertEqual(self.events[0][1]["code"], "core.unknown")
+
+    def test_list_models_needs_a_ready_free_client_and_fails_on_death(self):
+        fresh = client.CoreClient(FakeProcess(), lambda k, v: None)
+        self.assertFalse(fresh.list_models())
+        self.assertTrue(self.c.propose("x"))
+        self.assertFalse(self.c.list_models())
+        self.p.feed(reply(self.last_sent()["id"], {"question": "?"}))
+        self.events.clear()
+        self.assertTrue(self.c.list_models())
+        self.p.finished.emit(0)
+        self.assertEqual(self.events[0], (client.MODELS_FAILED,
+                                          {"code": client.CORE_DIED,
+                                           "message": "Le noyau Cassini s'est arrêté."}))
+
     def test_question_is_a_result_without_plan_id(self):
         ident = self.propose()
         self.p.feed(reply(ident, {"question": "Laquelle ?"}))

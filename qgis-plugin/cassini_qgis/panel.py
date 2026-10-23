@@ -30,7 +30,7 @@ from qgis.PyQt.QtWidgets import (
     QWidget,
 )
 
-from . import agentview, client, form, runlog, summary, texts
+from . import agentview, client, form, models, runlog, summary, texts
 
 
 class LayerCombo(QComboBox):
@@ -216,6 +216,12 @@ class CassiniPanel(QWidget):
         self.focus = None  # ligne du journal ou étape du plan cliquée : ("entry", e) / ("step", s)
         self._shown_result = None  # résultat affiché, pour « Ouvrir le dossier »
         self._last_request = None  # dernière demande envoyée, rendue après un échec
+        self.models = None  # dernière liste d'`agent.models` (nettoyée), None avant la première
+        self.models_error = None  # (code, message) du dernier échec de la liste
+        remembered = settings.value(models.SETTING_KEY, "")
+        self.model = str(remembered) if remembered else None  # nom envoyé avec chaque demande
+        self._filling_models = False  # remplissage de la liste : pas un choix de l'utilisateur
+        self._models_shown = None  # (langue, liste, choix) déjà affichés dans la liste
         self.catalogue = []
         self.ready = False
         self.banner = "no_project"
@@ -262,7 +268,7 @@ class CassiniPanel(QWidget):
         head.addWidget(self.settings_button)
         col.addLayout(head)
 
-        # Réglages : langue, modèle grisé.
+        # Réglages : langue, modèle (liste rendue par le noyau, `agent.models`).
         # Fenêtre à part : les réglages ne se mêlent pas au panneau.
         self.settings_zone = QDialog(self)
         self.settings_zone.setModal(True)
@@ -274,11 +280,19 @@ class CassiniPanel(QWidget):
         self.lang_box.setCurrentIndex(0 if self.lang == "fr" else 1)
         self.lang_box.currentIndexChanged.connect(self._lang_changed)
         self.model_label = QLabel()
-        self.model_label.setEnabled(False)
-        self.model_label.setWordWrap(True)
+        self.model_box = QComboBox()
+        self.model_box.currentIndexChanged.connect(self._model_changed)
+        self.model_label.setBuddy(self.model_box)
+        self.model_reason = QLabel()
+        self.model_reason.setWordWrap(True)
+        self.model_reason.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
         sl.addWidget(self.lang_label)
         sl.addWidget(self.lang_box)
         sl.addWidget(self.model_label)
+        sl.addWidget(self.model_box)
+        sl.addWidget(self.model_reason)
 
         # Bandeau d'état : un seul à la fois.
         self.banner_zone = QWidget()
@@ -425,7 +439,7 @@ class CassiniPanel(QWidget):
 
         # Ordre de tabulation = ordre vertical.
         order = [
-            self.settings_button, self.lang_box, self.banner_button, self.input,
+            self.settings_button, self.lang_box, self.model_box, self.banner_button, self.input,
             self.send_button, self.plan_list, self.approve_button, self.reject_button,
             self.plan_stop_button, self.plan_details.button, self.details.button, self.log_list,
             self.expert.button, self.command_list, self.run_button, self.stop_button,
@@ -502,6 +516,8 @@ class CassiniPanel(QWidget):
             _announce(self.plan_notice, self.t("live_question"))
         elif kind == client.PLAN_FAILED:
             agent.failed(payload.get("code", ""), payload.get("message", ""))
+            if payload.get("code") in ("models.unknown", "models.unusable"):
+                self._actions.list_models()  # la liste a changé : la redemander
             if self._last_request and not self.input.toPlainText().strip():
                 self.input.setPlainText(self._last_request)  # à corriger sans tout retaper
             _announce(self.plan_notice, self.t("live_error"))
@@ -551,8 +567,24 @@ class CassiniPanel(QWidget):
             _announce(self.result_text, self.t("live_cancelled"))
         self.render()
 
+    def on_models(self, kind, payload):
+        """Liste des modèles reçue (MODELS) ou en échec (MODELS_FAILED)."""
+        if kind == client.MODELS:
+            self.models = models.clean(payload.get("models"))
+            self.models_error = None
+            chosen, forget = models.choose(self.models, self.model)
+            if forget:
+                QSettings().remove(models.SETTING_KEY)  # choix disparu : oublié
+            self.model = chosen
+        else:
+            self.models_error = (payload.get("code", ""), payload.get("message", ""))
+        self._render_models()
+
     def on_event(self, kind, payload):
-        """Événements RUN_* et PLAN_* du client."""
+        """Événements RUN_*, PLAN_* et des modèles du client."""
+        if kind in client.MODEL_EVENTS:
+            self.on_models(kind, payload or {})
+            return
         if kind in client.PLAN_EVENTS:
             self._on_plan_event(kind, payload or {})
             return
@@ -595,6 +627,7 @@ class CassiniPanel(QWidget):
         self.lang_label.setText(t("settings_language"))
         self.lang_box.setAccessibleName(t("settings_language"))
         self.model_label.setText(t("settings_model"))
+        self._render_models()
 
         usable = self.ready and self.banner is None
         if self.banner is None:
@@ -979,7 +1012,7 @@ class CassiniPanel(QWidget):
         )
         if not c["send_enabled"]:
             return
-        if self._actions.propose(text):  # la demande part sans les blancs des bords
+        if self._actions.propose(text, self.model):  # la demande part sans les blancs des bords
             self._last_request = text
             self.agent.generating()
             self.input.clear()
@@ -1011,7 +1044,50 @@ class CassiniPanel(QWidget):
         elif action == "relaunch":
             self._actions.relaunch()
 
+    def _render_models(self):
+        """Liste des modèles des Réglages : grisée avec sa raison si rien ne se choisit."""
+        t = self.t
+        self.model_box.setAccessibleName(t("settings_model"))
+        shown = (self.lang, repr(self.models), self.model)
+        if shown != self._models_shown:  # ne refaire la liste que si elle a changé
+            self._fill_models()
+            self._models_shown = shown
+        reason = models.reason(self.lang, self.models, self.models_error)
+        usable = self.ready and self.banner is None
+        self.model_box.setEnabled(
+            usable and reason is None and bool(models.usable(self.models or []))
+        )
+        self.model_reason.setText(reason or "")
+        self.model_reason.setVisible(bool(reason))
+        self.model_box.setAccessibleDescription(reason or "")
+
+    def _fill_models(self):
+        self._filling_models = True
+        try:
+            self.model_box.clear()
+            for entry in self.models or []:
+                self.model_box.addItem(models.label(self.lang, entry), entry["file"])
+                if entry["problem"] is not None:
+                    item = self.model_box.model().item(self.model_box.count() - 1)
+                    if item is not None:
+                        item.setEnabled(False)  # grisée, la raison dans son libellé
+            index = self.model_box.findData(self.model) if self.model else -1
+            if index >= 0:
+                self.model_box.setCurrentIndex(index)
+        finally:
+            self._filling_models = False
+
+    def _model_changed(self, index):
+        if self._filling_models or index < 0:
+            return
+        name = self.model_box.itemData(index)
+        if not isinstance(name, str) or name not in models.usable(self.models or []):
+            return
+        self.model = name
+        QSettings().setValue(models.SETTING_KEY, name)  # le choix survit à QGIS
+
     def _open_settings(self):
+        self._actions.list_models()  # liste fraîche si le client est libre
         self.settings_zone.setWindowTitle(self.t("settings"))
         self.settings_zone.exec()
         self.settings_button.setFocus()
