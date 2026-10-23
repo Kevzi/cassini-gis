@@ -319,6 +319,8 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-selecteur-de-modele-dans-les-reglages-du-panneau-plan.md`
   summary: Reporter dans le contrat d'architecture (`bmad-architecture`) l'ecart assume a AD-15 : la liste des modeles du selecteur passe par la methode du canal `agent.models`, hors registre et hors journal (jamais `command.run model.list` cote extension), et `plan.propose` porte un `model` facultatif ; le noyau seul decouvre les modeles.
   evidence: decision du 2026-10-18, appliquee par 5.14 (`docs/canal-local.md`, « agent.models ») ; un fichier de contrat d'architecture ne se re-decide pas dans un build.
+  status: close, 2026-10-23, mise a jour du contrat d'architecture (AD-23)
+  resolution: l'ecart est deja ecrit dans AD-15 (« Ecart assume (2026-10-18) ») depuis la mise a jour E1 ; rien a changer au contrat.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-selecteur-de-modele-dans-les-reglages-du-panneau-plan.md`
   summary: Tester sans Qt le cablage du selecteur de modele de `panel.py` : sortir dans `models.py` la decision a la reception de MODELS (choix, oubli de `cassini/model`) et la regle « codes `models.unknown` / `models.unusable` qui redemandent la liste », chacune avec un test `unittest`.
   evidence: relecture verification-gap de 5.14 : aucun test ne charge `panel.py` (`FakePanel` dans `test_tracer.py`) ; remettre `propose(text)` dans `_send`, ou retirer `QSettings().remove(...)` d'`on_models`, ne fait echouer aucun test ; seule la recette manuelle du ticket 14 le verrait.

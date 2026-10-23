@@ -227,7 +227,6 @@ covers = ["CAP-4"]
 after = [15]
 hitl = true
 risk = "high"
-unknown = "AD-23 ne couvre pas encore les coordonnees : le contrat d'architecture est etendu par bmad-architecture avant le build ; retirer cette ligne une fois fait."
 references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-23"]
 notes = [
   "Decision: 2026-10-23 — le proprietaire veut que le probleme de la phrase E soit resolu a coup sur : un garde-fou du noyau, regle generale sur la provenance des coordonnees, et non une regle de prompt ni un correctif par phrase.",
@@ -235,7 +234,9 @@ notes = [
   "Decision: 2026-10-23 — cette regle etend AD-23 (un plan ne nomme que des chemins deja connus de la session) aux coordonnees. Le contrat d'architecture est mis a jour par bmad-architecture avant le build de ce ticket.",
   "Decision: 2026-10-23 — 5.15 reste sur sa branche et n'est fusionnee dans main qu'apres ce ticket et la recette du proprietaire dans QGIS ; ce ticket part de cette branche.",
   "Assumption: le garde-fou s'applique apres judge et retry_turns, sans changer le prompt, judge ni le tour de redemande ; la parite au jeton avec l'entrainement reste intacte.",
-  "Open question: comment reconnaitre une coordonnee de la demande (ecritures 2,458 et 2.458, ordre x/y, tolerance) ; a trancher avec le proprietaire au debut du build.",
+  "Decision: 2026-10-23 — AD-23 etendu aux coordonnees (type Point partage marque au schema, x, y et systeme exiges dans la demande, reference step: vers un Point de sortie, controle a la fin de la composition, provenance model|guard dans la question, rien au journal) ; le build suit ce texte.",
+  "Decision: 2026-10-23 — quand le garde-fou rend sa question, le panneau remet la phrase d'origine dans la zone de saisie, pour que l'utilisateur y ajoute le point.",
+  "Open question: ecritures d'un nombre a reconnaitre dans la demande (2,458 et 2.458, 652 000) ; a trancher au debut du build.",
   "hitl : le proprietaire fait la recette dans QGIS avec la phrase E et la phrase de demo.",
   "Check hors criteres (risque high) : le proprietaire rejoue dans QGIS la phrase E et une phrase avec des coordonnees donnees, et confirme le comportement.",
 ]

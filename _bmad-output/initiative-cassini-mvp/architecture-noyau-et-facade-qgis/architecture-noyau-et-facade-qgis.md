@@ -7,7 +7,7 @@ paradigm: 'hexagonal (ports et adaptateurs), avec un adaptateur sortant distant'
 scope: "Invariants du MVP Cassini : frontière entre le noyau Rust Apache-2.0 et l'extension QGIS GPL, contrat du registre de commandes, journal rejouable, agent local et serveur MCP, moteur de terrain, distribution et recette ; après le MVP, extension du catalogue par le cadre de traitement de QGIS (CAP-14)"
 status: final
 created: '2026-10-14'
-updated: '2026-10-18'
+updated: '2026-10-23'
 binds: [CAP-1, CAP-3, CAP-4, CAP-5, CAP-6, CAP-7, CAP-8, CAP-9, CAP-10, CAP-11, CAP-13, CAP-14]
 sources:
   - ../spec-cassini-mvp/spec-cassini-mvp.md
@@ -405,13 +405,41 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
 - **Prevents:** la seule vraie faille du produit — un plan composé par un modèle
   est une entrée non fiable ; s'il peut rendre du code, une expression ou un
   chemin absolu, il contourne AD-8, AD-9 et AD-22 sans que personne ne l'ait
-  décidé.
+  décidé ; et un point inventé par le modèle, montré comme juste, qui rend un
+  résultat faux sans aucun signal.
 - **Rule:** la sortie du modèle est contrainte à une suite d'appels de commandes
   du registre, validée contre les schémas engendrés avant d'être montrée à
   l'utilisateur ; une sortie non conforme est rejetée et redemandée, jamais
   réparée à la main. Rien de ce que le modèle produit n'est exécuté comme du
   code, du Python, du SQL ou une expression. Un plan ne peut nommer que des
   commandes disponibles (AD-7) et des chemins déjà connus de la session.
+  - **Coordonnées (2026-10-23).** Une coordonnée d'un plan composé par le
+    modèle local vient de la demande de l'utilisateur ou du résultat d'une
+    étape précédente, jamais du modèle seul ; sinon le noyau ne montre pas le
+    plan et rend une question qui demande le point (x, y et système).
+    - **Un seul type.** Toute coordonnée du registre est le type `Point`
+      partagé du noyau (x, y, epsg), porté tel quel par chaque commande et
+      marqué dans le schéma engendré (AD-6), à travers références, objets
+      imbriqués et tableaux. Le contrôle de contrat refuse un champ `x` ou `y`
+      numérique hors de `Point`. Une emprise n'est pas un `Point` et reste hors
+      de cette règle.
+    - **Dans la demande.** x, y et le système y figurent tous trois, comparés
+      comme nombres, x et y distincts l'un de l'autre et des autres nombres
+      déjà pris par le plan (distance, durée). Un système absent de la demande
+      n'est pas pris au projet : c'est la question.
+    - **D'une étape.** Le paramètre entier est une référence `step:` vers un
+      champ que le schéma de sortie de cette étape déclare `Point`. Une
+      coordonnée lue dans l'inventaire du projet ne compte pas.
+    - **Où.** Une fonction pure du noyau, appliquée une fois à la fin de la
+      composition, après la validation et la redemande, sans changer le prompt
+      ni le tour de redemande ; tous les chemins de composition y passent
+      (canal, ligne de commande, mesures).
+    - **Trace.** La question rendue porte sa provenance, `model` ou `guard`,
+      hors de la grammaire du modèle. Le journal (AD-11) n'en porte rien : il ne
+      tient que des étapes exécutées, et le rejeu ne compose pas.
+    - **Hors règle.** Le serveur MCP : le noyau n'y compose aucun plan, l'IA
+      externe appelle les commandes une à une ; le risque d'un point inventé par
+      elle est accepté.
 
 ### AD-24 — Une primitive de QGIS est une commande écrite à la main, exécutée par une ligne d'une table fermée
 
