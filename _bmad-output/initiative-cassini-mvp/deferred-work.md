@@ -339,3 +339,21 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-15-tache-b-reentrainement-et-mesures.md`
   summary: Une origine d'isochrone inventee par le modele passe `judge` et `check_plan` sans alerte : decider (architecture, pas un pansement de prompt) si le noyau doit exiger que des coordonnees viennent de la demande ou d'une etape, et non du modele seul.
   evidence: phrase E de 5.15 tache B : `analysis.isochrone` avec `origin` {epsg 4326, x 2.458, y 48.658}, absent de la demande, accepte apres une redemande ; le resultat serait faux sans aucun signal a l'utilisateur.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-nouvelle-passe-sur-le-generateur-isochrone-depuis-un-lieu-de-plan.md`
+  summary: 5.17, tache B — re-entrainer par la commande unique (8 000 exemples, meme base, meme methode) sur le generateur de la tache A, fusionner en GGUF, parite des decoupeurs, essais reels sur GPU (plan_reel >= 20/25 et <= 1 fausse question, ecart_reel >= 32/40, question_reel >= 9/12, phrase E en question du modele sans le garde-fou), demo QGIS avec la phrase exacte, chiffres et note sur la mesure aveugle dans docs/entrainement-du-modele.md, puis recette du proprietaire ; fusion dans main seulement apres B.
+  evidence: decoupe par le proprietaire (2026-10-23, bmad-build 5.17) : plan entier a ~1 800 jetons ; la tache A (generateur, testable sans GPU) passe d'abord, sur la meme branche.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-nouvelle-passe-sur-le-generateur-isochrone-depuis-un-lieu-de-plan.md`
+  summary: Isochrone demandee depuis plusieurs points donnes en coordonnees (« depuis les points A et B (Lambert-93) ») : aucun exemple de refus ; le modele pourrait faire un plan sur le premier point et oublier le second.
+  evidence: non verifie (medium si vrai) : relecture blind-hunter de 5.17 t.A ; `isochrone_vers_cible` ne tire qu'un point, la decision a ne vise que des lieux nommes ; a juger sur les sorties du modele de la tache B.
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-17-tache-b-reentrainement-et-mesures.md`
+  summary: Phrase E encore manquee par le modele de 5.17 dans le produit : `cassini plan` (processeur et CUDA) et le panneau QGIS rendent la question du garde-fou, seuls `duree_reel` et `llama-completion` une question du modele ; nouvelle passe a ouvrir en ticket (decision du proprietaire, 2026-10-24).
+  evidence: mesures de 5.17 tache B (docs/entrainement-du-modele.md, « La phrase E ») ; le modele hesite entre question et point invente selon le calcul du prompt.
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-17-tache-b-reentrainement-et-mesures.md`
+  summary: Isochrone depuis plusieurs points en coordonnees, constat observe en 5.17 tache B : le modele ecrit deux origines dans un meme objet, sortie rejetee, question du garde-fou qui ne dit pas pourquoi ; jamais un plan faux.
+  evidence: `cassini plan` et `llama-completion` sur « … des points 655200, 6849800 et 656100, 6850400 (Lambert-93) » ; suite de l'entree differee de la tache A.
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-17-tache-b-reentrainement-et-mesures.md`
+  summary: Plusieurs phrases enchainees dans une meme session saturent le contexte : les couches de resultat s'ajoutent a l'inventaire et, des la 4e phrase, `plan.propose` echoue en `ai.prompt_too_long` (N_CTX 8192) ; composition 68 s, 75 s puis 108 s avant l'echec.
+  evidence: recette de 5.17 dans QGIS (2026-10-24), noyau et modele installes, projet de Villeneuve : phrases 1 a 3 justes, phrases 4 a 10 toutes en `ai.prompt_too_long` en 0,4 s ; les memes phrases passent une a une sur projet vierge. Prolonge l'entree existante sur N_CTX.
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-17-tache-b-reentrainement-et-mesures.md`
+  summary: Reference a un resultat precedent (« Trouve les parcelles dans ces zones ... » apres « Garde les zones U du PLU. ») : le modele prend la couche source entiere au lieu de la couche de resultat ; famille d'entrainement a ajouter, jamais une regle de prompt.
+  evidence: recette de 5.17 dans QGIS : intersection des parcelles avec `plu_zones` entiere (2 513) au lieu de la selection des zones U (2 429).

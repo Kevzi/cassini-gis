@@ -85,19 +85,20 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `distance_reference_filtree` | distance à une référence filtrée (« des gares de la ligne D ») |
 | `dans_une_zone` | « en zone N », « en zone inondable d'aléa fort » → sélection de la zone, puis intersection |
 | `intersection` | « situés dans une zone humide », « croise la couche A avec la couche B » |
-| `conditions_multiples` | zone et distance, cible filtrée et distance, deux distances : intersections successives |
+| `conditions_multiples` | zone et distance, cible filtrée et distance, deux distances, inclusion dans une couche entière : intersections successives |
 | `constructible` | vocabulaire d'urbanisme : « parcelles constructibles », avec ou sans distance et PDF |
 | `export_pdf` | « sors-moi la carte en PDF », titre donné par l'utilisateur ou déduit de la demande |
 | `isochrone` | « zone atteinte en 10 minutes à pied depuis le point ... (Lambert-93) » |
+| `isochrone_vers_cible` | « les écoles à 10 min à pied du point ... (Lambert-93) » → isochrone, puis intersection de la cible avec l'étape 1 ; la couche du lieu (gares, écoles...) est souvent dans l'inventaire, seules les coordonnées donnent l'origine ; une fois sur trois, le lieu est nommé avec ses coordonnées (« de la gare de X (652 000 / 6 862 000, Lambert-93) ») et reste un plan |
 | `decompte_par_zone` | « nombre d'écoles par commune », nom des zones sur demande seulement |
 | `ouverture` | ouvrir un fichier non chargé, CSV à coordonnées compris |
 | `description` | décrire une couche, inventaire du projet, version, modèles installés |
 | `question_couche_absente` | une couche dont rien ne parle dans l'inventaire → question |
 | `question_champ_absent` | un critère qu'aucun champ ne porte → question, jamais un champ voisin deviné |
 | `refus` | courriel, suppression, reprojection, export de couche, style, itinéraire, téléchargement, 3D → refus affirmatif |
-| `refus_hors_registre` | champ de vision, ligne de vue, pente, cadrage ou zoom de la carte, PDF en A3, A0 ou portrait, altitude moyenne par zone (statistiques sur un raster), MNT présent pour le terrain → refus affirmatif, jamais un plan de substitution |
+| `refus_hors_registre` | champ de vision, ligne de vue, pente, cadrage ou zoom de la carte, PDF en A3, A0 ou portrait, altitude moyenne par zone (statistiques sur un raster), MNT présent pour le terrain, trajet depuis plusieurs lieux (« de chaque gare », « de toutes les gares », « des gares ») → refus affirmatif, jamais un plan de substitution |
 | `appartenance_commune` | « qui appartiennent à la commune de X », « sur le territoire de X » → sélection de la commune par son nom, puis intersection ; sans couche de communes, ou sans nom de commune, une question. Une commune citée seule (« à Orly ») reste un contexte sans effet |
-| `question_isochrone` | isochrone depuis un lieu nommé (« depuis la mairie de X »), sans coordonnées → question qui demande le point en X et Y avec son système |
+| `question_isochrone` | isochrone ou cible à une durée de trajet d'un lieu nommé (« depuis la mairie de X », « les parcelles à 10 min à pied de la gare de X »), sans coordonnées → question qui demande le point en X et Y avec son système ; « d'une gare » → question qui demande laquelle |
 | `etape_unique` | une seule opération demandée, une autre couche citée pour le contexte (« je m'occuperai des écoles plus tard ») → une étape |
 | `redemande` | environ 5 % du jeu : un exemple d'une autre famille vu au tour de redemande (voir plus bas) |
 
@@ -105,6 +106,37 @@ Depuis 5.15, `conditions_multiples` porte aussi les plans à **trois conditions*
 filtrée, zone et distance ; zone et deux distances), quatre à six étapes, jamais plus de six.
 L'export PDF s'y ajoute une fois sur quatre, et seulement aux plans de cinq étapes ou moins
 (jamais à « zone et deux distances », qui en a déjà six).
+
+### Nouvelle passe de 5.17 (tâche A)
+
+Les constats de 5.15 sur le jeu tenu à l'écart et sur la phrase E de `duree_reel` deviennent
+des familles, jamais des règles de prompt :
+
+- **Trajet depuis un lieu de l'inventaire.** La même tournure de trajet (« à N minutes à pied
+  de ... », « situées à », « à moins de », « accessibles en ... depuis », « qu'on rejoint
+  en ») rend une question quand l'origine est un lieu sans coordonnées (`question_isochrone`,
+  couche du lieu présente le plus souvent, cible souvent citée, la question du
+  garde-fou de 5.16 parmi les réponses), et un plan quand l'origine est un point en
+  coordonnées (`isochrone_vers_cible` : `analysis.isochrone`, puis `analysis.intersect` de la
+  cible avec `step:1`). Une distance en mètres reste un plan (`distance`). « À N minutes à
+  pied de » nu passe par « situées à » : c'est la tournure de la phrase E.
+- **Origines multiples** (décision du propriétaire, 2026-10-23, option a) : « de chaque
+  gare », « de toutes les gares », « des gares » → refus affirmatif (`refus_hors_registre`) :
+  l'isochrone du catalogue part d'un seul point. « D'une gare » → question (laquelle, en
+  coordonnées) ; « de la gare de X » → question.
+- **Plans à plusieurs conditions.** La cible filtrée l'est aussi par un nombre (`gt`, `lt`,
+  `gte`, `lte`), une différence (`ne`) ou un nom (`contains`, `begins_with`), plus seulement
+  par égalité. Deux formes s'ajoutent : cible filtrée et deux distances (cinq étapes :
+  sélection, deux tampons, deux intersections), et distance avec inclusion dans une couche
+  entière (« situées dans une zone humide », la couche prise telle quelle, intersections dans
+  l'ordre de la phrase). Le poids de `conditions_multiples` passe de 9 à 13. Un test vérifie
+  qu'aucune étape n'est perdue : chacune sert à une étape suivante.
+
+**Limite de la mesure.** Ces familles visent des écarts nommés par le jeu tenu à l'écart
+(H08, H17 à H23, H40), sans en lire les phrases. Viser des écarts nommés affaiblit
+pourtant `ecart_reel` comme mesure aveugle : le score qui suivra mesure en partie ce qu'on a
+cherché à corriger. Il faudra le lire avec cette réserve, et un jeu neuf, écrit par un autre
+auteur, redonnera une mesure aveugle.
 
 ### Les inventaires de QGIS (5.15)
 
@@ -738,3 +770,150 @@ s'arrêter. La démo QGIS n'est pas rejouée, le modèle n'est pas installé dan
 sorties restent hors du dépôt, dans le dossier des modèles de la machine (`ajuste-5-15`). Une nouvelle passe sur
 le générateur (isochrone dont l'origine est une couche de points présente sans le point
 choisi, et plans à plusieurs conditions) fera l'objet d'un autre ticket.
+
+## Tâche B de 5.17 : ré-entraînement et mesures
+
+Le générateur de la tâche A de 5.17 (commit `ac11428` : trajet depuis un lieu de
+l'inventaire, origines multiples, plans à plusieurs conditions) a été entraîné par la
+commande unique, sans autre changement : 8 000 exemples, même base (`Qwen/Qwen3.5-4B` @
+`851bf6e`), même méthode, même révision de llama.cpp (`d812350`).
+
+### Entraînement
+
+| Mesure | Valeur |
+|---|---|
+| Exemples | 8 000 d'entraînement, 300 de validation, aucun écarté car trop long |
+| Jetons par séquence | médiane 749, maximum 1 659 (la limite de 2 048 suffit) |
+| Perte finale | 0,0044 (500 pas) |
+| Validation (graine 2, glouton) | 298 / 300 : plans 236 / 237, questions 35 / 36, refus 27 / 27 |
+| Durée totale | 330 min, dont 49 min de validation (RTX 3070 Ti, WSL) |
+| Essai `llama-completion` | base + adaptateur et fusionné rendent le plan attendu |
+| Modèle fusionné | `cassini-composition-4b-Q4_K_M.gguf`, SHA-256 `6bde9803c06b85d796255c35d533f9f856681a8ee66049416100badf185a8084` |
+
+La durée passe de 241 à 330 min pour le même nombre d'exemples ; les séquences sont un peu
+plus longues (médiane 749 contre 735), ce qui n'explique pas tout. La cause n'est pas établie.
+
+### Parité des découpeurs
+
+- `parite_decoupeurs.py` : **300 / 300**, 0 écart.
+- Test de `ai` sur la base `qwen3.5-4b-base-Q4_K_M.gguf` sortie par cet entraînement :
+  300 premiers essais et **339 redemandes** identiques au jeton.
+
+### Essais réels (GPU, modèle fusionné, prompt court)
+
+Les scores de justesse se mesurent sur le GPU (décision du propriétaire du 2026-10-17) ; ils ne sont pas
+refaits sur le processeur.
+
+| Essai | 5.15 | 5.17 |
+|---|---|---|
+| `plan_reel` | 25 / 25, 0 question | **25 / 25**, 0 question, 0 du garde-fou |
+| `question_reel` | 12 / 12 | **12 / 12**, 0 du garde-fou |
+| `ecart_reel` | 32 / 40 | **33 / 40** (plans 19 / 26, questions 8 / 8, refus 6 / 6), 331 s |
+| redemandes sur `ecart_reel` | 1 (0 sauvée) | 2, sur H17 et H19 (0 sauvée) |
+
+Formes des écarts du jeu tenu à l'écart :
+
+| Phrase | Écart en 5.17 | En 5.15 |
+|---|---|---|
+| H08 | une question au lieu d'un plan | même écart |
+| H13 | paramètre `label_field` de l'étape 1 | juste |
+| H17, H18 | une étape de moins | même écart |
+| H19 | une étape de moins | paramètre `operator` de l'étape 1 |
+| H20 | une étape de plus | une étape de moins |
+| H22 | une étape de plus | commande de l'étape 2 |
+| H23 | juste | une question au lieu d'un plan |
+| H40 | juste | un plan au lieu du refus attendu |
+
+H23 et H40 deviennent justes ; H13 recule. Les plans à plusieurs conditions restent la
+faiblesse : le nombre d'étapes y est encore faux, dans les deux sens. Le gain tient à une
+phrase ; il se lit avec la réserve de la tâche A : les familles ont visé des écarts nommés,
+`ecart_reel` n'est plus tout à fait une mesure aveugle.
+
+### Durée sur processeur (4 fils, 4 cœurs physiques)
+
+Même recette qu'en 5.15 (affinité `0x55`, `CASSINI_TEST_THREADS=4`, inventaire de
+Villeneuve-le-Roi traduit) :
+
+| id | appels | lecture du prompt (s) | écriture (s) | jetons écrits | total (s) | 5.15 (s) | issue |
+|---|---|---|---|---|---|---|---|
+| amorce | 1 | 28,1 (+ chargement 2,5) | 2,2 | 17 | 32,8 | 31,2 | plan, 1 étape |
+| A0 | 1 | 1,0 | 39,5 | 248 | 40,5 | 37,7 | plan, 5 étapes |
+| A | 1 | 1,1 | 39,7 | 252 | 40,9 | 40,5 | plan, 5 étapes |
+| B1 | 1 | 0,5 | 11,1 | 71 | 11,7 | 10,8 | plan, 1 étape |
+| B2 | 1 | 0,7 | 28,7 | 180 | 29,4 | 27,1 | plan, 3 étapes |
+| B3 | 1 | 0,5 | 3,1 | 23 | 3,7 | 3,5 | plan, 1 étape |
+| C | 1 | 0,6 | 19,6 | 124 | 20,3 | 18,8 | plan, 2 étapes |
+| D | 1 | 0,5 | 4,2 | 27 | 4,8 | 4,4 | question |
+| E | 1 | 0,7 | 5,6 | 32 | 6,4 | 49,5 | question du modèle |
+
+Moyenne hors amorce : 19,7 s (24,0 s en 5.15). Tout le gain vient de E ; les autres phrases
+écrivent le même nombre de jetons qu'en 5.15 et prennent de 1 à 8 % de plus, écart de la
+machine d'un jour à l'autre. L'exigence produit (une longue phrase en moins de 30 s sur
+processeur) reste manquée par A0 et A ; elle est suivie dans `deferred-work.md`.
+
+### La phrase E
+
+« Trouve les parcelles à 10 minutes à pied de la gare de Villeneuve-le-Roi. », sur le même
+inventaire traduit, avec la déclaration du modèle de 5.17 (`--model`) :
+
+| Chemin | Réponse |
+|---|---|
+| `duree_reel` (processeur, 4 fils, tête du prompt reprise d'un instantané) | question du modèle, 32 jetons |
+| `llama-completion`, prompt d'entraînement rendu par `cassini-training`, sans grammaire | question du modèle : « Quelles sont les coordonnées du point de départ (X, Y et système, par exemple Lambert-93) ? » |
+| `cassini plan`, noyau du produit (processeur) ou noyau CUDA, modèle installé ou copie d'origine | question du **garde-fou** (`"source":"guard"`) |
+| panneau QGIS (`cassini serve`, `plan.propose`), noyau installé | question du **garde-fou** |
+
+Le modèle hésite entre la question et un point de départ inventé : la balance penche d'un
+côté ou de l'autre selon la façon dont le prompt est calculé (fils, instantané de la tête,
+noyau). La cause exacte n'est pas mesurée. Dans le produit, c'est le point inventé qui
+l'emporte, et le garde-fou de 5.16 le change en question : l'utilisateur ne reçoit jamais un
+plan faux, mais la réponse n'est pas apprise.
+
+Piège de mesure : une phrase passée à `cassini.exe` par un script PowerShell enregistré en
+UTF-8 **sans BOM** arrive aux accents abîmés (Windows PowerShell lit le script en ANSI). Une
+première mesure de E, faite ainsi, avait donné à tort une question du modèle sur processeur.
+Les scripts de mesure s'enregistrent en UTF-8 avec BOM.
+
+Phrases de contraste, même inventaire, noyau et modèle installés (script en UTF-8 avec BOM) :
+
+| Phrase | Réponse |
+|---|---|
+| « … à 10 minutes à pied du point 655200, 6849800 (Lambert-93). » | `analysis.isochrone` depuis ce point, puis `analysis.intersect` des parcelles |
+| « … à 10 minutes à pied de chaque gare. » | refus : l'isochrone part d'un seul point |
+| « … à 10 minutes à pied des points 655200, 6849800 et 656100, 6850400 (Lambert-93). » | question du garde-fou : `llama-completion` montre deux origines écrites dans un même objet, sortie rejetée |
+
+### Démo de bout en bout dans QGIS
+
+Le 2026-10-24, même sonde et même projet qu'à la tâche 4 de 5.10. **Noyau du produit**
+(processeur, installé dans `%LOCALAPPDATA%\Cassini\bin`), `CASSINI_MODELS` sur un dossier qui
+ne contient que le modèle fusionné et sa déclaration. Phrase exacte de `CLAUDE.md`.
+
+| Étape | Résultat | Durée |
+|---|---|---|
+| `project.inventory` | 6 couches | 0,06 s |
+| Composition (`plan.propose`, chargement du modèle et lecture du prompt à froid compris) | plan de 5 étapes, validé | 67,1 s |
+| 1. `analysis.select_by_attribute` `typezone = U` sur `plu_zones` | 137 zones | 0,17 s |
+| 2. `analysis.buffer` 500 m autour des gares | 8 objets | 0,05 s |
+| 3. `analysis.intersect` parcelles × zones U | 6 792 objets | 3,9 s |
+| 4. `analysis.intersect` (étape 3) × tampon (étape 2) | 2 429 objets | 1,9 s |
+| 5. `layout.export_pdf`, titre « Parcelles constructibles du PLU à moins de 500 m d'une gare à Villeneuve-le-Roi » | 1 page, 3,0 Mo, PDF lisible | 1,2 s |
+
+**Réussite** : même plan et mêmes nombres qu'à la tâche 4 de 5.10, les cinq étapes au
+journal. La composition à froid sur processeur (67 s) compte le chargement et la première
+lecture du prompt ; la mesure à chaud est celle de `duree_reel`.
+
+### Bilan contre la barre du ticket
+
+| Barre | Mesure | |
+|---|---|---|
+| `plan_reel` ≥ 20 / 25 | 25 / 25 | tenue |
+| ≤ 1 fausse question sur 25 | 0 | tenue |
+| `ecart_reel` ≥ 32 / 40 | 33 / 40 | tenue |
+| `question_reel` ≥ 9 / 12 | 12 / 12 | tenue |
+| phrase E rendue en question par le modèle | question du garde-fou dans le produit ; du modèle seulement dans `duree_reel` | **manquée** |
+
+Barre manquée sur E. Décision du propriétaire (2026-10-24) : garder quand même le modèle de
+5.17, meilleur que celui de 5.15 sur tout le reste, E restant rattrapée par le garde-fou. Il est
+installé dans le dossier des modèles du poste sous le nom de déclaration que le panneau a
+retenu (`cassini-composition-4b.modele.json`) ; celui de 5.15 y reste sous le nom
+`cassini-composition-4b-5-15`. La suite de E fera l'objet d'un autre ticket (`deferred-work.md`).

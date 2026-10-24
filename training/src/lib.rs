@@ -440,6 +440,97 @@ mod tests {
         assert!(retries > 0);
     }
 
+    /// Une distance écrite dans la demande : un nombre suivi de « m » ou « km » (espace
+    /// facultative, pas de lettre après), ou les mots entiers « mètre(s) », « kilomètre(s) ».
+    /// Une durée (« 10 min ») ou « périmètre » n'en sont pas.
+    fn has_distance(request: &str) -> bool {
+        let lower = request.to_lowercase();
+        let words = lower
+            .split(|c: char| !c.is_alphabetic())
+            .any(|w| matches!(w, "mètre" | "mètres" | "kilomètre" | "kilomètres"));
+        let chars: Vec<char> = lower.chars().collect();
+        let unit = (0..chars.len()).any(|i| {
+            if !chars[i].is_ascii_digit() {
+                return false;
+            }
+            let mut j = i + 1;
+            if chars.get(j) == Some(&' ') {
+                j += 1;
+            }
+            if chars.get(j) == Some(&'k') {
+                j += 1;
+            }
+            chars.get(j) == Some(&'m') && !chars.get(j + 1).is_some_and(|c| c.is_alphabetic())
+        });
+        words || unit
+    }
+
+    #[test]
+    fn a_travel_without_coordinates_never_becomes_a_plan() {
+        // Une durée de trajet depuis un lieu sans coordonnées mène à une question (un refus
+        // depuis plusieurs lieux, décision a) ; une question de coordonnées ne porte jamais sur
+        // une distance en mètres, qui reste un plan.
+        let (examples, _) = generate(DEFAULT_SEED, DEFAULT_COUNT);
+        let modes = [
+            "à pied",
+            "en marchant",
+            "à la marche",
+            "en voiture",
+            "en auto",
+            "en véhicule",
+        ];
+        let mut travels = 0;
+        for e in &examples {
+            let r = e.request.to_lowercase();
+            let travel = modes.iter().any(|m| r.contains(m));
+            let coordinates = ["lambert", "epsg", "wgs"].iter().any(|c| r.contains(c));
+            if travel && !coordinates {
+                travels += 1;
+                let refused = e.expected["reason"] == families::NO_MULTI_ORIGIN;
+                assert!(
+                    e.expected["kind"] == "question" || refused,
+                    "{} → {}",
+                    e.request,
+                    e.expected
+                );
+            }
+            let asks_point = e.expected["question"]
+                .as_str()
+                .is_some_and(|q| q.contains("coordonnées"));
+            if asks_point {
+                assert!(travel && !has_distance(&e.request), "{}", e.request);
+            }
+        }
+        assert!(travels > 50, "{travels}");
+        assert!(has_distance("à moins de 500 m d'une gare"));
+        assert!(has_distance("à 300m"));
+        assert!(has_distance("à moins de 2 km"));
+        assert!(has_distance("à deux kilomètres"));
+        assert!(!has_distance("à 10 min à pied"));
+        assert!(!has_distance("dans le périmètre"));
+    }
+
+    #[test]
+    fn the_isochrone_still_starts_from_a_single_point() {
+        // Le refus des origines multiples tient tant que l'origine est un seul point.
+        let registry = Registry::standard();
+        let spec = registry.spec("analysis.isochrone").expect("isochrone");
+        let schema = &spec.params_schema;
+        let mut origin = &schema["properties"]["origin"];
+        // `{"$ref": "#/$defs/Point"}` : la forme est dans les définitions du schéma.
+        if let Some(name) = origin["$ref"]
+            .as_str()
+            .and_then(|r| r.strip_prefix("#/$defs/"))
+        {
+            origin = &schema["$defs"][name];
+        }
+        assert!(origin.is_object(), "{schema}");
+        assert_ne!(origin["type"], "array", "{origin}");
+        for key in ["x", "y", "epsg"] {
+            assert!(origin["properties"][key].is_object(), "{key} : {origin}");
+        }
+    }
+
     #[test]
     fn no_plan_of_the_generated_set_passes_six_steps() {
         let (examples, _) = generate(DEFAULT_SEED, DEFAULT_COUNT);
