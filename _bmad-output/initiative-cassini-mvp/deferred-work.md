@@ -345,3 +345,9 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-nouvelle-passe-sur-le-generateur-isochrone-depuis-un-lieu-de-plan.md`
   summary: Isochrone demandee depuis plusieurs points donnes en coordonnees (« depuis les points A et B (Lambert-93) ») : aucun exemple de refus ; le modele pourrait faire un plan sur le premier point et oublier le second.
   evidence: non verifie (medium si vrai) : relecture blind-hunter de 5.17 t.A ; `isochrone_vers_cible` ne tire qu'un point, la decision a ne vise que des lieux nommes ; a juger sur les sorties du modele de la tache B.
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-17-tache-b-reentrainement-et-mesures.md`
+  summary: Phrase E encore manquee par le modele de 5.17 dans le produit : `cassini plan` (processeur et CUDA) et le panneau QGIS rendent la question du garde-fou, seuls `duree_reel` et `llama-completion` une question du modele ; nouvelle passe a ouvrir en ticket (decision du proprietaire, 2026-10-24).
+  evidence: mesures de 5.17 tache B (docs/entrainement-du-modele.md, « La phrase E ») ; le modele hesite entre question et point invente selon le calcul du prompt.
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-17-tache-b-reentrainement-et-mesures.md`
+  summary: Isochrone depuis plusieurs points en coordonnees, constat observe en 5.17 tache B : le modele ecrit deux origines dans un meme objet, sortie rejetee, question du garde-fou qui ne dit pas pourquoi ; jamais un plan faux.
+  evidence: `cassini plan` et `llama-completion` sur « … des points 655200, 6849800 et 656100, 6850400 (Lambert-93) » ; suite de l'entree differee de la tache A.
