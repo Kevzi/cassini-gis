@@ -351,3 +351,9 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-17-tache-b-reentrainement-et-mesures.md`
   summary: Isochrone depuis plusieurs points en coordonnees, constat observe en 5.17 tache B : le modele ecrit deux origines dans un meme objet, sortie rejetee, question du garde-fou qui ne dit pas pourquoi ; jamais un plan faux.
   evidence: `cassini plan` et `llama-completion` sur « … des points 655200, 6849800 et 656100, 6850400 (Lambert-93) » ; suite de l'entree differee de la tache A.
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-17-tache-b-reentrainement-et-mesures.md`
+  summary: Plusieurs phrases enchainees dans une meme session saturent le contexte : les couches de resultat s'ajoutent a l'inventaire et, des la 4e phrase, `plan.propose` echoue en `ai.prompt_too_long` (N_CTX 8192) ; composition 68 s, 75 s puis 108 s avant l'echec.
+  evidence: recette de 5.17 dans QGIS (2026-10-24), noyau et modele installes, projet de Villeneuve : phrases 1 a 3 justes, phrases 4 a 10 toutes en `ai.prompt_too_long` en 0,4 s ; les memes phrases passent une a une sur projet vierge. Prolonge l'entree existante sur N_CTX.
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-17-tache-b-reentrainement-et-mesures.md`
+  summary: Reference a un resultat precedent (« Trouve les parcelles dans ces zones ... » apres « Garde les zones U du PLU. ») : le modele prend la couche source entiere au lieu de la couche de resultat ; famille d'entrainement a ajouter, jamais une regle de prompt.
+  evidence: recette de 5.17 dans QGIS : intersection des parcelles avec `plu_zones` entiere (2 513) au lieu de la selection des zones U (2 429).
