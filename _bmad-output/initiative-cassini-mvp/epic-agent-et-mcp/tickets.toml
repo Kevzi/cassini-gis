@@ -152,7 +152,7 @@ title = "Refactor sweep"
 description = "Nettoie ce que l'epic a laisse : doublons entre ai/, serve.rs et le serveur MCP, constats de revue reportes dans deferred-work.md ; le perimetre est fixe au demarrage d'apres les plans et les constats."
 verify = "cargo test, clippy et fmt propres, les constats reportes de l'epic sont traites ou re-reportes avec leur raison."
 covers = []
-after = [1, 2, 3, 4, 5, 6, 7, 11, 12, 13, 14, 16, 18]
+after = [1, 2, 3, 4, 5, 6, 7, 11, 12, 13, 14, 16, 18, 19]
 hitl = false
 risk = "low"
 
@@ -278,4 +278,25 @@ notes = [
   "Open question: contexte plus grand (16 384) contre inventaire plus court ; cout en memoire et en duree de chaque choix sur le processeur de 4 coeurs, a mesurer au debut du build.",
   "hitl : le proprietaire fait la recette enchainee dans QGIS apres la demo de Claude.",
   "Check hors criteres (risque high) : le proprietaire enchaine au moins dix phrases dans une meme session QGIS et confirme qu'aucune n'echoue sur la taille du contexte.",
+]
+
+[[entry]]
+id = 19
+type = "story"
+title = "Duree par phrase sous 30 s dans une session QGIS, sur processeur"
+description = "Ramene sous 30 s, sur processeur seul, la composition d'un plan dans une session QGIS ou les phrases s'enchainent. Mesure d'abord ou part le temps a chaque phrase (relecture de l'inventaire, ecriture du plan, charge de QGIS), puis applique les leviers dans l'ordre du moins couteux : inventaire garde en memoire d'une phrase a l'autre (couches de l'utilisateur en tete et nouveaux resultats a la fin, pour que seules les nouvelles couches soient relues), budget d'inventaire plus serre si la justesse le permet, et seulement si ce n'est pas assez, identifiants de couche courts dans le plan ecrit, qui demandent un re-entrainement."
+verify = "Sur le 5800X bride a 4 coeurs, sans CUDA, la recette enchainee de dix phrases (sonde jetable, vrai noyau, vrai modele, projet de Villeneuve-le-Roi) compose chaque plan de la phrase de demo et des phrases courtes en moins de 30 s, durees par phrase consignees dans docs/ ; aucune ai.prompt_too_long ; plan_reel, question_reel et ecart_reel sur GPU ne baissent pas par rapport a 5.18."
+covers = ["CAP-4"]
+after = [18]
+hitl = true
+risk = "high"
+notes = [
+  "Decision: 2026-10-24 — ticket demande par le proprietaire apres 5.18 : l'exigence de moins de 30 s par phrase sur processeur seul (2026-10-17) redevient un critere, mesure dans une session QGIS enchainee et non plus seulement par duree_reel.",
+  "Constat 2026-10-24 (recette de 5.18) : 75 a 120 s de composition par phrase dans QGIS, contre 41,4 s pour la phrase de demo par duree_reel (5.10 tache 4b) ; l'inventaire, qui change a chaque phrase, est relu en entier apres l'instantane de la partie fixe.",
+  "Reprend l'entree de deferred-work.md sur la duree de la phrase de demo (41,4 s, ecriture de 248 jetons a environ 6 jetons/s).",
+  "Le budget de 5.18 garde l'ordre de QGIS (nouveaux resultats en tete) : changer cet ordre pour garder l'inventaire en memoire est permis, l'entrainement melangeant l'ordre des couches ; a mesurer sur la justesse.",
+  "Decision: 2026-10-22 (reprise de 5.10) — une phrase mal comprise devient une famille d'exemples, jamais une regle de prompt.",
+  "Open question: faut-il des identifiants de couche courts (re-entrainement) ou les leviers sans re-entrainement suffisent-ils ? A trancher apres la mesure, au debut du build.",
+  "hitl : le proprietaire fait la recette enchainee dans QGIS et confirme la duree ; un re-entrainement eventuel tourne sur sa carte graphique.",
+  "Check hors criteres (risque high) : le proprietaire enchaine dix phrases dans QGIS et confirme qu'aucune ne depasse 30 s.",
 ]
