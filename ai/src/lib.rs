@@ -43,7 +43,7 @@ pub enum AiError {
     Adapter(String),
     /// Le contexte d'inférence n'a pas pu être créé.
     Context(String),
-    /// La phrase ne tient pas dans le contexte.
+    /// L'invite (consignes, inventaire du projet, demande) ne tient pas dans le contexte.
     PromptTooLong,
     /// Le décodage a échoué.
     Decode(String),
@@ -70,7 +70,7 @@ impl fmt::Display for AiError {
             AiError::Context(e) => write!(f, "Le contexte du modèle n'a pas pu être créé : {e}"),
             AiError::PromptTooLong => write!(
                 f,
-                "La demande, avec le catalogue et l'inventaire, ne tient pas dans le contexte du modèle."
+                "La demande et l'inventaire du projet ne tiennent pas dans le contexte du modèle ; le plus souvent, l'inventaire est trop long : retirez des couches du projet, puis refaites la demande."
             ),
             AiError::Decode(e) => write!(f, "Le modèle n'a pas pu répondre : {e}"),
             AiError::Grammar(e) => {
@@ -658,6 +658,15 @@ pub fn generate_files_measured(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Ticket 5.18 : le message nomme l'inventaire du projet comme cause habituelle, et dit quoi faire.
+    #[test]
+    fn a_prompt_too_long_names_the_project_inventory() {
+        let message = AiError::PromptTooLong.to_string();
+        assert!(message.contains("inventaire du projet"), "{message}");
+        assert!(message.contains("retirez des couches"), "{message}");
+        assert_eq!(AiError::PromptTooLong.code(), "ai.prompt_too_long");
+    }
 
     #[test]
     fn empty_prompt_is_refused_before_loading() {

@@ -7,10 +7,12 @@
 //! `Session::call` (journal, chemins, annulation), une à la fois, les références `step:k`
 //! étant résolues depuis les sorties déjà obtenues : le journal garde les valeurs résolues.
 
+use std::path::Path;
+
 use serde_json::{json, Value};
 
 use super::{invalid_params, is_available, Channel, RpcError, State};
-use crate::agent_inventory::agent_inventory;
+use crate::agent_inventory::{agent_inventory, within_budget, WorkFile, INVENTORY_BUDGET_CHARS};
 use crate::error::ErrorReport;
 use crate::exec::Executor;
 use crate::journal::relativize;
@@ -131,6 +133,7 @@ pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<V
     let Some(composer) = state.composer else {
         return Err(unavailable());
     };
+    let work_dir = state.session.as_ref().map(|s| s.work_dir().to_path_buf());
     let plan = {
         let link = state.link.clone();
         let announced = &state.announced;
@@ -141,10 +144,16 @@ pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<V
                 )));
             }
             // Directement par le canal, hors `Session` : l'inventaire n'est pas journalisé.
-            // Le modèle voit la forme de son entraînement, traduite ici (ticket 5.10, t. 4a).
+            // Le modèle voit la forme de son entraînement, traduite ici (ticket 5.10, t. 4a),
+            // bornée au budget d'inventaire (ticket 5.18) : les couches de résultat les plus
+            // anciennes sortent de sa vue, jamais du projet. Les fichiers sont lus après la
+            // réponse de l'extension, au plus près de l'inventaire.
             Channel { link: link.clone() }
                 .execute("project.inventory", json!({}))
-                .map(|raw| agent_inventory(&raw))
+                .map(|raw| {
+                    let files = work_dir.as_deref().map(work_files).unwrap_or_default();
+                    within_budget(agent_inventory(&raw), &files, INVENTORY_BUDGET_CHARS)
+                })
                 .map_err(ErrorReport::from)
         };
         composer
@@ -171,6 +180,32 @@ pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<V
         plan,
     });
     Ok(json!({"plan_id": id, "plan": shown}))
+}
+
+/// Les fichiers du dossier de travail et de son dossier de rejeu (`replay/`, où un rejeu écrit
+/// ses résultats), avec leur date. Un dossier illisible ou absent n'en donne aucun (rien n'est
+/// alors reconnu comme résultat, rien n'est retiré) ; un fichier illisible est ignoré.
+fn work_files(dir: &Path) -> Vec<WorkFile> {
+    let mut files = files_in(dir);
+    files.extend(files_in(&dir.join("replay")));
+    files
+}
+
+/// Les fichiers d'un dossier (sans ses sous-dossiers), avec leur date.
+fn files_in(dir: &Path) -> Vec<WorkFile> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let meta = entry.metadata().ok().filter(|m| m.is_file())?;
+            Some(WorkFile {
+                name: entry.file_name().into_string().ok()?,
+                modified: meta.modified().ok()?,
+            })
+        })
+        .collect()
 }
 
 /// `plan.reject {plan_id}` : oublie le plan en attente.
@@ -227,4 +262,33 @@ pub(super) fn execute(state: &mut State<'_>, params: Option<&Value>) -> Result<V
         outputs.push(value);
     }
     Ok(json!({"plan_id": pending.id, "steps": steps}))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn work_files_include_the_replay_folder() {
+        let dir = std::env::temp_dir().join(format!("cassini-work-files-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // Dossier absent : aucun fichier.
+        assert!(work_files(&dir).is_empty());
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("3-analysis.buffer.gpkg"), b"x").unwrap();
+        // Sans `replay/` : les fichiers du dossier de travail seuls.
+        let names = |d: &Path| {
+            let mut n: Vec<String> = work_files(d).into_iter().map(|f| f.name).collect();
+            n.sort();
+            n
+        };
+        assert_eq!(names(&dir), ["3-analysis.buffer.gpkg"]);
+        std::fs::create_dir_all(dir.join("replay")).unwrap();
+        std::fs::write(dir.join("replay").join("1-analysis.intersect.gpkg"), b"x").unwrap();
+        assert_eq!(
+            names(&dir),
+            ["1-analysis.intersect.gpkg", "3-analysis.buffer.gpkg"]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

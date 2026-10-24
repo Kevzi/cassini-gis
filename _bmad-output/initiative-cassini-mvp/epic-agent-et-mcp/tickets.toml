@@ -152,7 +152,7 @@ title = "Refactor sweep"
 description = "Nettoie ce que l'epic a laisse : doublons entre ai/, serve.rs et le serveur MCP, constats de revue reportes dans deferred-work.md ; le perimetre est fixe au demarrage d'apres les plans et les constats."
 verify = "cargo test, clippy et fmt propres, les constats reportes de l'epic sont traites ou re-reportes avec leur raison."
 covers = []
-after = [1, 2, 3, 4, 5, 6, 7, 11, 12, 13, 14, 16]
+after = [1, 2, 3, 4, 5, 6, 7, 11, 12, 13, 14, 16, 18]
 hitl = false
 risk = "low"
 
@@ -259,4 +259,23 @@ notes = [
   "hitl : l'entrainement tourne sur la carte graphique du proprietaire (environ 4 h), qui fait ensuite la recette dans QGIS.",
   "Check hors criteres (risque high) : le proprietaire rejoue la phrase de demo et la phrase E dans QGIS et confirme le comportement.",
   "Viser des familles sur des ecarts nommes du jeu tenu a l'ecart (H08, H17 a H23, H40) affaiblit ecart_reel comme mesure aveugle : le consigner avec les chiffres.",
+]
+
+[[entry]]
+id = 18
+type = "story"
+title = "Plusieurs phrases enchainees dans une session sans saturer le contexte"
+description = "Corrige dans le noyau, sans re-entrainer, la saturation du contexte quand l'utilisateur enchaine les phrases dans une meme session QGIS : les couches de resultat s'ajoutent a l'inventaire et, des la 4e phrase de la recette de 5.17, plan.propose echoue en ai.prompt_too_long (N_CTX 8192). Mesure d'abord la taille en jetons de chaque partie du prompt (consignes, inventaire par couche) au fil de la recette enchainee, puis choisit et applique le correctif : un inventaire qui grandit moins vite, un contexte plus grand, ou les deux. Corrige aussi le message de ai.prompt_too_long, qui accuse la phrase alors que l'inventaire est en cause."
+verify = "La recette enchainee de 5.17 (dix phrases dans une meme session QGIS, projet de Villeneuve-le-Roi, vrai noyau et vrai modele) se rejoue sans aucun ai.prompt_too_long et les phrases 1 a 3 rendent les memes plans qu'avant ; un test sans modele montre qu'un inventaire de la taille atteinte a la 10e phrase tient au contexte et qu'un inventaire trop gros rend une erreur typee qui nomme l'inventaire ; plan_reel, question_reel et ecart_reel sur GPU ne baissent pas par rapport a 5.17."
+covers = ["CAP-4"]
+after = [17]
+hitl = true
+risk = "high"
+notes = [
+  "Decision: 2026-10-24 — choisi par le proprietaire apres la recette de 5.17 : un correctif du noyau, sans re-entrainement ; ensuite rejouer la recette enchainee.",
+  "Decision: 2026-10-22 (reprise de 5.10) — une phrase mal comprise devient une famille d'exemples, jamais une regle de prompt : la reprise de « ces zones » (deferred-work.md, recette de 5.17) reste hors de ce ticket.",
+  "Toute forme d'inventaire que le modele ajuste n'a pas vue a l'entrainement (champs retires, valeurs coupees, cle nouvelle) peut faire baisser sa justesse : a mesurer sur GPU avant de la garder.",
+  "Open question: contexte plus grand (16 384) contre inventaire plus court ; cout en memoire et en duree de chaque choix sur le processeur de 4 coeurs, a mesurer au debut du build.",
+  "hitl : le proprietaire fait la recette enchainee dans QGIS apres la demo de Claude.",
+  "Check hors criteres (risque high) : le proprietaire enchaine au moins dix phrases dans une meme session QGIS et confirme qu'aucune n'echoue sur la taille du contexte.",
 ]
