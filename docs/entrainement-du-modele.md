@@ -500,6 +500,65 @@ brute. C'est plus que la plus longue séquence entière vue à l'entraînement (
 PLU réel porte 24 champs, dont des empreintes et des libellés longs. L'effet sur le modèle
 ajusté se mesure à la tâche 4b.
 
+### Budget d'inventaire (5.18)
+
+Chaque plan exécuté ajoute ses couches de résultat au projet, donc à l'inventaire : à la recette
+enchaînée de 5.17, la 4ᵉ phrase ne tenait plus dans le contexte (8 192 jetons). Le noyau borne
+donc l'inventaire vu par le modèle (`core/src/agent_inventory.rs`, `within_budget`) : sous le
+budget, il est rendu tel quel ; au-delà, toutes les couches de l'utilisateur restent, avec les
+couches de résultat les plus récentes qui tiennent, dans l'ordre de l'inventaire. Une couche de
+résultat est une couche dont le fichier source est dans le dossier de travail `<projet>.cassini/`
+ou dans son dossier de rejeu `replay/` ; la plus récente est celle dont le fichier est le plus
+récent (à date égale, le plus grand numéro d'étape). Rien n'est retiré de QGIS et une couche
+gardée n'est pas modifiée. Une couche retirée reste donc dans le projet : un plan qui la cite
+s'exécute, seul le modèle ne la voit plus.
+
+Le budget est en **caractères** du texte JSON compact de l'inventaire, parce que le noyau ne
+tokenise pas. Mesure du 2026-10-24, tokeniseur du modèle livré
+(`cassini-composition-4b-Q4_K_M.gguf`), test ignoré
+`the_inventory_budget_fits_the_context_with_the_real_tokenizer` de `ai/src/plan.rs` :
+
+| Mesure | Caractères | Jetons | Jeton par caractère |
+|---|---|---|---|
+| inventaire de Villeneuve (6 couches) | 4 007 | 1 458 | 0,364 |
+| couche d'intersection à 34 champs (parcelles × zones du PLU) | 1 999 | 724 | 0,362 |
+| tout le reste au premier essai (consignes, armature, longue phrase) | — | 359 | — |
+| ajout de la redemande au pire (sortie recopiée à 1 500 caractères, 8 écarts) | — | 1 106 | — |
+
+Il reste donc 8 192 − 1 024 (réponse) − 359 − 1 106 = 5 703 jetons pour l'inventaire, soit
+15 600 caractères au rapport mesuré. Le budget est fixé à **14 000 caractères** : Villeneuve
+plus quatre intersections et une cinquième coupée (13 972 caractères) donnent une redemande de
+6 501 jetons, plus 1 024 de réponse, soit 7 525 sur 8 192. Le budget tient tant que
+l'inventaire ne dépasse pas 0,41 jeton par caractère. Le contrôle exact de `cassini-ai`
+(`ai.prompt_too_long`) reste le dernier filet ; son message nomme désormais l'inventaire du
+projet et conseille d'en retirer des couches. Le budget vise le prompt court du modèle livré :
+le long prompt, plus lourd de son catalogue, garde son erreur typée.
+
+**Recette enchaînée** (2026-10-24, QGIS 3.44.15, `projet-test-villeneuve.qgz`, noyau du
+produit sur processeur, modèle livré seul dans `CASSINI_MODELS`, sonde jetable hors dépôt sur le
+modèle de `qgis-plugin/tests/probe_demo.py`) : les dix phrases de la recette de 5.17, dans une
+même session, chaque plan exécuté. Aucune `ai.prompt_too_long` (en 5.17 : phrases 4 à 10) ; le
+projet passe de 6 à 18 couches. Les phrases 1 à 3 rendent les mêmes plans et les mêmes nombres
+qu'en 5.17 (5 étapes, 2 429 parcelles ; une sélection, 137 zones ; 3 étapes, 2 513 parcelles,
+« ces zones » toujours mal reprises, hors ticket). Les phrases 4 à 10 rendent ce qu'elles
+rendaient une à une sur projet vierge en 5.17 : PDF, tampon puis intersection (40 576), question
+du garde-fou, isochrone puis intersection, refus, question du modèle, refus.
+
+Seconde recette enchaînée, après la relecture (même poste, même modèle, dix autres phrases :
+démo, zones U, parcelles dans ces zones près d'une gare, tampon de 200 m, routes à 30 km/h,
+bâtiments près de ces routes, altitude moyenne du MNT par zone, zones N, démo de nouveau, PDF) :
+aucune `ai.prompt_too_long`, le projet passe de 6 à 19 couches (39 289 caractères bruts).
+Huit plans exécutés, un refus juste (statistiques sur un raster). Constat : la phrase de démo,
+juste en 1ʳᵉ position, rend en 9ᵉ position une question (« Je ne vois pas de champ de type de
+zone dans la couche plu_zones »), alors que `plu_zones` et `typezone` sont dans l'inventaire
+vu. L'inventaire au budget (14 000 caractères) est bien plus gros que ceux de l'entraînement
+(couches citées plus une à quatre de distraction) : la justesse du modèle sur de longs
+inventaires de session reste à apprendre (`deferred-work.md`).
+
+Jeu de mesures sur GPU après le changement, modèle livré : `plan_reel` 25 / 25 (0 question),
+`question_reel` 12 / 12, `ecart_reel` 33 / 40 (plans 19 / 26, questions 8 / 8, refus 6 / 6),
+les mêmes qu'en 5.17 : ces essais passent par `cassini-ai` et des inventaires sous le budget.
+
 ## Tâche 4 : mesures
 
 Tâche 4b du ticket 5.10, le 2026-10-23, au commit `540f59c` plus les changements de la tâche :

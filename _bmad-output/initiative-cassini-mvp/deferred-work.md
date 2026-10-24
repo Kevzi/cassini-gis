@@ -357,3 +357,12 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-17-tache-b-reentrainement-et-mesures.md`
   summary: Reference a un resultat precedent (« Trouve les parcelles dans ces zones ... » apres « Garde les zones U du PLU. ») : le modele prend la couche source entiere au lieu de la couche de resultat ; famille d'entrainement a ajouter, jamais une regle de prompt.
   evidence: recette de 5.17 dans QGIS : intersection des parcelles avec `plu_zones` entiere (2 513) au lieu de la selection des zones U (2 429).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-plusieurs-phrases-enchainees-dans-une-session-sans-saturer-l-plan.md`
+  summary: Les couches de resultat retirees de la vue du modele par le budget d'inventaire (5.18) ne sont signalees ni au modele ni a l'utilisateur ; une phrase qui en cite une (« la zone tampon de tout a l'heure ») finit en question ou en plan sans explication.
+  evidence: relecture de 5.18 (blind-hunter) ; ni `plan.propose` ni le panneau ne portent de compte des couches retirees.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-plusieurs-phrases-enchainees-dans-une-session-sans-saturer-l-plan.md`
+  summary: Non verifie (medium s'il est vrai) : la date d'un fichier de resultat GeoPackage pourrait changer quand QGIS l'ouvre ou le ferme (journal WAL), et fausser l'ordre « plus recents d'abord » du budget d'inventaire.
+  evidence: relecture de 5.18 (edge-case-hunter). A trancher : comparer la date d'un `.gpkg` du dossier de travail avant et apres ouverture et fermeture dans QGIS.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-plusieurs-phrases-enchainees-dans-une-session-sans-saturer-l-plan.md`
+  summary: Justesse du modele sur un long inventaire de session : en 9e position d'une recette enchainee, la phrase de demo exacte rend une question (« Je ne vois pas de champ de type de zone dans la couche plu_zones ») alors qu'elle rend un plan juste en 1re position ; famille d'entrainement a ajouter (inventaires avec des couches de resultat d'une session, pres du budget de 14 000 caracteres), jamais une regle de prompt.
+  evidence: seconde recette enchainee de 5.18 (2026-10-24), 19 couches dans le projet, `plu_zones` et `typezone` dans l'inventaire vu (couches de l'utilisateur jamais retirees) ; les inventaires d'entrainement ne portent que les couches citees et une a quatre de distraction (`training/src/inventories.rs`, `finish`).

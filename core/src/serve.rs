@@ -1983,6 +1983,92 @@ mod tests {
         c.close().1.unwrap();
     }
 
+    /// Ticket 5.18 : dix couches de résultat dont les fichiers sont au dossier de travail
+    /// dépassent le budget d'inventaire ; le compositeur reçoit toutes les couches de
+    /// l'utilisateur, puis les résultats les plus récents qui tiennent, les plus anciens absents.
+    #[test]
+    fn the_composer_sees_an_inventory_reduced_to_the_budget() {
+        use crate::agent_inventory::INVENTORY_BUDGET_CHARS;
+        use std::time::{Duration, SystemTime};
+        let composer = composer(three_steps()).unwrap();
+        let seen = composer.seen.clone();
+        let mut c = Client::start_with(CANCEL_GRACE, Some(composer));
+        c.hello_with(&ALL);
+        // Les fichiers des dix résultats, datés de l'étape 1 (la plus ancienne) à la 10.
+        let work = c.dir.join("p.cassini");
+        let base = SystemTime::now() - Duration::from_secs(3_600);
+        for k in 1..=10u64 {
+            let file = work.join(format!("{k}-analysis.intersect.gpkg"));
+            std::fs::write(&file, b"gpkg").unwrap();
+            std::fs::File::options()
+                .write(true)
+                .open(&file)
+                .unwrap()
+                .set_modified(base + Duration::from_secs(k * 60))
+                .unwrap();
+        }
+        let fields: Vec<Value> = (0..34)
+            .map(|i| json!({"name": format!("champ_assez_long_{i:02}"), "type": "Integer64"}))
+            .collect();
+        let user = |id: &str| {
+            json!({"layer_id": id, "name": id, "source": "villeneuve.gpkg", "crs": "EPSG:2154",
+                "kind": "vector", "geometry": "MultiPolygon", "feature_count": 3,
+                "fields": [{"name": "typezone", "type": "String", "values": ["U", "N"]}]})
+        };
+        // Comme QGIS les pose : les nouveaux résultats en tête de légende.
+        let mut layers: Vec<Value> = (1..=10)
+            .rev()
+            .map(|k| {
+                json!({"layer_id": format!("Intersection_{k}"), "name": "Intersection",
+                    "source": format!("{k}-analysis.intersect.gpkg"), "crs": "EPSG:2154",
+                    "kind": "vector", "geometry": "MultiPolygon", "feature_count": 9,
+                    "fields": fields})
+            })
+            .collect();
+        layers.extend([user("plu"), user("gares"), user("parcelles")]);
+        c.send(json!({"jsonrpc":"2.0","id":2,"method":"plan.propose","params":{"request":"x"}}));
+        let order = c.recv();
+        assert_eq!(order["params"]["command"], "project.inventory");
+        c.send(reply(
+            &order["id"],
+            json!({"project_name": "p", "project_crs": "EPSG:2154", "extent": null,
+                "layers": layers}),
+        ));
+        assert!(c.recv()["result"]["plan_id"].is_string());
+        let seen = seen.lock().unwrap();
+        let inventory = &seen[0];
+        let ids: Vec<&str> = inventory["layers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|l| l["layer_id"].as_str().unwrap())
+            .collect();
+        // Ordre de l'inventaire gardé ; seuls les résultats des étapes 1 à 3 sont sortis.
+        assert_eq!(
+            ids,
+            [
+                "Intersection_10",
+                "Intersection_9",
+                "Intersection_8",
+                "Intersection_7",
+                "Intersection_6",
+                "Intersection_5",
+                "Intersection_4",
+                "plu",
+                "gares",
+                "parcelles"
+            ]
+        );
+        assert!(inventory.to_string().chars().count() <= INVENTORY_BUDGET_CHARS);
+        // Une couche gardée garde sa forme apprise, champs compris.
+        assert_eq!(
+            inventory["layers"][0]["fields"].as_array().unwrap().len(),
+            34
+        );
+        drop(seen);
+        c.close().1.unwrap();
+    }
+
     #[test]
     fn the_composer_sees_the_inventory_in_the_learned_shape() {
         let composer = composer(three_steps()).unwrap();

@@ -1244,4 +1244,156 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(dir);
     }
+
+    /// Ticket 5.18, sans modèle : le budget d'inventaire du noyau (14 000 caractères) a été mesuré
+    /// pour ces valeurs-là. Avant d'en changer une, relancer avec le modèle
+    /// `the_inventory_budget_fits_the_context_with_the_real_tokenizer`, puis mettre à jour ce test.
+    #[test]
+    fn the_inventory_budget_was_measured_for_these_values() {
+        const RERUN: &str =
+            "relancer the_inventory_budget_fits_the_context_with_the_real_tokenizer \
+            avec le modèle avant de changer cette valeur";
+        assert_eq!(crate::N_CTX, 8192, "N_CTX : {RERUN}");
+        assert_eq!(MAX_PLAN_TOKENS, 1024, "MAX_PLAN_TOKENS : {RERUN}");
+        assert_eq!(MAX_ECHO_CHARS, 1500, "MAX_ECHO_CHARS : {RERUN}");
+        assert_eq!(MAX_REPORTED, 8, "MAX_REPORTED : {RERUN}");
+        assert_eq!(
+            cassini_core::agent_inventory::INVENTORY_BUDGET_CHARS,
+            14_000,
+            "INVENTORY_BUDGET_CHARS : {RERUN}"
+        );
+        assert_eq!(SHORT_SYSTEM.chars().count(), 1041, "SHORT_SYSTEM : {RERUN}");
+    }
+
+    /// Mesure du ticket 5.18, avec le vrai tokeniseur du modèle livré : jetons par caractère de
+    /// l'inventaire de Villeneuve et d'une couche d'intersection à 34 champs (parcelles × zones du
+    /// PLU), et place prise par tout ce qui n'est pas l'inventaire (consignes, armature, phrase,
+    /// redemande). Le noyau ne tokenise pas : son budget d'inventaire, en caractères, se vérifie
+    /// ici au pire cas. `CASSINI_TEST_INVENTORY` : inventaire traduit du projet réel (hors dépôt),
+    /// par défaut `../donnees-test-cassini/inventaire-villeneuve-traduit-4b.json`, chemin relatif
+    /// à la racine du dépôt.
+    #[test]
+    #[ignore = "charge le vrai modèle ; lancer avec CASSINI_TEST_MODEL et --ignored"]
+    fn the_inventory_budget_fits_the_context_with_the_real_tokenizer() {
+        use cassini_core::agent_inventory::INVENTORY_BUDGET_CHARS;
+        use llama_cpp_2::model::params::LlamaModelParams;
+        use llama_cpp_2::model::LlamaModel;
+        let Some(path) = std::env::var_os("CASSINI_TEST_MODEL") else {
+            eprintln!("CASSINI_TEST_MODEL absent : mesure ignorée.");
+            return;
+        };
+        let inventory_path = std::env::var_os("CASSINI_TEST_INVENTORY")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../donnees-test-cassini/inventaire-villeneuve-traduit-4b.json")
+            });
+        let text = std::fs::read_to_string(&inventory_path).expect("inventaire de Villeneuve");
+        let villeneuve: Value = serde_json::from_str(&text).unwrap();
+        let mut guard = crate::engine()
+            .unwrap()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        guard.loaded = None;
+        let llama = LlamaModel::load_from_file(
+            &guard.backend,
+            Path::new(&path),
+            &LlamaModelParams::default(),
+        )
+        .unwrap();
+        let vocab = llama.vocab();
+        let count = |s: &str| vocab.tokenize(s.as_bytes(), false, false).len();
+        let chars = |v: &Value| v.to_string().chars().count();
+
+        // L'inventaire de Villeneuve, tel que le prompt court l'écrit.
+        let inv_chars = chars(&villeneuve);
+        let inv_tokens = count(&villeneuve.to_string());
+        // Une couche d'intersection : les 10 champs des parcelles puis les 24 du PLU.
+        let layers = villeneuve["layers"].as_array().unwrap();
+        let by_name = |n: &str| layers.iter().find(|l| l["name"] == n).unwrap().clone();
+        let (parcelles, plu) = (by_name("parcelles"), by_name("plu_zones"));
+        let mut fields = parcelles["fields"].as_array().unwrap().clone();
+        fields.extend(plu["fields"].as_array().unwrap().iter().cloned());
+        assert_eq!(fields.len(), 34);
+        let intersect = |k: usize| {
+            json!({"layer_id": format!("Intersection_{k:02}_8d2f0c55_7a1e_4b8e_9b0f_2c6d5e4a3b1c"),
+                "name": "Intersection", "kind": "vector", "geometry": "MultiPolygon",
+                "epsg": 2154, "feature_count": 2429,
+                "source": format!("{}-analysis.intersect.gpkg", 20 + k), "fields": fields})
+        };
+        let layer_chars = chars(&intersect(1));
+        let layer_tokens = count(&intersect(1).to_string());
+
+        // Tout le reste : consignes, armature, une longue phrase, l'inventaire vide.
+        let request = "Trouve les parcelles constructibles du PLU à moins de 500 m d'une gare à \
+            Villeneuve-le-Roi, hors des zones inondables, et sors-moi la carte en PDF avec un titre.";
+        let empty = json!({"project": villeneuve["project"], "layers": [], "unloaded_files": []});
+        let fixed = |inv: &Value| {
+            let turns = first_turns(PromptStyle::Short, &registry(), inv, request);
+            crate::chat_tokens(&vocab, &turns).0.len()
+        };
+        let base = fixed(&empty);
+        // La redemande au pire : la sortie recopiée à son plafond, et le plafond d'écarts.
+        let echo: String = r#"{"command":"analysis.intersect","params":{"layer_id":"step:3.layer_id","overlay_layer_id":"plu_zones_5a071b18_e012_4e1f_9c1c_250bbfb7550c"}},"#
+            .repeat(20)
+            .chars()
+        .take(MAX_ECHO_CHARS)
+        .collect();
+        let errors: Vec<String> = (1..=MAX_REPORTED)
+            .map(|k| format!("étape {k} : la couche « plu_zones_5a071b18_e012_4e1f_9c1c_250bbfb7550c_bis » n'est pas dans l'inventaire du projet"))
+            .collect();
+        let retry = |inv: &Value| {
+            let turns = retry_turns(
+                first_turns(PromptStyle::Short, &registry(), inv, request),
+                &echo,
+                &errors,
+            );
+            crate::chat_tokens(&vocab, &turns).0.len()
+        };
+        let retry_extra = retry(&empty) - base;
+
+        // Un inventaire au budget : Villeneuve, puis des intersections tant qu'elles tiennent.
+        let mut full = villeneuve.clone();
+        let mut k = 1;
+        loop {
+            let mut next = full.clone();
+            next["layers"].as_array_mut().unwrap().push(intersect(k));
+            if chars(&next) > INVENTORY_BUDGET_CHARS {
+                break;
+            }
+            full = next;
+            k += 1;
+        }
+        // Puis une dernière intersection, aux champs coupés, pour arriver au plus près du budget.
+        for n in (0..fields.len()).rev() {
+            let mut last = intersect(k);
+            last["fields"] = json!(fields[..n]);
+            let mut next = full.clone();
+            next["layers"].as_array_mut().unwrap().push(last);
+            if chars(&next) <= INVENTORY_BUDGET_CHARS {
+                full = next;
+                break;
+            }
+        }
+        let full_tokens = retry(&full);
+        eprintln!(
+            "Villeneuve : {inv_chars} caractères, {inv_tokens} jetons ({:.3} jeton/caractère)",
+            inv_tokens as f64 / inv_chars as f64
+        );
+        eprintln!(
+            "intersection à 34 champs : {layer_chars} caractères, {layer_tokens} jetons ({:.3} jeton/caractère)",
+            layer_tokens as f64 / layer_chars as f64
+        );
+        eprintln!("hors inventaire : {base} jetons au premier essai, {retry_extra} de plus à la redemande");
+        eprintln!(
+            "budget {INVENTORY_BUDGET_CHARS} caractères : {} intersections et une coupée, {} caractères, redemande de {full_tokens} jetons + {MAX_PLAN_TOKENS} de réponse, contexte {}",
+            k - 1,
+            chars(&full),
+            crate::N_CTX
+        );
+        assert!(
+            full_tokens + MAX_PLAN_TOKENS <= crate::N_CTX as usize,
+            "le budget ne laisse pas la place à la réponse"
+        );
+    }
 }
