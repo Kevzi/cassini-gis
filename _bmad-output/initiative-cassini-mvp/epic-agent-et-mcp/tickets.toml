@@ -334,3 +334,22 @@ notes = [
   "hitl : le proprietaire teste sur sa carte graphique NVIDIA ; une carte AMD ou Intel n'est pas disponible, le repli et le chemin Vulkan generique sont a verifier autrement.",
   "Check hors criteres (risque high) : le proprietaire installe le paquet livre et lance une phrase dans QGIS, avec puis sans carte graphique.",
 ]
+
+[[entry]]
+id = 22
+type = "story"
+title = "Phrase qui suit un plan a plusieurs resultats sous 30 s, sur processeur"
+description = "Reduit ce que le modele relit apres un plan qui ajoute des couches de resultat lourdes : la phrase qui suit un plan a plusieurs resultats lit une fois toutes ses couches (4 couches, 3 436 jetons, 69,6 s en phrase 2 de la recette enchainee), et celle qui suit une selection relit tous les champs de la couche source (zones U du PLU, ~1 100 jetons, 36,6 s en phrase 3). Deux leviers, dans la vue du modele seulement : ne montrer que la couche finale de chaque plan, les etapes intermediaires restant dans QGIS, ou alleger les champs des couches de resultat. Mesure d'abord, choisit avec le proprietaire, puis applique."
+verify = "Sur le 5800X bride a 4 coeurs, sans CUDA, la recette enchainee de dix phrases de 5.19 compose les phrases 2 et 3 en moins de 30 s, durees consignees dans docs/mesure-duree-par-phrase.md ; aucune ai.prompt_too_long ; plan_reel, question_reel et ecart_reel sur GPU ne baissent pas par rapport a 5.19 (25/25, 12/12, 32/40) ; une phrase qui cite une couche intermediaire ou un champ retire est consignee avec son issue."
+covers = ["CAP-4"]
+after = [19]
+hitl = true
+risk = "high"
+notes = [
+  "Decision: 2026-10-29 — ticket demande par le proprietaire a la fin de 5.19 ; reprend deux entrees de deferred-work.md (phrase apres un plan a plusieurs resultats, phrase apres une selection).",
+  "Open question: couche finale seule, champs alleges, ou les deux ? A trancher avec le proprietaire apres la mesure, au debut du build, sur la duree et la justesse.",
+  "Le journal, le plan garde et QGIS gardent toutes les couches et tous les champs : seule la vue du modele change, comme le budget de 5.18 et les identifiants courts de 5.19.",
+  "Decision: 2026-10-22 (reprise de 5.10) — une phrase mal comprise devient une famille d'exemples, jamais une regle de prompt ; un re-entrainement eventuel tourne sur la carte graphique du proprietaire.",
+  "hitl : le proprietaire tranche le levier et confirme la duree dans QGIS.",
+  "Check hors criteres (risque high) : le proprietaire enchaine dix phrases dans QGIS, dont une qui reprend un resultat intermediaire, et confirme la duree et l'issue.",
+]
