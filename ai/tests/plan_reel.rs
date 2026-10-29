@@ -90,6 +90,8 @@ fn plan_reel_at_least_80_percent_of_the_plans_match() {
     };
     let registry = Registry::standard();
     let inventory: Value = serde_json::from_str(INVENTORY).unwrap();
+    // Comme dans le produit : identifiants courts montrés, plan retraduit (ticket 5.19).
+    let (inventory, ids) = common::shown_inventory(&inventory);
     let sentences: Vec<Value> = serde_json::from_str(SENTENCES).unwrap();
     let mut generator = model_files_generator(files);
     let (mut right, mut total, mut questions, mut guarded) = (0, 0, 0, 0);
@@ -100,7 +102,10 @@ fn plan_reel_at_least_80_percent_of_the_plans_match() {
         );
         let want = expected(id);
         total += 1;
-        let got = compose_plan_with(style, &registry, &inventory, text, &mut generator);
+        let got = common::restored(
+            compose_plan_with(style, &registry, &inventory, text, &mut generator),
+            &ids,
+        );
         let ok = match (&got, &want) {
             (Ok(Plan::Calls { calls }), Some(plan)) => {
                 serde_json::to_value(calls).unwrap() == *plan

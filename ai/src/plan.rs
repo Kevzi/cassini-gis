@@ -278,9 +278,94 @@ fn fixed_system_text(registry: &Registry) -> String {
     text
 }
 
+/// Ce qui précède l'inventaire dans le long prompt.
+const FULL_INVENTORY_LEAD: &str = "\nINVENTAIRE DU PROJET :\n";
+/// Ce qui précède l'inventaire dans le prompt court.
+const SHORT_INVENTORY_LEAD: &str = "\n\nINVENTAIRE DU PROJET :\n";
+
 /// La partie du message système qui suit la partie fixe : l'inventaire du projet.
 fn inventory_text(inventory: &Value) -> String {
-    format!("\nINVENTAIRE DU PROJET :\n{inventory}\n")
+    format!("{FULL_INVENTORY_LEAD}{inventory}\n")
+}
+
+/// Position, dans le texte JSON compact d'une couche `text`, de sa dernière clé (juste après le
+/// guillemet qui l'ouvre) : `None` si la couche n'est pas un objet non vide ou si cette clé ne
+/// suit pas `,"` ou `{"` et ne commence pas par une lettre.
+///
+/// Couper là ne change aucun jeton du découpeur de Qwen (BPE à pré-découpe par classes de
+/// caractères) : la ponctuation qui précède (`","`, `],"`, `},"`…) forme un morceau qui finit au
+/// guillemet, et les lettres de la clé en commencent un autre. Prouvé par le test au vrai
+/// tokeniseur sur les inventaires de l'entraînement.
+fn last_key_cut(layer: &Value, text: &str) -> Option<usize> {
+    let (key, value) = layer.as_object()?.iter().next_back()?;
+    let key = serde_json::to_string(key).ok()?;
+    let entry = format!("{key}:{value}}}");
+    let start = text.strip_suffix(&entry).map(str::len)?;
+    let opener = text[..start].chars().last()?;
+    let first = key[1..].chars().next()?;
+    (matches!(opener, ',' | '{') && first.is_ascii_alphabetic()).then_some(start + 1)
+}
+
+/// Coupes du texte JSON compact de `inventory` : une par couche, juste avant sa dernière clé, en
+/// octets depuis le début du texte. Toutes ou aucune : une seule couche qui ne se coupe pas, ou un
+/// texte d'une autre forme que `{"layers":[…],…}`, et l'inventaire se lit d'un tenant.
+fn layer_cuts(inventory: &Value) -> Vec<usize> {
+    let Some(layers) = inventory.get("layers").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let text = inventory.to_string();
+    const OPEN: &str = "{\"layers\":[";
+    if !text.starts_with(OPEN) {
+        return Vec::new();
+    }
+    let mut pos = OPEN.len();
+    let mut cuts = Vec::with_capacity(layers.len());
+    for (i, layer) in layers.iter().enumerate() {
+        if i > 0 {
+            if !text[pos..].starts_with(',') {
+                return Vec::new();
+            }
+            pos += 1;
+        }
+        let one = layer.to_string();
+        if !text[pos..].starts_with(&one) {
+            return Vec::new();
+        }
+        let Some(cut) = last_key_cut(layer, &one) else {
+            return Vec::new();
+        };
+        cuts.push(pos + cut);
+        pos += one.len();
+    }
+    cuts
+}
+
+/// La suite du message système, `lead`, l'inventaire et un retour à la ligne, découpée aux
+/// frontières de couches (ticket 5.19) : les parties mises en cache (une par couche, chacune
+/// finie juste avant la dernière clé de sa couche), le rang de la partie d'ancrage (celle de la
+/// dernière couche de l'utilisateur, si `user_layers` est connu et non nul), et le reste. Mis bout
+/// à bout, c'est le texte d'un tenant, à l'octet près.
+fn inventory_parts(
+    lead: &str,
+    inventory: &Value,
+    user_layers: Option<usize>,
+) -> (Vec<String>, Option<usize>, String) {
+    let whole = format!("{lead}{inventory}\n");
+    let cuts = layer_cuts(inventory);
+    if cuts.is_empty() {
+        return (Vec::new(), None, whole);
+    }
+    let mut parts = Vec::with_capacity(cuts.len());
+    let mut from = 0;
+    for cut in cuts {
+        let to = lead.len() + cut;
+        parts.push(whole[from..to].to_string());
+        from = to;
+    }
+    let anchor = user_layers
+        .and_then(|n| n.checked_sub(1))
+        .map(|i| i.min(parts.len() - 1));
+    (parts, anchor, whole[from..].to_string())
 }
 
 /// Le message système : consignes, catalogue, exemples, puis inventaire (la partie fixe
@@ -305,31 +390,35 @@ N'ajoute ni étape, ni option, ni chemin de sortie que la demande ne réclame pa
 Si un mot de la demande ne désigne aucune couche ni aucun champ de l'inventaire, pose une question au lieu de deviner. \
 Refuse seulement si aucune commande ne sait faire l'opération demandée.";
 
-/// La suite du message système du prompt court : l'inventaire du projet. La coupe suit la fin
-/// des consignes, comme celle du long prompt : un test avec le vrai modèle vérifie qu'elle ne
-/// change aucun jeton par rapport au prompt d'entraînement lu d'un tenant.
-fn short_inventory_text(inventory: &Value) -> String {
-    format!("\n\nINVENTAIRE DU PROJET :\n{inventory}\n")
-}
-
-/// Les tours de la première tentative, dans le prompt `style`. La fin de la partie fixe est un
-/// point d'instantané, pour les deux prompts.
+/// Les tours de la première tentative, dans le prompt `style`, sans savoir où finissent les
+/// couches de l'utilisateur.
+#[cfg(test)]
 fn first_turns(
     style: PromptStyle,
     registry: &Registry,
     inventory: &Value,
     request: &str,
 ) -> Vec<Turn> {
-    let system = match style {
-        PromptStyle::Full => Turn::with_cached_head(
-            Role::System,
-            fixed_system_text(registry),
-            inventory_text(inventory),
-        ),
-        PromptStyle::Short => {
-            Turn::with_cached_head(Role::System, SHORT_SYSTEM, short_inventory_text(inventory))
-        }
+    first_turns_anchored(style, registry, inventory, None, request)
+}
+
+/// Les tours de la première tentative, dans le prompt `style`. La fin de la partie fixe est un
+/// point d'instantané, pour les deux prompts ; l'inventaire qui la suit est coupé aux frontières de
+/// ses couches (ticket 5.19), avec un instantané juste avant la dernière clé de la dernière des
+/// `user_layers` premières couches, et juste avant la dernière clé de la dernière couche.
+fn first_turns_anchored(
+    style: PromptStyle,
+    registry: &Registry,
+    inventory: &Value,
+    user_layers: Option<usize>,
+    request: &str,
+) -> Vec<Turn> {
+    let (head, lead) = match style {
+        PromptStyle::Full => (fixed_system_text(registry), FULL_INVENTORY_LEAD),
+        PromptStyle::Short => (SHORT_SYSTEM.to_string(), SHORT_INVENTORY_LEAD),
     };
+    let (parts, anchor, rest) = inventory_parts(lead, inventory, user_layers);
+    let system = Turn::with_cached_parts(Role::System, head, parts, anchor, rest);
     vec![system, Turn::new(Role::User, request)]
 }
 
@@ -445,11 +534,27 @@ pub fn compose_plan_with(
     request: &str,
     generate: &mut dyn FnMut(&GenerationRequest) -> Result<Completion, AiError>,
 ) -> Result<Plan, AgentError> {
+    compose_plan_anchored(style, registry, inventory, None, request, generate)
+}
+
+/// Même composition que `compose_plan_with`, quand on sait que les `user_layers` premières couches
+/// de `inventory` sont celles de l'utilisateur (ticket 5.19) : le moteur garde alors un instantané
+/// juste avant la dernière clé de la dernière d'entre elles, repris quand seules les couches de
+/// résultat qui les suivent changent. Même invite,
+/// donc même plan : seuls les instantanés gardés changent.
+pub fn compose_plan_anchored(
+    style: PromptStyle,
+    registry: &Registry,
+    inventory: &Value,
+    user_layers: Option<usize>,
+    request: &str,
+    generate: &mut dyn FnMut(&GenerationRequest) -> Result<Completion, AiError>,
+) -> Result<Plan, AgentError> {
     if request.trim().is_empty() {
         return Err(AiError::EmptyPrompt.into());
     }
     let grammar = plan_grammar(registry);
-    let mut turns = first_turns(style, registry, inventory, request);
+    let mut turns = first_turns_anchored(style, registry, inventory, user_layers, request);
     let mut last_errors = Vec::new();
     for attempt in 0..2 {
         let completion = match generate(&GenerationRequest {
@@ -836,6 +941,11 @@ mod tests {
         );
     }
 
+    /// Ce qu'un tour lit après sa tête : ses parties mises en cache, puis son reste.
+    fn after_head(turn: &Turn) -> String {
+        turn.cached_parts.concat() + &turn.text
+    }
+
     #[test]
     fn the_fixed_head_is_the_same_for_two_inventories_and_the_inventory_comes_last() {
         let other = json!({"layers": [{"layer_id": "routes_9", "name": "Routes"}]});
@@ -846,10 +956,10 @@ mod tests {
         assert_eq!(a[0].cached_head, b[0].cached_head);
         assert_ne!(a[0].text, b[0].text);
         assert!(!a[0].cached_head.contains("gares_1"));
-        assert!(a[0].text.contains("gares_1"));
+        assert!(after_head(&a[0]).contains("gares_1"));
         // Le tour se lit comme le message système entier.
         let whole = system_text(&registry(), &inventory());
-        assert_eq!(format!("{}{}", a[0].cached_head, a[0].text), whole);
+        assert_eq!(format!("{}{}", a[0].cached_head, after_head(&a[0])), whole);
         let examples = whole.find("EXEMPLES :").unwrap();
         let inventory = whole.find("INVENTAIRE DU PROJET :").unwrap();
         let catalog = whole.find("CATALOGUE :").unwrap();
@@ -1014,7 +1124,7 @@ mod tests {
         assert_eq!(a[0].role, Role::System);
         assert_eq!(a[0].cached_head, b[0].cached_head);
         assert_ne!(a[0].text, b[0].text);
-        assert!(a[0].text.contains("gares_1"));
+        assert!(after_head(&a[0]).contains("gares_1"));
         assert!(!a[0].cached_head.contains("CATALOGUE") && !a[0].cached_head.contains("EXEMPLES"));
         assert_eq!(a[1], Turn::new(Role::User, "x"));
         let full = first_turns(PromptStyle::Full, &registry(), &inventory(), "x");
@@ -1076,6 +1186,203 @@ mod tests {
         );
     }
 
+    // -- coupes aux frontières de couches (ticket 5.19) ----------------------
+
+    fn epreuve() -> Value {
+        serde_json::from_str(include_str!(
+            "../../tests/epreuve-modele-local/inventory.json"
+        ))
+        .unwrap()
+    }
+
+    /// L'inventaire de l'épreuve réduit à ses `n` premières couches.
+    fn first_layers(n: usize) -> Value {
+        let mut inv = epreuve();
+        inv["layers"].as_array_mut().unwrap().truncate(n);
+        inv
+    }
+
+    #[test]
+    fn the_inventory_is_cut_once_per_layer_just_before_its_last_key() {
+        let inv = epreuve();
+        let n = inv["layers"].as_array().unwrap().len();
+        let (parts, anchor, rest) = inventory_parts(SHORT_INVENTORY_LEAD, &inv, Some(3));
+        assert_eq!(parts.len(), n);
+        assert_eq!(anchor, Some(2));
+        // Bout à bout : le texte d'un tenant, à l'octet près.
+        assert_eq!(
+            parts.concat() + &rest,
+            format!("{SHORT_INVENTORY_LEAD}{inv}\n")
+        );
+        // Chaque partie finit au guillemet qui ouvre la dernière clé d'une couche ; la suivante
+        // commence par les lettres de cette clé.
+        for part in &parts {
+            assert!(part.ends_with(",\"") || part.ends_with("{\""), "{part}");
+        }
+        for next in parts[1..].iter().chain([&rest]) {
+            assert!(next.starts_with("source\":"), "{next}");
+        }
+        // Ancrage : aucun sans le nombre de couches de l'utilisateur, ni à zéro ; borné à la
+        // dernière partie au-delà.
+        assert_eq!(inventory_parts(SHORT_INVENTORY_LEAD, &inv, None).1, None);
+        assert_eq!(inventory_parts(SHORT_INVENTORY_LEAD, &inv, Some(0)).1, None);
+        assert_eq!(
+            inventory_parts(SHORT_INVENTORY_LEAD, &inv, Some(99)).1,
+            Some(n - 1)
+        );
+    }
+
+    #[test]
+    fn one_more_layer_keeps_every_part_of_the_previous_inventory() {
+        let n = epreuve()["layers"].as_array().unwrap().len();
+        let (before, _, _) = inventory_parts(SHORT_INVENTORY_LEAD, &first_layers(n - 1), Some(2));
+        let (after, _, _) = inventory_parts(SHORT_INVENTORY_LEAD, &first_layers(n), Some(2));
+        assert_eq!(&after[..before.len()], &before[..]);
+        // Une couche de résultat retirée en tête des résultats : les parties de l'utilisateur
+        // restent, jusqu'à l'ancrage compris.
+        let mut removed = epreuve();
+        removed["layers"].as_array_mut().unwrap().remove(2);
+        let (full, anchor, _) = inventory_parts(SHORT_INVENTORY_LEAD, &epreuve(), Some(2));
+        let (less, _, _) = inventory_parts(SHORT_INVENTORY_LEAD, &removed, Some(2));
+        let anchor = anchor.unwrap();
+        assert_eq!(&less[..=anchor], &full[..=anchor]);
+        assert_ne!(less[anchor + 1], full[anchor + 1]);
+    }
+
+    #[test]
+    fn an_inventory_of_another_shape_is_read_in_one_piece() {
+        for inv in [
+            json!({"layers": []}),
+            json!({"project": {}}),
+            json!({"layers": [{}]}),
+            json!({"layers": [{"layer_id": "a", "~x": 1}]}),
+            json!({"layers": [{"layer_id": "a"}, "pas une couche"]}),
+        ] {
+            let (parts, anchor, rest) = inventory_parts(FULL_INVENTORY_LEAD, &inv, Some(1));
+            assert!(parts.is_empty(), "{inv}");
+            assert_eq!(anchor, None);
+            assert_eq!(rest, inventory_text(&inv));
+        }
+        // Une seule clé : la coupe suit `{"`.
+        let one = json!({"layers": [{"layer_id": "a"}]});
+        let (parts, _, rest) = inventory_parts(FULL_INVENTORY_LEAD, &one, None);
+        assert_eq!(parts, [format!("{FULL_INVENTORY_LEAD}{{\"layers\":[{{\"")]);
+        assert_eq!(rest, "layer_id\":\"a\"}]}\n");
+    }
+
+    #[test]
+    fn the_whole_generated_set_is_cut_at_every_layer() {
+        let (examples, _) = cassini_training::generate(
+            cassini_training::DEFAULT_SEED,
+            cassini_training::DEFAULT_COUNT,
+        );
+        for e in &examples {
+            let layers = e.inventory["layers"].as_array().map_or(0, Vec::len);
+            assert_eq!(layer_cuts(&e.inventory).len(), layers, "{}", e.inventory);
+        }
+    }
+
+    #[test]
+    fn the_anchored_composition_reads_the_same_prompt_with_its_cuts() {
+        let inv = epreuve();
+        let mut seen = Vec::new();
+        let _ = compose_plan_anchored(
+            PromptStyle::Short,
+            &registry(),
+            &inv,
+            Some(3),
+            "Tampon de 300 m.",
+            &mut |r| {
+                seen.push(r.turns.to_vec());
+                Ok(done(GOOD))
+            },
+        );
+        let turns = &seen[0];
+        assert_eq!(turns[0].anchor, Some(2));
+        assert_eq!(turns[0].cached_parts.len(), 7);
+        assert_eq!(
+            chat_text(turns),
+            chat_text(&first_turns(
+                PromptStyle::Short,
+                &registry(),
+                &inv,
+                "Tampon de 300 m."
+            ))
+        );
+        assert_eq!(
+            chat_text(turns),
+            cassini_training::prompt::render_prompt(&inv, "Tampon de 300 m.")
+        );
+    }
+
+    /// Avec le vrai modèle (ticket 5.19) : une couche de plus reprend l'instantané de la dernière
+    /// frontière de l'invite d'avant ; à invite égale, la sortie est la même sans instantané ; un
+    /// résultat retiré en tête reprend l'instantané d'ancrage. Ignoré sans `CASSINI_TEST_MODEL`
+    /// (GGUF ou déclaration) :
+    ///
+    ///   cargo test -p cassini-ai --release --features cuda --lib -- --ignored --nocapture reprise_reel
+    #[test]
+    #[ignore = "charge le vrai modèle ; lancer avec CASSINI_TEST_MODEL et --ignored"]
+    fn reprise_reel_one_more_layer_resumes_at_the_last_boundary() {
+        let Some(path) = std::env::var_os("CASSINI_TEST_MODEL") else {
+            eprintln!("CASSINI_TEST_MODEL absent : essai ignoré.");
+            return;
+        };
+        let (files, style) = resolve_model(Path::new(&path)).unwrap();
+        let reg = registry();
+        let grammar = plan_grammar(&reg);
+        let request = "Fais une zone tampon de 300 m autour des gares.";
+        let users = 3;
+        let n = epreuve()["layers"].as_array().unwrap().len();
+        let before = first_layers(n - 1);
+        let after = epreuve();
+        let mut removed = epreuve();
+        removed["layers"].as_array_mut().unwrap().remove(users);
+        let turns = |inv: &Value| first_turns_anchored(style, &reg, inv, Some(users), request);
+        let run = |inv: &Value| {
+            crate::generate_files_measured(
+                &files,
+                &turns(inv),
+                Some(&grammar),
+                MAX_PLAN_TOKENS,
+                None,
+            )
+            .unwrap()
+        };
+        let engine = || {
+            crate::engine()
+                .unwrap()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+        };
+        engine().loaded = None;
+        // Points de coupe, avec le vrai découpeur.
+        let cut = |inv: &Value, slot: usize| {
+            let guard = engine();
+            let vocab = guard.loaded.as_ref().unwrap().model.vocab();
+            let (_, cuts) = crate::chat_tokens(&vocab, &turns(inv));
+            cuts.iter().find(|c| c.slot == Some(slot)).unwrap().at
+        };
+        let (c1, t1) = run(&before);
+        eprintln!("avant : {t1:?}\n  {}", c1.text);
+        let (c2, t2) = run(&after);
+        eprintln!("une couche de plus : {t2:?}\n  {}", c2.text);
+        assert_eq!(t2.cached_tokens, cut(&before, crate::SLOT_LAST));
+        // Sans instantané, même invite : même sortie, tout est relu.
+        engine().loaded.as_mut().unwrap().checkpoints.clear();
+        let (c3, t3) = run(&after);
+        eprintln!("sans instantané : {t3:?}");
+        assert_eq!(t3.cached_tokens, 0);
+        assert_eq!(c3, c2, "à invite égale, la sortie gloutonne est la même");
+        // Le plus ancien résultat retiré : reprise à l'ancrage (avant la dernière clé de la
+        // dernière couche de l'utilisateur).
+        let (_, t4) = run(&removed);
+        eprintln!("un résultat retiré : {t4:?}");
+        assert_eq!(t4.cached_tokens, cut(&after, crate::SLOT_ANCHOR));
+        assert!(t4.cached_tokens < t2.cached_tokens);
+        engine().loaded = None;
+    }
+
     /// Avec le vrai modèle (la base du modèle ajusté) : les jetons que `ai` lit pour le prompt
     /// court, découpé par segments, sont ceux du prompt d'entraînement découpé d'un tenant, balises
     /// comprises : pour 300 premiers essais, puis (depuis 5.15) pour chaque redemande du jeu
@@ -1109,6 +1416,7 @@ mod tests {
             .len()
             + vocab.tokenize(SHORT_SYSTEM.as_bytes(), false, false).len();
         let mut checked = 0;
+        let mut cut_layers = 0;
         for e in &examples {
             let turns = first_turns(PromptStyle::Short, &reg, &e.inventory, &e.request);
             let (ours, points) = crate::chat_tokens(&vocab, &turns);
@@ -1116,10 +1424,15 @@ mod tests {
             let theirs = vocab.tokenize(text.as_bytes(), false, true);
             assert_eq!(ours, theirs, "{}", e.request);
             // La tête fixe se découpe toujours de même : son point d'instantané est commun.
-            assert_eq!(points[0], head_end, "{}", e.request);
+            assert_eq!(points[0].at, head_end, "{}", e.request);
+            // Ticket 5.19 : une coupe par couche, entre la tête et la fin du tour système ; les
+            // jetons lus par parties sont ceux du prompt lu d'un tenant (ci-dessus).
+            let layers = e.inventory["layers"].as_array().map_or(0, Vec::len);
+            assert_eq!(points.len(), layers + 2, "{}", e.request);
+            cut_layers += layers;
             checked += 1;
         }
-        eprintln!("parité au jeton : {checked} prompts identiques");
+        eprintln!("parité au jeton : {checked} prompts identiques, {cut_layers} coupes de couches");
         // La redemande : chaque exemple de redemande du jeu entier, tours de `retry_turns`
         // découpés par segments contre le prompt de redemande d'entraînement lu d'un tenant.
         let (all, _) = cassini_training::generate(
@@ -1140,7 +1453,7 @@ mod tests {
             let theirs = vocab.tokenize(text.as_bytes(), false, true);
             assert_eq!(ours, theirs, "{}", e.request);
             // La redemande garde la tête fixe : même point d'instantané qu'au premier essai.
-            assert_eq!(points[0], head_end, "{}", e.request);
+            assert_eq!(points[0].at, head_end, "{}", e.request);
             retries += 1;
         }
         assert!(retries * 25 >= all.len(), "{retries} redemandes");

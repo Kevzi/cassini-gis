@@ -2,8 +2,11 @@
 //! Aucun serveur, aucune socket, aucun réseau.
 //!
 //! Le modèle reste chargé dans le processus d'un appel à l'autre (ticket 12), et la lecture de
-//! la partie fixe de l'invite est gardée en mémoire sous forme d'instantanés de l'état du moteur.
-//! Rien n'est écrit sur disque, et rien d'une demande n'est gardé au-delà du tour système.
+//! la partie fixe de l'invite est gardée en mémoire sous forme d'instantanés de l'état du moteur :
+//! au plus quatre, à la fin des consignes, juste avant la dernière clé de la dernière couche de
+//! l'utilisateur (l'ancrage), juste avant la dernière clé de la dernière couche (la dernière
+//! frontière) et à la fin du tour système (ticket 5.19). Rien n'est écrit sur disque,
+//! et rien d'une demande n'est gardé au-delà du tour système.
 
 use std::fmt;
 use std::num::NonZeroU32;
@@ -166,15 +169,25 @@ fn model_key(files: &ModelFiles) -> Result<ModelKey, AiError> {
     })
 }
 
-/// Un instantané de l'état de la séquence, pris après les jetons `tokens`, au point
-/// d'instantané numéro `slot` de l'invite.
+/// Place d'un instantané : la fin de la tête mise en cache.
+const SLOT_HEAD: usize = 0;
+/// Place d'un instantané : la fin du tour système.
+const SLOT_SYSTEM: usize = 1;
+/// Place d'un instantané : la partie d'ancrage (dans l'inventaire, elle finit juste avant la
+/// dernière clé de la dernière couche de l'utilisateur).
+const SLOT_ANCHOR: usize = 2;
+/// Place d'un instantané : la dernière partie mise en cache (la dernière frontière de couches).
+const SLOT_LAST: usize = 3;
+
+/// Un instantané de l'état de la séquence, pris après les jetons `tokens`, à la place `slot`
+/// (une des quatre `SLOT_*` : au plus quatre instantanés sont gardés).
 struct Saved<S> {
     slot: usize,
     tokens: Vec<LlamaToken>,
     state: S,
 }
 
-/// Les instantanés gardés : au plus un par point d'instantané.
+/// Les instantanés gardés : au plus un par place.
 struct Checkpoints<S> {
     saved: Vec<Saved<S>>,
 }
@@ -195,7 +208,7 @@ impl<S> Checkpoints<S> {
             .max_by_key(|s| s.tokens.len())
     }
 
-    /// Garde `state` pour le point `slot`, à la place de l'instantané qui l'occupait.
+    /// Garde `state` à la place `slot`, au lieu de l'instantané qui l'occupait.
     fn put(&mut self, slot: usize, tokens: Vec<LlamaToken>, state: S) {
         self.saved.retain(|s| s.slot != slot);
         self.saved.push(Saved {
@@ -319,11 +332,23 @@ impl Role {
 ///
 /// `cached_head` est une tête qui ne change pas d'une demande à l'autre (consignes,
 /// catalogue, exemples) : elle est lue avant `text`, et l'état du moteur après elle est
-/// gardé pour être repris. Le tour se lit comme `cached_head` suivi de `text`.
+/// gardé pour être repris.
+///
+/// `cached_parts` (ticket 5.19) suivent la tête : des morceaux qui changent peu d'une demande à
+/// l'autre (les couches de l'inventaire, découpées à leurs frontières). La lecture est toujours
+/// coupée après chacun, et l'état du moteur gardé après deux d'entre eux : la partie d'ancrage
+/// `anchor` (dans l'inventaire : celle qui finit juste avant la dernière clé de la dernière couche
+/// de l'utilisateur) et la dernière. Chaque morceau est découpé en
+/// jetons à part : à l'appelant de couper là où ce découpage ne change aucun jeton.
+///
+/// Le tour se lit comme `cached_head`, puis `cached_parts` bout à bout, puis `text`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Turn {
     pub role: Role,
     pub cached_head: String,
+    pub cached_parts: Vec<String>,
+    /// Rang, dans `cached_parts`, de la partie d'ancrage.
+    pub anchor: Option<usize>,
     pub text: String,
 }
 
@@ -332,6 +357,8 @@ impl Turn {
         Turn {
             role,
             cached_head: String::new(),
+            cached_parts: Vec::new(),
+            anchor: None,
             text: text.into(),
         }
     }
@@ -339,14 +366,32 @@ impl Turn {
     /// Un tour dont la tête `head` est mise en cache, suivie de `rest`.
     pub fn with_cached_head(role: Role, head: impl Into<String>, rest: impl Into<String>) -> Self {
         Turn {
-            role,
             cached_head: head.into(),
-            text: rest.into(),
+            ..Turn::new(role, rest)
+        }
+    }
+
+    /// Un tour dont la tête `head` et les parties `parts` sont mises en cache, suivies de `rest` ;
+    /// `anchor` est le rang de la partie d'ancrage dans `parts`.
+    pub fn with_cached_parts(
+        role: Role,
+        head: impl Into<String>,
+        parts: Vec<String>,
+        anchor: Option<usize>,
+        rest: impl Into<String>,
+    ) -> Self {
+        Turn {
+            cached_head: head.into(),
+            cached_parts: parts,
+            anchor,
+            ..Turn::new(role, rest)
         }
     }
 
     fn is_blank(&self) -> bool {
-        self.cached_head.trim().is_empty() && self.text.trim().is_empty()
+        self.cached_head.trim().is_empty()
+            && self.cached_parts.iter().all(|p| p.trim().is_empty())
+            && self.text.trim().is_empty()
     }
 }
 
@@ -358,12 +403,20 @@ pub struct Completion {
     pub truncated: bool,
 }
 
-/// Jetons de l'invite, avec les points d'instantané : la fin de chaque tête mise en cache
-/// et la fin de chaque tour système, en nombre de jetons depuis le début, croissants.
-/// Seule l'armature chatml est lue comme jetons spéciaux : le texte des tours (phrase,
-/// catalogue, inventaire) est du texte, jamais une balise de structure. La tête est découpée
-/// à part, pour que ses jetons ne dépendent pas de ce qui la suit.
-fn chat_tokens(vocab: &LlamaVocab<'_>, turns: &[Turn]) -> (Vec<LlamaToken>, Vec<usize>) {
+/// Un point de coupe de la lecture, en nombre de jetons depuis le début, et la place de
+/// l'instantané qui y est gardé (aucun pour une partie mise en cache ni d'ancrage ni dernière).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Cut {
+    at: usize,
+    slot: Option<usize>,
+}
+
+/// Jetons de l'invite, avec les points de coupe, croissants : la fin de chaque tête mise en cache
+/// et de chaque partie mise en cache, et la fin de chaque tour système. Seule l'armature chatml
+/// est lue comme jetons spéciaux : le texte des tours (phrase, catalogue, inventaire) est du texte,
+/// jamais une balise de structure. La tête et chaque partie sont découpées à part, pour que leurs
+/// jetons ne dépendent pas de ce qui les suit.
+fn chat_tokens(vocab: &LlamaVocab<'_>, turns: &[Turn]) -> (Vec<LlamaToken>, Vec<Cut>) {
     chat_tokens_with(turns, |text, special| {
         vocab.tokenize(text.as_bytes(), false, special)
     })
@@ -373,32 +426,48 @@ fn chat_tokens(vocab: &LlamaVocab<'_>, turns: &[Turn]) -> (Vec<LlamaToken>, Vec<
 fn chat_tokens_with<T>(
     turns: &[Turn],
     tokenize: impl Fn(&str, bool) -> Vec<T>,
-) -> (Vec<T>, Vec<usize>) {
+) -> (Vec<T>, Vec<Cut>) {
     let mut tokens = Vec::new();
-    let mut points = Vec::new();
+    let mut cuts: Vec<Cut> = Vec::new();
+    // Deux coupes au même endroit n'en font qu'une, qui garde la première place nommée.
+    let mut cut = |at: usize, slot: Option<usize>| match cuts.last_mut() {
+        Some(last) if last.at == at => last.slot = last.slot.or(slot),
+        _ => cuts.push(Cut { at, slot }),
+    };
     for turn in turns {
         tokens.extend(tokenize(&turn_head(turn.role.name()), true));
         if !turn.cached_head.is_empty() {
             tokens.extend(tokenize(&turn.cached_head, false));
-            points.push(tokens.len());
+            cut(tokens.len(), Some(SLOT_HEAD));
+        }
+        let last = turn.cached_parts.len().checked_sub(1);
+        for (i, part) in turn.cached_parts.iter().enumerate() {
+            tokens.extend(tokenize(part, false));
+            let slot = if turn.anchor == Some(i) {
+                Some(SLOT_ANCHOR)
+            } else if last == Some(i) {
+                Some(SLOT_LAST)
+            } else {
+                None
+            };
+            cut(tokens.len(), slot);
         }
         tokens.extend(tokenize(&turn.text, false));
         tokens.extend(tokenize(TURN_END, true));
         if turn.role == Role::System {
-            points.push(tokens.len());
+            cut(tokens.len(), Some(SLOT_SYSTEM));
         }
     }
     tokens.extend(tokenize(ASSISTANT_OPEN, true));
-    points.dedup();
-    (tokens, points)
+    (tokens, cuts)
 }
 
-/// Bornes des segments lus à partir de `start` : les points d'instantané au-delà de
-/// `start`, puis la fin de l'invite. La découpe est la même avec ou sans instantané repris.
-fn segment_ends(points: &[usize], start: usize, len: usize) -> Vec<usize> {
-    let mut ends: Vec<usize> = points
+/// Bornes des segments lus à partir de `start` : les points de coupe au-delà de `start`, puis
+/// la fin de l'invite. La découpe est la même avec ou sans instantané repris.
+fn segment_ends(cuts: &[Cut], start: usize, len: usize) -> Vec<usize> {
+    let mut ends: Vec<usize> = cuts
         .iter()
-        .copied()
+        .map(|c| c.at)
         .filter(|&p| p > start && p < len)
         .collect();
     ends.push(len);
@@ -485,9 +554,9 @@ pub fn generate_files(
 /// nombre de cœurs physiques (`default_threads`), comme `generate`.
 ///
 /// Le modèle est gardé d'un appel à l'autre tant que son fichier ne change pas. L'invite est
-/// lue par segments, coupés aux points d'instantané ; après chaque point, l'état du moteur est
-/// gardé, et un appel suivant reprend le plus profond instantané dont les jetons sont un
-/// préfixe des siens.
+/// lue par segments, coupés aux points de coupe ; à ceux qui ont une place (tête, ancrage,
+/// dernière partie, tour système), l'état du moteur est gardé, et un appel suivant reprend le
+/// plus profond instantané dont les jetons sont un préfixe des siens.
 pub fn generate_measured(
     model: &Path,
     turns: &[Turn],
@@ -572,7 +641,7 @@ pub fn generate_files_measured(
     }
 
     let vocab = llama.vocab();
-    let (tokens, points) = chat_tokens(&vocab, turns);
+    let (tokens, cuts) = chat_tokens(&vocab, turns);
     if tokens.len() + max_new_tokens > N_CTX as usize {
         return Err(AiError::PromptTooLong);
     }
@@ -593,7 +662,7 @@ pub fn generate_files_measured(
     let mut batch = LlamaBatch::new(tokens.len().max(512), 1);
     let last = tokens.len() - 1;
     let mut from = cached_tokens;
-    for to in segment_ends(&points, cached_tokens, tokens.len()) {
+    for to in segment_ends(&cuts, cached_tokens, tokens.len()) {
         batch.clear();
         for (i, t) in tokens.iter().enumerate().take(to).skip(from) {
             batch
@@ -601,7 +670,7 @@ pub fn generate_files_measured(
                 .map_err(|e| decode_err(&e))?;
         }
         ctx.decode(&mut batch).map_err(|e| decode_err(&e))?;
-        if let Some(slot) = points.iter().position(|&p| p == to) {
+        if let Some(slot) = cuts.iter().find(|c| c.at == to).and_then(|c| c.slot) {
             // Un instantané qui ne se prend pas n'empêche pas de répondre : il manquera, voilà tout.
             if let Ok(state) = ctx.state_seq_get(0, LlamaStateSeqFlags::empty()) {
                 checkpoints.put(slot, tokens[..to].to_vec(), state);
@@ -755,9 +824,24 @@ mod tests {
 
     #[test]
     fn segments_are_cut_at_the_same_points_with_or_without_a_checkpoint() {
-        let points = [100, 130];
-        assert_eq!(segment_ends(&points, 0, 150), vec![100, 130, 150]);
-        assert_eq!(segment_ends(&points, 100, 150), vec![130, 150]);
+        let points = [
+            Cut {
+                at: 100,
+                slot: Some(SLOT_HEAD),
+            },
+            Cut {
+                at: 120,
+                slot: None,
+            },
+            Cut {
+                at: 130,
+                slot: Some(SLOT_SYSTEM),
+            },
+        ];
+        assert_eq!(segment_ends(&points, 0, 150), vec![100, 120, 130, 150]);
+        assert_eq!(segment_ends(&points, 100, 150), vec![120, 130, 150]);
+        // Une reprise entre deux coupes (instantané d'une invite d'avant) : mêmes coupes ensuite.
+        assert_eq!(segment_ends(&points, 110, 150), vec![120, 130, 150]);
         assert_eq!(segment_ends(&points, 130, 150), vec![150]);
         assert_eq!(segment_ends(&[], 0, 10), vec![10]);
     }
@@ -932,7 +1016,10 @@ mod tests {
             Turn::with_cached_head(Role::System, "CONSIGNES", "INVENTAIRE"),
             Turn::new(Role::User, "demande"),
         ];
-        let (tokens, points) = chat_tokens_with(&first, chars);
+        let (tokens, cuts) = chat_tokens_with(&first, chars);
+        let slots: Vec<Option<usize>> = cuts.iter().map(|c| c.slot).collect();
+        assert_eq!(slots, [Some(SLOT_HEAD), Some(SLOT_SYSTEM)]);
+        let points: Vec<usize> = cuts.iter().map(|c| c.at).collect();
         assert_eq!(points.len(), 2, "{points:?}");
         assert!(points[0] < points[1] && points[1] < tokens.len());
         let head_end = turn_head("system").chars().count() + "CONSIGNES".len();
@@ -942,13 +1029,77 @@ mod tests {
         let mut retry = first.clone();
         retry.push(Turn::new(Role::Assistant, "{}"));
         retry.push(Turn::new(Role::User, "écarts"));
-        let (retry_tokens, retry_points) = chat_tokens_with(&retry, chars);
-        assert_eq!(retry_points, points);
+        let (retry_tokens, retry_cuts) = chat_tokens_with(&retry, chars);
+        assert_eq!(retry_cuts, cuts);
         assert_eq!(&retry_tokens[..points[1]], &tokens[..points[1]]);
         // Sans tête mise en cache ni tour système : aucun point.
         assert!(chat_tokens_with(&[Turn::new(Role::User, "x")], chars)
             .1
             .is_empty());
+    }
+
+    /// Ticket 5.19 : une coupe après chaque partie mise en cache ; un instantané à la partie
+    /// d'ancrage et à la dernière seulement, en plus de la tête et du tour système.
+    #[test]
+    fn every_cached_part_is_a_cut_and_only_the_anchor_and_the_last_keep_a_snapshot() {
+        let parts = |n: usize| (0..n).map(|i| format!("C{i}")).collect::<Vec<_>>();
+        let system = Turn::with_cached_parts(Role::System, "TETE", parts(5), Some(1), "FIN");
+        let turns = [system.clone(), Turn::new(Role::User, "demande")];
+        let (tokens, cuts) = chat_tokens_with(&turns, chars);
+        let head_end = turn_head("system").chars().count() + "TETE".len();
+        let at: Vec<usize> = cuts.iter().map(|c| c.at).collect();
+        assert_eq!(
+            at,
+            [
+                head_end,
+                head_end + 2,
+                head_end + 4,
+                head_end + 6,
+                head_end + 8,
+                head_end + 10,
+                head_end + 10 + "FIN".len() + TURN_END.len()
+            ]
+        );
+        let slots: Vec<Option<usize>> = cuts.iter().map(|c| c.slot).collect();
+        assert_eq!(
+            slots,
+            [
+                Some(SLOT_HEAD),
+                None,
+                Some(SLOT_ANCHOR),
+                None,
+                None,
+                Some(SLOT_LAST),
+                Some(SLOT_SYSTEM)
+            ]
+        );
+        // Le tour se lit tête, parties, reste : mêmes jetons qu'un tour d'un tenant.
+        let whole = Turn::with_cached_head(Role::System, "TETE", "C0C1C2C3C4FIN");
+        let (one_piece, _) = chat_tokens_with(&[whole, turns[1].clone()], chars);
+        assert_eq!(tokens, one_piece);
+        // L'ancrage sur la dernière partie : une seule coupe, qui garde la place d'ancrage.
+        let on_last = Turn::with_cached_parts(Role::System, "T", parts(2), Some(1), "F");
+        let slots: Vec<Option<usize>> = chat_tokens_with(&[on_last], chars)
+            .1
+            .iter()
+            .map(|c| c.slot)
+            .collect();
+        assert_eq!(
+            slots,
+            [Some(SLOT_HEAD), None, Some(SLOT_ANCHOR), Some(SLOT_SYSTEM)]
+        );
+        // Une partie vide ne fait pas une seconde coupe au même endroit.
+        let empty = Turn::with_cached_parts(
+            Role::System,
+            "T",
+            vec!["A".into(), String::new()],
+            None,
+            "F",
+        );
+        let cuts = chat_tokens_with(&[empty], chars).1;
+        assert_eq!(cuts.len(), 3, "{cuts:?}");
+        assert_eq!(cuts[1].slot, Some(SLOT_LAST));
+        assert!(!Turn::with_cached_parts(Role::System, "", vec!["x".into()], None, "").is_blank());
     }
 
     #[test]

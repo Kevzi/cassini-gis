@@ -19,10 +19,23 @@
 //!
 //! **Budget d'inventaire** (ticket 5.18). Chaque plan exécuté ajoute ses couches de résultat au
 //! projet, donc à l'inventaire lu par le modèle : enchaînées dans une session, les phrases finissent
-//! par ne plus tenir dans le contexte. `within_budget` borne l'inventaire vu par le modèle : toutes
-//! les couches de l'utilisateur, et les couches de résultat les plus récentes qui tiennent, dans
-//! l'ordre de l'inventaire. Rien n'est retiré de QGIS, et la forme d'une couche gardée ne change pas.
+//! par ne plus tenir dans le contexte. `within_budget_by_batches` borne l'inventaire vu par le
+//! modèle : toutes les couches de l'utilisateur, et des couches de résultat les plus récentes ;
+//! au dépassement du budget, les plus anciennes sortent par paquets (ticket 5.19). Rien n'est
+//! retiré de QGIS, et la forme d'une couche gardée ne change pas.
+//!
+//! **Ordre stable et identifiants courts** (ticket 5.19). La lecture de l'inventaire domine la
+//! durée d'une phrase quand il change ; le moteur reprend un instantané pris à une frontière de couches
+//! si tout ce qui la précède est inchangé. `stable_order` range donc les couches de l'utilisateur
+//! d'abord (dans l'ordre de QGIS), puis les résultats du plus ancien au plus récent : un plan
+//! exécuté n'ajoute ses couches qu'à la fin. L'entraînement mélange l'ordre des couches, cet ordre
+//! est donc un ordre déjà vu. `ShortIds` montre au modèle un identifiant court `nom_<4 hex>`
+//! (forme apprise) pour un identifiant QGIS `nom_<uuid>`, que le modèle recopie bien plus vite ;
+//! le noyau retraduit le plan rendu avant de le vérifier et de le garder : le journal, le plan
+//! gardé et l'extension ne voient que les vrais identifiants.
 
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, HashMap};
 use std::time::SystemTime;
 
 use serde_json::{json, Map, Value};
@@ -42,6 +55,12 @@ pub const MAX_VALUES: usize = 10;
 /// le vérifie au pire cas.
 pub const INVENTORY_BUDGET_CHARS: usize = 14_000;
 
+/// Seuil bas du retrait par paquets (ticket 5.19, décision du 2026-10-29) : quand l'inventaire vu
+/// dépasse `INVENTORY_BUDGET_CHARS`, les résultats les plus anciens sortent jusqu'à descendre sous
+/// ce seuil, la moitié du budget. La phrase du retrait relit les résultats gardés ; les suivantes
+/// n'ajoutent que leurs couches, jusqu'au prochain dépassement.
+pub const INVENTORY_LOW_CHARS: usize = 7_000;
+
 /// Un fichier du dossier de travail Cassini du projet (`<projet>.cassini/`, ou de son dossier
 /// de rejeu `replay/`) et sa date de
 /// modification : une couche dont la source porte ce nom est une couche de résultat.
@@ -57,50 +76,63 @@ fn json_chars(value: &Value) -> usize {
     value.to_string().chars().count()
 }
 
-/// L'inventaire traduit, borné à `budget` caractères pour le modèle.
+/// L'inventaire traduit, borné par paquets (ticket 5.19) : sous `budget` caractères pour le modèle,
+/// en retirant les résultats les plus anciens jusqu'à `low` à chaque dépassement.
 ///
-/// Sous le budget, l'inventaire est rendu tel quel. Au-delà, seules des couches de résultat
-/// (source nommée dans `work_files`) sont retirées, l'ordre de l'inventaire restant celui
-/// d'entrée : les plus récentes sont gardées tant qu'elles tiennent ; dès qu'une ne tient plus,
-/// elle et toutes les plus anciennes sont retirées. Les plus récentes d'abord : date du fichier
-/// décroissante, puis numéro d'étape en tête du nom décroissant (un nom sans numéro après ceux
-/// qui en ont un), puis nom décroissant, puis rang dans l'inventaire. Si les couches de
-/// l'utilisateur seules dépassent le budget, elles restent toutes : le contrôle du contexte de
-/// l'IA tranche. Une couche gardée n'est jamais modifiée.
-pub fn within_budget(inventory: Value, work_files: &[WorkFile], budget: usize) -> Value {
-    if json_chars(&inventory) <= budget {
-        return inventory;
-    }
+/// Le noyau ne garde rien d'une phrase à l'autre : la décision est rejouée sur les résultats
+/// présents, du plus ancien au plus récent (même ordre que `stable_order`). Chaque résultat est
+/// ajouté à la vue ; si elle dépasse alors `budget`, les plus anciens de la vue en sortent jusqu'à
+/// ce qu'elle tienne sous `low`, sauf le résultat qui vient d'entrer : il ne sort que s'il ne tient
+/// pas sous `budget` à côté des couches de l'utilisateur. Un résultat plus récent ne fait que
+/// prolonger ce rejeu : tant que la vue ne redépasse pas le budget, les résultats gardés restent
+/// les mêmes, et l'invite d'avant reste un préfixe de la nouvelle. Les couches de l'utilisateur ne sortent jamais (si elles seules
+/// dépassent, le contrôle du contexte de l'IA tranche). Ordre d'entrée gardé, couches gardées
+/// intactes.
+pub fn within_budget_by_batches(
+    inventory: Value,
+    work_files: &[WorkFile],
+    budget: usize,
+    low: usize,
+) -> Value {
     let Some(layers) = inventory.get("layers").and_then(Value::as_array) else {
         return inventory;
     };
-    // Les couches de résultat, les plus récentes d'abord : (rang dans l'inventaire, date, nom).
-    let mut results: Vec<(usize, SystemTime, &str)> = layers
-        .iter()
-        .enumerate()
-        .filter_map(|(index, layer)| {
-            result_date(layer, work_files).map(|(date, name)| (index, date, name))
-        })
-        .collect();
-    results.sort_by(|a, b| {
-        b.1.cmp(&a.1)
-            .then_with(|| step_number(b.2).cmp(&step_number(a.2)))
-            .then_with(|| b.2.cmp(a.2))
-            .then(a.0.cmp(&b.0))
-    });
-    // Toutes les couches d'abord, puis les résultats retirés du plus ancien au plus récent
-    // jusqu'à tenir. Une couche retirée raccourcit le tableau de sa longueur et d'une virgule
-    // (le tableau ne contient jamais moins d'une couche à ce moment-là).
-    let mut keep = vec![true; layers.len()];
-    let mut size = json_chars(&inventory);
-    let mut count = layers.len();
-    for (index, _, _) in results.iter().rev() {
-        if size <= budget {
-            break;
+    let mut results = results_of(layers, work_files);
+    results.sort_by(|a, b| newest_first(b, a));
+    let mut is_result = vec![false; layers.len()];
+    for (index, _, _) in &results {
+        is_result[*index] = true;
+    }
+    // Taille de la vue : l'inventaire sans couche, plus chaque couche et une virgule entre deux.
+    let mut empty = inventory.clone();
+    empty["layers"] = json!([]);
+    let users: Vec<usize> = (0..layers.len()).filter(|&i| !is_result[i]).collect();
+    let mut count = users.len();
+    let mut size = json_chars(&empty)
+        + users.iter().map(|&i| json_chars(&layers[i])).sum::<usize>()
+        + count.saturating_sub(1);
+    let mut kept: std::collections::VecDeque<usize> = std::collections::VecDeque::new();
+    for (index, _, _) in &results {
+        size += json_chars(&layers[*index]) + usize::from(count > 0);
+        count += 1;
+        kept.push_back(*index);
+        if size > budget {
+            // Le plus récent reste, même si les couches de l'utilisateur dépassent déjà `low`.
+            while size > low && kept.len() > 1 {
+                let oldest = kept.pop_front().expect("au moins deux résultats gardés");
+                count -= 1;
+                size -= json_chars(&layers[oldest]) + usize::from(count > 0);
+            }
+            if size > budget {
+                kept.pop_back();
+                count -= 1;
+                size -= json_chars(&layers[*index]) + usize::from(count > 0);
+            }
         }
-        keep[*index] = false;
-        size -= json_chars(&layers[*index]) + usize::from(count > 1);
-        count -= 1;
+    }
+    let mut keep = vec![false; layers.len()];
+    for &i in users.iter().chain(&kept) {
+        keep[i] = true;
     }
     let mut out = inventory.clone();
     out["layers"] = layers
@@ -110,6 +142,247 @@ pub fn within_budget(inventory: Value, work_files: &[WorkFile], budget: usize) -
         .map(|(l, _)| l.clone())
         .collect();
     out
+}
+
+/// Une couche de résultat : rang dans l'inventaire, date et nom de son fichier.
+type ResultKey<'a> = (usize, SystemTime, &'a str);
+
+/// Les couches de résultat de `layers` (source nommée dans `work_files`), dans l'ordre d'entrée.
+fn results_of<'a>(layers: &'a [Value], work_files: &[WorkFile]) -> Vec<ResultKey<'a>> {
+    layers
+        .iter()
+        .enumerate()
+        .filter_map(|(index, layer)| {
+            result_date(layer, work_files).map(|(date, name)| (index, date, name))
+        })
+        .collect()
+}
+
+/// Les plus récentes d'abord : date du fichier décroissante, puis numéro d'étape décroissant (un
+/// nom sans numéro après ceux qui en ont un), puis nom décroissant, puis rang dans l'inventaire
+/// (le plus haut dans la légende de QGIS, où les nouveaux arrivent en tête, d'abord).
+fn newest_first(a: &ResultKey<'_>, b: &ResultKey<'_>) -> Ordering {
+    b.1.cmp(&a.1)
+        .then_with(|| step_number(b.2).cmp(&step_number(a.2)))
+        .then_with(|| b.2.cmp(a.2))
+        .then(a.0.cmp(&b.0))
+}
+
+/// L'inventaire dans un ordre stable d'une phrase à l'autre, et le nombre de couches de
+/// l'utilisateur, qui viennent en tête.
+///
+/// Les couches de l'utilisateur d'abord, dans l'ordre d'entrée (celui de QGIS) ; puis les couches
+/// de résultat (source nommée dans `work_files`), de la plus ancienne à la plus récente, l'ordre
+/// exactement inverse de `newest_first`. Seul l'ordre change : chaque couche
+/// reste celle d'entrée, à l'octet près, et le reste de l'inventaire aussi.
+pub fn stable_order(inventory: Value, work_files: &[WorkFile]) -> (Value, usize) {
+    let Some(layers) = inventory.get("layers").and_then(Value::as_array) else {
+        return (inventory, 0);
+    };
+    let mut results = results_of(layers, work_files);
+    results.sort_by(|a, b| newest_first(b, a));
+    let mut is_result = vec![false; layers.len()];
+    for (index, _, _) in &results {
+        is_result[*index] = true;
+    }
+    let mut ordered: Vec<Value> = layers
+        .iter()
+        .zip(&is_result)
+        .filter(|(_, &r)| !r)
+        .map(|(l, _)| l.clone())
+        .collect();
+    let users = ordered.len();
+    ordered.extend(results.iter().map(|(index, _, _)| layers[*index].clone()));
+    let mut out = inventory.clone();
+    out["layers"] = Value::Array(ordered);
+    (out, users)
+}
+
+/// Longueur de l'identifiant court de départ, en chiffres hexadécimaux : celle de l'entraînement.
+const SHORT_HEX: usize = 4;
+
+/// Un identifiant de couche QGIS `nom_<uuid>` (uuid aux tirets remplacés par des soulignés,
+/// groupes de 8, 4, 4, 4 et 12 chiffres hexadécimaux) : le nom et les 32 chiffres. `None` pour
+/// toute autre forme, et pour un uuid sans nom devant.
+fn qgis_uuid_id(id: &str) -> Option<(&str, String)> {
+    const UUID: usize = 36;
+    let cut = id.len().checked_sub(UUID)?;
+    if !id.is_char_boundary(cut) {
+        return None;
+    }
+    let (head, tail) = id.split_at(cut);
+    let name = head.strip_suffix('_').filter(|n| !n.is_empty())?;
+    let groups: Vec<&str> = tail.split('_').collect();
+    let lengths: Vec<usize> = groups.iter().map(|g| g.len()).collect();
+    if lengths != [8, 4, 4, 4, 12]
+        || !groups
+            .iter()
+            .all(|g| g.bytes().all(|b| b.is_ascii_hexdigit()))
+    {
+        return None;
+    }
+    Some((name, groups.concat()))
+}
+
+/// La table des identifiants courts montrés au modèle (ticket 5.19).
+///
+/// Un identifiant QGIS `nom_<uuid>` est montré `nom_<4 premiers chiffres de l'uuid>`, la forme de
+/// l'entraînement ; tout autre identifiant est montré tel quel. Deux couches dont les courts se
+/// confondent (entre eux, ou avec un identifiant montré tel quel) reçoivent un chiffre de plus,
+/// ensemble, jusqu'à être uniques ; au-delà des 32 chiffres, l'identifiant complet. La table ne
+/// dépend que de l'ensemble des identifiants, jamais de leur ordre.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ShortIds {
+    /// Identifiant complet de chaque court qui en diffère.
+    full: BTreeMap<String, String>,
+    /// Court de chaque identifiant complet qui en a un.
+    short: BTreeMap<String, String>,
+}
+
+impl ShortIds {
+    /// La table des identifiants `ids` (ceux des couches de l'inventaire).
+    pub fn of<'a>(ids: impl IntoIterator<Item = &'a str>) -> ShortIds {
+        let ids: Vec<&str> = ids.into_iter().collect();
+        let split: Vec<Option<(&str, String)>> = ids.iter().map(|id| qgis_uuid_id(id)).collect();
+        let mut digits = vec![SHORT_HEX; ids.len()];
+        let shown = |digits: &[usize]| -> Vec<String> {
+            ids.iter()
+                .zip(&split)
+                .zip(digits)
+                .map(|((id, parts), &n)| match parts {
+                    Some((name, hex)) if n <= hex.len() => format!("{name}_{}", &hex[..n]),
+                    _ => (*id).to_string(),
+                })
+                .collect()
+        };
+        let mut shorts = shown(&digits);
+        loop {
+            let mut count: HashMap<&str, usize> = HashMap::new();
+            for s in &shorts {
+                *count.entry(s.as_str()).or_default() += 1;
+            }
+            let mut longer = false;
+            for (i, s) in shorts.iter().enumerate() {
+                if count[s.as_str()] > 1 && split[i].is_some() && digits[i] <= 32 {
+                    digits[i] += 1;
+                    longer = true;
+                }
+            }
+            if !longer {
+                break;
+            }
+            shorts = shown(&digits);
+        }
+        let mut table = ShortIds::default();
+        for (id, s) in ids.iter().zip(shorts) {
+            if s != *id {
+                table.full.insert(s.clone(), (*id).to_string());
+                table.short.insert((*id).to_string(), s);
+            }
+        }
+        table
+    }
+
+    /// La table des couches de `inventory`.
+    pub fn of_inventory(inventory: &Value) -> ShortIds {
+        let layers = inventory.get("layers").and_then(Value::as_array);
+        ShortIds::of(
+            layers
+                .into_iter()
+                .flatten()
+                .filter_map(|l| l.get("layer_id").and_then(Value::as_str)),
+        )
+    }
+
+    /// L'inventaire vu par le modèle : chaque `layer_id` remplacé par son court, rien d'autre.
+    pub fn shorten(&self, mut inventory: Value) -> Value {
+        if let Some(layers) = inventory.get_mut("layers").and_then(Value::as_array_mut) {
+            for layer in layers {
+                let id = layer.get("layer_id").and_then(Value::as_str);
+                if let Some(short) = id.and_then(|id| self.short.get(id)) {
+                    layer["layer_id"] = Value::String(short.clone());
+                }
+            }
+        }
+        inventory
+    }
+
+    /// `text` (une question, une raison de refus) où chaque court de la table, écrit comme un mot
+    /// entier (ni lettre, ni chiffre, ni souligné juste avant ou juste après), est remplacé par son
+    /// identifiant complet, les plus longs courts d'abord. Un identifiant complet déjà écrit, qui
+    /// commence par son court, n'est donc jamais touché.
+    pub fn restore_text(&self, text: &str) -> String {
+        let is_id = |c: char| c.is_alphanumeric() || c == '_';
+        let mut shorts: Vec<(&String, &String)> = self.full.iter().collect();
+        shorts.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then(a.0.cmp(b.0)));
+        let mut out = String::with_capacity(text.len());
+        let mut rest = text;
+        let mut prev: Option<char> = None;
+        'scan: while let Some(c) = rest.chars().next() {
+            if !prev.is_some_and(is_id) {
+                for (short, full) in &shorts {
+                    if let Some(after) = rest.strip_prefix(short.as_str()) {
+                        if !after.chars().next().is_some_and(is_id) {
+                            out.push_str(full);
+                            rest = after;
+                            prev = short.chars().last();
+                            continue 'scan;
+                        }
+                    }
+                }
+            }
+            out.push(c);
+            rest = &rest[c.len_utf8()..];
+            prev = Some(c);
+        }
+        out
+    }
+
+    /// Retraduit vers les identifiants complets tout texte de `value` égal à un court de la table,
+    /// à toute profondeur. Un texte qui n'est pas un court de la table reste tel quel (un
+    /// identifiant inconnu est refusé ensuite, comme sans traduction).
+    pub fn restore(&self, value: &mut Value) {
+        match value {
+            Value::String(text) => {
+                if let Some(full) = self.full.get(text.as_str()) {
+                    *text = full.clone();
+                }
+            }
+            Value::Array(items) => items.iter_mut().for_each(|v| self.restore(v)),
+            Value::Object(map) => map.values_mut().for_each(|v| self.restore(v)),
+            _ => {}
+        }
+    }
+}
+
+/// L'inventaire montré au modèle, et le nombre de couches de l'utilisateur, qui viennent en tête
+/// (le moteur garde un instantané juste avant la dernière clé de la dernière d'entre elles).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelInventory {
+    pub inventory: Value,
+    pub user_layers: usize,
+}
+
+/// De `project.inventory` à l'inventaire montré au modèle, avec la table pour retraduire son plan :
+/// forme de l'entraînement, ordre stable, identifiants courts (table faite sur toutes les couches,
+/// pour qu'un court ne change pas quand une couche sort de la vue), puis budget par paquets
+/// (`budget`, seuil bas `low`).
+pub fn model_inventory(
+    raw: &Value,
+    work_files: &[WorkFile],
+    budget: usize,
+    low: usize,
+) -> (ModelInventory, ShortIds) {
+    let (ordered, user_layers) = stable_order(agent_inventory(raw), work_files);
+    let ids = ShortIds::of_inventory(&ordered);
+    let inventory = within_budget_by_batches(ids.shorten(ordered), work_files, budget, low);
+    (
+        ModelInventory {
+            inventory,
+            user_layers,
+        },
+        ids,
+    )
 }
 
 /// Numéro d'étape en tête d'un nom de fichier de résultat (`21-analysis.intersect.gpkg` donne
@@ -486,69 +759,13 @@ mod tests {
     }
 
     #[test]
-    fn under_the_budget_the_inventory_is_unchanged() {
-        let (inventory, files) = session();
-        let size = json_chars(&inventory);
-        assert_eq!(within_budget(inventory.clone(), &files, size), inventory);
-        let alone = json!({"project": {}, "layers": [user_layer("plu")], "unloaded_files": []});
-        assert_eq!(
-            within_budget(alone.clone(), &[], INVENTORY_BUDGET_CHARS),
-            alone
-        );
-    }
-
-    #[test]
-    fn over_the_budget_the_oldest_results_leave_first() {
-        let (inventory, files) = session();
-        let users = json!({"project": {"name": "p", "epsg": 2154},
-            "layers": [user_layer("plu"), user_layer("gares"), user_layer("parcelles")],
-            "unloaded_files": []});
-        let per_result = json_chars(&result_layer(10)) + 1;
-        // De quoi garder quatre résultats, pas cinq.
-        let budget = json_chars(&users) + 4 * per_result + per_result / 2;
-        let out = within_budget(inventory.clone(), &files, budget);
-        // L'ordre de l'inventaire reste celui d'entrée : seuls les plus anciens résultats partent.
-        assert_eq!(
-            ids(&out),
-            [
-                "plu",
-                "gares",
-                "Intersection_10",
-                "Intersection_9",
-                "Intersection_8",
-                "parcelles",
-                "Intersection_7"
-            ]
-        );
-        assert!(json_chars(&out) <= budget);
-        // Le compte des caractères est exact : un résultat de plus ne tiendrait pas.
-        let mut more = out.clone();
-        more["layers"].as_array_mut().unwrap().push(result_layer(6));
-        assert!(json_chars(&more) > budget);
-        // Les couches gardées sont celles d'entrée, à l'octet près ; le reste aussi.
-        for layer in out["layers"].as_array().unwrap() {
-            assert!(inventory["layers"].as_array().unwrap().contains(layer));
-        }
-        assert_eq!(out["project"], inventory["project"]);
-        assert_eq!(out["unloaded_files"], json!([]));
-        // Déterministe.
-        assert_eq!(within_budget(inventory, &files, budget), out);
-    }
-
-    #[test]
-    fn the_newest_results_win_by_file_date_not_by_legend_order() {
+    fn the_newest_results_are_decided_by_file_date_then_step_number() {
         let (inventory, mut files) = session();
         // Le fichier de l'étape 2 est réécrit en dernier : il devient le plus récent.
         files[1].modified = UNIX_EPOCH + Duration::from_secs(5_000);
-        let users_only = within_budget(inventory.clone(), &files, 0);
-        let one = json_chars(&users_only) + json_chars(&result_layer(2)) + 1;
-        let out = within_budget(inventory, &files, one);
-        assert_eq!(ids(&out), ["plu", "gares", "parcelles", "Intersection_2"]);
-    }
-
-    #[test]
-    fn equal_dates_are_broken_by_the_step_number_of_the_file_name() {
-        let (inventory, files) = session();
+        let (ordered, _) = stable_order(inventory.clone(), &files);
+        assert_eq!(ids(&ordered).last().unwrap(), "Intersection_2");
+        // À date égale, le numéro d'étape tranche : l'étape 10 est la plus récente, pas « 9-… ».
         let same: Vec<WorkFile> = files
             .into_iter()
             .map(|f| WorkFile {
@@ -556,39 +773,350 @@ mod tests {
                 ..f
             })
             .collect();
-        let users_only = within_budget(inventory.clone(), &same, 0);
-        let one = json_chars(&users_only) + json_chars(&result_layer(10)) + 1;
-        // L'étape 10 est la plus récente, pas « 9-… » que l'ordre des textes mettrait devant.
-        assert_eq!(
-            ids(&within_budget(inventory, &same, one)),
-            ["plu", "gares", "Intersection_10", "parcelles"]
-        );
-        // Un nom sans numéro d'étape vient après tous ceux qui en ont un.
+        let (ordered, _) = stable_order(inventory, &same);
+        assert_eq!(ids(&ordered).last().unwrap(), "Intersection_10");
         assert_eq!(step_number("21-analysis.intersect.gpkg"), Some(21));
         assert_eq!(step_number("resultat.gpkg"), None);
         assert!(step_number("resultat.gpkg") < step_number("1-a.gpkg"));
     }
 
     #[test]
-    fn user_layers_are_never_removed_even_over_the_budget() {
-        let (inventory, files) = session();
-        let out = within_budget(inventory.clone(), &files, 10);
-        assert_eq!(ids(&out), ["plu", "gares", "parcelles"]);
-        // Sans couche de résultat, rien n'est retiré : le contrôle de l'IA tranche.
-        let users = json!({"project": {}, "layers": [user_layer("plu"), user_layer("gares")],
-            "unloaded_files": []});
-        assert_eq!(within_budget(users.clone(), &files, 10), users);
-    }
-
-    #[test]
-    fn without_a_work_folder_nothing_is_a_result() {
+    fn a_work_file_the_layer_does_not_name_does_not_make_it_a_result() {
         let (inventory, _) = session();
-        assert_eq!(within_budget(inventory.clone(), &[], 10), inventory);
-        // Un fichier du dossier de travail que la couche ne nomme pas ne la rend pas résultat.
         let other = [WorkFile {
             name: "journal.jsonl".to_string(),
             modified: UNIX_EPOCH,
         }];
-        assert_eq!(within_budget(inventory.clone(), &other, 10), inventory);
+        assert_eq!(
+            within_budget_by_batches(inventory.clone(), &other, 10, 5),
+            inventory
+        );
+    }
+
+    // -- ordre stable et identifiants courts (ticket 5.19) --
+
+    #[test]
+    fn users_come_first_in_qgis_order_then_results_from_oldest_to_newest() {
+        let (inventory, files) = session();
+        let (ordered, users) = stable_order(inventory.clone(), &files);
+        assert_eq!(users, 3);
+        let mut want = vec!["plu".to_string(), "gares".into(), "parcelles".into()];
+        want.extend((1..=10).map(|k| format!("Intersection_{k}")));
+        assert_eq!(ids(&ordered), want);
+        // Seul l'ordre change : mêmes couches à l'octet près, même reste.
+        for layer in ordered["layers"].as_array().unwrap() {
+            assert!(inventory["layers"].as_array().unwrap().contains(layer));
+        }
+        assert_eq!(ordered["project"], inventory["project"]);
+        // Sans dossier de travail, rien n'est un résultat : l'ordre de QGIS est gardé.
+        let (same, all) = stable_order(inventory.clone(), &[]);
+        assert_eq!((same, all), (inventory, 13));
+        assert_eq!(stable_order(json!({}), &files), (json!({}), 0));
+    }
+
+    #[test]
+    fn one_more_result_only_adds_a_layer_at_the_end() {
+        let (inventory, mut files) = session();
+        let (before, _) = stable_order(inventory.clone(), &files);
+        // Le plan suivant ajoute l'étape 11, que QGIS pose en tête de légende.
+        let mut next = inventory.clone();
+        next["layers"]
+            .as_array_mut()
+            .unwrap()
+            .insert(0, result_layer(11));
+        files.push(work_file(11, 2_000));
+        let (after, users) = stable_order(next, &files);
+        assert_eq!(users, 3);
+        let before = before["layers"].as_array().unwrap();
+        let after = after["layers"].as_array().unwrap();
+        assert_eq!(&after[..before.len()], &before[..]);
+        assert_eq!(after[before.len()], result_layer(11));
+        assert_eq!(after.len(), before.len() + 1);
+    }
+
+    #[test]
+    fn a_user_layer_added_in_qgis_changes_the_prefix_in_the_middle() {
+        let (inventory, files) = session();
+        let mut next = inventory.clone();
+        next["layers"]
+            .as_array_mut()
+            .unwrap()
+            .insert(0, user_layer("routes"));
+        let (after, users) = stable_order(next, &files);
+        assert_eq!(users, 4);
+        assert_eq!(ids(&after)[..4], ["routes", "plu", "gares", "parcelles"]);
+    }
+
+    const PARCELLES: &str = "parcelles_e9ba733c_8a43_4717_ac73_04344c1b6bb5";
+    const GARES: &str = "gares_83d935aa_ca33_431d_966f_dbbf0fb7ac0f";
+    const RESULT: &str = "141_analysis_select_by_attribute_e63fa196_c4d5_4255_9a08_203c73df1f96";
+
+    #[test]
+    fn a_qgis_id_is_shown_with_the_first_four_hex_digits_of_its_uuid() {
+        let ids = ShortIds::of([PARCELLES, GARES, RESULT, "plu_1", "Intersection_3"]);
+        let mut inventory = json!({"layers": [
+            {"layer_id": PARCELLES, "name": "Parcelles"},
+            {"layer_id": GARES, "name": "Gares"},
+            {"layer_id": RESULT, "name": "141-analysis.select_by_attribute"},
+            {"layer_id": "plu_1", "name": "PLU"},
+            {"layer_id": "Intersection_3", "name": "Intersection"}
+        ], "project": {}});
+        inventory = ids.shorten(inventory);
+        assert_eq!(
+            inventory["layers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|l| l["layer_id"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            [
+                "parcelles_e9ba",
+                "gares_83d9",
+                "141_analysis_select_by_attribute_e63f",
+                "plu_1",
+                "Intersection_3"
+            ]
+        );
+        assert_eq!(inventory["layers"][0]["name"], "Parcelles");
+        // Formes voisines qui ne sont pas un identifiant QGIS : montrées telles quelles.
+        for id in [
+            "e9ba733c_8a43_4717_ac73_04344c1b6bb5",
+            "_e9ba733c_8a43_4717_ac73_04344c1b6bb5",
+            "x_e9ba733c_8a43_4717_ac73_04344c1b6bbz",
+            "x_e9ba733c-8a43-4717-ac73-04344c1b6bb5",
+            "x_e9ba733c_8a43_4717_ac7_304344c1b6bb5",
+            "é",
+        ] {
+            assert_eq!(qgis_uuid_id(id), None, "{id}");
+        }
+        assert_eq!(
+            qgis_uuid_id("zoné_E9BA733C_8A43_4717_AC73_04344C1B6BB5").map(|p| p.0),
+            Some("zoné")
+        );
+    }
+
+    #[test]
+    fn colliding_short_ids_are_lengthened_until_unique_whatever_the_order() {
+        let a = "parcelles_e9ba733c_8a43_4717_ac73_04344c1b6bb5";
+        let b = "parcelles_e9ba7f00_0000_4717_ac73_04344c1b6bb5";
+        let c = "parcelles_e9bb0000_0000_4717_ac73_04344c1b6bb5";
+        let ids = ShortIds::of([a, b, c]);
+        assert_eq!(ids.short[a], "parcelles_e9ba73");
+        assert_eq!(ids.short[b], "parcelles_e9ba7f");
+        assert_eq!(ids.short[c], "parcelles_e9bb");
+        assert_eq!(ShortIds::of([c, b, a]), ids);
+        // Un identifiant montré tel quel qui vaut le court d'un autre : l'autre s'allonge.
+        let ids = ShortIds::of(["parcelles_e9ba", a]);
+        assert_eq!(ids.short[a], "parcelles_e9ba7");
+        assert!(!ids.short.contains_key("parcelles_e9ba"));
+        // Deux fois le même identifiant (impossible dans QGIS) : complet, sans boucler.
+        let ids = ShortIds::of([a, a]);
+        assert!(ids.short.is_empty());
+    }
+
+    #[test]
+    fn a_plan_is_translated_back_to_the_full_ids_and_unknown_ids_stay() {
+        let ids = ShortIds::of([PARCELLES, GARES, "plu_1"]);
+        let mut params = json!({"layer_id": "parcelles_e9ba", "overlay_layer_id": "step:1.layer_id",
+            "layers": ["gares_83d9", "plu_1", "routes_ab12"], "distance": {"value": 5, "unit": "m"},
+            "title": "parcelles_e9ba près des gares"});
+        ids.restore(&mut params);
+        assert_eq!(
+            params,
+            json!({"layer_id": PARCELLES, "overlay_layer_id": "step:1.layer_id",
+                "layers": [GARES, "plu_1", "routes_ab12"], "distance": {"value": 5, "unit": "m"},
+                "title": "parcelles_e9ba près des gares"})
+        );
+        // Un identifiant complet recopié tel quel reste complet.
+        let mut full = json!({"layer_id": PARCELLES});
+        ids.restore(&mut full);
+        assert_eq!(full, json!({"layer_id": PARCELLES}));
+    }
+
+    #[test]
+    fn the_model_inventory_is_ordered_shortened_then_bounded() {
+        let raw_layer = |id: &str, source: &str| {
+            json!({"layer_id": id, "name": id, "source": source, "crs": "EPSG:2154",
+                "kind": "vector", "geometry": "MultiPolygon", "feature_count": 3, "fields": []})
+        };
+        let result_id = |k: u64| format!("{k}_analysis_buffer_e63fa196_c4d5_4255_9a08_20{k:010}");
+        let mut layers: Vec<Value> = (1..=3u64)
+            .rev()
+            .map(|k| raw_layer(&result_id(k), &format!("{k}-analysis.buffer.gpkg")))
+            .collect();
+        layers.push(raw_layer(PARCELLES, "villeneuve.gpkg"));
+        let raw = json!({"project_name": "p", "project_crs": "EPSG:2154", "layers": layers});
+        let files: Vec<WorkFile> = (1..=3u64)
+            .map(|k| WorkFile {
+                name: format!("{k}-analysis.buffer.gpkg"),
+                modified: UNIX_EPOCH + Duration::from_secs(k),
+            })
+            .collect();
+        let (view, table) =
+            model_inventory(&raw, &files, INVENTORY_BUDGET_CHARS, INVENTORY_LOW_CHARS);
+        assert_eq!(view.user_layers, 1);
+        assert_eq!(
+            ids(&view.inventory),
+            [
+                "parcelles_e9ba",
+                "1_analysis_buffer_e63f",
+                "2_analysis_buffer_e63f",
+                "3_analysis_buffer_e63f"
+            ]
+        );
+        let mut back = json!(["parcelles_e9ba", "3_analysis_buffer_e63f"]);
+        table.restore(&mut back);
+        assert_eq!(back, json!([PARCELLES, result_id(3)]));
+        // Au-delà du budget, les plus anciens résultats sortent ; les courts ne changent pas.
+        let one = {
+            let (all, _) = model_inventory(&raw, &files, 0, 0);
+            json_chars(&all.inventory) + json_chars(&view.inventory["layers"][3]) + 1
+        };
+        let (small, same_table) = model_inventory(&raw, &files, one, one);
+        assert_eq!(
+            ids(&small.inventory),
+            ["parcelles_e9ba", "3_analysis_buffer_e63f"]
+        );
+        assert_eq!(same_table, table);
+        assert_eq!(small.user_layers, 1);
+    }
+
+    // -- retrait par paquets (ticket 5.19, décision du 2026-10-29) --
+
+    /// La session, rangée dans l'ordre stable, avec les étapes 1 à `last` seulement ; un budget qui
+    /// tient six résultats et un seuil bas qui en tient trois.
+    fn batches_up_to(last: usize) -> (Value, Vec<WorkFile>, usize, usize) {
+        let mut layers = vec![
+            user_layer("plu"),
+            user_layer("gares"),
+            user_layer("parcelles"),
+        ];
+        layers.extend((1..=last).map(result_layer));
+        let inventory = json!({"project": {"name": "p", "epsg": 2154}, "layers": layers,
+            "unloaded_files": []});
+        let files = (1..=last).map(|k| work_file(k, 1_000 + k as u64)).collect();
+        let users = json!({"project": {"name": "p", "epsg": 2154},
+            "layers": [user_layer("plu"), user_layer("gares"), user_layer("parcelles")],
+            "unloaded_files": []});
+        let per = json_chars(&result_layer(10)) + 1;
+        let base = json_chars(&users);
+        (
+            inventory,
+            files,
+            base + 6 * per + per / 2,
+            base + 3 * per + per / 2,
+        )
+    }
+
+    fn results_in(inventory: &Value) -> Vec<String> {
+        ids(inventory)
+            .into_iter()
+            .filter(|id| id.starts_with("Intersection_"))
+            .collect()
+    }
+
+    fn steps(range: std::ops::RangeInclusive<usize>) -> Vec<String> {
+        range.map(|k| format!("Intersection_{k}")).collect()
+    }
+
+    #[test]
+    fn under_the_budget_nothing_leaves_by_batches() {
+        let (inventory, files, budget, low) = batches_up_to(6);
+        assert_eq!(
+            within_budget_by_batches(inventory.clone(), &files, budget, low),
+            inventory
+        );
+    }
+
+    #[test]
+    fn over_the_budget_the_oldest_results_leave_down_to_the_low_mark() {
+        // Sept résultats : le 7ᵉ fait dépasser, la vue retombe à trois (5, 6, 7).
+        let (inventory, files, budget, low) = batches_up_to(7);
+        let out = within_budget_by_batches(inventory.clone(), &files, budget, low);
+        assert_eq!(results_in(&out), steps(5..=7));
+        assert!(json_chars(&out) <= low);
+        assert_eq!(ids(&out)[..3], ["plu", "gares", "parcelles"]);
+        for layer in out["layers"].as_array().unwrap() {
+            assert!(inventory["layers"].as_array().unwrap().contains(layer));
+        }
+    }
+
+    #[test]
+    fn after_a_batch_new_results_only_add_to_the_end_until_the_next_overflow() {
+        let view = |last: usize| {
+            let (inventory, files, budget, low) = batches_up_to(last);
+            within_budget_by_batches(inventory, &files, budget, low)
+        };
+        // De 7 à 10 résultats, la vue garde 5, 6, 7 et ne fait qu'ajouter : chaque vue est le
+        // début de la suivante, donc l'invite d'avant reste un préfixe.
+        for last in 7..10 {
+            let before = view(last)["layers"].as_array().unwrap().clone();
+            let after = view(last + 1)["layers"].as_array().unwrap().clone();
+            assert_eq!(&after[..before.len()], &before[..], "étape {}", last + 1);
+            assert_eq!(after.len(), before.len() + 1);
+        }
+        assert_eq!(results_in(&view(10)), steps(5..=10));
+        // Le 11ᵉ refait dépasser : nouveau paquet, la vue retombe à 9, 10, 11.
+        assert_eq!(results_in(&view(11)), steps(9..=11));
+        // Déterministe, et indépendant de l'ordre d'entrée (celui de QGIS ici, nouveaux en tête).
+        let (mut inventory, files, budget, low) = batches_up_to(10);
+        inventory["layers"].as_array_mut().unwrap()[3..].reverse();
+        let out = within_budget_by_batches(inventory, &files, budget, low);
+        let mut got = results_in(&out);
+        got.sort_by_key(|id| id[13..].parse::<u32>().unwrap());
+        assert_eq!(got, steps(5..=10));
+    }
+
+    #[test]
+    fn user_layers_never_leave_by_batches() {
+        let (inventory, files, _, _) = batches_up_to(4);
+        let out = within_budget_by_batches(inventory, &files, 10, 5);
+        assert_eq!(ids(&out), ["plu", "gares", "parcelles"]);
+        let (inventory, _, _, _) = batches_up_to(4);
+        // Sans dossier de travail, rien n'est un résultat : rien ne sort.
+        assert_eq!(
+            within_budget_by_batches(inventory.clone(), &[], 10, 5),
+            inventory
+        );
+        assert_eq!(
+            within_budget_by_batches(json!({}), &files, 10, 5),
+            json!({})
+        );
+    }
+
+    #[test]
+    fn users_over_the_low_mark_still_see_the_newest_result() {
+        // Couches de l'utilisateur au-dessus du seuil bas, sous le budget : à chaque dépassement,
+        // le résultat qui vient d'entrer reste ; il ne sort que s'il ne tient pas sous le budget.
+        let (inventory, files, _, _) = batches_up_to(4);
+        let users = json!({"project": {"name": "p", "epsg": 2154},
+            "layers": [user_layer("plu"), user_layer("gares"), user_layer("parcelles")],
+            "unloaded_files": []});
+        let per = json_chars(&result_layer(10)) + 1;
+        let low = json_chars(&users) - 1;
+        let budget = json_chars(&users) + per + per / 2;
+        let out = within_budget_by_batches(inventory.clone(), &files, budget, low);
+        assert_eq!(results_in(&out), steps(4..=4));
+        assert!(json_chars(&out) <= budget);
+        // Un budget qui ne laisse la place à aucun résultat : aucun ne reste.
+        let tight = json_chars(&users) + per / 2;
+        let out = within_budget_by_batches(inventory, &files, tight, low);
+        assert!(results_in(&out).is_empty());
+    }
+
+    #[test]
+    fn a_question_or_a_reason_quoting_short_ids_gets_the_full_ids() {
+        let longer = "parcelles_e9ba7f00_0000_4717_ac73_04344c1b6bb5";
+        let ids = ShortIds::of([PARCELLES, longer, GARES]);
+        // `parcelles_e9ba73` et `parcelles_e9ba7f` : le plus long d'abord, aucun n'est coupé.
+        assert_eq!(
+            ids.restore_text(
+                "Laquelle : parcelles_e9ba73 ou parcelles_e9ba7f, près de gares_83d9 ?"
+            ),
+            format!("Laquelle : {PARCELLES} ou {longer}, près de {GARES} ?")
+        );
+        // Un identifiant complet déjà écrit n'est pas touché ; un texte sans court non plus.
+        assert_eq!(ids.restore_text(GARES), GARES);
+        assert_eq!(ids.restore_text("Aucune couche."), "Aucune couche.");
     }
 }

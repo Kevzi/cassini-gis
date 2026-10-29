@@ -1098,13 +1098,18 @@ mod tests {
             _registry: &Registry,
             _request: &str,
             model: Option<&str>,
-            inventory: &mut dyn FnMut() -> Result<Value, ErrorReport>,
+            inventory: &mut dyn FnMut() -> Result<
+                crate::agent_inventory::ModelInventory,
+                ErrorReport,
+            >,
         ) -> Result<crate::plan::Plan, ErrorReport> {
             self.chosen.lock().unwrap().push(model.map(str::to_string));
             if self.inventory {
-                let inv = inventory()?;
-                assert!(inv["layers"].is_array());
-                self.seen.lock().unwrap().push(inv);
+                let view = inventory()?;
+                assert!(view.inventory["layers"].is_array());
+                let users = view.inventory["layers"].as_array().unwrap().len();
+                assert!(view.user_layers <= users);
+                self.seen.lock().unwrap().push(view.inventory);
             }
             let next = self.first.borrow_mut().pop_front();
             next.map(Ok)
@@ -1983,9 +1988,9 @@ mod tests {
         c.close().1.unwrap();
     }
 
-    /// Ticket 5.18 : dix couches de résultat dont les fichiers sont au dossier de travail
+    /// Tickets 5.18 et 5.19 : dix couches de résultat dont les fichiers sont au dossier de travail
     /// dépassent le budget d'inventaire ; le compositeur reçoit toutes les couches de
-    /// l'utilisateur, puis les résultats les plus récents qui tiennent, les plus anciens absents.
+    /// l'utilisateur, puis les résultats les plus récents gardés par paquets, les plus anciens absents.
     #[test]
     fn the_composer_sees_an_inventory_reduced_to_the_budget() {
         use crate::agent_inventory::INVENTORY_BUDGET_CHARS;
@@ -2043,26 +2048,27 @@ mod tests {
             .iter()
             .map(|l| l["layer_id"].as_str().unwrap())
             .collect();
-        // Ordre de l'inventaire gardé ; seuls les résultats des étapes 1 à 3 sont sortis.
+        // Ordre stable (ticket 5.19) : l'utilisateur, puis les résultats du plus ancien au plus
+        // récent ; retrait par paquets (5.19) : rejoués du plus ancien au plus récent, les
+        // résultats dépassent le budget et redescendent sous le seuil bas, puis s'ajoutent
+        // jusqu'à l'étape 10 sans redépasser : les étapes 6 à 10 restent.
         assert_eq!(
             ids,
             [
-                "Intersection_10",
-                "Intersection_9",
-                "Intersection_8",
-                "Intersection_7",
-                "Intersection_6",
-                "Intersection_5",
-                "Intersection_4",
                 "plu",
                 "gares",
-                "parcelles"
+                "parcelles",
+                "Intersection_6",
+                "Intersection_7",
+                "Intersection_8",
+                "Intersection_9",
+                "Intersection_10"
             ]
         );
         assert!(inventory.to_string().chars().count() <= INVENTORY_BUDGET_CHARS);
         // Une couche gardée garde sa forme apprise, champs compris.
         assert_eq!(
-            inventory["layers"][0]["fields"].as_array().unwrap().len(),
+            inventory["layers"][3]["fields"].as_array().unwrap().len(),
             34
         );
         drop(seen);
@@ -2112,6 +2118,107 @@ mod tests {
                 "unloaded_files": []
             })]
         );
+        c.close().1.unwrap();
+    }
+
+    /// Ticket 5.19 : le compositeur voit des identifiants courts ; le plan qu'il rend en courts est
+    /// retraduit vers les identifiants de QGIS avant d'être vérifié, gardé, montré et exécuté.
+    #[test]
+    fn the_composer_sees_short_ids_and_its_plan_is_translated_back() {
+        const PARCELLES: &str = "parcelles_e9ba733c_8a43_4717_ac73_04344c1b6bb5";
+        const GARES: &str = "gares_83d935aa_ca33_431d_966f_dbbf0fb7ac0f";
+        let composer = composer(json!({"kind": "calls", "calls": [
+            {"command": "test.make", "params": {"layer": "gares_83d9"}},
+            {"command": "test.fixed", "params": {"layer": "parcelles_e9ba"}},
+            {"command": "test.fixed", "params": {"layer": "step:1.layer_id"}}
+        ]}))
+        .unwrap();
+        let seen = composer.seen.clone();
+        let mut c = Client::start_with(CANCEL_GRACE, Some(composer));
+        c.hello_with(&ALL);
+        c.send(json!({"jsonrpc":"2.0","id":2,"method":"plan.propose","params":{"request":"x"}}));
+        let order = c.recv();
+        assert_eq!(order["params"]["command"], "project.inventory");
+        let layer = |id: &str| json!({"layer_id": id, "name": id, "crs": "EPSG:2154"});
+        c.send(reply(
+            &order["id"],
+            json!({"project_crs": "EPSG:2154", "layers": [layer(PARCELLES), layer(GARES)]}),
+        ));
+        let proposed = c.recv();
+        let seen_ids: Vec<String> = seen.lock().unwrap()[0]["layers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|l| l["layer_id"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(seen_ids, ["parcelles_e9ba", "gares_83d9"]);
+        // Le plan montré porte les identifiants de QGIS.
+        assert_eq!(
+            proposed["result"]["plan"]["calls"],
+            json!([
+                {"command": "test.make", "params": {"layer": GARES}},
+                {"command": "test.fixed", "params": {"layer": PARCELLES}},
+                {"command": "test.fixed", "params": {"layer": "step:1.layer_id"}}
+            ])
+        );
+        // Le plan gardé aussi : l'extension reçoit les vrais identifiants, le journal les garde.
+        c.execute(3, "plan-1");
+        let order = c.expect_step("plan-1", 1, "test.make");
+        assert_eq!(order["params"]["params"], json!({"layer": GARES}));
+        c.send(reply(&order["id"], json!({"layer_id": "l_1"})));
+        let order = c.expect_step("plan-1", 2, "test.fixed");
+        assert_eq!(order["params"]["params"], json!({"layer": PARCELLES}));
+        c.send(reply(&order["id"], json!({"ok": true})));
+        let order = c.expect_step("plan-1", 3, "test.fixed");
+        assert_eq!(order["params"]["params"], json!({"layer": "l_1"}));
+        c.send(reply(&order["id"], json!({"ok": true})));
+        assert_eq!(c.recv()["id"], 3);
+        let journal = c.journal();
+        assert_eq!(journal[0]["params"], json!({"layer": GARES}));
+        assert_eq!(journal[1]["params"], json!({"layer": PARCELLES}));
+        c.close().1.unwrap();
+    }
+
+    /// Ticket 5.19 : une question ou un refus du modèle qui cite un identifiant court le montre
+    /// avec l'identifiant de QGIS.
+    #[test]
+    fn a_question_or_a_refusal_quoting_a_short_id_shows_the_qgis_id() {
+        const GARES: &str = "gares_83d935aa_ca33_431d_966f_dbbf0fb7ac0f";
+        let composer = FixedComposer {
+            inventory: true,
+            outcome: Ok(json!({"kind": "refusal", "reason": "gares_83d9 n'a pas de champ."})),
+            first: std::cell::RefCell::new(
+                [json!({"kind": "question", "question": "Quelle gare de gares_83d9 ?"})].into(),
+            ),
+            seen: Default::default(),
+            chosen: Default::default(),
+        };
+        let mut c = Client::start_with(CANCEL_GRACE, Some(composer));
+        c.hello_with(&ALL);
+        let inventory = json!({"project_crs": "EPSG:2154",
+            "layers": [{"layer_id": GARES, "name": "Gares", "crs": "EPSG:2154"}]});
+        for id in [2, 3] {
+            c.send(
+                json!({"jsonrpc":"2.0","id":id,"method":"plan.propose","params":{"request":"x"}}),
+            );
+            let order = c.recv();
+            assert_eq!(order["params"]["command"], "project.inventory");
+            c.send(reply(&order["id"], inventory.clone()));
+            let answer = c.recv();
+            if id == 2 {
+                assert_eq!(
+                    answer["result"]["question"],
+                    format!("Quelle gare de {GARES} ?")
+                );
+            } else {
+                assert_eq!(code_of(&answer), "agent.refused");
+                let message = answer["error"]["message"].as_str().unwrap();
+                assert!(
+                    message.contains(&format!("{GARES} n'a pas de champ.")),
+                    "{message}"
+                );
+            }
+        }
         c.close().1.unwrap();
     }
 

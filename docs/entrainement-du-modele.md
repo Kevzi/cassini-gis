@@ -504,7 +504,7 @@ ajusté se mesure à la tâche 4b.
 
 Chaque plan exécuté ajoute ses couches de résultat au projet, donc à l'inventaire : à la recette
 enchaînée de 5.17, la 4ᵉ phrase ne tenait plus dans le contexte (8 192 jetons). Le noyau borne
-donc l'inventaire vu par le modèle (`core/src/agent_inventory.rs`, `within_budget`) : sous le
+donc l'inventaire vu par le modèle (`core/src/agent_inventory.rs`, `within_budget_by_batches` depuis 5.19) : sous le
 budget, il est rendu tel quel ; au-delà, toutes les couches de l'utilisateur restent, avec les
 couches de résultat les plus récentes qui tiennent, dans l'ordre de l'inventaire. Une couche de
 résultat est une couche dont le fichier source est dans le dossier de travail `<projet>.cassini/`
@@ -558,6 +558,37 @@ inventaires de session reste à apprendre (`deferred-work.md`).
 Jeu de mesures sur GPU après le changement, modèle livré : `plan_reel` 25 / 25 (0 question),
 `question_reel` 12 / 12, `ecart_reel` 33 / 40 (plans 19 / 26, questions 8 / 8, refus 6 / 6),
 les mêmes qu'en 5.17 : ces essais passent par `cassini-ai` et des inventaires sous le budget.
+
+### Ordre stable et identifiants courts (5.19)
+
+Pour que la lecture d'une phrase reprenne l'état du moteur au plus près, l'inventaire vu par le
+modèle est rangé dans un ordre stable (`stable_order`) : les couches de l'utilisateur d'abord,
+dans l'ordre de QGIS, puis les couches de résultat de la plus ancienne à la plus récente (l'ordre
+inverse du budget). Un plan exécuté n'ajoute donc ses couches qu'à la fin. L'entraînement mélange
+l'ordre des couches : cet ordre est un ordre déjà vu.
+
+Le modèle voit aussi un identifiant court pour chaque identifiant QGIS `nom_<uuid>` : `nom_` suivi
+des 4 premiers chiffres hexadécimaux de l'uuid (`parcelles_e9ba` pour
+`parcelles_e9ba733c_8a43_4717_ac73_04344c1b6bb5`), la forme engendrée pour un tiers des couches
+de l'entraînement. Deux courts qui se confondent reçoivent un chiffre de plus, ensemble, jusqu'à
+être uniques ; tout autre identifiant est montré tel quel. La table est faite sur toutes les
+couches avant le budget, pour qu'un court ne change pas quand une couche sort de la vue. Le noyau
+retraduit le plan rendu vers les identifiants complets avant de le vérifier (`plan.propose`) : le
+plan gardé, montré, exécuté et journalisé ne porte que les vrais identifiants ; un court inconnu
+reste tel quel et le plan est refusé comme avant. Les essais réels `plan_reel`, `question_reel`
+et `ecart_reel` passent par la même table (`CASSINI_TEST_FULL_IDS=1` pour les identifiants
+complets). Mesures : `mesure-duree-par-phrase.md`, « Session enchaînée dans QGIS ».
+
+Le budget de 5.18 retire désormais **par paquets** (décision du 2026-10-29) : quand la vue dépasse
+14 000 caractères, les résultats les plus anciens sortent jusqu'à descendre sous 7 000
+(`within_budget_by_batches`). La décision est rejouée à chaque phrase sur les résultats présents,
+du plus ancien au plus récent : les résultats gardés restent les mêmes jusqu'au dépassement
+suivant, et l'invite d'avant reste un préfixe de la nouvelle.
+
+L'invite reste celle de l'entraînement à l'octet près : `cassini-ai` coupe seulement sa lecture
+juste avant la dernière clé de chaque couche, là où le découpeur de Qwen ne change aucun jeton
+(prouvé au vrai tokeniseur sur 300 inventaires engendrés, 1 357 coupes, et sur les 339 redemandes
+du jeu entier).
 
 ## Tâche 4 : mesures
 
