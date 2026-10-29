@@ -12,7 +12,10 @@ use std::path::Path;
 use serde_json::{json, Value};
 
 use super::{invalid_params, is_available, Channel, RpcError, State};
-use crate::agent_inventory::{agent_inventory, within_budget, WorkFile, INVENTORY_BUDGET_CHARS};
+use crate::agent_inventory::{
+    model_inventory, ModelInventory, ShortIds, WorkFile, INVENTORY_BUDGET_CHARS,
+    INVENTORY_LOW_CHARS,
+};
 use crate::error::ErrorReport;
 use crate::exec::Executor;
 use crate::journal::relativize;
@@ -23,9 +26,11 @@ use crate::registry::{Registry, RegistryError};
 /// implémentation par le modèle local vit hors de `core`, qui ne dépend pas de l'IA).
 pub trait Composer {
     /// Compose le plan de `request`. `inventory` demande l'inventaire du projet à
-    /// l'extension (`project.inventory`, hors journal) : à appeler seulement une fois prêt à
-    /// composer, pour qu'un modèle absent ne coûte aucun ordre. Le plan rendu est vérifié
-    /// ensuite par le noyau ; un refus du modèle se rend en erreur `agent.refused`, une
+    /// l'extension (`project.inventory`, hors journal) et le rend tel que le modèle doit le voir
+    /// (`ModelInventory` : forme apprise, ordre stable, identifiants courts, budget) : à appeler
+    /// seulement une fois prêt à composer, pour qu'un modèle absent ne coûte aucun ordre. Les
+    /// identifiants du plan rendu sont retraduits par le noyau (ticket 5.19). Le plan rendu est
+    /// vérifié ensuite par le noyau ; un refus du modèle se rend en erreur `agent.refused`, une
     /// question (`Plan::Question`) en résultat `{"question", "source"}`, sans `plan_id` : elle n'est
     /// jamais gardée, donc jamais exécutable. `model` est un nom de la liste de `models`
     /// (comparé tel quel) ; absent, le premier modèle sans problème.
@@ -34,7 +39,7 @@ pub trait Composer {
         registry: &Registry,
         request: &str,
         model: Option<&str>,
-        inventory: &mut dyn FnMut() -> Result<Value, ErrorReport>,
+        inventory: &mut dyn FnMut() -> Result<ModelInventory, ErrorReport>,
     ) -> Result<Plan, ErrorReport>;
 
     /// Les modèles que l'utilisateur peut choisir, triés par nom : chacun
@@ -134,7 +139,10 @@ pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<V
         return Err(unavailable());
     };
     let work_dir = state.session.as_ref().map(|s| s.work_dir().to_path_buf());
-    let plan = {
+    // La table des identifiants courts montrés au modèle, pour retraduire son plan (ticket 5.19).
+    let mut short_ids = ShortIds::default();
+    let mut plan = {
+        let short_ids = &mut short_ids;
         let link = state.link.clone();
         let announced = &state.announced;
         let mut inventory = || {
@@ -145,22 +153,26 @@ pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<V
             }
             // Directement par le canal, hors `Session` : l'inventaire n'est pas journalisé.
             // Le modèle voit la forme de son entraînement, traduite ici (ticket 5.10, t. 4a),
-            // bornée au budget d'inventaire (ticket 5.18) : les couches de résultat les plus
+            // rangée dans un ordre stable aux identifiants courts (ticket 5.19), bornée au budget
+            // d'inventaire (ticket 5.18) par paquets (5.19) : les couches de résultat les plus
             // anciennes sortent de sa vue, jamais du projet. Les fichiers sont lus après la
             // réponse de l'extension, au plus près de l'inventaire.
-            Channel { link: link.clone() }
+            let raw = Channel { link: link.clone() }
                 .execute("project.inventory", json!({}))
-                .map(|raw| {
-                    let files = work_dir.as_deref().map(work_files).unwrap_or_default();
-                    within_budget(agent_inventory(&raw), &files, INVENTORY_BUDGET_CHARS)
-                })
-                .map_err(ErrorReport::from)
+                .map_err(ErrorReport::from)?;
+            let files = work_dir.as_deref().map(work_files).unwrap_or_default();
+            let (view, ids) =
+                model_inventory(&raw, &files, INVENTORY_BUDGET_CHARS, INVENTORY_LOW_CHARS);
+            *short_ids = ids;
+            Ok(view)
         };
         composer
             .compose(state.registry, request, model, &mut inventory)
             .map_err(RpcError::business)?
     };
+    // Un refus ou une question qui cite un identifiant court le montre avec celui de QGIS.
     if let Plan::Refusal { reason } = &plan {
+        let reason = short_ids.restore_text(reason);
         return Err(RpcError::coded(
             "agent.refused",
             format!("L'agent ne peut pas répondre à cette demande : {reason}"),
@@ -169,7 +181,15 @@ pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<V
     // Une question est une réplique, pas un plan : rien n'est gardé, aucun `plan_id`.
     // Sa provenance est toujours explicite : `model`, ou `guard` (AD-23, coordonnées).
     if let Plan::Question { question, source } = &plan {
+        let question = short_ids.restore_text(question);
         return Ok(json!({"question": question, "source": source.as_str()}));
+    }
+    // Les identifiants courts du plan redeviennent ceux de QGIS, avant toute vérification : le
+    // plan vérifié, gardé, montré et journalisé ne porte que les vrais identifiants.
+    if let Plan::Calls { calls } = &mut plan {
+        for call in calls {
+            short_ids.restore(&mut call.params);
+        }
     }
     verify(state, &plan).map_err(RpcError::business)?;
     state.next_plan += 1;

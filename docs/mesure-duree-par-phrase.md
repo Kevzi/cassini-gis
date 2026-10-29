@@ -238,3 +238,134 @@ fusionné, prompt court). Avec `CASSINI_TEST_INVENTORY`, le scénario commence p
 de démo exacte de `CLAUDE.md`, précédée d'une amorce exclue des moyennes. Relevé du 2026-10-23
 (4 fils, `0x55`) : A0 en 41,4 s avec le modèle fusionné, invite de 1 737 jetons ; détail dans
 `entrainement-du-modele.md`, « Tâche 4 : mesures ».
+
+## Session enchaînée dans QGIS (ticket 5.19)
+
+Les mesures ci-dessus passent les phrases une à une sur un inventaire fixe. Dans QGIS, chaque
+plan exécuté ajoute ses couches de résultat à l'inventaire, qui change donc d'une phrase à
+l'autre : avant 5.19, il était relu en entier à chaque phrase (les nouveaux résultats arrivent en
+tête, ordre de QGIS), seules les consignes étaient reprises.
+
+**Mode opératoire.** Sonde jetable hors dépôt, sur le modèle de `qgis-plugin/tests/probe_demo.py` :
+dix phrases enchaînées dans une même session, chaque plan exécuté, QGIS 3.44.15,
+`projet-test-villeneuve.qgz`, modèle livré (`cassini-composition-4b.modele.json`), vrai noyau
+construit **sans CUDA**. La sonde se borne à 4 cœurs physiques du 5800X (`0x55`, hérité par le
+noyau) et lance le noyau avec deux variables de mesure, sans effet sans elles :
+`CASSINI_THREADS=4` (sous Windows, le nombre de fils par défaut ne voit pas le masque
+d'affinité : un noyau bridé à 4 cœurs en prendrait 8) et `CASSINI_TIMINGS=1` (une ligne
+`cassini-timings` par appel au modèle sur la sortie d'erreur du noyau, sans rien de la demande).
+La première phrase d'une session (chargement, première lecture) est hors critère, comme en 5.12.
+
+Phrases : 1. démo (`CLAUDE.md`) ; 2. « Garde les zones U du PLU. » ; 3. « Trouve les parcelles
+dans ces zones à moins de 300 m d'une gare. » ; 4. « Fais une zone tampon de 200 m autour des
+gares. » ; 5. « Sélectionne les routes limitées à 30 km/h. » ; 6. « Trouve les bâtiments à moins
+de 50 m de ces routes. » ; 7. « Calcule l'altitude moyenne du MNT dans chaque zone du PLU. » ;
+8. « Garde les zones N du PLU. » ; 9. démo de nouveau ; 10. « Sors-moi la carte en PDF. »
+
+**Avant** (2026-10-29, noyau de 4558c3f, plus la seule ligne de mesure) :
+
+| n | issue | composition (s) | lecture (s) | jetons | repris | écriture (s) | écrits |
+|---|---|---|---|---|---|---|---|
+| 1 | plan | 76,4 | 30,9 | 1 778 | 0 | 43,0 | 248 |
+| 2 | plan | 105,9 | 92,5 | 5 230 | 258 | 13,2 | 71 |
+| 3 | plan | 141,7 | 109,1 | 6 332 | 258 | 32,3 | 180 |
+| 4 | plan | 107,8 | 97,0 | 5 796 | 258 | 10,5 | 63 |
+| 5 | plan | 112,8 | 100,8 | 5 956 | 258 | 11,6 | 69 |
+| 6 | plan | 103,2 | 81,8 | 4 948 | 258 | 21,0 | 124 |
+| 7 | refus | 97,7 | 91,2 | 5 460 | 258 | 6,0 | 36 |
+| 8 | plan | 13,1 | 0,7 | 5 453 | 5 432 | 11,9 | 71 |
+| 9 | question | 92,0 | 86,1 | 5 232 | 258 | 5,4 | 32 |
+| 10 | plan | 4,5 | 0,7 | 5 204 | 5 183 | 3,4 | 23 |
+
+Lecture d'environ 57 jetons/s, écriture d'environ 5,7 jetons/s. Seules les phrases qui suivent un
+refus ou une question (8 et 10 : inventaire inchangé) reprennent le tour système ; toutes les
+autres ne reprennent que les consignes (258 jetons) et relisent l'inventaire entier.
+
+**Après** (même jour, même poste, noyau de 5.19) : ordre stable de l'inventaire (couches de
+l'utilisateur, puis résultats du plus ancien au plus récent), lecture coupée à chaque frontière de
+couches avec des instantanés à la fin des consignes, à l'ancrage, à la dernière frontière et à la
+fin du tour système, identifiants courts `nom_<4 hex>` vus par le modèle. L'ancrage et la dernière
+frontière sont des coupes juste avant la dernière clé (`source`) d'une couche : la dernière couche
+de l'utilisateur pour l'ancrage, la dernière couche de l'inventaire pour la dernière frontière. Dans
+les tableaux, « fin de l'utilisateur » désigne la reprise à l'ancrage.
+
+| n | issue | composition (s) | lecture (s) | jetons | repris | écriture (s) | écrits | reprise |
+|---|---|---|---|---|---|---|---|---|
+| 1 | plan | 55,7 | 27,1 | 1 603 | 0 | 26,0 | 165 | — (1ʳᵉ phrase) |
+| 2 | plan | 69,6 | 61,9 | 4 946 | 1 510 | 7,5 | 42 | fin de l'utilisateur |
+| 3 | plan | 41,0 | 23,4 | 6 023 | 4 886 | 17,3 | 101 | dernière frontière |
+| 4 | plan | 90,6 | 84,2 | 6 137 | 1 510 | 6,0 | 38 | fin de l'utilisateur (budget) |
+| 5 | plan | 71,2 | 64,7 | 5 073 | 1 510 | 6,2 | 39 | fin de l'utilisateur (budget) |
+| 6 | plan | 15,9 | 5,5 | 5 259 | 5 009 | 10,0 | 63 | dernière frontière |
+| 7 | refus | 17,6 | 11,2 | 5 716 | 5 192 | 6,0 | 36 | dernière frontière |
+| 8 | plan | 7,9 | 0,7 | 5 709 | 5 688 | 6,7 | 42 | tour système |
+| 9 | plan | 99,4 | 72,2 | 5 483 | 1 510 | 26,7 | 165 | fin de l'utilisateur (budget) |
+| 10 | plan | 86,1 | 82,0 | 6 014 | 1 510 | 3,4 | 23 | fin de l'utilisateur (budget) |
+
+**Lecture.** Les identifiants courts réduisent l'écriture : la phrase de démo écrit 165 jetons au
+lieu de 248 (26,0 s au lieu de 43,0 s), à plan identique. Quand une phrase ne fait qu'ajouter des
+couches à la fin de l'inventaire, la reprise à la dernière frontière fonctionne : phrases 3, 6 et 7
+en 41,0, 15,9 et 17,6 s (la phrase 3 relit encore la dernière couche d'avant et une intersection
+nouvelle, 1 137 jetons). Deux cas restent au-dessus de 30 s, et ce sont eux qui portent l'écart :
+
+- **le budget dépassé** (phrases 4, 5, 9, 10) : le budget de 5.18 retire les résultats les plus
+  anciens, qui suivent maintenant les couches de l'utilisateur ; la reprise retombe à la fin des
+  couches de l'utilisateur (1 510 jetons) et tous les résultats gardés sont relus (3 500 à
+  4 600 jetons, 65 à 84 s) ;
+- **beaucoup de résultats nouveaux d'un coup** (phrase 2) : le plan de démo produit quatre couches
+  (sélection, tampon, deux intersections à beaucoup de champs), soit 3 436 jetons à lire une fois
+  (62 s), sans aucun retrait.
+
+Ces deux cas ont été soumis au propriétaire avec leurs chiffres (2026-10-29). Décisions : retrait
+par paquets pour le budget ; la phrase qui suit un plan à plusieurs résultats part dans un ticket
+suivant (`deferred-work.md`).
+
+**Après le retrait par paquets** (même jour, même poste, noyau final de 5.19). Quand la vue dépasse
+le budget de 14 000 caractères, les résultats les plus anciens sortent jusqu'à descendre sous
+7 000 caractères (`INVENTORY_LOW_CHARS`) ; le noyau ne gardant rien d'une phrase à l'autre, la
+décision est rejouée sur les résultats présents, du plus ancien au plus récent, si bien que les
+résultats gardés ne changent pas jusqu'au dépassement suivant (`within_budget_by_batches`).
+
+| n | issue | composition (s) | lecture (s) | jetons | repris | écriture (s) | écrits | reprise |
+|---|---|---|---|---|---|---|---|---|
+| 1 | plan | 58,7 | 28,8 | 1 603 | 0 | 27,0 | 165 | — (1ʳᵉ phrase) |
+| 2 | plan | 72,5 | 64,7 | 4 942 | 1 510 | 7,5 | 42 | fin de l'utilisateur (4 résultats nouveaux) |
+| 3 | plan | 36,6 | 24,6 | 6 020 | 4 882 | 11,7 | 69 | dernière frontière |
+| 4 | plan | 15,0 | 8,6 | 1 946 | 1 510 | 6,1 | 38 | fin de l'utilisateur (paquet retiré) |
+| 5 | plan | 10,4 | 4,1 | 2 078 | 1 878 | 6,0 | 39 | dernière frontière |
+| 6 | plan | 15,5 | 4,9 | 2 262 | 2 014 | 10,4 | 63 | dernière frontière |
+| 7 | refus | 16,6 | 10,2 | 2 718 | 2 195 | 6,1 | 36 | dernière frontière |
+| 8 | plan | 7,7 | 0,6 | 2 711 | 2 690 | 6,8 | 42 | tour système |
+| 9 | plan | 44,6 | 17,2 | 3 552 | 2 651 | 27,0 | 165 | dernière frontière |
+| 10 | plan | 45,2 | 41,4 | 3 878 | 1 510 | 3,3 | 23 | fin de l'utilisateur (paquet retiré) |
+
+**Verdict au 2026-10-29 : critère pas encore atteint pour chaque phrase.** Hors première phrase,
+5 phrases sur 9 passent sous 30 s (avant 5.19 : 2 sur 9), et la durée totale des phrases 2 à 10
+passe de 779 s à 264 s ; aucune `ai.prompt_too_long`. Restent au-dessus, consignés tels quels :
+
+- phrase 2 (72,5 s) : elle lit une fois les quatre couches produites par le plan de démo
+  (3 432 jetons) ; ticket suivant (couche finale seule vue par le modèle, ou champs allégés) ;
+- phrase 3 (36,6 s) : même cause, en plus petit : la sélection des zones U de la phrase 2 porte
+  tous les champs du PLU (environ 1 100 jetons à lire une fois) ;
+- phrase 9 (44,6 s), la phrase de démo en cours de session : la lecture ne coûte plus que 17 s,
+  mais l'écriture de son plan à cinq étapes reste à 27 s (165 jetons à environ 6 jetons/s). Son
+  issue a changé : en 5.18 (et dans la mesure « avant »), elle rendait une question ; en 5.19, elle
+  rend le plan à cinq étapes, exécuté jusqu'au PDF ;
+- phrase 10 (45,2 s) : la phrase du retrait par paquets, qui relit les résultats gardés ; admise
+  par la décision du propriétaire, les phrases suivantes reprenant à la dernière frontière.
+
+La phrase de démo seule, en tête de session, est hors critère (chargement et première lecture) ;
+sa composition passe de 76,4 à 58,7 s.
+
+**Justesse sur GPU** (`--features cuda`, modèle livré, essais passés par les identifiants courts
+comme dans le produit ; `CASSINI_TEST_FULL_IDS=1` pour les identifiants complets) :
+
+| essai | 5.18 | 5.19, identifiants complets | 5.19, identifiants courts |
+|---|---|---|---|
+| `plan_reel` | 25 / 25 | 25 / 25 | 25 / 25 |
+| `question_reel` | 12 / 12 | — | 12 / 12 |
+| `ecart_reel` | 33 / 40 | 33 / 40 | 32 / 40 |
+
+Les coupes aux frontières de couches ne changent rien (mêmes scores). Les identifiants courts
+coûtent une phrase du jeu tenu à l'écart : H11 (isochrone de 15 minutes depuis un point, par la
+couche de voirie) rend un refus au lieu du plan.

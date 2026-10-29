@@ -381,6 +381,8 @@ fn ecart_reel_score_on_the_held_out_set() {
     };
     let registry = Registry::standard();
     let inventory: Value = serde_json::from_str(INVENTORY).unwrap();
+    // Comme dans le produit : identifiants courts montrés, plan retraduit (ticket 5.19).
+    let (inventory, ids) = common::shown_inventory(&inventory);
     let sentences: Vec<Value> = serde_json::from_str(SENTENCES).unwrap();
     let mut model = model_files_generator(files);
     // (justes, total) par sorte attendue.
@@ -400,7 +402,10 @@ fn ecart_reel_score_on_the_held_out_set() {
                 calls += 1;
                 model(r)
             };
-            compose_plan_with(style, &registry, &inventory, text, &mut generator)
+            common::restored(
+                compose_plan_with(style, &registry, &inventory, text, &mut generator),
+                &ids,
+            )
         };
         let graded = grade(expected, &got);
         guarded += usize::from(matches!(

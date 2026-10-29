@@ -161,6 +161,8 @@ fn duree_reel_par_phrase() {
                 (serde_json::from_str(INVENTORY).unwrap(), sentences)
             }
         };
+    // Comme dans le produit : identifiants courts montrés, plan retraduit (ticket 5.19).
+    let (inventory, ids) = common::shown_inventory(&inventory);
     let registry = Registry::standard();
 
     let fils = threads.map_or_else(
@@ -186,7 +188,10 @@ fn duree_reel_par_phrase() {
                 row.add(&timings);
                 Ok(completion)
             };
-            compose_plan_with(style, &registry, &inventory, text, &mut generator)
+            common::restored(
+                compose_plan_with(style, &registry, &inventory, text, &mut generator),
+                &ids,
+            )
         };
         println!(
             "| {id} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",

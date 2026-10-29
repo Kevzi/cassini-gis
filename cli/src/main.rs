@@ -262,7 +262,10 @@ impl cassini_core::serve::Composer for ModelComposer {
         registry: &Registry,
         request: &str,
         model: Option<&str>,
-        inventory: &mut dyn FnMut() -> Result<Value, ErrorReport>,
+        inventory: &mut dyn FnMut() -> Result<
+            cassini_core::agent_inventory::ModelInventory,
+            ErrorReport,
+        >,
     ) -> Result<cassini_core::plan::Plan, ErrorReport> {
         // La phrase vide est refusée avant toute recherche de modèle ni demande d'inventaire.
         if request.trim().is_empty() {
@@ -271,10 +274,16 @@ impl cassini_core::serve::Composer for ModelComposer {
         }
         // Modèle inconnu ou inutilisable : refusé avant tout inventaire.
         let (chosen, hidden) = self.choose(model)?;
-        let inventory = inventory()?;
-        let mut generator = cassini_ai::plan::model_files_generator(chosen.files.clone());
+        let view = inventory()?;
+        let mut generator = measured_generator(chosen.files.clone());
         chosen
-            .compose(registry, &inventory, request, &mut generator)
+            .compose(
+                registry,
+                &view.inventory,
+                Some(view.user_layers),
+                request,
+                &mut generator,
+            )
             .map_err(|e| scrub(report(e.code(), e.to_string()), &hidden))
     }
 
@@ -291,6 +300,43 @@ impl cassini_core::serve::Composer for ModelComposer {
     }
 }
 
+/// Générateur du canal, branché sur le modèle `files`. Deux variables d'environnement servent à
+/// mesurer une session réelle (ticket 5.19), sans rien changer sans elles : `CASSINI_TIMINGS` non
+/// vide fait écrire à chaque appel au modèle ses durées sur la sortie d'erreur (une ligne, sans
+/// rien de la demande) ; `CASSINI_THREADS=<n>` fixe le nombre de fils du moteur (sous Windows, le
+/// défaut ne voit pas le masque d'affinité : sans elle, un noyau bridé à 4 cœurs prendrait 8 fils).
+fn measured_generator(
+    files: cassini_ai::ModelFiles,
+) -> impl FnMut(
+    &cassini_ai::plan::GenerationRequest,
+) -> Result<cassini_ai::Completion, cassini_ai::AiError> {
+    let report = std::env::var_os("CASSINI_TIMINGS").is_some_and(|v| !v.is_empty());
+    let threads = std::env::var("CASSINI_THREADS")
+        .ok()
+        .and_then(|v| v.parse::<std::num::NonZeroU32>().ok());
+    move |request| {
+        let (completion, t) = cassini_ai::generate_files_measured(
+            &files,
+            request.turns,
+            Some(request.grammar),
+            request.max_new_tokens,
+            threads,
+        )?;
+        if report {
+            eprintln!(
+                "cassini-timings chargement={:.2}s lecture={:.2}s jetons={} repris={} ecriture={:.2}s ecrits={}",
+                t.load.as_secs_f64(),
+                t.prompt.as_secs_f64(),
+                t.prompt_tokens,
+                t.cached_tokens,
+                t.write.as_secs_f64(),
+                t.written_tokens
+            );
+        }
+        Ok(completion)
+    }
+}
+
 /// Un modèle choisi : ses fichiers, et le prompt qu'il attend.
 #[derive(Debug, PartialEq)]
 struct ChosenModel {
@@ -299,17 +345,26 @@ struct ChosenModel {
 }
 
 impl ChosenModel {
-    /// Compose le plan de `request` dans le prompt que ce modèle attend.
+    /// Compose le plan de `request` dans le prompt que ce modèle attend. `user_layers` : le nombre
+    /// de couches de l'utilisateur en tête de `inventory`, quand il est connu (ticket 5.19).
     fn compose(
         &self,
         registry: &Registry,
         inventory: &Value,
+        user_layers: Option<usize>,
         request: &str,
         generate: &mut dyn FnMut(
             &cassini_ai::plan::GenerationRequest,
         ) -> Result<cassini_ai::Completion, cassini_ai::AiError>,
     ) -> Result<cassini_core::plan::Plan, cassini_ai::plan::AgentError> {
-        cassini_ai::plan::compose_plan_with(self.style, registry, inventory, request, generate)
+        cassini_ai::plan::compose_plan_anchored(
+            self.style,
+            registry,
+            inventory,
+            user_layers,
+            request,
+            generate,
+        )
     }
 
     /// Chemin de chaque fichier du modèle, avec le seul nom de fichier qui le remplace.
@@ -547,7 +602,7 @@ fn plan(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         Err(e) => return fail(err, &e.code, e.message),
     };
     let mut generator = cassini_ai::plan::model_files_generator(chosen.files.clone());
-    match chosen.compose(&registry, &inventory, request, &mut generator) {
+    match chosen.compose(&registry, &inventory, None, request, &mut generator) {
         // Les fichiers du modèle ne sont nommés que par leur nom, comme dans le canal.
         Err(e) => {
             let e = scrub(report(e.code(), e.to_string()), &chosen.hidden());
@@ -961,7 +1016,7 @@ mod tests {
         let inventory = json!({"layers": []});
         let first_system = |chosen: &ChosenModel| {
             let mut seen = None;
-            let _ = chosen.compose(&registry, &inventory, "Ouvre les gares.", &mut |r| {
+            let _ = chosen.compose(&registry, &inventory, None, "Ouvre les gares.", &mut |r| {
                 seen.get_or_insert_with(|| r.turns[0].cached_head.clone());
                 Ok(cassini_ai::Completion {
                     text: r#"{"kind":"question","question":"Laquelle ?"}"#.to_string(),
@@ -1150,6 +1205,55 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    /// Ticket 5.19 : l'inventaire du noyau arrive au modèle coupé une fois par couche, avec
+    /// l'ancrage sur la dernière couche de l'utilisateur. Une forme de sérialisation changée
+    /// couperait l'inventaire d'un tenant, sans erreur : ce test le verrait.
+    #[test]
+    fn the_core_inventory_reaches_the_model_cut_per_layer_with_the_user_anchor() {
+        use cassini_core::agent_inventory::{
+            model_inventory, WorkFile, INVENTORY_BUDGET_CHARS, INVENTORY_LOW_CHARS,
+        };
+        let (dir, _) = temp_project();
+        let decl = dir.join("ajuste.modele.json");
+        std::fs::write(&decl, r#"{"model":"base.gguf","prompt":"short"}"#).unwrap();
+        let layer = |id: &str, source: &str| {
+            json!({"layer_id": id, "name": id, "source": source, "crs": "EPSG:2154",
+                "kind": "vector", "geometry": "MultiPolygon", "feature_count": 3,
+                "fields": [{"name": "typezone", "type": "String", "values": ["U", "N"]}]})
+        };
+        // Comme QGIS les pose : le résultat en tête de légende.
+        let raw = json!({"project_name": "p", "project_crs": "EPSG:2154", "layers": [
+            layer("1_analysis_buffer_e63fa196_c4d5_4255_9a08_203c73df1f96", "1-analysis.buffer.gpkg"),
+            layer("plu_zones_5a071b18_e012_4e1f_9c1c_250bbfb7550c", "plu.gpkg"),
+            layer("gares_83d935aa_ca33_431d_966f_dbbf0fb7ac0f", "gares.gpkg")
+        ]});
+        let files = [WorkFile {
+            name: "1-analysis.buffer.gpkg".to_string(),
+            modified: std::time::SystemTime::now(),
+        }];
+        let (view, _) = model_inventory(&raw, &files, INVENTORY_BUDGET_CHARS, INVENTORY_LOW_CHARS);
+        assert_eq!(view.user_layers, 2);
+        let registry = Registry::standard();
+        let mut seen = None;
+        let _ = resolve_model(&decl).unwrap().compose(
+            &registry,
+            &view.inventory,
+            Some(view.user_layers),
+            "Ouvre les gares.",
+            &mut |r| {
+                seen.get_or_insert_with(|| r.turns[0].clone());
+                Ok(cassini_ai::Completion {
+                    text: r#"{"kind":"question","question":"Laquelle ?"}"#.to_string(),
+                    truncated: false,
+                })
+            },
+        );
+        let system = seen.expect("le générateur est appelé");
+        assert_eq!(system.cached_parts.len(), 3);
+        assert_eq!(system.anchor, Some(view.user_layers - 1));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn an_unknown_or_unusable_model_is_refused_before_any_inventory() {
         use cassini_core::serve::Composer;
@@ -1166,7 +1270,10 @@ mod tests {
             let e = composer
                 .compose(&registry, "Ouvre les gares.", Some(model), &mut || {
                     asked = true;
-                    Ok(json!({}))
+                    Ok(cassini_core::agent_inventory::ModelInventory {
+                        inventory: json!({}),
+                        user_layers: 0,
+                    })
                 })
                 .unwrap_err();
             assert_eq!(e.code, code, "{model}");
