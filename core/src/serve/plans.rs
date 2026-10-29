@@ -19,7 +19,7 @@ use crate::agent_inventory::{
 use crate::error::ErrorReport;
 use crate::exec::Executor;
 use crate::journal::relativize;
-use crate::plan::{resolve_references, Plan};
+use crate::plan::{parse_reference, resolve_references, Plan};
 use crate::registry::{Registry, RegistryError};
 
 /// Ce qui compose un plan depuis une demande en langage naturel (port du noyau ; son
@@ -145,6 +145,7 @@ pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<V
         let short_ids = &mut short_ids;
         let link = state.link.clone();
         let announced = &state.announced;
+        let intermediates = &state.intermediates;
         let mut inventory = || {
             if !announced.contains("project.inventory") {
                 return Err(ErrorReport::from(RegistryError::Unavailable(
@@ -156,13 +157,19 @@ pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<V
             // rangée dans un ordre stable aux identifiants courts (ticket 5.19), bornée au budget
             // d'inventaire (ticket 5.18) par paquets (5.19) : les couches de résultat les plus
             // anciennes sortent de sa vue, jamais du projet. Les fichiers sont lus après la
-            // réponse de l'extension, au plus près de l'inventaire.
+            // réponse de l'extension, au plus près de l'inventaire. Les couches intermédiaires des
+            // plans exécutés sortent de sa vue, et les résultats y perdent leurs valeurs (5.22).
             let raw = Channel { link: link.clone() }
                 .execute("project.inventory", json!({}))
                 .map_err(ErrorReport::from)?;
             let files = work_dir.as_deref().map(work_files).unwrap_or_default();
-            let (view, ids) =
-                model_inventory(&raw, &files, INVENTORY_BUDGET_CHARS, INVENTORY_LOW_CHARS);
+            let (view, ids) = model_inventory(
+                &raw,
+                &files,
+                intermediates,
+                INVENTORY_BUDGET_CHARS,
+                INVENTORY_LOW_CHARS,
+            );
             *short_ids = ids;
             Ok(view)
         };
@@ -277,6 +284,13 @@ pub(super) fn execute(state: &mut State<'_>, params: Option<&Value>) -> Result<V
         let value = session
             .call(&call.command, params)
             .map_err(|e| RpcError::business(e.at_step(step)))?;
+        // L'étape a abouti et a produit une couche : chaque couche qu'elle a consommée (`step:k`)
+        // devient intermédiaire. Une étape sans couche (description, PDF) ne cache rien.
+        if value.get("layer_id").and_then(Value::as_str).is_some() {
+            state
+                .intermediates
+                .extend(consumed_layers(&call.params, &outputs));
+        }
         let shown = relativize(&value, session.work_dir());
         steps.push(json!({"step": step, "command": call.command, "result": shown}));
         outputs.push(value);
@@ -284,9 +298,44 @@ pub(super) fn execute(state: &mut State<'_>, params: Option<&Value>) -> Result<V
     Ok(json!({"plan_id": pending.id, "steps": steps}))
 }
 
+/// Les identifiants des couches de sortie que les paramètres non résolus `params` consomment :
+/// pour chaque référence de premier niveau `step:k` ou `step:k.layer_id`, le `layer_id` de la
+/// sortie de l'étape `k`, s'il en a un (ticket 5.22). Une référence à un autre champ
+/// (`step:k.feature_count`) ne consomme pas la couche.
+fn consumed_layers(params: &Value, outputs: &[Value]) -> Vec<String> {
+    let Value::Object(map) = params else {
+        return Vec::new();
+    };
+    map.values()
+        .filter_map(|v| parse_reference(v)?.ok())
+        .filter(|(_, field)| field.as_deref().is_none_or(|f| f == "layer_id"))
+        .filter_map(|(k, _)| outputs.get(k.checked_sub(1)?)?.get("layer_id")?.as_str())
+        .map(str::to_string)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_outputs_a_step_refers_to_are_consumed() {
+        let outputs = [
+            json!({"layer_id": "r1", "feature_count": 3}),
+            json!({"layer_id": "r2"}),
+            json!({"path": "carte.pdf"}),
+        ];
+        let params = json!({"layer_id": "step:1.layer_id", "overlay_layer_id": "step:2",
+            "pdf": "step:3", "bad": "step:0", "far": "step:9", "plain": "r2", "list": ["step:2"]});
+        let mut got = consumed_layers(&params, &outputs);
+        got.sort();
+        assert_eq!(got, ["r1", "r2"]);
+        // Un champ scalaire de la sortie ne consomme pas la couche.
+        let scalar = json!({"count": "step:1.feature_count", "name": "step:2.name"});
+        assert!(consumed_layers(&scalar, &outputs).is_empty());
+        assert!(consumed_layers(&json!({"layer_id": "r1"}), &outputs).is_empty());
+        assert!(consumed_layers(&json!(null), &outputs).is_empty());
+    }
 
     #[test]
     fn work_files_include_the_replay_folder() {

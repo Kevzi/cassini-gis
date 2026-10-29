@@ -33,9 +33,16 @@
 //! (forme apprise) pour un identifiant QGIS `nom_<uuid>`, que le modèle recopie bien plus vite ;
 //! le noyau retraduit le plan rendu avant de le vérifier et de le garder : le journal, le plan
 //! gardé et l'extension ne voient que les vrais identifiants.
+//!
+//! **Résultats allégés** (ticket 5.22). Une couche de résultat coûte cher à relire : un plan de
+//! démo en produit quatre, et une sélection porte tous les champs de sa couche, valeurs comprises.
+//! `without_intermediates` retire de la vue les sorties qu'une étape exécutée du même plan a
+//! consommées (le noyau les retient en mémoire, le temps de son processus), et
+//! `results_without_values` ôte la clé `values` des champs des résultats. Les couches de
+//! l'utilisateur ne changent pas ; QGIS, le journal et le plan gardé non plus.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::SystemTime;
 
 use serde_json::{json, Map, Value};
@@ -365,17 +372,23 @@ pub struct ModelInventory {
 
 /// De `project.inventory` à l'inventaire montré au modèle, avec la table pour retraduire son plan :
 /// forme de l'entraînement, ordre stable, identifiants courts (table faite sur toutes les couches,
-/// pour qu'un court ne change pas quand une couche sort de la vue), puis budget par paquets
-/// (`budget`, seuil bas `low`).
+/// pour qu'un court ne change pas quand une couche sort de la vue), couches intermédiaires
+/// (`intermediates`, identifiants complets) retirées et résultats sans valeurs (ticket 5.22), puis
+/// budget par paquets (`budget`, seuil bas `low`).
 pub fn model_inventory(
     raw: &Value,
     work_files: &[WorkFile],
+    intermediates: &HashSet<String>,
     budget: usize,
     low: usize,
 ) -> (ModelInventory, ShortIds) {
     let (ordered, user_layers) = stable_order(agent_inventory(raw), work_files);
     let ids = ShortIds::of_inventory(&ordered);
-    let inventory = within_budget_by_batches(ids.shorten(ordered), work_files, budget, low);
+    let lighter = results_without_values(
+        without_intermediates(ordered, work_files, intermediates),
+        work_files,
+    );
+    let inventory = within_budget_by_batches(ids.shorten(lighter), work_files, budget, low);
     (
         ModelInventory {
             inventory,
@@ -383,6 +396,51 @@ pub fn model_inventory(
         },
         ids,
     )
+}
+
+/// L'inventaire sans les couches de résultat dont l'identifiant est dans `intermediates` (ticket
+/// 5.22) : les sorties d'une étape qu'une étape exécutée du même plan a consommées (`step:k`). Une
+/// couche de l'utilisateur n'est jamais retirée, même citée par l'ensemble (une couche ouverte par
+/// `layer.add` puis reprise par l'étape suivante reste vue). Ordre et couches gardées intacts.
+pub fn without_intermediates(
+    mut inventory: Value,
+    work_files: &[WorkFile],
+    intermediates: &HashSet<String>,
+) -> Value {
+    if intermediates.is_empty() {
+        return inventory;
+    }
+    if let Some(layers) = inventory.get_mut("layers").and_then(Value::as_array_mut) {
+        layers.retain(|layer| {
+            let hidden = layer
+                .get("layer_id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| intermediates.contains(id));
+            !(hidden && result_date(layer, work_files).is_some())
+        });
+    }
+    inventory
+}
+
+/// L'inventaire où les champs des couches de résultat n'ont plus de clé `values` (ticket 5.22) :
+/// la forme d'un champ texte trop varié, déjà apprise. Les couches de l'utilisateur gardent leurs
+/// valeurs ; rien d'autre ne change.
+pub fn results_without_values(mut inventory: Value, work_files: &[WorkFile]) -> Value {
+    if let Some(layers) = inventory.get_mut("layers").and_then(Value::as_array_mut) {
+        for layer in layers {
+            if result_date(layer, work_files).is_none() {
+                continue;
+            }
+            if let Some(fields) = layer.get_mut("fields").and_then(Value::as_array_mut) {
+                for field in fields {
+                    if let Some(map) = field.as_object_mut() {
+                        map.remove("values");
+                    }
+                }
+            }
+        }
+    }
+    inventory
 }
 
 /// Numéro d'étape en tête d'un nom de fichier de résultat (`21-analysis.intersect.gpkg` donne
@@ -952,8 +1010,13 @@ mod tests {
                 modified: UNIX_EPOCH + Duration::from_secs(k),
             })
             .collect();
-        let (view, table) =
-            model_inventory(&raw, &files, INVENTORY_BUDGET_CHARS, INVENTORY_LOW_CHARS);
+        let (view, table) = model_inventory(
+            &raw,
+            &files,
+            &HashSet::new(),
+            INVENTORY_BUDGET_CHARS,
+            INVENTORY_LOW_CHARS,
+        );
         assert_eq!(view.user_layers, 1);
         assert_eq!(
             ids(&view.inventory),
@@ -969,10 +1032,10 @@ mod tests {
         assert_eq!(back, json!([PARCELLES, result_id(3)]));
         // Au-delà du budget, les plus anciens résultats sortent ; les courts ne changent pas.
         let one = {
-            let (all, _) = model_inventory(&raw, &files, 0, 0);
+            let (all, _) = model_inventory(&raw, &files, &HashSet::new(), 0, 0);
             json_chars(&all.inventory) + json_chars(&view.inventory["layers"][3]) + 1
         };
-        let (small, same_table) = model_inventory(&raw, &files, one, one);
+        let (small, same_table) = model_inventory(&raw, &files, &HashSet::new(), one, one);
         assert_eq!(
             ids(&small.inventory),
             ["parcelles_e9ba", "3_analysis_buffer_e63f"]
@@ -1118,5 +1181,188 @@ mod tests {
         // Un identifiant complet déjà écrit n'est pas touché ; un texte sans court non plus.
         assert_eq!(ids.restore_text(GARES), GARES);
         assert_eq!(ids.restore_text("Aucune couche."), "Aucune couche.");
+    }
+
+    // -- résultats allégés (ticket 5.22) --
+
+    fn raw_layer(id: &str, source: &str) -> Value {
+        json!({"layer_id": id, "name": id, "source": source, "crs": "EPSG:2154",
+            "kind": "vector", "geometry": "MultiPolygon", "feature_count": 3,
+            "fields": [{"name": "typezone", "type": "String", "values": ["U", "N"]},
+                {"name": "surface", "type": "Real"}]})
+    }
+
+    /// Le plan de démo exécuté : PLU et gares de l'utilisateur, puis sélection (1), tampon (2) et
+    /// deux intersections (3, 4), posés par QGIS en tête de légende.
+    fn demo() -> (Value, Vec<WorkFile>) {
+        let steps = [
+            "1-analysis.select_by_attribute.gpkg",
+            "2-analysis.buffer.gpkg",
+            "3-analysis.intersect.gpkg",
+            "4-analysis.intersect.gpkg",
+        ];
+        let mut layers: Vec<Value> = steps
+            .iter()
+            .enumerate()
+            .rev()
+            .map(|(i, f)| raw_layer(&format!("r{}", i + 1), f))
+            .collect();
+        layers.push(raw_layer("plu", "plu.gpkg"));
+        layers.push(raw_layer("gares", "gares.gpkg"));
+        let raw = json!({"project_name": "p", "project_crs": "EPSG:2154", "layers": layers});
+        let files = steps
+            .iter()
+            .enumerate()
+            .map(|(i, f)| WorkFile {
+                name: (*f).to_string(),
+                modified: UNIX_EPOCH + Duration::from_secs(10 + i as u64),
+            })
+            .collect();
+        (raw, files)
+    }
+
+    fn set(ids: &[&str]) -> HashSet<String> {
+        ids.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn a_chained_plan_shows_only_its_last_result_without_values() {
+        let (raw, files) = demo();
+        let hidden = set(&["r1", "r2", "r3"]);
+        let (view, table) = model_inventory(
+            &raw,
+            &files,
+            &hidden,
+            INVENTORY_BUDGET_CHARS,
+            INVENTORY_LOW_CHARS,
+        );
+        assert_eq!(ids(&view.inventory), ["plu", "gares", "r4"]);
+        assert_eq!(view.user_layers, 2);
+        let layers = view.inventory["layers"].as_array().unwrap();
+        // L'utilisateur garde ses valeurs ; le résultat a la forme d'un champ trop varié.
+        assert_eq!(layers[0]["fields"][0]["values"], json!(["N", "U"]));
+        assert_eq!(
+            layers[2]["fields"],
+            json!([{"name": "typezone", "type": "string"}, {"name": "surface", "type": "number"}])
+        );
+        // La table est faite sur toutes les couches, cachées comprises.
+        assert_eq!(
+            table,
+            ShortIds::of(["r1", "r2", "r3", "r4", "plu", "gares"])
+        );
+    }
+
+    #[test]
+    fn a_one_step_plan_keeps_its_result_without_values() {
+        let (raw, files) = demo();
+        let (view, _) = model_inventory(&raw, &files, &HashSet::new(), 100_000, 50_000);
+        assert_eq!(
+            ids(&view.inventory),
+            ["plu", "gares", "r1", "r2", "r3", "r4"]
+        );
+        for layer in &view.inventory["layers"].as_array().unwrap()[2..] {
+            for field in layer["fields"].as_array().unwrap() {
+                assert!(field.get("values").is_none(), "{field}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_user_layer_named_as_intermediate_stays_whole() {
+        // `layer.add` puis une étape qui reprend la couche ouverte : elle reste vue, valeurs comprises.
+        let (raw, files) = demo();
+        let hidden = set(&["plu", "r2"]);
+        let shaped = stable_order(agent_inventory(&raw), &files).0;
+        let out = without_intermediates(shaped.clone(), &files, &hidden);
+        assert_eq!(ids(&out), ["plu", "gares", "r1", "r3", "r4"]);
+        assert_eq!(out["layers"][0], shaped["layers"][0]);
+        // Ensemble vide ou sans dossier de travail : rien ne sort.
+        assert_eq!(
+            without_intermediates(shaped.clone(), &files, &HashSet::new()),
+            shaped
+        );
+        assert_eq!(without_intermediates(shaped.clone(), &[], &hidden), shaped);
+        assert_eq!(results_without_values(shaped.clone(), &[]), shaped);
+    }
+
+    #[test]
+    fn with_the_same_results_the_view_does_not_change_and_a_new_plan_only_adds() {
+        let (raw, mut files) = demo();
+        let mut hidden = set(&["r1", "r2", "r3"]);
+        let view = |raw: &Value, files: &[WorkFile], hidden: &HashSet<String>| {
+            model_inventory(
+                raw,
+                files,
+                hidden,
+                INVENTORY_BUDGET_CHARS,
+                INVENTORY_LOW_CHARS,
+            )
+            .0
+            .inventory
+        };
+        let before = view(&raw, &files, &hidden);
+        assert_eq!(view(&raw, &files, &hidden), before);
+        // Un plan de deux étapes chaînées ajoute r5 (consommée) et r6.
+        let mut next = raw.clone();
+        let layers = next["layers"].as_array_mut().unwrap();
+        layers.insert(0, raw_layer("r5", "5-analysis.buffer.gpkg"));
+        layers.insert(0, raw_layer("r6", "6-analysis.intersect.gpkg"));
+        for (k, name) in [
+            (5, "5-analysis.buffer.gpkg"),
+            (6, "6-analysis.intersect.gpkg"),
+        ] {
+            files.push(WorkFile {
+                name: name.to_string(),
+                modified: UNIX_EPOCH + Duration::from_secs(100 + k),
+            });
+        }
+        hidden.insert("r5".to_string());
+        let after = view(&next, &files, &hidden);
+        let before = before["layers"].as_array().unwrap();
+        let after = after["layers"].as_array().unwrap();
+        assert_eq!(&after[..before.len()], &before[..]);
+        assert_eq!(ids(&json!({"layers": after})), ["plu", "gares", "r4", "r6"]);
+    }
+
+    #[test]
+    fn the_lightening_runs_before_the_budget() {
+        // Douze résultats à vingt champs texte de dix valeurs : la vue brute dépasse le budget ;
+        // huit sont intermédiaires, et les quatre autres, sans valeurs, tiennent tous.
+        let fields: Vec<Value> = (0..20)
+            .map(|i| {
+                let values: Vec<String> = (0..10).map(|v| format!("valeur_{i:02}_{v}")).collect();
+                json!({"name": format!("champ_{i:02}"), "type": "String", "values": values})
+            })
+            .collect();
+        let mut layers: Vec<Value> = (1..=12)
+            .rev()
+            .map(|k| {
+                let mut l = raw_layer(&format!("r{k}"), &format!("{k}-analysis.intersect.gpkg"));
+                l["fields"] = json!(fields);
+                l
+            })
+            .collect();
+        layers.push(raw_layer("plu", "plu.gpkg"));
+        let raw = json!({"project_name": "p", "project_crs": "EPSG:2154", "layers": layers});
+        let files: Vec<WorkFile> = (1..=12u64)
+            .map(|k| WorkFile {
+                name: format!("{k}-analysis.intersect.gpkg"),
+                modified: UNIX_EPOCH + Duration::from_secs(k),
+            })
+            .collect();
+        assert!(json_chars(&agent_inventory(&raw)) > INVENTORY_BUDGET_CHARS);
+        let hidden: HashSet<String> = [1, 2, 4, 5, 7, 8, 10, 11]
+            .iter()
+            .map(|k| format!("r{k}"))
+            .collect();
+        let (view, _) = model_inventory(
+            &raw,
+            &files,
+            &hidden,
+            INVENTORY_BUDGET_CHARS,
+            INVENTORY_LOW_CHARS,
+        );
+        assert_eq!(ids(&view.inventory), ["plu", "r3", "r6", "r9", "r12"]);
+        assert!(json_chars(&view.inventory) <= INVENTORY_BUDGET_CHARS);
     }
 }
