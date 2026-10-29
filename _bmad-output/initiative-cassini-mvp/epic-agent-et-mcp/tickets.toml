@@ -152,7 +152,7 @@ title = "Refactor sweep"
 description = "Nettoie ce que l'epic a laisse : doublons entre ai/, serve.rs et le serveur MCP, constats de revue reportes dans deferred-work.md ; le perimetre est fixe au demarrage d'apres les plans et les constats."
 verify = "cargo test, clippy et fmt propres, les constats reportes de l'epic sont traites ou re-reportes avec leur raison."
 covers = []
-after = [1, 2, 3, 4, 5, 6, 7, 11, 12, 13, 14, 16, 18, 19]
+after = [1, 2, 3, 4, 5, 6, 7, 11, 12, 13, 14, 16, 18, 19, 20, 21]
 hitl = false
 risk = "low"
 
@@ -299,4 +299,38 @@ notes = [
   "Open question: faut-il des identifiants de couche courts (re-entrainement) ou les leviers sans re-entrainement suffisent-ils ? A trancher apres la mesure, au debut du build.",
   "hitl : le proprietaire fait la recette enchainee dans QGIS et confirme la duree ; un re-entrainement eventuel tourne sur sa carte graphique.",
   "Check hors criteres (risque high) : le proprietaire enchaine dix phrases dans QGIS et confirme qu'aucune ne depasse 30 s.",
+]
+
+[[entry]]
+id = 20
+type = "story"
+title = "Nombre de fils par defaut : coeurs physiques et masque d'affinite, sous Windows"
+description = "Verifie, puis corrige si besoin, le nombre de fils que le noyau prend par defaut pour le modele local : il doit valoir le nombre de coeurs physiques que le processus a le droit d'utiliser, masque d'affinite compris, sous Windows comme sous Linux. Mesure ensuite si ce reglage est le plus rapide pour l'ecriture du plan, bornee par la memoire, face aux fils logiques."
+verify = "Sur le 5800X (8 coeurs, 16 fils), le noyau lance sans reglage prend 8 fils, et 4 sous le masque 0x55 ; un test sans modele couvre le calcul ; la duree de la phrase de demo sur CPU, sans reglage, n'est pas plus longue qu'avec CASSINI_THREADS fixe au meme nombre."
+covers = ["CAP-4"]
+after = [19]
+hitl = true
+risk = "medium"
+notes = [
+  "Decision: 2026-10-29 — ticket demande par le proprietaire apres le constat de 5.19 : sous le masque 0x55, le noyau a pris 16 fils au lieu de 4.",
+  "Toute dependance ajoutee (par exemple pour lire le masque d'affinite sous Windows) se demande avant, avec sa licence : MIT, Apache-2.0 ou BSD seulement dans le noyau.",
+  "hitl : le proprietaire lance la mesure sur son poste Windows.",
+]
+
+[[entry]]
+id = 21
+type = "story"
+title = "Acceleration par carte graphique dans le noyau livre, avec repli sur le processeur"
+description = "Le noyau livre profite d'une carte graphique quand la machine en a une, NVIDIA, AMD ou Intel, et retombe seul sur le processeur sinon, sans reglage de l'utilisateur. Aujourd'hui le paquet est construit sans GPU et l'option CUDA ne sert qu'aux mesures. Choisit d'abord la technique (Vulkan de preference, qui couvre les trois fabricants, contre CUDA) sur sa licence, la taille du paquet et la duree mesuree, puis livre la detection au demarrage et le repli."
+verify = "Sur le poste du proprietaire avec sa carte graphique, la phrase de demo est composee bien plus vite que sur processeur, durees consignees dans docs/ ; le meme paquet, carte graphique masquee ou absente, compose sur processeur sans erreur ; plan_reel, question_reel et ecart_reel donnent les memes scores sur le chemin livre ; cargo deny reste vert ; la taille du paquet est consignee."
+covers = ["CAP-4"]
+after = [19]
+hitl = true
+risk = "high"
+notes = [
+  "Decision: 2026-10-29 — ticket demande par le proprietaire : le noyau doit tirer parti de n'importe quel processeur ou carte graphique.",
+  "Open question: Vulkan ou CUDA (ou les deux) ; licence de chaque bibliotheque liee au noyau a verifier avant de l'ajouter (MIT, Apache-2.0, BSD seulement), taille du paquet et duree a comparer au debut du build.",
+  "Toujours aucun serveur ni aucun reseau : la carte graphique est utilisee dans le processus du noyau.",
+  "hitl : le proprietaire teste sur sa carte graphique NVIDIA ; une carte AMD ou Intel n'est pas disponible, le repli et le chemin Vulkan generique sont a verifier autrement.",
+  "Check hors criteres (risque high) : le proprietaire installe le paquet livre et lance une phrase dans QGIS, avec puis sans carte graphique.",
 ]
