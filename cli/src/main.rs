@@ -687,7 +687,7 @@ mod tests {
         assert_eq!(
             out.trim(),
             format!(
-                r#"{{"core_version":"{}","protocol_version":1}}"#,
+                r#"{{"core_version":"{}","protocol_version":2}}"#,
                 cassini_core::VERSION
             )
         );
@@ -842,7 +842,7 @@ mod tests {
 {}
 ",
             json!({"jsonrpc":"2.0","id":1,"method":"session.hello",
-                "params":{"protocol_version":1,"commands":[],"project":project}}),
+                "params":{"protocol_version":2,"commands":[],"project":project}}),
             json!({"jsonrpc":"2.0","id":2,"method":"command.run",
                 "params":{"command":"system.about"}}),
         );
@@ -854,7 +854,7 @@ mod tests {
             .collect();
         assert_eq!(lines.len(), 2);
         assert!(lines[0]["result"]["commands"].is_array());
-        assert_eq!(lines[1]["result"]["protocol_version"], 1);
+        assert_eq!(lines[1]["result"]["protocol_version"], 2);
         let journal = std::fs::read_to_string(dir.join("p.cassini/journal.jsonl")).unwrap();
         assert_eq!(journal.lines().count(), 1);
         let registry = Registry::standard();

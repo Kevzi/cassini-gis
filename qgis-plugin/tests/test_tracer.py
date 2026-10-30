@@ -122,18 +122,18 @@ class ClientTest(unittest.TestCase):
         self.assertTrue(self.p.written[0].endswith(b"\n"))
         self.assertEqual(hello["method"], "session.hello")
         self.assertEqual(hello["params"]["project"], "C:/a/p.qgz")
-        self.assertEqual(hello["params"]["protocol_version"], 1)
-        data = reply(1, {"protocol_version": 1, "core_version": "0.1", "commands": []})
+        self.assertEqual(hello["params"]["protocol_version"], 2)
+        data = reply(1, {"protocol_version": 2, "core_version": "0.1", "commands": []})
         self.p.feed(data[:10])  # réponse coupée : le cadrage par ligne tient
         self.assertEqual(len(self.p.written), 1)
         self.p.feed(data[10:])
         run = self.sent()[1]
         self.assertEqual(run["method"], "command.run")
         self.assertEqual(run["params"], {"command": "system.about", "params": {}})
-        self.p.feed(reply(2, {"core_version": "0.1.0", "protocol_version": 1}))
+        self.p.feed(reply(2, {"core_version": "0.1.0", "protocol_version": 2}))
         self.assertEqual(
             self.events,
-            [(client.READY, {"core_version": "0.1.0", "protocol_version": 1, "commands": []})],
+            [(client.READY, {"core_version": "0.1.0", "protocol_version": 2, "commands": []})],
         )
 
     def test_mismatch_shown_as_is_and_core_stopped(self):
@@ -209,8 +209,8 @@ class OrderTest(unittest.TestCase):
             self.p, lambda k, v: self.events.append((k, v)), self.reg
         )
         self.c.start("cassini", "/p.qgz")
-        self.p.feed(reply(1, {"protocol_version": 1, "core_version": "0.1", "commands": []}))
-        self.p.feed(reply(2, {"core_version": "0.1.0", "protocol_version": 1}))
+        self.p.feed(reply(1, {"protocol_version": 2, "core_version": "0.1", "commands": []}))
+        self.p.feed(reply(2, {"core_version": "0.1.0", "protocol_version": 2}))
         self.base = len(self.p.written)
 
     def order(self, ident="core-1", command="test.qgis_probe", params=None):
@@ -348,9 +348,9 @@ class RunTest(unittest.TestCase):
         self.c.start("cassini", "/p.qgz")
 
     def ready(self):
-        self.p.feed(reply(1, {"protocol_version": 1, "core_version": "0.1",
+        self.p.feed(reply(1, {"protocol_version": 2, "core_version": "0.1",
                               "commands": self.CATALOGUE}))
-        self.p.feed(reply(2, {"core_version": "0.1.0", "protocol_version": 1}))
+        self.p.feed(reply(2, {"core_version": "0.1.0", "protocol_version": 2}))
         self.base = len(self.p.written)
 
     def new(self):
@@ -705,8 +705,8 @@ class ReplayTest(unittest.TestCase):
         self.p = FakeProcess()
         c = client.CoreClient(self.p, lambda k, v: self.events.append((k, v)), registry)
         c.start("cassini", "/p.qgz")
-        self.p.feed(reply(1, {"protocol_version": 1, "core_version": "0.1", "commands": []}))
-        self.p.feed(reply(2, {"core_version": "0.1.0", "protocol_version": 1}))
+        self.p.feed(reply(1, {"protocol_version": 2, "core_version": "0.1", "commands": []}))
+        self.p.feed(reply(2, {"core_version": "0.1.0", "protocol_version": 2}))
         base = len(self.p.written)
         self.assertTrue(c.replay())
         self.p.feed((json.dumps({"jsonrpc": "2.0", "id": "core-1", "method": "order.execute",

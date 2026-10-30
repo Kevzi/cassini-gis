@@ -82,7 +82,7 @@ fn via_serve(id: &str, params: &Value, project: &str) -> String {
         .spawn()
         .expect("le binaire se lance");
     let hello = json!({"jsonrpc":"2.0","id":1,"method":"session.hello",
-        "params":{"protocol_version":1,"commands":[],"project":project}});
+        "params":{"protocol_version":2,"commands":[],"project":project}});
     let call = json!({"jsonrpc":"2.0","id":2,"method":"command.run",
         "params":{"command":id,"params":params}});
     let mut stdin = child.stdin.take().unwrap();

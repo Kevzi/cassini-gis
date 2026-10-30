@@ -17,7 +17,7 @@ méthodes, `ids()` et `create(id)` (voir `gestures.py`).
 
 import json
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 
 # Événements rendus au rappel `on_event(kind, payload)`.
 READY = "ready"  # payload : {"core_version", "protocol_version"}

@@ -13,7 +13,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 /// Version du protocole du noyau.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Où s'exécute une commande.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -392,7 +392,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             out,
-            json!({"core_version": crate::VERSION, "protocol_version": 1})
+            json!({"core_version": crate::VERSION, "protocol_version": 2})
         );
     }
 
