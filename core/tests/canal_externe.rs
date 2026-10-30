@@ -1,6 +1,6 @@
-//! Canal d'IA externe côté session (AD-29, tickets 5.24 et 5.28) : une extension simulée par des
+//! Canal d'IA externe côté session (AD-29, tickets 5.24, 5.28 et 5.29) : une extension simulée par des
 //! flux en mémoire, un relais brut branché au vrai canal (socket Unix ou tube nommé), un nom de
-//! canal propre à chaque test. Chaque ligne des matrices des deux tickets a son test.
+//! canal propre à chaque test. Chaque ligne des matrices de ces tickets a son test.
 
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
@@ -15,7 +15,7 @@ use cassini_core::error::ErrorReport;
 use cassini_core::external::{self, ChannelName};
 use cassini_core::plan::Plan;
 use cassini_core::registry::{Registry, PROTOCOL_VERSION};
-use cassini_core::serve::{serve_with_channel, Composer};
+use cassini_core::serve::{serve_with_channel, Composer, APPROVE_TIMEOUT};
 use serde_json::{json, Value};
 
 const WAIT: Duration = Duration::from_secs(10);
@@ -157,6 +157,19 @@ impl Session {
     }
 
     fn start_with(name: &ChannelName, composer: Option<FakeComposer>) -> Session {
+        Session::start_full(name, composer, APPROVE_TIMEOUT)
+    }
+
+    /// Une session dont la demande d'accord `external.approve` expire après `timeout`.
+    fn start_quick(name: &ChannelName, timeout: Duration) -> Session {
+        Session::start_full(name, None, timeout)
+    }
+
+    fn start_full(
+        name: &ChannelName,
+        composer: Option<FakeComposer>,
+        approve_timeout: Duration,
+    ) -> Session {
         let dir = temp_dir();
         let project = dir.join("p.qgz").to_string_lossy().replace('\\', "/");
         let (to, in_rx) = mpsc::channel();
@@ -174,7 +187,7 @@ impl Session {
                 buf: Vec::new(),
             };
             let composer = composer.as_ref().map(|c| c as &dyn Composer);
-            serve_with_channel(&registry, composer, name, reader, writer)
+            serve_with_channel(&registry, composer, name, approve_timeout, reader, writer)
         });
         Session {
             to: Some(to),
@@ -240,6 +253,32 @@ impl Session {
         assert_eq!(order["method"], "order.execute", "{order}");
         assert_eq!(order["params"]["command"], command, "{order}");
         order
+    }
+
+    /// La prochaine demande d'accord `external.approve`, dont la commande est vérifiée.
+    fn expect_approve(&self, command: &str) -> Value {
+        let request = self.recv();
+        assert_eq!(request["method"], "external.approve", "{request}");
+        assert!(
+            request["id"].as_str().unwrap().starts_with("core-"),
+            "{request}"
+        );
+        assert_eq!(request["params"]["command"], command, "{request}");
+        request
+    }
+
+    /// La prochaine notification `request.cancel`, qui doit viser `request`.
+    fn expect_withdrawn(&self, request: &Value) {
+        let notice = self.recv();
+        assert_eq!(notice["method"], "request.cancel", "{notice}");
+        assert!(notice.get("id").is_none(), "{notice}");
+        assert_eq!(notice["params"]["id"], request["id"], "{notice}");
+    }
+
+    /// Allume le canal, case « Me demander avant chaque appel » cochée.
+    fn switch_on_asking(&mut self) {
+        let r = self.switch(json!({"enabled": true, "ask": true}));
+        assert_eq!(r["result"], json!({"enabled": true, "ask": true}), "{r}");
     }
 
     fn reply(&self, order: &Value, result: Value) {
@@ -838,23 +877,312 @@ fn a_composition_or_a_pending_plan_makes_the_relay_busy() {
 }
 
 #[test]
-fn with_the_ask_box_on_nothing_is_run() {
-    let name = unique_name("demande");
+fn with_the_ask_box_on_an_approved_call_runs_and_off_none_is_asked() {
+    let name = unique_name("accord");
     let mut s = Session::start(&name);
-    s.hello(&[]);
-    let r = s.switch(json!({"enabled": true, "ask": true}));
-    assert_eq!(r["result"], json!({"enabled": true, "ask": true}));
+    s.hello(&["layer.describe"]);
+    s.switch_on_asking();
     let mut relay = Relay::attached(&name);
-    relay.run(7, "system.about", json!({}));
-    assert_eq!(code_of(&relay.recv()), "external.not_approved");
+    relay.run(7, "layer.describe", json!({"layer_id": "l1"}));
+    // La demande précède toute annonce : rien n'est encore parti au panneau ni exécuté.
+    let request = s.expect_approve("layer.describe");
+    assert_eq!(request["params"]["call_id"], "external-1");
+    assert_eq!(request["params"]["params"], json!({"layer_id": "l1"}));
     s.assert_silent();
-    assert!(s.journal().is_empty());
-    // La case éteinte, l'appel passe.
+    s.reply(&request, json!({"approved": true}));
+    let started = s.expect_call("started");
+    assert_eq!(started["call_id"], "external-1");
+    let order = s.expect_order("layer.describe");
+    s.reply(&order, described());
+    assert_eq!(s.expect_call("finished")["result"], described());
+    let r = relay.recv();
+    assert_eq!(
+        (r["id"].clone(), r["result"].clone()),
+        (json!(7), described())
+    );
+    let journal = s.journal();
+    assert_eq!(journal.len(), 1);
+    assert_eq!(journal[0]["origin"], "external");
+
+    // La case éteinte : aucune demande, le chemin de 5.28.
     s.switch_on();
     relay.run(8, "system.about", json!({}));
     s.expect_call("started");
     s.expect_call("finished");
     assert!(relay.recv()["result"].is_object());
+}
+
+#[test]
+fn a_refused_call_runs_nothing_and_only_the_approved_one_is_journaled() {
+    let name = unique_name("refus");
+    let mut s = Session::start(&name);
+    s.hello(&["layer.add"]);
+    s.switch_on_asking();
+    let mut relay = Relay::attached(&name);
+    relay.run(7, "system.about", json!({}));
+    let request = s.expect_approve("system.about");
+    s.reply(&request, json!({"approved": false}));
+    let r = relay.recv();
+    assert_eq!(
+        (r["id"].clone(), code_of(&r)),
+        (json!(7), "external.not_approved")
+    );
+    assert!(
+        r["error"]["message"].as_str().unwrap().contains("refusé"),
+        "{r}"
+    );
+    // Aucun `external.call`, rien au journal.
+    s.assert_silent();
+    assert!(s.journal().is_empty());
+    // Refusés d'office, sans déranger l'utilisateur : commande inconnue, chemin qui sort du
+    // projet, commande QGIS non annoncée.
+    relay.run(8, "nope.nothing", json!({}));
+    assert_eq!(code_of(&relay.recv()), "registry.unknown_command");
+    relay.run(81, "layer.add", json!({"path": "/abs/x.gpkg"}));
+    assert_eq!(code_of(&relay.recv()), "external.path_refused");
+    relay.run(82, "layer.describe", json!({"layer_id": "l"}));
+    assert_eq!(code_of(&relay.recv()), "registry.unavailable");
+    s.assert_silent();
+
+    relay.run(9, "system.about", json!({}));
+    let request = s.expect_approve("system.about");
+    s.reply(&request, json!({"approved": true}));
+    s.expect_call("started");
+    s.expect_call("finished");
+    assert!(relay.recv()["result"].is_object());
+    let journal = s.journal();
+    assert_eq!(journal.len(), 1);
+    assert_eq!(journal[0]["id"], "system.about");
+    assert_eq!(journal[0]["origin"], "external");
+}
+
+#[test]
+fn an_error_or_a_malformed_answer_is_not_an_approval() {
+    let name = unique_name("erreur");
+    let mut s = Session::start(&name);
+    s.hello(&[]);
+    s.switch_on_asking();
+    let mut relay = Relay::attached(&name);
+    // L'extension d'avant 5.26 ne connaît pas la méthode.
+    relay.run(7, "system.about", json!({}));
+    let request = s.expect_approve("system.about");
+    s.send(json!({"jsonrpc":"2.0","id":request["id"],
+        "error":{"code":-32601,"message":"Méthode inconnue : external.approve"}}));
+    let r = relay.recv();
+    assert_eq!(code_of(&r), "external.not_approved");
+    assert!(
+        r["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("mettez-la à jour"),
+        "{r}"
+    );
+    // Une autre erreur : une cause neutre.
+    relay.run(5, "system.about", json!({}));
+    let request = s.expect_approve("system.about");
+    s.send(json!({"jsonrpc":"2.0","id":request["id"],
+        "error":{"code":-32000,"message":"panne"}}));
+    let r = relay.recv();
+    assert_eq!(code_of(&r), "external.not_approved");
+    assert!(
+        !r["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("mettez-la à jour"),
+        "{r}"
+    );
+    // Une réponse que la lecture rejette, mais qui porte l'id de la demande : retirée, refusée.
+    relay.run(6, "system.about", json!({}));
+    let request = s.expect_approve("system.about");
+    s.send(json!({"jsonrpc":"2.0","id":request["id"]}));
+    s.expect_withdrawn(&request);
+    let r = relay.recv();
+    assert_eq!(
+        (r["id"].clone(), code_of(&r)),
+        (json!(6), "external.not_approved")
+    );
+    for (id, answer) in [
+        (8, json!({"approved": "oui"})),
+        (9, json!({})),
+        (10, json!(true)),
+    ] {
+        relay.run(id, "system.about", json!({}));
+        let request = s.expect_approve("system.about");
+        s.reply(&request, answer);
+        let r = relay.recv();
+        assert_eq!(
+            (r["id"].clone(), code_of(&r)),
+            (json!(id), "external.not_approved")
+        );
+    }
+    s.assert_silent();
+    assert!(s.journal().is_empty());
+}
+
+#[test]
+fn an_unanswered_request_expires_and_a_late_answer_is_ignored() {
+    let name = unique_name("delai");
+    let mut s = Session::start_quick(&name, Duration::from_millis(300));
+    s.hello(&[]);
+    s.switch_on_asking();
+    let mut relay = Relay::attached(&name);
+    relay.run(7, "system.about", json!({}));
+    let request = s.expect_approve("system.about");
+    // Pas de réponse : la demande est retirée auprès de l'extension.
+    s.expect_withdrawn(&request);
+    let r = relay.recv();
+    assert_eq!(
+        (r["id"].clone(), code_of(&r)),
+        (json!(7), "external.not_approved")
+    );
+    assert!(s.journal().is_empty());
+    // La réponse tardive est ignorée ; la session sert l'appel suivant.
+    s.reply(&request, json!({"approved": true}));
+    s.assert_silent();
+    relay.run(8, "system.about", json!({}));
+    let next = s.expect_approve("system.about");
+    assert_ne!(next["id"], request["id"]);
+    s.reply(&next, json!({"approved": true}));
+    s.expect_call("started");
+    s.expect_call("finished");
+    assert!(relay.recv()["result"].is_object());
+    assert_eq!(s.journal().len(), 1);
+}
+
+#[test]
+fn the_relay_or_the_extension_cancels_a_pending_request() {
+    let name = unique_name("annule-demande");
+    let mut s = Session::start(&name);
+    s.hello(&["layer.describe"]);
+    s.switch_on_asking();
+    let mut relay = Relay::attached(&name);
+    let mut other = Relay::attached(&name);
+    // Par le relais, avec l'`id` de son `command.run` ; une commande non annulable aussi.
+    relay.run(7, "layer.describe", json!({"layer_id": "l"}));
+    let request = s.expect_approve("layer.describe");
+    assert_eq!(code_of(&relay.cancel(8, json!(99))), "request.unknown");
+    assert_eq!(code_of(&other.cancel(8, json!(7))), "request.unknown");
+    let r = relay.cancel(9, json!(7));
+    assert_eq!(r["result"], json!({"cancelled": true}), "{r}");
+    s.expect_withdrawn(&request);
+    let r = relay.recv();
+    assert_eq!(
+        (r["id"].clone(), code_of(&r)),
+        (json!(7), "external.not_approved")
+    );
+    // La réponse tardive est ignorée.
+    s.reply(&request, json!({"approved": true}));
+    s.assert_silent();
+
+    // Par l'extension, avec le `call_id`.
+    relay.run(10, "layer.describe", json!({"layer_id": "l"}));
+    let request = s.expect_approve("layer.describe");
+    let call_id = request["params"]["call_id"].clone();
+    assert_eq!(call_id, "external-2");
+    assert_eq!(
+        code_of(&s.request("request.cancel", json!({"id": 10}))),
+        "request.unknown"
+    );
+    let r = s.request("request.cancel", json!({"id": call_id}));
+    assert_eq!(r["result"], json!({"cancelled": true}), "{r}");
+    s.expect_withdrawn(&request);
+    assert_eq!(code_of(&relay.recv()), "external.not_approved");
+    s.assert_silent();
+    assert!(s.journal().is_empty());
+
+    // La session sert l'appel suivant.
+    relay.run(11, "system.about", json!({}));
+    let request = s.expect_approve("system.about");
+    s.reply(&request, json!({"approved": true}));
+    s.expect_call("started");
+    s.expect_call("finished");
+    assert!(relay.recv()["result"].is_object());
+}
+
+#[test]
+fn a_pending_request_makes_everyone_else_busy() {
+    let name = unique_name("attente");
+    let mut s = Session::start(&name);
+    s.hello(&[]);
+    s.switch_on_asking();
+    let mut relay = Relay::attached(&name);
+    relay.run(7, "system.about", json!({}));
+    let request = s.expect_approve("system.about");
+    let mut other = Relay::attached(&name);
+    other.run(1, "system.about", json!({}));
+    assert_eq!(code_of(&other.recv()), "session.busy");
+    for (method, params) in [
+        ("command.run", json!({"command": "system.about"})),
+        ("journal.replay", json!({})),
+        ("plan.propose", json!({"request": "x"})),
+        ("plan.execute", json!({"plan_id": "plan-1"})),
+        ("plan.reject", json!({"plan_id": "plan-1"})),
+        ("agent.models", json!({})),
+        (
+            "session.hello",
+            json!({"protocol_version": PROTOCOL_VERSION, "commands": [], "project": "/x/p.qgz"}),
+        ),
+    ] {
+        let r = s.request(method, params);
+        assert_eq!(code_of(&r), "session.busy", "{method} : {r}");
+    }
+    // L'interrupteur reste servi.
+    let r = s.switch(json!({"enabled": true, "ask": true}));
+    assert_eq!(r["result"], json!({"enabled": true, "ask": true}), "{r}");
+    s.reply(&request, json!({"approved": true}));
+    s.expect_call("started");
+    s.expect_call("finished");
+    assert_eq!(relay.recv()["id"], 7);
+}
+
+#[test]
+fn losing_the_session_or_the_relay_during_a_request_runs_nothing() {
+    let name = unique_name("perte-demande");
+    let mut s = Session::start(&name);
+    s.hello(&[]);
+    // Interrupteur éteint : le relais reçoit la perte, aucune réponse.
+    s.switch_on_asking();
+    let mut relay = Relay::attached(&name);
+    relay.run(7, "system.about", json!({}));
+    let request = s.expect_approve("system.about");
+    let off = s.switch(json!({"enabled": false}));
+    assert_eq!(off["result"], json!({"enabled": false}));
+    s.expect_withdrawn(&request);
+    assert_eq!(relay.recv()["method"], "external.session_lost");
+    relay.assert_closed();
+    s.assert_silent();
+
+    // Relais parti.
+    s.switch_on_asking();
+    let relay = {
+        let mut relay = Relay::attached(&name);
+        relay.run(8, "system.about", json!({}));
+        relay
+    };
+    let request = s.expect_approve("system.about");
+    relay.out.shutdown();
+    relay.assert_closed();
+    drop(relay);
+    s.expect_withdrawn(&request);
+    s.assert_silent();
+    assert!(s.journal().is_empty());
+    // La session est libérée.
+    let r = s.request("command.run", json!({"command": "system.about"}));
+    assert!(r["result"].is_object(), "{r}");
+
+    // Fin d'entrée (QGIS fermé).
+    let mut relay = Relay::attached(&name);
+    relay.run(9, "system.about", json!({}));
+    s.expect_approve("system.about");
+    s.close().unwrap();
+    let lost = relay.recv();
+    assert_eq!(lost["method"], "external.session_lost", "{lost}");
+    assert_eq!(lost["params"]["reason"], "session_ended");
+    relay.assert_closed();
+    // Seule l'étape de l'extension est au journal.
+    let journal = s.journal();
+    assert_eq!(journal.len(), 1);
+    assert!(journal[0].get("origin").is_none());
 }
 
 #[test]

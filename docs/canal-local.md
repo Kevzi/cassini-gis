@@ -273,9 +273,8 @@ notifie la perte de la session. **Aucun chemin ne passe** sur ce canal, dans auc
 ```
 
 Allumé, le noyau ouvre le canal et répond `{"enabled": true, "ask": false}`. `ask` est la case
-« Me demander avant chaque appel ». La validation de chaque appel (`external.approve`) est un
-ticket à part : d'ici là, **la case allumée refuse tout appel d'un relais** par
-`external.not_approved`, sans rien exécuter. Rallumer un canal déjà ouvert ne change que `ask`.
+« Me demander avant chaque appel » : cochée, chaque appel d'un relais attend l'accord de
+l'utilisateur (voir `external.approve`). Rallumer un canal déjà ouvert ne change que `ask`.
 
 ```json
 {"jsonrpc":"2.0","id":9,"method":"session.external","params":{"enabled":false}}
@@ -332,7 +331,10 @@ l'extension (AD-5), que celle-ci exécute comme d'habitude. Il répond au relais
 commande ou par une erreur AD-21.
 
 - **Avant tout** : session ouverte (`session.not_started` sinon), exécutant libre (`session.busy`
-  sinon, aussitôt, rien n'est mis en file), case `ask` éteinte (`external.not_approved` sinon).
+  sinon, aussitôt, rien n'est mis en file).
+- **Case `ask` cochée** : après tous les contrôles ci-dessous (un appel refusé d'office ne dérange
+  pas l'utilisateur), le noyau demande l'accord par `external.approve` ; sans accord, l'appel
+  répond `external.not_approved` et rien n'est exécuté.
 - Une commande inconnue répond `registry.unknown_command`, une commande QGIS non annoncée
   `registry.unavailable` ; rien ne part vers l'extension.
 - **Chemins (AD-9)** : un paramètre de chemin de la commande (`path_params`, par exemple `path`
@@ -359,15 +361,50 @@ panneau arrête l'appel en le renvoyant dans `request.cancel`.
 ```
 
 `finished` porte `result`, ou `error {code, message}`. Un appel refusé avant l'exécution
-(occupation, case `ask`, chemin, commande inconnue ou indisponible, paramètres mal formés)
-n'est pas annoncé. L'extension, qui ne connaît pas encore cette notification, l'ignore.
+(occupation, accord non donné, chemin, commande inconnue ou indisponible, paramètres mal formés)
+n'est pas annoncé : `started` ne part qu'après l'accord. L'extension, qui ne connaît pas encore
+cette notification, l'ignore.
+
+### `external.approve` (noyau vers extension, requête)
+
+Case « Me demander avant chaque appel » cochée, le noyau demande l'accord de l'utilisateur avant
+d'exécuter l'appel d'un relais. L'`id` est une chaîne `core-<n>`, du même compteur que les ordres ;
+`params` porte le `call_id` de l'appel, la commande et les paramètres **tels que le relais les a
+envoyés** (relatifs au projet, AD-9) :
+
+```json
+{"jsonrpc":"2.0","id":"core-4","method":"external.approve","params":{"call_id":"external-3","command":"layer.describe","params":{"layer_id":"l1"}}}
+{"jsonrpc":"2.0","id":"core-4","result":{"approved":true}}
+```
+
+- **Accord** : seul un résultat dont `approved` vaut `true`. L'appel part alors comme case
+  éteinte : `external.call` `started`, exécution, `finished`, journal `origin: external`.
+- **Toute autre issue** répond `external.not_approved` au relais, dont le message dit la cause,
+  sans rien exécuter, annoncer ni journaliser : `approved: false` (refus de l'utilisateur), réponse
+  d'erreur (une extension qui ne connaît pas la méthode répond `-32601`), réponse illisible, délai,
+  annulation.
+- **Délai** : 120 s (`APPROVE_TIMEOUT`). Passé ce délai, la demande est retirée.
+- **Case décochée pendant l'attente** : la demande en cours n'est pas retirée ; elle attend sa
+  réponse, le délai ou une annulation. La case ne vaut que pour les appels suivants.
+- **Annulation** pendant l'attente : `request.cancel` du relais (l'`id` de son `command.run`) ou de
+  l'extension (le `call_id`), que la commande soit annulable ou non, puisque rien n'est encore
+  exécuté. Réponse `{"cancelled": true}` ; le relais reçoit ensuite `external.not_approved`.
+- **Retrait** : délai, annulation ou perte, le noyau envoie à l'extension la notification
+  `request.cancel {"id": "core-<n>"}`, pour que le panneau ferme sa question. Une réponse arrivée
+  après le retrait est ignorée, comme toute réponse à un `id` déjà soldé.
+- **Perte** : interrupteur éteint, entrée fermée ou relais débranché pendant l'attente : rien n'est
+  exécuté et le relais ne reçoit aucune réponse (il reçoit `external.session_lost`, ou il est
+  parti).
+- Le noyau lit toutes ses connexions pendant l'attente (AD-4) : l'attente occupe la session (voir
+  « Occupation »), `session.external` reste servi. Aucun appel n'est mis en file derrière elle.
 
 ### Occupation
 
 Un seul état d'occupation par processus, valable dans les deux sens (AD-29). L'occupent : une
 composition ou une exécution de plan, un `command.run` ou un `journal.replay` de l'extension, un
-appel d'un relais. Un **plan proposé non tranché** occupe pour les relais seulement : l'extension
-garde son `command.run` et peut le remplacer par un nouveau `plan.propose`.
+appel d'un relais, attente de son `external.approve` comprise. Un **plan proposé non tranché**
+occupe pour les relais seulement : l'extension garde son `command.run` et peut le remplacer par
+un nouveau `plan.propose`.
 
 - Côté relais : pendant une occupation, `command.run` répond `session.busy` aussitôt ; quand
   seul un plan proposé attend, le message dit qu'il attend la validation de l'utilisateur.
@@ -477,7 +514,7 @@ Seuls transports : l'entrée et la sortie standard côté client, le canal d'IA 
 | `external.io` | `session.external` : le canal d'IA externe n'a pas pu s'ouvrir (dossier qui n'est pas privé, panne du système) ; le message ne porte aucun chemin |
 | `session.protocol_mismatch` | `session.hello` ou `external.attach` : la version de protocole diffère ; le message nomme ce qu'il faut mettre à jour |
 | `session.not_started` | toute requête de l'extension avant `session.hello`, `session.external` compris ; `external.attach` ou `command.run` d'un relais sans session ouverte |
-| `external.not_approved` | `command.run` d'un relais alors que la case « Me demander avant chaque appel » est cochée ; rien n'est exécuté |
+| `external.not_approved` | `command.run` d'un relais, case « Me demander avant chaque appel » cochée, sans accord : refus de l'utilisateur, réponse d'erreur ou illisible à `external.approve`, délai de 120 s, annulation pendant l'attente ; le message dit la cause ; rien n'est exécuté ni journalisé |
 | `external.path_refused` | `command.run` d'un relais dont un paramètre de chemin est absolu ou sort du projet ; rien n'est exécuté ni journalisé |
 | `external.session_lost` | résultat `isError` d'un `tools/call` de `cassini mcp` en relais : la session a été perdue pendant l'appel (interrupteur coupé, QGIS fermé) ; rien n'est réexécuté en autonome |
 
