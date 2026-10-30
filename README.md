@@ -95,10 +95,12 @@ cinquième : l'agent local tourne dans QGIS. Concrètement :
 **La durée par phrase.** L'exigence est qu'une longue phrase soit résolue en moins
 de 30 s sur un processeur de bureau ordinaire. Sur dix phrases enchaînées dans une
 session QGIS, bridée à quatre cœurs, huit sur neuf passent ; la phrase de démo, en
-cours de session, reste juste au-dessus (32 s au mieux). Les relevés sont dans
+cours de session, reste juste au-dessus (32 s au mieux). Quand le poste a une carte
+graphique dédiée, le noyau s'en sert seul, par Vulkan (NVIDIA, AMD et Intel), et
+retombe sur le processeur sans elle, sans aucun réglage. Une carte intégrée n'est
+jamais prise. Sur une RTX 3070 Ti, les neuf phrases passent sous 30 s, et la phrase de
+démo en cours de session tombe à 14 s. Les relevés sont dans
 [`docs/mesure-duree-par-phrase.md`](docs/mesure-duree-par-phrase.md).
-L'accélération par carte graphique, avec repli seul sur le processeur, est en
-cours (ticket 5.21).
 
 **Conservé pour la V2** (`app/`) : une coquille de bureau Tauri v2 qui affiche
 une carte MapLibre sur un fond PMTiles lu sur le disque, sans aucune requête
@@ -116,7 +118,7 @@ commence avant que la précédente ne soit testée.
 | 2 | Épreuve du modèle local sur un registre factice | **faite** : verdict « oui sous conditions », dans `_bmad-output/initiative-cassini-mvp/epic-epreuve-du-modele-local/` |
 | 3 | Registre de commandes et journal rejouable | **faite**, suite de bout en bout comprise : exécuter, fermer, rouvrir, rejouer, comparer |
 | 4 | Façade QGIS — extension, canal local, commandes exécutées par QGIS | **faite**, suite de bout en bout comprise : ouvrir, analyser, exporter, rejouer |
-| 5 | Agent IA local et serveur MCP | **en cours** : l'agent est fait et tourne dans QGIS ; restent la carte graphique (5.21), le serveur MCP (`cassini mcp`, pas encore écrit) et la suite de bout en bout |
+| 5 | Agent IA local et serveur MCP | **en cours** : l'agent est fait et tourne dans QGIS, sur carte graphique ou sur processeur ; restent le serveur MCP (`cassini mcp`, pas encore écrit) et la suite de bout en bout |
 | 6 | Analyse de terrain dans le noyau — champ de vision, ligne de vue, pente | à venir |
 | 7 | Scénario de démo, puis publication : dépôt d'extensions QGIS, installeurs, vidéo | à venir |
 
@@ -349,9 +351,12 @@ cargo test -p cassini-core -p cassini-ai -p cassini
 
 Pour essayer Cassini dans QGIS :
 
-1. Construire le noyau : `cargo build --release -p cassini`.
-2. Poser `cassini.exe` dans `%LOCALAPPDATA%\Cassini\bin` (Windows) ou `cassini`
-   dans `~/.local/share/cassini/bin` (Linux), et un modèle `.gguf` dans le dossier
+1. Construire le noyau : `cargo build --release -p cassini` donne un noyau processeur
+   d'un seul fichier. Le paquet livré, qui se sert aussi de la carte graphique, se
+   construit avec `--features gpu` et le SDK Vulkan : c'est un dossier, `cassini.exe` et
+   ses bibliothèques — voir [`docs/paquet-du-noyau.md`](docs/paquet-du-noyau.md).
+2. Poser le noyau dans `%LOCALAPPDATA%\Cassini\bin` (Windows) ou
+   `~/.local/share/cassini/bin` (Linux), et un modèle `.gguf` dans le dossier
    `models/` voisin — voir [`docs/dossier-des-modeles.md`](docs/dossier-des-modeles.md).
 3. Copier `qgis-plugin/cassini_qgis` dans le dossier des extensions de QGIS, puis
    activer *Cassini* — détail dans [`qgis-plugin/README.md`](qgis-plugin/README.md).
@@ -373,7 +378,7 @@ le run passe au rouge.
 | `cargo test -p cassini-core -p cassini-ai -p cassini -p cassini-training --locked` | Les tests du noyau, de la couche IA, du binaire et du générateur d'exemples, dont le refus de toute source réseau, la parité entre `run` et `serve`, le rejeu du journal et la suite de bout en bout. |
 | `cargo run --release -p cassini -- run system.about` | Le binaire de release connaît bien les commandes du noyau. |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | Zéro avertissement, coquille Tauri comprise. |
-| `cargo test --release -p cassini --test hors_ligne`, sous Windows | La table d'imports du binaire ne nomme aucune bibliothèque réseau. |
+| `cargo test --release -p cassini --test hors_ligne`, sous Windows | Ni le binaire ni les bibliothèques posées à côté de lui n'importent une bibliothèque réseau. Avec `--features gpu` (à la main, la CI n'a pas le SDK Vulkan), il vérifie aussi le contenu du paquet. |
 | `python -I qgis-plugin/tests/check_extension.py` puis les tests de `qgis-plugin/tests`, sous Linux et Windows | L'extension n'importe ni module réseau ni PyQt direct, tient sous la taille permise, et ses tests passent sans QGIS. |
 | les tests de `training/entrainement/tests` | La chaîne d'entraînement : lecture du jeu, notation, gardes — sans GPU. |
 | `npm run check`, `npm run build` et `npm run verify:dist`, depuis `app` | La coquille V2 : typage strict, garde hors ligne de l'interface, fond de carte de recette. |
