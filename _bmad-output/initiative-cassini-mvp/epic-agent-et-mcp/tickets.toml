@@ -353,3 +353,20 @@ notes = [
   "hitl : le proprietaire tranche le levier et confirme la duree dans QGIS.",
   "Check hors criteres (risque high) : le proprietaire enchaine dix phrases dans QGIS, dont une qui reprend un resultat intermediaire, et confirme la duree et l'issue.",
 ]
+
+[[entry]]
+id = 23
+type = "story"
+title = "La chaine d'entrainement accepte un fichier d'exemples externe"
+description = "La commande d'entrainement prend un fichier d'exemples fourni de l'exterieur, au format chat ({prompt, completion}), en plus du jeu engendre depuis le registre, pour entrainer un adaptateur de domaine hors de ce depot. Elle produit un adaptateur sur la meme base et avec le meme prompt court, sous un nom choisi qui n'ecrase pas le modele civil, avec sa declaration *.modele.json. Le rapport consigne l'empreinte du fichier externe et le nombre de ses exemples, jamais son contenu. Une ligne mal formee arrete la chaine avant l'entrainement, en nommant la ligne."
+verify = "Tests sans GPU sur un petit fichier synthetique : lecture, refus d'une ligne fausse, melange des jeux, noms de sortie, empreinte dans le rapport. Un court entrainement reel (--pas-max) avec un fichier externe synthetique sort l'adaptateur et sa declaration, model.list les voit, le modele civil existant n'est pas touche. cargo deny et les tests de training/ restent verts."
+covers = ["CAP-4"]
+after = [17]
+hitl = false
+risk = "medium"
+notes = [
+  "Decision: 2026-10-30 — par defaut, l'adaptateur s'entraine sur le jeu civil engendre plus le fichier externe, pour ne pas perdre les phrases civiles ; une option prend le fichier externe seul.",
+  "Decision: 2026-10-30 — par defaut, une part du fichier externe est mise de cote pour le score de validation ; une option accepte un second fichier de validation externe.",
+  "Decision: 2026-10-30 — sorties par defaut : l'adaptateur GGUF et sa declaration seulement, sans fusion ; la base GGUF est deja dans le dossier des modeles.",
+  "Aucun vocabulaire de domaine dans ce depot : les tests n'utilisent qu'un fichier d'exemples synthetique.",
+]
