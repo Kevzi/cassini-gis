@@ -310,6 +310,7 @@ dependencies = [
  "cassini-core",
  "cassini-training",
  "llama-cpp-2",
+ "llama-cpp-sys-2",
  "num_cpus",
  "serde_json",
  "windows-sys 0.61.2",

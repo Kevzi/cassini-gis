@@ -17,6 +17,10 @@ llama-cpp-2 = { version = "=0.1.159", default-features = false }
 # Decision du proprietaire (ticket 12) : num_cpus (MIT OR Apache-2.0), pour regler le nombre
 # de fils du moteur sur le nombre de coeurs physiques de la machine.
 num_cpus = "1"
+# Ticket 5.21 : dependance directe sur la crate deja tiree par llama-cpp-2 (meme version, meme
+# licence MIT OR Apache-2.0) : lire `DEP_LLAMA_BACKENDS_DIR` dans `build.rs` (cargo ne la donne
+# qu'aux dependants directs) et couper les journaux du moteur avant son initialisation.
+llama-cpp-sys-2 = { version = "=0.1.160", default-features = false }
 
 # Decision du proprietaire (ticket 5.20, 2026-10-30) : windows-sys (Microsoft, MIT OR Apache-2.0,
 # deja dependance transitive), sous Windows seulement, pour compter les coeurs physiques autorises
@@ -35,6 +39,11 @@ windows-sys = { version = "0.61", features = [
 [dev-dependencies]
 cassini-training = { path = "../training" }
 
-# Acceleration GPU facultative, absente par defaut : le produit reste CPU. Sert a mesurer vite.
 [features]
+# Mesure seulement : CUDA n'est jamais livre (bibliotheques proprietaires NVIDIA).
 cuda = ["llama-cpp-2/cuda"]
+# Paquet livre (ticket 5.21) : moteurs de calcul charges au demarrage, comme des bibliotheques
+# posees a cote de l'executable : processeur (variantes par jeu d'instructions) et carte
+# graphique Vulkan, ignoree si elle ne se charge pas. Hors defaut : la construire demande le
+# SDK Vulkan, que la recette (CI) n'a pas.
+gpu = ["llama-cpp-2/vulkan", "llama-cpp-2/dynamic-backends"]
