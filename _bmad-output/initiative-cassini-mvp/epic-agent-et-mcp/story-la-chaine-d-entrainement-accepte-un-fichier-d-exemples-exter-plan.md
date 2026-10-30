@@ -3,7 +3,7 @@ title: "La chaîne d'entraînement accepte un fichier d'exemples externe"
 type: 'feature'
 ticket: '23'
 created: '2026-10-30'
-status: 'built'
+status: 'done'
 baseline_revision: '43a0e8f0f9371ab6aea6feac728eaea8fe29398b'
 route: 'full'
 route_source: 'auto'
