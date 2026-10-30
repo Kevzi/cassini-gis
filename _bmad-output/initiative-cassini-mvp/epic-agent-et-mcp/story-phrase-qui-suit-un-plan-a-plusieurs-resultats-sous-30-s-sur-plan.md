@@ -3,7 +3,7 @@ title: 'Phrase qui suit un plan à plusieurs résultats sous 30 s, sur processeu
 type: 'feature'
 ticket: '22'
 created: '2026-10-29'
-status: 'built'
+status: 'done'
 baseline_revision: 'ac0cdef31e97ae18e7a02bff28b07630817dcc56'
 route: 'full'
 route_source: 'auto'
