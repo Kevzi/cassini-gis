@@ -11,10 +11,14 @@ l'utilisateur occasionnel, qui sait ce qu'il veut mais pas où cliquer.
 **L'utilisateur apporte ses propres données.** Cassini n'en télécharge, n'en
 catalogue et n'en redistribue aucune.
 
-La cible, en une phrase — et c'est bien une cible, pas l'état actuel :
+La phrase de démo, sur un projet où l'utilisateur a déjà ouvert ses fichiers :
 
 > « Trouve les parcelles constructibles du PLU à moins de 500 m d'une gare à
 > Villeneuve-le-Roi et sors-moi la carte en PDF. »
+
+Elle passe aujourd'hui dans QGIS, sur processeur et sans réseau : le modèle local
+compose le plan, l'utilisateur le valide, QGIS l'exécute et le PDF sort. Ce qui
+reste avant la publication est listé plus bas.
 
 **Cassini ne refait pas QGIS.** QGIS est libre, hors ligne, organisé en projets
 et mûr depuis vingt ans : reconstruire sa carte, son ouverture de fichiers, ses
@@ -23,7 +27,8 @@ Ce qui n'existe nulle part, c'est un SIG de bureau hors ligne piloté par une IA
 locale. Au MVP, Cassini est donc une **extension QGIS posée sur un noyau
 indépendant** : QGIS exécute la carte, l'ouverture des fichiers, le projet, les
 analyses vectorielles et l'export PDF ; le noyau porte le registre de commandes,
-l'agent, le journal rejouable et un moteur de terrain en licence permissive.
+l'agent, le journal rejouable et, à venir, un moteur de terrain en licence
+permissive.
 
 Ce découpage date du 2026-10-14 et remplace un plan où Cassini était une
 application de bureau complète ; le raisonnement est écrit en entier dans
@@ -33,52 +38,72 @@ code déjà écrit pour elle reste au dépôt.
 
 La frontière entre le noyau et l'extension est fixée par
 [le contrat d'architecture](_bmad-output/initiative-cassini-mvp/architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md),
-en vingt-trois décisions numérotées de AD-1 à AD-23 ; ce README en résume ce qui
-change la forme du produit.
-
-Le projet en est à l'**étape 1 sur 7** : le socle technique et le verrou hors
-ligne. La section suivante dit exactement ce que cela couvre.
+en décisions numérotées (AD-1 et suivantes) ; ce README en résume ce qui change
+la forme du produit.
 
 ## Ce qui marche aujourd'hui
 
-Rien de l'extension QGIS n'existe encore — le dossier `qgis-plugin/` n'est pas
-créé. Ce qui est écrit, testé et conservé, c'est le socle, plus la coquille de
-bureau désormais reportée en V2 :
+Le projet a franchi les étapes 1 à 4 de `CLAUDE.md` §7 et l'essentiel de la
+cinquième : l'agent local tourne dans QGIS. Concrètement :
 
-- Un workspace Rust : `cassini-core`, le noyau ; `cassini`, le binaire de la
-  CLI ; `cassini-app`, la coquille de bureau en Tauri v2.
-- Le **registre de commandes** : chaque commande s'inscrit seule, sans toucher un
-  fichier partagé, et le registre contrôle son contrat (id, descriptions
-  française et anglaise, schémas, exécutant, test). Une seule commande de
-  production aujourd'hui, `system.about`.
-- Le **journal rejouable**, écrit à côté du projet en ajout seul sous verrou
-  exclusif, et le binaire `cassini` : `run` exécute une commande, `replay`
-  rejoue le journal, `serve` ouvre le canal local en JSON-RPC sur l'entrée et la
-  sortie standard. Un même appel donne le même résultat par `run` et par
-  `serve`, ce que contrôle un test sur le vrai binaire. `mcp` n'existe pas
-  encore.
-- Une fenêtre qui s'ouvre sous Windows et affiche une carte MapLibre GL JS,
-  navigable au zoom et au déplacement.
-- Un fond de carte au format PMTiles **lu sur le disque** : le noyau en sert les
-  octets par l'IPC de Tauri, l'interface ne connaît jamais le chemin du fichier,
-  et aucune requête réseau n'intervient à aucun moment.
-- Deux commandes exposées par la coquille, et deux seulement : `engine_version`
-  et `read_basemap`. L'interface n'appelle que la seconde ; la coquille ne passe
-  pas encore par le registre de commandes.
-- Le verrou hors ligne vit dans le noyau — `BasemapSource` refuse à la
-  construction toute source qui désigne le réseau — et il est doublé d'une garde
-  qui relit l'interface fichier par fichier.
-- Un générateur **déterministe** de l'archive PMTiles de recette, et deux
-  vérificateurs qui la relisent : conformité de l'archive, puis chemin complet de
-  chargement de la carte.
-- Une recette qui tient en cinq commandes : 110 tests du noyau et de la CLI, `cargo fmt`,
-  `cargo clippy`, et le contrôle de l'interface — lancée par GitHub Actions à
-  chaque poussée.
+- **Le noyau** (`core/`, crate `cassini-core`) : le **registre de commandes**,
+  où chaque commande s'inscrit seule et dont le registre contrôle lui-même le
+  contrat (id, descriptions française et anglaise, schémas, exécutant, test) ; le
+  **journal rejouable**, écrit à côté du projet QGIS en ajout seul sous verrou
+  exclusif ; la validation des plans composés par l'agent, dont le garde-fou qui
+  refuse une coordonnée que la demande n'a pas fournie.
+- **Le binaire `cassini`** (`cli/`) : `run` exécute une commande, `replay` rejoue
+  un journal, `serve` ouvre le canal local de l'extension, `plan` compose un plan
+  depuis une phrase en ligne de commande, `model-check` vérifie qu'un modèle
+  répond. Un même appel donne le même résultat par `run` et par `serve`, ce que
+  contrôle un test sur le vrai binaire.
+- **L'extension QGIS** (`qgis-plugin/`) : un panneau ancré dans QGIS 3.44 et
+  4.x. On y écrit une demande en français, le plan proposé s'affiche étape par
+  étape, on le valide ou on l'arrête, et le journal dit en une phrase ce que
+  chaque étape a fait. Un mode expert lance une commande du registre à la main ;
+  les Réglages choisissent la langue et le modèle.
+- **Les commandes exécutées par QGIS**, toutes déclarées au registre :
 
-La carte et la coquille sont **hors du chemin critique du MVP** depuis le
-2026-10-14, mais elles marchent et elles restent : c'est la fondation de la V2
-autonome. Tout le reste de ce README — agent IA, serveur MCP, extension, terrain —
-décrit une **cible**, pas une fonction disponible.
+  | Commande | Ce qu'elle fait |
+  |---|---|
+  | `layer.add` | ouvre un GeoPackage, un Shapefile, un GeoJSON, un CSV à coordonnées ou un GeoParquet, sans toucher le fichier |
+  | `project.inventory`, `layer.describe` | décrivent le projet et ses couches, pour l'utilisateur et pour l'agent |
+  | `analysis.buffer` | zone tampon |
+  | `analysis.intersect` | intersection de deux couches |
+  | `analysis.select_by_attribute` | sélection par attribut |
+  | `analysis.zonal_statistics` | statistiques par zone |
+  | `analysis.isochrone` | isochrones à pied et en voiture sur un réseau |
+  | `layout.export_pdf` | carte en PDF avec titre, légende, échelle, flèche du nord et sources |
+
+  S'y ajoutent deux commandes du noyau : `system.about` et `model.list`, qui liste
+  les modèles présents sur le poste.
+- **L'agent local** (`ai/`, crate `cassini-ai`) : un modèle quantifié au format
+  GGUF, chargé **dans le processus du noyau** par llama.cpp lié en bibliothèque —
+  jamais un serveur HTTP. Le modèle retenu est un Qwen3.5-4B (Apache-2.0) ajusté sur
+  le registre de Cassini, choisi dans les Réglages du panneau ; il pose une question au lieu de deviner quand la demande
+  est ambiguë, et enchaîne plusieurs phrases dans une même session sans saturer son
+  contexte.
+- **La chaîne d'entraînement** (`training/`) : le jeu d'exemples est engendré
+  depuis le registre lui-même, l'entraînement et la fusion en GGUF se refont d'une
+  seule commande, et un jeu tenu à l'écart mesure le modèle. Détail dans
+  [`docs/entrainement-du-modele.md`](docs/entrainement-du-modele.md).
+- **Le verrou hors ligne**, vérifié autrement que par lecture de code : la table
+  d'imports du binaire Windows ne nomme aucune bibliothèque réseau, l'extension
+  n'importe aucun module réseau, et `cargo deny` refuse tout client HTTP, toute
+  couche TLS et toute licence non permissive dans le noyau.
+
+**La durée par phrase.** L'exigence est qu'une longue phrase soit résolue en moins
+de 30 s sur un processeur de bureau ordinaire. Sur dix phrases enchaînées dans une
+session QGIS, bridée à quatre cœurs, huit sur neuf passent ; la phrase de démo, en
+cours de session, reste juste au-dessus (32 s au mieux). Les relevés sont dans
+[`docs/mesure-duree-par-phrase.md`](docs/mesure-duree-par-phrase.md).
+L'accélération par carte graphique, avec repli seul sur le processeur, est en
+cours (ticket 5.21).
+
+**Conservé pour la V2** (`app/`) : une coquille de bureau Tauri v2 qui affiche
+une carte MapLibre sur un fond PMTiles lu sur le disque, sans aucune requête
+réseau. Elle marche et reste testée, mais elle est hors du chemin critique du MVP
+depuis le 2026-10-14.
 
 ## Ce qui est prévu
 
@@ -87,25 +112,32 @@ commence avant que la précédente ne soit testée.
 
 | Étape | Ce qu'elle apporte | État |
 |---|---|---|
-| 1 | Socle technique, verrou hors ligne, recette automatique | **faite pour l'essentiel** ; la recette tourne à chaque poussée |
-| 2 | Épreuve du modèle local — un modèle quantifié sait-il transformer une phrase française en suite de commandes typées correcte, sur un registre factice | **faite** : verdict « oui sous conditions », dans `_bmad-output/initiative-cassini-mvp/epic-epreuve-du-modele-local/` |
-| 3 | Registre de commandes et journal rejouable — l'épine dorsale | **en cours** : contrat, journal, `run`, `replay` et `serve` faits ; reste la suite de bout en bout |
-| 4 | Façade QGIS — extension, canal local, commandes exécutées par QGIS | à venir |
-| 5 | Agent IA local (llama.cpp) et serveur MCP | à venir |
+| 1 | Socle technique, verrou hors ligne, recette automatique | **faite** |
+| 2 | Épreuve du modèle local sur un registre factice | **faite** : verdict « oui sous conditions », dans `_bmad-output/initiative-cassini-mvp/epic-epreuve-du-modele-local/` |
+| 3 | Registre de commandes et journal rejouable | **faite**, suite de bout en bout comprise : exécuter, fermer, rouvrir, rejouer, comparer |
+| 4 | Façade QGIS — extension, canal local, commandes exécutées par QGIS | **faite**, suite de bout en bout comprise : ouvrir, analyser, exporter, rejouer |
+| 5 | Agent IA local et serveur MCP | **en cours** : l'agent est fait et tourne dans QGIS ; restent la carte graphique (5.21), le serveur MCP (`cassini mcp`, pas encore écrit) et la suite de bout en bout |
 | 6 | Analyse de terrain dans le noyau — champ de vision, ligne de vue, pente | à venir |
-| 7 | Scénario de démo, puis publication : dépôt d'extensions QGIS, installeurs, vidéo | le présent README est pris par avance, le dépôt étant déjà public |
+| 7 | Scénario de démo, puis publication : dépôt d'extensions QGIS, installeurs, vidéo | à venir |
 
-Formats que QGIS ouvrira pour le compte du registre : GeoPackage, Shapefile,
+Un catalogue étendu est déjà découpé pour l'après-MVP (epic 10) : reprojection,
+conversion de format, plus proche voisin, plus court chemin, atlas PDF,
+statistiques zonales sur un MNT, géocodage sur la Base Adresse Nationale.
+
+Limite connue de la phrase de démo : « constructible » se traduit aujourd'hui par
+la zone urbaine `U` du standard du CNIG ; les zones `AUc` ne sont pas encore
+couvertes, faute d'opérateur « parmi » dans le registre.
+
+Formats ouverts par QGIS pour le compte du registre : GeoPackage, Shapefile,
 GeoJSON, CSV à coordonnées, GeoParquet. Systèmes de coordonnées : Lambert-93
 (EPSG:2154) et WGS84 au minimum, avec reprojection quand la couche diffère du
 projet — reprojection exécutée par QGIS, jamais par le noyau (AD-19). Aucune
 parité avec QGIS n'est visée ni revendiquée.
 
-Une seule extension servira QGIS 3.44 LTR et la série 4.x (AD-18). Cassini se
-distribuera en deux artefacts : l'extension, légère et sans binaire, par le
-dépôt d'extensions QGIS ; le noyau et, en option, le modèle d'IA, par un paquet
-Cassini installé à part. Une clé USB portant les deux suffira sur un poste qui
-n'a jamais vu le réseau (AD-17).
+Cassini se distribuera en deux artefacts : l'extension, légère et sans binaire,
+par le dépôt d'extensions QGIS ; le noyau et le modèle d'IA, par un paquet Cassini
+installé à part. Une clé USB portant les deux suffira sur un poste qui n'a jamais
+vu le réseau (AD-17).
 
 ## Quatre principes non négociables
 
@@ -133,29 +165,24 @@ Les principes complets, dont la règle de travail en salle blanche, sont dans
 
 ### L'architecture en couches
 
-**Schéma d'une cible, pour l'essentiel.** QGIS existe et fonctionne, mais rien de
-ce qui le relie à Cassini n'est écrit. Du noyau, une seule case est faite — la
-lecture du fond de carte. La case `app/`, elle, est livrée et fonctionne, mais
-elle est reportée en V2. Les cases marquées « prévu » n'existent pas encore dans
-le dépôt, et `qgis-plugin/` pas davantage.
+Les cases vertes sont écrites et testées ; les grises n'existent pas encore.
 
 ```mermaid
 flowchart TB
     subgraph qgis["QGIS — GPL — fourni, pas écrit ici"]
-        panneau["Panneau Cassini — extension Python — prévu"]
+        panneau["Panneau Cassini — extension Python — fait"]
         moteurQgis["Carte, fichiers, projet, analyses vectorielles, export PDF"]
     end
 
-    canal["Canal local — JSON-RPC 2.0 sur l'entrée et la sortie standard, dans les deux sens, aucun réseau — côté noyau fait"]
+    canal["Canal local — JSON-RPC 2.0 sur l'entrée et la sortie standard, dans les deux sens, aucun réseau — fait"]
 
     subgraph noyau["Noyau Cassini — Rust, Apache-2.0 — tourne sans QGIS"]
-        binaire["Binaire cassini, sous cli/ — run, replay, serve faits ; mcp prévu"]
+        binaire["Binaire cassini, sous cli/ — run, replay, serve, plan faits ; mcp prévu"]
         registre["Registre de commandes, qui tient la boucle d'exécution — fait"]
         binaire --> registre
         terrain["Terrain sur MNT — champ de vision, ligne de vue, pente — prévu"]
         journal["Journal rejouable, écrit à côté du projet QGIS — fait"]
-        ia["Couche IA — modèle local llama.cpp, lié au processus — prévu"]
-        fond["Lecture du fond de carte, refus du réseau — fait"]
+        ia["Couche IA — modèle local llama.cpp, lié au processus — fait"]
         registre --> terrain
         registre --> journal
         binaire --> ia
@@ -167,47 +194,43 @@ flowchart TB
     panneau <--> canal
     canal <--> binaire
     panneau -->|"délégation déclarée"| moteurQgis
-    fond -.->|"sert aujourd'hui"| v2
     registre -.->|"servira en V2"| v2
 
     classDef fait fill:#dcf2e3,stroke:#2f7a46,color:#13331f
     classDef prevu fill:#f2f2f2,stroke:#8d8d8d,color:#333333
     classDef fourni fill:#e7eefb,stroke:#45659c,color:#1a2740
     classDef reporte fill:#f6eede,stroke:#9c7a45,color:#3d2f1a
-    class fond,canal,binaire,registre,journal fait
-    class panneau,terrain,ia prevu
+    class panneau,canal,binaire,registre,journal,ia fait
+    class terrain prevu
     class moteurQgis fourni
     class v2 reporte
 ```
 
-Trois conséquences de ce découpage, qui valent dès maintenant :
+Trois conséquences de ce découpage :
 
 - **Aucune logique métier dans l'extension.** L'extension QGIS, la ligne de
-  commande, l'agent local et le serveur MCP appelleront *les mêmes* commandes du
-  registre.
+  commande, l'agent local et le futur serveur MCP appellent *les mêmes* commandes
+  du registre.
 - **Chaque commande déclare son exécutant.** Soit une implémentation en Rust dans
   le noyau, soit une délégation déclarée à QGIS — jamais implicite, jamais les
   deux.
-- **Indépendance vis-à-vis des fournisseurs d'IA.** Le code ne dépendra d'aucune
-  IA en particulier : IA locale par défaut, IA externes par MCP.
+- **Indépendance vis-à-vis des fournisseurs d'IA.** Le code ne dépend d'aucune IA
+  en particulier : IA locale par défaut, IA externes par MCP.
 
-Le canal local est tranché (AD-2, AD-3) : l'extension lance le binaire du noyau
-comme processus enfant et dialogue avec lui par son entrée et sa sortie
-standard, en JSON-RPC 2.0, un message par ligne, dans les deux sens. Aucune
-socket, aucun port, aucun fichier d'échange. Ce qui porte l'argument de licence
-du principe 2, c'est la **nature** de ce qui circule : des identifiants, des
-chemins relatifs, des paramètres à schéma JSON et des résultats typés — jamais
-une couche entière ni une structure interne (AD-8, AD-16).
-
-Le noyau lit lui-même les modèles numériques d'élévation dont le terrain a
-besoin ; QGIS ne lui passe qu'un chemin de fichier et une emprise (AD-20).
+Le canal local (AD-2, AD-3) : l'extension lance le binaire du noyau comme
+processus enfant et dialogue avec lui par son entrée et sa sortie standard, en
+JSON-RPC 2.0, un message par ligne, dans les deux sens. Aucune socket, aucun port,
+aucun fichier d'échange. Ce qui porte l'argument de licence du principe 2, c'est
+la **nature** de ce qui circule : des identifiants, des chemins relatifs, des
+paramètres à schéma JSON et des résultats typés — jamais une couche entière ni une
+structure interne (AD-8, AD-16). Le contrat des messages est dans
+[`docs/canal-local.md`](docs/canal-local.md).
 
 ### Le trajet d'une demande en langage naturel
 
-**Schéma d'une cible.** Ni l'extension, ni le registre, ni l'agent ne sont
-écrits : le registre arrive à l'étape 3, la façade QGIS à l'étape 4, l'agent à
-l'étape 5. Ce qui est déjà fixé, c'est la forme de l'échange — le panneau
-demande, le noyau décide et dicte une étape à la fois (AD-5).
+Le panneau demande, le noyau décide et dicte une étape à la fois (AD-5). La branche
+« commande portée par le noyau » ne sert encore qu'à `system.about` et `model.list` ;
+le terrain y viendra à l'étape 6.
 
 ```mermaid
 sequenceDiagram
@@ -221,15 +244,15 @@ sequenceDiagram
 
     Humain->>Panneau: une demande en français
     Panneau->>Agent: la demande, par le canal local
-    Agent->>Registre: lecture des commandes disponibles
+    Agent->>Registre: lecture des commandes disponibles et de l'inventaire du projet
     Registre-->>Agent: identifiants, descriptions, paramètres typés
-    Agent-->>Panneau: un plan ordonné de commandes et de paramètres
+    Agent-->>Panneau: un plan ordonné, ou une question
     Panneau-->>Humain: le plan affiché étape par étape
-    Humain->>Panneau: validation, ou correction d'une étape
+    Humain->>Panneau: validation, ou arrêt
     Panneau->>Registre: le plan validé
     loop le noyau dicte chaque étape, une à la fois
         alt commande portée par le noyau
-            Registre->>Registre: calcul de terrain, en Rust
+            Registre->>Registre: calcul en Rust
         else commande déléguée à QGIS
             Registre->>Panneau: ordre de l'étape, paramètres typés
             Panneau->>QGIS: exécution par le cadre de traitement
@@ -245,15 +268,16 @@ sequenceDiagram
 L'agent ne fait rien d'autre que **choisir des commandes du registre** : il n'a
 pas d'accès direct à QGIS ni au disque, et son plan est validé contre les schémas
 des commandes avant d'être montré ; rien de ce qu'il produit n'est exécuté comme
-du code (AD-23). L'extension n'enchaîne jamais deux commandes d'elle-même. Toute
-exécution est journalisée par le noyau seul (AD-11), pour que la même demande
-puisse être rejouée à l'identique.
+du code (AD-23). Un plan invalide est refusé, jamais réparé en silence.
+L'extension n'enchaîne jamais deux commandes d'elle-même. Toute exécution est
+journalisée par le noyau seul (AD-11), pour que la même demande puisse être
+rejouée à l'identique.
 
 ### Le cycle de vie d'un projet QGIS
 
-**Schéma d'une cible.** Le projet appartient à QGIS : Cassini n'a pas de format
-de projet et n'en aura pas au MVP. Ce qu'il écrit, c'est son journal, posé à côté
-du fichier de projet.
+Le projet appartient à QGIS : Cassini n'a pas de format de projet et n'en aura
+pas au MVP. Ce qu'il écrit, c'est son journal, posé à côté du fichier de projet,
+et les couches produites par les analyses, dans un dossier `<projet>.cassini/`.
 
 ```mermaid
 stateDiagram-v2
@@ -283,103 +307,90 @@ stateDiagram-v2
     end note
 ```
 
-Le projet, ses couches, leur ordre, leur symbologie, l'étendue et la mise en page
-sont enregistrés par QGIS, dans le format de QGIS. Le journal Cassini ne double
-pas ce travail : il garde la trace des commandes exécutées, et c'est lui qui rend
-une analyse rejouable.
-
 ## Les dossiers du dépôt
 
 | Dossier | À quoi il sert |
 |---|---|
-| `core/` | Le noyau, crate `cassini-core`, sans aucune dépendance. Toute la logique métier y vivra — registre, journal et terrain sont encore à écrire — et les tests unitaires sont à côté du code qu'ils couvrent. |
-| `app/` | **Reporté en V2, conservé exprès.** La coquille de bureau et la carte : `app/src` la webview — TypeScript strict, MapLibre ; `app/src-tauri` la coquille Rust qui ouvre la fenêtre et relaie les appels ; `app/scripts` les scripts de recette et le générateur de fond de carte. Hors du chemin critique du MVP depuis le 2026-10-14, mais testé et gardé comme fondation de l'application autonome. |
-| `docs/` | La documentation. Index dans [`docs/README.md`](docs/README.md), dont la marche à suivre pour compiler sous Windows. |
+| `core/` | Le noyau, crate `cassini-core` : registre de commandes, commandes, journal, canal local, validation des plans. Les tests unitaires sont à côté du code qu'ils couvrent. |
+| `ai/` | La couche IA, crate `cassini-ai` : le modèle local chargé dans le processus du noyau par llama.cpp, la composition du plan, le choix des fils de calcul. `cassini-core` n'en dépend jamais (AD-13). |
+| `cli/` | Le binaire unique `cassini`. Il vit à part parce qu'il a besoin du noyau **et** de la couche IA. Ses tests d'intégration lancent le vrai binaire. |
+| `qgis-plugin/` | L'extension QGIS en Python, sous GPL : le panneau, l'exécutant des gestes QGIS, et ses tests. Installation et recettes manuelles dans [`qgis-plugin/README.md`](qgis-plugin/README.md). |
+| `training/` | La chaîne d'entraînement du modèle : générateur d'exemples tiré du registre (Rust), entraînement et notation (Python). Ne tourne jamais en CI, sauf ses tests. |
+| `app/` | **Reporté en V2, conservé exprès.** La coquille Tauri et la carte MapLibre, avec ses scripts de recette et le générateur de fond de carte. |
+| `docs/` | La documentation. Index dans [`docs/README.md`](docs/README.md). |
 | `fixtures/` | Les jeux de test, légers et fabriqués par le dépôt lui-même — aucune donnée géographique tierce. Voir [`fixtures/README.md`](fixtures/README.md). |
-| `tests/` | Les tests qui traversent plusieurs briques, à venir avec le registre et l'extension. Ne contient encore que son [`README.md`](tests/README.md). |
-| `_bmad-output/` | La planification : spécification, dossier de recherche, epics, propositions de changement, et le plan écrit de chaque entrée de travail. |
-| `_bmad/` | L'outillage de planification qui produit ce qui précède. Ses scripts sont réinstallables, donc ignorés par git ; `skills-lock.json`, à la racine, en verrouille les versions. |
+| `tests/` | Réservé aux tests qui traversent plusieurs briques ; les suites de bout en bout vivent pour l'instant dans `cli/tests/` et `qgis-plugin/tests/`. |
+| `_bmad-output/` | La planification : spécification, contrat d'architecture, epics, tickets, et le plan écrit de chaque entrée de travail. |
+| `_bmad/` | L'outillage de planification qui produit ce qui précède. |
 
 À la racine : [`CLAUDE.md`](CLAUDE.md), la source de vérité du projet ;
-`Cargo.toml`, le workspace à deux membres (`core` et `app/src-tauri`) ; `LICENSE`.
+`Cargo.toml`, le workspace (`core`, `ai`, `cli`, `training`, `app/src-tauri`) ;
+`deny.toml`, la garde des licences et des dépendances ; `LICENSE`.
 
-Trois dossiers annoncés par `CLAUDE.md` §9 n'existent pas encore :
-
-| Dossier | À quoi il servira |
-|---|---|
-| `cli/` | Le binaire unique `cassini`, crate du même nom, avec ses sous-commandes `serve` (le canal de l'extension), `mcp`, `run` et `replay`. Il vit à part parce qu'il a besoin du noyau **et** de la couche IA, alors que `cassini-core` ne dépend jamais de `cassini-ai` (AD-13, et la direction des dépendances du contrat). |
-| `qgis-plugin/` | L'extension QGIS en Python, **pas encore créée**, qui arrivera à l'étape 4 et portera le panneau du MVP. |
-| `ai/` | La couche IA, crate `cassini-ai` : le modèle local chargé dans le processus du noyau, jamais servi par HTTP (AD-15). Elle arrivera à l'étape 5. |
+Les essais à la main se font sur un jeu de données réelles (Villeneuve-le-Roi,
+Natural Earth, modèle d'élévation) qui vit **hors du dépôt**, dans
+`../donnees-test-cassini/`, et n'est jamais commité ni redistribué.
 
 ## Démarrage rapide
 
-**Prérequis** : Rust stable avec `cargo`, Node.js avec `npm`, et les prérequis
-système de Tauri v2. Sous Windows, tout est détaillé pas à pas dans
-[`docs/compiler-sous-windows.md`](docs/compiler-sous-windows.md), preuve de
-fonctionnement réseau coupé comprise.
+**Prérequis** : Rust stable avec `cargo` (la version est figée par
+`rust-toolchain.toml`), CMake et libclang pour compiler llama.cpp. Sous Windows,
+la marche à suivre est dans
+[`docs/modele-local-sous-windows.md`](docs/modele-local-sous-windows.md) ; la
+coquille V2 demande en plus Node.js et les prérequis de Tauri v2, détaillés dans
+[`docs/compiler-sous-windows.md`](docs/compiler-sous-windows.md).
 
-Le noyau se teste seul, sans rien installer d'autre que Rust — c'est le principe
-3 en pratique :
-
-```bash
-cargo test -p cassini-core
-```
-
-La coquille de bureau reportée en V2, depuis le dossier `app` :
+Le noyau se teste seul, sans QGIS et sans modèle — c'est le principe 3 en
+pratique :
 
 ```bash
-npm install
-npm run check        # typage, garde hors ligne, archive et protocole
-npm run tauri dev    # ouvre la fenêtre Cassini avec son fond de carte
+cargo test -p cassini-core -p cassini-ai -p cassini
 ```
 
-Deux précisions qui font gagner du temps :
+Pour essayer Cassini dans QGIS :
 
-- `npm run dev` ne lance que la webview Vite, **sans le noyau** : le fond de
-  carte y reste indisponible, puisque ses octets viennent de l'IPC de Tauri. Pour
-  voir l'application, c'est `npm run tauri dev`.
-- `npm run fixtures` régénère l'archive PMTiles de `fixtures/`. La génération est
-  déterministe : deux exécutions produisent le même fichier, octet pour octet.
+1. Construire le noyau : `cargo build --release -p cassini`.
+2. Poser `cassini.exe` dans `%LOCALAPPDATA%\Cassini\bin` (Windows) ou `cassini`
+   dans `~/.local/share/cassini/bin` (Linux), et un modèle `.gguf` dans le dossier
+   `models/` voisin — voir [`docs/dossier-des-modeles.md`](docs/dossier-des-modeles.md).
+3. Copier `qgis-plugin/cassini_qgis` dans le dossier des extensions de QGIS, puis
+   activer *Cassini* — détail dans [`qgis-plugin/README.md`](qgis-plugin/README.md).
+4. Ouvrir un projet QGIS avec ses couches, et écrire une demande dans le panneau.
 
-Il n'y a encore rien à installer dans QGIS : l'extension arrive à l'étape 4.
+Rien n'est téléchargé à aucun moment : le modèle se copie à la main, comme le
+noyau.
 
 ## La recette
 
-Cinq commandes, que le workflow
-[`.github/workflows/recette.yml`](.github/workflows/recette.yml) lance à chaque
-poussée, et qui se lancent aussi à la main. Si l'une échoue, le run passe au
-rouge. Un emplacement y est réservé au contrôle du Python de l'extension QGIS,
-qui arrivera avec elle.
+Le workflow [`.github/workflows/recette.yml`](.github/workflows/recette.yml) la
+lance à chaque poussée ; chaque contrôle se lance aussi à la main. Si l'un échoue,
+le run passe au rouge.
 
-| Commande | Ce qu'elle contrôle |
+| Contrôle | Ce qu'il vérifie |
 |---|---|
-| `cargo test -p cassini-core -p cassini --locked` | Les 110 tests du noyau et de la CLI, dont le refus de toute source réseau, la parité entre `run` et `serve` et le rejeu du journal. |
+| `cargo deny check` | Licences permissives seulement dans le noyau ; aucun client HTTP, aucune couche asynchrone, aucune couche TLS (AD-14). |
 | `cargo fmt --all --check` | La mise en forme du Rust. |
-| `cargo clippy --workspace --all-targets --locked -- -D warnings` | Zéro avertissement, sur les deux crates et leurs tests. |
-| `npm run check`, depuis `app` | Le typage strict, puis quatre vérifications décrites ci-dessous. |
-| `npm run build` puis `npm run verify:dist`, depuis `app` | Chaque fichier que le paquet construit désigne existe dans `dist/`. |
+| `cargo test -p cassini-core -p cassini-ai -p cassini -p cassini-training --locked` | Les tests du noyau, de la couche IA, du binaire et du générateur d'exemples, dont le refus de toute source réseau, la parité entre `run` et `serve`, le rejeu du journal et la suite de bout en bout. |
+| `cargo run --release -p cassini -- run system.about` | Le binaire de release connaît bien les commandes du noyau. |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | Zéro avertissement, coquille Tauri comprise. |
+| `cargo test --release -p cassini --test hors_ligne`, sous Windows | La table d'imports du binaire ne nomme aucune bibliothèque réseau. |
+| `python -I qgis-plugin/tests/check_extension.py` puis les tests de `qgis-plugin/tests`, sous Linux et Windows | L'extension n'importe ni module réseau ni PyQt direct, tient sous la taille permise, et ses tests passent sans QGIS. |
+| les tests de `training/entrainement/tests` | La chaîne d'entraînement : lecture du jeu, notation, gardes — sans GPU. |
+| `npm run check`, `npm run build` et `npm run verify:dist`, depuis `app` | La coquille V2 : typage strict, garde hors ligne de l'interface, fond de carte de recette. |
 
-Sous WSL, `--workspace` demande `libdbus` (dépendance de la coquille Tauri) : lancer
-`cargo clippy -p cassini-core -p cassini --all-targets --locked -- -D warnings`.
-La version de Rust est figée à 1.93.1 par `rust-toolchain.toml`.
+Sous WSL, `--workspace` demande `libdbus` (dépendance de la coquille Tauri) :
+lancer `cargo clippy -p cassini-core -p cassini-ai -p cassini --all-targets --locked -- -D warnings`.
 
-Ce que `npm run check` enchaîne après `tsc` :
+Deux familles de contrôles ne tournent pas en CI, parce qu'elles demandent ce que
+la CI n'a pas :
 
-- `scripts/check-offline.mjs` — la **garde hors ligne** côté interface : elle
-  échoue si la moindre adresse réseau apparaît dans `app/index.html`, dans le
-  style `app/src/basemap.style.json`, ou dans les fichiers `.ts`, `.tsx`, `.js`,
-  `.mjs`, `.css` et `.html` de `app/src` — une feuille de style est une porte de
-  sortie aussi directe qu'un `fetch`. Seule exception, nommée : le schéma
-  `pmtiles://` suivi de la clé locale attendue, qu'elle relit dans le code plutôt
-  que de la recopier.
-- `scripts/verify-basemap.mjs` — 30 contrôles sur l'archive PMTiles : en-tête,
-  tuiles, emprise, zooms, déterminisme, et quatre contrôles qui mettent le
-  validateur en échec exprès.
-- `scripts/verify-protocol.mjs` — 24 contrôles sur le chemin de chargement de la
-  carte, et la preuve qu'une clé non enregistrée partirait bien sur le réseau,
-  c'est-à-dire ce que la garde précédente existe pour empêcher.
-- `scripts/verify-ids.mjs` — chaque id de `app/index.html` est visé par `main.ts` ou
-  `style.css`, et chaque id visé existe dans le HTML.
+- **Les sondes sous le vrai QGIS** (`qgis-plugin/tests/probe_*.py`), lancées par
+  `python-qgis-ltr.bat` : elles enchaînent les commandes dans un vrai projet, le
+  ferment, le rouvrent et rejouent le journal.
+- **Les mesures du vrai modèle** (`ai/tests/*_reel.rs`) : justesse des plans
+  (`plan_reel`), des questions (`question_reel`), score sur le jeu tenu à l'écart
+  (`ecart_reel`) et durée par phrase (`duree_reel`). Elles demandent un modèle
+  posé par `CASSINI_TEST_MODEL`.
 
 Un garde-fou qu'on n'a jamais vu refuser quelque chose ne garde rien : d'où les
 contrôles qui échouent exprès.
@@ -388,13 +399,13 @@ contrôles qui échouent exprès.
 
 Trois régimes, et celui de l'extension n'est pas un choix :
 
-- **Le noyau et la coquille de bureau** — `core/`, `app/` et, quand ils
-  existeront, `cli/` et `ai/` : **Apache-2.0**, voir [`LICENSE`](LICENSE).
+- **Le noyau, la couche IA, le binaire et la coquille de bureau** — `core/`,
+  `ai/`, `cli/`, `training/`, `app/` : **Apache-2.0**, voir [`LICENSE`](LICENSE).
   L'usage commercial et institutionnel est permis, et aucune dépendance GPL ou
   LGPL n'y est admise, même par liaison statique.
-- **L'extension QGIS** — `qgis-plugin/`, pas encore créée : **GPL**, comme QGIS.
-  C'est une conséquence de l'hôte, pas une préférence. Elle vit séparée du noyau,
-  qui ne lie jamais QGIS et reste utilisable sans lui.
+- **L'extension QGIS** — `qgis-plugin/` : **GPL**, comme QGIS. C'est une
+  conséquence de l'hôte, pas une préférence. Elle vit séparée du noyau, qui ne lie
+  jamais QGIS et reste utilisable sans lui.
 - **Le module défense**, s'il voit le jour : **dépôt privé distinct**, bâti sur le
   noyau et non sur l'extension — précisément parce que l'extension est en GPL. Sa
   licence et ses conditions de commercialisation dépendent de la réponse à une
