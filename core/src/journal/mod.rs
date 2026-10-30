@@ -208,6 +208,17 @@ impl<'a> Session<'a> {
     /// chemin non représentable) n'écrit rien. Une session en lecture seule
     /// répond `journal.read_only` sans rien exécuter.
     pub fn call(&mut self, id: &str, params: Value) -> Result<Value, ErrorReport> {
+        self.call_from(id, params, None)
+    }
+
+    /// Comme `call`, en notant l'origine de l'étape (`"origin"`, par exemple `external` pour un
+    /// appel d'une IA externe, AD-29). Le rejeu l'ignore : il ne lit que des clés nommées.
+    pub fn call_from(
+        &mut self,
+        id: &str,
+        params: Value,
+        origin: Option<&str>,
+    ) -> Result<Value, ErrorReport> {
         if self.mode == Mode::ReadOnly {
             return Err(JournalError::ReadOnly.into());
         }
@@ -242,6 +253,9 @@ impl<'a> Session<'a> {
         line.insert("id".into(), json!(id));
         line.insert("params".into(), canonical(&logged));
         line.insert("inputs".into(), Value::Array(inputs));
+        if let Some(origin) = origin {
+            line.insert("origin".into(), json!(origin));
+        }
         let cancelled = matches!(outcome, Err(RegistryError::Cancelled(_)));
         match &outcome {
             Ok(value) => {

@@ -1,17 +1,21 @@
-//! Canal d'IA externe côté session (AD-29, ticket 5.24) : une extension simulée par des flux en
-//! mémoire, un relais brut branché au vrai canal (socket Unix ou tube nommé), un nom de canal
-//! propre à chaque test. Chaque ligne de la matrice du ticket a son test.
+//! Canal d'IA externe côté session (AD-29, tickets 5.24 et 5.28) : une extension simulée par des
+//! flux en mémoire, un relais brut branché au vrai canal (socket Unix ou tube nommé), un nom de
+//! canal propre à chaque test. Chaque ligne des matrices des deux tickets a son test.
 
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::Mutex;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+use cassini_core::agent_inventory::ModelInventory;
+use cassini_core::error::ErrorReport;
 use cassini_core::external::{self, ChannelName};
+use cassini_core::plan::Plan;
 use cassini_core::registry::{Registry, PROTOCOL_VERSION};
-use cassini_core::serve::serve_with_channel;
+use cassini_core::serve::{serve_with_channel, Composer};
 use serde_json::{json, Value};
 
 const WAIT: Duration = Duration::from_secs(10);
@@ -108,8 +112,51 @@ struct Session {
     next_id: u64,
 }
 
+/// Un compositeur factice : il rend un plan d'une étape, `system.about` sans commande imposée.
+/// Avec une barrière, il signale qu'il compose, puis attend que le test le libère (composition
+/// lente).
+struct FakeComposer {
+    gate: Option<Gate>,
+    /// L'étape du plan rendu (`{"command", "params"}`) ; `None` : `system.about`.
+    step: Option<Value>,
+}
+
+/// La barrière d'une composition lente : « je compose » vers le test, « vas-y » depuis le test.
+struct Gate {
+    entered: Mutex<Sender<()>>,
+    release: Mutex<Receiver<()>>,
+}
+
+impl Composer for FakeComposer {
+    fn compose(
+        &self,
+        _registry: &Registry,
+        _request: &str,
+        _model: Option<&str>,
+        _inventory: &mut dyn FnMut() -> Result<ModelInventory, ErrorReport>,
+    ) -> Result<Plan, ErrorReport> {
+        if let Some(gate) = &self.gate {
+            let _ = gate.entered.lock().unwrap().send(());
+            let _ = gate.release.lock().unwrap().recv_timeout(WAIT);
+        }
+        let step = self
+            .step
+            .clone()
+            .unwrap_or_else(|| json!({"command": "system.about", "params": {}}));
+        Ok(serde_json::from_value(json!({"kind": "calls", "calls": [step]})).unwrap())
+    }
+
+    fn models(&self, _registry: &Registry) -> Result<Vec<Value>, ErrorReport> {
+        Ok(Vec::new())
+    }
+}
+
 impl Session {
     fn start(name: &ChannelName) -> Session {
+        Session::start_with(name, None)
+    }
+
+    fn start_with(name: &ChannelName, composer: Option<FakeComposer>) -> Session {
         let dir = temp_dir();
         let project = dir.join("p.qgz").to_string_lossy().replace('\\', "/");
         let (to, in_rx) = mpsc::channel();
@@ -126,7 +173,8 @@ impl Session {
                 tx: out_tx,
                 buf: Vec::new(),
             };
-            serve_with_channel(&registry, None, name, reader, writer)
+            let composer = composer.as_ref().map(|c| c as &dyn Composer);
+            serve_with_channel(&registry, composer, name, reader, writer)
         });
         Session {
             to: Some(to),
@@ -175,6 +223,42 @@ impl Session {
     fn switch_on(&mut self) {
         let r = self.switch(json!({"enabled": true, "ask": false}));
         assert_eq!(r["result"], json!({"enabled": true, "ask": false}), "{r}");
+    }
+
+    /// La prochaine notification `external.call`, dont l'événement est vérifié.
+    fn expect_call(&self, event: &str) -> Value {
+        let notice = self.recv();
+        assert_eq!(notice["method"], "external.call", "{notice}");
+        assert!(notice.get("id").is_none());
+        assert_eq!(notice["params"]["event"], event, "{notice}");
+        notice["params"].clone()
+    }
+
+    /// Le prochain ordre `order.execute`, dont la commande est vérifiée.
+    fn expect_order(&self, command: &str) -> Value {
+        let order = self.recv();
+        assert_eq!(order["method"], "order.execute", "{order}");
+        assert_eq!(order["params"]["command"], command, "{order}");
+        order
+    }
+
+    fn reply(&self, order: &Value, result: Value) {
+        self.send(json!({"jsonrpc":"2.0","id":order["id"],"result":result}));
+    }
+
+    fn assert_silent(&self) {
+        assert_eq!(
+            self.from.recv_timeout(Duration::from_millis(300)),
+            Err(RecvTimeoutError::Timeout)
+        );
+    }
+
+    fn journal(&self) -> Vec<Value> {
+        std::fs::read_to_string(self.dir.join("p.cassini/journal.jsonl"))
+            .unwrap_or_default()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect()
     }
 
     /// Ferme l'entrée standard (QGIS fermé) : rend l'issue du serveur.
@@ -256,6 +340,24 @@ impl Relay {
     fn attach(&mut self, version: u64) -> Value {
         self.send(json!({"jsonrpc":"2.0","id":1,"method":"external.attach",
             "params":{"protocol_version":version}}));
+        self.recv()
+    }
+
+    /// Branche un relais et fait la poignée de main.
+    fn attached(name: &ChannelName) -> Relay {
+        let mut relay = Relay::connect(name);
+        assert!(relay.attach(u64::from(PROTOCOL_VERSION))["result"].is_object());
+        relay
+    }
+
+    fn run(&mut self, id: u64, command: &str, params: Value) {
+        self.send(json!({"jsonrpc":"2.0","id":id,"method":"command.run",
+            "params":{"command":command,"params":params}}));
+    }
+
+    fn cancel(&mut self, id: u64, target: Value) -> Value {
+        self.send(json!({"jsonrpc":"2.0","id":id,"method":"request.cancel",
+            "params":{"id":target}}));
         self.recv()
     }
 }
@@ -427,16 +529,21 @@ fn another_method_from_a_relay_runs_nothing() {
     s.hello(&["layer.describe"]);
     s.switch_on();
     let mut relay = Relay::connect(&name);
-    relay.send(json!({"jsonrpc":"2.0","id":7,"method":"command.run",
-        "params":{"command":"layer.describe","params":{"layer_id":"l"}}}));
-    let r = relay.recv();
-    assert_eq!(r["id"], 7);
-    assert_eq!(r["error"]["code"], -32601);
+    for method in ["plan.propose", "journal.replay", "session.external"] {
+        relay.send(json!({"jsonrpc":"2.0","id":7,"method":method,"params":{}}));
+        let r = relay.recv();
+        assert_eq!(
+            (r["id"].clone(), r["error"]["code"].clone()),
+            (json!(7), json!(-32601))
+        );
+    }
     relay.send(json!({"jsonrpc":"2.0","id":8,"method":"session.hello",
         "params":{"protocol_version":PROTOCOL_VERSION,"commands":[],"project":"/x/p.qgz"}}));
     assert_eq!(relay.recv()["error"]["code"], -32601);
-    // Une notification ne reçoit rien ; une ligne illisible, une erreur à identifiant nul.
-    relay.send(json!({"jsonrpc":"2.0","method":"command.run","params":{}}));
+    // Un `command.run` sans identifiant n'est ni répondu ni exécuté ; une ligne illisible reçoit
+    // une erreur à identifiant nul.
+    relay.send(json!({"jsonrpc":"2.0","method":"command.run",
+        "params":{"command":"system.about"}}));
     writeln!(relay.out, "pas du json").unwrap();
     let r = relay.recv();
     assert_eq!(
@@ -562,4 +669,545 @@ fn a_remote_client_is_refused() {
     // Le client local passe.
     let mut relay = Relay::connect(&name);
     assert!(relay.attach(u64::from(PROTOCOL_VERSION))["result"].is_object());
+}
+
+// ---- Ticket 5.28 : exécution des appels du relais ----
+
+#[test]
+fn a_core_call_is_announced_answered_journaled_and_replayed() {
+    let name = unique_name("noyau");
+    let mut s = Session::start(&name);
+    s.hello(&[]);
+    s.switch_on();
+    let mut relay = Relay::attached(&name);
+    relay.run(7, "system.about", json!({}));
+    let started = s.expect_call("started");
+    assert_eq!(started["call_id"], "external-1");
+    assert_eq!(started["command"], "system.about");
+    assert_eq!(started["params"], json!({}));
+    let finished = s.expect_call("finished");
+    assert_eq!(finished["call_id"], "external-1");
+    assert_eq!(finished["result"]["protocol_version"], PROTOCOL_VERSION);
+    assert!(finished["duration_ms"].is_u64());
+    assert!(finished.get("error").is_none());
+    let r = relay.recv();
+    assert_eq!(r["id"], 7);
+    assert_eq!(r["result"], finished["result"]);
+    // Une commande inconnue ou des paramètres mal formés : une erreur, rien d'exécuté.
+    relay.run(8, "nope.nothing", json!({}));
+    assert_eq!(code_of(&relay.recv()), "registry.unknown_command");
+    relay.send(json!({"jsonrpc":"2.0","id":9,"method":"command.run",
+        "params":{"command":"system.about","params":[]}}));
+    assert_eq!(relay.recv()["error"]["code"], -32602);
+    s.assert_silent();
+    // Le journal porte l'origine de l'étape ; l'étape de l'extension n'en porte aucune.
+    let r = s.request("command.run", json!({"command": "system.about"}));
+    assert!(r["result"].is_object(), "{r}");
+    let journal = s.journal();
+    assert_eq!(journal.len(), 2);
+    assert_eq!(journal[0]["origin"], "external");
+    assert!(journal[1].get("origin").is_none());
+    // Le rejeu ignore l'origine ; il n'écrit rien, les lignes la gardent.
+    let r = s.request("journal.replay", json!({}));
+    assert_eq!(r["result"], json!({"steps": 2, "identical": true}), "{r}");
+    assert_eq!(s.journal(), journal);
+}
+
+#[test]
+fn a_qgis_call_is_an_order_and_the_extension_is_busy_meanwhile() {
+    let name = unique_name("qgis");
+    let mut s = Session::start(&name);
+    s.hello(&["layer.describe"]);
+    s.switch_on();
+    let mut relay = Relay::attached(&name);
+    // Une commande QGIS non annoncée est indisponible : rien ne part vers l'extension.
+    relay.run(6, "layer.add", json!({"path": "x.gpkg"}));
+    assert_eq!(code_of(&relay.recv()), "registry.unavailable");
+    s.assert_silent();
+
+    relay.run(7, "layer.describe", json!({"layer_id": "l1"}));
+    let started = s.expect_call("started");
+    assert_eq!(started["params"], json!({"layer_id": "l1"}));
+    let order = s.expect_order("layer.describe");
+    // L'appel du relais tient l'exécutant : l'extension reçoit `session.busy` aussitôt.
+    for (method, params) in [
+        ("command.run", json!({"command": "system.about"})),
+        ("journal.replay", json!({})),
+        ("plan.propose", json!({"request": "x"})),
+        ("plan.execute", json!({"plan_id": "plan-1"})),
+        ("plan.reject", json!({"plan_id": "plan-1"})),
+    ] {
+        let r = s.request(method, params);
+        assert_eq!(code_of(&r), "session.busy", "{method} : {r}");
+    }
+    // Un second relais aussi.
+    let mut other = Relay::attached(&name);
+    other.run(1, "system.about", json!({}));
+    assert_eq!(code_of(&other.recv()), "session.busy");
+    let described = json!({"name": "Gares", "fields": [], "crs": "EPSG:2154",
+        "feature_count": 3, "geometry": "point"});
+    s.reply(&order, described.clone());
+    let finished = s.expect_call("finished");
+    assert_eq!(finished["result"], described);
+    assert_eq!(relay.recv()["result"], described);
+    let journal = s.journal();
+    assert_eq!(journal.len(), 1);
+    assert_eq!(journal[0]["id"], "layer.describe");
+    assert_eq!(journal[0]["origin"], "external");
+    // L'exécutant est libéré : le rejeu repasse par un ordre, à l'identique.
+    s.send(json!({"jsonrpc":"2.0","id":90,"method":"journal.replay"}));
+    let order = s.expect_order("layer.describe");
+    s.reply(&order, described);
+    let r = s.recv();
+    assert_eq!(r["id"], 90);
+    assert_eq!(r["result"], json!({"steps": 1, "identical": true}), "{r}");
+}
+
+#[test]
+fn a_call_of_the_extension_makes_the_relay_busy() {
+    let name = unique_name("occupe");
+    let mut s = Session::start(&name);
+    s.hello(&["layer.describe"]);
+    s.switch_on();
+    let mut relay = Relay::attached(&name);
+    s.send(json!({"jsonrpc":"2.0","id":50,"method":"command.run",
+        "params":{"command":"layer.describe","params":{"layer_id":"l"}}}));
+    let order = s.expect_order("layer.describe");
+    relay.run(7, "system.about", json!({}));
+    let r = relay.recv();
+    assert_eq!((r["id"].clone(), code_of(&r)), (json!(7), "session.busy"));
+    // La poignée de main reste servie pendant l'ordre.
+    assert!(relay.attach(u64::from(PROTOCOL_VERSION))["result"].is_object());
+    s.reply(
+        &order,
+        json!({"name": "l", "fields": [], "crs": "EPSG:2154",
+        "feature_count": 0, "geometry": "point"}),
+    );
+    assert_eq!(s.recv()["id"], 50);
+    // Libéré : l'appel du relais passe.
+    relay.run(8, "system.about", json!({}));
+    s.expect_call("started");
+    s.expect_call("finished");
+    assert!(relay.recv()["result"].is_object());
+}
+
+#[test]
+fn a_composition_or_a_pending_plan_makes_the_relay_busy() {
+    let name = unique_name("plan");
+    let (release, gate) = mpsc::channel();
+    let (entered_tx, entered) = mpsc::channel();
+    let composer = FakeComposer {
+        gate: Some(Gate {
+            entered: Mutex::new(entered_tx),
+            release: Mutex::new(gate),
+        }),
+        step: None,
+    };
+    let mut s = Session::start_with(&name, Some(composer));
+    s.hello(&[]);
+    s.switch_on();
+    let mut relay = Relay::attached(&name);
+    s.send(json!({"jsonrpc":"2.0","id":60,"method":"plan.propose",
+        "params":{"request":"Qui es-tu ?"}}));
+    // Le modèle compose : le fil lecteur du relais répond lui-même, sans attendre.
+    entered.recv_timeout(WAIT).unwrap();
+    relay.run(7, "system.about", json!({}));
+    let r = relay.recv();
+    assert_eq!((r["id"].clone(), code_of(&r)), (json!(7), "session.busy"));
+    release.send(()).unwrap();
+    let proposed = s.recv();
+    assert_eq!(proposed["id"], 60);
+    let plan_id = proposed["result"]["plan_id"].clone();
+    assert!(plan_id.is_string(), "{proposed}");
+    // Un plan non tranché occupe pour le relais seulement : l'extension garde son `command.run`.
+    relay.run(8, "system.about", json!({}));
+    let r = relay.recv();
+    assert_eq!(code_of(&r), "session.busy");
+    assert!(
+        r["error"]["message"].as_str().unwrap().contains("plan"),
+        "{r}"
+    );
+    let r = s.request("command.run", json!({"command": "system.about"}));
+    assert!(r["result"].is_object(), "{r}");
+    let r = s.request("plan.reject", json!({"plan_id": plan_id}));
+    assert_eq!(r["result"]["rejected"], true, "{r}");
+    relay.run(9, "system.about", json!({}));
+    s.expect_call("started");
+    s.expect_call("finished");
+    assert!(relay.recv()["result"].is_object());
+}
+
+#[test]
+fn with_the_ask_box_on_nothing_is_run() {
+    let name = unique_name("demande");
+    let mut s = Session::start(&name);
+    s.hello(&[]);
+    let r = s.switch(json!({"enabled": true, "ask": true}));
+    assert_eq!(r["result"], json!({"enabled": true, "ask": true}));
+    let mut relay = Relay::attached(&name);
+    relay.run(7, "system.about", json!({}));
+    assert_eq!(code_of(&relay.recv()), "external.not_approved");
+    s.assert_silent();
+    assert!(s.journal().is_empty());
+    // La case éteinte, l'appel passe.
+    s.switch_on();
+    relay.run(8, "system.about", json!({}));
+    s.expect_call("started");
+    s.expect_call("finished");
+    assert!(relay.recv()["result"].is_object());
+}
+
+#[test]
+fn a_path_leaving_the_project_is_refused_and_no_absolute_path_goes_back() {
+    let name = unique_name("chemin");
+    let mut s = Session::start(&name);
+    s.hello(&["layer.add"]);
+    s.switch_on();
+    let mut relay = Relay::attached(&name);
+    let absolute = s.dir.join("x.gpkg").to_string_lossy().into_owned();
+    for (id, path) in [(1, absolute.as_str()), (2, "/abs/x.gpkg"), (3, "../x.gpkg")] {
+        relay.run(id, "layer.add", json!({"path": path}));
+        let r = relay.recv();
+        assert_eq!(code_of(&r), "external.path_refused", "{r}");
+        assert!(!r.to_string().contains("cassini-canal-externe"), "{r}");
+    }
+    s.assert_silent();
+    assert!(s.journal().is_empty());
+
+    // Un chemin relatif passe ; l'ordre, sur le canal de l'extension, porte le chemin absolu.
+    relay.run(4, "layer.add", json!({"path": "donnees/x.gpkg"}));
+    let started = s.expect_call("started");
+    assert_eq!(started["params"], json!({"path": "donnees/x.gpkg"}));
+    let order = s.expect_order("layer.add");
+    let real = order["params"]["params"]["path"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(real.contains("cassini-canal-externe"), "{order}");
+    // L'erreur de l'extension cite le chemin réel : il ne part ni au relais ni dans `external.call`.
+    s.send(
+        json!({"jsonrpc":"2.0","id":order["id"],"error":{"code":-32000,"message":"absent",
+        "data":{"code":"qgis.file_missing","message":format!("Fichier introuvable : {real}")}}}),
+    );
+    let finished = s.expect_call("finished");
+    assert_eq!(finished["error"]["code"], "qgis.file_missing");
+    let r = relay.recv();
+    assert_eq!(code_of(&r), "qgis.file_missing");
+    for text in [finished.to_string(), r.to_string()] {
+        assert!(!text.contains("cassini-canal-externe"), "{text}");
+        assert!(text.contains("x.gpkg"), "{text}");
+    }
+    let journal = s.journal();
+    assert_eq!(journal.len(), 1);
+    assert_eq!(journal[0]["params"]["path"], "donnees/x.gpkg");
+    assert_eq!(journal[0]["origin"], "external");
+}
+
+fn buffer_params() -> Value {
+    json!({"layer_id": "l", "distance": {"value": 500, "unit": "m"}})
+}
+
+#[test]
+fn a_relay_cancels_its_call_by_its_id() {
+    let name = unique_name("annule");
+    let mut s = Session::start(&name);
+    s.hello(&["analysis.buffer"]);
+    s.switch_on();
+    let mut relay = Relay::attached(&name);
+    let mut other = Relay::attached(&name);
+    relay.run(7, "analysis.buffer", buffer_params());
+    s.expect_call("started");
+    let order = s.expect_order("analysis.buffer");
+    // Un autre id, une autre connexion, ou l'id du relais depuis l'extension : rien ne change.
+    assert_eq!(code_of(&relay.cancel(8, json!(99))), "request.unknown");
+    assert_eq!(code_of(&other.cancel(8, json!(7))), "request.unknown");
+    assert_eq!(
+        code_of(&s.request("request.cancel", json!({"id": 7}))),
+        "request.unknown"
+    );
+    let r = relay.cancel(9, json!(7));
+    assert_eq!(r["result"], json!({"cancelled": true}), "{r}");
+    let notice = s.recv();
+    assert_eq!(notice["method"], "request.cancel");
+    assert_eq!(notice["params"]["id"], order["id"]);
+    s.reply(&order, json!({}));
+    let finished = s.expect_call("finished");
+    assert_eq!(finished["error"]["code"], "registry.cancelled");
+    assert_eq!(code_of(&relay.recv()), "registry.cancelled");
+    let journal = s.journal();
+    assert_eq!(journal[0]["cancelled"], true);
+    assert_eq!(journal[0]["origin"], "external");
+    // Hors appel, l'annulation ne vise rien.
+    assert_eq!(code_of(&relay.cancel(10, json!(7))), "request.unknown");
+}
+
+#[test]
+fn the_extension_cancels_a_relay_call_by_its_call_id() {
+    let name = unique_name("panneau");
+    let mut s = Session::start(&name);
+    s.hello(&["analysis.buffer", "layer.describe"]);
+    s.switch_on();
+    let mut relay = Relay::attached(&name);
+    relay.run(7, "analysis.buffer", buffer_params());
+    let call_id = s.expect_call("started")["call_id"].clone();
+    let order = s.expect_order("analysis.buffer");
+    s.send(json!({"jsonrpc":"2.0","id":80,"method":"request.cancel","params":{"id":call_id}}));
+    let notice = s.recv();
+    assert_eq!(notice["method"], "request.cancel", "{notice}");
+    assert_eq!(notice["params"]["id"], order["id"]);
+    let r = s.recv();
+    assert_eq!(
+        (r["id"].clone(), r["result"].clone()),
+        (json!(80), json!({"cancelled": true}))
+    );
+    s.reply(&order, json!({}));
+    assert_eq!(
+        s.expect_call("finished")["error"]["code"],
+        "registry.cancelled"
+    );
+    assert_eq!(code_of(&relay.recv()), "registry.cancelled");
+    // Une commande non annulable refuse l'annulation et continue.
+    relay.run(8, "layer.describe", json!({"layer_id": "l"}));
+    let call_id = s.expect_call("started")["call_id"].clone();
+    assert_eq!(call_id, "external-2");
+    let order = s.expect_order("layer.describe");
+    let r = s.request("request.cancel", json!({"id": call_id}));
+    assert_eq!(code_of(&r), "request.not_cancellable");
+    s.reply(
+        &order,
+        json!({"name": "l", "fields": [], "crs": "EPSG:2154",
+        "feature_count": 0, "geometry": "point"}),
+    );
+    s.expect_call("finished");
+    assert!(relay.recv()["result"].is_object());
+}
+
+#[test]
+fn switching_off_during_a_call_cancels_it_or_lets_it_finish() {
+    let name = unique_name("coupe");
+    let mut s = Session::start(&name);
+    s.hello(&["analysis.buffer", "layer.describe"]);
+    s.switch_on();
+    // Annulable : l'ordre est annulé, le relais reçoit la perte de session et aucune réponse.
+    let mut relay = Relay::attached(&name);
+    relay.run(7, "analysis.buffer", buffer_params());
+    s.expect_call("started");
+    let order = s.expect_order("analysis.buffer");
+    let off = s.switch(json!({"enabled": false}));
+    assert_eq!(off["result"], json!({"enabled": false}));
+    let notice = s.recv();
+    assert_eq!(notice["method"], "request.cancel", "{notice}");
+    assert_eq!(notice["params"]["id"], order["id"]);
+    assert_eq!(relay.recv()["method"], "external.session_lost");
+    relay.assert_closed();
+    s.reply(&order, json!({}));
+    assert_eq!(
+        s.expect_call("finished")["error"]["code"],
+        "registry.cancelled"
+    );
+    assert_eq!(s.journal()[0]["cancelled"], true);
+
+    // Non annulable : l'ordre finit et l'étape est journalisée, sans réponse au relais.
+    s.switch_on();
+    let mut relay = Relay::attached(&name);
+    relay.run(8, "layer.describe", json!({"layer_id": "l"}));
+    s.expect_call("started");
+    let order = s.expect_order("layer.describe");
+    s.switch(json!({"enabled": false}));
+    assert_eq!(relay.recv()["method"], "external.session_lost");
+    relay.assert_closed();
+    s.assert_silent();
+    s.reply(
+        &order,
+        json!({"name": "l", "fields": [], "crs": "EPSG:2154",
+        "feature_count": 0, "geometry": "point"}),
+    );
+    assert!(s.expect_call("finished")["result"].is_object());
+    let journal = s.journal();
+    assert_eq!(journal[1]["id"], "layer.describe");
+    assert!(journal[1]["result"].is_object());
+    // La session est libérée.
+    let r = s.request("command.run", json!({"command": "system.about"}));
+    assert!(r["result"].is_object(), "{r}");
+}
+
+#[test]
+fn a_relay_that_leaves_during_a_call_frees_the_session() {
+    let name = unique_name("parti");
+    let mut s = Session::start(&name);
+    s.hello(&["analysis.buffer"]);
+    s.switch_on();
+    let relay = {
+        let mut relay = Relay::attached(&name);
+        relay.run(7, "analysis.buffer", buffer_params());
+        relay
+    };
+    s.expect_call("started");
+    let order = s.expect_order("analysis.buffer");
+    // Le relais part : sa connexion se ferme (sous Windows, le tube l'est au dernier handle).
+    relay.out.shutdown();
+    relay.assert_closed();
+    drop(relay);
+    let notice = s.recv();
+    assert_eq!(notice["method"], "request.cancel", "{notice}");
+    s.reply(&order, json!({}));
+    assert_eq!(
+        s.expect_call("finished")["error"]["code"],
+        "registry.cancelled"
+    );
+    assert_eq!(s.journal()[0]["cancelled"], true);
+    let r = s.request("command.run", json!({"command": "system.about"}));
+    assert!(r["result"].is_object(), "{r}");
+}
+
+#[test]
+fn closing_the_input_during_a_call_answers_nothing_but_the_loss() {
+    let name = unique_name("fin-appel");
+    let mut s = Session::start(&name);
+    s.hello(&["analysis.buffer"]);
+    s.switch_on();
+    let mut relay = Relay::attached(&name);
+    relay.run(7, "analysis.buffer", buffer_params());
+    s.expect_call("started");
+    s.expect_order("analysis.buffer");
+    s.close().unwrap();
+    let lost = relay.recv();
+    assert_eq!(lost["method"], "external.session_lost", "{lost}");
+    assert_eq!(lost["params"]["reason"], "session_ended");
+    relay.assert_closed();
+    let journal = s.journal();
+    assert_eq!(journal[0]["cancelled"], true);
+    assert_eq!(journal[0]["origin"], "external");
+}
+
+fn described() -> Value {
+    json!({"name": "l", "fields": [], "crs": "EPSG:2154", "feature_count": 0, "geometry": "point"})
+}
+
+#[test]
+fn absolute_paths_in_a_successful_result_do_not_reach_the_relay() {
+    let name = unique_name("resultat");
+    let mut s = Session::start(&name);
+    s.hello(&["layer.describe"]);
+    s.switch_on();
+    let mut relay = Relay::attached(&name);
+    relay.run(7, "layer.describe", json!({"layer_id": "l"}));
+    s.expect_call("started");
+    let order = s.expect_order("layer.describe");
+    let inside = s
+        .dir
+        .join("donnees")
+        .join("x.gpkg")
+        .to_string_lossy()
+        .into_owned();
+    let work = s
+        .dir
+        .join("p.cassini")
+        .join("1-a.gpkg")
+        .to_string_lossy()
+        .into_owned();
+    s.reply(
+        &order,
+        json!({"name": inside, "fields": [], "crs": "EPSG:2154",
+        "feature_count": 0, "geometry": "point", "work": work,
+        "source": "/ailleurs/y.gpkg", "windows": "D:\\SIG\\cadastre.gpkg",
+        "note": format!("Lu dans {inside} et /ailleurs/z.gpkg")}),
+    );
+    let finished = s.expect_call("finished");
+    let r = relay.recv();
+    for text in [finished["result"].to_string(), r["result"].to_string()] {
+        assert!(!text.contains("cassini-canal-externe"), "{text}");
+        for absolute in ["/ailleurs", "D:\\\\SIG", "SIG"] {
+            assert!(!text.contains(absolute), "{absolute} : {text}");
+        }
+    }
+    assert_eq!(r["result"]["name"], "donnees/x.gpkg");
+    assert_eq!(r["result"]["source"], "y.gpkg");
+    assert_eq!(r["result"]["windows"], "cadastre.gpkg");
+    assert_eq!(r["result"], finished["result"]);
+}
+
+#[test]
+fn a_relay_cannot_cancel_a_call_of_the_extension() {
+    let name = unique_name("pas-a-lui");
+    let mut s = Session::start(&name);
+    s.hello(&["analysis.buffer"]);
+    s.switch_on();
+    let mut relay = Relay::attached(&name);
+    s.send(json!({"jsonrpc":"2.0","id":50,"method":"command.run",
+        "params":{"command":"analysis.buffer","params":buffer_params()}}));
+    let order = s.expect_order("analysis.buffer");
+    assert_eq!(code_of(&relay.cancel(9, json!(50))), "request.unknown");
+    // Aucune annulation n'est partie vers l'extension.
+    s.assert_silent();
+    s.reply(
+        &order,
+        json!({"layer_id": "t", "name": "Tampon", "feature_count": 1,
+        "crs": "EPSG:2154"}),
+    );
+    let r = s.recv();
+    assert_eq!(r["id"], 50);
+    assert!(r["result"].is_object(), "{r}");
+}
+
+/// Pendant un ordre de l'extension, l'appel du relais reçoit `session.busy` aussitôt.
+fn relay_busy(relay: &mut Relay, id: u64) {
+    relay.run(id, "system.about", json!({}));
+    let r = relay.recv();
+    assert_eq!(
+        (r["id"].clone(), code_of(&r)),
+        (json!(id), "session.busy"),
+        "{r}"
+    );
+}
+
+/// Une fois l'appel de l'extension soldé, celui du relais passe.
+fn relay_served(s: &Session, relay: &mut Relay, id: u64) {
+    relay.run(id, "system.about", json!({}));
+    s.expect_call("started");
+    s.expect_call("finished");
+    let r = relay.recv();
+    assert_eq!(r["id"], id);
+    assert!(r["result"].is_object(), "{r}");
+}
+
+#[test]
+fn a_relay_is_busy_during_a_replay_or_a_plan_execution() {
+    let name = unique_name("rejeu-plan");
+    let composer = FakeComposer {
+        gate: None,
+        step: Some(json!({"command": "layer.describe", "params": {"layer_id": "l"}})),
+    };
+    let mut s = Session::start_with(&name, Some(composer));
+    s.hello(&["layer.describe"]);
+    s.switch_on();
+    let mut relay = Relay::attached(&name);
+    // Une étape QGIS au journal, pour que le rejeu dicte un ordre.
+    s.send(json!({"jsonrpc":"2.0","id":40,"method":"command.run",
+        "params":{"command":"layer.describe","params":{"layer_id":"l"}}}));
+    let order = s.expect_order("layer.describe");
+    s.reply(&order, described());
+    assert_eq!(s.recv()["id"], 40);
+
+    s.send(json!({"jsonrpc":"2.0","id":41,"method":"journal.replay"}));
+    let order = s.expect_order("layer.describe");
+    relay_busy(&mut relay, 1);
+    s.reply(&order, described());
+    let r = s.recv();
+    assert_eq!(r["id"], 41);
+    assert_eq!(r["result"]["identical"], true, "{r}");
+    relay_served(&s, &mut relay, 2);
+
+    let proposed = s.request("plan.propose", json!({"request": "Décris la couche."}));
+    let plan_id = proposed["result"]["plan_id"].clone();
+    assert!(plan_id.is_string(), "{proposed}");
+    s.send(json!({"jsonrpc":"2.0","id":42,"method":"plan.execute","params":{"plan_id":plan_id}}));
+    assert_eq!(s.recv()["method"], "plan.step");
+    let order = s.expect_order("layer.describe");
+    relay_busy(&mut relay, 3);
+    s.reply(&order, described());
+    let r = s.recv();
+    assert_eq!(r["id"], 42);
+    assert!(r["result"]["steps"].is_array(), "{r}");
+    relay_served(&s, &mut relay, 4);
 }

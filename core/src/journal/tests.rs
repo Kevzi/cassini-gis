@@ -738,3 +738,33 @@ fn an_input_touched_since_the_journal_diverges_even_if_the_result_is_the_same() 
     assert!(err.message.contains("data.txt"));
     let _ = fs::remove_dir_all(dir);
 }
+
+#[test]
+fn an_external_origin_is_journaled_and_ignored_by_the_replay() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, &project).unwrap();
+    s.call("system.about", json!({})).unwrap();
+    s.call_from(
+        "test.write_output",
+        json!({"text": "salut"}),
+        Some("external"),
+    )
+    .unwrap();
+    let l = lines(&s);
+    assert!(l[0].get("origin").is_none());
+    assert_eq!(l[1]["origin"], "external");
+    let before = fs::read_to_string(s.journal_path()).unwrap();
+    let (report, _) = replay_of(&registry, &project).unwrap();
+    assert_eq!(
+        report,
+        ReplayReport {
+            steps: 2,
+            identical: true
+        }
+    );
+    // Le rejeu n'écrit rien : les lignes gardent leur origine.
+    assert_eq!(fs::read_to_string(s.journal_path()).unwrap(), before);
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
