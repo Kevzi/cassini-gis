@@ -1,5 +1,7 @@
 //! Binaire `cassini` : premier point d'entrée du registre de commandes (AD-13).
 
+mod mcp;
+
 use std::io::{BufRead, Write};
 use std::path::Path;
 use std::process::ExitCode;
@@ -13,6 +15,7 @@ use serde_json::{json, Value};
 const USAGE: &str = "Usage : cassini run <id> [json] [--project <fichier>]
        cassini replay <projet>
        cassini serve
+       cassini mcp [--project <fichier>]
        cassini model-check --model <fichier.gguf> --prompt <phrase>
        cassini plan <phrase> --inventory <fichier.json> [--model <fichier.gguf|fichier.modele.json>]
 ";
@@ -65,6 +68,13 @@ pub fn run(
 ) -> i32 {
     if args.first().map(String::as_str) == Some("serve") {
         return serve(&args[1..], input, out, err);
+    }
+    if args.first().map(String::as_str) == Some("mcp") {
+        let Some(project) = mcp::parse(&args[1..]) else {
+            let _ = err.write_all(USAGE.as_bytes());
+            return 2;
+        };
+        return mcp::serve(project, err);
     }
     if args.first().map(String::as_str) == Some("replay") {
         return replay(&args[1..], out, err);
@@ -866,6 +876,29 @@ mod tests {
         let (code, _, err) = call(&["serve", "extra"]);
         assert_eq!(code, 2);
         assert!(err.contains("cassini serve"));
+    }
+
+    #[test]
+    fn mcp_with_a_bad_argument_prints_usage() {
+        for args in [
+            &["mcp", "extra"][..],
+            &["mcp", "--project"][..],
+            &["mcp", "--project", "a", "b"][..],
+        ] {
+            let (code, out, err) = call(args);
+            assert_eq!((code, out.as_str()), (2, ""), "{args:?}");
+            assert!(err.contains("cassini mcp"), "{args:?}");
+        }
+    }
+
+    #[test]
+    fn mcp_with_a_project_that_cannot_open_fails_before_any_exchange() {
+        let (dir, _) = temp_project();
+        let project = dir.join("absent").join("manque.qgz");
+        let (code, out, err) = call(&["mcp", "--project", &project.to_string_lossy()]);
+        assert_eq!((code, out.as_str()), (1, ""));
+        assert!(error_code(err.trim()).starts_with("journal."), "{err}");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

@@ -15,14 +15,21 @@ deny = [
   # clients HTTP
   { crate = "reqwest" }, { crate = "hyper" }, { crate = "ureq" }, { crate = "curl" },
   { crate = "isahc" }, { crate = "attohttpc" }, { crate = "surf" },
-  # piles async
-  { crate = "tokio" }, { crate = "async-std" }, { crate = "smol" },
+  # piles async ; tokio n'est admis que sous le serveur MCP (ticket 5.7), sans `net` (voir plus bas)
+  { crate = "tokio", wrappers = ["rmcp", "tokio-util", "cassini"] }, { crate = "async-std" }, { crate = "smol" },
+  { crate = "tokio-util", wrappers = ["rmcp"] },
   # TLS
   { crate = "openssl" }, { crate = "native-tls" }, { crate = "rustls" },
   { crate = "schannel" },
   # le noyau ne depend pas de la couche IA : seul le binaire cassini la tire
   { crate = "cassini-ai", wrappers = ["cassini"] },
 ]
+
+# tokio sert le serveur MCP sur l'entrée et la sortie standard : sa feature `net` (sockets) est
+# interdite, et avec elle la feature `transport-io` de rmcp qui la tire (AD-14).
+[[bans.features]]
+crate = "tokio"
+deny = ["net"]
 
 [sources]
 unknown-registry = "deny"

@@ -55,7 +55,8 @@ cinquième : l'agent local tourne dans QGIS. Concrètement :
 - **Le binaire `cassini`** (`cli/`) : `run` exécute une commande, `replay` rejoue
   un journal, `serve` ouvre le canal local de l'extension, `plan` compose un plan
   depuis une phrase en ligne de commande, `model-check` vérifie qu'un modèle
-  répond. Un même appel donne le même résultat par `run` et par `serve`, ce que
+  répond, `mcp` expose le registre à une IA externe par le protocole MCP. Un même
+  appel donne le même résultat par `run`, par `serve` et par `mcp`, ce que
   contrôle un test sur le vrai binaire.
 - **L'extension QGIS** (`qgis-plugin/`) : un panneau ancré dans QGIS 3.44 et
   4.x. On y écrit une demande en français, le plan proposé s'affiche étape par
@@ -118,7 +119,7 @@ commence avant que la précédente ne soit testée.
 | 2 | Épreuve du modèle local sur un registre factice | **faite** : verdict « oui sous conditions », dans `_bmad-output/initiative-cassini-mvp/epic-epreuve-du-modele-local/` |
 | 3 | Registre de commandes et journal rejouable | **faite**, suite de bout en bout comprise : exécuter, fermer, rouvrir, rejouer, comparer |
 | 4 | Façade QGIS — extension, canal local, commandes exécutées par QGIS | **faite**, suite de bout en bout comprise : ouvrir, analyser, exporter, rejouer |
-| 5 | Agent IA local et serveur MCP | **en cours** : l'agent est fait et tourne dans QGIS, sur carte graphique ou sur processeur ; restent le serveur MCP (`cassini mcp`, pas encore écrit) et la suite de bout en bout |
+| 5 | Agent IA local et serveur MCP | **en cours** : l'agent est fait et tourne dans QGIS, sur carte graphique ou sur processeur ; le serveur MCP (`cassini mcp`) est écrit et n'expose que les commandes du noyau ; reste la suite de bout en bout |
 | 6 | Analyse de terrain dans le noyau — champ de vision, ligne de vue, pente | à venir |
 | 7 | Scénario de démo, puis publication : dépôt d'extensions QGIS, installeurs, vidéo | à venir |
 
@@ -364,6 +365,37 @@ Pour essayer Cassini dans QGIS :
 
 Rien n'est téléchargé à aucun moment : le modèle se copie à la main, comme le
 noyau.
+
+### Brancher un client MCP
+
+Une IA externe, si on en veut une, pilote Cassini par `cassini mcp`, un serveur MCP
+sur l'entrée et la sortie standard — aucun port, aucune socket. Le client lance le
+binaire lui-même ; avec `--project`, chaque appel est journalisé à côté du projet,
+comme par `cassini run` :
+
+```json
+{
+  "mcpServers": {
+    "cassini": {
+      "command": "cassini",
+      "args": ["mcp", "--project", "C:/chemin/vers/projet.qgz"]
+    }
+  }
+}
+```
+
+Si `cassini` n'est pas dans le `PATH` (c'est le cas du paquet Windows, posé dans
+`%LOCALAPPDATA%\Cassini\bin`), `command` doit porter le chemin complet du binaire,
+par exemple `C:/Users/<vous>/AppData/Local/Cassini/bin/cassini.exe`.
+
+Seules les commandes du noyau sont exposées comme outils (`system.about`,
+`model.list`), avec leurs schémas. Les commandes exécutées par QGIS n'y sont pas :
+elles ont besoin de l'extension. Le serveur ne compose aucun plan : l'IA externe
+appelle les commandes une à une.
+
+Avec `--project`, le serveur tient le verrou du journal du projet **pendant toute sa
+vie**. QGIS ouvert sur le même projet passe alors en lecture seule ; et si QGIS tenait
+le verrou le premier, chaque appel MCP répond `journal.read_only`.
 
 ## La recette
 

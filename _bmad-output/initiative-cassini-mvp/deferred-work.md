@@ -400,3 +400,13 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-acceleration-par-carte-graphique-dans-le-noyau-livre-avec-re-plan.md`
   summary: Repli sur processeur quand la carte échoue au décodage ou à l'adaptateur (non vérifié ; medium si réel).
   evidence: Relecture 5.21, constat 6 : le repli ne couvre que le chargement et la création du contexte ; à trancher en lançant une longue session sur une carte de 4 Go.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-serveur-mcp-cassini-mcp-expose-le-registre-a-un-client-tiers-plan.md`
+  summary: Vérifier que les clients MCP visés acceptent des noms d'outils avec un point (`system.about`), sinon les exposer sous une forme admise.
+  evidence: non vérifié (maybe-false, medium si vrai) ; la spec MCP 2025-11-25 admet le point, certaines API de modèles n'admettent que [A-Za-z0-9_-] ; tranché par la recette hitl de 5.7.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-serveur-mcp-cassini-mcp-expose-le-registre-a-un-client-tiers-plan.md`
+  summary: Tester la négociation des révisions MCP 2024-11-05 et 2026-07-28 (sans initialize) annoncées par l'architecture.
+  evidence: le client de test ne négocie que 2025-11-25 ; rmcp épinglé =3.8.0, ne régresse qu'à une montée de version.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-serveur-mcp-cassini-mcp-expose-le-registre-a-un-client-tiers-plan.md`
+  summary: Servir les appels MCP sans bloquer le runtime (ping et annulation pendant une commande longue) avant d'exposer les commandes de terrain.
+  evidence: call_tool attend la réponse du fil d'exécution sur l'unique fil du runtime ; sans effet sur system.about et model.list.

@@ -7,7 +7,7 @@ paradigm: 'hexagonal (ports et adaptateurs), avec un adaptateur sortant distant'
 scope: "Invariants du MVP Cassini : frontière entre le noyau Rust Apache-2.0 et l'extension QGIS GPL, contrat du registre de commandes, journal rejouable, agent local et serveur MCP, moteur de terrain, distribution et recette ; après le MVP, extension du catalogue par le cadre de traitement de QGIS (CAP-14)"
 status: final
 created: '2026-10-14'
-updated: '2026-10-23'
+updated: '2026-10-30'
 binds: [CAP-1, CAP-3, CAP-4, CAP-5, CAP-6, CAP-7, CAP-8, CAP-9, CAP-10, CAP-11, CAP-13, CAP-14]
 sources:
   - ../spec-cassini-mvp/spec-cassini-mvp.md
@@ -605,7 +605,7 @@ Vérifié courant le 2026-10-14 ; le code en devient propriétaire dès qu'il ex
 | cassini-core | 0.1.0 |
 | serde_json | 1.0.154 |
 | schemars | 1.2.3 |
-| rmcp (SDK Rust officiel de MCP, Apache-2.0) | 3.5.1 |
+| rmcp (SDK Rust officiel de MCP, Apache-2.0) | 3.8.0 (feature `server` seule), avec tokio (MIT) en `rt` et `io-std`, sans `net` |
 | llama-cpp-2 (MIT OR Apache-2.0) | 0.1.159 |
 | wbgeotiff (MIT OR Apache-2.0) | 0.1.2 |
 | wbraster (MIT OR Apache-2.0) | 0.2.1 |
@@ -771,10 +771,12 @@ faire.
 - **Reconnaissance des schémas français** (cadastre Etalab, zonage du GPU) et
   **définition de « parcelle constructible »** : contenu métier, pas structure.
   Resteront des descriptions de commandes, gouvernées par AD-6.
-- **Révision de MCP servie par `rmcp`.** La pile Rust est épinglée en 3.5.1 et la
-  spécification en révision 2026-07-28, mais la correspondance entre les deux n'a
-  pas été vérifiée : à faire à l'ouverture de l'epic agent et MCP, avant d'écrire
-  l'adaptateur.
+- **Révision de MCP servie par `rmcp`.** *Vérifié le 2026-10-30 (ticket 5.7).*
+  `rmcp` 3.8.0 connaît les révisions 2024-11-05 à 2026-07-28
+  (`ProtocolVersion::KNOWN_VERSIONS`) : il répond à la poignée de main `initialize`
+  jusqu'à 2025-11-25, la dernière qui en ait une, et sert 2026-07-28 par les
+  métadonnées portées par chaque requête. `cassini mcp` les sert toutes, sur
+  l'entrée et la sortie standard seules (feature `server`, sans `transport-io`).
 - **Version de Python de l'extension à confirmer** sur QGIS 3.44 sous Windows :
   le plancher annoncé au tableau de pile n'a pas été vérifié sur le poste le plus
   ancien visé.
