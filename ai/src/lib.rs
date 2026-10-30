@@ -24,8 +24,11 @@ use llama_cpp_2::token::LlamaToken;
 use llama_cpp_2::vocab::LlamaVocab;
 use llama_cpp_2::{LlamaStateSeqFlags, SeqState};
 
+mod devices;
 pub mod plan;
 mod threads;
+
+use devices::Placement;
 
 pub use threads::default_threads;
 
@@ -253,24 +256,36 @@ struct Loaded {
     model: LlamaModel,
     adapter: Option<LlamaLoraAdapter>,
     checkpoints: Checkpoints<SeqState>,
+    /// Le modèle est sur une carte graphique (ticket 5.21).
+    on_gpu: bool,
 }
 
 /// Le moteur et le modèle gardé : un seul par processus, derrière un verrou.
 struct Engine {
     backend: LlamaBackend,
     loaded: Option<Loaded>,
+    /// Où poser un modèle, décidé une fois, après le chargement des moteurs de calcul.
+    placement: Placement,
 }
 
-/// Le moteur ne s'initialise qu'une fois par processus ; ses journaux sont coupés.
+/// Le moteur ne s'initialise qu'une fois par processus ; ses journaux sont coupés. Avec la
+/// feature `gpu`, les moteurs de calcul posés à côté de l'exécutable sont chargés d'abord.
 fn engine() -> Result<&'static Mutex<Engine>, AiError> {
     static ENGINE: OnceLock<Result<Mutex<Engine>, String>> = OnceLock::new();
     ENGINE
         .get_or_init(|| {
+            // Avant `init` : sans moteur chargé, llama.cpp les chercherait d'abord dans le dossier
+            // de construction compilé en dur.
+            #[cfg(feature = "gpu")]
+            devices::load_backends()?;
             let mut backend = LlamaBackend::init().map_err(|e| e.to_string())?;
-            backend.void_logs();
+            if std::env::var_os("CASSINI_DEBUG_LLAMA").is_none() {
+                backend.void_logs();
+            }
             Ok(Mutex::new(Engine {
                 backend,
                 loaded: None,
+                placement: Placement::current(),
             }))
         })
         .as_ref()
@@ -486,11 +501,13 @@ pub fn complete(model: &Path, prompt: &str) -> Result<Completion, AiError> {
     )
 }
 
-/// Paramètres de chargement. Avec la feature `cuda` (mesure seulement), les couches déportées
-/// sur le GPU viennent de `CASSINI_GPU_LAYERS` (défaut 99) ; sans elle, rien ne change.
-fn model_params() -> LlamaModelParams {
+/// Paramètres de chargement pour `placement` (ticket 5.21 : carte dédiée seule, processeur
+/// sinon). Avec la feature `cuda` (mesure seulement), les couches déportées sur le GPU viennent
+/// de `CASSINI_GPU_LAYERS` (défaut 99), comme avant.
+fn model_params(placement: &Placement) -> LlamaModelParams {
     #[cfg(feature = "cuda")]
     {
+        let _ = placement;
         let layers = std::env::var("CASSINI_GPU_LAYERS")
             .ok()
             .and_then(|v| v.parse::<u32>().ok())
@@ -498,7 +515,21 @@ fn model_params() -> LlamaModelParams {
         LlamaModelParams::default().with_n_gpu_layers(layers)
     }
     #[cfg(not(feature = "cuda"))]
-    LlamaModelParams::default()
+    placement.params()
+}
+
+/// Charge le modèle de `files` là où `placement` le dit. Si la carte le refuse (mémoire trop
+/// petite, pilote), un nouveau chargement est fait sur le processeur, une fois ; l'erreur
+/// rendue est alors celle du processeur.
+fn load_model(
+    backend: &LlamaBackend,
+    files: &ModelFiles,
+    placement: &Placement,
+) -> Result<(LlamaModel, bool), AiError> {
+    devices::with_cpu_fallback(placement, |p| {
+        LlamaModel::load_from_file(backend, &files.model, &model_params(p))
+            .map_err(|e| AiError::Load(e.to_string()))
+    })
 }
 
 /// Durées d'un appel au modèle, en temps réel (ticket 11 : mesure de référence).
@@ -582,13 +613,68 @@ pub fn generate_files_measured(
     }
     let key = model_key(files)?;
     let mut guard = engine()?.lock().unwrap_or_else(|e| e.into_inner());
-    let Engine { backend, loaded } = &mut *guard;
+    let engine = &mut *guard;
+    let first = generate_on(
+        engine,
+        files,
+        key.clone(),
+        turns,
+        grammar,
+        max_new_tokens,
+        threads,
+        start,
+        false,
+    );
+    // Ticket 5.21 : la carte a pris le modèle mais pas son contexte (mémoire trop petite) :
+    // le modèle est rechargé sur le processeur, une fois, et y reste tant qu'il est gardé.
+    let on_gpu = engine.loaded.as_ref().is_some_and(|l| l.on_gpu);
+    devices::retry_context_on_cpu(first, on_gpu, || {
+        generate_on(
+            engine,
+            files,
+            key,
+            turns,
+            grammar,
+            max_new_tokens,
+            threads,
+            start,
+            true,
+        )
+    })
+}
+
+/// Corps de `generate_files_measured`, verrou pris. `force_cpu` libère un modèle gardé sur la
+/// carte et le recharge sur le processeur.
+#[allow(clippy::too_many_arguments)]
+fn generate_on(
+    engine: &mut Engine,
+    files: &ModelFiles,
+    key: ModelKey,
+    turns: &[Turn],
+    grammar: Option<&str>,
+    max_new_tokens: usize,
+    threads: Option<NonZeroU32>,
+    start: Instant,
+    force_cpu: bool,
+) -> Result<(Completion, Timings), AiError> {
+    let Engine {
+        backend,
+        loaded,
+        placement,
+    } = engine;
     // Autre base ou autre adaptateur : l'ancien modèle et ses instantanés sont libérés avant
     // le chargement.
     drop_if_other_key(loaded, &key, |l| &l.key);
+    if force_cpu && loaded.as_ref().is_some_and(|l| l.on_gpu) {
+        *loaded = None;
+    }
     if loaded.is_none() {
-        let mut llama = LlamaModel::load_from_file(backend, &files.model, &model_params())
-            .map_err(|e| AiError::Load(e.to_string()))?;
+        let placement = if force_cpu {
+            &Placement::Cpu
+        } else {
+            &*placement
+        };
+        let (mut llama, on_gpu) = load_model(backend, files, placement)?;
         // Un adaptateur illisible ne laisse rien de gardé : la base est libérée avec l'erreur.
         let adapter = match &files.adapter {
             None => None,
@@ -603,6 +689,7 @@ pub fn generate_files_measured(
             model: llama,
             adapter,
             checkpoints: Checkpoints::default(),
+            on_gpu,
         });
     }
     let Some(Loaded {

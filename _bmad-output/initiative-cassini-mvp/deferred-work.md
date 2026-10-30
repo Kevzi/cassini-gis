@@ -391,3 +391,12 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-nombre-de-fils-par-defaut-coeurs-physiques-et-masque-d-affin-plan.md`
   summary: Rendre la vérification complète (cargo test, clippy, fmt, deny) possible sous Linux/WSL, en fournissant libclang à llama-cpp-sys.
   evidence: Relecture 5.20, constat 1 : l'espace de travail ne se construit pas sous WSL faute de libclang ; seuls des morceaux isolés y sont testés, les tickets 5.19 à 5.22 ne vérifient que sous PowerShell.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-acceleration-par-carte-graphique-dans-le-noyau-livre-avec-re-plan.md`
+  summary: Vérifier automatiquement la construction `gpu` (build.rs, load_backends, bloc gpu de `hors_ligne`) : job CI avec le SDK Vulkan, ou étape obligatoire de la liste de publication.
+  evidence: Relecture 5.21, constat 5 : la CI ne compile jamais `--features gpu` ; une DLL réseau ajoutée au paquet ou un moteur processeur manquant ne ferait rien échouer.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-acceleration-par-carte-graphique-dans-le-noyau-livre-avec-re-plan.md`
+  summary: Prouver sur un poste à carte intégrée seule que rien ne part sur cette carte (liste vide de périphériques bien transmise à llama.cpp).
+  evidence: Relecture 5.21, constat 3 : le test `processor_parameters_offload_nothing` ne distingue pas liste vide et liste absente ; aucun poste à carte intégrée n'a été essayé.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-acceleration-par-carte-graphique-dans-le-noyau-livre-avec-re-plan.md`
+  summary: Repli sur processeur quand la carte échoue au décodage ou à l'adaptateur (non vérifié ; medium si réel).
+  evidence: Relecture 5.21, constat 6 : le repli ne couvre que le chargement et la création du contexte ; à trancher en lançant une longue session sur une carte de 4 Go.

@@ -17,6 +17,9 @@
 - `modele-local-sous-windows.md` — compiler llama.cpp, lancer `model-check`, variables
   et chemin court.
 
+- `paquet-du-noyau.md` — construire le paquet livré du noyau (`--features gpu`) : SDK Vulkan,
+  commande, fichiers à copier, vérification avec et sans carte graphique.
+
 - `regle-de-redaction-des-commandes.md` — comment écrire la description et les
   schémas d'une commande, et ce que le registre contrôle lui-même.
 

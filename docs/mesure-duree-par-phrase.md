@@ -501,3 +501,65 @@ secondes ; la phrase 1 (chargement, première lecture) est hors critère :
   157,0 s. Le défaut reste aux cœurs physiques ; aucune décision n'est à soumettre.
 - Sur les phrases 2 à 10, 8 sur 9 passent sous 30 s dans les quatre réglages ; la phrase 9 (démo
   en cours de session) reste au-dessus, à 32,0 s au mieux (8 fils sans masque).
+
+## Carte graphique dans le paquet livré (ticket 5.21)
+
+Le paquet livré (`--features gpu`, voir `paquet-du-noyau.md`) charge ses moteurs de calcul depuis
+le dossier de `cassini.exe` : le processeur toujours, Vulkan s'il se charge et trouve une carte
+dédiée. Poste : RTX 3070 Ti 8 Go, pilote 616.92 ; modèle livré (`cassini-composition-4b.modele.json`).
+
+**Taille du paquet** : 60,3 Mo (`cassini.exe` 1,8 Mo, `llama.dll`, `ggml.dll`, `ggml-base.dll`,
+neuf variantes `ggml-cpu-*.dll` d'environ 1 Mo, `ggml-vulkan.dll` 43,1 Mo) ; 15,1 Mo sans le
+moteur carte. L'ancien noyau processeur seul faisait 5,7 Mo d'un seul fichier.
+
+**Vulkan contre CUDA** (2026-10-30, `duree_reel`, phrases A0 à E sur l'inventaire traduit, sans
+masque ; A0 est la phrase de démo) :
+
+| construction | amorce, lecture (s) | A0 (s) | A (s) | moyenne A0 à E (s) | écriture moyenne (s) |
+|---|---|---|---|---|---|
+| paquet, Vulkan | 18,3 | 13,9 | 13,9 | 7,1 | 6,9 |
+| `--features cuda` (mesure, non livré) | 0,6 | 14,8 | 16,5 | 7,6 | 7,6 |
+| paquet, carte masquée, `0x55` (4 fils) | 26,0 | 27,9 | 27,3 | 13,8 | 13,1 |
+| noyau processeur seul de 5.20, `0x55` | 28,5 | 29,8 | 29,5 | 15,1 | 14,3 |
+
+Vulkan n'est pas plus lent que CUDA : aucune décision à soumettre. La lecture de l'amorce (18,3 s
+contre 0,6 s) paie la compilation des shaders Vulkan par le pilote au premier usage ; le pilote la
+garde ensuite en cache (dans la session QGIS ci-dessous, première lecture en 4,0 s).
+
+**Session enchaînée dans QGIS** (même jour, mode opératoire de 5.20 : les onze phrases, QGIS
+3.44.15, chaque plan exécuté, noyau lancé depuis une copie du paquet, masque vérifié par la sonde).
+Composition en secondes ; la phrase 1 est hors critère :
+
+| n | carte (8 fils) | carte masquée, `0x55` | moteur carte retiré, `0x55` | 5.20, `0x55` |
+|---|---|---|---|---|
+| 1 | 20,3 | 55,0 | 55,0 | 54,7 |
+| 2 | 3,9 | 14,7 | 14,8 | 15,1 |
+| 3 | 8,4 | 22,1 | 21,5 | 26,1 |
+| 4 | 3,5 | 15,4 | 14,6 | 15,5 |
+| 5 | 3,8 | 9,8 | 9,5 | 10,0 |
+| 6 | 5,9 | 15,0 | 14,9 | 15,1 |
+| 7 | 3,7 | 12,7 | 11,6 | 12,7 |
+| 8 | 3,9 | 8,3 | 7,6 | 8,4 |
+| 9 | **14,2** | 35,3 | 33,5 | 34,8 |
+| 10 | 2,5 | 12,6 | 12,5 | 12,6 |
+| 11 | 5,1 | 12,5 | 12,4 | 12,7 |
+| total 2 à 10 | **49,9** | 145,9 | 140,5 | 150,3 |
+
+Carte masquée par `GGML_VK_VISIBLE_DEVICES=aucune` (Vulkan ne voit plus aucune carte) ; moteur
+carte retiré : copie du paquet sans `ggml-vulkan.dll`. Les deux composent sans erreur, pas plus
+lentement qu'en 5.20. Les issues sont les mêmes dans les trois colonnes (phrase 7 : refus ; phrase
+11 : plan dont l'exécution échoue sur `layer.not_vector`, comme en 5.20).
+
+**Lecture.**
+
+- Sur la carte, les phrases 2 à 10 passent de 150,3 à 49,9 s, et la démo en cours de session
+  (phrase 9) de 34,8 à **14,2 s** : 9 phrases sur 9 sous 30 s.
+- L'écriture ne gagne qu'un facteur deux environ (écriture moyenne 6,9 s contre 13,1 s ; A0, pour
+  165 jetons : 13,9 s contre 27,9 s, soit environ 12 jetons/s), et CUDA ne fait pas mieux : le coût n'est plus le modèle, qui tient entièrement sur
+  la carte, mais ce qui reste sur le processeur à chaque jeton, pour l'essentiel la grammaire, qui
+  examine à chaque pas tout le vocabulaire (248 000 jetons). Piste hors de ce ticket, sans changer
+  ni la grammaire ni l'issue (décodage glouton) : proposer d'abord le jeton le plus probable seul à
+  la grammaire, et ne filtrer tout le vocabulaire que s'il est refusé.
+
+**Justesse sur la carte** (paquet, `--features gpu`) : `plan_reel` 25/25, `question_reel` 12/12,
+`ecart_reel` 32/40 (plans 18/26, questions 8/8, refus 6/6) — les seuils du ticket.
