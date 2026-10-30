@@ -9,6 +9,7 @@ Aucune dépendance lourde ici (ni torch, ni transformers) : ce module se teste e
 from __future__ import annotations
 
 import json
+import random
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable
@@ -86,6 +87,26 @@ def drop_overlap(
         else:
             kept.append(example)
     return kept, removed
+
+
+def split_validation(
+    examples: list[Example], share: float, seed: int
+) -> tuple[list[Example], list[Example]]:
+    """Met de côté une part `share` des exemples pour la validation, tirée par la graine
+    `seed` : même fichier et même graine, même découpage. Chaque côté garde l'ordre du
+    fichier. Une part non nulle laisse au moins un exemple de chaque côté dès qu'il y en a
+    deux."""
+    if not 0 <= share < 1:
+        raise ValueError(f"part de validation hors de [0, 1) : {share}")
+    count = round(len(examples) * share)
+    if share > 0 and len(examples) >= 2:
+        count = min(max(count, 1), len(examples) - 1)
+    indices = list(range(len(examples)))
+    random.Random(seed).shuffle(indices)
+    chosen = set(indices[:count])
+    training = [e for i, e in enumerate(examples) if i not in chosen]
+    validation = [e for i, e in enumerate(examples) if i in chosen]
+    return training, validation
 
 
 def expected_answer(example: Example) -> str:

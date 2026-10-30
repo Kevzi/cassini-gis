@@ -315,12 +315,49 @@ la recette : les tests `python3 -I -m unittest discover -s training/entrainement
 Le dossier `travail/` garde les jeux engendrés et l'adaptateur au format de Hugging Face ;
 les GGUF intermédiaires en f16 (près de 9 Go chacun) sont effacés à la fin.
 
-### Un adaptateur de domaine, plus tard
+### Un adaptateur de domaine : `--exemples-externes` (5.23)
 
-La méthode garde la base intacte : l'adaptateur GGUF se charge sur la base GGUF. Un autre
-adaptateur de domaine, entraîné ailleurs sur **la même base à la même révision**, avec la
-même commande et le même prompt court, se chargera de la même façon, sans ré-entraîner
-celui-ci. Le choix entre adaptateurs reviendra au sélecteur de 5.14.
+La méthode garde la base intacte : l'adaptateur GGUF se charge sur la base GGUF. La même
+commande entraîne un autre adaptateur, de domaine, sur un fichier d'exemples écrit ailleurs,
+hors de ce dépôt : **même base à la même révision, mêmes graines, mêmes hyperparamètres,
+même prompt court**.
+
+```
+uv run --project training/entrainement python training/entrainement/pipeline.py \
+    --sortie <dossier hors dépôt> --exemples-externes <fichier.jsonl> --nom <nom>
+```
+
+- Le fichier est au format `chat` de `cassini-training` : une ligne `{"prompt", "completion"}`
+  par exemple, le prompt déjà mis en forme (prompt court, chatml), la réponse finie par
+  `<|im_end|>`. Il est lu et vérifié **avant** le GPU et le téléchargement : une ligne mal
+  formée arrête la commande avec le nom du fichier et le numéro de la ligne.
+- `--nom` : minuscules, chiffres, `-` et `_`. Un nom qui reprendrait une sortie du modèle
+  civil (tout nom qui commence par `cassini-composition`) est refusé avant tout travail.
+- **Mélange** : par défaut, le jeu civil engendré (`--exemples`, `--validation`) plus le fichier
+  externe ; `--externe-seul` n'entraîne que sur le fichier externe.
+- **Validation** : par défaut, 10 % du fichier externe, tirés par la graine de validation, sont
+  mis de côté pour le score ; `--validation-externe <fichier>` donne un second fichier à la place,
+  et rien n'est alors retiré du premier. Un prompt de validation vu à l'entraînement en est
+  retiré et compté.
+- Deux scores, séparés : `validation` (le jeu civil, quand il est mélangé, comme en 5.17) et
+  `validation_externe`. Ensemble, ils montrent si l'adaptateur oublie les commandes ordinaires.
+- `rapport.json` ne garde du fichier externe que son empreinte SHA-256 et ses comptes
+  (`donnees.externe`) ; l'essai `llama-completion` sur un exemple externe n'y écrit ni la sortie
+  ni l'attendu. Les sorties de validation externes (`validation-externe-sorties.jsonl`) restent
+  dans le dossier de sortie, hors dépôt.
+- `--reprendre` refuse un autre fichier externe ou un autre mélange que ceux de l'entraînement
+  commencé.
+
+| Fichier de sortie | Rôle |
+|---|---|
+| `qwen3.5-4b-base-Q4_K_M.gguf` | la base, identique à chaque entraînement, partagée par tous les adaptateurs |
+| `<nom>-adaptateur-f16.gguf` | l'adaptateur LoRA de domaine |
+| `<nom>.modele.json` | sa déclaration : base + adaptateur, prompt court |
+
+Pas de modèle fusionné. Pour l'installer, copier l'adaptateur et sa déclaration dans le dossier
+des modèles (celui que désigne `CASSINI_MODELS`, ou `models/` à côté de l'exécutable), et la
+base si elle n'y est pas déjà : `cassini run model.list '{}'` liste alors la déclaration. Le
+choix entre adaptateurs reviendra au sélecteur de 5.14.
 
 ### Mesure
 

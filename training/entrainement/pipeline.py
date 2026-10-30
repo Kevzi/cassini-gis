@@ -18,6 +18,14 @@
     base GGUF avec l'adaptateur GGUF, et modèle fusionné ;
 10. `rapport.json`.
 
+Avec `--exemples-externes <fichier> --nom <nom>` (ticket 5.23), la même commande entraîne un
+adaptateur de domaine sur un fichier d'exemples `{prompt, completion}` venu d'ailleurs : même
+base, mêmes graines, mêmes hyperparamètres. Par défaut le jeu civil engendré s'y ajoute
+(`--externe-seul` le retire) et une part du fichier est mise de côté pour la validation
+(`--validation-externe` donne un second fichier à la place). La sortie contient la base GGUF,
+l'adaptateur et sa déclaration, sous le nom choisi, sans fusion. Le fichier est lu et vérifié
+avant le GPU ; le rapport n'en garde que l'empreinte et les comptes, jamais le contenu.
+
 Python ne met rien en forme : le texte vu par le modèle vient de `training/src/prompt.rs`.
 Les modèles et poids sortent hors du dépôt. torch et transformers ne sont importés que dans
 les étapes qui en ont besoin : les gardes se testent sans eux (`tests/`).
@@ -31,10 +39,12 @@ import json
 import os
 import platform
 import random
+import re
 import shutil
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -101,6 +111,40 @@ DECLARATIONS = {
     MERGED_DECLARATION_NAME: {"model": MERGED_NAME, "prompt": "short"},
 }
 
+# Adaptateur de domaine (5.23) : part du fichier externe mise de côté pour le score, tirée
+# par la graine de validation ; nom choisi, en minuscules, sans séparateur de dossier.
+EXTERNAL_VALIDATION_SHARE = 0.1
+NAME_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}")
+CIVIL_PREFIX = "cassini-composition"
+
+
+@dataclass(frozen=True)
+class Outputs:
+    """Ce que la commande écrit dans le dossier de sortie : la base GGUF, un adaptateur, le
+    modèle fusionné s'il y en a un, et les déclarations lues par `model.list`."""
+
+    adapter: str
+    merged: str | None
+    declarations: dict[str, dict[str, str]]
+
+    @property
+    def files(self) -> list[str]:
+        return [BASE_NAME, self.adapter] + ([self.merged] if self.merged else [])
+
+
+CIVIL_OUTPUTS = Outputs(adapter=ADAPTER_NAME, merged=MERGED_NAME, declarations=DECLARATIONS)
+
+
+def external_outputs(name: str) -> Outputs:
+    """Sorties d'un adaptateur de domaine nommé `name` : la même base, son adaptateur et sa
+    déclaration (base + adaptateur, prompt court), sans fusion."""
+    adapter = f"{name}-adaptateur-f16.gguf"
+    return Outputs(
+        adapter=adapter,
+        merged=None,
+        declarations={f"{name}.modele.json": {"model": BASE_NAME, "adapter": adapter, "prompt": "short"}},
+    )
+
 
 class PipelineStop(RuntimeError):
     """Arrêt volontaire, avec un message clair pour le propriétaire."""
@@ -143,6 +187,141 @@ def check_gpu(total_memory: int | None) -> None:
             f"GPU trop petit : {total_memory / 1024**3:.1f} Gio, il en faut au moins "
             f"{MIN_GPU_MEMORY / 1024**3:.0f}"
         )
+
+
+def check_options(args: argparse.Namespace) -> Outputs:
+    """Vérifie les options du fichier externe et rend les sorties prévues. Sans
+    `--exemples-externes`, les sorties de 5.17, inchangées. Un nom qui reprendrait une sortie
+    du modèle civil est refusé avant tout travail."""
+    if args.external is None:
+        extra = [flag for flag, value in (("--nom", args.name), ("--externe-seul", args.external_only),
+                                          ("--validation-externe", args.external_validation)) if value]
+        if extra:
+            raise PipelineStop(f"{', '.join(extra)} n'a de sens qu'avec --exemples-externes <fichier>")
+        return CIVIL_OUTPUTS
+    if not args.name:
+        raise PipelineStop("--exemples-externes exige --nom <nom> : le nom de l'adaptateur et de sa déclaration")
+    if not NAME_PATTERN.fullmatch(args.name):
+        raise PipelineStop(
+            f"nom refusé : {args.name!r}. Lettres minuscules, chiffres, - et _ seulement, 63 au plus, "
+            "sans dossier ni extension"
+        )
+    outputs = external_outputs(args.name)
+    civil = {ADAPTER_NAME, MERGED_NAME, *DECLARATIONS}
+    clashes = sorted(civil & {outputs.adapter, *outputs.declarations})
+    if clashes or args.name.startswith(CIVIL_PREFIX):
+        raise PipelineStop(
+            f"nom refusé : {args.name!r} reprend le nom du modèle civil ({CIVIL_PREFIX}…"
+            + (f", {', '.join(clashes)}" if clashes else "")
+            + ") et l'écraserait dans un dossier de modèles. Choisissez un autre nom."
+        )
+    return outputs
+
+
+@dataclass(frozen=True)
+class External:
+    """Le fichier externe lu et découpé, et ce que le rapport en garde : empreintes et
+    comptes, jamais un exemple."""
+
+    training: list[data.Example]
+    validation: list[data.Example]
+    info: dict[str, Any]
+
+
+def read_dataset(path: Path) -> list[data.Example]:
+    """Lit un fichier d'exemples externe ; toute ligne mal formée arrête la chaîne avec le nom
+    du fichier et le numéro de la ligne."""
+    if not path.is_file():
+        raise PipelineStop(f"fichier d'exemples introuvable : {path}")
+    try:
+        examples = data.read_jsonl(path)
+    except data.UnreadableDataset as error:
+        raise PipelineStop(f"{path} : {error}") from error
+    except (OSError, UnicodeDecodeError) as error:
+        raise PipelineStop(f"{path} : illisible ({error})") from error
+    if not examples:
+        raise PipelineStop(f"{path} : aucun exemple")
+    # La réponse doit se lire comme un plan : sinon la notation échouerait après l'entraînement.
+    numbers = [n for n, line in enumerate(path.read_text(encoding="utf-8").split("\n"), start=1) if line.strip()]
+    for number, example in zip(numbers, examples):
+        if scoring.read_plan(data.expected_answer(example)) is None:
+            raise PipelineStop(f"{path} : ligne {number} : la réponse n'est pas un plan lisible")
+    return examples
+
+
+def read_external(path: Path, validation_path: Path | None) -> External:
+    """Lit le fichier externe et sa validation : le second fichier s'il est donné (rien
+    n'est alors retiré du premier), sinon une part du premier tirée par la graine."""
+    examples = read_dataset(path)
+    info: dict[str, Any] = {"empreinte": sha256(path), "exemples": len(examples)}
+    if validation_path is not None:
+        training, validation = examples, read_dataset(validation_path)
+        info |= {"validation_source": "fichier", "empreinte_validation": sha256(validation_path)}
+    else:
+        if len(examples) < 2:
+            raise PipelineStop(f"{path} : au moins deux exemples, pour en garder un pour la validation")
+        training, validation = data.split_validation(examples, EXTERNAL_VALIDATION_SHARE, VALIDATION_SEED)
+        info |= {"validation_source": "part du fichier", "part_validation": EXTERNAL_VALIDATION_SHARE}
+    info["exemples_validation"] = len(validation)
+    return External(training=training, validation=validation, info=info)
+
+
+def mix(
+    civil_training: list[data.Example],
+    civil_validation: list[data.Example],
+    external: External | None,
+) -> dict[str, Any]:
+    """Assemble les jeux : l'entraînement réunit le civil et l'externe, et chaque validation
+    perd les prompts vus à l'entraînement, comptés. Sans fichier externe, le seul retrait de 5.17."""
+    external_training = external.training if external else []
+    training = civil_training + external_training
+    civil_kept, civil_overlap = data.drop_overlap(civil_validation, training)
+    external_kept, external_overlap = data.drop_overlap(external.validation if external else [], training)
+    return {
+        "civil_training": civil_training,
+        "external_training": external_training,
+        "civil_validation": civil_kept,
+        "external_validation": external_kept,
+        "civil_overlap": civil_overlap,
+        "external_overlap": external_overlap,
+    }
+
+
+def check_resume(report: dict[str, Any], external: External | None, civil: bool) -> None:
+    """À la reprise, refuse un autre fichier externe ou un autre mélange que ceux de
+    l'entraînement commencé (lus dans son rapport) : l'adaptateur déjà écrit ne leur
+    correspondrait pas."""
+    if "donnees" not in report:
+        return
+    before = report["donnees"].get("externe")
+    now = external.info | {"melange": mode_label(civil)} if external is not None else None
+    keys = ("empreinte", "empreinte_validation", "melange")
+    if (before is None) != (now is None) or (
+        before is not None and any(before.get(k) != now.get(k) for k in keys)
+    ):
+        raise PipelineStop(
+            "--reprendre avec d'autres exemples externes ou un autre mélange que l'entraînement commencé : "
+            "relancez avec les mêmes options, ou dans un dossier vide"
+        )
+
+
+def mode_label(civil: bool) -> str:
+    return "civil + externe" if civil else "externe seul"
+
+
+def trial_example(external_validation: list[data.Example],
+                  civil_validation: list[data.Example]) -> tuple[data.Example, bool]:
+    """L'exemple de l'essai `llama-completion`, et s'il est externe (son contenu ne s'écrit
+    alors ni au rapport ni au journal). Un plan d'appels externe d'abord, puis civil, puis le
+    premier exemple externe."""
+    for examples, private in ((external_validation, True), (civil_validation, False)):
+        try:
+            return first_calls_example(examples), private
+        except PipelineStop:
+            pass
+    if external_validation:
+        return external_validation[0], True
+    raise PipelineStop("aucun exemple de validation pour l'essai")
 
 
 def gpu_memory() -> tuple[int | None, str | None]:
@@ -386,29 +565,31 @@ def prepare_llama_cpp() -> Path:
     return folder
 
 
-def convert(llama: Path, base_dir: str, adapter_dir: Path, output: Path, work: Path, resume: bool) -> None:
+def convert(llama: Path, base_dir: str, adapter_dir: Path, output: Path, work: Path, resume: bool,
+            outputs: Outputs = CIVIL_OUTPUTS) -> None:
     py = sys.executable
     base_f16 = work / "base-f16.gguf"
     merged_f16 = work / "fusionne-f16.gguf"
-    adapter = output / ADAPTER_NAME
+    adapter = output / outputs.adapter
     quantize = llama / "build" / "bin" / "llama-quantize"
 
     def todo(path: Path) -> bool:
         return not (resume and path.exists())
 
-    if todo(output / BASE_NAME) or todo(output / MERGED_NAME):
+    merge = outputs.merged is not None
+    if todo(output / BASE_NAME) or (merge and todo(output / outputs.merged)):
         if todo(base_f16):
             write_atomically(base_f16, [py, str(llama / "convert_hf_to_gguf.py"), base_dir, "--outtype", "f16",
                                         "--outfile", str(temporary(base_f16))])
     if todo(adapter):
         write_atomically(adapter, [py, str(llama / "convert_lora_to_gguf.py"), str(adapter_dir), "--base", base_dir,
                                    "--outtype", "f16", "--outfile", str(temporary(adapter))])
-    if todo(output / MERGED_NAME):
+    if merge and todo(output / outputs.merged):
         if todo(merged_f16):
             write_atomically(merged_f16, [str(llama / "build" / "bin" / "llama-export-lora"), "-m", str(base_f16),
                                           "--lora", str(adapter), "-o", str(temporary(merged_f16))])
-        write_atomically(output / MERGED_NAME,
-                         [str(quantize), str(merged_f16), str(temporary(output / MERGED_NAME)), QUANTIZATION])
+        write_atomically(output / outputs.merged,
+                         [str(quantize), str(merged_f16), str(temporary(output / outputs.merged)), QUANTIZATION])
     if todo(output / BASE_NAME):
         write_atomically(output / BASE_NAME,
                          [str(quantize), str(base_f16), str(temporary(output / BASE_NAME)), QUANTIZATION])
@@ -426,9 +607,11 @@ def first_calls_example(examples: list[data.Example]) -> data.Example:
     raise PipelineStop("aucun exemple de validation n'attend un plan d'appels")
 
 
-def try_model(llama: Path, model_args: list[str], example: data.Example, work: Path, label: str) -> dict[str, Any]:
+def try_model(llama: Path, model_args: list[str], example: data.Example, work: Path, label: str,
+              private: bool = False) -> dict[str, Any]:
     """Une demande de validation passée à `llama-completion` (prompt brut, déjà en chatml,
-    décodage glouton) : la sortie doit se lire comme un plan JSON."""
+    décodage glouton) : la sortie doit se lire comme un plan JSON. Sur un exemple externe
+    (`private`), ni la sortie ni l'attendu ne s'écrivent au journal ou au rapport."""
     prompt_file = work / "essai-prompt.txt"
     prompt_file.write_text(example.prompt, encoding="utf-8")
     result = run(
@@ -442,8 +625,7 @@ def try_model(llama: Path, model_args: list[str], example: data.Example, work: P
     for end in ("[end of text]", data.END_OF_ANSWER):
         output = output.split(end)[0].strip()
     expected = data.expected_answer(example)
-    log(f"essai llama-completion ({label}) : {output}")
-    return {
+    trial = {
         "outil": "llama-completion",
         "modele": label,
         "sortie": output,
@@ -451,6 +633,13 @@ def try_model(llama: Path, model_args: list[str], example: data.Example, work: P
         "se_lit_comme_un_plan": scoring.read_plan(output) is not None,
         "juste": scoring.plan_matches(output, expected),
     }
+    if private:
+        del trial["sortie"], trial["attendu"]
+        trial["exemple"] = "externe, contenu non consigné"
+        log(f"essai llama-completion ({label}) : plan lisible {trial['se_lit_comme_un_plan']}, juste {trial['juste']}")
+    else:
+        log(f"essai llama-completion ({label}) : {output}")
+    return trial
 
 
 # -- orchestration -------------------------------------------------------------------------
@@ -462,14 +651,14 @@ def read_report(path: Path) -> dict[str, Any]:
     return {}
 
 
-def write_declarations(output: Path) -> list[str]:
+def write_declarations(output: Path, declarations: dict[str, dict[str, str]] = DECLARATIONS) -> list[str]:
     """Écrit les déclarations de modèle à côté des GGUF (base + adaptateur, fusionné), sous un
     nom temporaire puis renommées, et rend leurs noms. Réécrites à l'identique à la reprise."""
-    for name, declaration in DECLARATIONS.items():
+    for name, declaration in declarations.items():
         partial = temporary(output / name)
         partial.write_text(json.dumps(declaration, ensure_ascii=False) + "\n", encoding="utf-8")
         partial.replace(output / name)
-    return list(DECLARATIONS)
+    return list(declarations)
 
 
 def write_report(path: Path, report: dict[str, Any]) -> None:
@@ -502,7 +691,12 @@ def repository_state() -> dict[str, Any]:
 
 def launch(args: argparse.Namespace) -> dict[str, Any]:
     output: Path = args.output.resolve()
-    # Le GPU d'abord : un refus ne laisse ni dossier rempli, ni téléchargement.
+    # Les options et le fichier externe avant tout coût : un nom refusé ou une ligne mal formée
+    # n'attend ni le GPU, ni un téléchargement.
+    outputs = check_options(args)
+    external = read_external(args.external, args.external_validation) if args.external else None
+    civil = not args.external_only
+    # Le GPU ensuite : un refus ne laisse ni dossier rempli, ni téléchargement.
     memory, gpu_name = gpu_memory()
     check_gpu(memory)
     log(f"GPU : {gpu_name}, {memory / 1024**3:.1f} Gio")
@@ -524,16 +718,19 @@ def launch(args: argparse.Namespace) -> dict[str, Any]:
         "versions": versions(),
     })
     report.pop("commit_cassini", None)
+    check_resume(report, external, civil)
     write_report(report_path, report)
 
     # 3. jeux
     data_dir = work / "donnees"
-    if args.resume and (data_dir / "validation.jsonl").exists():
+    if not civil:
+        sets = {}
+    elif args.resume and (data_dir / "validation.jsonl").exists():
         sets = {"entrainement": data_dir / "entrainement.jsonl", "validation": data_dir / "validation.jsonl"}
     else:
         sets = generate(data_dir, args.examples, args.validation)
-    training = data.read_jsonl(sets["entrainement"])
-    validation, overlap = data.drop_overlap(data.read_jsonl(sets["validation"]), training)
+    mixed = mix(data.read_jsonl(sets["entrainement"]) if civil else [],
+                data.read_jsonl(sets["validation"]) if civil else [], external)
 
     # 4. base
     from huggingface_hub import snapshot_download
@@ -546,23 +743,53 @@ def launch(args: argparse.Namespace) -> dict[str, Any]:
     def length(e: data.Example) -> int:
         return len(encode(tokenizer, e)[0])
 
-    training, too_long = data.drop_too_long(training, length, MAX_LENGTH)
-    validation, too_long_validation = data.drop_too_long(validation, length, MAX_LENGTH)
+    training, too_long = data.drop_too_long(mixed["civil_training"], length, MAX_LENGTH)
+    validation, too_long_validation = data.drop_too_long(mixed["civil_validation"], length, MAX_LENGTH)
+    external_training, external_too_long = data.drop_too_long(mixed["external_training"], length, MAX_LENGTH)
+    external_validation, external_too_long_validation = data.drop_too_long(
+        mixed["external_validation"], length, MAX_LENGTH)
+    training = training + external_training
+    if not training:
+        raise PipelineStop("aucun exemple d'entraînement ne tient dans la longueur maximale")
+    # Un jeu de validation vide se voit avant l'entraînement, pas après.
+    for scored, examples, label in ((civil, validation, "de validation"),
+                                    (external is not None, external_validation, "de validation externe")):
+        if scored and not examples:
+            raise PipelineStop(f"aucun exemple {label} : le score ne peut pas être mesuré")
     lengths = sorted(length(e) for e in training)
     report["donnees"] = {
         "entrainement": len(training),
-        "validation": len(validation),
-        "ecartes_trop_longs": too_long,
-        "ecartes_trop_longs_validation": too_long_validation,
-        "validation_retires_car_vus_a_l_entrainement": overlap,
+        **({
+            "validation": len(validation),
+            "ecartes_trop_longs": too_long,
+            "ecartes_trop_longs_validation": too_long_validation,
+            "validation_retires_car_vus_a_l_entrainement": mixed["civil_overlap"],
+        } if civil else {}),
         "jetons_mediane": lengths[len(lengths) // 2],
         "jetons_max": lengths[-1],
-        "empreinte_entrainement": sha256(sets["entrainement"]),
-        "empreinte_validation": sha256(sets["validation"]),
+        **({
+            "empreinte_entrainement": sha256(sets["entrainement"]),
+            "empreinte_validation": sha256(sets["validation"]),
+        } if civil else {}),
     }
+    if external is not None:
+        # Empreintes et comptes seulement : aucun exemple externe n'entre au rapport.
+        report["donnees"]["externe"] = {
+            "nom": args.name,
+            "melange": mode_label(civil),
+            **external.info,
+            "entrainement": len(external_training),
+            "validation": len(external_validation),
+            "ecartes_trop_longs": external_too_long,
+            "ecartes_trop_longs_validation": external_too_long_validation,
+            "validation_retires_car_vus_a_l_entrainement": mixed["external_overlap"],
+        }
     write_report(report_path, report)
     log(f"{len(training)} exemples d'entraînement, {len(validation)} de validation, "
         f"{too_long} écartés car trop longs")
+    if external is not None:
+        log(f"dont {len(external_training)} exemples externes ; {len(external_validation)} de validation externe, "
+            f"{external_too_long} écartés car trop longs")
 
     # 5 et 6. entraînement et validation
     adapter_dir = work / "adaptateur-hf"
@@ -573,15 +800,24 @@ def launch(args: argparse.Namespace) -> dict[str, Any]:
         write_report(report_path, report)
     else:
         model = None
-    if not (args.resume and "validation" in report):
+    # Le score civil (5.17) quand le jeu civil est mélangé, et le score externe à part : les deux
+    # montrent si l'adaptateur de domaine oublie les commandes ordinaires.
+    scores = ([("validation", validation, "validation-sorties.jsonl", "de validation")] if civil else []) + (
+        [("validation_externe", external_validation, "validation-externe-sorties.jsonl", "de validation externe")]
+        if external is not None else [])
+    for key, examples, outputs_file, label in scores:
+        if args.resume and key in report:
+            continue
+        if not examples:
+            raise PipelineStop(f"aucun exemple {label} : le score ne peut pas être mesuré")
         if model is None:
             from peft import PeftModel
 
             model = PeftModel.from_pretrained(load_model(base_dir), adapter_dir)
-        log(f"validation sur {len(validation)} exemples")
-        report["validation"] = validate(model, tokenizer, validation, output / "validation-sorties.jsonl")
+        log(f"{label.removeprefix('de ')} sur {len(examples)} exemples")
+        report[key] = validate(model, tokenizer, examples, output / outputs_file)
         write_report(report_path, report)
-        log(f"score de validation : {report['validation']['justes']}/{report['validation']['total']}")
+        log(f"score {label} : {report[key]['justes']}/{report[key]['total']}")
     del model
     import torch
 
@@ -589,26 +825,34 @@ def launch(args: argparse.Namespace) -> dict[str, Any]:
 
     # 7 et 8. GGUF
     llama = prepare_llama_cpp()
-    convert(llama, base_dir, adapter_dir, output, work, args.resume)
+    convert(llama, base_dir, adapter_dir, output, work, args.resume, outputs)
     report["sorties"] = {
         name: {"fichier": name, "octets": (output / name).stat().st_size, "sha256": sha256(output / name)}
-        for name in (BASE_NAME, ADAPTER_NAME, MERGED_NAME)
+        for name in outputs.files
     }
     report["sorties"][BASE_NAME]["role"] = "base, sur laquelle se charge l'adaptateur"
-    report["sorties"][ADAPTER_NAME]["role"] = "adaptateur LoRA de composition"
-    report["sorties"][MERGED_NAME]["role"] = "base et adaptateur fusionnés, quantifiés"
+    report["sorties"][outputs.adapter]["role"] = (
+        "adaptateur LoRA de composition" if external is None else "adaptateur LoRA de domaine")
+    if outputs.merged:
+        report["sorties"][outputs.merged]["role"] = "base et adaptateur fusionnés, quantifiés"
     # Les déclarations : le dossier de sortie, copié dans un dossier de modèles, est prêt.
-    report["declarations"] = write_declarations(output)
+    report["declarations"] = write_declarations(output, outputs.declarations)
     write_report(report_path, report)
 
-    # 9. essai, par les deux chemins, sur une demande qui attend un plan d'appels
-    example = first_calls_example(validation)
+    # 9. essai sur une demande qui attend un plan d'appels : par les deux chemins pour le modèle
+    # civil, par la base et l'adaptateur seuls pour un adaptateur de domaine (pas de fusion).
+    if external is None:
+        example, private = first_calls_example(validation), False
+    else:
+        example, private = trial_example(external_validation, validation)
     report["essai"] = {
         "base_et_adaptateur": try_model(
-            llama, ["-m", str(output / BASE_NAME), "--lora", str(output / ADAPTER_NAME)],
-            example, work, "base GGUF + adaptateur GGUF"),
-        "fusionne": try_model(llama, ["-m", str(output / MERGED_NAME)], example, work, "modèle fusionné"),
+            llama, ["-m", str(output / BASE_NAME), "--lora", str(output / outputs.adapter)],
+            example, work, "base GGUF + adaptateur GGUF", private),
     }
+    if outputs.merged:
+        report["essai"]["fusionne"] = try_model(
+            llama, ["-m", str(output / outputs.merged)], example, work, "modèle fusionné", private)
     write_report(report_path, report)
     unreadable = [name for name, trial in report["essai"].items() if not trial["se_lit_comme_un_plan"]]
     if unreadable and args.max_steps is not None:
@@ -632,6 +876,14 @@ def main(argv: list[str] | None = None) -> int:
                         help="exemples de validation engendrés")
     parser.add_argument("--pas-max", dest="max_steps", type=int, default=None,
                         help="borne de pas (essai rapide de la chaîne)")
+    parser.add_argument("--exemples-externes", dest="external", type=Path, default=None,
+                        help="fichier d'exemples {prompt, completion} : entraîne un adaptateur de domaine")
+    parser.add_argument("--nom", dest="name", default=None,
+                        help="nom de l'adaptateur de domaine et de sa déclaration (avec --exemples-externes)")
+    parser.add_argument("--externe-seul", dest="external_only", action="store_true",
+                        help="n'entraîne que sur le fichier externe, sans le jeu civil engendré")
+    parser.add_argument("--validation-externe", dest="external_validation", type=Path, default=None,
+                        help="second fichier pour le score externe, au lieu d'une part du premier")
     args = parser.parse_args(argv)
     start = time.time()
     try:
