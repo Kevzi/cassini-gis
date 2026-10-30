@@ -405,6 +405,53 @@ s'arrête). La connexion est fermée juste après. Le noyau confie d'abord la no
 les relais, puis leur laisse **une demi-seconde en tout**, quel que soit leur nombre, pour la
 recevoir : un relais qui ne lit plus ne retient pas la session au-delà (AD-4).
 
+### Le relais vu de `cassini mcp` (ticket 5.25)
+
+`cassini mcp` a deux modes (AD-13), choisis à chaque `tools/list` et `tools/call` de son client,
+jamais par sondage :
+
+- **Relais** : une connexion vivante au canal est gardée ; sinon `cassini mcp` se branche
+  (`ChannelName::for_user`) et envoie `external.attach`. Une réponse fait le mode relais : les
+  outils sont les entrées `available` du catalogue rendu (nom `id`, description en français puis
+  en anglais, schémas de la session), commandes QGIS comprises ; le registre propre du relais
+  n'est jamais lu. Chaque `tools/call` devient un `command.run`. `--project` est ignoré, et aucun
+  chemin ne part (AD-9).
+- **Autonome** : aucun canal, ou une session qui ne répond pas. Les outils sont les commandes
+  `runs_in: core` (ticket 5.7) ; avec `--project`, le projet est ouvert puis refermé à chaque
+  appel, comme `cassini run` : le verrou du journal n'est jamais tenu entre deux appels. Un projet
+  introuvable reste refusé au démarrage (code 1).
+- **Versions différentes** : `external.attach` répond `session.protocol_mismatch`. Les outils
+  restent ceux du mode autonome, et chaque `tools/call` rend un résultat `isError` portant cette
+  erreur, dont le message nomme le binaire à mettre à jour ; rien n'est exécuté.
+
+Le serveur annonce `tools.listChanged` ; dès que le catalogue servi diffère du dernier servi
+(changement de mode ou de catalogue), il envoie `notifications/tools/list_changed`. Il l'envoie
+aussi dès la réception d'`external.session_lost` (ou la fin du flux du canal), et la requête
+suivante est servie en autonome.
+
+Traduction (AD-29) :
+
+| MCP | Canal d'IA externe |
+|---|---|
+| `tools/call` d'un outil du catalogue | `command.run {command, params}`, `id` propre à la connexion |
+| `notifications/cancelled` de cet appel | notification `request.cancel {id}`, puis attente de la réponse du `command.run` (le service MCP l'abandonne, le client ayant annulé) |
+| réponse `result` | résultat structuré |
+| erreur portant un `ErrorReport` (AD-21) | résultat `isError`, texte = `ErrorReport` en JSON (comme en 5.7) |
+| `external.session_lost` ou fin du flux pendant l'appel | résultat `isError` `external.session_lost` ; l'appel n'est **jamais** réexécuté en autonome |
+| erreur sans `ErrorReport` (erreur de protocole de la session, par exemple `-32602`) | erreur de protocole MCP de même code et même message |
+| outil hors catalogue du mode courant | erreur de protocole `-32602` |
+
+Appels simultanés : en relais, la session n'exécute qu'un appel à la fois ; un second `tools/call`
+pendant qu'un premier est en cours reçoit aussitôt le résultat `isError` `session.busy`. En
+autonome, le fil d'exécution les met en file et les sert dans l'ordre.
+
+Le runtime de `cassini mcp` n'attend jamais un appel de façon bloquante : chaque requête est une
+tâche, et `ping` est servi pendant une commande longue, dans les deux modes. L'annulation du
+client devient `request.cancel` en relais ; en autonome, la réponse de l'appel annulé est
+abandonnée, mais la commande du noyau va jusqu'au bout (et, avec `--project`, est journalisée).
+Seuls transports : l'entrée et la sortie standard côté client, le canal d'IA externe côté session
+(AD-14).
+
 ## Erreurs
 
 | Code | Quand |
@@ -432,6 +479,7 @@ recevoir : un relais qui ne lit plus ne retient pas la session au-delà (AD-4).
 | `session.not_started` | toute requête de l'extension avant `session.hello`, `session.external` compris ; `external.attach` ou `command.run` d'un relais sans session ouverte |
 | `external.not_approved` | `command.run` d'un relais alors que la case « Me demander avant chaque appel » est cochée ; rien n'est exécuté |
 | `external.path_refused` | `command.run` d'un relais dont un paramètre de chemin est absolu ou sort du projet ; rien n'est exécuté ni journalisé |
+| `external.session_lost` | résultat `isError` d'un `tools/call` de `cassini mcp` en relais : la session a été perdue pendant l'appel (interrupteur coupé, QGIS fermé) ; rien n'est réexécuté en autonome |
 
 Toute autre requête reçue pendant un ordre reçoit sa réponse normale, sans
 attendre la fin de l'ordre.
