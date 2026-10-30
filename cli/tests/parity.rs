@@ -1,8 +1,11 @@
 //! Parité des points d'entrée (R3, AD-13) : une même commande du registre donne le
-//! même résultat par `cassini run` et par `cassini serve`, sans QGIS.
+//! même résultat par `cassini run`, par `cassini serve` et par `cassini mcp`, sans QGIS.
 //!
 //! Le test lance le vrai binaire, pour chaque commande `core` du registre et chacun
 //! de ses exemples déclarés, sur deux projets de test de même contenu.
+
+#[path = "support/mcp_client.rs"]
+mod mcp_client;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -98,6 +101,17 @@ fn via_serve(id: &str, params: &Value, project: &str) -> String {
     canonical(&reply["result"])
 }
 
+/// Résultat canonique de la même commande par `cassini mcp --project` : `tools/call`.
+fn via_mcp(id: &str, params: &Value, project: &str) -> String {
+    let mut client = mcp_client::McpClient::connect(&["--project", project], &models_dir());
+    let reply = client.call_tool(id, params.clone());
+    client.assert_no_server_request();
+    let (status, _) = client.close();
+    assert!(status.success(), "mcp a échoué");
+    assert_eq!(reply["result"]["isError"], false, "mcp {id} : {reply}");
+    canonical(&reply["result"]["structuredContent"])
+}
+
 /// Toutes les paires (commande, paramètres) à comparer ; échoue si une commande
 /// `core` n'a aucun exemple, pour qu'aucune n'échappe à la parité.
 fn core_calls() -> Vec<(String, Value)> {
@@ -138,14 +152,17 @@ fn cleanup(dirs: &[&Path]) {
 }
 
 #[test]
-fn every_core_command_gives_the_same_result_through_run_and_serve() {
+fn every_core_command_gives_the_same_result_through_run_serve_and_mcp() {
     for (id, params) in core_calls() {
         let (dir_run, project_run) = temp_project("run");
         let (dir_serve, project_serve) = temp_project("serve");
+        let (dir_mcp, project_mcp) = temp_project("mcp");
         let a = via_run(&id, &params, &project_run);
         let b = via_serve(&id, &params, &project_serve);
-        cleanup(&[&dir_run, &dir_serve]);
+        let c = via_mcp(&id, &params, &project_mcp);
+        cleanup(&[&dir_run, &dir_serve, &dir_mcp]);
         compare(&id, &params, &a, &b).unwrap();
+        compare(&id, &params, &a, &c).unwrap();
         assert!(!a.is_empty());
     }
 }

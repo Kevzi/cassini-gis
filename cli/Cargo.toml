@@ -15,6 +15,10 @@ path = "src/main.rs"
 cassini-ai = { path = "../ai" }
 cassini-core = { path = "../core" }
 serde_json = "1"
+# Serveur MCP (ticket 5.7, decision du proprietaire 2026-10-30) : rmcp (Apache-2.0), sans
+# transport reseau, et tokio (MIT) reduit au runtime a un fil et aux flux standard (AD-14).
+rmcp = { version = "=3.8.0", default-features = false, features = ["server"] }
+tokio = { version = "1", default-features = false, features = ["rt", "io-std"] }
 
 # Paquet livre (ticket 5.21) : moteurs de calcul a part, carte graphique Vulkan prise si elle se
 # charge, processeur sinon. Hors defaut (SDK Vulkan requis a la construction).
