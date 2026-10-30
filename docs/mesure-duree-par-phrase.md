@@ -445,3 +445,59 @@ jetons, 30 s) qui dépasse, hors de ce que l'inventaire peut alléger.
 scores de 5.19, aucun ne baisse. Ces essais composent sur des inventaires fixes, sans couche de
 résultat : les deux leviers n'y changent rien, ils vérifient seulement que rien d'autre n'a bougé.
 La justesse sur une session enchaînée reste portée par la recette ci-dessus.
+
+## Fils par défaut : cœurs physiques autorisés (ticket 5.20)
+
+Le nombre de fils par défaut du moteur (`default_threads`) compte désormais les **cœurs physiques
+dont au moins un processeur logique est autorisé au processus** par son masque d'affinité, sous
+Windows (`GetProcessAffinityMask`, `GetLogicalProcessorInformation`) et sous Linux
+(`/proc/self/status`, un cœur par masque distinct de
+`/sys/devices/system/cpu/cpuN/topology/thread_siblings_list`), sans dépasser
+`available_parallelism` ; si la lecture échoue, ou au-delà de 64 processeurs logiques, il retombe
+sur l'ancienne formule (cœurs physiques de la machine). `CASSINI_THREADS` garde la priorité. La
+ligne `cassini-timings` donne maintenant les fils pris (`fils=`).
+
+**Fils pris** (5800X, lus dans `cassini-timings` ou par un petit programme lancé avec
+`start /affinity`) : sans masque **8** ; `0x55` **4** ; `0x3` **1** ; `0x7` **2**. Sous Linux
+(WSL, `taskset`), mêmes chiffres.
+
+**Correction des mesures 5.19 et 5.22.** Leur sonde posait le masque par `ctypes` sans déclarer
+les types des arguments : le pseudo-handle de `GetCurrentProcess` était tronqué et
+`SetProcessAffinityMask` échouait sans bruit. Le premier essai de 5.20, avec la même sonde, a pris
+8 fils sous un `0x55` prétendu : ces deux tableaux ont donc été mesurés **sans masque, à 4 fils**,
+et non sur 4 cœurs. La sonde de 5.20 déclare les types, vérifie le retour et affiche le masque
+effectif (`0x55`).
+
+**Mesure** (2026-10-30, mode opératoire de 5.22 : les onze phrases enchaînées, QGIS 3.44.15, modèle
+livré, noyau construit sans CUDA ; noyau lancé depuis `C:\ct\release` copié dans la sonde, QGIS du
+propriétaire ouvert, inactif, d'où une copie du projet de test pour son journal). Composition en
+secondes ; la phrase 1 (chargement, première lecture) est hors critère :
+
+| n | `0x55`, défaut (4 fils) | `0x55`, `CASSINI_THREADS=4` | sans masque, défaut (8 fils) | sans masque, 16 fils |
+|---|---|---|---|---|
+| 1 | 54,7 | 54,3 | 50,0 | 58,9 |
+| 2 | 15,1 | 15,0 | 13,3 | 15,4 |
+| 3 | 26,1 | 21,7 | 21,5 | 25,2 |
+| 4 | 15,5 | 15,0 | 12,7 | 13,0 |
+| 5 | 10,0 | 11,8 | 8,6 | 11,1 |
+| 6 | 15,1 | 15,5 | 13,3 | 15,8 |
+| 7 | 12,7 | 12,3 | 10,3 | 11,6 |
+| 8 | 8,4 | 8,3 | 7,9 | 9,4 |
+| 9 | 34,8 | 36,8 | **32,0** | 42,7 |
+| 10 | 12,6 | 13,1 | 10,1 | 12,8 |
+| 11 | 12,7 | 6,3 | 11,9 | 7,1 |
+| total 2 à 10 | 150,3 | 149,5 | **129,7** | 157,0 |
+
+**Lecture.**
+
+- **Sous `0x55`**, le défaut prend 4 fils, comme `CASSINI_THREADS=4` : mêmes durées à l'écart de
+  mesure près (150,3 contre 149,5 s sur les phrases 2 à 10). L'écart de la phrase 3 (26,1 contre
+  21,7 s) tient à l'écriture (18,6 contre 15,1 s pour les mêmes 97 jetons), celui de la phrase 11 à
+  l'issue : deux appels et un échec `layer.not_vector` dans un cas, une question dans l'autre —
+  le modèle ne répond pas toujours pareil à cette phrase, ce n'est pas un effet du nombre de fils.
+- **Sans masque, 8 fils (cœurs physiques) battent 16 (fils logiques)** : la lecture du prompt
+  gagne un peu à 16 fils (phrase 1 : 17,8 contre 19,6 s), mais l'écriture jeton par jeton y perd
+  nettement (phrase 9 : 37,4 contre 26,4 s), et le total des phrases 2 à 10 passe de 129,7 à
+  157,0 s. Le défaut reste aux cœurs physiques ; aucune décision n'est à soumettre.
+- Sur les phrases 2 à 10, 8 sur 9 passent sous 30 s dans les quatre réglages ; la phrase 9 (démo
+  en cours de session) reste au-dessus, à 32,0 s au mieux (8 fils sans masque).

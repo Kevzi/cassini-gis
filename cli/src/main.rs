@@ -303,8 +303,9 @@ impl cassini_core::serve::Composer for ModelComposer {
 /// Générateur du canal, branché sur le modèle `files`. Deux variables d'environnement servent à
 /// mesurer une session réelle (ticket 5.19), sans rien changer sans elles : `CASSINI_TIMINGS` non
 /// vide fait écrire à chaque appel au modèle ses durées sur la sortie d'erreur (une ligne, sans
-/// rien de la demande) ; `CASSINI_THREADS=<n>` fixe le nombre de fils du moteur (sous Windows, le
-/// défaut ne voit pas le masque d'affinité : sans elle, un noyau bridé à 4 cœurs prendrait 8 fils).
+/// rien de la demande) ; `CASSINI_THREADS=<n>` fixe le nombre de fils du moteur, à la place du
+/// défaut (`cassini_ai::default_threads` : les cœurs physiques autorisés par le masque d'affinité,
+/// sous Windows et sous Linux).
 fn measured_generator(
     files: cassini_ai::ModelFiles,
 ) -> impl FnMut(
@@ -315,22 +316,24 @@ fn measured_generator(
         .ok()
         .and_then(|v| v.parse::<std::num::NonZeroU32>().ok());
     move |request| {
+        let n = threads.unwrap_or_else(cassini_ai::default_threads);
         let (completion, t) = cassini_ai::generate_files_measured(
             &files,
             request.turns,
             Some(request.grammar),
             request.max_new_tokens,
-            threads,
+            Some(n),
         )?;
         if report {
             eprintln!(
-                "cassini-timings chargement={:.2}s lecture={:.2}s jetons={} repris={} ecriture={:.2}s ecrits={}",
+                "cassini-timings chargement={:.2}s lecture={:.2}s jetons={} repris={} ecriture={:.2}s ecrits={} fils={}",
                 t.load.as_secs_f64(),
                 t.prompt.as_secs_f64(),
                 t.prompt_tokens,
                 t.cached_tokens,
                 t.write.as_secs_f64(),
-                t.written_tokens
+                t.written_tokens,
+                n
             );
         }
         Ok(completion)
