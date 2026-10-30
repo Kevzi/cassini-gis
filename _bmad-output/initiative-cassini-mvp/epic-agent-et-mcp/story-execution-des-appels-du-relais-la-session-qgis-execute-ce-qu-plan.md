@@ -3,7 +3,7 @@ title: "Exécution des appels du relais : la session QGIS exécute ce que l'IA e
 type: 'feature'
 ticket: '28'
 created: '2026-10-30'
-status: 'built'
+status: 'done'
 baseline_revision: '7e2bb23bbb868de6444e9e434dfd7d9ed52e180a'
 route: 'full'
 route_source: 'auto'
