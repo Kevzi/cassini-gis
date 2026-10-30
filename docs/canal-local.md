@@ -1,11 +1,14 @@
 # Canal local : ordres du noyau, annulation et rejeu
 
 Le canal de `cassini serve` est du JSON-RPC 2.0, un message par ligne, sur
-l'entrée et la sortie standard, **dans les deux sens** (AD-3). Le protocole reste
-à la version 1. Ce document fixe les messages que l'extension QGIS consomme.
+l'entrée et la sortie standard, **dans les deux sens** (AD-3). Le protocole est
+à la version **2** depuis le canal d'IA externe (AD-7, AD-29, 2026-10-30). Ce document fixe
+les messages que l'extension QGIS consomme, et ceux du canal d'IA externe.
 
-Un fil du noyau lit l'entrée ; la boucle principale est seule à écrire. Une seule
-étape s'exécute à la fois (AD-5).
+Un fil du noyau lit l'entrée ; la boucle principale est seule à écrire sur la sortie. Les
+relais du canal d'IA externe ont chacun un fil lecteur et un fil écrivain : leurs lignes
+entrent dans la même file que celles de l'entrée, avec leur source. Une seule étape
+s'exécute à la fois (AD-5).
 
 ## `order.execute` (noyau vers extension)
 
@@ -236,6 +239,89 @@ Un chemin sous le dossier de travail est rendu relatif à lui : aucun chemin abs
 Réponse `{"plan_id":"plan-1","rejected":true}` ; le plan est oublié. Un `plan_id` qui
 n'est pas celui du plan en attente répond `plan.unknown` et laisse ce plan en attente.
 
+## Canal d'IA externe : `session.external` et `external.attach`
+
+Le canal d'IA externe (AD-2, AD-14, AD-29) est un second canal local, réservé à `cassini mcp`
+en mode relais. Il n'existe que tant que l'utilisateur l'autorise dans le panneau : **éteint par
+défaut**, jamais rallumé seul par le noyau. Même grammaire que le canal de l'extension
+(JSON-RPC 2.0, un message par ligne), mais le noyau n'y envoie aucune requête : il répond, et
+notifie la perte de la session. **Aucun chemin ne passe** sur ce canal, dans aucun sens (AD-9).
+
+**Nom du canal**, propre à l'utilisateur :
+
+- Windows : tube nommé `\\.\pipe\cassini-<utilisateur>-external`, qui refuse les clients
+  distants (`PIPE_REJECT_REMOTE_CLIENTS` : une connexion par `\\localhost\pipe\…` échoue), n'admet
+  que l'utilisateur courant (descripteur `O:<SID>D:P(A;;GA;;;<SID>)`), et dont la première
+  instance est exclusive (`FILE_FLAG_FIRST_PIPE_INSTANCE`). Le client vérifie que le tube
+  appartient à l'utilisateur courant et se branche en `SECURITY_SQOS_PRESENT`.
+- Unix : socket de domaine `$XDG_RUNTIME_DIR/cassini/external.sock`, sinon
+  `<dossier temporaire>/cassini-<uid>/external.sock`. Le dossier est en 0700 et appartient à
+  l'utilisateur (vérifié, jamais corrigé : un dossier ouvert aux autres fait refuser le canal).
+  Jamais l'espace abstrait de Linux. Une socket orpheline laissée par un noyau mort (personne ne
+  répond) est supprimée avant d'ouvrir.
+- La variable `CASSINI_EXTERNAL_TAG`, lue seulement si elle est posée, isole le nom par un
+  suffixe : elle sert aux tests, jamais à l'utilisateur.
+
+### `session.external` (extension vers noyau)
+
+```json
+{"jsonrpc":"2.0","id":8,"method":"session.external","params":{"enabled":true,"ask":false}}
+```
+
+Allumé, le noyau ouvre le canal et répond `{"enabled": true, "ask": false}`. `ask` est la case
+« Me demander avant chaque appel » ; elle est gardée pour l'exécution des appels du relais
+(ticket suivant). Rallumer un canal déjà ouvert ne change que `ask`.
+
+```json
+{"jsonrpc":"2.0","id":9,"method":"session.external","params":{"enabled":false}}
+```
+
+Éteint, le noyau envoie à chaque relais branché la notification `external.session_lost`, coupe
+les connexions, ferme le canal (la socket Unix est supprimée) et répond `{"enabled": false}` ;
+même réponse si le canal était déjà éteint.
+
+- Il faut une session ouverte (`session.not_started` sinon). `enabled` est requis, et `ask`
+  pour allumer : sinon `-32602`.
+- Une autre session QGIS du même utilisateur tient déjà le canal : `external.channel_taken`, et
+  rien n'est ouvert. Une autre panne d'ouverture : `external.io`.
+- `session.external` est servi aussi pendant un ordre en vol : il n'exige pas l'exécutant.
+
+### `external.attach` (relais vers noyau, sur le canal d'IA externe)
+
+La poignée de main du relais (AD-7) :
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"external.attach","params":{"protocol_version":2}}
+```
+
+Réponse : la version du protocole, celle du noyau, et le **catalogue disponible** de la session
+(AD-25) — les seules commandes disponibles, sous la forme du catalogue de `session.hello`, sans
+aucun chemin :
+
+```json
+{"jsonrpc":"2.0","id":1,"result":{"protocol_version":2,"core_version":"0.1.0","commands":[{"id":"system.about","available":true}]}}
+```
+
+Une version différente répond `session.protocol_mismatch`, dont le message nomme le binaire à
+mettre à jour : le relais (`cassini mcp`) s'il est en retard, le paquet du noyau de la session
+QGIS sinon. Une `protocol_version` absente ou qui n'est pas un entier répond `-32602`.
+
+`external.attach` est répondu à toute heure, **pendant un ordre en vol compris**, sans attendre
+sa fin. Jusqu'au ticket suivant, toute autre méthode d'un relais (`command.run`,
+`request.cancel`…) répond « méthode inconnue » (`-32601`) et rien n'est exécuté ; une
+notification ne reçoit rien, une ligne illisible une erreur à identifiant nul.
+
+### `external.session_lost` (noyau vers relais, notification)
+
+```json
+{"jsonrpc":"2.0","method":"external.session_lost","params":{"reason":"switched_off","message":"L'utilisateur a fermé le canal d'IA externe dans QGIS."}}
+```
+
+`reason` vaut `switched_off` (interrupteur éteint) ou `session_ended` (entrée fermée : QGIS
+s'arrête). La connexion est fermée juste après. Le noyau confie d'abord la notification à tous
+les relais, puis leur laisse **une demi-seconde en tout**, quel que soit leur nombre, pour la
+recevoir : un relais qui ne lit plus ne retient pas la session au-delà (AD-4).
+
 ## Erreurs
 
 | Code | Quand |
@@ -257,6 +343,10 @@ n'est pas celui du plan en attente répond `plan.unknown` et laisse ce plan en a
 | `registry.unavailable` | `journal.replay` : une commande QGIS du journal n'est pas annoncée par l'extension |
 | `request.not_cancellable` | `request.cancel` sur une commande non annulable ; rien ne change |
 | `request.unknown` | `request.cancel` sur un `id` inconnu ou déjà soldé ; rien ne change |
+| `external.channel_taken` | `session.external` : une autre session QGIS de l'utilisateur tient déjà le canal d'IA externe ; rien n'est ouvert |
+| `external.io` | `session.external` : le canal d'IA externe n'a pas pu s'ouvrir (dossier qui n'est pas privé, panne du système) ; le message ne porte aucun chemin |
+| `session.protocol_mismatch` | `session.hello` ou `external.attach` : la version de protocole diffère ; le message nomme ce qu'il faut mettre à jour |
+| `session.not_started` | toute requête de l'extension avant `session.hello`, `session.external` compris |
 
 Toute autre requête reçue pendant un ordre reçoit sa réponse normale, sans
 attendre la fin de l'ordre.
@@ -266,3 +356,7 @@ attendre la fin de l'ordre.
 Si l'entrée se ferme pendant un ordre, l'étape est annulée comme ci-dessus (sans
 attente, puisque plus rien ne peut arriver), le serveur se termine proprement et
 le verrou du journal est libéré. Aucun côté ne tue l'autre.
+
+Quelle que soit la cause de la fin (entrée fermée, sortie en panne), les relais branchés au
+canal d'IA externe reçoivent `external.session_lost` (`session_ended`), puis le canal est fermé
+et la socket Unix supprimée, avant que le serveur ne rende la main.

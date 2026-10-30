@@ -40,8 +40,8 @@ class PlanClientTest(unittest.TestCase):
         self.events = []
         self.c = client.CoreClient(self.p, lambda k, v: self.events.append((k, v)))
         self.c.start("cassini", "/p.qgz")
-        self.p.feed(reply(1, {"protocol_version": 1, "core_version": "0.1", "commands": []}))
-        self.p.feed(reply(2, {"core_version": "0.1", "protocol_version": 1}))
+        self.p.feed(reply(1, {"protocol_version": 2, "core_version": "0.1", "commands": []}))
+        self.p.feed(reply(2, {"core_version": "0.1", "protocol_version": 2}))
         self.events.clear()
         self.p.written.clear()
 
@@ -330,8 +330,8 @@ class PlanOutputsTest(unittest.TestCase):
         self.events = []
         self.c = client.CoreClient(self.p, lambda k, v: self.events.append((k, v)), reg)
         self.c.start("cassini", "/p.qgz")
-        self.p.feed(reply(1, {"protocol_version": 1, "core_version": "0.1", "commands": []}))
-        self.p.feed(reply(2, {"core_version": "0.1", "protocol_version": 1}))
+        self.p.feed(reply(1, {"protocol_version": 2, "core_version": "0.1", "commands": []}))
+        self.p.feed(reply(2, {"core_version": "0.1", "protocol_version": 2}))
         self.c.propose("x")
         self.p.feed(reply(3, {"plan_id": "plan-1", "plan": PLAN}))
         self.c.execute_plan("plan-1")

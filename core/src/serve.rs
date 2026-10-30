@@ -9,7 +9,10 @@
 //! refusées `session.busy`). `request.cancel` annule la requête en vol.
 //! `plan.propose`, `plan.execute` et `plan.reject` portent les plans de l'agent
 //! (voir le sous-module `plans`) ; `agent.models` rend les modèles que l'agent peut prendre.
+//! `session.external` ouvre ou ferme le canal d'IA externe (AD-29, sous-module `external`) :
+//! ses relais versent leurs lignes dans la même file que l'entrée, avec leur source.
 
+mod external;
 mod plans;
 
 pub use plans::Composer;
@@ -27,6 +30,7 @@ use serde_json::{json, Map, Value};
 
 use crate::error::ErrorReport;
 use crate::exec::{Executor, Router};
+pub use crate::external::ChannelName;
 use crate::journal::{Replay, Session};
 use crate::registry::{Registry, RegistryError, RunsIn, PROTOCOL_VERSION};
 
@@ -73,11 +77,22 @@ impl RpcError {
     }
 }
 
-/// Ce que le fil de lecture transmet à la boucle.
+/// D'où vient une ligne : l'extension (entrée standard) ou un relais du canal d'IA externe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Source {
+    Extension,
+    External(u64),
+}
+
+/// Ce que les fils de lecture transmettent à la boucle, par une file unique.
 enum Msg {
-    Line(String),
+    Line(Source, String),
+    /// Entrée standard fermée.
     Eof,
+    /// Entrée standard illisible.
     Failed(io::Error),
+    /// Un relais s'est débranché.
+    Detached(u64),
 }
 
 /// Le fil de lecture : il ne fait que lire des lignes et les passer.
@@ -93,7 +108,11 @@ fn read_lines(input: &mut impl BufRead, tx: Sender<Msg>) {
             Ok(_) => {
                 let text = String::from_utf8_lossy(&buf);
                 let line = text.trim();
-                if !line.is_empty() && tx.send(Msg::Line(line.to_string())).is_err() {
+                if !line.is_empty()
+                    && tx
+                        .send(Msg::Line(Source::Extension, line.to_string()))
+                        .is_err()
+                {
                     return;
                 }
             }
@@ -116,9 +135,29 @@ struct Link<'a> {
     run_id: RefCell<Option<Value>>,
     /// Première panne d'entrée ou de sortie rencontrée pendant un ordre.
     failure: RefCell<Option<io::Error>>,
+    /// L'entrée standard s'est fermée (la fin a pu être lue pendant un ordre). La file ne se
+    /// ferme pas d'elle-même : le canal d'IA externe en tient une entrée.
+    input_closed: Cell<bool>,
+    /// Le canal d'IA externe et ses relais.
+    external: external::Hub,
 }
 
 impl Link<'_> {
+    /// Traite un message des relais, à toute heure ; rend ceux de l'entrée standard.
+    fn side(&self, msg: Msg) -> Option<Msg> {
+        match msg {
+            Msg::Line(Source::External(conn), line) => {
+                self.external.on_line(conn, &line);
+                None
+            }
+            Msg::Detached(conn) => {
+                self.external.detached(conn);
+                None
+            }
+            other => Some(other),
+        }
+    }
+
     fn send(&self, message: &Value) -> io::Result<()> {
         let mut out = self.out.borrow_mut();
         writeln!(out, "{message}")?;
@@ -168,7 +207,7 @@ pub fn serve(
     input: impl BufRead + Send,
     output: impl Write,
 ) -> io::Result<()> {
-    serve_with(registry, None, input, output, CANCEL_GRACE)
+    serve_with(registry, None, None, input, output, CANCEL_GRACE)
 }
 
 /// Comme `serve`, avec un compositeur de plans pour `plan.propose`.
@@ -178,17 +217,38 @@ pub fn serve_with_composer(
     input: impl BufRead + Send,
     output: impl Write,
 ) -> io::Result<()> {
-    serve_with(registry, Some(composer), input, output, CANCEL_GRACE)
+    serve_with(registry, Some(composer), None, input, output, CANCEL_GRACE)
+}
+
+/// Comme `serve_with_composer`, avec un nom de canal d'IA externe imposé (tests : un nom par
+/// test, voir `ChannelName::tagged`).
+pub fn serve_with_channel(
+    registry: &Registry,
+    composer: Option<&dyn Composer>,
+    channel: ChannelName,
+    input: impl BufRead + Send,
+    output: impl Write,
+) -> io::Result<()> {
+    serve_with(
+        registry,
+        composer,
+        Some(channel),
+        input,
+        output,
+        CANCEL_GRACE,
+    )
 }
 
 fn serve_with<'a>(
     registry: &'a Registry,
     composer: Option<&'a dyn Composer>,
+    channel: Option<ChannelName>,
     mut input: impl BufRead + Send,
     mut output: impl Write,
     grace: Duration,
 ) -> io::Result<()> {
     let (tx, rx) = mpsc::channel();
+    let hub = external::Hub::new(channel, tx.clone());
     thread::scope(|scope| {
         let input = &mut input;
         scope.spawn(move || read_lines(input, tx));
@@ -200,6 +260,8 @@ fn serve_with<'a>(
             next_order: Cell::new(0),
             run_id: RefCell::new(None),
             failure: RefCell::new(None),
+            input_closed: Cell::new(false),
+            external: hub,
         });
         let mut state = State {
             registry,
@@ -212,20 +274,34 @@ fn serve_with<'a>(
             next_plan: 0,
             intermediates: HashSet::new(),
         };
-        loop {
-            let line = match link.rx.recv() {
-                Ok(Msg::Line(line)) => line,
-                Ok(Msg::Failed(e)) => return Err(e),
-                // Entrée fermée (la lecture a pu être consommée pendant un ordre).
-                Ok(Msg::Eof) | Err(_) => return Ok(()),
+        let outcome = loop {
+            // Entrée fermée pendant un ordre : la fin a déjà été lue.
+            if link.input_closed.get() {
+                break Ok(());
+            }
+            let msg = match link.rx.recv() {
+                Ok(msg) => msg,
+                Err(_) => break Ok(()),
+            };
+            let line = match link.side(msg) {
+                None => continue,
+                Some(Msg::Line(_, line)) => line,
+                Some(Msg::Failed(e)) => break Err(e),
+                Some(Msg::Detached(_)) => continue,
+                Some(Msg::Eof) => break Ok(()),
             };
             if let Some(response) = handle_line(&mut state, &line) {
-                link.send(&response)?;
+                if let Err(e) = link.send(&response) {
+                    break Err(e);
+                }
             }
             if let Some(e) = link.failure.borrow_mut().take() {
-                return Err(e);
+                break Err(e);
             }
-        }
+        };
+        // Fin de session, quelle qu'en soit la cause : les relais sont prévenus, le canal fermé.
+        link.external.close(external::Lost::SessionEnded);
+        outcome
     })
 }
 
@@ -374,6 +450,7 @@ fn dispatch(
         "plan.execute" => plans::execute(state, params),
         "plan.reject" => plans::reject(state, params),
         "agent.models" => plans::models(state),
+        "session.external" => external::session_external(&state.link.external, params),
         _ => Err(RpcError::protocol(METHOD_NOT_FOUND, "Méthode inconnue.")),
     }
 }
@@ -453,6 +530,8 @@ impl Channel<'_> {
     ) -> Option<Value> {
         let outcome = match method {
             "request.cancel" => request_cancel(&self.link, params, Some(flight)),
+            // L'interrupteur n'exige pas l'exécutant : il est servi pendant l'ordre.
+            "session.external" => external::session_external(&self.link.external, params),
             "session.hello" | "command.run" | "journal.replay" | "plan.propose"
             | "plan.execute" | "plan.reject" | "agent.models" => Err(RpcError::coded(
                 "session.busy",
@@ -498,19 +577,31 @@ impl Executor for Channel<'_> {
         let cancelled = || RegistryError::Cancelled(id.to_string());
         let mut cancelling: Option<Instant> = None;
         loop {
+            // La file ne se ferme pas avec l'entrée (les relais en tiennent une entrée) : une
+            // entrée déjà fermée vaut une file fermée.
             let received = match cancelling {
+                _ if link.input_closed.get() => Err(RecvTimeoutError::Disconnected),
                 None => link.rx.recv().map_err(|_| RecvTimeoutError::Disconnected),
                 Some(deadline) => link
                     .rx
                     .recv_timeout(deadline.saturating_duration_since(Instant::now())),
             };
+            // Les relais sont servis pendant l'ordre ; seule l'extension peut y répondre.
+            let received = match received {
+                Ok(msg) => match link.side(msg) {
+                    Some(msg) => Ok(msg),
+                    None => continue,
+                },
+                Err(e) => Err(e),
+            };
             let line = match received {
-                Ok(Msg::Line(line)) => line,
+                Ok(Msg::Line(_, line)) => line,
                 Err(RecvTimeoutError::Timeout) => return Err(cancelled()),
                 // Entrée fermée ou illisible : plus rien à attendre, l'étape est annulée.
                 other => {
-                    if let Ok(Msg::Failed(e)) = other {
-                        link.fail(e);
+                    match other {
+                        Ok(Msg::Failed(e)) => link.fail(e),
+                        _ => link.input_closed.set(true),
                     }
                     if cancelling.is_none() {
                         link.send_or_fail(&cancel_notification(&order_id));
@@ -613,6 +704,12 @@ fn hello(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, RpcErro
     state.session = Some(session);
     state.project = Some(project.to_string());
     state.announced = commands;
+    // Les relais ne voient que les commandes disponibles, sans aucun chemin (AD-25, AD-9).
+    let available = catalogue(state)
+        .into_iter()
+        .filter(|entry| entry["available"] == json!(true))
+        .collect();
+    state.link.external.set_catalogue(available);
     Ok(json!({
         "protocol_version": PROTOCOL_VERSION,
         "core_version": crate::VERSION,
@@ -744,7 +841,7 @@ mod tests {
         let dir = temp_dir();
         let project = project_in(&dir);
         let r = exchange(&[
-            hello_line(1, &[], &project),
+            hello_line(2, &[], &project),
             run_line(2, "system.about", json!({})),
         ]);
         assert_eq!(r.len(), 2);
@@ -760,7 +857,7 @@ mod tests {
             .unwrap();
         assert_eq!(probe["available"], false);
         assert_eq!(r[1]["id"], 2);
-        assert_eq!(r[1]["result"]["protocol_version"], 1);
+        assert_eq!(r[1]["result"]["protocol_version"], 2);
         assert_eq!(r[1]["result"]["core_version"], crate::VERSION);
         let journal = std::fs::read_to_string(dir.join("p.cassini/journal.jsonl")).unwrap();
         assert_eq!(journal.lines().count(), 1);
@@ -817,7 +914,7 @@ mod tests {
     fn a_second_hello_is_refused() {
         let dir = temp_dir();
         let project = project_in(&dir);
-        let r = exchange(&[hello_line(1, &[], &project), hello_line(1, &[], &project)]);
+        let r = exchange(&[hello_line(2, &[], &project), hello_line(2, &[], &project)]);
         assert!(r[0].get("result").is_some());
         assert_eq!(code_of(&r[1]), "session.already_started");
         let _ = std::fs::remove_dir_all(dir);
@@ -828,7 +925,7 @@ mod tests {
         let dir = temp_dir();
         let project = project_in(&dir);
         let r = exchange(&[
-            hello_line(1, &[], &project),
+            hello_line(2, &[], &project),
             run_line(2, "test.qgis_probe", json!({"layer": "l"})),
         ]);
         assert_eq!(code_of(&r[1]), "registry.unavailable");
@@ -841,7 +938,7 @@ mod tests {
         let dir = temp_dir();
         let project = project_in(&dir);
         let r = exchange(&[
-            hello_line(1, &["test.qgis_probe"], &project),
+            hello_line(2, &["test.qgis_probe"], &project),
             run_line(2, "test.qgis_probe", json!({"layer": "l"})),
         ]);
         let commands = r[0]["result"]["commands"].as_array().unwrap();
@@ -867,7 +964,7 @@ mod tests {
 
     #[test]
     fn a_relative_project_is_refused() {
-        let r = exchange(&[hello_line(1, &[], "p.qgz")]);
+        let r = exchange(&[hello_line(2, &[], "p.qgz")]);
         assert_eq!(r[0]["error"]["code"], -32602);
     }
 
@@ -877,7 +974,7 @@ mod tests {
         let project = project_in(&dir);
         let notification = json!({"jsonrpc":"2.0","method":"command.run","params":{}}).to_string();
         let r = exchange(&[
-            hello_line(1, &[], &project),
+            hello_line(2, &[], &project),
             notification,
             json!({"jsonrpc":"2.0","id":5,"method":"nope"}).to_string(),
             json!({"jsonrpc":"2.0","id":6,"method":"command.run","params":{}}).to_string(),
@@ -893,7 +990,7 @@ mod tests {
         let dir = temp_dir();
         let project = project_in(&dir);
         let r = exchange(&[
-            hello_line(1, &[], &project),
+            hello_line(2, &[], &project),
             run_line(2, "system.about", json!({"x": 1})),
             run_line(3, "foo.bar", json!({})),
         ]);
@@ -907,7 +1004,7 @@ mod tests {
     fn closing_the_input_frees_the_project_lock() {
         let dir = temp_dir();
         let project = project_in(&dir);
-        exchange(&[hello_line(1, &[], &project)]);
+        exchange(&[hello_line(2, &[], &project)]);
         let registry = Registry::standard();
         let session = Session::open(&registry, Path::new(&project)).unwrap();
         assert_eq!(session.mode(), crate::journal::Mode::Write);
@@ -1187,7 +1284,7 @@ mod tests {
                     buf: Vec::new(),
                 };
                 let composer = composer.as_ref().map(|c| c as &dyn Composer);
-                serve_with(&registry, composer, reader, writer, grace)
+                serve_with(&registry, composer, None, reader, writer, grace)
             });
             Client {
                 to: Some(to),
@@ -1220,7 +1317,7 @@ mod tests {
         /// Ouvre la session, annonce les deux commandes qgis.
         fn hello(&self) {
             self.send(json!({"jsonrpc":"2.0","id":1,"method":"session.hello",
-                "params":{"protocol_version":1,"commands":["test.render","test.fixed"],
+                "params":{"protocol_version":2,"commands":["test.render","test.fixed"],
                 "project":self.project}}));
             assert!(self.recv()["result"].is_object());
         }
@@ -1228,7 +1325,7 @@ mod tests {
         /// Ouvre la session en annonçant `commands`.
         fn hello_with(&self, commands: &[&str]) {
             self.send(json!({"jsonrpc":"2.0","id":1,"method":"session.hello",
-                "params":{"protocol_version":1,"commands":commands,"project":self.project}}));
+                "params":{"protocol_version":2,"commands":commands,"project":self.project}}));
             assert!(self.recv()["result"].is_object());
         }
 
@@ -1459,7 +1556,7 @@ mod tests {
         assert_eq!(busy["id"], 3);
         assert_eq!(code_of(&busy), "session.busy");
         c.send(json!({"jsonrpc":"2.0","id":4,"method":"session.hello",
-            "params":{"protocol_version":1,"commands":[],"project":c.project}}));
+            "params":{"protocol_version":2,"commands":[],"project":c.project}}));
         assert_eq!(code_of(&c.recv()), "session.busy");
         c.send(reply_ok("core-1"));
         assert_eq!(c.recv()["id"], 2);
@@ -1502,7 +1599,7 @@ mod tests {
         assert_eq!(code_of(&c.recv()), "registry.cancelled");
         c.send(json!({"jsonrpc":"2.0","id":3,"method":"command.run",
             "params":{"command":"system.about","params":{}}}));
-        assert_eq!(c.recv()["result"]["protocol_version"], 1);
+        assert_eq!(c.recv()["result"]["protocol_version"], 2);
         c.close().1.unwrap();
         let registry = scripted_registry();
         let replay = crate::journal::Replay::load(&registry, Path::new(&c.project)).unwrap();
@@ -1574,7 +1671,7 @@ mod tests {
         )
         .unwrap();
         c.send(json!({"jsonrpc":"2.0","id":1,"method":"session.hello",
-            "params":{"protocol_version":1,"commands":[],"project":c.project}}));
+            "params":{"protocol_version":2,"commands":[],"project":c.project}}));
         assert!(c.recv()["result"].is_object());
         c.send(json!({"jsonrpc":"2.0","id":2,"method":"journal.replay"}));
         let done = c.recv();
@@ -1808,7 +1905,7 @@ mod tests {
         assert_eq!(code_of(&c.recv()), "plan.unknown");
         c.send(json!({"jsonrpc":"2.0","id":4,"method":"command.run",
             "params":{"command":"system.about","params":{}}}));
-        assert_eq!(c.recv()["result"]["protocol_version"], 1);
+        assert_eq!(c.recv()["result"]["protocol_version"], 2);
         c.close().1.unwrap();
     }
 

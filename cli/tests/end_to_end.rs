@@ -48,7 +48,7 @@ fn serve_session(project: &str, calls: usize) -> Vec<Value> {
         .expect("le binaire se lance");
     let mut stdin = child.stdin.take().unwrap();
     let hello = json!({"jsonrpc":"2.0","id":1,"method":"session.hello",
-        "params":{"protocol_version":1,"commands":[],"project":project}});
+        "params":{"protocol_version":2,"commands":[],"project":project}});
     writeln!(stdin, "{hello}").unwrap();
     for n in 0..calls {
         let call = json!({"jsonrpc":"2.0","id":n + 2,"method":"command.run",
@@ -174,7 +174,7 @@ fn plan_propose_without_a_model_is_a_typed_error_and_the_session_goes_on() {
     let mut stdin = child.stdin.take().unwrap();
     for message in [
         json!({"jsonrpc":"2.0","id":1,"method":"session.hello",
-            "params":{"protocol_version":1,"commands":["project.inventory"],"project":project}}),
+            "params":{"protocol_version":2,"commands":["project.inventory"],"project":project}}),
         json!({"jsonrpc":"2.0","id":2,"method":"plan.propose",
             "params":{"request":"Ouvre les gares."}}),
         json!({"jsonrpc":"2.0","id":3,"method":"command.run",
@@ -201,7 +201,7 @@ fn plan_propose_without_a_model_is_a_typed_error_and_the_session_goes_on() {
     let dir_text = dir.to_string_lossy();
     assert!(!text.contains(&*dir_text) && !text.contains(&dir_text.replace('\\', "/")));
     assert!(!text.contains("modeles-vides"));
-    assert_eq!(replies[2]["result"]["protocol_version"], 1);
+    assert_eq!(replies[2]["result"]["protocol_version"], 2);
     assert_eq!(replies[3]["id"], 4);
     assert_eq!(replies[3]["error"]["data"]["code"], "ai.empty_prompt");
     // Seul `command.run` est journalisé.
@@ -230,7 +230,7 @@ fn plan_propose_with_a_missing_models_folder_hides_the_folder() {
         stdin,
         "{}",
         json!({"jsonrpc":"2.0","id":1,"method":"session.hello",
-            "params":{"protocol_version":1,"commands":[],"project":project}})
+            "params":{"protocol_version":2,"commands":[],"project":project}})
     )
     .unwrap();
     writeln!(
@@ -274,7 +274,7 @@ fn propose_with_models(project: &str, models: &Path) -> (Value, String) {
         stdin,
         "{}",
         json!({"jsonrpc":"2.0","id":1,"method":"session.hello",
-            "params":{"protocol_version":1,"commands":["project.inventory"],"project":project}})
+            "params":{"protocol_version":2,"commands":["project.inventory"],"project":project}})
     )
     .unwrap();
     assert!(next(&mut text)["result"].is_object());
@@ -339,7 +339,7 @@ fn serve_with_models(project: &str, models: &Path, messages: &[Value]) -> String
         .expect("le binaire se lance");
     let mut stdin = child.stdin.take().unwrap();
     let hello = json!({"jsonrpc":"2.0","id":1,"method":"session.hello",
-        "params":{"protocol_version":1,"commands":["project.inventory"],"project":project}});
+        "params":{"protocol_version":2,"commands":["project.inventory"],"project":project}});
     for message in std::iter::once(&hello).chain(messages) {
         writeln!(stdin, "{message}").unwrap();
     }
@@ -435,4 +435,65 @@ fn agent_models_lists_two_models_and_an_unknown_choice_is_refused() {
         .unwrap_or_default()
         .is_empty());
     cleanup(&dir);
+}
+
+/// Le chemin de production du canal d'IA externe (ticket 5.24) : `cassini serve` résout son nom
+/// par `ChannelName::for_user`, isolé ici par `CASSINI_EXTERNAL_TAG`. Un relais brut s'y branche,
+/// puis l'entrée se ferme : le relais reçoit `external.session_lost`.
+#[test]
+fn serve_opens_the_external_channel_of_the_user_and_warns_the_relay_at_the_end() {
+    use std::io::{BufRead, BufReader};
+
+    use cassini_core::external::{self, ChannelName};
+
+    let (dir, project, _) = temp_project();
+    let tag = format!("e2e-{}", std::process::id());
+    let mut child = Command::new(BIN)
+        .arg("serve")
+        .env("CASSINI_EXTERNAL_TAG", &tag)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("le binaire se lance");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut reply = || {
+        let mut line = String::new();
+        stdout.read_line(&mut line).unwrap();
+        serde_json::from_str::<Value>(&line).expect("serve rend du JSON")
+    };
+    let hello = json!({"jsonrpc":"2.0","id":1,"method":"session.hello",
+        "params":{"protocol_version":2,"commands":[],"project":project}});
+    writeln!(stdin, "{hello}").unwrap();
+    assert!(reply()["result"].is_object());
+    let switch = json!({"jsonrpc":"2.0","id":2,"method":"session.external",
+        "params":{"enabled":true,"ask":false}});
+    writeln!(stdin, "{switch}").unwrap();
+    assert_eq!(reply()["result"], json!({"enabled": true, "ask": false}));
+
+    let name = ChannelName::tagged(&tag).unwrap();
+    let mut relay = external::connect(&name).expect("le canal de l'utilisateur est ouvert");
+    let mut input = BufReader::new(relay.try_clone().unwrap());
+    let mut read = || {
+        let mut line = String::new();
+        input.read_line(&mut line).unwrap();
+        line
+    };
+    let attach = json!({"jsonrpc":"2.0","id":1,"method":"external.attach",
+        "params":{"protocol_version":2}});
+    writeln!(relay, "{attach}").unwrap();
+    let attached: Value = serde_json::from_str(&read()).unwrap();
+    assert_eq!(attached["result"]["protocol_version"], 2);
+    assert!(attached["result"]["commands"].is_array());
+
+    // QGIS se ferme : le relais est prévenu, le noyau sort en code 0, le canal n'existe plus.
+    drop(stdin);
+    let lost: Value = serde_json::from_str(&read()).unwrap();
+    assert_eq!(lost["method"], "external.session_lost");
+    assert_eq!(lost["params"]["reason"], "session_ended");
+    assert_eq!(read(), "", "fin de flux attendue");
+    assert!(child.wait().unwrap().success());
+    assert!(external::connect(&name).is_err());
+    let _ = std::fs::remove_dir_all(dir);
 }

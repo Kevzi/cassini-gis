@@ -9,6 +9,7 @@ pub mod commands;
 pub mod contract;
 pub mod error;
 pub mod exec;
+pub mod external;
 pub mod journal;
 pub mod plan;
 pub mod point;
