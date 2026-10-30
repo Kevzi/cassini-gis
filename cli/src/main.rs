@@ -1231,7 +1231,13 @@ mod tests {
             name: "1-analysis.buffer.gpkg".to_string(),
             modified: std::time::SystemTime::now(),
         }];
-        let (view, _) = model_inventory(&raw, &files, INVENTORY_BUDGET_CHARS, INVENTORY_LOW_CHARS);
+        let (view, _) = model_inventory(
+            &raw,
+            &files,
+            &std::collections::HashSet::new(),
+            INVENTORY_BUDGET_CHARS,
+            INVENTORY_LOW_CHARS,
+        );
         assert_eq!(view.user_layers, 2);
         let registry = Registry::standard();
         let mut seen = None;

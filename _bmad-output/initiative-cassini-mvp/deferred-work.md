@@ -378,3 +378,13 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-duree-par-phrase-sous-30-s-dans-une-session-qgis-sur-process-plan.md`
   summary: Une couche de resultat de selection garde tous les champs de sa couche source (zones U du PLU, ~1 100 jetons) : la phrase qui suit la lit une fois et depasse 30 s (36,6 s, phrase 3) ; meme levier que la phrase apres un plan a plusieurs resultats (champs alleges dans la vue du modele).
   evidence: recette enchainee finale de 5.19 (2026-10-29).
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-phrase-qui-suit-un-plan-a-plusieurs-resultats-sous-30-s-sur-plan.md`
+  summary: Juger la justesse du modèle sur une vue allégée (intermédiaires cachés, résultats sans valeurs), dans une session enchaînée, et pas seulement sur les inventaires fixes de plan_reel, question_reel et ecart_reel.
+  evidence: Les trois essais GPU de 5.22 n'ont aucune couche de résultat, les leviers ne s'y appliquent pas ; la recette CPU montre la phrase 3 reliée au PLU entier au lieu de la sélection.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-phrase-qui-suit-un-plan-a-plusieurs-resultats-sous-30-s-sur-plan.md`
+  summary: Retrouver les couches intermédiaires après une relance du noyau ou un journal.replay (par exemple depuis le journal), pour qu'elles ne réapparaissent pas toute la session.
+  evidence: State.intermediates est en mémoire et n'est alimenté que par plan.execute ; après relance ou rejeu, les intermédiaires sont vus et peuvent ramener le retrait par paquets de 5.19.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-phrase-qui-suit-un-plan-a-plusieurs-resultats-sous-30-s-sur-plan.md`
+  summary: Famille d'entraînement (5.10) « couche citée introuvable → question sur la couche », pour une phrase qui cite une couche cachée.
+  evidence: Recette 5.22, phrase 11 « Montre le tampon de 500 m. » : question hors de propos sur des coordonnées X/Y.

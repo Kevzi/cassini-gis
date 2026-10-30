@@ -369,3 +369,79 @@ comme dans le produit ; `CASSINI_TEST_FULL_IDS=1` pour les identifiants complets
 Les coupes aux frontières de couches ne changent rien (mêmes scores). Les identifiants courts
 coûtent une phrase du jeu tenu à l'écart : H11 (isochrone de 15 minutes depuis un point, par la
 couche de voirie) rend un refus au lieu du plan.
+
+## Résultats allégés dans la vue du modèle (ticket 5.22)
+
+Deux leviers, décidés par le propriétaire le 2026-10-29, ne changent que l'inventaire **vu par le
+modèle** (`model_inventory`) ; QGIS, le journal, le plan gardé et l'extension gardent toutes les
+couches et tous les champs :
+
+- **couches intermédiaires cachées** : la sortie d'une étape qu'une étape **exécutée** du même plan
+  consomme (`step:k`) sort de la vue. Le noyau retient ces identifiants en mémoire, le temps de son
+  processus ; à la relance (QGIS rouvert), tout résultat est relu une fois. Une sortie reprise par
+  une phrase suivante (« ces zones ») reste vue, et une couche de l'utilisateur n'est jamais cachée ;
+- **résultats sans valeurs** : les champs des couches de résultat perdent leur clé `values` (forme
+  apprise d'un champ texte trop varié) ; les couches de l'utilisateur gardent les leurs.
+
+**Mesure** (2026-10-29, même poste et même mode opératoire qu'en 5.19 : 5800X bridé à `0x55`,
+`CASSINI_THREADS=4`, noyau construit sans CUDA et installé dans `%LOCALAPPDATA%\Cassini\bin`, modèle
+livré), les dix phrases de 5.19 puis une onzième, « Montre le tampon de 500 m. », qui cite le
+tampon de la phrase de démo, caché au modèle :
+
+| n | issue | composition 5.19 (s) | composition 5.22 (s) | lecture (s) | jetons | repris | écriture (s) | écrits |
+|---|---|---|---|---|---|---|---|---|
+| 1 | plan | 58,7 | 56,3 | 27,0 | 1 603 | 0 | 26,6 | 165 |
+| 2 | plan | 72,5 | **15,1** | 7,9 | 1 970 | 1 510 | 6,9 | 42 |
+| 3 | plan | 36,6 | **21,8** | 6,3 | 2 264 | 1 910 | 15,3 | 97 |
+| 4 | plan | 15,0 | 14,3 | 8,2 | 2 654 | 2 192 | 5,8 | 38 |
+| 5 | plan | 10,4 | 9,4 | 3,0 | 2 731 | 2 586 | 6,0 | 39 |
+| 6 | plan | 15,5 | 14,3 | 4,3 | 2 887 | 2 667 | 9,6 | 63 |
+| 7 | refus | 16,6 | 12,2 | 5,5 | 3 092 | 2 820 | 6,3 | 36 |
+| 8 | plan | 7,7 | 8,8 | 0,7 | 3 085 | 3 064 | 7,6 | 42 |
+| 9 | plan | 44,6 | 38,1 | 7,7 | 3 393 | 3 025 | 30,0 | 165 |
+| 10 | plan | 45,2 | 13,5 | 9,2 | 3 760 | 3 304 | 3,6 | 23 |
+| 11 | question | — | 6,6 | 0,7 | 3 763 | 3 739 | 5,3 | 28 |
+
+**Lecture.** Les phrases 2 et 3 passent sous 30 s (72,5 → 15,1 s et 36,6 → 21,8 s) : après le plan
+de démo, la phrase 2 ne lit plus que la dernière intersection, sans valeurs (460 jetons nouveaux au
+lieu de 3 432) ; la phrase 3, la sélection des zones U sans valeurs (354 au lieu d'environ 1 100).
+La vue reste sous le budget sur toute la session : aucun retrait par paquets, donc plus de phrase
+qui relit tous les résultats gardés (la phrase 10 passe de 45,2 à 13,5 s). Aucune
+`ai.prompt_too_long`. Sur les phrases 2 à 10 (même base qu'en 5.19), 8 phrases sur 9 passent sous
+30 s (5.19 : 5 sur 9), et leur durée totale passe de 264 s à 148 s ; la onzième, nouvelle, passe
+aussi (6,6 s).
+
+Reste au-dessus, consigné tel quel : la **phrase 9** (38,1 s), la phrase de démo en cours de
+session. Sa lecture ne coûte plus que 7,7 s ; c'est l'écriture de son plan à cinq étapes (165
+jetons, 30 s) qui dépasse, hors de ce que l'inventaire peut alléger.
+
+**Issues à surveiller.**
+
+- **Phrase 3** (« Trouve les parcelles dans ces zones à moins de 300 m d'une gare ») : le plan prend
+  la couche entière du PLU (`plu_zones_…`) pour « ces zones », et non la sélection des zones U de
+  la phrase 2, pourtant vue. En 5.19, il prenait le tampon de 500 m de la phrase 1, qui est
+  maintenant caché ; la sélection n'a plus ses valeurs (dont `typezone` = `U`). La cause n'est pas
+  séparée entre les deux leviers (vue sans intermédiaires, résultats sans valeurs) : aucune mesure
+  ne les isole. À traiter par l'entraînement (5.10), pas par une règle.
+- **Phrase 11** (« Montre le tampon de 500 m. ») cite une couche cachée : le modèle rend une
+  **question**, sans rien exécuter — mais une question hors de propos (« Depuis quel point faut-il
+  partir : quelles sont ses coordonnées X et Y ? »). Aucun plan faux n'est exécuté ; la couche reste
+  dans QGIS, où l'utilisateur la voit. Coût accepté par la décision du propriétaire.
+- **Valeur retirée** : courte sonde séparée, même poste et même mode opératoire (démo, « Garde les
+  zones U du PLU. », puis une phrase qui cite une valeur de la sélection). La valeur citée, `0300` du
+  champ `formdomi`, n'était visible que par la sélection des zones U (dix valeurs, sous le plafond),
+  donc retirée en 5.22 ; le PLU de l'utilisateur en a onze, au-delà du plafond, donc aucune.
+  « Dans ces zones, garde celles dont le formdomi vaut 0300. » : durées 53,9, 14,5 et **10,8 s** ; la
+  troisième rend une **question**, « Aucune couche de zonage du PLU dans le projet : laquelle faut-il
+  utiliser ? », sans rien exécuter, alors que la sélection et le PLU sont vus. Le modèle ne relie
+  plus la phrase à la sélection : l'utilisateur doit préciser la couche. Coût accepté par la
+  décision du propriétaire ; la cause (valeur absente, ou phrase mal reliée) n'est pas séparée.
+  Un premier essai citant le libellé `UCAAAAAA` (question « Quelle couche faut-il prendre ? »,
+  8,7 s) ne compte pas : `libelle` a onze valeurs dans les deux couches, il n'en montrait déjà
+  aucune avant 5.22.
+
+**Justesse sur GPU** (`--features cuda`, modèle livré, identifiants courts) : `plan_reel` 25 / 25,
+`question_reel` 12 / 12, `ecart_reel` 32 / 40 (plans 18 / 26, questions 8 / 8, refus 6 / 6) — les
+scores de 5.19, aucun ne baisse. Ces essais composent sur des inventaires fixes, sans couche de
+résultat : les deux leviers n'y changent rien, ils vérifient seulement que rien d'autre n'a bougé.
+La justesse sur une session enchaînée reste portée par la recette ci-dessus.

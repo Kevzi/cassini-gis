@@ -155,6 +155,10 @@ struct State<'a> {
     pending: Option<plans::Pending>,
     /// Compteur des plans proposés, pour les identifiants `plan-<n>`.
     next_plan: u64,
+    /// Identifiants des couches intermédiaires (ticket 5.22) : sorties d'une étape consommées par
+    /// une étape exécutée du même plan, cachées au modèle. En mémoire seulement, le temps du
+    /// processus : à la relance du noyau, tout résultat est revu une fois.
+    intermediates: HashSet<String>,
 }
 
 /// Sert le canal jusqu'à la fermeture de l'entrée. Rend une erreur si la sortie
@@ -206,6 +210,7 @@ fn serve_with<'a>(
             composer,
             pending: None,
             next_plan: 0,
+            intermediates: HashSet::new(),
         };
         loop {
             let line = match link.rx.recv() {
@@ -2071,6 +2076,92 @@ mod tests {
             inventory["layers"][3]["fields"].as_array().unwrap().len(),
             34
         );
+        drop(seen);
+        c.close().1.unwrap();
+    }
+
+    /// Ticket 5.22 : un plan à résultats chaînés exécuté, puis un plan arrêté en cours ; à la
+    /// proposition suivante, le compositeur ne voit que les sorties qu'aucune étape exécutée n'a
+    /// consommées, sans valeurs, et les couches de l'utilisateur intactes.
+    #[test]
+    fn the_composer_no_longer_sees_the_intermediates_of_an_executed_plan() {
+        let chained = json!({"kind":"calls","calls":[
+            {"command":"test.make","params":{"layer":"src"}},
+            {"command":"test.make","params":{"layer":"step:1.layer_id"}},
+            {"command":"test.make","params":{"layer":"step:2.layer_id"}},
+            {"command":"test.fixed","params":{"layer":"step:3.layer_id"}}
+        ]});
+        let stopped = json!({"kind":"calls","calls":[
+            {"command":"test.make","params":{"layer":"src"}},
+            {"command":"test.make","params":{"layer":"step:1.layer_id"}}
+        ]});
+        let composer = composer(three_steps()).unwrap();
+        composer.first.borrow_mut().extend([chained, stopped]);
+        let seen = composer.seen.clone();
+        let mut c = Client::start_with(CANCEL_GRACE, Some(composer));
+        c.hello_with(&ALL);
+        // Plan à trois résultats chaînés : r1 et r2 consommés, r3 final, cité ensuite par une
+        // étape qui ne produit aucune couche (comme une description) : r3 reste vu.
+        assert_eq!(c.propose(2)["result"]["plan_id"], "plan-1");
+        c.execute(3, "plan-1");
+        for (step, id) in [(1, "r1"), (2, "r2"), (3, "r3")] {
+            let order = c.expect_step("plan-1", step, "test.make");
+            c.send(reply(&order["id"], json!({"layer_id": id})));
+        }
+        let order = c.expect_step("plan-1", 4, "test.fixed");
+        c.send(reply(&order["id"], json!({"feature_count": 3})));
+        assert_eq!(c.recv()["id"], 3);
+        // Plan arrêté à l'étape 2 : r4 n'a été consommé par aucune étape exécutée.
+        assert_eq!(c.propose(4)["result"]["plan_id"], "plan-2");
+        c.execute(5, "plan-2");
+        let order = c.expect_step("plan-2", 1, "test.make");
+        c.send(reply(&order["id"], json!({"layer_id": "r4"})));
+        let order = c.expect_step("plan-2", 2, "test.make");
+        c.send(
+            json!({"jsonrpc":"2.0","id":order["id"],"error":{"code":-32000,
+            "message":"Raté.","data":{"code":"qgis.failed","message":"Raté."}}}),
+        );
+        assert!(c.recv()["error"].is_object());
+        // Les fichiers des résultats au dossier de travail, comme les écrit une exécution.
+        let work = c.dir.join("p.cassini");
+        for k in 1..=4 {
+            std::fs::write(work.join(format!("{k}-test.make.gpkg")), b"gpkg").unwrap();
+        }
+        let layer = |id: &str, source: &str| {
+            json!({"layer_id": id, "name": id, "source": source, "crs": "EPSG:2154",
+                "kind": "vector", "geometry": "MultiPolygon", "feature_count": 3,
+                "fields": [{"name": "typezone", "type": "String", "values": ["U", "N"]}]})
+        };
+        let mut layers: Vec<Value> = (1..=4)
+            .rev()
+            .map(|k| layer(&format!("r{k}"), &format!("{k}-test.make.gpkg")))
+            .collect();
+        layers.push(layer("plu", "plu.gpkg"));
+        c.send(json!({"jsonrpc":"2.0","id":6,"method":"plan.propose","params":{"request":"x"}}));
+        let order = c.recv();
+        assert_eq!(order["params"]["command"], "project.inventory");
+        c.send(reply(
+            &order["id"],
+            json!({"project_name": "p", "project_crs": "EPSG:2154", "layers": layers}),
+        ));
+        assert!(c.recv()["result"]["plan_id"].is_string());
+        let seen = seen.lock().unwrap();
+        let inventory = &seen[2];
+        let ids: Vec<&str> = inventory["layers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|l| l["layer_id"].as_str().unwrap())
+            .collect();
+        // Ordre stable : l'utilisateur, puis les résultats du plus ancien au plus récent.
+        assert_eq!(ids, ["plu", "r3", "r4"]);
+        assert_eq!(
+            inventory["layers"][0]["fields"][0]["values"],
+            json!(["N", "U"])
+        );
+        for l in &inventory["layers"].as_array().unwrap()[1..] {
+            assert_eq!(l["fields"], json!([{"name": "typezone", "type": "string"}]));
+        }
         drop(seen);
         c.close().1.unwrap();
     }
