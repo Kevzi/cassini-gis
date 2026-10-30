@@ -25,6 +25,9 @@ use llama_cpp_2::vocab::LlamaVocab;
 use llama_cpp_2::{LlamaStateSeqFlags, SeqState};
 
 pub mod plan;
+mod threads;
+
+pub use threads::default_threads;
 
 /// Taille du contexte, en jetons.
 const N_CTX: u32 = 8192;
@@ -272,16 +275,6 @@ fn engine() -> Result<&'static Mutex<Engine>, AiError> {
         })
         .as_ref()
         .map_err(|e| AiError::Backend(e.clone()))
-}
-
-/// Nombre de fils par défaut : les cœurs physiques de la machine, sans dépasser les fils que
-/// le processus peut utiliser (affinité, quotas), au moins un.
-pub fn default_threads() -> NonZeroU32 {
-    let usable = std::thread::available_parallelism().map_or(usize::MAX, |n| n.get());
-    u32::try_from(num_cpus::get_physical().min(usable))
-        .ok()
-        .and_then(NonZeroU32::new)
-        .unwrap_or(NonZeroU32::MIN)
 }
 
 /// Libère la valeur gardée `kept` si sa clé n'est pas `key` ; la garde sinon.
@@ -551,7 +544,7 @@ pub fn generate_files(
 
 /// Même génération que `generate`, qui rend en plus les durées de ses trois phases.
 /// `threads` règle le nombre de fils du moteur (lecture et écriture) ; `None` prend le
-/// nombre de cœurs physiques (`default_threads`), comme `generate`.
+/// nombre de cœurs physiques autorisés au processus (`default_threads`), comme `generate`.
 ///
 /// Le modèle est gardé d'un appel à l'autre tant que son fichier ne change pas. L'invite est
 /// lue par segments, coupés aux points de coupe ; à ceux qui ont une place (tête, ancrage,
@@ -970,13 +963,6 @@ mod tests {
         assert_eq!(e.code(), "ai.adapter");
         let guard = engine().unwrap().lock().unwrap_or_else(|e| e.into_inner());
         assert!(guard.loaded.is_none());
-    }
-
-    #[test]
-    fn default_threads_is_physical_cores_bounded_by_usable_threads() {
-        let usable = std::thread::available_parallelism().map_or(usize::MAX, |n| n.get());
-        let want = num_cpus::get_physical().min(usable).max(1);
-        assert_eq!(default_threads().get() as usize, want);
     }
 
     #[test]

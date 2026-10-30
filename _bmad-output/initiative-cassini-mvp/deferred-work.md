@@ -388,3 +388,6 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-phrase-qui-suit-un-plan-a-plusieurs-resultats-sous-30-s-sur-plan.md`
   summary: Famille d'entraînement (5.10) « couche citée introuvable → question sur la couche », pour une phrase qui cite une couche cachée.
   evidence: Recette 5.22, phrase 11 « Montre le tampon de 500 m. » : question hors de propos sur des coordonnées X/Y.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-nombre-de-fils-par-defaut-coeurs-physiques-et-masque-d-affin-plan.md`
+  summary: Rendre la vérification complète (cargo test, clippy, fmt, deny) possible sous Linux/WSL, en fournissant libclang à llama-cpp-sys.
+  evidence: Relecture 5.20, constat 1 : l'espace de travail ne se construit pas sous WSL faute de libclang ; seuls des morceaux isolés y sont testés, les tickets 5.19 à 5.22 ne vérifient que sous PowerShell.

@@ -18,6 +18,17 @@ llama-cpp-2 = { version = "=0.1.159", default-features = false }
 # de fils du moteur sur le nombre de coeurs physiques de la machine.
 num_cpus = "1"
 
+# Decision du proprietaire (ticket 5.20, 2026-10-30) : windows-sys (Microsoft, MIT OR Apache-2.0,
+# deja dependance transitive), sous Windows seulement, pour compter les coeurs physiques autorises
+# par le masque d'affinite (GetProcessAffinityMask, GetLogicalProcessorInformation). Sous Linux,
+# lecture de /proc et /sys, sans dependance.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+] }
+
 # Chaine d'entrainement en dependance de developpement seulement (plan 5.10, tache 3) : un test
 # compare le prompt court de `plan.rs` a celui de l'entrainement, octet par octet. Le binaire du
 # produit n'embarque pas le generateur. Crate du depot, aucune dependance externe ajoutee.

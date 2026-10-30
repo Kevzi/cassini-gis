@@ -312,6 +312,7 @@ dependencies = [
  "llama-cpp-2",
  "num_cpus",
  "serde_json",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
