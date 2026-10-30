@@ -3,7 +3,7 @@ title: "Validation des appels externes : la case « Me demander avant chaque app
 type: 'feature'
 ticket: '29'
 created: '2026-10-30'
-status: 'built'
+status: 'done'
 baseline_revision: '106bfa75b0d6f246f9bf5a24f6d6357bca6583fa'
 route: 'full'
 route_source: 'auto'
