@@ -3,7 +3,7 @@ title: "Relais : cassini mcp pilote la session QGIS quand elle l'autorise"
 type: 'feature'
 ticket: '25'
 created: '2026-10-30'
-status: 'built'
+status: 'done'
 baseline_revision: 'ee9da302a08d0d6937065b91a9cfb35920c1cb45'
 route: 'full'
 route_source: 'auto'
