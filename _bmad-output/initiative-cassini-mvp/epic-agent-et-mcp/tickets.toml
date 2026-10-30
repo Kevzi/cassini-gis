@@ -205,13 +205,35 @@ references = [
 ]
 
 [[entry]]
+id = 29
+type = "story"
+title = "Validation des appels externes : la case « Me demander avant chaque appel »"
+description = "Report de 28. Case ask allumee, le noyau n'execute plus aussitot un command.run de relais : il envoie d'abord external.approve {call_id, command, params} a l'extension, qui repond {approved}. L'attente occupe la session (session.busy pour tout autre demandeur) sans bloquer la lecture des connexions (AD-4), dure au plus 120 s et s'annule par request.cancel, du relais ou du panneau par l'identifiant d'appel. Accord : l'appel suit le chemin de 28 (external.call de debut, execution, journal external). Refus, erreur de l'extension, delai depasse ou annulation : external.not_approved, rien n'est execute ni journalise, aucun external.call n'est emis. Session coupee pendant l'attente (interrupteur eteint, QGIS ferme) : external.session_lost. Le delai est reglable par les tests. Remplace le refus systematique de 28 (AD-4, AD-5, AD-21, AD-29)."
+verify = "cargo test -p cassini-core --test canal_externe passe sous Linux et Windows avec un client brut du canal et une extension simulee : accord puis execution journalisee, refus, erreur de l'extension, delai depasse (delai court de test), annulation par le relais et par l'identifiant d'appel, session.busy pendant l'attente, session coupee pendant l'attente, case eteinte inchangee ; hors_ligne.rs, la recette pytest de l'extension et cargo deny check restent verts ; docs/canal-local.md decrit external.approve et ses issues."
+covers = ["CAP-8", "CAP-13"]
+after = [28]
+hitl = false
+risk = "high"
+references = [
+  "../architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md — AD-4, AD-5, AD-21, AD-29 (Validation, Un seul etat d'occupation)",
+  "story-execution-des-appels-du-relais-la-session-qgis-execute-ce-qu-plan.md — plan de 5.28, Decisions (ticket coupe)",
+  "../deferred-work.md — entree « Validation des appels externes »",
+]
+notes = [
+  "Decision: 2026-10-30 — 5.28 coupe a la demande du proprietaire ; ce ticket en est la validation, a construire avant 26 qui allume la case.",
+  "Decision: 2026-10-30 — external.call de debut part apres l'accord : un appel refuse n'apparait pas dans le fil du panneau.",
+  "Decision: 2026-10-30 — l'extension reelle n'est pas touchee ; Autoriser / Refuser restent dans 26.",
+  "Risque high (canal) : relecture a plusieurs lentilles (thorough, CLAUDE.md §8) ; la recette reelle de 27 confirme hors de ce ticket.",
+]
+
+[[entry]]
 id = 26
 type = "story"
 title = "Le panneau montre chaque appel de l'IA externe et peut l'arreter"
 description = "L'extension ajoute dans les Reglages l'interrupteur « Autoriser une IA externe » (eteint par defaut, jamais rallume seul, grise sur external.channel_taken) et la case « Me demander avant chaque appel » (eteinte par defaut), qu'elle envoie par session.external dans la forme fixee par 24 ; allume, un bandeau l'annonce avec Couper, chaque external.call s'ajoute au journal du panneau marque « IA externe » (commande, parametres en clair, resultat, duree) avec Arreter par son identifiant d'appel, external.approve affiche Autoriser / Refuser sans geler QGIS, et session.busy pendant un appel externe grise la saisie avec « L'IA externe travaille » (AD-4, AD-12, AD-29, EXPERIENCE.md)."
 verify = "La recette pytest de l'extension passe avec un noyau simule couvrant l'interrupteur, le fil des appels, Arreter, Autoriser / Refuser et l'expiration sans gel."
 covers = ["CAP-8", "CAP-13"]
-after = [28]
+after = [28, 29]
 hitl = false
 risk = "high"
 references = [
@@ -250,7 +272,7 @@ title = "Refactor sweep"
 description = "Nettoie ce que l'epic a laisse : doublons entre ai/, serve.rs et le serveur MCP, constats de revue reportes dans deferred-work.md ; le perimetre est fixe au demarrage d'apres les plans et les constats."
 verify = "cargo test, clippy et fmt propres, les constats reportes de l'epic sont traites ou re-reportes avec leur raison."
 covers = []
-after = [1, 2, 3, 4, 5, 6, 7, 11, 12, 13, 14, 16, 18, 19, 20, 21, 24, 28, 25, 26]
+after = [1, 2, 3, 4, 5, 6, 7, 11, 12, 13, 14, 16, 18, 19, 20, 21, 24, 28, 25, 29, 26]
 hitl = false
 risk = "low"
 

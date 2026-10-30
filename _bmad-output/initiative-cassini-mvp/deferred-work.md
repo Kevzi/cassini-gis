@@ -419,6 +419,8 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-execution-des-appels-du-relais-la-session-qgis-execute-ce-qu-plan.md`
   summary: Validation des appels externes (AD-29, case « Me demander avant chaque appel ») — avec ask allumé, external.approve {call_id, command, params} vers l'extension avant d'exécuter, sans bloquer (AD-4), borné à 120 s et annulable ; refus, erreur ou délai rendent external.not_approved, rien n'est journalisé ; délai réglable par les tests.
   evidence: 5.28 coupé à la demande du propriétaire le 2026-10-30 (plan d'environ 2 600 jetons, cible 1 600) ; 5.28 garde l'exécution, l'occupation, external.call, les chemins, l'annulation, la perte de session et le journal. D'ici là, ask allumé refuse tout appel externe par external.not_approved. À créer en ticket avant 5.26, qui allume la case.
+  status: ticket, 2026-10-30, entrée 5.29 (`epic-agent-et-mcp/tickets.toml`)
+  resolution: Devenu le ticket 5.29 « Validation des appels externes » ; 5.26 l'attend.
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-relais-cassini-mcp-pilote-la-session-qgis-quand-elle-l-autor-plan.md`
   summary: Tester `ping` et l'annulation pendant un appel autonome de `cassini mcp` en vol (moitié autonome de « runtime non bloquant », 5.25).
