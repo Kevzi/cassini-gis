@@ -156,13 +156,13 @@ covers = ["CAP-8", "CAP-13"]
 after = [7]
 hitl = false
 risk = "high"
-unknown = "La crate d'acces a l'API Win32 (windows-sys, MIT OR Apache-2.0, deja indirecte dans Cargo.lock) doit etre acceptee par le proprietaire comme dependance directe du noyau avant le build (CLAUDE.md §8)."
 references = [
   "../architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md — AD-2, AD-4, AD-6, AD-7, AD-9, AD-11, AD-12, AD-14, AD-21, AD-29",
   "../change-ia-externe-pilote-la-session-qgis-ouverte/change-ia-externe-pilote-la-session-qgis-ouverte.md",
 ]
 notes = [
   "Decision: 2026-10-30 — le proprietaire veut qu'une IA externe travaille pendant que QGIS est ouvert et qu'il voie ce qui se fait, « sinon ca sert a rien » ; piste du relais MCP retenue, appel direct aux fournisseurs ecarte.",
+  "Decision: 2026-10-30 — le proprietaire accepte windows-sys (MIT OR Apache-2.0, deja indirecte dans Cargo.lock) comme dependance directe du noyau, compilee seulement sous Windows, pour le tube nomme (CLAUDE.md §8).",
   "Cas a couvrir : interrupteur eteint par defaut (aucun canal), session.not_started, external.not_approved par refus et par delai de 120 s, seconde session external.channel_taken, interrupteur coupe donne external.session_lost, relais deconnecte en plein appel, annulation par identifiant d'appel, rejeu d'un journal portant des etapes external, socket orpheline supprimee, connexion par \\\\localhost\\pipe refusee.",
 ]
 
