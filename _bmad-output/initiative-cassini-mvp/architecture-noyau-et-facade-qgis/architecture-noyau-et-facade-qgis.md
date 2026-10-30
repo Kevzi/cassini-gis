@@ -12,6 +12,7 @@ binds: [CAP-1, CAP-3, CAP-4, CAP-5, CAP-6, CAP-7, CAP-8, CAP-9, CAP-10, CAP-11, 
 sources:
   - ../spec-cassini-mvp/spec-cassini-mvp.md
   - ../change-facade-qgis-avant-app-autonome/change-facade-qgis-avant-app-autonome.md
+  - ../change-ia-externe-pilote-la-session-qgis-ouverte/change-ia-externe-pilote-la-session-qgis-ouverte.md
   - ../initiative-cassini-mvp.md
 companions:
   - ../../../CLAUDE.md
@@ -57,8 +58,15 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   deux transports concurrents ; un service fantôme dont le cycle de vie
   divergerait de celui de QGIS.
 - **Rule:** l'extension lance le binaire du noyau en `cassini serve` et dialogue
-  par son entrée et sa sortie standard. Aucune socket, aucun port TCP, aucun
-  fichier d'échange, dans aucune des deux moitiés. La sortie d'erreur standard
+  par son entrée et sa sortie standard. Aucune socket réseau, aucun port TCP,
+  aucun fichier d'échange, dans aucune des deux moitiés. **Seule exception, le
+  canal d'IA externe (AD-29, 2026-10-30)** : quand l'utilisateur l'autorise dans
+  le panneau, le noyau de la session ouvre un canal local réservé à `cassini
+  mcp` — tube nommé Windows qui refuse les clients distants et n'admet que
+  l'utilisateur courant, socket de domaine Unix dans un dossier privé de
+  l'utilisateur ailleurs — fermé dès que l'interrupteur s'éteint ou que la
+  session s'arrête. Les deux se nomment désormais **canal de l'extension**
+  (stdio) et **canal d'IA externe** ; « canal local » seul désigne le premier. La sortie d'erreur standard
   est réservée aux traces de mise au point et ne porte jamais de message de
   protocole. Le noyau s'arrête de lui-même quand son entrée standard se ferme.
 
@@ -127,6 +135,15 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   données de l'utilisateur, et aucune n'est offerte au modèle ni à un client MCP.
   Ajouter une méthode demande d'amender ce contrat ; toute action sur le projet ou
   sur les données est une commande du registre.
+- **Amendement (2026-10-30, AD-29) :** la liste fermée gagne quatre méthodes,
+  aucune n'étant une commande ni offerte au modèle. Canal de l'extension :
+  `session.external` (extension → noyau : allumer ou éteindre le canal d'IA
+  externe, et la case de validation), `external.call` (notification noyau →
+  extension : début et fin de chaque appel externe) et `external.approve`
+  (requête noyau → extension, réponse : un booléen `approved`). Canal d'IA externe :
+  `external.attach` (poignée de main du relais). Le relais n'y emploie sinon que
+  `command.run` et `request.cancel`. Un joker comme `session.*` ne couvre aucune
+  méthode qui n'est pas nommée ici.
 
 ### AD-7 — Annonce au branchement : refus net sur le protocole, dégradation sur les commandes
 
@@ -147,6 +164,10 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   des commandes disponibles. La version de protocole est un entier, incrémenté à
   chaque rupture de compatibilité, et jamais réutilisé. Une session vaut pour un
   projet : ouvrir un autre projet termine la session et en ouvre une neuve.
+- **Précision (2026-10-30) :** les méthodes de AD-29 font passer le protocole à
+  **2**. Le relais l'annonce par `external.attach` ; un écart rend
+  `session.protocol_mismatch` avec un message qui nomme le binaire à mettre à
+  jour — le relais, la session ou l'extension, selon celui qui est en retard.
 
 ### AD-8 — Ce qui traverse : des références, et des géométries explicitement bornées
 
@@ -183,12 +204,16 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   POSIX ; aucun chemin absolu, messages d'erreur compris. Un fichier situé hors
   de l'arborescence du projet est accepté mais journalisé comme **non portable**,
   et le rejeu sur un autre poste le signale avant de commencer.
-- **Exception volontaire (2026-10-15) :** sur le canal local, et là seulement,
+- **Exception volontaire (2026-10-15) :** sur le canal de l'extension, et là seulement,
   `order.execute` porte des chemins absolus décidés par le noyau, et
   `session.hello` le chemin absolu du projet (AD-7). Le noyau et l'extension
   sont sur la même machine, et l'extension a besoin du chemin réel pour écrire.
   Ces chemins ne sont jamais écrits au journal (il garde les chemins relatifs) ni
   rendus dans un message d'erreur ; le noyau refuse un `project` non absolu.
+  Sur le canal d'IA externe (AD-29), aucun chemin absolu ne passe, dans aucun
+  sens : un paramètre de chemin absolu ou qui sort de l'arborescence du projet est
+  refusé (`external.path_refused`), et aucune réponse n'en porte. Le chemin réel
+  du poste ne part jamais chez un fournisseur d'IA.
 
 ### AD-10 — Le noyau décide des chemins et des noms de sortie
 
@@ -263,6 +288,15 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   en ligne de commande) et `replay`. Les quatre traversent le même registre
   compilé dans `cassini-core`. Aucun point d'entrée ne porte de commande qui lui
   soit propre, et aucun ne modifie le comportement d'une commande.
+- **Précision (2026-10-30) :** `mcp` a deux modes. **Relais** quand une session
+  QGIS a ouvert le canal d'IA externe : il n'exécute rien lui-même (AD-29).
+  **Autonome** sinon : il sert le registre du noyau, commandes `runs_in: core`
+  seules (ticket 5.7). Le mode se décide à chaque requête MCP (`tools/list`,
+  `tools/call`) : relais si le canal d'IA externe répond, autonome sinon ; un
+  changement de mode ou de catalogue envoie `notifications/tools/list_changed`.
+  Un appel commencé en relais ne finit jamais en autonome. En mode autonome, le
+  verrou du projet n'est pris que le temps d'un appel, comme `cassini run` :
+  `mcp` n'empêche jamais une session QGIS de s'ouvrir en écriture.
 
 ### AD-14 — Le réseau est absent par construction, et prouvé des deux côtés
 
@@ -281,6 +315,20 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   de `urllib`, `requests`, `socket` ou `http`. Aucun garde-fou global n'est posé
   à l'exécution : QGIS et les autres extensions de l'utilisateur gardent leur
   accès au réseau, ce qu'on prouve c'est que Cassini ne s'en sert pas.
+- **Précision (2026-10-30) :** `tokio` n'est admis que sous `rmcp` (serveur MCP,
+  ticket 5.7), sa feature `net` interdite par `cargo-deny`. Le canal d'IA externe
+  (AD-29) est prouvé local : un test montre qu'il refuse un client distant, et le
+  test de la table d'imports du binaire (aucune DLL réseau de Windows) reste vert.
+  Le canal s'écrit sans tokio, sur des fils bloquants : `std::os::unix::net`
+  ailleurs que sous Windows ; sous Windows, l'API Win32 des tubes nommés
+  (`kernel32`, `advapi32` pour le descripteur de sécurité), par une crate
+  permissive dont la licence est demandée au ticket ; AF_UNIX y est interdit
+  (il passe par Winsock). Tube Windows : `PIPE_REJECT_REMOTE_CLIENTS`,
+  `FILE_FLAG_FIRST_PIPE_INSTANCE` avec une seule instance, descripteur réservé à
+  l'utilisateur courant, client en `SECURITY_SQOS_PRESENT` ; un test montre
+  qu'une connexion par `\\localhost\pipe\…` échoue. Unix : socket dans un
+  dossier propre à l'utilisateur en 0700, jamais l'espace abstrait de Linux,
+  socket orpheline d'un noyau mort supprimée avant d'ouvrir.
 
 ### AD-15 — L'IA locale est une bibliothèque liée, jamais un serveur
 
@@ -574,6 +622,59 @@ flowchart LR
 - La flèche en pointillés est la frontière de licence : elle ne porte que des
   messages, et c'est tout l'argument de AD-16.
 
+### AD-29 — Une IA externe pilote la session ouverte par relais, sous les yeux de l'utilisateur
+
+- **Binds:** CAP-8, CAP-13, CAP-1
+- **Prevents:** une IA externe aveugle, qui travaille sans QGIS et que
+  l'utilisateur ne voit pas ; un second auteur du journal ; deux états
+  d'occupation qui laisseraient un appel externe s'intercaler dans un plan ; le
+  chemin réel du poste envoyé chez un fournisseur ; du code propre à un
+  fournisseur d'IA.
+- **Rule:** la session ouverte dans QGIS (`cassini serve`) reste le seul
+  exécutant : elle valide, dicte un ordre à la fois (AD-5), journalise (AD-11).
+  `cassini mcp` en mode relais transporte et ne décide rien ; il prend son
+  catalogue et ses schémas dans la session, jamais dans son propre registre.
+  - **Poignée de main.** Le relais envoie `external.attach` (version de
+    protocole, AD-7). Il n'ouvre ni session ni journal. Le noyau répond par le
+    catalogue disponible de la session (AD-25), sans aucun chemin, ou par
+    `session.not_started` si l'extension n'a pas ouvert de session.
+  - **Un seul état d'occupation par processus**, partagé par toutes les
+    connexions et valable dans les deux sens. Sont occupants : une composition de
+    plan, un plan proposé non tranché, l'exécution d'un plan, un appel en cours,
+    l'attente d'un `external.approve`. Toute requête qui exige l'exécutant reçoit
+    alors `session.busy` aussitôt ; rien n'est mis en file. Le noyau lit toutes
+    ses connexions pendant tout travail long (AD-4) ; elles alimentent une seule
+    file d'entrée et un seul écrivain par connexion.
+  - **Plusieurs relais** peuvent se brancher ; leurs appels passent un à la fois
+    par l'état d'occupation. Les `id` de requête sont propres à chaque connexion :
+    une annulation ne vise que l'appel de sa connexion.
+  - **Visibilité.** Le noyau émet `external.call` vers l'extension au début et à
+    la fin de chaque appel externe (commande, paramètres, résultat ou erreur
+    AD-21, durée), commandes `core` comprises ; le panneau le montre et peut
+    l'arrêter (AD-12). Le journal note l'origine `external` de l'étape ; le
+    rejeu l'ignore.
+  - **Validation.** Case « Me demander avant chaque appel », éteinte par défaut
+    (décision du propriétaire, 2026-10-30) : allumée, le noyau envoie
+    `external.approve` avant d'exécuter, sans bloquer (AD-4), borné à 120 s et
+    annulable ; un refus ou un délai rend `external.not_approved`. Éteinte, c'est
+    l'écart volontaire à la validation préalable de AD-5 : l'IA externe appelle
+    les commandes une à une (comme AD-23, hors règle).
+  - **Consentement et cycle de vie.** Le canal n'existe que tant que
+    l'interrupteur `session.external` est allumé ; éteint par défaut, jamais
+    rallumé seul. Une seule session par utilisateur l'ouvre (première instance
+    du tube, AD-14) ; la seconde reçoit `external.channel_taken` et le panneau le
+    dit. Interrupteur coupé ou QGIS fermé : les appels en cours sont annulés s'ils
+    sont annulables, sinon terminés et journalisés ; le relais reçoit
+    `external.session_lost`. Relais déconnecté en plein appel : même traitement,
+    la réponse est abandonnée.
+  - **Traduction MCP.** `notifications/cancelled` devient `request.cancel`. Une
+    erreur AD-21 devient un résultat d'outil `isError` portant `code` et
+    `message` (comme en 5.7) ; une demande hors catalogue reste une erreur de
+    protocole.
+  - **Aucun fournisseur nommé.** Le relais parle MCP et rien d'autre : tout
+    client MCP local (Claude, ChatGPT pour ordinateur et Codex, Gemini CLI) est
+    servi par le même code. Cassini n'appelle jamais l'API d'un fournisseur.
+
 ## Consistency Conventions
 
 | Concern | Convention |
@@ -612,7 +713,7 @@ Vérifié courant le 2026-10-14 ; le code en devient propriétaire dès qu'il ex
 | JSON-RPC | 2.0 |
 | Spécification MCP (révision) | 2026-07-28 |
 | GeoJSON | RFC 7946 |
-| Protocole Cassini | 1 |
+| Protocole Cassini | 2 (AD-29, 2026-10-30) |
 
 ## Structural Seed
 
@@ -638,7 +739,8 @@ flowchart TB
   REG --- AGT
   REG --- TER
   CLI --> REG
-  MCP -- "cassini mcp, stdio" --> REG
+  MCP -- "cassini mcp, stdio" --> RELAIS["cassini mcp<br/>relais ou autonome"]
+  RELAIS -. "canal local d'IA externe,<br/>si l'utilisateur l'autorise (AD-29)" .-> REG
 ```
 
 ### La phrase de démonstration, de bout en bout
@@ -726,7 +828,7 @@ faire.
 | CAP-5 Export PDF | registre dans `core`, mise en page par QGIS | AD-5, AD-6, AD-10 |
 | CAP-6 Registre de commandes | `core` | AD-6, AD-13, AD-21 |
 | CAP-7 Journal rejouable | `core` | AD-9, AD-10, AD-11, AD-12 |
-| CAP-8 Serveur MCP | `cli` (sous-commande `mcp`), registre dans `core` | AD-3, AD-13 |
+| CAP-8 Serveur MCP | `cli` (sous-commande `mcp`, relais vers la session ou autonome), registre dans `core` | AD-2, AD-3, AD-13, AD-14, AD-29 |
 | CAP-9 Ouverture des données de l'utilisateur | registre dans `core`, lecture par QGIS | AD-8, AD-9, AD-10, AD-19 |
 | CAP-10 Projet | projet QGIS, journal à côté par `core` | AD-9, AD-10, AD-11 |
 | CAP-11 Analyse de terrain | `core` | AD-1, AD-19, AD-20, AD-22 |
@@ -747,7 +849,9 @@ faire.
 - **Confirmation juridique de la frontière GPL.** Le raisonnement de distance de
   bras est à faire confirmer par un juriste avant toute vente, pas avant
   d'écrire du code. AD-8 et AD-16 sont écrites pour tenir cet examen.
-- **Socket locale au lieu de l'entrée/sortie standard.** Reportée en V2 : le
+- **Socket locale au lieu de l'entrée/sortie standard** pour le canal de
+  l'extension (le canal d'IA externe de AD-29 est un ajout, pas ce remplacement).
+  Reportée en V2 : le
   protocole de AD-3 ne nomme pas son transport, le changer plus tard ne touche la
   logique d'aucune des deux moitiés. Le seul gain attendu — un modèle partagé en
   mémoire entre plusieurs clients — ne se présente pas au MVP.

@@ -129,8 +129,9 @@ code existant reste au dépôt comme fondation.
   MVP ; la crate `geo` ne redevient nécessaire qu'avec la V2 autonome.
 - **Canal local** : tranché le 2026-10-14. L'extension lance le binaire du noyau
   comme **processus enfant** et dialogue par son entrée et sa sortie standard, en
-  JSON-RPC 2.0, un message par ligne, **dans les deux sens**. Aucune socket,
-  aucun port, aucun fichier d'échange.
+  JSON-RPC 2.0, un message par ligne, **dans les deux sens**. Aucune socket
+  réseau, aucun port, aucun fichier d'échange ; seule exception, le canal local
+  d'IA externe, ouvert à la demande de l'utilisateur (AD-29, 2026-10-30).
 - **Qui décide** : le noyau tient la boucle. Il compose le plan, le fait valider,
   puis dicte une étape à la fois et journalise la réponse. L'extension n'enchaîne
   jamais deux commandes d'elle-même.

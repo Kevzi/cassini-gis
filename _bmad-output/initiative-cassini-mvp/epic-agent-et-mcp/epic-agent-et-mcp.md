@@ -28,7 +28,7 @@ citées telles quelles par les entrées de `tickets.toml` (inception du 2026-10-
 1. CAP-4 : une demande en français produit un plan d'appels de commandes affiché étape par étape **dans le panneau Cassini de QGIS**, que l'utilisateur valide avant exécution et rejoue ensuite à l'identique.
 2. L'IA ne calcule rien elle-même : elle choisit des commandes et leurs paramètres, le moteur fait le calcul. Vérifié en rejouant un plan sans l'IA et en obtenant le même résultat.
 3. Le modèle local tourne sans aucun accès réseau, modèle embarqué compris.
-4. CAP-8 : un client MCP tiers découvre les commandes et en exécute une ; sans IA externe branchée, l'application garde toutes ses fonctions.
+4. CAP-8 : un client MCP tiers découvre les commandes et en exécute une ; avec QGIS ouvert, Claude, GPT et Gemini pilotent la session sous les yeux de l'utilisateur ; sans IA externe branchée, l'application garde toutes ses fonctions.
 5. Quand l'agent ne sait pas relier un mot de l'utilisateur à une couche ou un champ, il pose une question au lieu de deviner.
 6. Sur un poste sans carte graphique (le Ryzen 7 5800X du propriétaire bridé à 4 cœurs), une longue phrase rend son plan en moins de 30 s dès la deuxième demande.
 

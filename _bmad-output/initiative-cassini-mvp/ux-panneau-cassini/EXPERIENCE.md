@@ -121,6 +121,8 @@ Comportement. Les spécifications visuelles sont dans `DESIGN.md.Components`.
 | Session en lecture seule | Bandeau | Texte explicite, rejeu seulement ; Lancer, saisie et modèle grisés (AD-7, AD-17). |
 | Saisie désactivée avant l'agent | Saisie principale | Champ visible et grisé, « Disponible avec l'agent. » [9.4] ; devient actif à l'epic 5. |
 | Hors ligne | Pied du panneau | Information, pas une panne : « Cassini fonctionne sans connexion. » Jamais de bandeau d'erreur réseau. |
+| IA externe autorisée [5.24–5.25] | Bandeau + fil des appels | Interrupteur « Autoriser une IA externe » dans les réglages, éteint par défaut et jamais rallumé seul. Allumé : bandeau « Une IA externe peut agir sur ce projet », bouton **Couper**. Chaque appel externe s'ajoute au journal du panneau en direct (commande, paramètres en clair, résultat, durée), marqué « IA externe », avec **Arrêter** (AD-12, AD-29). Case « Me demander avant chaque appel », éteinte par défaut : allumée, chaque appel attend **Autoriser** / **Refuser**. |
+| IA externe déjà branchée ailleurs | Réglages | Interrupteur grisé, « Une autre session QGIS accepte déjà l'IA externe. » (AD-29) |
 
 ## Interaction Primitives
 
@@ -181,6 +183,17 @@ Statut : **[9.1–9.3]** pour le comportement, **[9.4]** pour la forme.
 5. **Climax :** le bandeau disparaît, « Démarrage du noyau… » puis le mode expert s'ouvre, et une première exécution de `system.about` répond que le noyau est prêt.
 
 Échec : le fichier choisi n'est pas un noyau valide ou parle un autre protocole → bandeau « versions incompatibles » avec **Choisir le noyau**.
+
+### Flux 4 — Une IA externe travaille sous les yeux de l'utilisateur (Camille, ChatGPT pour ordinateur)
+
+Statut : **[5.24–5.26]**. Camille a QGIS ouvert sur son projet Villeneuve-le-Roi et ChatGPT pour ordinateur branché sur `cassini mcp`.
+
+1. Dans les réglages du panneau, elle allume **Autoriser une IA externe**. Le bandeau l'annonce.
+2. Dans ChatGPT, elle tape la phrase de démo.
+3. Les appels défilent dans le journal du panneau, marqués « IA externe » ; les couches produites apparaissent sur la carte.
+4. **Climax :** le PDF est écrit, le journal se rejoue à l'identique, et Camille a vu chaque étape.
+
+Échec : Camille lance une analyse dans le panneau pendant que ChatGPT travaille → l'appel arrivé second reçoit « Une commande est déjà en cours » ; rien n'est mis en file. Elle clique **Couper** : le canal se ferme, ChatGPT reçoit une erreur claire.
 
 ## Responsive & Platform
 

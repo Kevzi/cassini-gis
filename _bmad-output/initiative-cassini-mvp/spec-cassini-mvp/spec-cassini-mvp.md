@@ -51,7 +51,7 @@ CAP-2 a été retirée (préparation des données d'une commune par code INSEE) 
 
 - **CAP-8** — Serveur MCP
   - **intent:** une IA externe choisie par l'utilisateur pilote Cassini à travers le même registre de commandes, en option.
-  - **success:** un client MCP tiers découvre les commandes et en exécute une ; le produit garde toutes ses fonctions quand aucune IA externe n'est branchée.
+  - **success:** un client MCP tiers découvre les commandes et en exécute une ; quand une session QGIS est ouverte et que l'utilisateur l'autorise, il pilote cette session et chaque appel est visible dans le panneau ; vérifié avec un client de chacune des familles Claude, GPT et Gemini ; le produit garde toutes ses fonctions quand aucune IA externe n'est branchée (changement du 2026-10-30).
 
 - **CAP-9** — Ouverture des données de l'utilisateur
   - **intent:** l'utilisateur ajoute à son projet les fichiers géographiques qu'il possède déjà, sans préparation préalable ni outil tiers.
