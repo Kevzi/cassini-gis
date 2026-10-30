@@ -47,6 +47,10 @@ const APPLICATION_ERROR: i64 = -32000;
 /// avant que le noyau nettoie les sorties de l'étape.
 pub const CANCEL_GRACE: Duration = Duration::from_secs(5);
 
+/// Temps laissé à l'utilisateur pour accorder ou refuser l'appel d'un relais, quand la case « Me
+/// demander avant chaque appel » est cochée (AD-29) : au-delà, l'appel n'est pas exécuté.
+pub const APPROVE_TIMEOUT: Duration = Duration::from_secs(120);
+
 /// Une erreur prête à être mise dans une réponse.
 struct RpcError {
     code: i64,
@@ -168,6 +172,8 @@ struct Link<'a> {
     rx: Receiver<Msg>,
     out: RefCell<&'a mut dyn Write>,
     grace: Duration,
+    /// Délai de la demande d'accord `external.approve` (`APPROVE_TIMEOUT` hors des tests).
+    approve_timeout: Duration,
     next_order: Cell<u64>,
     /// L'appel en cours d'exécution, et sa source (pour `request.cancel`).
     current: RefCell<Option<Current>>,
@@ -254,7 +260,15 @@ pub fn serve(
     input: impl BufRead + Send,
     output: impl Write,
 ) -> io::Result<()> {
-    serve_with(registry, None, None, input, output, CANCEL_GRACE)
+    serve_with(
+        registry,
+        None,
+        None,
+        input,
+        output,
+        CANCEL_GRACE,
+        APPROVE_TIMEOUT,
+    )
 }
 
 /// Comme `serve`, avec un compositeur de plans pour `plan.propose`.
@@ -264,15 +278,25 @@ pub fn serve_with_composer(
     input: impl BufRead + Send,
     output: impl Write,
 ) -> io::Result<()> {
-    serve_with(registry, Some(composer), None, input, output, CANCEL_GRACE)
+    serve_with(
+        registry,
+        Some(composer),
+        None,
+        input,
+        output,
+        CANCEL_GRACE,
+        APPROVE_TIMEOUT,
+    )
 }
 
 /// Comme `serve_with_composer`, avec un nom de canal d'IA externe imposé (tests : un nom par
-/// test, voir `ChannelName::tagged`).
+/// test, voir `ChannelName::tagged`) et le délai de la demande d'accord `external.approve`
+/// (`APPROVE_TIMEOUT` hors des tests, plus court pour les tester).
 pub fn serve_with_channel(
     registry: &Registry,
     composer: Option<&dyn Composer>,
     channel: ChannelName,
+    approve_timeout: Duration,
     input: impl BufRead + Send,
     output: impl Write,
 ) -> io::Result<()> {
@@ -283,6 +307,7 @@ pub fn serve_with_channel(
         input,
         output,
         CANCEL_GRACE,
+        approve_timeout,
     )
 }
 
@@ -293,6 +318,7 @@ fn serve_with<'a>(
     mut input: impl BufRead + Send,
     mut output: impl Write,
     grace: Duration,
+    approve_timeout: Duration,
 ) -> io::Result<()> {
     let (tx, rx) = mpsc::channel();
     let hub = external::Hub::new(channel, tx.clone());
@@ -304,6 +330,7 @@ fn serve_with<'a>(
             rx,
             out: RefCell::new(&mut output),
             grace,
+            approve_timeout,
             next_order: Cell::new(0),
             current: RefCell::new(None),
             failure: RefCell::new(None),
@@ -552,6 +579,16 @@ fn busy() -> RpcError {
     )
 }
 
+/// La réponse à une méthode de l'extension pendant que l'exécutant est tenu (ordre en vol, demande
+/// d'accord) : `session.busy` pour celles qui l'exigent, « méthode inconnue » pour les autres.
+fn refused_while_held(method: &str) -> RpcError {
+    match method {
+        "session.hello" | "command.run" | "journal.replay" | "plan.propose" | "plan.execute"
+        | "plan.reject" | "agent.models" => busy(),
+        _ => RpcError::protocol(METHOD_NOT_FOUND, "Méthode inconnue."),
+    }
+}
+
 fn is_cancellable(registry: &Registry, command: &str) -> bool {
     registry
         .spec(command)
@@ -635,9 +672,7 @@ impl Channel<'_> {
             "request.cancel" => request_cancel(&self.link, Source::Extension, params, Some(flight)),
             // L'interrupteur n'exige pas l'exécutant : il est servi pendant l'ordre.
             "session.external" => external::session_external(&self.link.external, params),
-            "session.hello" | "command.run" | "journal.replay" | "plan.propose"
-            | "plan.execute" | "plan.reject" | "agent.models" => Err(busy()),
-            _ => Err(RpcError::protocol(METHOD_NOT_FOUND, "Méthode inconnue.")),
+            other => Err(refused_while_held(other)),
         };
         respond(id, outcome)
     }
@@ -1427,7 +1462,15 @@ mod tests {
                     buf: Vec::new(),
                 };
                 let composer = composer.as_ref().map(|c| c as &dyn Composer);
-                serve_with(&registry, composer, None, reader, writer, grace)
+                serve_with(
+                    &registry,
+                    composer,
+                    None,
+                    reader,
+                    writer,
+                    grace,
+                    APPROVE_TIMEOUT,
+                )
             });
             Client {
                 to: Some(to),

@@ -7,13 +7,23 @@
 //! (`started`) et à la fin (`finished`, résultat ou erreur, durée). Aucun chemin absolu ne passe
 //! vers le relais (AD-9) : un paramètre de chemin absolu ou qui sort du projet est refusé avant
 //! toute exécution, et le résultat comme l'erreur sont réduits avant de partir.
+//!
+//! Case « Me demander avant chaque appel » cochée (ticket 5.29) : après les contrôles, le noyau
+//! demande l'accord de l'extension par `external.approve` et l'attend sans cesser de lire (AD-4),
+//! au plus `approve_timeout`, annulable. Seul `{"approved": true}` fait exécuter l'appel ; toute
+//! autre issue rend `external.not_approved`, et rien n'est annoncé ni journalisé.
 
 use std::path::Path;
+use std::sync::mpsc::RecvTimeoutError;
 use std::time::Instant;
 
 use serde_json::{json, Map, Value};
 
-use super::{check_available, respond, run_params, Current, RpcError, Source, State};
+use super::{
+    busy, cancel_notification, check_available, classify, external, invalid_params,
+    refused_while_held, respond, run_params, Current, Incoming, Link, Msg, RelayCall, RpcError,
+    Source, State, METHOD_NOT_FOUND,
+};
 use crate::error::ErrorReport;
 use crate::journal::relativize;
 use crate::registry::RegistryError;
@@ -35,7 +45,7 @@ pub(super) fn run(state: &mut State<'_>, conn: u64, id: Value, params: Option<Va
     hub.release();
     // Session perdue (entrée fermée) : aucune réponse, le relais recevra `external.session_lost`.
     // Relais parti ou coupé par l'interrupteur : sa connexion n'est plus inscrite, rien ne part.
-    if link.input_closed.get() {
+    if link.input_closed.get() || link.failure.borrow().is_some() {
         return;
     }
     if let Some(response) = respond(Some(id), outcome) {
@@ -50,16 +60,6 @@ fn call(
     params: Option<&Value>,
 ) -> Result<Value, RpcError> {
     let link = state.link.clone();
-    // La validation de chaque appel (`external.approve`) est un ticket à part : d'ici là, la
-    // case allumée refuse tout appel (décision du propriétaire, 2026-10-30).
-    if link.external.ask() {
-        return Err(RpcError::coded(
-            "external.not_approved",
-            "La case « Me demander avant chaque appel » est cochée dans QGIS : cet appel n'est \
-             pas exécuté."
-                .to_string(),
-        ));
-    }
     let (command, args) = run_params(params)?;
     let Some(spec) = state.registry.spec(&command) else {
         return Err(RpcError::business(ErrorReport::from(
@@ -86,15 +86,23 @@ fn call(
     };
     state.next_call += 1;
     let call_id = format!("external-{}", state.next_call);
-    notify(
-        state,
-        json!({"call_id": call_id, "event": "started", "command": command, "params": args}),
-    );
+    // L'appel est en cours dès la demande d'accord : `request.cancel` peut le viser, et la perte
+    // du relais se voit.
     *link.current.borrow_mut() = Some(Current {
         source: Source::External(conn),
         id: Some(id.clone()),
         call_id: Some(call_id.clone()),
     });
+    if link.external.ask() {
+        if let Err(e) = approve(&link, &call_id, &command, &args) {
+            *link.current.borrow_mut() = None;
+            return Err(e);
+        }
+    }
+    notify(
+        state,
+        json!({"call_id": call_id, "event": "started", "command": command, "params": args}),
+    );
     let started = Instant::now();
     let session = state
         .session
@@ -126,6 +134,191 @@ fn call(
     finished.insert("duration_ms".into(), json!(duration_ms));
     notify(state, Value::Object(finished));
     outcome.map_err(RpcError::business)
+}
+
+/// Demande à l'extension l'accord de l'utilisateur pour l'appel `call_id` (`external.approve`),
+/// et l'attend en continuant de servir le canal (AD-4) : `Ok` seulement sur `{"approved": true}`.
+/// Refus, erreur, réponse illisible, délai ou annulation rendent `external.not_approved` ; la
+/// perte de la session ou du relais rend aussi une erreur, qui ne partira pas (le relais n'est
+/// plus là, ou l'entrée est fermée). Retirée, la demande est annulée auprès de l'extension par
+/// `request.cancel`, pour que le panneau ferme sa question ; une réponse tardive est ignorée.
+fn approve(link: &Link<'_>, call_id: &str, command: &str, args: &Value) -> Result<(), RpcError> {
+    let n = link.next_order.get() + 1;
+    link.next_order.set(n);
+    let request_id = format!("core-{n}");
+    let request = json!({
+        "jsonrpc": "2.0", "id": request_id, "method": "external.approve",
+        "params": {"call_id": call_id, "command": command, "params": args},
+    });
+    if !link.send_or_fail(&request) {
+        return Err(not_approved(
+            "La demande d'accord n'a pas pu être envoyée à QGIS",
+        ));
+    }
+    let withdraw = |why: &str| {
+        link.send_or_fail(&cancel_notification(&request_id));
+        Err(not_approved(why))
+    };
+    let lost = || {
+        Err(RpcError::coded(
+            "external.session_lost",
+            "La session QGIS a été perdue pendant la demande d'accord.".to_string(),
+        ))
+    };
+    let deadline = Instant::now() + link.approve_timeout;
+    loop {
+        // Relais parti ou coupé par l'interrupteur : rien n'est exécuté, la demande est retirée.
+        if link.caller_lost() {
+            link.send_or_fail(&cancel_notification(&request_id));
+            return lost();
+        }
+        let received = link
+            .rx
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()));
+        let line = match received {
+            Ok(Msg::Line(line)) => line,
+            Ok(Msg::Detached(conn)) => {
+                link.external.detached(conn);
+                continue;
+            }
+            Ok(Msg::Relay(conn, RelayCall::Cancel { id, params })) => {
+                let aims = cancel_target(params.as_ref()).map(|target| {
+                    link.current
+                        .borrow()
+                        .as_ref()
+                        .is_some_and(|c| c.answers(Source::External(conn), &target))
+                });
+                let outcome = match aims {
+                    Ok(true) => Ok(json!({"cancelled": true})),
+                    Ok(false) => Err(unknown_request()),
+                    Err(e) => Err(e),
+                };
+                let cancelled = outcome.is_ok();
+                if let Some(response) = respond(id, outcome) {
+                    link.external.send(conn, &response);
+                }
+                if cancelled {
+                    return withdraw("La demande d'accord a été annulée");
+                }
+                continue;
+            }
+            // Impossible tant que l'appel tient l'exécutant ; refusé par prudence, sans toucher à
+            // la réservation d'un autre.
+            Ok(Msg::Relay(conn, RelayCall::Run { id, .. })) => {
+                link.external.release_for(Source::External(conn));
+                if let Some(response) = respond(Some(id), Err(busy())) {
+                    link.external.send(conn, &response);
+                }
+                continue;
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                let seconds = link.approve_timeout.as_millis().div_ceil(1000);
+                return withdraw(&format!(
+                    "Personne n'a répondu dans QGIS en {seconds} s à la demande d'accord"
+                ));
+            }
+            // Entrée fermée ou illisible : la session est perdue, rien n'est exécuté.
+            other => {
+                match other {
+                    Ok(Msg::Failed(e)) => link.fail(e),
+                    _ => link.input_closed.set(true),
+                }
+                link.send_or_fail(&cancel_notification(&request_id));
+                return lost();
+            }
+        };
+        match classify(&line) {
+            Err(response) => {
+                // Une réponse mal formée à la demande vaut refus.
+                if response.get("id") == Some(&json!(request_id)) {
+                    return withdraw("La réponse de QGIS à la demande d'accord est illisible");
+                }
+                if !link.send_or_fail(&response) {
+                    return lost();
+                }
+            }
+            Ok(Incoming::Reply { id, outcome }) => {
+                if id != json!(request_id) {
+                    // Réponse à une demande ou un ordre déjà soldé : ignorée.
+                    continue;
+                }
+                return match outcome {
+                    Ok(result) if result.get("approved") == Some(&Value::Bool(true)) => Ok(()),
+                    Ok(result) if result.get("approved") == Some(&Value::Bool(false)) => {
+                        Err(not_approved("L'utilisateur a refusé cet appel dans QGIS"))
+                    }
+                    Ok(_) => Err(not_approved(
+                        "La réponse de QGIS à la demande d'accord est illisible",
+                    )),
+                    // Une extension d'avant 5.26 ne connaît pas la méthode.
+                    Err(error) if error.get("code") == Some(&json!(METHOD_NOT_FOUND)) => {
+                        Err(not_approved(
+                            "L'extension QGIS n'a pas su demander l'accord de l'utilisateur \
+                             (mettez-la à jour)",
+                        ))
+                    }
+                    Err(_) => Err(not_approved(
+                        "QGIS a répondu par une erreur à la demande d'accord",
+                    )),
+                };
+            }
+            Ok(Incoming::Call { id, method, params }) => {
+                let mut cancelled = false;
+                let outcome = match method.as_str() {
+                    "request.cancel" => cancel_target(params.as_ref()).and_then(|target| {
+                        let aims = link
+                            .current
+                            .borrow()
+                            .as_ref()
+                            .is_some_and(|c| c.answers(Source::Extension, &target));
+                        cancelled = aims;
+                        if aims {
+                            Ok(json!({"cancelled": true}))
+                        } else {
+                            Err(unknown_request())
+                        }
+                    }),
+                    // L'interrupteur n'exige pas l'exécutant : il est servi pendant l'attente.
+                    "session.external" => {
+                        external::session_external(&link.external, params.as_ref())
+                    }
+                    other => Err(refused_while_held(other)),
+                };
+                if let Some(response) = respond(id, outcome) {
+                    if !link.send_or_fail(&response) {
+                        return lost();
+                    }
+                }
+                if cancelled {
+                    return withdraw("La demande d'accord a été annulée dans QGIS");
+                }
+            }
+        }
+    }
+}
+
+/// L'identifiant visé par un `request.cancel`.
+fn cancel_target(params: Option<&Value>) -> Result<Value, RpcError> {
+    params
+        .and_then(|p| p.get("id"))
+        .filter(|v| v.is_string() || v.is_number())
+        .cloned()
+        .ok_or_else(|| invalid_params("id est requis."))
+}
+
+fn unknown_request() -> RpcError {
+    RpcError::coded(
+        "request.unknown",
+        "Aucune requête en cours ne porte cet identifiant : rien n'est annulé.".to_string(),
+    )
+}
+
+/// `external.not_approved`, avec sa cause.
+fn not_approved(why: &str) -> RpcError {
+    RpcError::coded(
+        "external.not_approved",
+        format!("{why} : l'appel n'est pas exécuté."),
+    )
 }
 
 /// La notification `external.call` vers l'extension ; rien ne part une fois l'entrée fermée.
