@@ -113,7 +113,7 @@ Comportement. Les spécifications visuelles sont dans `DESIGN.md.Components`.
 | Noyau absent | Bandeau | Message « introuvable », bouton **Choisir le noyau**. Saisie et mode expert grisés. Jamais de téléchargement (AD-14). |
 | Noyau planté / mort | Bandeau | Message « s'est arrêté », bouton **Relancer**. Si une commande tournait, sa ligne du journal passe à « Erreur ». Panneau grisé. |
 | Protocole refusé | Bandeau | Message « versions incompatibles », bouton **Choisir le noyau**. Pas de Relancer (relancer le même noyau ne servirait à rien). Panneau grisé. |
-| Occupé | Mode expert | Lancer grisé, raison « Une commande est déjà en cours », Arrêter proposé. Le panneau reste réactif (aucune lecture bloquante). |
+| Occupé | Mode expert et saisie | Lancer et Envoyer grisés, raison « Une commande est déjà en cours » (ou « L'IA externe travaille » pendant un appel externe, AD-29), Arrêter proposé. Le panneau reste réactif (aucune lecture bloquante). |
 | Commande indisponible | Liste experte | Ligne grisée, raison en détail ; non lançable (AD-11). |
 | Étape non annulable | Bouton Arrêter | Grisé, raison « cette étape ne peut pas être interrompue » (AD-12). On ne tue jamais le noyau pour annuler. |
 | Erreur d'étape | Résultat + journal | Étape fautive, code `domaine.cause`, message français, ligne « Erreur » au journal (AD-21). Aucune exception ne remonte jusqu'à l'utilisateur ; le panneau est de nouveau libre. |
@@ -121,7 +121,7 @@ Comportement. Les spécifications visuelles sont dans `DESIGN.md.Components`.
 | Session en lecture seule | Bandeau | Texte explicite, rejeu seulement ; Lancer, saisie et modèle grisés (AD-7, AD-17). |
 | Saisie désactivée avant l'agent | Saisie principale | Champ visible et grisé, « Disponible avec l'agent. » [9.4] ; devient actif à l'epic 5. |
 | Hors ligne | Pied du panneau | Information, pas une panne : « Cassini fonctionne sans connexion. » Jamais de bandeau d'erreur réseau. |
-| IA externe autorisée [5.24–5.25] | Bandeau + fil des appels | Interrupteur « Autoriser une IA externe » dans les réglages, éteint par défaut et jamais rallumé seul. Allumé : bandeau « Une IA externe peut agir sur ce projet », bouton **Couper**. Chaque appel externe s'ajoute au journal du panneau en direct (commande, paramètres en clair, résultat, durée), marqué « IA externe », avec **Arrêter** (AD-12, AD-29). Case « Me demander avant chaque appel », éteinte par défaut : allumée, chaque appel attend **Autoriser** / **Refuser**. |
+| IA externe autorisée [5.24–5.26] | Bandeau + fil des appels | Interrupteur « Autoriser une IA externe » dans les réglages, éteint par défaut et jamais rallumé seul. Allumé : bandeau « Une IA externe peut agir sur ce projet », bouton **Couper**. Chaque appel externe s'ajoute au journal du panneau en direct (commande, paramètres en clair, résultat, durée), marqué « IA externe », avec **Arrêter** (AD-12, AD-29). Case « Me demander avant chaque appel », éteinte par défaut : allumée, chaque appel attend **Autoriser** / **Refuser**. |
 | IA externe déjà branchée ailleurs | Réglages | Interrupteur grisé, « Une autre session QGIS accepte déjà l'IA externe. » (AD-29) |
 
 ## Interaction Primitives
@@ -186,7 +186,7 @@ Statut : **[9.1–9.3]** pour le comportement, **[9.4]** pour la forme.
 
 ### Flux 4 — Une IA externe travaille sous les yeux de l'utilisateur (Camille, ChatGPT pour ordinateur)
 
-Statut : **[5.24–5.26]**. Camille a QGIS ouvert sur son projet Villeneuve-le-Roi et ChatGPT pour ordinateur branché sur `cassini mcp`.
+Statut : **[5.24–5.27]**. Camille a QGIS ouvert sur son projet Villeneuve-le-Roi et ChatGPT pour ordinateur branché sur `cassini mcp`.
 
 1. Dans les réglages du panneau, elle allume **Autoriser une IA externe**. Le bandeau l'annonce.
 2. Dans ChatGPT, elle tape la phrase de démo.

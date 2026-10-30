@@ -324,7 +324,8 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   (`kernel32`, `advapi32` pour le descripteur de sécurité), par une crate
   permissive dont la licence est demandée au ticket ; AF_UNIX y est interdit
   (il passe par Winsock). Tube Windows : `PIPE_REJECT_REMOTE_CLIENTS`,
-  `FILE_FLAG_FIRST_PIPE_INSTANCE` avec une seule instance, descripteur réservé à
+  `FILE_FLAG_FIRST_PIPE_INSTANCE` sur la première instance (les suivantes,
+  ouvertes par le même noyau, servent d'autres relais), descripteur réservé à
   l'utilisateur courant, client en `SECURITY_SQOS_PRESENT` ; un test montre
   qu'une connexion par `\\localhost\pipe\…` échoue. Unix : socket dans un
   dossier propre à l'utilisateur en 0700, jamais l'espace abstrait de Linux,
@@ -647,7 +648,10 @@ flowchart LR
     file d'entrée et un seul écrivain par connexion.
   - **Plusieurs relais** peuvent se brancher ; leurs appels passent un à la fois
     par l'état d'occupation. Les `id` de requête sont propres à chaque connexion :
-    une annulation ne vise que l'appel de sa connexion.
+    une annulation ne vise que l'appel de sa connexion. Chaque appel externe
+    reçoit du noyau un identifiant d'appel, porté par `external.call` ; le
+    panneau l'arrête en le renvoyant dans `request.cancel` (aucune méthode
+    nouvelle).
   - **Visibilité.** Le noyau émet `external.call` vers l'extension au début et à
     la fin de chaque appel externe (commande, paramètres, résultat ou erreur
     AD-21, durée), commandes `core` comprises ; le panneau le montre et peut
@@ -828,7 +832,7 @@ faire.
 | CAP-5 Export PDF | registre dans `core`, mise en page par QGIS | AD-5, AD-6, AD-10 |
 | CAP-6 Registre de commandes | `core` | AD-6, AD-13, AD-21 |
 | CAP-7 Journal rejouable | `core` | AD-9, AD-10, AD-11, AD-12 |
-| CAP-8 Serveur MCP | `cli` (sous-commande `mcp`, relais vers la session ou autonome), registre dans `core` | AD-2, AD-3, AD-13, AD-14, AD-29 |
+| CAP-8 Serveur MCP | `cli` (sous-commande `mcp`, relais vers la session ou autonome), registre et écouteur du canal d'IA externe dans `core` (boucle de session) | AD-2, AD-3, AD-13, AD-14, AD-29 |
 | CAP-9 Ouverture des données de l'utilisateur | registre dans `core`, lecture par QGIS | AD-8, AD-9, AD-10, AD-19 |
 | CAP-10 Projet | projet QGIS, journal à côté par `core` | AD-9, AD-10, AD-11 |
 | CAP-11 Analyse de terrain | `core` | AD-1, AD-19, AD-20, AD-22 |

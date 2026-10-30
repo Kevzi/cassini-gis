@@ -40,6 +40,7 @@ Frontière par capacité : la couche IA et le pont MCP, dans le noyau. Aucune lo
 
 - parent — `_bmad-output/initiative-cassini-mvp/initiative-cassini-mvp.md`, section Requirements
 - spec — `../spec-cassini-mvp/spec-cassini-mvp.md`, section Capabilities
+- change — `../change-ia-externe-pilote-la-session-qgis-ouverte/change-ia-externe-pilote-la-session-qgis-ouverte.md` (2026-10-30), et AD-29 de l'architecture
 - constraint — `CLAUDE.md` §2.6 indépendance des fournisseurs d'IA, §2.3 hors ligne total
 
 ## Notes
@@ -55,3 +56,4 @@ Frontière par capacité : la couche IA et le pont MCP, dans le noyau. Aucune lo
 - Decision: la répétition de démo sur le projet réel Villeneuve-le-Roi appartient à l'epic 6, qui en reçoit le scénario dans ses Notes, et non à cet epic (2026-10-17).
 - Decision: l'entrée 10 (modèle ajusté) reste hors du ménage final (8) : longue et faite à la main, elle peut finir après la suite de bout en bout ; elle reste nécessaire même si l'entrée 12 tient les 30 s, pour les postes plus modestes et le seuil strict de clarification (2026-10-17).
 - Decision: phrase E du scénario, isochrone d'origine inventée par le modèle de 5.15 : l'entrée 16 (garde-fou du noyau sur la provenance des coordonnées) la règle à coup sûr, puis l'entrée 17 (nouvelle passe sur le générateur et ré-entraînement) apprend au modèle à poser la question. AD-23 est étendu aux coordonnées par bmad-architecture avant le build de 16 ; 15 reste sur sa branche jusqu'à 16 et la recette du propriétaire dans QGIS. Comme l'entrée 10, les entrées 15 et 17 (entraînement long, fait à la main) restent hors du ménage final (8) ; 16 y entre (2026-10-23).
+- Decision: 2026-10-30 — changement « une IA externe pilote la session QGIS ouverte » : quatre entrées après 7, dans l'ordre 24 (canal côté session, protocole 2), 25 (relais `cassini mcp`), 26 (panneau : interrupteur et fil des appels, que l'epic 5 remplit comme pour l'entrée 14), 27 (recette Claude, GPT et Gemini). 24, 25 et 26 entrent au ménage final (8) ; 27, recette à la main avec des applications de bureau, reste hors de 8 comme 10, 15 et 17, pour ne pas bloquer 8 et 9 sur la disponibilité du propriétaire.

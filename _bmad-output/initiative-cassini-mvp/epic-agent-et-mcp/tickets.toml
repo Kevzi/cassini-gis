@@ -1,7 +1,8 @@
 # tickets.toml — epic 5, agent en langage naturel et serveur MCP.
 # L'ordre des tables est l'ordre de construction. `id` nomme une entree pour de bon.
 # Deux pistes : l'agent (1 a 6, crate ai/ puis canal puis panneau) et le serveur MCP (7),
-# qui ne depend que du noyau et peut avancer en parallele. Aucune logique metier : l'agent
+# qui ne depend que du noyau et peut avancer en parallele, puis le relais vers la session
+# QGIS ouverte (24 a 27, changement du 2026-10-30, AD-29). Aucune logique metier : l'agent
 # ne compose que des commandes du registre (AD-23).
 # Inception le 2026-10-17, apres les epics 2, 8 et 9. Decisions : le modele est livre dans le
 # paquet Cassini, jamais telecharge (CLAUDE.md §3, AD-17) ; la clarification (critere 5) est
@@ -146,13 +147,88 @@ risk = "high"
 notes = ["hitl : le proprietaire branche un client MCP tiers de son choix pour la recette."]
 
 [[entry]]
+id = 24
+type = "story"
+title = "Canal d'IA externe cote session : le noyau de QGIS accepte un relais"
+description = "Dans la boucle de session (core/src/serve.rs), le noyau ouvre sur session.external le canal d'IA externe de AD-2 et AD-14 (tube nomme Windows, socket Unix en dossier 0700, ecouteur dans core) et le ferme a l'extinction ou a l'arret ; il sert external.attach, command.run et request.cancel venus d'un relais, tient un seul etat d'occupation pour toutes les connexions (session.busy dans les deux sens), refuse les chemins absolus (external.path_refused), emet external.call (avec identifiant d'appel) et external.approve vers l'extension, journalise l'origine external, et passe le protocole a 2 des deux cotes (core/src/registry.rs et la constante de qgis-plugin/cassini_qgis/client.py avec son test) ; il fixe la forme des messages que 25 et 26 consomment (AD-6, AD-7, AD-9, AD-29)."
+verify = "cargo test -p cassini-core --test canal_externe passe sous Linux et Windows (client brut du canal et extension simulee), hors_ligne.rs et la recette pytest de l'extension restent verts, et cargo deny check passe."
+covers = ["CAP-8", "CAP-13"]
+after = [7]
+hitl = false
+risk = "high"
+unknown = "La crate d'acces a l'API Win32 (windows-sys, MIT OR Apache-2.0, deja indirecte dans Cargo.lock) doit etre acceptee par le proprietaire comme dependance directe du noyau avant le build (CLAUDE.md §8)."
+references = [
+  "../architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md — AD-2, AD-4, AD-6, AD-7, AD-9, AD-11, AD-12, AD-14, AD-21, AD-29",
+  "../change-ia-externe-pilote-la-session-qgis-ouverte/change-ia-externe-pilote-la-session-qgis-ouverte.md",
+]
+notes = [
+  "Decision: 2026-10-30 — le proprietaire veut qu'une IA externe travaille pendant que QGIS est ouvert et qu'il voie ce qui se fait, « sinon ca sert a rien » ; piste du relais MCP retenue, appel direct aux fournisseurs ecarte.",
+  "Cas a couvrir : interrupteur eteint par defaut (aucun canal), session.not_started, external.not_approved par refus et par delai de 120 s, seconde session external.channel_taken, interrupteur coupe donne external.session_lost, relais deconnecte en plein appel, annulation par identifiant d'appel, rejeu d'un journal portant des etapes external, socket orpheline supprimee, connexion par \\\\localhost\\pipe refusee.",
+]
+
+[[entry]]
+id = 25
+type = "story"
+title = "Relais : cassini mcp pilote la session QGIS quand elle l'autorise"
+description = "cassini mcp choisit a chaque tools/list et tools/call entre relais (canal d'IA externe de 24 joignable : catalogue et schemas pris dans la session, commandes QGIS comprises) et autonome (5.7, verrou du projet pris le temps d'un appel seulement), envoie notifications/tools/list_changed quand le mode ou le catalogue change, ne finit jamais en autonome un appel commence en relais, traduit notifications/cancelled en request.cancel et une erreur AD-21 en isError, et sert ses appels sans bloquer son runtime (ping et annulation pendant une commande longue, report de 5.7) (AD-13, AD-29)."
+verify = "cargo test -p cassini --test mcp passe avec une session simulee derriere le canal : bascule relais et autonome, list_changed, annulation, appel QGIS dicte et journalise, aucune prise durable du verrou en autonome."
+covers = ["CAP-8"]
+after = [24]
+hitl = false
+risk = "high"
+unknown = "Les clients MCP visés reagissent-ils tous a notifications/tools/list_changed ? Sinon le catalogue n'est relu qu'au redemarrage du client ; a observer en 27."
+references = [
+  "../architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md — AD-13, AD-29",
+  "story-serveur-mcp-cassini-mcp-expose-le-registre-a-un-client-tiers-plan.md — plan de 5.7 et ses reports",
+]
+
+[[entry]]
+id = 26
+type = "story"
+title = "Le panneau montre chaque appel de l'IA externe et peut l'arreter"
+description = "L'extension ajoute dans les Reglages l'interrupteur « Autoriser une IA externe » (eteint par defaut, jamais rallume seul, grise sur external.channel_taken) et la case « Me demander avant chaque appel » (eteinte par defaut), qu'elle envoie par session.external dans la forme fixee par 24 ; allume, un bandeau l'annonce avec Couper, chaque external.call s'ajoute au journal du panneau marque « IA externe » (commande, parametres en clair, resultat, duree) avec Arreter par son identifiant d'appel, external.approve affiche Autoriser / Refuser sans geler QGIS, et session.busy pendant un appel externe grise la saisie avec « L'IA externe travaille » (AD-4, AD-12, AD-29, EXPERIENCE.md)."
+verify = "La recette pytest de l'extension passe avec un noyau simule couvrant l'interrupteur, le fil des appels, Arreter, Autoriser / Refuser et l'expiration sans gel."
+covers = ["CAP-8", "CAP-13"]
+after = [24]
+hitl = false
+risk = "high"
+references = [
+  "../ux-panneau-cassini/EXPERIENCE.md — etats « IA externe autorisee », « IA externe deja branchee ailleurs », « Occupe », flux 4",
+  "../architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md — AD-4, AD-12, AD-29",
+  "../change-ia-externe-pilote-la-session-qgis-ouverte/change-ia-externe-pilote-la-session-qgis-ouverte.md",
+]
+notes = [
+  "Decision: 2026-10-30 — chaque appel est execute et montre en direct avec Arreter ; la validation de chaque appel est une case, eteinte par defaut.",
+]
+
+[[entry]]
+id = 27
+type = "story"
+title = "Recette Claude, GPT et Gemini sur la phrase de demo, QGIS ouvert"
+description = "Ecrit dans README.md une fiche de branchement par client retenu — Claude Desktop pour Claude, ChatGPT pour ordinateur (ou Codex CLI en repli) pour GPT, Gemini CLI pour Gemini — et joue la phrase de demo avec chacun sur le projet Villeneuve-le-Roi ouvert dans QGIS, interrupteur allume, pour livrer le critere elargi de CAP-8."
+verify = "Avec chacun des trois clients, la phrase de demo fait defiler les appels dans le panneau, la couche apparait sur la carte et le journal se rejoue a l'identique ; resultats consignes dans le plan."
+covers = ["CAP-8"]
+after = [25, 26]
+hitl = true
+risk = "medium"
+unknown = "La prise en charge des serveurs STDIO par ChatGPT pour ordinateur sous Windows n'est pas confirmee par la page officielle ; a verifier en ouvrant le ticket, Codex CLI servant de repli pour GPT."
+references = [
+  "../change-ia-externe-pilote-la-session-qgis-ouverte/change-ia-externe-pilote-la-session-qgis-ouverte.md — §5, critere de succes",
+  "../../../../donnees-test-cassini/ — jeu Villeneuve-le-Roi, hors depot",
+]
+notes = [
+  "Decision: 2026-10-30 — ChatGPT web est hors perimetre : il ne lance pas de processus local.",
+  "hitl : le proprietaire est a distance ; Claude joue lui-meme ce qu'il peut lancer en ligne de commande et ne demande au proprietaire que les applications de bureau.",
+]
+
+[[entry]]
 id = 8
 type = "story"
 title = "Refactor sweep"
 description = "Nettoie ce que l'epic a laisse : doublons entre ai/, serve.rs et le serveur MCP, constats de revue reportes dans deferred-work.md ; le perimetre est fixe au demarrage d'apres les plans et les constats."
 verify = "cargo test, clippy et fmt propres, les constats reportes de l'epic sont traites ou re-reportes avec leur raison."
 covers = []
-after = [1, 2, 3, 4, 5, 6, 7, 11, 12, 13, 14, 16, 18, 19, 20, 21]
+after = [1, 2, 3, 4, 5, 6, 7, 11, 12, 13, 14, 16, 18, 19, 20, 21, 24, 25, 26]
 hitl = false
 risk = "low"
 
@@ -160,7 +236,7 @@ risk = "low"
 id = 9
 type = "story"
 title = "Suite de bout en bout : phrase, plan valide, execution, rejeu sans l'IA"
-description = "Prouve par un test commite le parcours de la phrase de demo : plan compose, valide, execute par le canal, puis rejoue sans charger le modele avec un resultat identique ; garde reseau sur l'agent et le serveur MCP ; re-mesure du taux sur le registre reel (sur GPU) et de la duree par phrase (sur processeur, comme l'entree 11)."
+description = "Prouve par un test commite le parcours de la phrase de demo : plan compose, valide, execute par le canal, puis rejoue sans charger le modele avec un resultat identique ; garde reseau sur l'agent et le serveur MCP ; un appel externe passe par le relais (25), journalise avec l'origine external, puis rejoue a l'identique ; re-mesure du taux sur le registre reel (sur GPU) et de la duree par phrase (sur processeur, comme l'entree 11)."
 verify = "La suite passe hors ligne, le rejeu d'un plan s'execute sans que le modele soit charge et rend identical: true, et le taux de plans conformes est consigne."
 covers = ["CAP-4", "CAP-8"]
 after = [8]

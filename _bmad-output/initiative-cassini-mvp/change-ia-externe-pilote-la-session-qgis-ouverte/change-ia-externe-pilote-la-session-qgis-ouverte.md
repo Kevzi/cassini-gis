@@ -20,10 +20,12 @@ Exigence du propriétaire (2026-10-30) : une IA externe doit travailler **pendan
 l'utilisateur doit **voir ce qui se fait** (carte, panneau Cassini) — « sinon ça ne sert à rien ». Elle doit
 être **compatible dès le départ avec GPT et Gemini**, pas seulement avec Claude.
 
-Fait vérifié le 2026-10-30 : les trois familles de clients savent lancer un serveur MCP local sur stdio —
+Fait vérifié le 2026-10-30 dans la documentation de chaque éditeur : les trois familles de clients savent lancer un serveur MCP local sur stdio —
 Claude Desktop et Claude Code ; ChatGPT pour ordinateur et Codex CLI (configuration partagée,
 `[mcp_servers.<nom>]`, `command` + `args`) ; Gemini CLI (`mcpServers` dans `settings.json`). L'application
-web de ChatGPT, elle, ne lance pas de processus local.
+web de ChatGPT, elle, ne lance pas de processus local. Réserve : la page d'OpenAI ne confirme pas
+explicitement STDIO pour ChatGPT pour ordinateur **sous Windows** ; Codex CLI sert de repli (à vérifier en
+5.27).
 
 ## 2. Analyse d'impact
 
@@ -155,7 +157,7 @@ Arrêter.
 
 Portée : **modérée** (ajouts au carnet de l'epic 5, amendement d'architecture).
 
-Entrées à créer avec `bmad-ticket` dans l'epic 5 :
+Entrées à créer avec `bmad-ticket` dans l'epic 5 (à la création, le 2026-10-30, la vérification du lot a coupé la première en deux : 5.24 canal côté session, 5.25 relais `cassini mcp` ; le panneau devient 5.26 et la recette 5.27) :
 
 1. **5.24 — Canal local : la session QGIS accepte une IA externe** (`risk: high`). Interrupteur, canal
    local ouvert et fermé par le noyau de la session, `cassini mcp` relaie le catalogue et les appels, appels
