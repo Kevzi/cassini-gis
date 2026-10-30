@@ -10,8 +10,11 @@
 //! `plan.propose`, `plan.execute` et `plan.reject` portent les plans de l'agent
 //! (voir le sous-module `plans`) ; `agent.models` rend les modèles que l'agent peut prendre.
 //! `session.external` ouvre ou ferme le canal d'IA externe (AD-29, sous-module `external`) :
-//! ses relais versent leurs lignes dans la même file que l'entrée, avec leur source.
+//! les fils lecteurs de ses relais versent dans la même file que l'entrée les seuls appels qui
+//! exigent la boucle, exécutés par le sous-module `calls`. Un seul état d'occupation vaut pour
+//! l'extension et les relais : qui trouve l'exécutant pris reçoit `session.busy` aussitôt.
 
+mod calls;
 mod external;
 mod plans;
 
@@ -86,13 +89,52 @@ enum Source {
 
 /// Ce que les fils de lecture transmettent à la boucle, par une file unique.
 enum Msg {
-    Line(Source, String),
+    /// Une ligne de l'extension (entrée standard).
+    Line(String),
     /// Entrée standard fermée.
     Eof,
     /// Entrée standard illisible.
     Failed(io::Error),
     /// Un relais s'est débranché.
     Detached(u64),
+    /// Un appel d'un relais qui exige la boucle, versé par son fil lecteur.
+    Relay(u64, RelayCall),
+}
+
+/// Ce qu'un fil lecteur de relais verse dans la file : le reste, il y répond lui-même.
+enum RelayCall {
+    /// Un `command.run` dont le fil lecteur a réservé l'occupation : la boucle doit la libérer.
+    Run { id: Value, params: Option<Value> },
+    /// Un `request.cancel`, requête ou notification.
+    Cancel {
+        id: Option<Value>,
+        params: Option<Value>,
+    },
+}
+
+/// L'appel en cours, que `request.cancel` peut viser : un `command.run` ou un `plan.execute` de
+/// l'extension (par son `id`), ou un appel d'un relais (par son `id` depuis sa connexion, par son
+/// `call_id` depuis l'extension).
+struct Current {
+    source: Source,
+    id: Option<Value>,
+    call_id: Option<String>,
+}
+
+impl Current {
+    /// `target`, reçu de `requester`, désigne-t-il cet appel ?
+    fn answers(&self, requester: Source, target: &Value) -> bool {
+        match (requester, self.source) {
+            (Source::Extension, Source::Extension) => self.id.as_ref() == Some(target),
+            (Source::Extension, Source::External(_)) => {
+                self.call_id.is_some() && target.as_str() == self.call_id.as_deref()
+            }
+            (Source::External(a), Source::External(b)) => {
+                a == b && self.id.as_ref() == Some(target)
+            }
+            (Source::External(_), Source::Extension) => false,
+        }
+    }
 }
 
 /// Le fil de lecture : il ne fait que lire des lignes et les passer.
@@ -108,11 +150,7 @@ fn read_lines(input: &mut impl BufRead, tx: Sender<Msg>) {
             Ok(_) => {
                 let text = String::from_utf8_lossy(&buf);
                 let line = text.trim();
-                if !line.is_empty()
-                    && tx
-                        .send(Msg::Line(Source::Extension, line.to_string()))
-                        .is_err()
-                {
+                if !line.is_empty() && tx.send(Msg::Line(line.to_string())).is_err() {
                     return;
                 }
             }
@@ -131,8 +169,8 @@ struct Link<'a> {
     out: RefCell<&'a mut dyn Write>,
     grace: Duration,
     next_order: Cell<u64>,
-    /// Identifiant du `command.run` en cours d'exécution (pour `request.cancel`).
-    run_id: RefCell<Option<Value>>,
+    /// L'appel en cours d'exécution, et sa source (pour `request.cancel`).
+    current: RefCell<Option<Current>>,
     /// Première panne d'entrée ou de sortie rencontrée pendant un ordre.
     failure: RefCell<Option<io::Error>>,
     /// L'entrée standard s'est fermée (la fin a pu être lue pendant un ordre). La file ne se
@@ -143,18 +181,25 @@ struct Link<'a> {
 }
 
 impl Link<'_> {
-    /// Traite un message des relais, à toute heure ; rend ceux de l'entrée standard.
-    fn side(&self, msg: Msg) -> Option<Msg> {
-        match msg {
-            Msg::Line(Source::External(conn), line) => {
-                self.external.on_line(conn, &line);
-                None
-            }
-            Msg::Detached(conn) => {
-                self.external.detached(conn);
-                None
-            }
-            other => Some(other),
+    /// Le relais de l'appel en cours a-t-il disparu (débranché, ou coupé par l'interrupteur) ?
+    fn caller_lost(&self) -> bool {
+        match self.current.borrow().as_ref().map(|c| c.source) {
+            Some(Source::External(conn)) => !self.external.has_conn(conn),
+            _ => false,
+        }
+    }
+
+    /// Le `request.cancel` d'un relais : la réponse lui revient, par sa connexion.
+    fn relay_cancel(
+        &self,
+        conn: u64,
+        id: Option<Value>,
+        params: Option<&Value>,
+        in_flight: Option<InFlight<'_>>,
+    ) {
+        let outcome = request_cancel(self, Source::External(conn), params, in_flight);
+        if let Some(response) = respond(id, outcome) {
+            self.external.send(conn, &response);
         }
     }
 
@@ -194,6 +239,8 @@ struct State<'a> {
     pending: Option<plans::Pending>,
     /// Compteur des plans proposés, pour les identifiants `plan-<n>`.
     next_plan: u64,
+    /// Compteur des appels des relais, pour les identifiants `external-<n>`.
+    next_call: u64,
     /// Identifiants des couches intermédiaires (ticket 5.22) : sorties d'une étape consommées par
     /// une étape exécutée du même plan, cachées au modèle. En mémoire seulement, le temps du
     /// processus : à la relance du noyau, tout résultat est revu une fois.
@@ -258,7 +305,7 @@ fn serve_with<'a>(
             out: RefCell::new(&mut output),
             grace,
             next_order: Cell::new(0),
-            run_id: RefCell::new(None),
+            current: RefCell::new(None),
             failure: RefCell::new(None),
             input_closed: Cell::new(false),
             external: hub,
@@ -272,6 +319,7 @@ fn serve_with<'a>(
             composer,
             pending: None,
             next_plan: 0,
+            next_call: 0,
             intermediates: HashSet::new(),
         };
         let outcome = loop {
@@ -283,12 +331,26 @@ fn serve_with<'a>(
                 Ok(msg) => msg,
                 Err(_) => break Ok(()),
             };
-            let line = match link.side(msg) {
-                None => continue,
-                Some(Msg::Line(_, line)) => line,
-                Some(Msg::Failed(e)) => break Err(e),
-                Some(Msg::Detached(_)) => continue,
-                Some(Msg::Eof) => break Ok(()),
+            let line = match msg {
+                Msg::Line(line) => line,
+                Msg::Failed(e) => break Err(e),
+                Msg::Eof => break Ok(()),
+                Msg::Detached(conn) => {
+                    link.external.detached(conn);
+                    continue;
+                }
+                // Aucun appel en vol : rien à annuler.
+                Msg::Relay(conn, RelayCall::Cancel { id, params }) => {
+                    link.relay_cancel(conn, id, params.as_ref(), None);
+                    continue;
+                }
+                Msg::Relay(conn, RelayCall::Run { id, params }) => {
+                    calls::run(&mut state, conn, id, params);
+                    if let Some(e) = link.failure.borrow_mut().take() {
+                        break Err(e);
+                    }
+                    continue;
+                }
             };
             if let Some(response) = handle_line(&mut state, &line) {
                 if let Err(e) = link.send(&response) {
@@ -412,14 +474,37 @@ fn handle_line(state: &mut State<'_>, line: &str) -> Option<Value> {
         // Une réponse sans ordre en vol : id inconnu ou déjà soldé, ignorée.
         Ok(Incoming::Reply { .. }) => None,
         Ok(Incoming::Call { id, method, params }) => {
+            // Un seul état d'occupation (AD-29) : un appel de relais réservé, même encore en file,
+            // passe avant l'extension, qui reçoit `session.busy`.
+            let occupies = matches!(
+                method.as_str(),
+                "command.run" | "plan.propose" | "plan.execute" | "journal.replay"
+            );
+            let link = state.link.clone();
+            if occupies && !link.external.reserve(Source::Extension) {
+                return respond(id, Err(busy()));
+            }
+            if method == "plan.reject" && link.external.is_busy() {
+                return respond(id, Err(busy()));
+            }
             // `plan.execute` comme `command.run` : `request.cancel` vise l'étape en vol.
             let is_run = method == "command.run" || method == "plan.execute";
             if is_run {
-                *state.link.run_id.borrow_mut() = id.clone();
+                *link.current.borrow_mut() = Some(Current {
+                    source: Source::Extension,
+                    id: id.clone(),
+                    call_id: None,
+                });
             }
             let outcome = dispatch(state, &method, params.as_ref());
             if is_run {
-                *state.link.run_id.borrow_mut() = None;
+                *link.current.borrow_mut() = None;
+            }
+            // Un plan proposé non tranché occupe pour les relais seulement : il est noté avant
+            // la libération, pour qu'aucun relais ne réserve entre les deux.
+            link.external.set_plan_pending(state.pending.is_some());
+            if occupies {
+                link.external.release();
             }
             respond(id, outcome)
         }
@@ -433,7 +518,7 @@ fn dispatch(
 ) -> Result<Value, RpcError> {
     if method == "request.cancel" {
         // Aucun ordre en vol : rien à annuler.
-        return request_cancel(&state.link, params, None);
+        return request_cancel(&state.link, Source::Extension, params, None);
     }
     if state.session.is_none() && method != "session.hello" {
         return Err(RpcError::coded(
@@ -459,6 +544,20 @@ fn invalid_params(why: &str) -> RpcError {
     RpcError::protocol(INVALID_PARAMS, &format!("Paramètres invalides : {why}"))
 }
 
+/// L'exécutant est pris (AD-29) : refus immédiat, rien n'est mis en file.
+fn busy() -> RpcError {
+    RpcError::coded(
+        "session.busy",
+        "Une commande est en cours d'exécution : attendez sa fin ou annulez-la.".to_string(),
+    )
+}
+
+fn is_cancellable(registry: &Registry, command: &str) -> bool {
+    registry
+        .spec(command)
+        .is_some_and(|s| s.cancellable == Some(true))
+}
+
 /// Ordre en vol : sa commande, l'identifiant de son ordre et l'état de l'annulation.
 struct InFlight<'c> {
     command: &'c str,
@@ -466,10 +565,13 @@ struct InFlight<'c> {
     cancelling: &'c mut Option<Instant>,
 }
 
-/// `request.cancel` reçu comme requête ou comme notification. `in_flight` vaut
-/// `None` hors d'un ordre : aucune requête n'est alors annulable.
+/// `request.cancel` reçu de `requester`, comme requête ou comme notification. `in_flight` vaut
+/// `None` hors d'un ordre : aucune requête n'est alors annulable. Un relais ne vise que l'appel de
+/// sa connexion, par son `id` ; l'extension vise le sien par son `id`, celui d'un relais par son
+/// `call_id`.
 fn request_cancel(
     link: &Link<'_>,
+    requester: Source,
     params: Option<&Value>,
     in_flight: Option<InFlight<'_>>,
 ) -> Result<Value, RpcError> {
@@ -486,14 +588,15 @@ fn request_cancel(
     let Some(flight) = in_flight else {
         return Err(unknown());
     };
-    if link.run_id.borrow().as_ref() != Some(target) {
+    let aimed = link
+        .current
+        .borrow()
+        .as_ref()
+        .is_some_and(|c| c.answers(requester, target));
+    if !aimed {
         return Err(unknown());
     }
-    let cancellable = link
-        .registry
-        .spec(flight.command)
-        .is_some_and(|s| s.cancellable == Some(true));
-    if !cancellable {
+    if !is_cancellable(link.registry, flight.command) {
         return Err(RpcError::coded(
             "request.not_cancellable",
             format!(
@@ -529,15 +632,11 @@ impl Channel<'_> {
         params: Option<&Value>,
     ) -> Option<Value> {
         let outcome = match method {
-            "request.cancel" => request_cancel(&self.link, params, Some(flight)),
+            "request.cancel" => request_cancel(&self.link, Source::Extension, params, Some(flight)),
             // L'interrupteur n'exige pas l'exécutant : il est servi pendant l'ordre.
             "session.external" => external::session_external(&self.link.external, params),
             "session.hello" | "command.run" | "journal.replay" | "plan.propose"
-            | "plan.execute" | "plan.reject" | "agent.models" => Err(RpcError::coded(
-                "session.busy",
-                "Une commande est en cours d'exécution : attendez sa fin ou annulez-la."
-                    .to_string(),
-            )),
+            | "plan.execute" | "plan.reject" | "agent.models" => Err(busy()),
             _ => Err(RpcError::protocol(METHOD_NOT_FOUND, "Méthode inconnue.")),
         };
         respond(id, outcome)
@@ -576,7 +675,17 @@ impl Executor for Channel<'_> {
         }
         let cancelled = || RegistryError::Cancelled(id.to_string());
         let mut cancelling: Option<Instant> = None;
+        let mut lost = false;
         loop {
+            // Le relais de l'appel en cours a disparu (débranché, interrupteur coupé) : l'ordre est
+            // annulé s'il est annulable, sinon il finit et l'étape est journalisée (AD-29, AD-12).
+            if !lost && link.caller_lost() {
+                lost = true;
+                if cancelling.is_none() && is_cancellable(link.registry, id) {
+                    link.send_or_fail(&cancel_notification(&order_id));
+                    cancelling = Some(Instant::now() + link.grace);
+                }
+            }
             // La file ne se ferme pas avec l'entrée (les relais en tiennent une entrée) : une
             // entrée déjà fermée vaut une file fermée.
             let received = match cancelling {
@@ -587,15 +696,37 @@ impl Executor for Channel<'_> {
                     .recv_timeout(deadline.saturating_duration_since(Instant::now())),
             };
             // Les relais sont servis pendant l'ordre ; seule l'extension peut y répondre.
-            let received = match received {
-                Ok(msg) => match link.side(msg) {
-                    Some(msg) => Ok(msg),
-                    None => continue,
-                },
-                Err(e) => Err(e),
-            };
             let line = match received {
-                Ok(Msg::Line(_, line)) => line,
+                Ok(Msg::Line(line)) => line,
+                Ok(Msg::Detached(conn)) => {
+                    link.external.detached(conn);
+                    continue;
+                }
+                Ok(Msg::Relay(
+                    conn,
+                    RelayCall::Cancel {
+                        id: cancel_id,
+                        params,
+                    },
+                )) => {
+                    let flight = InFlight {
+                        command: id,
+                        order_id: &order_id,
+                        cancelling: &mut cancelling,
+                    };
+                    link.relay_cancel(conn, cancel_id, params.as_ref(), Some(flight));
+                    continue;
+                }
+                // Impossible tant que l'ordre tient l'exécutant ; refusé par prudence. Un appel en
+                // file tient sa propre réservation : elle est libérée, sans toucher à celle d'un
+                // autre.
+                Ok(Msg::Relay(conn, RelayCall::Run { id: run_id, .. })) => {
+                    link.external.release_for(Source::External(conn));
+                    if let Some(response) = respond(Some(run_id), Err(busy())) {
+                        link.external.send(conn, &response);
+                    }
+                    continue;
+                }
                 Err(RecvTimeoutError::Timeout) => return Err(cancelled()),
                 // Entrée fermée ou illisible : plus rien à attendre, l'étape est annulée.
                 other => {
@@ -733,7 +864,8 @@ fn catalogue(state: &State<'_>) -> Vec<Value> {
         .collect()
 }
 
-fn command_run(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, RpcError> {
+/// Les paramètres d'un `command.run` : l'identifiant de la commande et ses paramètres (objet).
+fn run_params(params: Option<&Value>) -> Result<(String, Value), RpcError> {
     let params = params.ok_or_else(|| invalid_params("command est requis."))?;
     let id = params
         .get("command")
@@ -744,6 +876,11 @@ fn command_run(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, R
         Some(p) if p.is_object() => p.clone(),
         Some(_) => return Err(invalid_params("params doit être un objet.")),
     };
+    Ok((id.to_string(), args))
+}
+
+/// Une commande du registre que l'extension n'a pas annoncée est indisponible (AD-7).
+fn check_available(state: &State<'_>, id: &str) -> Result<(), RpcError> {
     if let Some(spec) = state.registry.spec(id) {
         if !is_available(state, id, spec.runs_in) {
             return Err(RpcError::business(ErrorReport::from(
@@ -751,8 +888,14 @@ fn command_run(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, R
             )));
         }
     }
+    Ok(())
+}
+
+fn command_run(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, RpcError> {
+    let (id, args) = run_params(params)?;
+    check_available(state, &id)?;
     let session = state.session.as_mut().expect("session vérifiée");
-    session.call(id, args).map_err(RpcError::business)
+    session.call(&id, args).map_err(RpcError::business)
 }
 
 /// Exécutant QGIS du rejeu : refuse, en la nommant, une commande que l'extension n'a pas annoncée.
@@ -772,7 +915,7 @@ impl<E: Executor> Executor for Announced<E> {
 
 /// `journal.replay` : le noyau rejoue le journal du projet par le même routeur et
 /// le même canal que l'exécution d'origine (AD-11). Il n'est pas annulable : aucun
-/// `run_id` n'est posé, donc `request.cancel` répond `request.unknown`.
+/// appel en cours n'est posé, donc `request.cancel` répond `request.unknown`.
 fn journal_replay(state: &mut State<'_>) -> Result<Value, RpcError> {
     let project = state.project.clone().expect("session vérifiée");
     let replay = Replay::load(state.registry, Path::new(&project)).map_err(RpcError::business)?;

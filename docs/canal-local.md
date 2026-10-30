@@ -6,9 +6,11 @@ l'entrée et la sortie standard, **dans les deux sens** (AD-3). Le protocole est
 les messages que l'extension QGIS consomme, et ceux du canal d'IA externe.
 
 Un fil du noyau lit l'entrée ; la boucle principale est seule à écrire sur la sortie. Les
-relais du canal d'IA externe ont chacun un fil lecteur et un fil écrivain : leurs lignes
-entrent dans la même file que celles de l'entrée, avec leur source. Une seule étape
-s'exécute à la fois (AD-5).
+relais du canal d'IA externe ont chacun un fil lecteur et un fil écrivain : le fil lecteur
+répond lui-même à ce qui n'exige pas l'exécutant, et ne verse dans la file de la boucle que
+les `command.run` qu'il a pu réserver et les `request.cancel`. Une seule étape s'exécute à la
+fois (AD-5), sous **un seul état d'occupation** pour l'extension et les relais (AD-29, voir
+« Occupation »).
 
 ## `order.execute` (noyau vers extension)
 
@@ -43,7 +45,9 @@ Une réponse à un `id` inconnu ou déjà soldé est ignorée.
 répond `{"cancelled": true}` ; reçu comme notification, il ne répond pas.
 
 Du client vers le noyau, il annule le `command.run` en vol, à condition que sa
-commande soit déclarée `cancellable` :
+commande soit déclarée `cancellable`. L'extension vise le sien par son `id`, et l'appel d'un
+relais par son `call_id` (voir `external.call`) ; un relais ne vise que l'appel de sa propre
+connexion, par l'`id` de son `command.run`. Tout autre identifiant répond `request.unknown`.
 
 ```json
 {"jsonrpc":"2.0","id":3,"method":"request.cancel","params":{"id":2}}
@@ -269,8 +273,9 @@ notifie la perte de la session. **Aucun chemin ne passe** sur ce canal, dans auc
 ```
 
 Allumé, le noyau ouvre le canal et répond `{"enabled": true, "ask": false}`. `ask` est la case
-« Me demander avant chaque appel » ; elle est gardée pour l'exécution des appels du relais
-(ticket suivant). Rallumer un canal déjà ouvert ne change que `ask`.
+« Me demander avant chaque appel ». La validation de chaque appel (`external.approve`) est un
+ticket à part : d'ici là, **la case allumée refuse tout appel d'un relais** par
+`external.not_approved`, sans rien exécuter. Rallumer un canal déjà ouvert ne change que `ask`.
 
 ```json
 {"jsonrpc":"2.0","id":9,"method":"session.external","params":{"enabled":false}}
@@ -306,10 +311,88 @@ Une version différente répond `session.protocol_mismatch`, dont le message nom
 mettre à jour : le relais (`cassini mcp`) s'il est en retard, le paquet du noyau de la session
 QGIS sinon. Une `protocol_version` absente ou qui n'est pas un entier répond `-32602`.
 
-`external.attach` est répondu à toute heure, **pendant un ordre en vol compris**, sans attendre
-sa fin. Jusqu'au ticket suivant, toute autre méthode d'un relais (`command.run`,
-`request.cancel`…) répond « méthode inconnue » (`-32601`) et rien n'est exécuté ; une
-notification ne reçoit rien, une ligne illisible une erreur à identifiant nul.
+`external.attach` est répondu à toute heure, **pendant un ordre en vol et pendant une
+composition de plan compris**, sans attendre leur fin : le fil lecteur du relais y répond
+lui-même. Un relais n'emploie sinon que `command.run` et `request.cancel` (AD-6) ; toute autre
+méthode répond « méthode inconnue » (`-32601`) et rien n'est exécuté. Une notification ne
+reçoit rien (un `command.run` sans `id` n'est pas exécuté), une ligne illisible reçoit une
+erreur à identifiant nul.
+
+### `command.run` (relais vers noyau)
+
+Même forme que pour l'extension, sur une commande du **catalogue disponible** :
+
+```json
+{"jsonrpc":"2.0","id":7,"method":"command.run","params":{"command":"layer.describe","params":{"layer_id":"l1"}}}
+```
+
+Le noyau de la session l'exécute par le même chemin que celui de l'extension (`Session::call_from`, qui note l'origine) :
+validation, chemins de sortie, journal, et pour une commande QGIS l'ordre `order.execute` dicté à
+l'extension (AD-5), que celle-ci exécute comme d'habitude. Il répond au relais par la valeur de la
+commande ou par une erreur AD-21.
+
+- **Avant tout** : session ouverte (`session.not_started` sinon), exécutant libre (`session.busy`
+  sinon, aussitôt, rien n'est mis en file), case `ask` éteinte (`external.not_approved` sinon).
+- Une commande inconnue répond `registry.unknown_command`, une commande QGIS non annoncée
+  `registry.unavailable` ; rien ne part vers l'extension.
+- **Chemins (AD-9)** : un paramètre de chemin de la commande (`path_params`, par exemple `path`
+  de `layer.add`) doit être relatif au projet et ne pas en sortir. Absolu (`/x`, `C:\x`,
+  `\\serveur\x`) ou sortant par `..` : `external.path_refused`, rien n'est exécuté ni
+  journalisé, et le message ne cite que le nom du paramètre.
+- **Aucun chemin absolu ne repart** : le résultat est rendu relatif au dossier de travail ; un
+  texte qui est en entier un chemin du projet devient relatif au projet, un autre chemin absolu
+  entier son nom de fichier. Dans un message (d'erreur ou non), les dossiers du projet et de
+  travail deviennent `.`, et tout autre chemin absolu cité est réduit à son nom de fichier. Même
+  règle pour `external.call`.
+- **Journal** : la ligne de l'étape porte `"origin": "external"`. Le rejeu l'ignore et rejoue
+  l'étape à l'identique ; il n'écrit rien, les lignes gardent leur origine.
+
+### `external.call` (noyau vers extension, notification)
+
+Chaque appel d'un relais qui part à l'exécution est annoncé à l'extension, commandes `core`
+comprises, au début puis à la fin. Le `call_id`, `external-<n>`, est donné par le noyau ; le
+panneau arrête l'appel en le renvoyant dans `request.cancel`.
+
+```json
+{"jsonrpc":"2.0","method":"external.call","params":{"call_id":"external-3","event":"started","command":"layer.describe","params":{"layer_id":"l1"}}}
+{"jsonrpc":"2.0","method":"external.call","params":{"call_id":"external-3","event":"finished","command":"layer.describe","result":{},"duration_ms":41}}
+```
+
+`finished` porte `result`, ou `error {code, message}`. Un appel refusé avant l'exécution
+(occupation, case `ask`, chemin, commande inconnue ou indisponible, paramètres mal formés)
+n'est pas annoncé. L'extension, qui ne connaît pas encore cette notification, l'ignore.
+
+### Occupation
+
+Un seul état d'occupation par processus, valable dans les deux sens (AD-29). L'occupent : une
+composition ou une exécution de plan, un `command.run` ou un `journal.replay` de l'extension, un
+appel d'un relais. Un **plan proposé non tranché** occupe pour les relais seulement : l'extension
+garde son `command.run` et peut le remplacer par un nouveau `plan.propose`.
+
+- Côté relais : pendant une occupation, `command.run` répond `session.busy` aussitôt ; quand
+  seul un plan proposé attend, le message dit qu'il attend la validation de l'utilisateur.
+- Côté extension : pendant un appel d'un relais, `command.run`, `plan.*` et `journal.replay`
+  répondent `session.busy` (`session.external` reste servi). Un appel de relais déjà réservé
+  mais encore en file passe avant l'extension.
+- Plusieurs relais peuvent se brancher ; leurs appels passent un à la fois.
+
+### `request.cancel` (relais vers noyau)
+
+`{"id": <id du command.run du relais>}`. Mêmes règles que pour l'extension : annulable seulement
+si la commande l'est (`request.not_cancellable` sinon), l'ordre est annulé (AD-12), l'étape est
+journalisée `cancelled` et le `command.run` répond `registry.cancelled`. Un autre `id`, ou celui
+d'un autre relais : `request.unknown`.
+
+### Perte de la session ou du relais en plein appel
+
+- **Interrupteur coupé** pendant l'ordre d'un appel de relais : l'ordre est annulé s'il est
+  annulable, sinon il finit et l'étape est journalisée. Le relais reçoit
+  `external.session_lost` et **aucune réponse**.
+- **Entrée fermée** (QGIS fermé) : l'ordre est annulé comme tout ordre (plus rien ne peut y
+  répondre), l'étape est journalisée annulée ; le relais reçoit `external.session_lost`
+  (`session_ended`) et aucune réponse.
+- **Relais débranché** en plein appel : même traitement, la réponse est abandonnée, la session
+  est libérée.
 
 ### `external.session_lost` (noyau vers relais, notification)
 
@@ -327,7 +410,7 @@ recevoir : un relais qui ne lit plus ne retient pas la session au-delà (AD-4).
 | Code | Quand |
 |---|---|
 | `registry.cancelled` | le `command.run` ou l'étape en vol d'un `plan.execute` a été annulé, ou l'entrée s'est fermée pendant l'ordre |
-| `session.busy` | un `command.run`, un `journal.replay`, un `session.hello`, un `agent.models` ou une méthode `plan.*` arrive pendant un ordre en vol (y compris pendant un rejeu, une étape de plan ou l'inventaire d'une proposition) ; refus immédiat |
+| `session.busy` | un `command.run`, un `journal.replay`, un `session.hello`, un `agent.models` ou une méthode `plan.*` arrive pendant un ordre en vol (y compris pendant un rejeu, une étape de plan ou l'inventaire d'une proposition) ; un `command.run`, un `journal.replay` ou une méthode `plan.*` de l'extension pendant un appel de relais ; un `command.run` de relais pendant toute occupation (composition et plan non tranché compris) ; refus immédiat |
 | `plan.unknown` | `plan.execute` ou `plan.reject` sur un `plan_id` inconnu, déjà exécuté, rejeté ou remplacé ; rien n'est exécuté |
 | `agent.unavailable` | `plan.propose` ou `agent.models` : le noyau n'a pas de compositeur de plans |
 | `models.unknown` | `plan.propose` : `model` n'est pas dans la liste d'`agent.models` ; rien n'est composé, aucun ordre d'inventaire |
@@ -342,11 +425,13 @@ recevoir : un relais qui ne lit plus ne retient pas la session au-delà (AD-4).
 | `replay.diverged` | `journal.replay` : l'étape `step` ne redonne pas le résultat, l'erreur ou la sortie du journal |
 | `registry.unavailable` | `journal.replay` : une commande QGIS du journal n'est pas annoncée par l'extension |
 | `request.not_cancellable` | `request.cancel` sur une commande non annulable ; rien ne change |
-| `request.unknown` | `request.cancel` sur un `id` inconnu ou déjà soldé ; rien ne change |
+| `request.unknown` | `request.cancel` sur un `id` inconnu ou déjà soldé, ou sur l'appel d'une autre connexion ; rien ne change |
 | `external.channel_taken` | `session.external` : une autre session QGIS de l'utilisateur tient déjà le canal d'IA externe ; rien n'est ouvert |
 | `external.io` | `session.external` : le canal d'IA externe n'a pas pu s'ouvrir (dossier qui n'est pas privé, panne du système) ; le message ne porte aucun chemin |
 | `session.protocol_mismatch` | `session.hello` ou `external.attach` : la version de protocole diffère ; le message nomme ce qu'il faut mettre à jour |
-| `session.not_started` | toute requête de l'extension avant `session.hello`, `session.external` compris |
+| `session.not_started` | toute requête de l'extension avant `session.hello`, `session.external` compris ; `external.attach` ou `command.run` d'un relais sans session ouverte |
+| `external.not_approved` | `command.run` d'un relais alors que la case « Me demander avant chaque appel » est cochée ; rien n'est exécuté |
+| `external.path_refused` | `command.run` d'un relais dont un paramètre de chemin est absolu ou sort du projet ; rien n'est exécuté ni journalisé |
 
 Toute autre requête reçue pendant un ordre reçoit sa réponse normale, sans
 attendre la fin de l'ordre.

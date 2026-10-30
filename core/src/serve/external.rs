@@ -1,13 +1,14 @@
 //! Canal d'IA externe côté session (AD-29, AD-2, AD-4, AD-14) : `session.external`, la poignée
 //! de main `external.attach`, la table des connexions des relais et la notification
-//! `external.session_lost`.
+//! `external.session_lost`, et l'état d'occupation unique de la session.
 //!
 //! Le canal est éteint par défaut et n'est jamais rallumé seul : seul `session.external
 //! {enabled: true}` de l'extension l'ouvre. Un fil accepte les relais ; chaque connexion a un fil
-//! lecteur, qui verse ses lignes dans la file unique de la boucle avec leur source, et un fil
-//! écrivain, qui vide une file en mémoire : la boucle n'écrit jamais elle-même sur un relais et ne
-//! bloque donc jamais sur lui (AD-4). L'exécution des appels d'un relais est le ticket suivant :
-//! d'ici là, toute autre méthode que `external.attach` est inconnue, et rien n'est exécuté.
+//! lecteur et un fil écrivain, qui vide une file en mémoire : la boucle n'écrit jamais elle-même
+//! sur un relais et ne bloque donc jamais sur lui (AD-4). Le fil lecteur répond lui-même à tout ce
+//! qui n'exige pas l'exécutant (`external.attach`, lignes illisibles, méthodes inconnues,
+//! `session.busy`), composition de plan comprise ; il ne verse dans la file de la boucle que le
+//! `command.run` dont il a réservé l'occupation, et `request.cancel` (ticket 5.28).
 
 use std::collections::HashMap;
 use std::io::{self, BufRead, BufReader, Write};
@@ -19,7 +20,10 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
-use super::{classify, invalid_params, respond, Incoming, Msg, RpcError, Source, METHOD_NOT_FOUND};
+use super::{
+    busy, classify, invalid_params, respond, Incoming, Msg, RelayCall, RpcError, Source,
+    METHOD_NOT_FOUND,
+};
 use crate::external::{self, ChannelName, Listener, OpenError, Stream};
 use crate::registry::PROTOCOL_VERSION;
 
@@ -73,7 +77,55 @@ impl Conn {
     }
 }
 
-type Conns = Arc<Mutex<HashMap<u64, Conn>>>;
+/// L'état d'occupation unique du processus (AD-29), partagé par la boucle et les fils lecteurs.
+#[derive(Default)]
+struct Occupancy {
+    /// Qui tient l'exécutant : composition ou exécution de plan, `command.run`, `journal.replay`
+    /// de l'extension, ou appel d'un relais (réservé par son fil lecteur, encore en file compris).
+    busy: Option<Source>,
+    /// Un plan proposé attend sa validation : il n'occupe que pour les relais.
+    plan_pending: bool,
+}
+
+/// Ce que la boucle et les fils lecteurs des relais partagent.
+#[derive(Default)]
+struct Shared {
+    conns: Mutex<HashMap<u64, Conn>>,
+    /// Le catalogue disponible de la session (AD-25), fixé à `session.hello`.
+    catalogue: Mutex<Option<Vec<Value>>>,
+    occupancy: Mutex<Occupancy>,
+    /// La case « Me demander avant chaque appel ».
+    ask: AtomicBool,
+}
+
+impl Shared {
+    fn occupancy(&self) -> std::sync::MutexGuard<'_, Occupancy> {
+        self.occupancy.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Réserve l'exécutant pour `source` : vrai si rien ne l'occupe. Un relais attend aussi
+    /// qu'aucun plan ne soit en attente de validation.
+    fn reserve(&self, source: Source) -> bool {
+        let mut occupancy = self.occupancy();
+        let free =
+            occupancy.busy.is_none() && (source == Source::Extension || !occupancy.plan_pending);
+        if free {
+            occupancy.busy = Some(source);
+        }
+        free
+    }
+
+    /// Répond à un relais par la table des connexions ; une connexion disparue ne reçoit rien.
+    fn send(&self, conn: u64, message: &Value) {
+        if let Ok(conns) = self.conns.lock() {
+            if let Some(c) = conns.get(&conn) {
+                if let Some(out) = &c.out {
+                    let _ = out.send(message.to_string());
+                }
+            }
+        }
+    }
+}
 
 /// Le canal ouvert : le fil d'acceptation et ce qu'il faut pour l'arrêter.
 struct Open {
@@ -89,11 +141,7 @@ pub(super) struct Hub {
     /// Entrée de la file unique de la boucle, donnée aux fils lecteurs.
     tx: Sender<Msg>,
     open: std::cell::RefCell<Option<Open>>,
-    conns: Conns,
-    /// Le catalogue disponible de la session (AD-25), fixé à `session.hello`.
-    catalogue: std::cell::RefCell<Option<Vec<Value>>>,
-    /// La case « Me demander avant chaque appel » ; gardée pour le ticket suivant.
-    ask: std::cell::Cell<bool>,
+    shared: Arc<Shared>,
 }
 
 impl Hub {
@@ -102,20 +150,61 @@ impl Hub {
             name,
             tx,
             open: Default::default(),
-            conns: Default::default(),
-            catalogue: Default::default(),
-            ask: Default::default(),
+            shared: Default::default(),
         }
     }
 
     /// Fixe le catalogue rendu aux relais : les seules commandes disponibles.
     pub(super) fn set_catalogue(&self, commands: Vec<Value>) {
-        *self.catalogue.borrow_mut() = Some(commands);
+        if let Ok(mut catalogue) = self.shared.catalogue.lock() {
+            *catalogue = Some(commands);
+        }
+    }
+
+    /// Réserve l'exécutant pour `source` (voir `Occupancy`) : vrai si rien ne l'occupe.
+    pub(super) fn reserve(&self, source: Source) -> bool {
+        self.shared.reserve(source)
+    }
+
+    /// Libère l'exécutant, quelle que soit l'issue de ce qui l'occupait.
+    pub(super) fn release(&self) {
+        self.shared.occupancy().busy = None;
+    }
+
+    /// Quelqu'un tient l'exécutant (un relais dont l'appel attend encore en file compris).
+    pub(super) fn is_busy(&self) -> bool {
+        self.shared.occupancy().busy.is_some()
+    }
+
+    /// Libère l'exécutant s'il est tenu par `source`, et seulement alors.
+    pub(super) fn release_for(&self, source: Source) {
+        let mut occupancy = self.shared.occupancy();
+        if occupancy.busy == Some(source) {
+            occupancy.busy = None;
+        }
+    }
+
+    /// Un plan attend, ou n'attend plus, sa validation.
+    pub(super) fn set_plan_pending(&self, pending: bool) {
+        self.shared.occupancy().plan_pending = pending;
+    }
+
+    /// La case « Me demander avant chaque appel ».
+    pub(super) fn ask(&self) -> bool {
+        self.shared.ask.load(Ordering::SeqCst)
+    }
+
+    /// La connexion `conn` est-elle encore inscrite (ni débranchée, ni coupée par l'interrupteur) ?
+    pub(super) fn has_conn(&self, conn: u64) -> bool {
+        self.shared
+            .conns
+            .lock()
+            .is_ok_and(|conns| conns.contains_key(&conn))
     }
 
     fn enable(&self, ask: bool) -> Result<(), RpcError> {
         if self.open.borrow().is_some() {
-            self.ask.set(ask);
+            self.shared.ask.store(ask, Ordering::SeqCst);
             return Ok(());
         }
         let io_error = |e: io::Error| {
@@ -140,11 +229,11 @@ impl Hub {
         let stop = Arc::new(AtomicBool::new(false));
         let accept = {
             let stop = stop.clone();
-            let conns = self.conns.clone();
+            let shared = self.shared.clone();
             let tx = self.tx.clone();
-            thread::spawn(move || accept_loop(listener, &stop, &conns, &tx))
+            thread::spawn(move || accept_loop(listener, &stop, &shared, &tx))
         };
-        self.ask.set(ask);
+        self.shared.ask.store(ask, Ordering::SeqCst);
         *self.open.borrow_mut() = Some(Open { name, stop, accept });
         Ok(())
     }
@@ -163,6 +252,7 @@ impl Hub {
             let _ = open.accept.join();
         }
         let mut conns: Vec<Conn> = self
+            .shared
             .conns
             .lock()
             .map(|mut c| c.drain().map(|(_, conn)| conn).collect())
@@ -181,73 +271,117 @@ impl Hub {
 
     /// Un relais s'est débranché : sa connexion est retirée.
     pub(super) fn detached(&self, conn: u64) {
-        let gone = self.conns.lock().ok().and_then(|mut c| c.remove(&conn));
+        let gone = self
+            .shared
+            .conns
+            .lock()
+            .ok()
+            .and_then(|mut c| c.remove(&conn));
         if let Some(conn) = gone {
             conn.finish(None);
         }
     }
 
-    fn send(&self, conn: u64, message: &Value) {
-        if let Ok(conns) = self.conns.lock() {
-            if let Some(c) = conns.get(&conn) {
-                if let Some(out) = &c.out {
-                    let _ = out.send(message.to_string());
-                }
-            }
-        }
+    /// Répond à un relais ; une connexion disparue ne reçoit rien.
+    pub(super) fn send(&self, conn: u64, message: &Value) {
+        self.shared.send(conn, message);
     }
+}
 
-    /// Une ligne reçue d'un relais. Elle n'exige jamais l'exécutant : elle est traitée à toute
-    /// heure, ordre en vol compris.
-    pub(super) fn on_line(&self, conn: u64, line: &str) {
-        let response = match classify(line) {
-            Err(response) => Some(response),
-            // Le noyau n'envoie aucune requête au relais : une réponse est ignorée.
-            Ok(Incoming::Reply { .. }) => None,
-            Ok(Incoming::Call { id, method, params }) => {
-                let outcome = match method.as_str() {
-                    "external.attach" => self.attach(params.as_ref()),
-                    // `command.run` et `request.cancel` du relais : ticket suivant.
-                    _ => Err(RpcError::protocol(METHOD_NOT_FOUND, "Méthode inconnue.")),
-                };
-                respond(id, outcome)
+/// Une ligne reçue d'un relais, traitée par son fil lecteur, à toute heure (composition et ordre
+/// en vol compris). Seuls un `command.run` dont l'occupation est réservée et `request.cancel` vont
+/// à la boucle. Rend faux si la boucle n'écoute plus.
+fn on_line(shared: &Shared, tx: &Sender<Msg>, conn: u64, line: &str) -> bool {
+    let response = match classify(line) {
+        Err(response) => Some(response),
+        // Le noyau n'envoie aucune requête au relais : une réponse est ignorée.
+        Ok(Incoming::Reply { .. }) => None,
+        Ok(Incoming::Call { id, method, params }) => match method.as_str() {
+            "external.attach" => respond(id, attach(shared, params.as_ref())),
+            // Un appel sans identifiant ne pourrait être ni répondu ni annulé : il est ignoré.
+            "command.run" => match id {
+                None => None,
+                Some(id) => match run(shared, conn) {
+                    Ok(()) => {
+                        let call = RelayCall::Run { id, params };
+                        return tx.send(Msg::Relay(conn, call)).is_ok();
+                    }
+                    Err(e) => respond(Some(id), Err(e)),
+                },
+            },
+            "request.cancel" => {
+                let call = RelayCall::Cancel { id, params };
+                return tx.send(Msg::Relay(conn, call)).is_ok();
             }
-        };
-        if let Some(response) = response {
-            self.send(conn, &response);
-        }
+            _ => respond(
+                id,
+                Err(RpcError::protocol(METHOD_NOT_FOUND, "Méthode inconnue.")),
+            ),
+        },
+    };
+    if let Some(response) = response {
+        shared.send(conn, &response);
     }
+    true
+}
 
-    /// `external.attach {protocol_version}` : la poignée de main du relais (AD-7, AD-29).
-    fn attach(&self, params: Option<&Value>) -> Result<Value, RpcError> {
-        let version = params
-            .and_then(|p| p.get("protocol_version"))
-            .and_then(Value::as_u64)
-            .ok_or_else(|| invalid_params("protocol_version doit être un entier."))?;
-        let expected = u64::from(PROTOCOL_VERSION);
-        if version != expected {
-            let update = if version < expected {
-                "mettez à jour le binaire cassini du relais (cassini mcp)"
-            } else {
-                "mettez à jour le paquet du noyau Cassini de la session QGIS"
-            };
+/// Le `command.run` d'un relais peut-il partir ? Session ouverte, exécutant réservé.
+fn run(shared: &Shared, conn: u64) -> Result<(), RpcError> {
+    let started = shared.catalogue.lock().is_ok_and(|c| c.is_some());
+    if !started {
+        return Err(not_started_for_relay());
+    }
+    if !shared.reserve(Source::External(conn)) {
+        // Rien ne tient l'exécutant : c'est un plan proposé qui attend sa validation.
+        if shared.occupancy().busy.is_none() {
             return Err(RpcError::coded(
-                "session.protocol_mismatch",
-                format!("Le relais parle le protocole {version}, la session QGIS le {expected} : {update}."),
+                "session.busy",
+                "Un plan proposé attend la validation de l'utilisateur dans QGIS : réessayez \
+                 quand il aura été exécuté ou rejeté."
+                    .to_string(),
             ));
         }
-        let Some(commands) = self.catalogue.borrow().clone() else {
-            return Err(RpcError::coded(
-                "session.not_started",
-                "La session QGIS n'est pas ouverte.".to_string(),
-            ));
-        };
-        Ok(json!({
-            "protocol_version": PROTOCOL_VERSION,
-            "core_version": crate::VERSION,
-            "commands": commands,
-        }))
+        return Err(busy());
     }
+    Ok(())
+}
+
+fn not_started_for_relay() -> RpcError {
+    RpcError::coded(
+        "session.not_started",
+        "La session QGIS n'est pas ouverte.".to_string(),
+    )
+}
+
+/// `external.attach {protocol_version}` : la poignée de main du relais (AD-7, AD-29).
+fn attach(shared: &Shared, params: Option<&Value>) -> Result<Value, RpcError> {
+    let version = params
+        .and_then(|p| p.get("protocol_version"))
+        .and_then(Value::as_u64)
+        .ok_or_else(|| invalid_params("protocol_version doit être un entier."))?;
+    let expected = u64::from(PROTOCOL_VERSION);
+    if version != expected {
+        let update = if version < expected {
+            "mettez à jour le binaire cassini du relais (cassini mcp)"
+        } else {
+            "mettez à jour le paquet du noyau Cassini de la session QGIS"
+        };
+        return Err(RpcError::coded(
+            "session.protocol_mismatch",
+            format!(
+                "Le relais parle le protocole {version}, la session QGIS le {expected} : {update}."
+            ),
+        ));
+    }
+    let commands = shared.catalogue.lock().ok().and_then(|c| c.clone());
+    let Some(commands) = commands else {
+        return Err(not_started_for_relay());
+    };
+    Ok(json!({
+        "protocol_version": PROTOCOL_VERSION,
+        "core_version": crate::VERSION,
+        "commands": commands,
+    }))
 }
 
 impl Drop for Hub {
@@ -283,11 +417,11 @@ pub(super) fn session_external(hub: &Hub, params: Option<&Value>) -> Result<Valu
         .and_then(Value::as_bool)
         .ok_or_else(|| invalid_params("ask (booléen) est requis pour allumer le canal."))?;
     hub.enable(ask)?;
-    Ok(json!({"enabled": true, "ask": hub.ask.get()}))
+    Ok(json!({"enabled": true, "ask": hub.ask()}))
 }
 
 /// Le fil d'acceptation : chaque relais reçoit un fil lecteur et un fil écrivain.
-fn accept_loop(mut listener: Listener, stop: &AtomicBool, conns: &Conns, tx: &Sender<Msg>) {
+fn accept_loop(mut listener: Listener, stop: &AtomicBool, shared: &Arc<Shared>, tx: &Sender<Msg>) {
     loop {
         let accepted = listener.accept();
         if stop.load(Ordering::SeqCst) {
@@ -298,7 +432,7 @@ fn accept_loop(mut listener: Listener, stop: &AtomicBool, conns: &Conns, tx: &Se
             return;
         }
         match accepted {
-            Ok(stream) => start_conn(stream, conns, tx),
+            Ok(stream) => start_conn(stream, shared, tx),
             // Une panne passagère (descripteurs épuisés) ne fait pas tourner le fil à vide.
             Err(_) => thread::sleep(Duration::from_millis(50)),
         }
@@ -306,15 +440,16 @@ fn accept_loop(mut listener: Listener, stop: &AtomicBool, conns: &Conns, tx: &Se
 }
 
 /// Inscrit la connexion et lance ses deux fils. La table reste verrouillée jusqu'à
-/// l'inscription : une réponse de la boucle à la première ligne du relais trouve toujours sa
-/// connexion.
-fn start_conn(stream: Stream, conns: &Conns, tx: &Sender<Msg>) {
+/// l'inscription : une réponse à la première ligne du relais trouve toujours sa connexion. Le fil
+/// lecteur répond par la table, sans garder d'entrée de la file de l'écrivain : sinon l'écrivain
+/// ne finirait qu'à l'échéance des adieux.
+fn start_conn(stream: Stream, shared: &Arc<Shared>, tx: &Sender<Msg>) {
     let id = NEXT_CONN.fetch_add(1, Ordering::SeqCst);
     let (Ok(read_half), Ok(mut write_half)) = (stream.try_clone(), stream.try_clone()) else {
         stream.shutdown();
         return;
     };
-    let Ok(mut table) = conns.lock() else {
+    let Ok(mut table) = shared.conns.lock() else {
         stream.shutdown();
         return;
     };
@@ -329,7 +464,9 @@ fn start_conn(stream: Stream, conns: &Conns, tx: &Sender<Msg>) {
         }
     });
     let tx = tx.clone();
+    let reader_shared = shared.clone();
     let reader = thread::spawn(move || {
+        let shared = reader_shared;
         let mut input = BufReader::new(read_half);
         let mut buf = Vec::new();
         loop {
@@ -339,11 +476,7 @@ fn start_conn(stream: Stream, conns: &Conns, tx: &Sender<Msg>) {
                 Ok(_) => {
                     let text = String::from_utf8_lossy(&buf);
                     let line = text.trim();
-                    if !line.is_empty()
-                        && tx
-                            .send(Msg::Line(Source::External(id), line.to_string()))
-                            .is_err()
-                    {
+                    if !line.is_empty() && !on_line(&shared, &tx, id, line) {
                         return;
                     }
                 }

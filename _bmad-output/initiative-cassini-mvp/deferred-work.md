@@ -415,3 +415,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
   evidence: 5.24 coupé en deux à la demande du propriétaire le 2026-10-30 (plan d'environ 2 700 jetons, CLAUDE.md §8 « une tâche courte par session ») ; 5.24 garde le transport, le cycle de vie, external.attach et le protocole 2. Décision du propriétaire déjà prise pour cette suite : un plan proposé non tranché rend la session occupée pour le relais seulement, l'extension garde le droit de le remplacer par plan.propose.
   status: ticket, 2026-10-30, entrée 5.28 (`epic-agent-et-mcp/tickets.toml`)
   resolution: Devenu le ticket 5.28 « Execution des appels du relais » ; 5.25 et 5.26 l'attendent.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-execution-des-appels-du-relais-la-session-qgis-execute-ce-qu-plan.md`
+  summary: Validation des appels externes (AD-29, case « Me demander avant chaque appel ») — avec ask allumé, external.approve {call_id, command, params} vers l'extension avant d'exécuter, sans bloquer (AD-4), borné à 120 s et annulable ; refus, erreur ou délai rendent external.not_approved, rien n'est journalisé ; délai réglable par les tests.
+  evidence: 5.28 coupé à la demande du propriétaire le 2026-10-30 (plan d'environ 2 600 jetons, cible 1 600) ; 5.28 garde l'exécution, l'occupation, external.call, les chemins, l'annulation, la perte de session et le journal. D'ici là, ask allumé refuse tout appel externe par external.not_approved. À créer en ticket avant 5.26, qui allume la case.
