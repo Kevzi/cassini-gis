@@ -119,7 +119,7 @@ commence avant que la précédente ne soit testée.
 | 2 | Épreuve du modèle local sur un registre factice | **faite** : verdict « oui sous conditions », dans `_bmad-output/initiative-cassini-mvp/epic-epreuve-du-modele-local/` |
 | 3 | Registre de commandes et journal rejouable | **faite**, suite de bout en bout comprise : exécuter, fermer, rouvrir, rejouer, comparer |
 | 4 | Façade QGIS — extension, canal local, commandes exécutées par QGIS | **faite**, suite de bout en bout comprise : ouvrir, analyser, exporter, rejouer |
-| 5 | Agent IA local et serveur MCP | **en cours** : l'agent est fait et tourne dans QGIS, sur carte graphique ou sur processeur ; le serveur MCP (`cassini mcp`) est écrit et n'expose que les commandes du noyau ; reste la suite de bout en bout |
+| 5 | Agent IA local et serveur MCP | **en cours** : l'agent est fait et tourne dans QGIS, sur carte graphique ou sur processeur ; le serveur MCP (`cassini mcp`) est écrit : relais vers la session QGIS quand l'utilisateur l'autorise, commandes du noyau seules sinon ; reste la suite de bout en bout |
 | 6 | Analyse de terrain dans le noyau — champ de vision, ligne de vue, pente | à venir |
 | 7 | Scénario de démo, puis publication : dépôt d'extensions QGIS, installeurs, vidéo | à venir |
 
@@ -180,7 +180,7 @@ flowchart TB
     canal["Canal local — JSON-RPC 2.0 sur l'entrée et la sortie standard, dans les deux sens, aucun réseau — fait"]
 
     subgraph noyau["Noyau Cassini — Rust, Apache-2.0 — tourne sans QGIS"]
-        binaire["Binaire cassini, sous cli/ — run, replay, serve, plan faits ; mcp prévu"]
+        binaire["Binaire cassini, sous cli/ — run, replay, serve, plan, mcp faits"]
         registre["Registre de commandes, qui tient la boucle d'exécution — fait"]
         binaire --> registre
         terrain["Terrain sur MNT — champ de vision, ligne de vue, pente — prévu"]
@@ -388,14 +388,37 @@ Si `cassini` n'est pas dans le `PATH` (c'est le cas du paquet Windows, posé dan
 `%LOCALAPPDATA%\Cassini\bin`), `command` doit porter le chemin complet du binaire,
 par exemple `C:/Users/<vous>/AppData/Local/Cassini/bin/cassini.exe`.
 
-Seules les commandes du noyau sont exposées comme outils (`system.about`,
-`model.list`), avec leurs schémas. Les commandes exécutées par QGIS n'y sont pas :
-elles ont besoin de l'extension. Le serveur ne compose aucun plan : l'IA externe
-appelle les commandes une à une.
+Le serveur a **deux modes**, choisis à chaque demande du client (liste des outils,
+appel d'un outil) :
 
-Avec `--project`, le serveur tient le verrou du journal du projet **pendant toute sa
-vie**. QGIS ouvert sur le même projet passe alors en lecture seule ; et si QGIS tenait
-le verrou le premier, chaque appel MCP répond `journal.read_only`.
+- **Relais**, quand une session QGIS a allumé le canal d'IA externe dans le panneau :
+  `cassini mcp` s'y branche et pilote cette session. Les outils sont alors les
+  commandes disponibles de la session, **commandes exécutées par QGIS comprises**
+  (`layer.describe`, `analysis.buffer`…), avec leurs schémas ; chaque appel est
+  exécuté et journalisé par la session, avec l'origine `external`, sous les yeux de
+  l'utilisateur. Le relais ne décide rien et n'exécute rien lui-même ; `--project`
+  n'est pas transmis à la session, et aucun chemin absolu ne passe sur le canal,
+  dans aucun sens.
+- **Autonome** sinon : seules les commandes du noyau sont exposées (`system.about`,
+  `model.list`), sans QGIS.
+
+Tout changement de mode ou de catalogue est annoncé au client par
+`notifications/tools/list_changed`, qu'il suit en relisant la liste des outils. Un
+appel commencé en relais ne finit jamais en autonome : si l'utilisateur coupe le
+canal ou ferme QGIS pendant l'appel, le client reçoit l'erreur
+`external.session_lost`, et la demande suivante est servie en autonome. Une session
+qui parle une autre version du protocole refuse chaque appel par
+`session.protocol_mismatch`, dont le message nomme le binaire à mettre à jour. Le
+serveur ne compose aucun plan : l'IA externe appelle les commandes une à une. Il
+reste réactif pendant un appel long : `ping` y répond. En relais, l'annulation du
+client est transmise à la session ; en autonome, la réponse de l'appel annulé est
+abandonnée, mais la commande va jusqu'au bout (et, avec `--project`, est
+journalisée).
+
+En mode autonome avec `--project`, le serveur ne prend le verrou du journal du projet
+**que le temps d'un appel**, comme `cassini run` : il n'empêche jamais QGIS de
+s'ouvrir en écriture sur le même projet. Si QGIS tient le verrou, un appel autonome
+répond `journal.read_only`.
 
 ## La recette
 
