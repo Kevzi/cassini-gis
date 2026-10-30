@@ -3,7 +3,7 @@ title: 'Serveur MCP : cassini mcp expose le registre a un client tiers'
 type: 'feature'
 ticket: '7'
 created: '2026-10-30'
-status: 'built'
+status: 'done'
 baseline_revision: 'dbbf886bfa6b208a58a0976d0806bcd496a71b15'
 route: 'full'
 route_source: 'auto'
@@ -92,6 +92,14 @@ context:
 - `rmcp` 3.8.0 garde sa liste de révisions par défaut (2024-11-05 à 2026-07-28) : `initialize` jusqu'à 2025-11-25, métadonnées par requête pour 2026-07-28. Pas de `get_tool` : aucune validation de schéma par rmcp, la seule validation est celle du noyau.
 - Client de test partagé : `cli/tests/support/mcp_client.rs`, inclus par `#[path]` dans `mcp.rs` et `parity.rs` ; il lit une réponse avant d'envoyer la requête suivante.
 - Environnement : `cli` se construit sous Windows (PowerShell depuis WSL, `LIBCLANG_PATH`, `CARGO_TARGET_DIR=C:\ct`) ; `cargo deny check` aussi.
+
+### Recette hitl (2026-10-30, faite par Claude à la demande du propriétaire, à distance)
+
+- Client tiers : Claude Code (`claude -p --mcp-config`), sur `C:\ct\debug\cassini.exe mcp`. Il découvre `system_about` et `model_list` (il remplace le point par `_` : les noms avec un point passent), appelle `system.about` et reçoit `{"core_version":"0.1.0","protocol_version":1}`.
+- Avec `--project` sur un projet dans un dossier Windows : l'appel nominal écrit une ligne au journal, l'appel `{"x":1}` rend `registry.invalid_params` sans rien journaliser.
+- Un projet posé sur le disque de WSL (`\\wsl.localhost\...`) rend `journal.io` au verrou, pour `mcp` comme pour `run` : limite du système de fichiers, pas du serveur.
+- Le client signale `unknown format "uint32" ignored` sur le schéma de sortie de `system.about` : avertissement sans effet.
+- Le report « noms d'outils avec un point » de `deferred-work.md` est tranché par cette recette : vérifié avec Claude Code.
 
 ## Plan Change Log
 
