@@ -3,7 +3,7 @@ title: "Canal d'IA externe côté session : le noyau de QGIS accepte un relais"
 type: 'feature'
 ticket: '24'
 created: '2026-10-30'
-status: 'built'
+status: 'done'
 baseline_revision: 'e484a232d66eb8fe3fa26a833351e6bc2d59480c'
 route: 'full'
 route_source: 'auto'
