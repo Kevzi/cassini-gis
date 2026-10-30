@@ -167,13 +167,35 @@ notes = [
 ]
 
 [[entry]]
+id = 28
+type = "story"
+title = "Execution des appels du relais : la session QGIS execute ce que l'IA externe demande"
+description = "Seconde moitie de 24. Le noyau de la session execute les command.run d'un relais attache, commandes QGIS comprises, dictees a l'extension comme une etape de plan. Un seul etat d'occupation vaut pour l'extension et les relais : session.busy dans les deux sens ; un plan propose non tranche occupe la session pour le relais seulement, et l'extension garde le droit de le remplacer par plan.propose. Chaque appel est annonce a l'extension par external.call, avec son identifiant d'appel ; si ask est allume (session.external de 24), external.approve attend l'accord 120 s, sinon external.not_approved. Tout chemin absolu venu d'un relais est refuse (external.path_refused). request.cancel arrete un appel par son identifiant. Le journal porte l'origine external et se rejoue. Un relais recoit external.session_lost si la session coupe en plein appel, et un relais qui se deconnecte en plein appel ne laisse pas la session occupee. Fixe la forme des messages que 25 et 26 consomment (AD-4, AD-6, AD-7, AD-9, AD-12, AD-21, AD-29)."
+verify = "cargo test -p cassini-core --test canal_externe passe sous Linux et Windows, avec un client brut du canal et une extension simulee : appel execute et journalise external, appel QGIS dicte, occupation croisee dans les deux sens, plan non tranche remplace par l'extension, refus et delai de validation, chemin refuse, annulation par identifiant, perte de session et deconnexion du relais en plein appel, rejeu d'un journal portant des etapes external ; hors_ligne.rs, la recette pytest de l'extension et cargo deny check restent verts ; docs/canal-local.md decrit les nouveaux messages."
+covers = ["CAP-8", "CAP-13"]
+after = [24]
+hitl = false
+risk = "high"
+references = [
+  "../architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md — AD-4, AD-6, AD-7, AD-9, AD-12, AD-21, AD-29",
+  "../change-ia-externe-pilote-la-session-qgis-ouverte/change-ia-externe-pilote-la-session-qgis-ouverte.md",
+  "story-canal-d-ia-externe-cote-session-le-noyau-de-qgis-accepte-un-plan.md — plan de 5.24, Decisions et constat n° 10 (etat « attache » par connexion)",
+  "../deferred-work.md — entree « Executer les appels d'un relais sur le canal d'IA externe »",
+]
+notes = [
+  "Decision: 2026-10-30 — 5.24 coupe en deux a la demande du proprietaire (CLAUDE.md §8, une tache courte par session) ; ce ticket est la seconde moitie.",
+  "Decision: 2026-10-30 — un plan propose non tranche occupe la session pour le relais seulement ; l'extension garde le droit de le remplacer par plan.propose.",
+  "Risque high (canal et rejeu) : relecture a plusieurs lentilles (thorough, CLAUDE.md §8) ; la recette reelle de 27 confirme hors de ce ticket.",
+]
+
+[[entry]]
 id = 25
 type = "story"
 title = "Relais : cassini mcp pilote la session QGIS quand elle l'autorise"
 description = "cassini mcp choisit a chaque tools/list et tools/call entre relais (canal d'IA externe de 24 joignable : catalogue et schemas pris dans la session, commandes QGIS comprises) et autonome (5.7, verrou du projet pris le temps d'un appel seulement), envoie notifications/tools/list_changed quand le mode ou le catalogue change, ne finit jamais en autonome un appel commence en relais, traduit notifications/cancelled en request.cancel et une erreur AD-21 en isError, et sert ses appels sans bloquer son runtime (ping et annulation pendant une commande longue, report de 5.7) (AD-13, AD-29)."
 verify = "cargo test -p cassini --test mcp passe avec une session simulee derriere le canal : bascule relais et autonome, list_changed, annulation, appel QGIS dicte et journalise, aucune prise durable du verrou en autonome."
 covers = ["CAP-8"]
-after = [24]
+after = [28]
 hitl = false
 risk = "high"
 unknown = "Les clients MCP visés reagissent-ils tous a notifications/tools/list_changed ? Sinon le catalogue n'est relu qu'au redemarrage du client ; a observer en 27."
@@ -189,7 +211,7 @@ title = "Le panneau montre chaque appel de l'IA externe et peut l'arreter"
 description = "L'extension ajoute dans les Reglages l'interrupteur « Autoriser une IA externe » (eteint par defaut, jamais rallume seul, grise sur external.channel_taken) et la case « Me demander avant chaque appel » (eteinte par defaut), qu'elle envoie par session.external dans la forme fixee par 24 ; allume, un bandeau l'annonce avec Couper, chaque external.call s'ajoute au journal du panneau marque « IA externe » (commande, parametres en clair, resultat, duree) avec Arreter par son identifiant d'appel, external.approve affiche Autoriser / Refuser sans geler QGIS, et session.busy pendant un appel externe grise la saisie avec « L'IA externe travaille » (AD-4, AD-12, AD-29, EXPERIENCE.md)."
 verify = "La recette pytest de l'extension passe avec un noyau simule couvrant l'interrupteur, le fil des appels, Arreter, Autoriser / Refuser et l'expiration sans gel."
 covers = ["CAP-8", "CAP-13"]
-after = [24]
+after = [28]
 hitl = false
 risk = "high"
 references = [
@@ -228,7 +250,7 @@ title = "Refactor sweep"
 description = "Nettoie ce que l'epic a laisse : doublons entre ai/, serve.rs et le serveur MCP, constats de revue reportes dans deferred-work.md ; le perimetre est fixe au demarrage d'apres les plans et les constats."
 verify = "cargo test, clippy et fmt propres, les constats reportes de l'epic sont traites ou re-reportes avec leur raison."
 covers = []
-after = [1, 2, 3, 4, 5, 6, 7, 11, 12, 13, 14, 16, 18, 19, 20, 21, 24, 25, 26]
+after = [1, 2, 3, 4, 5, 6, 7, 11, 12, 13, 14, 16, 18, 19, 20, 21, 24, 28, 25, 26]
 hitl = false
 risk = "low"
 
