@@ -3,7 +3,7 @@ title: "Le panneau montre chaque appel de l'IA externe et peut l'arrêter"
 type: 'feature'
 ticket: '26'
 created: '2026-10-31'
-status: 'built'
+status: 'done'
 baseline_revision: '45e4d2c0c41adcdc7858ae884060b32f0ee8e4a4'
 route: 'full'
 route_source: 'auto'
