@@ -369,24 +369,79 @@ noyau.
 ### Brancher un client MCP
 
 Une IA externe, si on en veut une, pilote Cassini par `cassini mcp`, un serveur MCP
-sur l'entrée et la sortie standard — aucun port, aucune socket. Le client lance le
-binaire lui-même ; avec `--project`, chaque appel est journalisé à côté du projet,
-comme par `cassini run` :
+sur l'entrée et la sortie standard — aucun port, aucune socket. C'est l'application de
+l'IA qui lance le binaire ; Cassini ne contient aucune ligne propre à un fournisseur.
+Toutes les fiches ci-dessous lancent la même commande : le chemin complet du binaire
+(paquet Windows : `C:/Users/<vous>/AppData/Local/Cassini/bin/cassini.exe`), suivi de
+`mcp`. On peut ajouter `--project C:/chemin/vers/projet.qgz` : il ne sert qu'en mode
+autonome, pour journaliser chaque appel à côté du projet, comme `cassini run`.
+
+**Claude Desktop** ([documentation](https://modelcontextprotocol.io/docs/develop/connect-local-servers)).
+Réglages › Développeur › *Modifier la configuration* ouvre `claude_desktop_config.json`
+(`%APPDATA%\Claude\` ; l'application du Microsoft Store le range sous
+`%LOCALAPPDATA%\Packages\Claude_<suffixe>\LocalCache\Roaming\Claude\`). Y mettre, puis
+quitter complètement Claude Desktop et le rouvrir :
 
 ```json
 {
   "mcpServers": {
     "cassini": {
-      "command": "cassini",
-      "args": ["mcp", "--project", "C:/chemin/vers/projet.qgz"]
+      "command": "C:/Users/<vous>/AppData/Local/Cassini/bin/cassini.exe",
+      "args": ["mcp"]
     }
   }
 }
 ```
 
-Si `cassini` n'est pas dans le `PATH` (c'est le cas du paquet Windows, posé dans
-`%LOCALAPPDATA%\Cassini\bin`), `command` doit porter le chemin complet du binaire,
-par exemple `C:/Users/<vous>/AppData/Local/Cassini/bin/cassini.exe`.
+**ChatGPT pour ordinateur et Codex CLI** ([documentation](https://learn.chatgpt.com/docs/extend/mcp)).
+Les deux lisent la même configuration, `%USERPROFILE%\.codex\config.toml` : ce qui est
+branché dans l'un l'est dans l'autre. Dans l'application : Réglages › *MCP servers* ›
+*Add server*, type **STDIO**, commande et argument ci-dessus, puis *Restart*. En ligne de
+commande : `codex mcp add cassini -- C:/Users/<vous>/AppData/Local/Cassini/bin/cassini.exe mcp`.
+Ou directement dans le fichier :
+
+```toml
+[mcp_servers.cassini]
+command = "C:/Users/<vous>/AppData/Local/Cassini/bin/cassini.exe"
+args = ["mcp"]
+```
+
+Ajouter `default_tools_approval_mode = "approve"` sous `[mcp_servers.cassini]` évite une
+confirmation à chaque appel, pour ce serveur seulement. Codex ne pense pas toujours de
+lui-même à Cassini : commencer la demande par « Dans mon projet QGIS ouvert, avec les
+outils Cassini : ». L'application web de ChatGPT ne lance pas de programme sur le poste :
+elle ne peut pas servir.
+
+**Gemini CLI** ([documentation](https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md)).
+`gemini mcp add -s user cassini C:/Users/<vous>/AppData/Local/Cassini/bin/cassini.exe mcp`,
+ou à la main dans `%USERPROFILE%\.gemini\settings.json`, la même entrée `mcpServers` que
+pour Claude Desktop. Ajouter `"trust": true` à cette entrée évite une confirmation à chaque
+appel ; les autres outils de Gemini restent soumis à confirmation. Constaté lors de la
+recette du 31 octobre 2026 (pas dans la documentation de Google) : la 0.27 appelait des
+modèles retirés, d'où une version récente (`npm install -g @google/gemini-cli@latest`) ;
+la connexion par compte personnel gratuit était refusée (« no longer supported for Gemini
+Code Assist for individuals »), et une clé d'API de Google AI Studio, posée dans
+`GEMINI_API_KEY`, a servi à la place.
+Les avertissements « unknown format "uint64" ignored » au démarrage sont sans effet.
+
+**Claude Code** ([documentation](https://code.claude.com/docs/en/mcp)) : `claude mcp add cassini -- C:/Users/<vous>/AppData/Local/Cassini/bin/cassini.exe mcp`.
+
+**La recette, avec n'importe lequel de ces clients :**
+
+1. Ouvrir le projet dans QGIS, puis dans les Réglages du panneau Cassini, cocher
+   « Autoriser une IA externe » : le bandeau « Une IA externe peut agir sur ce projet »
+   apparaît.
+2. Lancer le client (ou le redémarrer s'il était ouvert) et vérifier qu'il voit les
+   outils de Cassini — dont `project.inventory`, `analysis.buffer`, `layout.export_pdf`.
+3. Lui donner la phrase de démo. Chaque appel défile au journal du panneau, marqué
+   « IA externe », et les couches produites apparaissent sur la carte.
+4. Couper l'IA externe par **Couper** dans le bandeau.
+
+Le panneau n'offre pas encore de bouton de rejeu. La sonde
+`qgis-plugin/tests/probe_external.py` joue la même recette sans écran, sous le Python de
+QGIS, pendant qu'un client en ligne de commande donne la phrase. Elle travaille sur une
+copie du projet, puis rouvre cette copie et rejoue le journal, qui doit rendre
+`identical: true` (mode d'emploi en tête du fichier).
 
 Le serveur a **deux modes**, choisis à chaque demande du client (liste des outils,
 appel d'un outil) :
