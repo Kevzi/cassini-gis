@@ -468,10 +468,10 @@ jamais par sondage :
 
 - **Relais** : une connexion vivante au canal est gardée ; sinon `cassini mcp` se branche
   (`ChannelName::for_user`) et envoie `external.attach`. Une réponse fait le mode relais : les
-  outils sont les entrées `available` du catalogue rendu (nom `id`, description en français puis
-  en anglais, schémas de la session), commandes QGIS comprises ; le registre propre du relais
-  n'est jamais lu. Chaque `tools/call` devient un `command.run`. `--project` est ignoré, et aucun
-  chemin ne part (AD-9).
+  outils sont les entrées `available` du catalogue rendu (nom tiré de l'`id`, description en
+  français puis en anglais, schémas de la session), commandes QGIS comprises ; le registre propre
+  du relais n'est jamais lu. Chaque `tools/call` devient un `command.run`. `--project` est
+  ignoré, et aucun chemin ne part (AD-9).
 - **Autonome** : aucun canal, ou une session qui ne répond pas. Les outils sont les commandes
   `runs_in: core` (ticket 5.7) ; avec `--project`, le projet est ouvert puis refermé à chaque
   appel, comme `cassini run` : le verrou du journal n'est jamais tenu entre deux appels. Un projet
@@ -479,6 +479,17 @@ jamais par sondage :
 - **Versions différentes** : `external.attach` répond `session.protocol_mismatch`. Les outils
   restent ceux du mode autonome, et chaque `tools/call` rend un résultat `isError` portant cette
   erreur, dont le message nomme le binaire à mettre à jour ; rien n'est exécuté.
+
+Nom des outils (ticket 5.30) : l'`id`, le point remplacé par un souligné (`analysis.buffer` →
+`analysis_buffer`), le même pour tous les clients et dans les deux modes ; certains clients
+refusent tout nom hors `^[a-zA-Z0-9_-]{1,64}$`, et Antigravity CLI y ajoute le préfixe
+`mcp_cassini_`, d'où 52 caractères au plus. Le remplacement n'étant pas réversible en général,
+`cassini mcp` garde avec le catalogue servi la table nom ↔ `id`. À l'appel, le nom est ramené à
+l'`id` : d'abord parmi les noms servis, puis parmi les `id` eux-mêmes, l'ancien nom à point restant
+accepté sans figurer au catalogue. Un `id` du registre a exactement un point (contrat
+`domaine.verbe`), et la session tire son catalogue du registre : aucun nom servi n'est donc un
+`id`. Deux `id` d'un catalogue de session donnant le même nom : seul le premier est servi. Le
+canal (`command.run`), le journal et le rejeu ne voient que l'`id`.
 
 Le serveur annonce `tools.listChanged` ; dès que le catalogue servi diffère du dernier servi
 (changement de mode ou de catalogue), il envoie `notifications/tools/list_changed`. Il l'envoie
@@ -489,7 +500,7 @@ Traduction (AD-29) :
 
 | MCP | Canal d'IA externe |
 |---|---|
-| `tools/call` d'un outil du catalogue | `command.run {command, params}`, `id` propre à la connexion |
+| `tools/call` d'un outil du catalogue (nom servi, ou ancien nom à point) | `command.run {command, params}`, `command` = l'`id` du registre, `id` de requête propre à la connexion |
 | `notifications/cancelled` de cet appel | notification `request.cancel {id}`, puis attente de la réponse du `command.run` (le service MCP l'abandonne, le client ayant annulé) |
 | réponse `result` | résultat structuré |
 | erreur portant un `ErrorReport` (AD-21) | résultat `isError`, texte = `ErrorReport` en JSON (comme en 5.7) |

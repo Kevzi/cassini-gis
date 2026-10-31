@@ -17,6 +17,11 @@ fn models_dir() -> String {
     dir.to_string_lossy().into_owned()
 }
 
+/// Le nom MCP d'une commande : l'identifiant, le point remplacé par un souligné (ticket 5.30).
+fn tool_name(id: &str) -> String {
+    id.replace('.', "_")
+}
+
 fn temp_project() -> (PathBuf, String) {
     static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let dir = std::env::temp_dir().join(format!(
@@ -43,7 +48,7 @@ fn tools_list_gives_every_core_command_with_its_schemas() {
         .collect();
     assert_eq!(tools.len(), core.len());
     for (tool, spec) in tools.iter().zip(core) {
-        assert_eq!(tool["name"], spec.id.as_str());
+        assert_eq!(tool["name"], tool_name(&spec.id));
         assert_eq!(
             tool["description"],
             format!("{}\n{}", spec.description_fr, spec.description_en)
@@ -56,11 +61,21 @@ fn tools_list_gives_every_core_command_with_its_schemas() {
     }
     // Aucune commande déléguée à QGIS, aucune méthode du protocole Cassini.
     for spec in registry.specs().filter(|s| s.runs_in == Some(RunsIn::Qgis)) {
-        assert!(tools.iter().all(|t| t["name"] != spec.id.as_str()));
+        assert!(tools
+            .iter()
+            .all(|t| t["name"] != spec.id.as_str() && t["name"] != tool_name(&spec.id)));
     }
     for tool in tools {
         let name = tool["name"].as_str().unwrap();
-        assert!(!name.starts_with("session.") && !name.starts_with("plan."));
+        assert!(!name.starts_with("session_") && !name.starts_with("plan_"));
+        // Accepté par tous les clients : `^[a-zA-Z0-9_-]+$`, 52 caractères au plus.
+        assert!(!name.contains('.'), "{name}");
+        assert!(name.len() <= 52, "{name}");
+        assert!(
+            name.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'),
+            "{name}"
+        );
     }
     client.assert_no_server_request();
     let (status, _) = client.close();
@@ -70,7 +85,7 @@ fn tools_list_gives_every_core_command_with_its_schemas() {
 #[test]
 fn system_about_gives_the_same_result_as_cassini_run() {
     let mut client = McpClient::connect(&[], &models_dir());
-    let reply = client.call_tool("system.about", json!({}));
+    let reply = client.call_tool("system_about", json!({}));
     let result = &reply["result"];
     assert_eq!(result["isError"], false);
     let run = Command::new(BIN)
@@ -89,7 +104,7 @@ fn system_about_gives_the_same_result_as_cassini_run() {
 #[test]
 fn invalid_params_are_a_tool_error_carrying_the_error_report() {
     let mut client = McpClient::connect(&[], &models_dir());
-    let reply = client.call_tool("system.about", json!({"x": 1}));
+    let reply = client.call_tool("system_about", json!({"x": 1}));
     assert!(reply.get("error").is_none(), "{reply}");
     let result = &reply["result"];
     assert_eq!(result["isError"], true);
@@ -98,7 +113,7 @@ fn invalid_params_are_a_tool_error_carrying_the_error_report() {
     assert_eq!(report["code"], "registry.invalid_params");
     assert!(report["message"].is_string());
     // Le serveur reste vivant.
-    let again = client.call_tool("system.about", json!({}));
+    let again = client.call_tool("system_about", json!({}));
     assert_eq!(again["result"]["isError"], false);
     client.assert_no_server_request();
     assert_eq!(client.close().0.code(), Some(0));
@@ -114,15 +129,54 @@ fn an_unknown_tool_or_a_qgis_command_is_an_invalid_params_protocol_error() {
         .id
         .clone();
     let mut client = McpClient::connect(&[], &models_dir());
-    for name in ["foo.bar", qgis.as_str(), "session.hello"] {
+    let qgis_name = tool_name(&qgis);
+    for name in [
+        "foo.bar",
+        "foo_bar",
+        qgis.as_str(),
+        qgis_name.as_str(),
+        "session.hello",
+        "session_hello",
+    ] {
         let reply = client.call_tool(name, json!({}));
         assert_eq!(reply["error"]["code"], -32602, "{name} : {reply}");
+        assert!(
+            reply["error"]["message"].as_str().unwrap().contains(name),
+            "{reply}"
+        );
         assert!(reply.get("result").is_none());
     }
-    let alive = client.call_tool("system.about", json!({}));
+    let alive = client.call_tool("system_about", json!({}));
     assert_eq!(alive["result"]["isError"], false);
     client.assert_no_server_request();
     assert_eq!(client.close().0.code(), Some(0));
+}
+
+/// L'ancien nom à point reste accepté en appel, exécuté comme le nom sans point, sans jamais
+/// figurer au catalogue ; avec `--project`, l'appel est journalisé sous l'identifiant à point.
+#[test]
+fn the_dotted_name_still_runs_but_is_never_listed() {
+    let (dir, project) = temp_project();
+    let mut client = McpClient::connect(&["--project", &project], &models_dir());
+    let listed = client.request("tools/list", json!({}));
+    let names = tool_names(&listed);
+    assert!(names.iter().any(|n| n == "system_about"));
+    assert!(names.iter().all(|n| !n.contains('.')), "{names:?}");
+    let old = client.call_tool("system.about", json!({}));
+    let new = client.call_tool("system_about", json!({}));
+    assert_eq!(old["result"]["isError"], false, "{old}");
+    assert_eq!(
+        old["result"]["structuredContent"],
+        new["result"]["structuredContent"]
+    );
+    assert_eq!(client.close().0.code(), Some(0));
+    let journal = std::fs::read_to_string(dir.join("p.cassini/journal.jsonl")).unwrap();
+    let ids: Vec<Value> = journal
+        .lines()
+        .map(|l| serde_json::from_str::<Value>(l).unwrap()["id"].clone())
+        .collect();
+    assert_eq!(ids, vec![json!("system.about"), json!("system.about")]);
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -130,11 +184,11 @@ fn a_call_with_a_project_writes_the_journal_and_frees_the_lock() {
     let (dir, project) = temp_project();
     let mut client = McpClient::connect(&["--project", &project], &models_dir());
     for _ in 0..2 {
-        let reply = client.call_tool("system.about", json!({}));
+        let reply = client.call_tool("system_about", json!({}));
         assert_eq!(reply["result"]["isError"], false, "{reply}");
     }
     // Paramètres invalides : rien n'est écrit.
-    let bad = client.call_tool("system.about", json!({"x": 1}));
+    let bad = client.call_tool("system_about", json!({"x": 1}));
     assert_eq!(bad["result"]["isError"], true);
     let report: Value =
         serde_json::from_str(bad["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
@@ -382,7 +436,7 @@ fn core_names() -> Vec<String> {
     Registry::standard()
         .specs()
         .filter(|s| s.runs_in == Some(RunsIn::Core))
-        .map(|s| s.id.clone())
+        .map(|s| tool_name(&s.id))
         .collect()
 }
 
@@ -403,9 +457,14 @@ fn the_relay_serves_the_catalogue_of_the_session_and_runs_a_qgis_command() {
     // Canal allumé : le catalogue de la session, commandes QGIS annoncées comprises.
     session.switch(true);
     let reply = client.request("tools/list", json!({}));
-    let mut expected = core_names();
+    let mut expected: Vec<String> = Registry::standard()
+        .specs()
+        .filter(|s| s.runs_in == Some(RunsIn::Core))
+        .map(|s| s.id.clone())
+        .collect();
     expected.extend(ANNOUNCED.iter().map(|s| s.to_string()));
     expected.sort();
+    let expected: Vec<String> = expected.iter().map(|id| tool_name(id)).collect();
     assert_eq!(tool_names(&reply), expected);
     client.wait_notification("notifications/tools/list_changed");
     let registry = Registry::standard();
@@ -414,7 +473,7 @@ fn the_relay_serves_the_catalogue_of_the_session_and_runs_a_qgis_command() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|t| t["name"] == "layer.describe")
+        .find(|t| t["name"] == "layer_describe")
         .unwrap();
     assert_eq!(
         tool["description"],
@@ -424,7 +483,7 @@ fn the_relay_serves_the_catalogue_of_the_session_and_runs_a_qgis_command() {
     assert_eq!(tool["outputSchema"], spec.output_schema);
 
     // Un appel QGIS : l'ordre est dicté à l'extension ; `ping` est servi pendant l'appel.
-    let call = client.start_tool("layer.describe", json!({"layer_id": "l1"}));
+    let call = client.start_tool("layer_describe", json!({"layer_id": "l1"}));
     let order = session.wait_order();
     assert_eq!(order["params"]["command"], "layer.describe");
     assert_eq!(order["params"]["params"], json!({"layer_id": "l1"}));
@@ -440,7 +499,7 @@ fn the_relay_serves_the_catalogue_of_the_session_and_runs_a_qgis_command() {
     assert_eq!(last["origin"], "external");
 
     // Une erreur de l'extension devient un résultat `isError`.
-    let call = client.start_tool("layer.describe", json!({"layer_id": "absente"}));
+    let call = client.start_tool("layer_describe", json!({"layer_id": "absente"}));
     let order = session.wait_order();
     session.answer(
         &order,
@@ -451,7 +510,7 @@ fn the_relay_serves_the_catalogue_of_the_session_and_runs_a_qgis_command() {
     assert_eq!(report["code"], "qgis.layer_missing");
 
     // Une commande QGIS non annoncée reste hors catalogue : erreur de protocole.
-    let reply = client.call_tool("analysis.intersect", json!({}));
+    let reply = client.call_tool("analysis_intersect", json!({}));
     assert_eq!(reply["error"]["code"], -32602, "{reply}");
     // Aucun autre changement de catalogue.
     assert_eq!(
@@ -473,7 +532,7 @@ fn a_busy_session_refuses_the_relay_at_once() {
         json!({"command": "analysis.buffer", "params": buffer_params()}),
     );
     let order = session.wait_order();
-    let report = tool_report(&client.call_tool("layer.describe", json!({"layer_id": "l1"})));
+    let report = tool_report(&client.call_tool("layer_describe", json!({"layer_id": "l1"})));
     assert_eq!(report["code"], "session.busy");
     session.answer(&order, buffered());
     session.wait_for("command.run", |m| m["id"] == json!(run));
@@ -486,8 +545,10 @@ fn a_busy_session_refuses_the_relay_at_once() {
 fn a_cancelled_mcp_call_becomes_a_request_cancel_and_a_cancelled_step() {
     let mut session = QgisSession::start(true);
     let mut client = McpClient::connect_tagged(&[], &models_dir(), &session.tag);
-    let call = client.start_tool("analysis.buffer", buffer_params());
+    let call = client.start_tool("analysis_buffer", buffer_params());
     let order = session.wait_order();
+    // Le nom sans point arrive à la session sous l'identifiant du registre.
+    assert_eq!(order["params"]["command"], "analysis.buffer");
     client.notify(
         "notifications/cancelled",
         json!({"requestId": call, "reason": "test"}),
@@ -520,7 +581,7 @@ fn a_cancelled_mcp_call_becomes_a_request_cancel_and_a_cancelled_step() {
 fn switching_the_channel_off_during_a_call_ends_it_and_falls_back_to_autonomous() {
     let mut session = QgisSession::start(true);
     let mut client = McpClient::connect_tagged(&[], &models_dir(), &session.tag);
-    let call = client.start_tool("layer.describe", json!({"layer_id": "l1"}));
+    let call = client.start_tool("layer_describe", json!({"layer_id": "l1"}));
     let order = session.wait_order();
     // L'utilisateur coupe l'interrupteur pendant l'ordre.
     session.switch(false);
@@ -529,12 +590,12 @@ fn switching_the_channel_off_during_a_call_ends_it_and_falls_back_to_autonomous(
     client.wait_notification("notifications/tools/list_changed");
     session.answer(&order, described());
     // La requête suivante est servie en autonome.
-    let reply = client.call_tool("system.about", json!({}));
+    let reply = client.call_tool("system_about", json!({}));
     assert_eq!(reply["result"]["isError"], false, "{reply}");
     let reply = client.request("tools/list", json!({}));
     assert_eq!(tool_names(&reply), core_names());
     // Un outil QGIS n'est plus au catalogue.
-    let reply = client.call_tool("layer.describe", json!({"layer_id": "l1"}));
+    let reply = client.call_tool("layer_describe", json!({"layer_id": "l1"}));
     assert_eq!(reply["error"]["code"], -32602, "{reply}");
     assert_eq!(
         client.take_notifications("notifications/tools/list_changed"),
@@ -555,7 +616,7 @@ fn switching_the_channel_off_during_a_call_ends_it_and_falls_back_to_autonomous(
 fn autonomous_mcp_does_not_hold_the_project_lock_between_calls() {
     let (dir, project) = temp_project();
     let mut client = McpClient::connect(&["--project", &project], &models_dir());
-    let reply = client.call_tool("system.about", json!({}));
+    let reply = client.call_tool("system_about", json!({}));
     assert_eq!(reply["result"]["isError"], false, "{reply}");
     // `mcp` vit encore : `cassini run` écrit le journal du même projet.
     let run = Command::new(BIN)
@@ -568,7 +629,7 @@ fn autonomous_mcp_does_not_hold_the_project_lock_between_calls() {
         "{}",
         String::from_utf8_lossy(&run.stderr)
     );
-    let reply = client.call_tool("system.about", json!({}));
+    let reply = client.call_tool("system_about", json!({}));
     assert_eq!(reply["result"]["isError"], false, "{reply}");
     assert_eq!(client.close().0.code(), Some(0));
     let journal = std::fs::read_to_string(dir.join("p.cassini/journal.jsonl")).unwrap();
@@ -594,11 +655,11 @@ fn an_autonomous_call_while_another_session_holds_the_lock_is_read_only() {
     assert_eq!(holder.mode(), cassini_core::journal::Mode::Write);
     let mut client = McpClient::connect(&["--project", &project], &models_dir());
     let before = lines();
-    let report = tool_report(&client.call_tool("system.about", json!({})));
+    let report = tool_report(&client.call_tool("system_about", json!({})));
     assert_eq!(report["code"], "journal.read_only");
     assert_eq!(lines(), before);
     drop(holder);
-    let reply = client.call_tool("system.about", json!({}));
+    let reply = client.call_tool("system_about", json!({}));
     assert_eq!(reply["result"]["isError"], false, "{reply}");
     assert_eq!(lines(), before + 1);
     assert_eq!(client.close().0.code(), Some(0));
@@ -639,11 +700,11 @@ fn a_protocol_mismatch_keeps_the_core_catalogue_and_refuses_every_call() {
     let mut client = McpClient::connect_tagged(&[], &models_dir(), &tag);
     let reply = client.request("tools/list", json!({}));
     assert_eq!(tool_names(&reply), core_names());
-    let report = tool_report(&client.call_tool("system.about", json!({})));
+    let report = tool_report(&client.call_tool("system_about", json!({})));
     assert_eq!(report["code"], "session.protocol_mismatch");
     assert_eq!(report["message"], message);
     // Un outil hors du catalogue autonome est refusé de même, avec le message de mise à jour.
-    let report = tool_report(&client.call_tool("layer.describe", json!({"layer_id": "l1"})));
+    let report = tool_report(&client.call_tool("layer_describe", json!({"layer_id": "l1"})));
     assert_eq!(report["code"], "session.protocol_mismatch");
     assert_eq!(report["message"], message);
     fake.join().unwrap();
