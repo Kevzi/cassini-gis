@@ -287,13 +287,33 @@ notes = [
 ]
 
 [[entry]]
+id = 31
+type = "story"
+title = "Rejeu d'un inventaire demande apres la creation de couches"
+description = "Au rejeu, avant de comparer un resultat a celui du journal, le noyau y remplace chaque identifiant de couche obtenu par ce rejeu et chaque chemin sous replay/ par leur equivalent d'origine, a toutes les profondeurs du resultat, d'apres la correspondance que le rejeu tient deja. Aujourd'hui seul le layer_id de premier niveau est ecarte : un project.inventory demande apres la creation de couches liste leurs layer_id (suffixe aleatoire) et leurs sources, et le rejeu rend replay.diverged. Le format du journal ne change pas : les journaux deja ecrits, celui de la recette Antigravity de 5.30 compris, deviennent rejouables. Une couche sans equivalent (ouverte a la main entre deux appels, par exemple) reste un ecart reel et le rejeu le signale toujours."
+verify = "Tests : un journal inventaire, tampon, inventaire rejoue avec identical: true ; un inventaire qui contient une couche sans equivalent diverge toujours ; un resultat reellement different diverge toujours, resume par empreinte ou non. Recette : le journal Antigravity de 5.30 rejoue avec identical: true, et le journal Claude Code de 5.30, rejoue, reste vert."
+covers = ["CAP-8"]
+after = [30]
+hitl = false
+risk = "high"
+references = [
+  "../deferred-work.md — entree « Rejeu d'un project.inventory demande apres la creation de couches »",
+  "story-noms-d-outils-mcp-sans-point-acceptes-par-tous-les-clients-plan.md — recette Antigravity CLI, troisieme essai",
+]
+notes = [
+  "Decision: 2026-10-31 — demande du proprietaire apres la recette de 5.30 : ticket a faire avant 5.8.",
+  "Decision: 2026-10-31 — la correction se fait au rejeu, sans changer le format du journal, pour que les journaux existants restent rejouables.",
+  "Decision: 2026-10-31 — risque high (rejeu) : relecture thorough ; controle exterieur, le proprietaire rejoue lui-meme le journal Antigravity.",
+]
+
+[[entry]]
 id = 8
 type = "story"
 title = "Refactor sweep"
 description = "Nettoie ce que l'epic a laisse : doublons entre ai/, serve.rs et le serveur MCP, constats de revue reportes dans deferred-work.md ; le perimetre est fixe au demarrage d'apres les plans et les constats."
 verify = "cargo test, clippy et fmt propres, les constats reportes de l'epic sont traites ou re-reportes avec leur raison."
 covers = []
-after = [1, 2, 3, 4, 5, 6, 7, 11, 12, 13, 14, 16, 18, 19, 20, 21, 24, 28, 25, 29, 26, 30]
+after = [1, 2, 3, 4, 5, 6, 7, 11, 12, 13, 14, 16, 18, 19, 20, 21, 24, 28, 25, 29, 26, 30, 31]
 hitl = false
 risk = "low"
 

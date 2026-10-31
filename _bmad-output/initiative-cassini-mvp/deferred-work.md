@@ -440,3 +440,5 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-noms-d-outils-mcp-sans-point-acceptes-par-tous-les-clients-plan.md`
   summary: Rejeu d'un `project.inventory` demandé après la création de couches. Le rejeu diverge, car l'inventaire liste des `layer_id` à suffixe aléatoire et des sources sous `replay/`, qui changent d'une exécution à l'autre.
   evidence: Recette 5.30 avec Antigravity CLI (2026-10-31, 18 h 45) : 17 appels réussis, puis `replay.diverged` à l'étape 13 (`project.inventory`, empreinte `6472c69290d01abf`). Les étapes 2 (inventaire initial) à 12 rejouent à l'identique. Risque high (rejeu) : relecture `thorough`.
+  status: ticket, 2026-10-31, entrée 5.31 (`epic-agent-et-mcp/tickets.toml`)
+  resolution: Devenu le ticket 5.31 « Rejeu d'un inventaire demandé après la création de couches » ; 5.8 l'attend.
