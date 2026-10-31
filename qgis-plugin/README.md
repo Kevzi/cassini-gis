@@ -245,6 +245,28 @@ Recette manuelle du journal explicite [ticket 13] (QGIS 3.44, même jeu, même m
 6. Réglages, English : la phrase affichée passe en anglais (« Buffer of 500 m around
    Gares: new layer Tampon, 8 features. »), le détail cliqué reste affiché.
 
+Recette manuelle de l'IA externe [ticket 5.26] (QGIS 3.44, même jeu, `cassini mcp` branché
+sur un client MCP, par exemple ChatGPT pour ordinateur) :
+
+1. Réglages : « Autoriser une IA externe » est décoché à chaque ouverture de QGIS. Cochez-le :
+   le bandeau « Une IA externe peut agir sur ce projet. » apparaît avec **Couper**.
+2. Depuis le client MCP, demandez la description d'une couche : une ligne « IA externe ·
+   Décrit une couche. » passe de « En cours… » à « Terminée », avec sa durée ; un clic dessus
+   montre la commande, ses paramètres et son résultat, sans chemin absolu. Pendant l'appel, la
+   saisie, Envoyer, Lancer, Valider le plan et Refuser sont grisés : « L'IA externe
+   travaille. »
+3. Lancez par l'IA externe une analyse longue : **Arrêter** dans le bandeau l'annule (ligne
+   « Annulée ») ; sur une commande non annulable, Arrêter est grisé avec sa raison.
+4. Cochez « Me demander avant chaque appel » : chaque appel affiche une question avec
+   **Autoriser** / **Refuser**, sans fenêtre. Refuser : l'IA externe reçoit un refus, rien n'est
+   exécuté. Sans réponse pendant deux minutes, la question disparaît (refus). La case est
+   retenue après redémarrage de QGIS, l'interrupteur non.
+5. Ouvrez le même utilisateur dans une seconde session QGIS et cochez l'interrupteur : il reste
+   éteint et grisé, « Une autre session QGIS accepte déjà l'IA externe. » ; il redevient
+   cliquable à la prochaine ouverture des Réglages.
+6. **Couper** : le bandeau disparaît, le client MCP reçoit une erreur claire. Relancez le noyau
+   pendant un appel : l'interrupteur est éteint, la ligne en cours passe à « Annulée ».
+
 Contrôle manuel : charger l'extension, ouvrir un projet, voir les deux versions,
 fermer QGIS et vérifier qu'aucun `cassini` ne reste dans le gestionnaire des
 tâches.

@@ -279,20 +279,24 @@ def is_cancellable(command, catalogue):
 
 
 # -- activations -------------------------------------------------------------
-def controls(view, ready, other_busy, has_text, catalogue):
+def controls(view, ready, other_busy, has_text, catalogue, external_busy=False):
     """État des contrôles de la saisie et du plan.
 
     `ready` : noyau prêt et sans bandeau ; `other_busy` : une commande experte
-    est en vol. Rend un dict : `input_enabled`, `send_enabled`, `input_reason`
-    (clé de texts ou None), `progress_visible`, `approve_visible`,
+    est en vol ; `external_busy` : un appel de l'IA externe est en vol ou
+    attend l'accord (saisie, Valider et Refuser grisés, raison
+    `input_reason_external`). Rend un dict : `input_enabled`, `send_enabled`,
+    `input_reason` (clé de texts ou None), `progress_visible`, `approve_visible`,
     `approve_enabled`, `reject_visible`, `reject_enabled`, `stop_visible`,
     `stop_enabled`, `stop_reason` (clé de texts ou None), `expert_enabled`.
     """
     phase = view.phase
     idle = phase == IDLE
-    input_enabled = bool(ready and idle and not other_busy)
+    input_enabled = bool(ready and idle and not other_busy and not external_busy)
     if not ready or input_enabled:
         reason = None  # hors état prêt, le bandeau dit pourquoi
+    elif external_busy and phase in (IDLE, PROPOSED):
+        reason = "input_reason_external"
     elif phase == PROPOSED:
         reason = "input_reason_plan"
     else:
@@ -311,9 +315,10 @@ def controls(view, ready, other_busy, has_text, catalogue):
         "input_reason": reason,
         "progress_visible": phase == GENERATING,
         "approve_visible": proposed,
-        "approve_enabled": bool(proposed and ready and not view.rejecting),
+        "approve_enabled": bool(proposed and ready and not view.rejecting and not external_busy),
         "reject_visible": proposed,
-        "reject_enabled": bool(proposed and ready and not view.rejecting),
+        # Refuser aussi : le noyau répondrait `session.busy` et le plan montré serait perdu.
+        "reject_enabled": bool(proposed and ready and not view.rejecting and not external_busy),
         "stop_visible": executing,
         "stop_enabled": bool(executing and ready and cancellable),
         "stop_reason": stop_reason,

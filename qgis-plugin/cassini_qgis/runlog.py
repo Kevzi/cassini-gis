@@ -29,10 +29,15 @@ class Entry:
     `params` : paramètres envoyés (ou ceux du plan) ; `result` : résultat rendu, ou None ;
     `step` : numéro de l'étape dans le plan, None hors plan ; `refs` : {k: résultat de
     l'étape k} du même plan, pour nommer les références `step:k` ; `error` : (code,
-    message) d'une ligne en erreur, ou None.
+    message) d'une ligne en erreur, ou None ; `origin` : None pour le panneau, `"external"`
+    pour un appel de l'IA externe, qui porte alors son `call_id` et, une fois fini, sa
+    durée `duration_ms` rendue par le noyau.
     """
 
-    def __init__(self, command, label, when, params=None, result=None, step=None, refs=None):
+    def __init__(
+        self, command, label, when, params=None, result=None, step=None, refs=None,
+        origin=None, call_id=None,
+    ):
         self.command = command
         self.label = label
         self.when = when
@@ -42,22 +47,49 @@ class Entry:
         self.step = step
         self.refs = refs if refs is not None else {}
         self.error = None
+        self.origin = origin
+        self.call_id = call_id
+        self.duration_ms = None
+
+
+EXTERNAL = "external"
 
 
 class RunLog:
     def __init__(self):
         self.entries = []
 
-    def start(self, command, label, when, params=None, result=None, step=None, refs=None):
-        entry = Entry(command, label, when, params, result, step, refs)
+    def start(
+        self, command, label, when, params=None, result=None, step=None, refs=None,
+        origin=None, call_id=None,
+    ):
+        entry = Entry(command, label, when, params, result, step, refs, origin, call_id)
         self.entries.append(entry)
         return entry
 
     def current(self):
-        """La dernière ligne en cours, ou None."""
+        """La dernière ligne en cours lancée par le panneau, ou None.
+
+        Une ligne de l'IA externe n'en est jamais : elle ne se ferme que par son `call_id`.
+        """
         for entry in reversed(self.entries):
-            if entry.status == RUNNING:
+            if entry.status == RUNNING and entry.origin is None:
                 return entry
+        return None
+
+    def find_call(self, call_id):
+        """La dernière ligne de l'appel externe `call_id`, ou None."""
+        for entry in reversed(self.entries):
+            if entry.origin == EXTERNAL and entry.call_id == call_id:
+                return entry
+        return None
+
+    def finish_call(self, call_id, status):
+        """Ferme la ligne en cours de l'appel externe `call_id` ; rend la ligne, ou None."""
+        entry = self.find_call(call_id)
+        if entry is not None and entry.status == RUNNING:
+            entry.status = status
+            return entry
         return None
 
     def finish(self, status):
@@ -67,9 +99,13 @@ class RunLog:
         return entry
 
 
-def line_text(entry, status_word):
-    """`✔ Terminée  system.about  14:02` ; `status_word` est le mot déjà traduit."""
-    return "%s %s  %s  %s" % (ICONS[entry.status], status_word, entry.label, entry.when)
+def line_text(entry, status_word, duration=None):
+    """`✔ Terminée  system.about  14:02` ; `status_word` est le mot déjà traduit.
+
+    `duration` : durée déjà mise en forme (« 41 ms »), ajoutée en fin de ligne.
+    """
+    line = "%s %s  %s  %s" % (ICONS[entry.status], status_word, entry.label, entry.when)
+    return "%s  (%s)" % (line, duration) if duration else line
 
 
 def _mask(match):
@@ -118,8 +154,11 @@ def step_details(params, result):
     return technical_details({"params": params, "result": result})
 
 
-def controls(ready, available, running, cancellable):
+def controls(ready, available, running, cancellable, external_busy=False):
     """État des boutons Lancer / Arrêter pour la commande choisie.
+
+    `external_busy` : un appel de l'IA externe est en vol ou attend l'accord ; Lancer
+    est alors grisé (le noyau répondrait `session.busy`).
 
     Rend un dict : `run_visible`, `run_enabled`, `stop_visible`, `stop_enabled`
     et `stop_reason` (clé de texts à afficher quand Arrêter est grisé, ou None).
@@ -134,7 +173,7 @@ def controls(ready, available, running, cancellable):
         }
     return {
         "run_visible": True,
-        "run_enabled": bool(ready and available),
+        "run_enabled": bool(ready and available and not external_busy),
         "stop_visible": False,
         "stop_enabled": False,
         "stop_reason": None,

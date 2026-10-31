@@ -8,6 +8,10 @@ Il porte aussi les plans de l'agent (`plan.propose`, `plan.execute`,
 `plan.reject`, notification `plan.step`) sans jamais les composer ni les
 enchaîner : il n'envoie qu'une demande, le nom du modèle choisi ou un `plan_id`.
 La liste des modèles vient du noyau par `agent.models` (noms et tailles seuls).
+Il porte enfin le canal d'IA externe (AD-29) : `session.external` à la demande du
+panneau, les notifications `external.call` rendues telles quelles, et la requête
+`external.approve`, gardée jusqu'à la réponse de l'utilisateur ou son retrait par le
+noyau ; il ne répond jamais à la place de l'utilisateur.
 Tout est piloté par les signaux du processus : aucune lecture bloquante.
 
 Le processus est un objet à l'interface de QProcess, fourni par l'appelant, ce
@@ -60,6 +64,24 @@ PLAN_EVENTS = (
     PLAN_REJECTED,
 )
 
+# Canal d'IA externe (docs/canal-local.md, « Canal d'IA externe »).
+EXTERNAL_STATE = "external_state"  # payload : {"enabled", "ask"} tels que le noyau les a répondus
+EXTERNAL_FAILED = "external_failed"  # payload : {"code", "message"} (session.external refusé)
+# payload : {"call_id", "command", "params"}
+EXTERNAL_CALL_STARTED = "external_call_started"
+# payload : {"call_id", "command", "result", "error" ({"code", "message"} ou None), "duration_ms"}
+EXTERNAL_CALL_FINISHED = "external_call_finished"
+APPROVAL_ASKED = "approval_asked"  # payload : {"request_id", "call_id", "command", "params"}
+APPROVAL_WITHDRAWN = "approval_withdrawn"  # payload : {"request_id"}
+EXTERNAL_EVENTS = (
+    EXTERNAL_STATE,
+    EXTERNAL_FAILED,
+    EXTERNAL_CALL_STARTED,
+    EXTERNAL_CALL_FINISHED,
+    APPROVAL_ASKED,
+    APPROVAL_WITHDRAWN,
+)
+
 GESTURE_UNKNOWN = "qgis.gesture_unknown"
 GESTURE_FAILED = "qgis.gesture_failed"
 BUSY = "qgis.busy"
@@ -92,6 +114,8 @@ class CoreClient:
         # "step" (étape annoncée par plan.step) et "outputs" ({étape: résultat d'ordre}).
         self._plan = None
         self._models = None  # agent.models en vol : id de la requête
+        # external.approve sans réponse : {"id", "call_id", "command", "params"} ; une seule.
+        self._approval = None
         self._closing = False
         self._done = False  # un événement terminal a déjà été rendu
         process.readyReadStandardOutput.connect(self._read)
@@ -125,6 +149,7 @@ class CoreClient:
         self._replay = None
         self._plan = None
         self._models = None
+        self._approval = None
         self._abort_current()
         self._p.closeWriteChannel()
         self._p.waitForFinished(wait_ms)
@@ -259,6 +284,123 @@ class CoreClient:
         self._request("request.cancel", {"id": target}, "cancel")
         return True
 
+    # -- canal d'IA externe -------------------------------------------
+    def set_external(self, enabled, ask=False):
+        """Envoie `session.external` ; servi même pendant une requête en vol.
+
+        Le verdict arrive par EXTERNAL_STATE (ce que le noyau a répondu) ou
+        EXTERNAL_FAILED. Rend False si rien n'est parti (noyau pas prêt ou fermé).
+        """
+        if not self._ready or self._closing:
+            return False
+        params = {"enabled": True, "ask": bool(ask)} if enabled else {"enabled": False}
+        self._request("session.external", params, "external")
+        return True
+
+    def cancel_external(self, call_id):
+        """Envoie `request.cancel {id: call_id}` pour arrêter un appel de l'IA externe.
+
+        Le noyau refuse lui-même un appel non annulable (AD-12) ; le verdict de l'appel
+        arrive par EXTERNAL_CALL_FINISHED.
+        """
+        if not self._ready or self._closing or not isinstance(call_id, str) or not call_id:
+            return False
+        self._request("request.cancel", {"id": call_id}, "cancel")
+        return True
+
+    def approval(self):
+        """La demande d'accord ouverte (copie), ou None."""
+        return dict(self._approval) if self._approval is not None else None
+
+    def answer_approval(self, request_id, approved):
+        """Répond à `external.approve` par `{"approved": true|false}`.
+
+        Seulement à la demande encore ouverte : une demande retirée par le noyau ou déjà
+        répondue n'envoie rien, et la fonction rend False.
+        """
+        approval = self._approval
+        if approval is None or approval["id"] != request_id or self._closing:
+            return False
+        self._approval = None
+        self._respond(request_id, {"approved": approved is True})
+        return True
+
+    def _external_answer(self, msg):
+        if "error" in msg:
+            code, _step = self._error_fields(msg["error"])
+            self._notify(
+                EXTERNAL_FAILED, {"code": code, "message": self._error_message(msg["error"])}
+            )
+            return
+        result = msg.get("result")
+        result = result if isinstance(result, dict) else {}
+        self._notify(
+            EXTERNAL_STATE,
+            {"enabled": result.get("enabled") is True, "ask": result.get("ask") is True},
+        )
+
+    def _external_call(self, params):
+        call_id = params.get("call_id")
+        event = params.get("event")
+        if not isinstance(call_id, str) or event not in ("started", "finished"):
+            return
+        command = params.get("command")
+        command = command if isinstance(command, str) else None
+        if event == "started":
+            self._notify(
+                EXTERNAL_CALL_STARTED,
+                {"call_id": call_id, "command": command, "params": params.get("params")},
+            )
+            return
+        error = params.get("error")
+        if isinstance(error, dict):
+            code = error.get("code")
+            message = error.get("message")
+            error = {
+                "code": code if isinstance(code, str) else "core.unknown",
+                "message": message if isinstance(message, str) else "",
+            }
+        else:
+            error = None
+        duration = params.get("duration_ms")
+        if not isinstance(duration, int) or isinstance(duration, bool) or duration < 0:
+            duration = None
+        self._notify(
+            EXTERNAL_CALL_FINISHED,
+            {
+                "call_id": call_id,
+                "command": command,
+                "result": params.get("result"),
+                "error": error,
+                "duration_ms": duration,
+            },
+        )
+
+    def _external_approve(self, ident, params):
+        """Garde la demande ; une seconde demande fait refuser la première (une seule question)."""
+        previous = self._approval
+        if previous is not None:
+            self._approval = None
+            self._respond(previous["id"], {"approved": False})
+            self._notify(APPROVAL_WITHDRAWN, {"request_id": previous["id"]})
+        command = params.get("command")
+        call_id = params.get("call_id")
+        self._approval = {
+            "id": ident,
+            "call_id": call_id if isinstance(call_id, str) else None,
+            "command": command if isinstance(command, str) else None,
+            "params": params.get("params"),
+        }
+        self._notify(
+            APPROVAL_ASKED,
+            {
+                "request_id": ident,
+                "call_id": self._approval["call_id"],
+                "command": self._approval["command"],
+                "params": self._approval["params"],
+            },
+        )
+
     # -- envoi --------------------------------------------------------
     def _write(self, message):
         if self._closing:
@@ -326,6 +468,8 @@ class CoreClient:
             self._plan_answer(step, msg)
         elif step == "models":
             self._models_answer(msg)
+        elif step == "external":
+            self._external_answer(msg)
         elif "error" in msg:
             self._fail(self._error_message(msg["error"]))
         elif step == "hello":
@@ -520,11 +664,22 @@ class CoreClient:
                     PLAN_STEP,
                     {"step": step, "command": command if isinstance(command, str) else None},
                 )
+        elif method == "external.call":
+            self._external_call(params)  # notification : jamais de réponse
+        elif method == "external.approve" and ident is not None:
+            self._external_approve(ident, params)
         elif method == "request.cancel":
             current = self._current
-            matches = current is not None and current["id"] == params.get("id")
+            target = params.get("id")
+            matches = current is not None and current["id"] == target
             if matches:
                 self._cancel_gesture(current)
+            approval = self._approval
+            if approval is not None and approval["id"] == target:
+                # Retrait de la question par le noyau (délai, annulation, perte) : aucune réponse.
+                self._approval = None
+                matches = True
+                self._notify(APPROVAL_WITHDRAWN, {"request_id": target})
             if ident is not None:
                 self._respond(ident, {"cancelled": matches})
         elif ident is not None:
@@ -633,6 +788,7 @@ class CoreClient:
 
     def _finished(self, *_):
         if not self._closing:
+            self._approval = None  # plus personne pour recevoir la réponse
             self._abort_current()
             self._fail_run("Le noyau Cassini s'est arrêté.")
             self._fail_replay("Le noyau Cassini s'est arrêté.")
@@ -642,6 +798,7 @@ class CoreClient:
 
     def _error(self, *_):
         if not self._closing:
+            self._approval = None
             self._abort_current()
             self._fail_run("Le noyau Cassini s'est arrêté.")
             self._fail_replay("Le noyau Cassini s'est arrêté.")

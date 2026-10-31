@@ -117,6 +117,18 @@ class CassiniPlugin:
     def reject(self, plan_id):
         return self.client is not None and self.client.reject_plan(plan_id)
 
+    def set_external(self, enabled, ask=False):
+        """Interrupteur ou Couper -> `session.external`. Rend True si la demande est partie."""
+        return self.client is not None and self.client.set_external(enabled, ask)
+
+    def stop_external(self, call_id):
+        """Arrêter un appel de l'IA externe -> `request.cancel {id: call_id}`."""
+        return self.client is not None and self.client.cancel_external(call_id)
+
+    def answer_approval(self, request_id, approved):
+        """Autoriser / Refuser -> réponse à `external.approve`, si la question est encore ouverte."""
+        return self.client is not None and self.client.answer_approval(request_id, approved)
+
     def choose_core(self):
         path, _ = QFileDialog.getOpenFileName(
             self.iface.mainWindow(),
@@ -190,7 +202,9 @@ class CassiniPlugin:
             client.RUN_DONE,
             client.RUN_CANCELLED,
             client.RUN_FAILED,
-        ) or kind in client.PLAN_EVENTS or kind in client.MODEL_EVENTS:
+        ) or kind in client.PLAN_EVENTS or kind in client.MODEL_EVENTS or (
+            kind in client.EXTERNAL_EVENTS
+        ):
             self.panel.on_event(kind, payload)
 
     def _stop(self, *_):
