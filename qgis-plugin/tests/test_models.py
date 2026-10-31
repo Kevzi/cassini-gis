@@ -110,5 +110,31 @@ class ReasonTest(unittest.TestCase):
         self.assertIsNone(models.reason("fr", None, None))
 
 
+class ReceivedTest(unittest.TestCase):
+    """La décision du panneau à la réception de MODELS, et quand redemander la liste."""
+
+    def test_the_list_is_cleaned_and_a_kept_choice_is_not_forgotten(self):
+        listed = LISTED + [{"size_bytes": 3}, "pas une entrée"]
+        entries, chosen, forget = models.received(listed, "ajuste.modele.json")
+        self.assertEqual([e["file"] for e in entries], [e["file"] for e in LISTED])
+        self.assertEqual((chosen, forget), ("ajuste.modele.json", False))
+
+    def test_a_vanished_or_unusable_choice_is_forgotten(self):
+        _, chosen, forget = models.received(LISTED, "b.gguf")
+        self.assertEqual((chosen, forget), ("Qwen3.5-9B-Q4_K_M.gguf", True))
+        listed = [{"file": "b.gguf", "size_bytes": 3, "problem": "illisible"}]
+        self.assertEqual(models.received(listed, "b.gguf"), (models.clean(listed), None, True))
+
+    def test_nothing_remembered_is_never_forgotten(self):
+        self.assertEqual(models.received([], None), ([], None, False))
+        self.assertEqual(models.received(None, ""), ([], None, False))
+
+    def test_only_a_stale_choice_asks_the_list_again(self):
+        self.assertTrue(models.asks_list_again("models.unknown"))
+        self.assertTrue(models.asks_list_again("models.unusable"))
+        for code in ("ai.no_model", "models.no_folder", "agent.refused", "", None):
+            self.assertFalse(models.asks_list_again(code), code)
+
+
 if __name__ == "__main__":
     unittest.main()

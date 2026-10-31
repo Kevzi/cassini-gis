@@ -588,7 +588,7 @@ class CassiniPanel(QWidget):
             _announce(self.plan_notice, self.t("live_question"))
         elif kind == client.PLAN_FAILED:
             agent.failed(payload.get("code", ""), payload.get("message", ""))
-            if payload.get("code") in ("models.unknown", "models.unusable"):
+            if models.asks_list_again(payload.get("code")):
                 self._actions.list_models()  # la liste a changé : la redemander
             if self._last_request and not self.input.toPlainText().strip():
                 self.input.setPlainText(self._last_request)  # à corriger sans tout retaper
@@ -642,9 +642,8 @@ class CassiniPanel(QWidget):
     def on_models(self, kind, payload):
         """Liste des modèles reçue (MODELS) ou en échec (MODELS_FAILED)."""
         if kind == client.MODELS:
-            self.models = models.clean(payload.get("models"))
+            self.models, chosen, forget = models.received(payload.get("models"), self.model)
             self.models_error = None
-            chosen, forget = models.choose(self.models, self.model)
             if forget:
                 QSettings().remove(models.SETTING_KEY)  # choix disparu : oublié
             self.model = chosen

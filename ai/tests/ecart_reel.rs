@@ -385,10 +385,10 @@ fn ecart_reel_score_on_the_held_out_set() {
     let (inventory, ids) = common::shown_inventory(&inventory);
     let sentences: Vec<Value> = serde_json::from_str(SENTENCES).unwrap();
     let mut model = model_files_generator(files);
-    // (justes, total) par sorte attendue.
-    let mut score = [("calls", 0, 0), ("question", 0, 0), ("refusal", 0, 0)];
+    // Une issue par phrase : (sorte attendue, juste, appels au générateur).
+    let mut outcomes: Vec<(String, bool, usize)> = Vec::new();
     let mut invalid = Vec::new();
-    let (mut retried, mut saved, mut guarded) = (0, 0, 0);
+    let mut guarded = 0;
     let started = std::time::Instant::now();
     for sentence in &sentences {
         let id = sentence["id"].as_str().unwrap();
@@ -424,16 +424,7 @@ fn ecart_reel_score_on_the_held_out_set() {
         if !valid {
             invalid.push(id.to_string());
         }
-        if calls > 1 {
-            retried += 1;
-            saved += usize::from(ok);
-        }
-        let row = score
-            .iter_mut()
-            .find(|(k, _, _)| *k == want)
-            .expect("sorte connue");
-        row.1 += usize::from(ok);
-        row.2 += 1;
+        outcomes.push((want.to_string(), ok, calls));
         let gap = match (&graded, valid) {
             (_, false) => " ; écart : échoue à check_plan".to_string(),
             (Err(gap), true) => format!(" ; écart : {gap}"),
@@ -445,6 +436,11 @@ fn ecart_reel_score_on_the_held_out_set() {
             got_kind(&got)
         );
     }
+    let Tally {
+        score,
+        retried,
+        saved,
+    } = tally(&outcomes);
     let right: usize = score.iter().map(|r| r.1).sum();
     eprintln!(
         "SCORE {right}/{} : plans {}/{}, questions {}/{}, refus {}/{}, dont {guarded} question(s) du garde-fou ({style:?}, {} s)",
@@ -463,6 +459,65 @@ fn ecart_reel_score_on_the_held_out_set() {
         "plans rendus qui échouent à check_plan : {}",
         invalid.join(", ")
     );
+}
+
+/// Compte d'un passage sur le jeu : (sorte, justes, total) par sorte attendue, dans l'ordre plans,
+/// questions, refus ; phrases passées par la redemande (plus d'un appel), et celles qu'elle a
+/// sauvées (justes au bout).
+#[derive(Debug, PartialEq)]
+struct Tally {
+    score: [(&'static str, usize, usize); 3],
+    retried: usize,
+    saved: usize,
+}
+
+/// Compte les issues `(sorte attendue, juste, appels)`, une par phrase.
+fn tally(outcomes: &[(String, bool, usize)]) -> Tally {
+    let mut t = Tally {
+        score: [("calls", 0, 0), ("question", 0, 0), ("refusal", 0, 0)],
+        retried: 0,
+        saved: 0,
+    };
+    for (want, ok, calls) in outcomes {
+        if *calls > 1 {
+            t.retried += 1;
+            t.saved += usize::from(*ok);
+        }
+        let row = t
+            .score
+            .iter_mut()
+            .find(|(k, _, _)| k == want)
+            .expect("sorte connue");
+        row.1 += usize::from(*ok);
+        row.2 += 1;
+    }
+    t
+}
+
+#[test]
+fn tally_counts_each_kind_and_the_retries_that_saved_a_sentence() {
+    let outcomes = [
+        ("calls", true, 1),
+        ("calls", false, 2),
+        ("calls", true, 2),
+        ("question", true, 1),
+        ("refusal", false, 1),
+        ("refusal", true, 2),
+    ]
+    .map(|(k, ok, n)| (k.to_string(), ok, n));
+    assert_eq!(
+        tally(&outcomes),
+        Tally {
+            score: [("calls", 2, 3), ("question", 1, 1), ("refusal", 1, 2)],
+            retried: 3,
+            saved: 2,
+        }
+    );
+    // Une phrase sans redemande n'est jamais comptée comme sauvée, même juste.
+    let none = tally(&[("calls".to_string(), true, 1)]);
+    assert_eq!((none.retried, none.saved), (0, 0));
+    // Aucun appel abouti (0) n'est pas une redemande.
+    assert_eq!(tally(&[("question".to_string(), false, 0)]).retried, 0);
 }
 
 // Sans modèle : la matrice du notateur.

@@ -249,6 +249,65 @@ fn plan_propose_with_a_missing_models_folder_hides_the_folder() {
     cleanup(&dir);
 }
 
+/// `cassini plan` sans `--model`, sur le dossier de modèles `models` : (code, sortie, erreur).
+fn plan_without_model(dir: &Path, models: &Path) -> (i32, String, String) {
+    let inventory = dir.join("inventaire.json");
+    std::fs::write(&inventory, r#"{"layers":[]}"#).unwrap();
+    let out = Command::new(BIN)
+        .args(["plan", "Ouvre les gares.", "--inventory"])
+        .arg(&inventory)
+        .env("CASSINI_MODELS", models)
+        .output()
+        .expect("le binaire se lance");
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8(out.stdout).unwrap(),
+        String::from_utf8(out.stderr).unwrap(),
+    )
+}
+
+/// `cassini plan` sans `--model` choisit son modèle comme le canal (ticket 5.8) : dossier
+/// absent ou vide, une erreur typée qui ne montre pas le dossier ; premier modèle inutilisable,
+/// le second est pris (ici un faux GGUF, qui échoue au chargement en le nommant seul).
+#[test]
+fn plan_without_a_model_chooses_like_the_channel_and_hides_the_folder() {
+    let (dir, _, _) = temp_project();
+    let code_of = |err: &str| -> Value {
+        let line: Value = serde_json::from_str(err.lines().last().unwrap_or("{}")).unwrap();
+        line["code"].clone()
+    };
+
+    let (code, out, err) = plan_without_model(&dir, &dir.join("absent"));
+    assert_eq!((code, out.as_str()), (1, ""), "{err}");
+    assert_eq!(code_of(&err), "models.no_folder", "{err}");
+    assert_hides(&err, &[&dir]);
+
+    let empty = dir.join("vide");
+    std::fs::create_dir_all(&empty).unwrap();
+    let (code, out, err) = plan_without_model(&dir, &empty);
+    assert_eq!((code, out.as_str()), (1, ""), "{err}");
+    assert_eq!(code_of(&err), "ai.no_model", "{err}");
+    assert_hides(&err, &[&dir]);
+
+    let models = dir.join("modeles");
+    std::fs::create_dir_all(&models).unwrap();
+    std::fs::write(models.join("a.modele.json"), "pas du json").unwrap();
+    std::fs::write(models.join("b.gguf"), b"pas un gguf").unwrap();
+    let (code, out, err) = plan_without_model(&dir, &models);
+    assert_eq!((code, out.as_str()), (1, ""), "{err}");
+    // `ai.load` : le GGUF `b.gguf` a atteint le chargement. La déclaration cassée, si elle avait
+    // été prise, aurait échoué avant, à sa lecture (`models.bad_declaration`). Le message de
+    // llama.cpp sur un faux GGUF ne nomme pas le fichier : le code seul le prouve.
+    assert_eq!(
+        code_of(&err),
+        "ai.load",
+        "le second modèle est choisi : {err}"
+    );
+    assert!(!err.contains("a.modele.json"), "{err}");
+    assert_hides(&err, &[&dir]);
+    cleanup(&dir);
+}
+
 /// Lance `serve` sur le dossier de modèles `models`, propose « Ouvre les gares. », répond à la
 /// demande d'inventaire, et rend la réponse à la proposition avec tout le texte reçu.
 fn propose_with_models(project: &str, models: &Path) -> (Value, String) {
@@ -305,7 +364,9 @@ fn assert_hides(text: &str, folders: &[&Path]) {
     for folder in folders {
         let f = folder.to_string_lossy();
         assert!(
-            !text.contains(&*f) && !text.contains(&f.replace('\\', "/")),
+            !text.contains(&*f)
+                && !text.contains(&f.replace('\\', "/"))
+                && !text.contains(&f.replace('\\', "\\\\")),
             "{text}"
         );
     }

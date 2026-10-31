@@ -447,8 +447,9 @@ gardés ensemble, sous une seule clé : un autre adaptateur sur la même base fa
 recharger et oublier les instantanés.
 
 `cassini plan --model` prend un GGUF ou une déclaration ; sans `--model`, et dans le canal
-de l'extension, le noyau prend la première entrée de `model.list`, par ordre de nom. Le
-choix entre modèles reviendra au sélecteur de 5.14.
+de l'extension quand aucun modèle n'est choisi, le noyau prend la première entrée de
+`model.list` sans problème, par ordre de nom (une seule règle depuis 5.8). Le sélecteur des
+Réglages (5.14) choisit entre modèles.
 
 ### Installer le modèle ajusté
 

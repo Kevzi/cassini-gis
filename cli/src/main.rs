@@ -418,11 +418,26 @@ fn scrub(mut e: ErrorReport, hidden: &[(String, String)]) -> ErrorReport {
     e
 }
 
-/// Remplace dans `text` chaque chemin de `hidden` par son substitut, dans l'ordre.
+/// Remplace dans `text` chaque chemin de `hidden` par son substitut, dans l'ordre. Un chemin
+/// est aussi reconnu écrit autrement, comme le fait llama.cpp : séparateurs `\` au lieu de `/`
+/// ou l'inverse, et préfixe Windows `\\?\` (forme longue) devant l'écriture en `\`.
 fn hide(text: &str, hidden: &[(String, String)]) -> String {
     let mut text = text.to_string();
     for (path, instead) in hidden.iter().filter(|(p, _)| !p.is_empty()) {
-        text = text.replace(path.as_str(), instead);
+        let back = path.replace('/', "\\");
+        let forward = path.replace('\\', "/");
+        // Un partage réseau `\\serveur\partage` a pour forme longue `\\?\UNC\serveur\partage`.
+        let unc = back
+            .strip_prefix(r"\\")
+            .filter(|_| !back.starts_with(r"\\?\"))
+            .map(|rest| format!(r"\\?\UNC\{rest}"));
+        // Les formes longues d'abord : remplacer l'écriture en `\` avant elles laisserait le préfixe.
+        for variant in unc
+            .into_iter()
+            .chain([format!(r"\\?\{back}"), path.clone(), back, forward])
+        {
+            text = text.replace(variant.as_str(), instead);
+        }
     }
     text
 }
@@ -536,20 +551,20 @@ fn fail(err: &mut dyn Write, code: &str, message: String) -> i32 {
     1
 }
 
-/// Modèle choisi quand `--model` manque : le premier de `model.list` (AD-15, le noyau seul
-/// découvre les modèles).
-fn default_model(registry: &Registry) -> Result<std::path::PathBuf, ErrorReport> {
-    let listed = registry
-        .call("model.list", json!({}))
-        .map_err(ErrorReport::from)?;
-    let folder = listed["folder"].as_str().unwrap_or_default();
-    match listed["models"][0]["file"].as_str() {
-        Some(file) => Ok(Path::new(folder).join(file)),
-        None => Err(ErrorReport {
-            code: "ai.no_model".to_string(),
-            message: format!("Aucun modèle GGUF n'a été trouvé dans « {folder} »."),
-            step: None,
-        }),
+/// Modèle de `cassini plan` : le fichier `model` s'il est donné, sinon la même règle que le
+/// canal (`ModelComposer::choose`, le premier modèle sans problème du dossier des modèles).
+/// Rend aussi les chemins à masquer ; une erreur est déjà masquée (AD-9).
+fn plan_model(
+    model: Option<&str>,
+    composer: &ModelComposer,
+) -> Result<(ChosenModel, Vec<(String, String)>), ErrorReport> {
+    match model {
+        Some(m) => {
+            let chosen = resolve_model(Path::new(m))?;
+            let hidden = chosen.hidden();
+            Ok((chosen, hidden))
+        }
+        None => composer.choose(None),
     }
 }
 
@@ -603,22 +618,16 @@ fn plan(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         let e = cassini_ai::AiError::EmptyPrompt;
         return fail(err, e.code(), e.to_string());
     }
-    let model = match model {
-        Some(m) => std::path::PathBuf::from(m),
-        None => match default_model(&registry) {
-            Ok(m) => m,
-            Err(e) => return fail(err, &e.code, e.message),
-        },
-    };
-    let chosen = match resolve_model(&model) {
+    let (chosen, hidden) = match plan_model(model, &ModelComposer::from_env()) {
         Ok(c) => c,
         Err(e) => return fail(err, &e.code, e.message),
     };
     let mut generator = cassini_ai::plan::model_files_generator(chosen.files.clone());
     match chosen.compose(&registry, &inventory, None, request, &mut generator) {
-        // Les fichiers du modèle ne sont nommés que par leur nom, comme dans le canal.
+        // Les fichiers du modèle ne sont nommés que par leur nom, le dossier par une mention
+        // neutre, comme dans le canal.
         Err(e) => {
-            let e = scrub(report(e.code(), e.to_string()), &chosen.hidden());
+            let e = scrub(report(e.code(), e.to_string()), &hidden);
             fail(err, &e.code, e.message)
         }
         ok => print_composed(ok, out, err),
@@ -1344,6 +1353,81 @@ mod tests {
         };
         assert!(empty.models(&Registry::standard()).unwrap().is_empty());
         assert_eq!(empty.choose(None).unwrap_err().code, "ai.no_model");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn hide_recognises_a_path_written_with_other_separators_or_the_long_prefix() {
+        let hidden = vec![
+            (
+                r"C:\Cassini\models\base.gguf".to_string(),
+                "base.gguf".to_string(),
+            ),
+            (r"C:\Cassini\models".to_string(), FOLDER.to_string()),
+        ];
+        for text in [
+            r"échec : C:\Cassini\models\base.gguf",
+            "échec : C:/Cassini/models/base.gguf",
+            r"échec : \\?\C:\Cassini\models\base.gguf",
+        ] {
+            assert_eq!(hide(text, &hidden), "échec : base.gguf", "{text}");
+        }
+        assert_eq!(
+            hide(r"rien dans \\?\C:\Cassini\models", &hidden),
+            format!("rien dans {FOLDER}")
+        );
+        let unc = vec![(r"\\serveur\partage\models".to_string(), FOLDER.to_string())];
+        for text in [
+            r"rien dans \\?\UNC\serveur\partage\models",
+            r"rien dans \\serveur\partage\models",
+            "rien dans //serveur/partage/models",
+        ] {
+            assert_eq!(hide(text, &unc), format!("rien dans {FOLDER}"), "{text}");
+        }
+        let posix = vec![(
+            "/opt/cassini/models/a.gguf".to_string(),
+            "a.gguf".to_string(),
+        )];
+        assert_eq!(
+            hide(
+                r"vu \opt\cassini\models\a.gguf et /opt/cassini/models/a.gguf",
+                &posix
+            ),
+            "vu a.gguf et a.gguf"
+        );
+    }
+
+    #[test]
+    fn plan_without_a_model_follows_the_channel_rule() {
+        // Le premier modèle a un problème, le second est sain : le second est choisi.
+        let (dir, _) = temp_project();
+        std::fs::write(dir.join("a.modele.json"), "pas du json").unwrap();
+        std::fs::write(dir.join("b.gguf"), b"123").unwrap();
+        let composer = ModelComposer {
+            setting: Some(dir.to_string_lossy().into_owned()),
+            exe_dir: None,
+        };
+        let (chosen, hidden) = plan_model(None, &composer).unwrap();
+        assert_eq!(chosen.files.model, dir.join("b.gguf"));
+        assert_eq!(hidden[0].1, "b.gguf");
+        assert!(hidden.iter().any(|(_, h)| h == FOLDER));
+        // Un dossier vide : `ai.no_model`, sans le chemin du dossier.
+        std::fs::remove_file(dir.join("b.gguf")).unwrap();
+        std::fs::remove_file(dir.join("a.modele.json")).unwrap();
+        let e = plan_model(None, &composer).unwrap_err();
+        assert_eq!(e.code, "ai.no_model");
+        assert!(shows_no_folder(&e.message, &dir), "{}", e.message);
+        // Un dossier absent : erreur typée, sans le chemin du dossier.
+        let absent = ModelComposer {
+            setting: Some(dir.join("absent").to_string_lossy().into_owned()),
+            exe_dir: None,
+        };
+        let e = plan_model(None, &absent).unwrap_err();
+        assert_eq!(e.code, "models.no_folder");
+        assert!(shows_no_folder(&e.message, &dir), "{}", e.message);
+        // `--model` donné : le fichier tel quel, sans passer par le dossier.
+        let (chosen, _) = plan_model(Some("ailleurs.gguf"), &absent).unwrap();
+        assert_eq!(chosen.files.model, Path::new("ailleurs.gguf"));
         let _ = std::fs::remove_dir_all(dir);
     }
 }
