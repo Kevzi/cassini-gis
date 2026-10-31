@@ -3,7 +3,7 @@ title: "Rejeu d'un inventaire demandé après la création de couches"
 type: 'bugfix'
 ticket: '31'
 created: '2026-10-31'
-status: 'built'
+status: 'done'
 baseline_revision: 'b53880531b6e9bd65cf3e12970739df14834bf02'
 route: 'full'
 route_source: 'auto'
