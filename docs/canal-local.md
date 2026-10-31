@@ -12,6 +12,36 @@ les `command.run` qu'il a pu réserver et les `request.cancel`. Une seule étape
 fois (AD-5), sous **un seul état d'occupation** pour l'extension et les relais (AD-29, voir
 « Occupation »).
 
+## `session.hello` (extension vers noyau)
+
+Première requête de l'extension : elle annonce la version du protocole, les commandes QGIS
+qu'elle sait exécuter et le chemin absolu du projet. Le noyau ouvre la session du projet et
+répond par ses versions, son catalogue et le mode de la session :
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"session.hello","params":{"protocol_version":2,"commands":["layer.add"],"project":"C:/a/p.qgz"}}
+{"jsonrpc":"2.0","id":1,"result":{"protocol_version":2,"core_version":"0.1.0","read_only":false,"commands":[…]}}
+```
+
+Réponse d'une seconde session, quand le journal du projet est déjà tenu :
+
+```json
+{"jsonrpc":"2.0","id":1,"result":{"protocol_version":2,"core_version":"0.1.0","read_only":true,"message":"Le journal de ce projet est tenu par une autre session : cette session est en lecture seule, rien n'est exécuté ni écrit.","commands":[…]}}
+```
+
+- `read_only` est toujours présent (ticket 5.32). Il vaut `true` quand le journal du projet
+  est déjà tenu par une autre session (une seconde fenêtre QGIS sur le même projet). La
+  réponse porte alors aussi `message`, le texte même de l'erreur `journal.read_only`.
+  L'extension ne se dit pas prête : elle arrête le noyau et le panneau affiche ce message
+  tel quel. Le champ est un ajout compatible, le protocole reste à la version 2.
+- Le démarrage ne lance **aucune commande journalisée** : l'extension lit `core_version` et
+  `protocol_version` dans cette réponse, et non plus par un `system.about`. Le panneau peut
+  ensuite demander `agent.models`, qui n'est pas journalisé. Ouvrir ou rouvrir un projet
+  n'allonge donc pas son journal. `system.about` reste une commande du registre : lancée à la
+  main (mode expert, CLI, MCP), elle est journalisée comme toute autre.
+- Une version de protocole différente est refusée par `session.protocol_mismatch` ; le
+  panneau affiche le message tel quel.
+
 ## `order.execute` (noyau vers extension)
 
 Quand un `command.run` vise une commande déléguée à QGIS et annoncée dans
@@ -96,8 +126,12 @@ et dont le message nomme la commande.
   octet. Un chemin sous le dossier de sortie est comparé par son nom de fichier.
 - Une commande QGIS que l'extension n'a pas annoncée à `session.hello` fait répondre
   `registry.unavailable`, avec le nom de la commande, à l'étape qui la porte.
-- Le journal compte tout ce que le noyau a exécuté, `system.about` du démarrage compris :
-  il est rejoué comme le reste.
+- Le journal compte les étapes lancées par l'utilisateur, l'agent ou une IA externe, et le
+  rejeu les refait toutes. Le démarrage n'y ajoute rien (voir `session.hello`), et un rejeu
+  n'écrit pas le journal : rejouer deux fois laisse le même nombre d'étapes. Certaines
+  requêtes ne sont jamais journalisées (`agent.models`, `model.list`, les ordres
+  d'inventaire d'une proposition). Un ancien journal qui porte une ligne `system.about`
+  d'accueil la rejoue comme le reste.
 
 ## Plans de l'agent : `agent.models`, `plan.propose`, `plan.execute`, `plan.reject`
 

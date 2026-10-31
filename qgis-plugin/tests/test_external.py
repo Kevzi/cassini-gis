@@ -69,7 +69,6 @@ class ExternalTest(unittest.TestCase):
         self.c = client.CoreClient(self.p, on_event)
         self.c.start("cassini", "/p.qgz")
         self.p.feed(reply(1, {"protocol_version": 2, "core_version": "0.1", "commands": CATALOGUE}))
-        self.p.feed(reply(2, {"core_version": "0.1", "protocol_version": 2}))
         self.events.clear()
         self.p.written.clear()
 

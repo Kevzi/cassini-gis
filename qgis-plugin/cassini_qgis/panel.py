@@ -230,6 +230,7 @@ class CassiniPanel(QWidget):
         self.catalogue = []
         self.ready = False
         self.banner = "no_project"
+        self.banner_message = None  # texte du noyau à montrer tel quel dans le bandeau
         self.running = False
         self.last = None  # {"kind", "command", "result"/"message"/"code"}
         self.selected = None  # entrée du catalogue choisie
@@ -516,16 +517,25 @@ class CassiniPanel(QWidget):
     def t(self, key, **values):
         return texts.tr(self.lang, key, **values)
 
-    def set_banner(self, kind):
-        """`kind` : clé de BANNERS, ou None quand le noyau est prêt."""
+    def set_banner(self, kind, message=None):
+        """`kind` : clé de BANNERS, ou None quand le noyau est prêt.
+
+        `message` : texte du noyau affiché tel quel à la place du texte du
+        bandeau (refus de version, session en lecture seule) ; repli sur le
+        texte du bandeau quand il est absent ou vide.
+        """
         self.banner = kind
+        self.banner_message = message if isinstance(message, str) and message else None
         self.focus = None
         if kind is not None:
             self.ready = False
             self._drop_stale_run()
         self.render()
         if kind is not None:
-            _announce(self.banner_text, self.t(BANNERS[kind][0]))
+            _announce(self.banner_text, self._banner_text(self.t))
+
+    def _banner_text(self, t):
+        return self.banner_message or t(BANNERS[self.banner][0])
 
     def _drop_stale_run(self):
         """Le noyau a été fermé : une commande ou un plan en vol n'existe plus."""
@@ -545,6 +555,7 @@ class CassiniPanel(QWidget):
         self._drop_stale_run()
         self.ready = True
         self.banner = None
+        self.banner_message = None
         self.catalogue = list(catalogue)
         self.selected = None
         self.render()
@@ -725,9 +736,10 @@ class CassiniPanel(QWidget):
         if self.banner is None:
             self.banner_zone.setVisible(False)
         else:
-            key, action = BANNERS[self.banner]
-            self.banner_text.setText(t(key))
-            self.banner_text.setAccessibleName(t(key))
+            action = BANNERS[self.banner][1]
+            text = self._banner_text(t)
+            self.banner_text.setText(text)
+            self.banner_text.setAccessibleName(text)
             self.banner_button.setVisible(action is not None)
             if action == "choose":
                 self.banner_button.setText(t("choose_core"))

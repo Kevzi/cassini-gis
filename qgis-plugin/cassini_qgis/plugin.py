@@ -145,9 +145,9 @@ class CassiniPlugin:
         self._refresh()
 
     # -- logique du plugin ----------------------------------------------
-    def _banner(self, kind):
+    def _banner(self, kind, message=None):
         if self.panel is not None:
-            self.panel.set_banner(kind)
+            self.panel.set_banner(kind, message)
 
     def _refresh(self, *_):
         file_name = QgsProject.instance().fileName()
@@ -195,8 +195,12 @@ class CassiniPlugin:
             self.client = None
             self.process = None
             self.project_path = None
-            # FAILED : le noyau a répondu non (protocole) ; DIED : il s'est arrêté.
-            self._banner("refused" if kind == client.FAILED else "died")
+            # FAILED : le noyau a répondu non (protocole, lecture seule), son message
+            # est affiché tel quel ; DIED : il s'est arrêté.
+            if kind == client.FAILED:
+                self._banner("refused", payload)
+            else:
+                self._banner("died")
         elif kind in (
             client.RUN_STARTED,
             client.RUN_DONE,

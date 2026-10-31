@@ -18,8 +18,8 @@ Dans un dossier temporaire, avec la fixture synthétique `fixtures/points-2154.c
    sorties des analyses (dont les deux isochrones) existent sous `replay/` ;
 4. un résultat du journal est altéré : le rejeu s'arrête en nommant l'étape de `analysis.buffer`.
 
-Le client lance `system.about` à chaque démarrage, et le noyau le journalise : le journal compte donc
-`system.about`, les étapes de `STEPS`, puis le `system.about` du second démarrage.
+Le démarrage ne lance aucune commande journalisée (versions lues dans `session.hello`) : le
+journal compte exactement les étapes de `STEPS`, et le rejeu ne l'allonge pas.
 
 Vérifie aussi que le CSV d'origine est inchangé (empreinte) et que les PDF commencent par `%PDF`.
 Aucune donnée hors dépôt n'est utilisée.
@@ -193,17 +193,17 @@ def _between():
     check("les deux isochrones rendent un polygone", walk_result.get("feature_count") == 1 and car_result.get("feature_count") == 1, (walk_result, car_result))
     check("l'export dessine 7 couches", export_result.get("layer_count") == 7, export_result)
     rows = read_journal()
-    # Le client lance `system.about` à chaque démarrage : c'est l'étape 1 du journal.
+    # Le démarrage n'écrit rien : le journal ne porte que les étapes lancées.
     check(
-        "le journal a l'accueil puis toutes les étapes",
-        [r["id"] for r in rows] == ["system.about"] + STEP_IDS,
+        "le journal a toutes les étapes, sans accueil",
+        [r["id"] for r in rows] == STEP_IDS,
         [r["id"] for r in rows],
     )
     state["export_step"] = [r["id"] for r in rows].index("layout.export_pdf") + 1
     pdf = os.path.join(cassini_dir, "%d-layout.export_pdf.pdf" % state["export_step"])
     with open(pdf, "rb") as f:
         check("le PDF d'origine commence par %PDF", f.read(4) == b"%PDF")
-    check("le journal garde le layer_id des couches créées", all(r.get("layer_id") for r in rows[1:-1]))
+    check("le journal garde le layer_id des couches créées", all(r.get("layer_id") for r in rows[:-1]))
     state["analysis_steps"] = [
         (i + 1, r["id"]) for i, r in enumerate(rows) if r["id"].startswith("analysis.")
     ]
@@ -218,15 +218,16 @@ def _between():
 # -- phase 2 : rejouer --------------------------------------------------------
 def on_second(kind, payload):
     if kind == client.READY:
+        state["journal_before_replay"] = read_journal()  # le démarrage n'a rien écrit
         check("l'extension est branchée au nouveau noyau", state["client"].replay())
     elif kind == client.REPLAY_DONE:
-        # Le journal compte alors le second `system.about` : le rejeu les refait tous.
-        expected = {"steps": len(read_journal()), "identical": True}
-        check(
-            "le rejeu rend identical: true, toutes étapes refaites",
-            payload == expected and expected["steps"] == len(STEPS) + 2,
-            payload,
-        )
+        # Le second démarrage n'a rien ajouté : le rejeu refait les étapes de STEPS.
+        expected = {"steps": len(STEPS), "identical": True}
+        check("le rejeu rend identical: true, toutes étapes refaites", payload == expected, payload)
+        # Le rejeu n'écrit pas le journal : il compte toujours len(STEPS) lignes.
+        after = read_journal()
+        check("le journal garde ses étapes après le rejeu", len(after) == len(STEPS), len(after))
+        check("le journal est inchangé par le rejeu", after == state["journal_before_replay"])
         # Chaque analyse a écrit sa sortie sous `replay/` (GeoPackage non vide), isochrones compris.
         missing = [
             "%d-%s.gpkg" % (n, cid)
