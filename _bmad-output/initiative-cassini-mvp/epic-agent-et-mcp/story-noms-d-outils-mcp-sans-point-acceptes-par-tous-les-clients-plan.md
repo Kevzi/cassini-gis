@@ -3,7 +3,7 @@ title: "Noms d'outils MCP sans point, acceptés par tous les clients"
 type: 'feature'
 ticket: '30'
 created: '2026-10-31'
-status: 'built'
+status: 'done'
 baseline_revision: 'c25de65270beb891d6acb0fc63bdd29b45df3645'
 route: 'full'
 route_source: 'auto'
