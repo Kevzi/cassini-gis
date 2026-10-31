@@ -121,6 +121,41 @@ fn read_inventory(path: &Path) -> Value {
         .unwrap_or_else(|e| panic!("inventaire illisible : {} ({e})", path.display()))
 }
 
+/// Moyennes par phrase mesurée : l'amorce (`WARMUP`) en est exclue, toute autre phrase compte,
+/// A0 comprise. `calls` est la somme des appels des phrases mesurées.
+#[derive(Debug, PartialEq)]
+struct Averages {
+    sentences: usize,
+    calls: usize,
+    warmed: bool,
+    load: Duration,
+    prompt: Duration,
+    write: Duration,
+    total: Duration,
+}
+
+/// Moyennes des lignes `rows`, alignées une à une sur les identifiants `ids`.
+fn averages(ids: &[&str], rows: &[Row]) -> Averages {
+    assert_eq!(ids.len(), rows.len(), "une ligne par phrase");
+    let measured: Vec<&Row> = ids
+        .iter()
+        .zip(rows)
+        .filter(|(id, _)| **id != WARMUP.0)
+        .map(|(_, r)| r)
+        .collect();
+    let n = measured.len().max(1) as u32;
+    let mean = |f: fn(&Row) -> Duration| measured.iter().map(|r| f(r)).sum::<Duration>() / n;
+    Averages {
+        sentences: measured.len(),
+        calls: measured.iter().map(|r| r.calls).sum(),
+        warmed: ids.contains(&WARMUP.0),
+        load: mean(|r| r.load),
+        prompt: mean(|r| r.prompt),
+        write: mean(|r| r.write),
+        total: mean(Row::total),
+    }
+}
+
 fn secs(d: Duration) -> String {
     format!("{:.1}", d.as_secs_f64()).replace('.', ",")
 }
@@ -213,25 +248,18 @@ fn duree_reel_par_phrase() {
         }
         rows.push(row);
     }
-    let warmed = sentences.iter().any(|(id, _)| id == WARMUP.0);
-    let measured: Vec<&Row> = sentences
-        .iter()
-        .zip(&rows)
-        .filter(|((id, _), _)| id != WARMUP.0)
-        .map(|(_, r)| r)
-        .collect();
-    let n = measured.len().max(1) as u32;
-    let sum = |f: fn(&Row) -> Duration| measured.iter().map(|r| f(r)).sum::<Duration>() / n;
-    let calls: usize = measured.iter().map(|r| r.calls).sum();
+    let ids: Vec<&str> = sentences.iter().map(|(id, _)| id.as_str()).collect();
+    let mean = averages(&ids, &rows);
     println!();
     println!(
-        "Moyennes sur {} phrases ({calls} appels{}) : chargement {} s, lecture du prompt {} s, écriture {} s, total {} s",
-        measured.len(),
-        if warmed { ", amorce exclue" } else { "" },
-        secs(sum(|r| r.load)),
-        secs(sum(|r| r.prompt)),
-        secs(sum(|r| r.write)),
-        secs(sum(Row::total)),
+        "Moyennes sur {} phrases ({} appels{}) : chargement {} s, lecture du prompt {} s, écriture {} s, total {} s",
+        mean.sentences,
+        mean.calls,
+        if mean.warmed { ", amorce exclue" } else { "" },
+        secs(mean.load),
+        secs(mean.prompt),
+        secs(mean.write),
+        secs(mean.total),
     );
     // Seule exigence : une ligne par phrase, et au moins un appel mesuré dans chacune (sinon le
     // modèle n'a pas répondu et la ligne ne mesure rien).
@@ -289,4 +317,50 @@ fn each_outcome_is_named_and_an_agent_error_still_gives_a_line() {
 #[should_panic(expected = "inventaire illisible : ")]
 fn an_unreadable_inventory_panics_with_its_path() {
     read_inventory(Path::new("absent-inventaire-villeneuve.json"));
+}
+
+/// Une ligne d'un seul appel, de durées données en millisecondes.
+fn row_of(load: u64, prompt: u64, write: u64) -> Row {
+    let mut row = Row::default();
+    row.add(&call(load, prompt, write, 100, 10));
+    row
+}
+
+#[test]
+fn averages_exclude_the_warmup_and_count_a0() {
+    let rows = vec![
+        row_of(9000, 9000, 9000),
+        row_of(1000, 2000, 3000),
+        row_of(3000, 4000, 5000),
+    ];
+    let mean = averages(&[WARMUP.0, "A0", "B1"], &rows);
+    assert_eq!(
+        mean,
+        Averages {
+            sentences: 2,
+            calls: 2,
+            warmed: true,
+            load: Duration::from_millis(2000),
+            prompt: Duration::from_millis(3000),
+            write: Duration::from_millis(4000),
+            total: Duration::from_millis(9000),
+        }
+    );
+    // Sans amorce : toutes les phrases comptent.
+    let mean = averages(&["A0", "B1"], &rows[1..]);
+    assert_eq!((mean.sentences, mean.warmed), (2, false));
+    assert_eq!(mean.total, Duration::from_millis(9000));
+    // Les lignes restent alignées sur leur phrase : l'amorce en dernier n'exclut qu'elle.
+    let mean = averages(
+        &["A0", "B1", WARMUP.0],
+        &[row_of(1000, 0, 0), row_of(3000, 0, 0), row_of(9000, 0, 0)],
+    );
+    assert_eq!(mean.load, Duration::from_millis(2000));
+}
+
+#[test]
+fn averages_of_the_warmup_alone_are_zero() {
+    let mean = averages(&[WARMUP.0], &[row_of(9000, 9000, 9000)]);
+    assert_eq!((mean.sentences, mean.calls), (0, 0));
+    assert_eq!(mean.total, Duration::ZERO);
 }

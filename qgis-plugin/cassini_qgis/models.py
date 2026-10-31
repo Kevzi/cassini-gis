@@ -58,6 +58,28 @@ def choose(listed, remembered):
     return (names[0] if names else None), remembered is not None
 
 
+# Codes d'échec d'une proposition qui disent que la liste a changé depuis qu'elle a été
+# reçue : le modèle envoyé n'y est plus, ou ne peut plus servir.
+STALE_LIST_CODES = ("models.unknown", "models.unusable")
+
+
+def asks_list_again(code):
+    """Un échec de proposition de code `code` demande-t-il de redemander la liste ?"""
+    return code in STALE_LIST_CODES
+
+
+def received(listed, remembered):
+    """Décision à la réception de la liste (MODELS) : (entrées, choix, oublier).
+
+    `entrées` : la liste nettoyée, à montrer ; `choix` : le modèle à envoyer (None si
+    aucun) ; `oublier` : vrai si le choix mémorisé (`SETTING_KEY`) doit être effacé,
+    parce qu'il n'est plus dans la liste sans problème.
+    """
+    entries = clean(listed)
+    chosen, forget = choose(entries, remembered)
+    return entries, chosen, forget
+
+
 def size_text(lang, size_bytes):
     """Taille lisible, en unités décimales : « 5,6 Go » en français, « 5.6 GB » en anglais."""
     if size_bytes is None:

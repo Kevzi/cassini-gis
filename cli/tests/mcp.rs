@@ -726,3 +726,54 @@ fn get_info_announces_tool_list_changed() {
     );
     assert_eq!(client.close().0.code(), Some(0));
 }
+
+/// Une révision ancienne (2024-11-05) est acceptée telle quelle, les outils sont listés, et la
+/// poignée de main porte les `instructions` qui disent que Cassini pilote le projet QGIS ouvert.
+#[test]
+fn an_old_revision_is_accepted_and_carries_the_instructions() {
+    let mut client = McpClient::spawn(&[], &models_dir());
+    let reply = client.request(
+        "initialize",
+        json!({"protocolVersion": "2024-11-05", "capabilities": {},
+            "clientInfo": {"name": "ancien", "version": "0"}}),
+    );
+    assert!(reply.get("error").is_none(), "{reply}");
+    assert_eq!(reply["result"]["protocolVersion"], "2024-11-05");
+    let instructions = reply["result"]["instructions"].as_str().unwrap_or_default();
+    assert!(instructions.contains("QGIS"), "{instructions}");
+    assert!(instructions.contains("noyau"), "{instructions}");
+    client.notify("notifications/initialized", json!({}));
+    let reply = client.request("tools/list", json!({}));
+    assert_eq!(tool_names(&reply), core_names());
+    assert_eq!(client.close().0.code(), Some(0));
+}
+
+/// La révision 2026-07-28, sans `initialize` : `server/discover` porte les mêmes instructions,
+/// et un `tools/list` qui donne sa révision dans `_meta` est servi.
+#[test]
+fn the_revision_without_initialize_discovers_the_instructions() {
+    let meta = json!({"io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities": {}});
+    let mut client = McpClient::spawn(&[], &models_dir());
+    let reply = client.request("server/discover", json!({"_meta": meta}));
+    assert!(reply.get("error").is_none(), "{reply}");
+    assert_eq!(reply["result"]["instructions"], cassini_instructions());
+    let reply = client.request("tools/list", json!({"_meta": meta}));
+    assert!(reply.get("error").is_none(), "{reply}");
+    assert_eq!(tool_names(&reply), core_names());
+    assert_eq!(client.close().0.code(), Some(0));
+}
+
+/// Les instructions annoncées par une poignée de main ordinaire, pour comparer.
+fn cassini_instructions() -> Value {
+    let mut client = McpClient::spawn(&[], &models_dir());
+    let reply = client.request(
+        "initialize",
+        json!({"protocolVersion": "2025-11-25", "capabilities": {},
+            "clientInfo": {"name": "test", "version": "0"}}),
+    );
+    let instructions = reply["result"]["instructions"].clone();
+    assert!(instructions.is_string(), "{reply}");
+    let _ = client.close();
+    instructions
+}

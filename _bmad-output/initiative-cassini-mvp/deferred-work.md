@@ -165,12 +165,18 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-composer-un-plan-prompt-contraint-validation-sans-reparation-plan.md`
   summary: AD-23 : verifier que les identifiants de couche et les chemins d'un plan sont connus de la session (inventaire).
   evidence: la grammaire accepte tout JSON pour params et judge ne compare rien a l'inventaire ; un id invente peut etre rendu comme plan valide.
+  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Reporté, décision d'architecture : refuser un identifiant inconnu de la session relève de `judge` ou de `verify` (AD-23) ; à trancher par le propriétaire avant de coder.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-composer-un-plan-prompt-contraint-validation-sans-reparation-plan.md`
   summary: La redemande doit porter la liste des ecarts, pas seulement la premiere erreur de check_plan.
   evidence: check_plan s'arrete a la premiere erreur ; un plan a plusieurs fautes demande plus d'une redemande.
+  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Reporté à la prochaine passe sur le générateur et au ré-entraînement (lignée 5.10, 5.15, 5.17), hors de 5.8 : défaut du modèle, à corriger par des exemples d'entraînement, jamais par une règle de prompt.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-composer-un-plan-prompt-contraint-validation-sans-reparation-plan.md`
   summary: Verifier la taille du prompt (catalogue + inventaire) contre N_CTX 8192 et corriger le message ai.prompt_too_long.
   evidence: aucun plafond sur l'inventaire ; le message accuse la phrase alors que le catalogue peut etre en cause.
+  status: close, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Clos par 5.18 (76e0f7b) : budget d'inventaire contre N_CTX, plusieurs phrases enchaînées sans saturer le contexte.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-composer-un-plan-prompt-contraint-validation-sans-reparation-plan.md`
   summary: Eviter de recharger le GGUF a chaque tentative de composition.
   evidence: generate charge le modele et cree un contexte a chaque appel ; une redemande double le cout.
@@ -179,27 +185,43 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-composer-un-plan-prompt-contraint-validation-sans-reparation-plan.md`
   summary: Tester le chemin de cassini plan sans --model (models.no_folder, ai.no_model).
   evidence: les tests CLI passent toujours --model absent.gguf.
+  status: close, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Corrigé en 5.8 : `cassini plan` sans `--model` passe par `ModelComposer::choose(None)`, la règle du canal (`default_model` supprimé) ; tests `plan_without_a_model_follows_the_channel_rule` (`cli/src/main.rs`) et `plan_without_a_model_chooses_like_the_channel_and_hides_the_folder` (`cli/tests/end_to_end.rs`) : dossier absent (`models.no_folder`), vide (`ai.no_model`), premier modèle inutilisable, sans le chemin du dossier.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-composer-un-plan-prompt-contraint-validation-sans-reparation-plan.md`
   summary: Le critere des 80 % est tenu en comptant les refus attendus : 10/13 plans reels (77 %) ; echecs S16, S17, S19.
   evidence: mesure GPU 22/25 sur Qwen3.5-9B Q4_K_M, deux fois ; 12 phrases attendent un refus faute de commande dans le registre reel. Mesure CPU non confirmee.
+  status: close, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Clos par les mesures de 5.15 et 5.17 (tâches B) : `plan_reel` 25/25 avec le modèle ajusté (`docs/entrainement-du-modele.md`), au-dessus du critère des 80 %.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-executer-un-plan-valide-etape-par-etape-par-le-canal-plan.md`
   summary: Rendre la composition d'un plan (`plan.propose`) annulable ; aujourd'hui elle bloque la boucle du noyau jusqu'a sa fin.
   evidence: le fil lecteur continue, mais les requetes recues pendant l'inference attendent la fin ; `request.cancel` sur l'id de `plan.propose` repond `request.unknown`. Decision prise sans redemander (Design Notes du plan).
+  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Reporté, décision d'architecture : rendre `plan.propose` annulable change le trait `Composer` ; à trancher par le propriétaire.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-executer-un-plan-valide-etape-par-etape-par-le-canal-plan.md`
   summary: `command.run` rend encore les chemins absolus d'une sortie QGIS (ex. `file` de `layout.export_pdf`) ; `plan.execute` les rend relatifs au dossier de travail.
   evidence: AD-9 interdit tout chemin absolu dans un message rendu ; seule la reponse de `plan.execute` est relativisee dans ce ticket.
+  status: decision, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Décision 5.8 : les chemins absolus de `command.run` restent voulus, `runlog.result_folder` en a besoin pour « Ouvrir le dossier » ; l'extension les masque à l'affichage par `runlog.redact` (AD-9 tenu dans ce qui est montré).
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-executer-un-plan-valide-etape-par-etape-par-le-canal-plan.md`
   summary: Verifier que le masquage des chemins de `ModelComposer` couvre un message de llama.cpp qui ecrit le chemin du modele sous une autre forme (canonique, separateurs, guillemets).
   evidence: maybe-false, medium si vrai (AD-9). Le masquage remplace les chaines exactes ; le test au faux `x.gguf` passe, mais un vrai GGUF corrompu sous Windows n'a pas ete essaye. A regler par cet essai.
+  status: close, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Corrigé en 5.8 : `hide` (`cli/src/main.rs`) reconnaît chaque chemin masqué écrit avec `\` ou `/` et sous la forme longue `\\?\` ; test `hide_recognises_a_path_written_with_other_separators_or_the_long_prefix`. Les guillemets n'entrent pas dans le chemin et ne gênent pas le remplacement. L'essai sur un vrai GGUF corrompu sous Windows reste à faire à la main ; le masquage couvre désormais les écritures qu'il produirait.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-clarification-poser-une-question-au-lieu-de-deviner-plan.md`
   summary: Le modele ecrit parfois une question dans un refus (`reason` en forme de question) ; rien ne le detecte, l'utilisateur recoit `agent.refused` formule comme une question.
   evidence: Essais reels de la 5.5 (essai 3 : Q02, Q03, Q11 ; essai 2 : S21). Comportement du modele, a corriger par les exemples d'entrainement du 5.10 plutot que par une regle de reparation (AD-23).
+  status: close, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Clos par le générateur (7addf14, 5.10 tâche 1, puis 4484464, 5.15 tâche A) : exemples d'entraînement de questions et de refus distincts ; plus de règle de réparation.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-modele-charge-une-fois-et-partie-fixe-du-prompt-gardee-en-ca-plan.md`
   summary: Precharger le modele et lire la partie fixe de l'invite au demarrage de cassini serve, pour que la premiere demande d'une session QGIS ne paie pas 173 s.
   evidence: mesure 12, S01 a 173,4 s sur 4 coeurs (chargement 4,1 s, lecture 163,7 s) ; le budget de 30 s ne compte que des la 2e demande, le premier appel reste visible a l'utilisateur.
+  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Reporté : le préchargement a été écarté par 5.19 (instantané du tour système à la première demande) ; à reprendre seulement sur décision du propriétaire.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-modele-charge-une-fois-et-partie-fixe-du-prompt-gardee-en-ca-plan.md`
   summary: Prouver avec le vrai modele que cassini serve garde le modele et l'instantane du tour systeme entre deux plan.propose avec l'inventaire envoye par QGIS.
   evidence: le cache n'est verifie que par appels directs a generate_measured (cache_reel) ; le chemin serve est raisonne, pas teste. A porter par la suite de bout en bout (entree 9).
+  status: close, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Clos par 5.19 (c93836b) : recette enchaînée dans QGIS avec le vrai modèle, reprise de l'instantané mesurée sur le chemin `serve` (`CASSINI_TIMINGS`, jetons repris).
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-panneau-saisie-en-langage-naturel-plan-a-valider-selecteur-d-plan.md`
   summary: Selecteur de modele dans les Reglages du panneau : methode du canal `agent.models` (liste sans dossier ni chemin, non journalisee, masquee par le compositeur de `cli`), `model` optionnel sur `plan.propose` (nom de fichier de la liste, absent = premier), erreur `models.unknown`, choix memorise dans `QSettings` `cassini/model`, rechargement par la cle de modele de l'entree 12.
   status: close — porte par l'entree 14 de l'epic 5 (2026-10-18)
@@ -207,36 +229,58 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-panneau-saisie-en-langage-naturel-plan-a-valider-selecteur-d-plan.md`
   summary: Le modele refuse « Garde seulement les parcelles de la section AB. » en lisant « garde seulement » comme une suppression d'entites, alors que analysis.select_by_attribute cree une nouvelle couche ; a corriger par les exemples d'entrainement du 5.10 (tournures « garde seulement / ne garde que / conserve »).
   evidence: recette du proprietaire dans QGIS, 2026-10-18, projet-test-villeneuve, Qwen3.5-9B Q4_K_M sur CPU : `agent.refused` « Aucune commande du catalogue ne permet de modifier ou de supprimer des entites d'une couche existante (comme les parcelles de la section AB) ; toutes les commandes d'analyse creent de nouvelles couches sans alterer les sources. » ; la meme tournure sur « les zones du PLU de type U » a donne un plan correct. Aucune regle de reparation (AD-23).
+  status: close, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Clos par le générateur (7addf14 et 4484464) : tournures « garde seulement / ne garde que / conserve » apprises vers `analysis.select_by_attribute`.
 - source_plan: `_bmad-output/initiative-cassini-mvp/architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md`
   summary: Bug latent du rejeu : `core/src/journal/summary.rs:24` prend la cle `truncated: true` de premier niveau pour le marqueur de resume ; un resultat de moins de 200 octets qui porte lui-meme `truncated: true` est juge identique a tout resultat garde ainsi marque. Placer les marqueurs sous une cle reservee (AD-11 resserree).
   evidence: revue adverse E1 (reviews/review-adverse-e1.md), verifie a la lecture du code le 2026-10-18 ; inatteignable aujourd'hui (un comptage tronque depasse 200 octets), atteignable par les resumes de l'epic 10.
+  status: ticket, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Repris par l'entrée 10.1 (`epic-catalogue-etendu-qgis/tickets.toml`) : les marqueurs du journal passent sous une clé réservée.
 - source_plan: `_bmad-output/initiative-cassini-mvp/architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md`
   summary: `model.list` rend `folder` en chemin absolu, journalise par `cassini run` et visible par MCP ; ne rendre aucun chemin absolu (AD-9, AD-15 amendee).
   evidence: revues E1 (faits verifies, grille B2), 2026-10-18.
+  status: ticket, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Repris par l'entrée 10.1 (`epic-catalogue-etendu-qgis/tickets.toml`) : `model.list` cesse de rendre son dossier en chemin absolu ; toujours vrai au 2026-10-31 (`core/src/commands/model_list.rs`, `folder`).
 - source_plan: `_bmad-output/initiative-cassini-mvp/architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md`
   summary: Renommer `analysis.zonal_statistics` en `analysis.count_points_in_polygon` et migrer son resultat au gabarit unique de resume (AD-27) : module Rust, table ALGORITHMS, test_analysis.py, sonde, README, prompt et jeu de l'epreuve ; les phrases S15, S23 et S24 visent en fait `raster.zonal_statistics`, non mecaniques.
   evidence: decision du proprietaire 2026-10-18 (contrat d'architecture, convention Familles de commandes) ; inventaire des occurrences dans reviews/review-faits-verifies-e1.md.
+  status: ticket, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Repris par l'entrée 10.2 (`epic-catalogue-etendu-qgis/tickets.toml`), renommage et gabarit de résumé.
 - source_plan: `_bmad-output/initiative-cassini-mvp/architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md`
   summary: Mettre le code au niveau d'AD-24, AD-25, AD-27 et AD-28 avant la premiere primitive de l'epic 10 : validation par le noyau du resultat recu (`qgis.bad_result`) ; annulabilite declaree seulement si chaque algorithme porte CanCancel, avec test table/registre ; version de chaine par ligne et version de QGIS annoncees a `session.hello` et journalisees ; annonce apres le chargement des fournisseurs ; constantes de `analysis.isochrone` (vitesses, accrochage 100 m) passees en parametres du contrat de reseau.
   evidence: gate de revue E1 du 2026-10-18 (reviews/review-grille-e1.md H1-H4, M2, M4 ; review-adverse-e1.md) ; aujourd'hui toutes les commandes deleguees sont `cancellable(true)` et le noyau ne valide pas les resultats.
+  status: ticket, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Repris par les entrées 10.1 (validation du résultat), 10.3 (annulabilité, version de chaîne), 10.4 (annonce après les fournisseurs, versions journalisées) et 10.6 (contrat de réseau) de `epic-catalogue-etendu-qgis/tickets.toml`.
 - source_plan: none
   summary: 5.10, tache 2 — entrainement reproductible : une commande lance un LoRA ou QLoRA tenant dans 8 Go de VRAM sur un modele de base Apache-2.0 ou MIT de 1,5 a 4 milliards de parametres, sur le jeu engendre, et fusionne en GGUF.
   evidence: decoupe du ticket 5.10 par le proprietaire (2026-10-22, bmad-build) : quatre livrables fusionnables a part ; celui-ci attend le jeu de donnees (tache 1) et des dependances Python dont la licence est a valider.
+  status: close, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Fait par `plan-5-10-t2-entrainement-reproductible.md` (built) : commande unique d'entraînement dans `training/`.
 - source_plan: none
   summary: 5.10, tache 3 — branchement du modele ajuste dans `ai/` : prompt court de quelques centaines de jetons, chargement d'une base avec un adaptateur LoRA, selon le selecteur de 5.14.
   evidence: decoupe du ticket 5.10 par le proprietaire (2026-10-22, bmad-build) ; independant de l'entrainement cote code, utile seulement une fois un modele ajuste disponible.
+  status: close, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Fait par `plan-5-10-t3-modele-ajuste-dans-ai.md` (built) : base et adaptateur chargés par `ai/`, prompt court.
 - source_plan: none
   summary: 5.10, tache 4 — mesures et demo : score du modele ajuste sur le jeu tenu a l'ecart au moins egal au 9B, seuil strict de clarification (>= 9/12, <= 1 fausse question), < 30 s sur le 5800X bride a 4 coeurs, demo de bout en bout dans QGIS avec la phrase de demo exacte.
   evidence: decoupe du ticket 5.10 par le proprietaire (2026-10-22, bmad-build) ; ferme le ticket, attend les taches 1 a 3.
+  status: close, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Fait par `plan-5-10-t4a-inventaire-au-format-appris.md` et `plan-5-10-t4b-mesures-et-demo.md` (built) ; les écarts restants (durée sur CPU, phrase E) sont des entrées à part, triées par 5.8.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-modele-de-composition-ajuste-et-plus-petit-fine-tuning-plan.md`
   summary: Avant l'entrainement (5.10 tache 2) : l'inventaire envoye par l'extension (`qgis-plugin/cassini_qgis/inventory.py` l.211) porte le nom et le type des champs mais pas leurs valeurs, alors que le jeu engendre les porte ; trancher : ajouter les valeurs distinctes a l'inventaire du produit, ou engendrer aussi des inventaires sans valeurs.
   evidence: constat de la tache 1 (2026-10-22) ; un modele entraine sur des valeurs qu'il ne verra pas en production apprendrait un appui absent (ex. typezone U).
+  status: close, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Clos par 5.10 tâche 4a (6cdda0f) : l'inventaire du produit porte les valeurs des champs, au format appris par le modèle (`core/src/agent_inventory.rs`).
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-modele-de-composition-ajuste-et-plus-petit-fine-tuning-plan.md`
   summary: Le generateur ne met jamais deux couches quasi synonymes cote a cote (« Routes » et « Reseau de voirie ») alors que le jeu tenu a l'ecart et les vrais projets le font ; ajouter une famille ou la phrase tranche, ou ou la sortie attendue est une question.
   evidence: relecture blind-hunter de la tache 1 ; garde volontaire dans `training/src/inventories.rs` (groupes exclusifs).
+  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Reporté à la prochaine passe sur le générateur et au ré-entraînement (lignée 5.10, 5.15, 5.17), hors de 5.8 : défaut du modèle, à corriger par des exemples d'entraînement, jamais par une règle de prompt.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-modele-de-composition-ajuste-et-plus-petit-fine-tuning-plan.md`
   summary: `ai/tests/ecart_reel.rs` : sortir la decision par phrase dans une fonction testee sans modele (refus en Err(Refused), titre seul different, titre absent, question attendue mais plan rendu), et imprimer pour chaque echec une forme de l'ecart (commande, ordre, valeur) sans le texte de la phrase.
   evidence: relecture verification-gap et blind-hunter ; a fermer quand la tache 4 reutilise le notateur pour le modele ajuste.
+  status: close, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Clos : `grade()` de `ai/tests/ecart_reel.rs` porte la décision par phrase et l'écart imprimé sans le texte, avec sa matrice de tests sans modèle (5.10 tâche 4).
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-modele-de-composition-ajuste-et-plus-petit-fine-tuning-plan.md`
   summary: La commande `cassini-training` n'a aucun test d'integration (deux executions identiques, autre graine differente, code non nul sans --out).
   evidence: relecture verification-gap ; verifie a la main par cmp ; a ajouter avant que la tache 2 depende du fichier.
@@ -245,6 +289,8 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-modele-de-composition-ajuste-et-plus-petit-fine-tuning-plan.md`
   summary: CLAUDE.md §9 (structure du depot) ne cite pas le nouveau crate `/training` (chaine d'entrainement) ; a ajouter par le proprietaire.
   evidence: relecture quick ; un fichier de contexte d'agent ne se modifie pas dans un build.
+  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Reporté au propriétaire : `CLAUDE.md` ne se modifie pas dans un build ; ajouter `/training` à la structure du dépôt (§9).
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t2-entrainement-reproductible.md`
   summary: L'extension joint a l'inventaire envoye au noyau quelques valeurs distinctes par champ texte (`qgis-plugin/cassini_qgis/inventory.py`), comme le jeu d'entrainement ; a faire avant la mesure du modele ajuste (5.10, tache 4).
   evidence: decision du proprietaire 2026-10-22 (bmad-build 5.10, tache 2) : « Ajouter les valeurs » plutot qu'entrainer sans valeurs.
@@ -258,6 +304,8 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t2-entrainement-reproductible.md`
   summary: Au prochain re-entrainement, rendre au `SYSTEM` du prompt court la precision « (en comptant a partir de 1) » pour `step:k.layer_id`, comme `ai/src/plan.rs`.
   evidence: relecture quick de la tache 2 ; la changer sans re-entrainer decalerait le prompt du modele deja entraine.
+  status: close, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Clos par le ré-entraînement de 5.15 tâche A (4484464) et B : le `SYSTEM` du prompt court a été réaligné sur `ai/src/plan.rs` au même passage.
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t2-entrainement-reproductible.md`
   summary: 5.10 tache 4 — mesurer les GGUF livres (base + adaptateur, et fusionne) par `ai/`, le score de validation de la tache 2 etant pris sur l'adaptateur en transformers.
   evidence: relecture intent-alignment de la tache 2 ; verifie a la main sur un exemple (plan identique), pas sur le jeu.
@@ -291,9 +339,13 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t4a-inventaire-au-format-appris.md`
   summary: Au prochain entrainement, le generateur ecrit les valeurs d'un champ triees, comme le produit (`core/src/agent_inventory.rs`), au lieu de l'ordre de definition du theme.
   evidence: relecture intent-alignment et blind-hunter de la tache 4a ; `training/src/inventories.rs` l.1349 trie des indices ; QGIS (`uniqueValues`) n'a pas d'ordre canonique, le produit trie.
+  status: close, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Clos par le générateur (4484464, 5.15 tâche A) : valeurs d'un champ triées comme `core/src/agent_inventory.rs`.
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t4a-inventaire-au-format-appris.md`
   summary: Formes d'inventaire jamais vues a l'entrainement : couche sans fichier (sorties temporaires des etapes precedentes, sans cle `source`), projet non enregistre (sans `project.name`), SCR non EPSG (sans `epsg`), table sans geometrie (`geometry: null` sur un vecteur), `unloaded_files` toujours vide dans QGIS (68 % des exemples en ont) ; mesurer en 4b, les apprendre au prochain entrainement.
   evidence: relectures edge-case-hunter, blind-hunter et quick de la tache 4a ; `forme_inventaire.rs` ne couvre que le cas nominal.
+  status: close, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Clos par le générateur (4484464, 5.15 tâche A) : formes d'inventaire du produit (couche sans source, projet non enregistré, SCR non EPSG, table sans géométrie) engendrées.
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t4a-inventaire-au-format-appris.md`
   summary: 5.10 tache 4b — chronometrer `project.inventory` sur le vrai projet : un `uniqueValues` par champ texte de chaque couche vecteur, sur le fil de QGIS, a chaque `plan.propose`, non interruptible ; si c'est long, garder les valeurs en cache par session.
   evidence: relectures blind-hunter, edge-case-hunter et quick de la tache 4a ; gravite non verifiee (maybe-false) : la sonde a compte les jetons, pas la duree.
@@ -307,15 +359,23 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t4b-mesures-et-demo.md`
   summary: Ticket de re-entrainement propose (5.10 reste ouvert) — familles a ajouter au generateur, jamais des regles de prompt : refus des demandes que le registre n'a pas encore (champ de vision, ligne de vue, pente, cadrage de la carte, PDF en A3, statistiques sur un raster), auxquelles le modele ajuste rend un plan de substitution ou un plan invalide (`plan_reel` 16/25, sous les 80 %) ; plans a plusieurs conditions qui perdent ou gagnent une etape (H08, H17 a H20, H22) ; « qui appartiennent a la commune » doit devenir une question (Q11) ; le tour de redemande (aucune phrase sauvee) ; un refus attendu (H40) rendu en plan.
   evidence: mesures GPU de la tache 4b (`docs/entrainement-du-modele.md`, « Tache 4 : mesures ») ; decision du proprietaire 2026-10-23 : sous la barre, chiffres consignes tels quels et re-entrainement propose.
+  status: close, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Clos par 5.15 tâche A (4484464, familles de refus ajoutées au générateur) puis 5.15 et 5.17 tâches B (ré-entraînement, `plan_reel` 25/25).
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t4b-mesures-et-demo.md`
   summary: La phrase de demo (A0) prend 41,4 s sur CPU 4 fils (fusionne ; 43,2 s base + adaptateur), au-dessus des 30 s : la lecture de l'invite est reglee (1 s par demande apres l'instantane), il reste l'ecriture des 248 jetons du plan a environ 6 jetons/s. Raccourcir le plan ecrit (identifiants de couche longs recopies a chaque etape, titre du PDF) au prochain entrainement, ou augmenter le debit d'ecriture.
   evidence: `duree_reel` de la tache 4b, binaire sans CUDA, masque 0x55, inventaire traduit du projet reel.
+  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Reporté à la prochaine passe sur le générateur et au ré-entraînement (lignée 5.10, 5.15, 5.17), hors de 5.8 : défaut du modèle, à corriger par des exemples d'entraînement, jamais par une règle de prompt. Durée : plan écrit plus court ou carte graphique (5.21).
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t4b-mesures-et-demo.md`
   summary: La phrase E du scenario (« a 10 minutes a pied de la gare de Villeneuve-le-Roi ») rend `agent.plan_invalid` deux fois avec le modele ajuste sur l'inventaire reel (aucune origine en coordonnees n'est donnee) ; elle devrait rendre une question. Famille a ajouter : isochrone sans coordonnees → question.
   evidence: `duree_reel` de la tache 4b, deux chemins.
+  status: close, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Clos par 5.16 (cf044a5, 4ff027d) : le garde-fou sur la provenance des coordonnées rend une question sur la phrase E au lieu d'un plan invalide.
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-10-t4b-mesures-et-demo.md`
   summary: `ai/tests/duree_reel.rs` et `ecart_reel.rs` : sortir l'agregation des moyennes (amorce exclue, A0 compte) et le compte des redemandes (phrases passees par la redemande, sauvees) dans des fonctions testees sans modele.
   evidence: relecture verification-gap de la tache 4b ; une inversion du filtre ou un decalage des lignes fausserait la mesure consignee sans faire echouer aucun test.
+  status: close, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Corrigé en 5.8 : `averages(...)` (`ai/tests/duree_reel.rs`) et `tally(...)` (`ai/tests/ecart_reel.rs`), testés sans modèle (`averages_exclude_the_warmup_and_count_a0`, `averages_of_the_warmup_alone_are_zero`, `tally_counts_each_kind_and_the_retries_that_saved_a_sentence`).
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-selecteur-de-modele-dans-les-reglages-du-panneau-plan.md`
   summary: Reporter dans le contrat d'architecture (`bmad-architecture`) l'ecart assume a AD-15 : la liste des modeles du selecteur passe par la methode du canal `agent.models`, hors registre et hors journal (jamais `command.run model.list` cote extension), et `plan.propose` porte un `model` facultatif ; le noyau seul decouvre les modeles.
   evidence: decision du 2026-10-18, appliquee par 5.14 (`docs/canal-local.md`, « agent.models ») ; un fichier de contrat d'architecture ne se re-decide pas dans un build.
@@ -324,92 +384,150 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-selecteur-de-modele-dans-les-reglages-du-panneau-plan.md`
   summary: Tester sans Qt le cablage du selecteur de modele de `panel.py` : sortir dans `models.py` la decision a la reception de MODELS (choix, oubli de `cassini/model`) et la regle « codes `models.unknown` / `models.unusable` qui redemandent la liste », chacune avec un test `unittest`.
   evidence: relecture verification-gap de 5.14 : aucun test ne charge `panel.py` (`FakePanel` dans `test_tracer.py`) ; remettre `propose(text)` dans `_send`, ou retirer `QSettings().remove(...)` d'`on_models`, ne fait echouer aucun test ; seule la recette manuelle du ticket 14 le verrait.
+  status: close, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Corrigé en 5.8 : `models.asks_list_again(code)` et `models.received(listed, remembered)` (entrées, choix, oubli) dans `qgis-plugin/cassini_qgis/models.py`, appelés par `panel.py` ; tests `ReceivedTest` de `qgis-plugin/tests/test_models.py`, sans Qt.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-re-entrainement-du-modele-ajuste-sur-les-familles-manquantes-plan.md`
   summary: 5.15, tache B — re-entrainer par la commande unique (8 000 exemples, meme base, meme methode) sur le generateur de la tache A, fusionner en GGUF, re-mesurer la parite des decoupeurs, mesurer les deux declarations sur GPU (plan_reel >= 20/25 et <= 1 fausse question, ecart_reel >= 32/40, question_reel >= 9/12, phrase E en question), rejouer la demo QGIS avec la phrase exacte, consigner dans docs/entrainement-du-modele.md, puis recette du proprietaire ; fusion dans main seulement apres B.
   evidence: decoupe par le proprietaire (2026-10-23, bmad-build 5.15) : plan entier a ~2 900 jetons ; la tache A (code, testable sans GPU) passe d'abord, sur la meme branche, car le prompt court change et le modele livre n'y est pas entraine.
+  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Reporté hors de 5.8 : tâche B de 5.15 menée sous sa propre entrée ; ses suites d'entraînement vont à la prochaine passe sur le générateur et au ré-entraînement.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-re-entrainement-du-modele-ajuste-sur-les-familles-manquantes-plan.md`
   summary: 5.15 tache B — etendre le test de parite sur vrai modele (`ai/src/plan.rs`, `CASSINI_TEST_MODEL`) aux exemples de redemande : `chat_tokens(retry_turns(...))` egal au decoupage d'un tenant de `prompt_text(e)`.
   evidence: non verifie (medium si vrai) : le test sur vrai modele ne construit que `first_turns` ; la parite de redemande n'est prouvee qu'a l'octet (relecture verification-gap et edge-case de 5.15 t.A).
+  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Reporté à la prochaine passe sur le générateur et au ré-entraînement (lignée 5.10, 5.15, 5.17), hors de 5.8 : défaut du modèle, à corriger par des exemples d'entraînement, jamais par une règle de prompt. Parité de redemande sur vrai modèle à faire au prochain ré-entraînement.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-re-entrainement-du-modele-ajuste-sur-les-familles-manquantes-plan.md`
   summary: 5.15 tache B — verifier dans le rapport d'entrainement que `ecartes_trop_longs` vaut 0 avec les prompts de redemande et les plans a 6 etapes, sinon relever `MAX_LENGTH` (2048) apres mesure.
   evidence: non verifie (medium si vrai) : le commentaire « moins de 1 400 jetons » date de 5.10 ; une redemande ajoute la sortie rejetee (jusqu'a 1 500 caracteres) et le tour des ecarts ; `data.drop_too_long` ecarterait les exemples les plus longs.
+  status: close, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Clos par la mesure de 5.17 tâche B : `ecartes_trop_longs` = 0, `jetons_max` 1659 sous `MAX_LENGTH` 2048 (`plan-5-17-tache-b-reentrainement-et-mesures.md`).
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-15-tache-b-reentrainement-et-mesures.md`
   summary: Nouvelle passe sur le generateur puis re-entrainement — isochrone dont l'origine est un lieu present comme couche de points (une gare de l'inventaire) sans le point choisi en coordonnees, qui doit rendre une question ; plans a plusieurs conditions sans etape perdue ; puis memes mesures que 5.15 et demo QGIS.
   evidence: 5.15 tache B (2026-10-23) : barre tenue sauf la phrase E du scenario, rendue en plan avec une origine inventee (EPSG:4326, 2,458 / 48,658) au lieu d'une question ; ecart_reel 32/40, dont trois plans a plusieurs conditions avec une etape de moins (formes dans docs/entrainement-du-modele.md, « Tache B de 5.15 »). Decision du proprietaire : consigner et s'arreter, la suite dans un autre ticket.
+  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Reporté à la prochaine passe sur le générateur et au ré-entraînement (lignée 5.10, 5.15, 5.17), hors de 5.8 : défaut du modèle, à corriger par des exemples d'entraînement, jamais par une règle de prompt.
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-15-tache-b-reentrainement-et-mesures.md`
   summary: Une origine d'isochrone inventee par le modele passe `judge` et `check_plan` sans alerte : decider (architecture, pas un pansement de prompt) si le noyau doit exiger que des coordonnees viennent de la demande ou d'une etape, et non du modele seul.
   evidence: phrase E de 5.15 tache B : `analysis.isochrone` avec `origin` {epsg 4326, x 2.458, y 48.658}, absent de la demande, accepte apres une redemande ; le resultat serait faux sans aucun signal a l'utilisateur.
+  status: close, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Clos par 5.16 (921a7c7, cf044a5) : AD-23 étendu, le noyau exige que des coordonnées viennent de la demande ou d'une étape (garde-fou).
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-nouvelle-passe-sur-le-generateur-isochrone-depuis-un-lieu-de-plan.md`
   summary: 5.17, tache B — re-entrainer par la commande unique (8 000 exemples, meme base, meme methode) sur le generateur de la tache A, fusionner en GGUF, parite des decoupeurs, essais reels sur GPU (plan_reel >= 20/25 et <= 1 fausse question, ecart_reel >= 32/40, question_reel >= 9/12, phrase E en question du modele sans le garde-fou), demo QGIS avec la phrase exacte, chiffres et note sur la mesure aveugle dans docs/entrainement-du-modele.md, puis recette du proprietaire ; fusion dans main seulement apres B.
   evidence: decoupe par le proprietaire (2026-10-23, bmad-build 5.17) : plan entier a ~1 800 jetons ; la tache A (generateur, testable sans GPU) passe d'abord, sur la meme branche.
+  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Reporté hors de 5.8 : tâche B de 5.17 menée sous sa propre entrée ; les familles restantes vont à la prochaine passe sur le générateur.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-nouvelle-passe-sur-le-generateur-isochrone-depuis-un-lieu-de-plan.md`
   summary: Isochrone demandee depuis plusieurs points donnes en coordonnees (« depuis les points A et B (Lambert-93) ») : aucun exemple de refus ; le modele pourrait faire un plan sur le premier point et oublier le second.
   evidence: non verifie (medium si vrai) : relecture blind-hunter de 5.17 t.A ; `isochrone_vers_cible` ne tire qu'un point, la decision a ne vise que des lieux nommes ; a juger sur les sorties du modele de la tache B.
+  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Reporté à la prochaine passe sur le générateur et au ré-entraînement (lignée 5.10, 5.15, 5.17), hors de 5.8 : défaut du modèle, à corriger par des exemples d'entraînement, jamais par une règle de prompt.
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-17-tache-b-reentrainement-et-mesures.md`
   summary: Phrase E encore manquee par le modele de 5.17 dans le produit : `cassini plan` (processeur et CUDA) et le panneau QGIS rendent la question du garde-fou, seuls `duree_reel` et `llama-completion` une question du modele ; nouvelle passe a ouvrir en ticket (decision du proprietaire, 2026-10-24).
   evidence: mesures de 5.17 tache B (docs/entrainement-du-modele.md, « La phrase E ») ; le modele hesite entre question et point invente selon le calcul du prompt.
+  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Reporté à la prochaine passe sur le générateur et au ré-entraînement (lignée 5.10, 5.15, 5.17), hors de 5.8 : défaut du modèle, à corriger par des exemples d'entraînement, jamais par une règle de prompt.
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-17-tache-b-reentrainement-et-mesures.md`
   summary: Isochrone depuis plusieurs points en coordonnees, constat observe en 5.17 tache B : le modele ecrit deux origines dans un meme objet, sortie rejetee, question du garde-fou qui ne dit pas pourquoi ; jamais un plan faux.
   evidence: `cassini plan` et `llama-completion` sur « … des points 655200, 6849800 et 656100, 6850400 (Lambert-93) » ; suite de l'entree differee de la tache A.
+  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Reporté à la prochaine passe sur le générateur et au ré-entraînement (lignée 5.10, 5.15, 5.17), hors de 5.8 : défaut du modèle, à corriger par des exemples d'entraînement, jamais par une règle de prompt.
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-17-tache-b-reentrainement-et-mesures.md`
   summary: Plusieurs phrases enchainees dans une meme session saturent le contexte : les couches de resultat s'ajoutent a l'inventaire et, des la 4e phrase, `plan.propose` echoue en `ai.prompt_too_long` (N_CTX 8192) ; composition 68 s, 75 s puis 108 s avant l'echec.
   evidence: recette de 5.17 dans QGIS (2026-10-24), noyau et modele installes, projet de Villeneuve : phrases 1 a 3 justes, phrases 4 a 10 toutes en `ai.prompt_too_long` en 0,4 s ; les memes phrases passent une a une sur projet vierge. Prolonge l'entree existante sur N_CTX.
+  status: close, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Clos par 5.18 (76e0f7b) : budget d'inventaire, plus de `ai.prompt_too_long` dans une recette enchaînée.
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-5-17-tache-b-reentrainement-et-mesures.md`
   summary: Reference a un resultat precedent (« Trouve les parcelles dans ces zones ... » apres « Garde les zones U du PLU. ») : le modele prend la couche source entiere au lieu de la couche de resultat ; famille d'entrainement a ajouter, jamais une regle de prompt.
   evidence: recette de 5.17 dans QGIS : intersection des parcelles avec `plu_zones` entiere (2 513) au lieu de la selection des zones U (2 429).
+  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Reporté à la prochaine passe sur le générateur et au ré-entraînement (lignée 5.10, 5.15, 5.17), hors de 5.8 : défaut du modèle, à corriger par des exemples d'entraînement, jamais par une règle de prompt.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-plusieurs-phrases-enchainees-dans-une-session-sans-saturer-l-plan.md`
   summary: Les couches de resultat retirees de la vue du modele par le budget d'inventaire (5.18) ne sont signalees ni au modele ni a l'utilisateur ; une phrase qui en cite une (« la zone tampon de tout a l'heure ») finit en question ou en plan sans explication.
   evidence: relecture de 5.18 (blind-hunter) ; ni `plan.propose` ni le panneau ne portent de compte des couches retirees.
+  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Reporté, ticket à créer : signaler au modèle et à l'utilisateur les couches retirées par le budget (nouvelle fonction, hors du ménage).
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-plusieurs-phrases-enchainees-dans-une-session-sans-saturer-l-plan.md`
   summary: Non verifie (medium s'il est vrai) : la date d'un fichier de resultat GeoPackage pourrait changer quand QGIS l'ouvre ou le ferme (journal WAL), et fausser l'ordre « plus recents d'abord » du budget d'inventaire.
   evidence: relecture de 5.18 (edge-case-hunter). A trancher : comparer la date d'un `.gpkg` du dossier de travail avant et apres ouverture et fermeture dans QGIS.
+  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Reporté, essai à la main dans QGIS : comparer la date d'un `.gpkg` du dossier de travail avant et après ouverture et fermeture (WAL).
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-plusieurs-phrases-enchainees-dans-une-session-sans-saturer-l-plan.md`
   summary: Justesse du modele sur un long inventaire de session : en 9e position d'une recette enchainee, la phrase de demo exacte rend une question (« Je ne vois pas de champ de type de zone dans la couche plu_zones ») alors qu'elle rend un plan juste en 1re position ; famille d'entrainement a ajouter (inventaires avec des couches de resultat d'une session, pres du budget de 14 000 caracteres), jamais une regle de prompt.
   evidence: seconde recette enchainee de 5.18 (2026-10-24), 19 couches dans le projet, `plu_zones` et `typezone` dans l'inventaire vu (couches de l'utilisateur jamais retirees) ; les inventaires d'entrainement ne portent que les couches citees et une a quatre de distraction (`training/src/inventories.rs`, `finish`).
+  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Reporté à la prochaine passe sur le générateur et au ré-entraînement (lignée 5.10, 5.15, 5.17), hors de 5.8 : défaut du modèle, à corriger par des exemples d'entraînement, jamais par une règle de prompt.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-duree-par-phrase-sous-30-s-dans-une-session-qgis-sur-process-plan.md`
   summary: Avec les identifiants courts vus par le modele (5.19), H11 (isochrone depuis un point par la voirie) rend un refus au lieu du plan : `ecart_reel` 32/40 contre 33/40 ; re-entrainement de la famille isochrone depuis un point, avec identifiants courts, jamais une regle de prompt.
   evidence: mesure GPU de 5.19 (2026-10-29) ; identifiants complets 33/40, courts 32/40 ; decision du proprietaire : garder les courts et re-entrainer dans un ticket suivant.
+  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Reporté à la prochaine passe sur le générateur et au ré-entraînement (lignée 5.10, 5.15, 5.17), hors de 5.8 : défaut du modèle, à corriger par des exemples d'entraînement, jamais par une règle de prompt.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-duree-par-phrase-sous-30-s-dans-une-session-qgis-sur-process-plan.md`
   summary: La phrase qui suit un plan a plusieurs resultats lit une fois toutes ses couches de resultat (4 couches, 3 436 jetons, ~62 s sur CPU 4 fils), au-dessus des 30 s ; aucun reglage du budget n'y suffit : ne montrer au modele que la couche finale de chaque plan, ou alleger les champs des couches d'intersection.
   evidence: recette enchainee de 5.19 (2026-10-29), phrase 2 apres le plan de demo a 69,6 s sans aucun retrait ; decision du proprietaire : ticket suivant.
+  status: close, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Clos par 5.22 (8d88fb0) : intermédiaires cachés et résultats allégés dans la vue du modèle.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-duree-par-phrase-sous-30-s-dans-une-session-qgis-sur-process-plan.md`
   summary: La phrase de demo rejouee en cours de session (phrase 9 de la recette enchainee) prend 44,6 s sur CPU 4 fils, dont 27 s d'ecriture de son plan a cinq etapes (165 jetons) : au-dessus des 30 s meme avec les identifiants courts ; debit d'ecriture a augmenter (5.21, carte graphique) ou plan ecrit encore plus court.
   evidence: recette enchainee finale de 5.19 (2026-10-29) ; lecture 17 s apres reprise, ecriture 27 s.
+  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Reporté au propriétaire : phrase 9 à 38 s sur CPU seul ; GPU (5.21) tenu, CPU à décider (plan écrit plus court ou exigence revue).
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-duree-par-phrase-sous-30-s-dans-une-session-qgis-sur-process-plan.md`
   summary: Une couche de resultat de selection garde tous les champs de sa couche source (zones U du PLU, ~1 100 jetons) : la phrase qui suit la lit une fois et depasse 30 s (36,6 s, phrase 3) ; meme levier que la phrase apres un plan a plusieurs resultats (champs alleges dans la vue du modele).
   evidence: recette enchainee finale de 5.19 (2026-10-29).
+  status: close, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Clos par 5.22 (8d88fb0) : résultats sans valeurs dans la vue du modèle, même levier.
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-phrase-qui-suit-un-plan-a-plusieurs-resultats-sous-30-s-sur-plan.md`
   summary: Juger la justesse du modèle sur une vue allégée (intermédiaires cachés, résultats sans valeurs), dans une session enchaînée, et pas seulement sur les inventaires fixes de plan_reel, question_reel et ecart_reel.
   evidence: Les trois essais GPU de 5.22 n'ont aucune couche de résultat, les leviers ne s'y appliquent pas ; la recette CPU montre la phrase 3 reliée au PLU entier au lieu de la sélection.
+  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Reporté à la prochaine passe sur le générateur et au ré-entraînement (lignée 5.10, 5.15, 5.17), hors de 5.8 : défaut du modèle, à corriger par des exemples d'entraînement, jamais par une règle de prompt. Essai en session enchaînée à joindre aux mesures du ré-entraînement.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-phrase-qui-suit-un-plan-a-plusieurs-resultats-sous-30-s-sur-plan.md`
   summary: Retrouver les couches intermédiaires après une relance du noyau ou un journal.replay (par exemple depuis le journal), pour qu'elles ne réapparaissent pas toute la session.
   evidence: State.intermediates est en mémoire et n'est alimenté que par plan.execute ; après relance ou rejeu, les intermédiaires sont vus et peuvent ramener le retrait par paquets de 5.19.
+  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Reporté, ticket à créer : retrouver les intermédiaires après une relance du noyau ou un rejeu (nouvelle fonction, hors du ménage).
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-phrase-qui-suit-un-plan-a-plusieurs-resultats-sous-30-s-sur-plan.md`
   summary: Famille d'entraînement (5.10) « couche citée introuvable → question sur la couche », pour une phrase qui cite une couche cachée.
   evidence: Recette 5.22, phrase 11 « Montre le tampon de 500 m. » : question hors de propos sur des coordonnées X/Y.
+  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Reporté à la prochaine passe sur le générateur et au ré-entraînement (lignée 5.10, 5.15, 5.17), hors de 5.8 : défaut du modèle, à corriger par des exemples d'entraînement, jamais par une règle de prompt.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-nombre-de-fils-par-defaut-coeurs-physiques-et-masque-d-affin-plan.md`
   summary: Rendre la vérification complète (cargo test, clippy, fmt, deny) possible sous Linux/WSL, en fournissant libclang à llama-cpp-sys.
   evidence: Relecture 5.20, constat 1 : l'espace de travail ne se construit pas sous WSL faute de libclang ; seuls des morceaux isolés y sont testés, les tickets 5.19 à 5.22 ne vérifient que sous PowerShell.
+  status: close, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Corrigé en 5.8 : note de construction sous WSL dans `README.md` (Démarrage rapide) : paquets `build-essential cmake clang libclang-dev`, `LIBCLANG_PATH` et `BINDGEN_EXTRA_CLANG_ARGS` (recette trouvée en 5.25), et repli `-p cassini-core -p cassini-ai -p cassini` sans libdbus ni GTK.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-acceleration-par-carte-graphique-dans-le-noyau-livre-avec-re-plan.md`
   summary: Vérifier automatiquement la construction `gpu` (build.rs, load_backends, bloc gpu de `hors_ligne`) : job CI avec le SDK Vulkan, ou étape obligatoire de la liste de publication.
   evidence: Relecture 5.21, constat 5 : la CI ne compile jamais `--features gpu` ; une DLL réseau ajoutée au paquet ou un moteur processeur manquant ne ferait rien échouer.
+  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Reporté, à mettre sur la liste de publication (étape 7) : construction `--features gpu` vérifiée à chaque livraison, ou job CI `gpu` avec le SDK Vulkan.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-acceleration-par-carte-graphique-dans-le-noyau-livre-avec-re-plan.md`
   summary: Prouver sur un poste à carte intégrée seule que rien ne part sur cette carte (liste vide de périphériques bien transmise à llama.cpp).
   evidence: Relecture 5.21, constat 3 : le test `processor_parameters_offload_nothing` ne distingue pas liste vide et liste absente ; aucun poste à carte intégrée n'a été essayé.
+  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Reporté, matériel : essai sur un poste à carte intégrée seule.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-acceleration-par-carte-graphique-dans-le-noyau-livre-avec-re-plan.md`
   summary: Repli sur processeur quand la carte échoue au décodage ou à l'adaptateur (non vérifié ; medium si réel).
   evidence: Relecture 5.21, constat 6 : le repli ne couvre que le chargement et la création du contexte ; à trancher en lançant une longue session sur une carte de 4 Go.
+  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Reporté, matériel : longue session sur une carte de 4 Go pour trancher le repli au décodage.
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-serveur-mcp-cassini-mcp-expose-le-registre-a-un-client-tiers-plan.md`
   summary: Vérifier que les clients MCP visés acceptent des noms d'outils avec un point (`system.about`), sinon les exposer sous une forme admise.
   evidence: non vérifié (maybe-false, medium si vrai) ; la spec MCP 2025-11-25 admet le point, certaines API de modèles n'admettent que [A-Za-z0-9_-] ; tranché par la recette hitl de 5.7.
+  status: close, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Clos par 5.30 (505795f) : noms d'outils sans point, acceptés par tous les clients.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-serveur-mcp-cassini-mcp-expose-le-registre-a-un-client-tiers-plan.md`
   summary: Tester la négociation des révisions MCP 2024-11-05 et 2026-07-28 (sans initialize) annoncées par l'architecture.
   evidence: le client de test ne négocie que 2025-11-25 ; rmcp épinglé =3.8.0, ne régresse qu'à une montée de version.
+  status: close, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Corrigé en 5.8 : `an_old_revision_is_accepted_and_carries_the_instructions` (initialize en 2024-11-05, révision rendue telle quelle, outils listés) et `the_revision_without_initialize_discovers_the_instructions` (2026-07-28 : `server/discover` puis `tools/list` avec la révision dans `_meta`), dans `cli/tests/mcp.rs`. rmcp 3.8.0 gère la révision sans initialize : elle est couverte.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-serveur-mcp-cassini-mcp-expose-le-registre-a-un-client-tiers-plan.md`
   summary: Servir les appels MCP sans bloquer le runtime (ping et annulation pendant une commande longue) avant d'exposer les commandes de terrain.
   evidence: call_tool attend la réponse du fil d'exécution sur l'unique fil du runtime ; sans effet sur system.about et model.list.
+  status: close, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Clos par 5.25 (055b9e1) : chaque requête MCP est une tâche du runtime, `ping` et l'annulation restent servis pendant un appel.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-canal-d-ia-externe-cote-session-le-noyau-de-qgis-accepte-un-plan.md`
   summary: Exécuter les appels d'un relais sur le canal d'IA externe (AD-29) — command.run et request.cancel externes, état d'occupation unique dans les deux sens (session.busy), external.call et external.approve (120 s, external.not_approved), refus des chemins (external.path_refused), origine external au journal et rejeu, external.session_lost pendant un appel ou à la déconnexion du relais.
   evidence: 5.24 coupé en deux à la demande du propriétaire le 2026-10-30 (plan d'environ 2 700 jetons, CLAUDE.md §8 « une tâche courte par session ») ; 5.24 garde le transport, le cycle de vie, external.attach et le protocole 2. Décision du propriétaire déjà prise pour cette suite : un plan proposé non tranché rend la session occupée pour le relais seulement, l'extension garde le droit de le remplacer par plan.propose.
@@ -425,18 +543,26 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-relais-cassini-mcp-pilote-la-session-qgis-quand-elle-l-autor-plan.md`
   summary: Tester `ping` et l'annulation pendant un appel autonome de `cassini mcp` en vol (moitié autonome de « runtime non bloquant », 5.25).
   evidence: Aucune commande `core` du binaire n'est assez lente pour tenir un appel en vol de façon déterministe ; un retour à une attente bloquante dans `call_autonomous` passerait inaperçu. À faire avec les commandes de terrain (étape 6).
+  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Reporté à l'étape 6 : attend une commande de terrain assez lente pour tenir un appel en vol de façon déterministe.
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-recette-claude-gpt-et-gemini-sur-la-phrase-de-demo-qgis-ouve-plan.md`
   summary: Finir la recette Gemini CLI sur la phrase de démo (sonde `probe_external.py`, nom `gemini`) : couche, PDF et rejeu identique.
   evidence: Le 2026-10-31, le relais est prouvé avec Gemini CLI 0.66 (catalogue reçu, `project.inventory` réussi, rejeu identique), mais l'API de Google a rendu des 503 « high demand », puis un 429 (quota gratuit de 20 requêtes par jour épuisé). Le propriétaire clôt 5.27 ainsi. À rejouer quand le quota revient, ou avec une clé facturée.
+  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Reporté au propriétaire : recette Gemini CLI à reprendre quand le quota gratuit de l'API de Google le permet.
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-recette-claude-gpt-et-gemini-sur-la-phrase-de-demo-qgis-ouve-plan.md`
   summary: Champ `instructions` du serveur MCP (`get_info` de `cassini mcp`) qui dit en quelques phrases que Cassini pilote le projet QGIS ouvert, pour que les clients le prennent d'eux-mêmes.
   evidence: Recette 5.27 : Codex CLI n'a pas employé Cassini avec la phrase seule (recherche sur le web) et ne l'a fait qu'en nommant QGIS et Cassini ; sa documentation dit qu'il lit `instructions`. Claude Code, lui, l'a pris de lui-même.
+  status: close, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Corrigé en 5.8 : `get_info` de `cassini mcp` porte `instructions` (`INSTRUCTIONS`, `cli/src/mcp.rs`) : Cassini pilote le projet QGIS ouvert quand la session l'autorise, sinon les seules commandes du noyau. Lu par les tests MCP en 2024-11-05, 2025-11-25 et 2026-07-28. À revérifier avec Codex CLI à la prochaine recette des clients.
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-recette-claude-gpt-et-gemini-sur-la-phrase-de-demo-qgis-ouve-plan.md`
   summary: Noms d'outils MCP sans point. `cassini mcp` expose les identifiants du registre tels quels (`analysis.buffer`) ; Antigravity CLI, successeur de Gemini CLI, les refuse tous (motif `^[a-zA-Z0-9_-]{1,64}$`). Exposer un nom sans point, le même pour tous les clients, et le ramener à l'identifiant à l'appel, dans les deux modes.
   evidence: Recette 5.27 du 2026-10-31 : `cli.log` d'agy 1.4.12, « tool name mcp_cassini_analysis.buffer violates ^[a-zA-Z0-9_-]{1,64}$ » pour les 11 outils, aucun appel possible. Seule voie restante pour la famille Gemini avec un compte Pro (Gemini CLI refuse les comptes personnels). Catalogue construit dans `cli/src/mcp.rs` (`catalogue`, `catalogue_from_session`) ; à trancher contre AD-29 (aucun code propre à un fournisseur : le renommage vaut pour tous) et contre la parité `run`/`serve`/`mcp`.
+  status: close, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Clos par 5.30 (505795f) : nom sans point exposé, ramené à l'identifiant à l'appel.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-noms-d-outils-mcp-sans-point-acceptes-par-tous-les-clients-plan.md`
   summary: Rejeu d'un `project.inventory` demandé après la création de couches. Le rejeu diverge, car l'inventaire liste des `layer_id` à suffixe aléatoire et des sources sous `replay/`, qui changent d'une exécution à l'autre.
   evidence: Recette 5.30 avec Antigravity CLI (2026-10-31, 18 h 45) : 17 appels réussis, puis `replay.diverged` à l'étape 13 (`project.inventory`, empreinte `6472c69290d01abf`). Les étapes 2 (inventaire initial) à 12 rejouent à l'identique. Risque high (rejeu) : relecture `thorough`.
@@ -446,3 +572,5 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-rejeu-d-un-inventaire-demande-apres-la-creation-de-couches-plan.md`
   summary: L'ouverture d'un projet dans QGIS ajoute au journal la poignée de main du client (`system.about`) ; rejouer un journal le modifie donc et allonge son nombre d'étapes.
   evidence: Recette 5.31 (2026-10-31) : rejeu des journaux Antigravity et Claude Code de 5.30 en 20 et 10 étapes au lieu de 19 et 9, journaux remis depuis une copie ; relecture `thorough` de 5.31, constat 9 (medium).
+  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
+  resolution: Reporté, ticket à créer (décision du propriétaire, 2026-10-31) : poignée de main `system.about` journalisée ; la règle du journal ne change pas en 5.8.

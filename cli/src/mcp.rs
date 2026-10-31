@@ -409,6 +409,14 @@ async fn lost_relay(modes: Weak<Mutex<Modes>>, lost: Weak<Relay>, autonomous: Va
     }
 }
 
+/// Champ `instructions` de la poignée de main : ce que le client sait de Cassini avant tout outil,
+/// pour qu'il le prenne de lui-même sur une demande de carte (recette 5.27).
+const INSTRUCTIONS: &str = "Cassini pilote le SIG de l'utilisateur, hors ligne. Quand une \
+session QGIS avec l'extension Cassini est ouverte et l'autorise, ces outils agissent sur le projet \
+QGIS ouvert (couches, analyses, mise en page, export PDF) : c'est la voie à prendre pour toute \
+demande sur ses cartes ou ses données géographiques. Sinon, seules les commandes du noyau sont \
+servies ; aucune donnée n'est téléchargée, les outils travaillent sur les fichiers de l'utilisateur.";
+
 impl ServerHandler for CassiniMcp {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(
@@ -418,6 +426,7 @@ impl ServerHandler for CassiniMcp {
                 .build(),
         )
         .with_server_info(Implementation::new("cassini", cassini_core::VERSION))
+        .with_instructions(INSTRUCTIONS)
     }
 
     async fn list_tools(

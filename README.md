@@ -343,6 +343,20 @@ la marche à suivre est dans
 coquille V2 demande en plus Node.js et les prérequis de Tauri v2, détaillés dans
 [`docs/compiler-sous-windows.md`](docs/compiler-sous-windows.md).
 
+Sous WSL (ou un Linux nu), la construction de llama.cpp demande libclang et les
+en-têtes de gcc, que `bindgen` ne trouve pas seul :
+
+```bash
+sudo apt install build-essential cmake clang libclang-dev
+export LIBCLANG_PATH=/usr/lib/llvm-18/lib        # le dossier qui contient libclang.so
+export BINDGEN_EXTRA_CLANG_ARGS=-I/usr/lib/gcc/x86_64-linux-gnu/13/include
+```
+
+Les numéros de version (`llvm-18`, gcc `13`) sont ceux du poste : `ls /usr/lib/llvm-*`
+et `ls /usr/lib/gcc/x86_64-linux-gnu` les donnent. `--workspace` demande en plus
+`libdbus-1-dev` et les bibliothèques GTK de la coquille Tauri (`app`) ; sans elles,
+s'en tenir à `-p cassini-core -p cassini-ai -p cassini`.
+
 Le noyau se teste seul, sans QGIS et sans modèle — c'est le principe 3 en
 pratique :
 
