@@ -442,3 +442,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
   evidence: Recette 5.30 avec Antigravity CLI (2026-10-31, 18 h 45) : 17 appels réussis, puis `replay.diverged` à l'étape 13 (`project.inventory`, empreinte `6472c69290d01abf`). Les étapes 2 (inventaire initial) à 12 rejouent à l'identique. Risque high (rejeu) : relecture `thorough`.
   status: ticket, 2026-10-31, entrée 5.31 (`epic-agent-et-mcp/tickets.toml`)
   resolution: Devenu le ticket 5.31 « Rejeu d'un inventaire demandé après la création de couches » ; 5.8 l'attend.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-rejeu-d-un-inventaire-demande-apres-la-creation-de-couches-plan.md`
+  summary: L'ouverture d'un projet dans QGIS ajoute au journal la poignée de main du client (`system.about`) ; rejouer un journal le modifie donc et allonge son nombre d'étapes.
+  evidence: Recette 5.31 (2026-10-31) : rejeu des journaux Antigravity et Claude Code de 5.30 en 20 et 10 étapes au lieu de 19 et 9, journaux remis depuis une copie ; relecture `thorough` de 5.31, constat 9 (medium).

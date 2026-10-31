@@ -641,7 +641,9 @@ impl<'a> Replay<'a> {
             out_dir: &self.replay_dir,
         };
         let mut replayed = 0;
-        // Ids de couche de la session d'origine -> ids obtenus par ce rejeu.
+        // Ids de couche de la session d'origine -> ids obtenus par ce rejeu. Sert dans les
+        // deux sens : ancien -> neuf dans les paramètres, neuf -> ancien dans les résultats
+        // (un inventaire liste les couches créées plus tôt), avant de les comparer.
         let mut bound: HashMap<String, String> = HashMap::new();
         for (i, line) in self.lines.iter().enumerate() {
             let step = i + 1;
@@ -669,7 +671,14 @@ impl<'a> Replay<'a> {
             let diverged = |why: String| ErrorReport::from(JournalError::Diverged { step, why });
             let same = match (&outcome, line.get("result"), line.get("error")) {
                 (Ok(value), Some(kept), None) => {
-                    same_result(&relativize(value, &self.replay_dir), kept)
+                    // Chaque neuf vient d'une étape distincte : la table inverse est sûre.
+                    let back: HashMap<String, String> = bound
+                        .iter()
+                        .map(|(old, new)| (new.clone(), old.clone()))
+                        .collect();
+                    let mut again = relativize(value, &self.replay_dir);
+                    substitute(&mut again, &back);
+                    same_result(&again, kept)
                 }
                 (Err(e), None, Some(Value::String(code))) => e.code() == code,
                 _ => false,
@@ -710,7 +719,8 @@ impl<'a> Replay<'a> {
     }
 }
 
-/// Remplace, dans toutes les chaînes de `value`, un ancien id de couche par le neuf.
+/// Remplace, dans toutes les chaînes entières de `value`, une clé de `bound` par sa valeur
+/// (ancien id de couche par le neuf, ou l'inverse avec la table retournée).
 fn substitute(value: &mut Value, bound: &HashMap<String, String>) {
     match value {
         Value::String(s) => {

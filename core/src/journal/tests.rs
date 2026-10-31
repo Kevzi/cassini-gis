@@ -524,6 +524,14 @@ struct SessionQgis {
     count: std::cell::Cell<u32>,
     feature_count: u64,
     empty_output: bool,
+    /// Couches créées par cette session : (id, source rendue par QGIS).
+    created: std::cell::RefCell<Vec<(String, String)>>,
+    /// Nombre d'entités annoncé par l'inventaire pour les couches créées.
+    inventory_feature_count: u64,
+    /// Inventaire réduit aux ids, gardé tel quel au journal (≤ 200 octets).
+    short_inventory: bool,
+    /// Une couche ouverte à la main après le tampon, sans équivalent à l'origine.
+    stranger: bool,
 }
 
 impl SessionQgis {
@@ -533,11 +541,46 @@ impl SessionQgis {
             count: std::cell::Cell::new(0),
             feature_count: 4,
             empty_output: false,
+            created: std::cell::RefCell::new(Vec::new()),
+            inventory_feature_count: 4,
+            short_inventory: false,
+            stranger: false,
         }
     }
 
     fn layer_id(&self, n: u32) -> String {
         format!("couche_g{}_{n}", self.generation)
+    }
+
+    fn inventory(&self) -> Value {
+        let mut layers: Vec<Value> = Vec::new();
+        if !self.short_inventory {
+            // Couche du projet : id stable, le projet étant rouvert depuis sa copie.
+            layers.push(json!({
+                "layer_id": "communes_0", "name": "communes",
+                "source": "communes.gpkg", "crs": "EPSG:2154"
+            }));
+        }
+        let mut created = self.created.borrow().clone();
+        // Ouverte à la main entre le tampon et le second inventaire.
+        if self.stranger && created.len() >= 2 {
+            created.push((format!("main_g{}", self.generation), "main.gpkg".into()));
+        }
+        for (id, source) in created {
+            layers.push(if self.short_inventory {
+                json!({"layer_id": id, "feature_count": self.inventory_feature_count})
+            } else {
+                json!({
+                    "layer_id": id, "name": "couche", "source": source,
+                    "crs": "EPSG:2154", "feature_count": self.inventory_feature_count
+                })
+            });
+        }
+        if self.short_inventory {
+            json!({"layers": layers})
+        } else {
+            json!({"layers": layers, "project_crs": "EPSG:2154"})
+        }
     }
 }
 
@@ -546,21 +589,36 @@ impl Executor for SessionQgis {
         let n = self.count.get() + 1;
         self.count.set(n);
         match id {
-            "layer.add" => Ok(json!({"layer_id": self.layer_id(n), "name": "points"})),
+            "layer.add" => {
+                let layer = self.layer_id(n);
+                self.created
+                    .borrow_mut()
+                    .push((layer.clone(), "pts.csv".into()));
+                Ok(json!({"layer_id": layer, "name": "points"}))
+            }
             "analysis.buffer" => {
-                // Le paramètre `layer_id` doit être celui de CETTE session.
-                assert_eq!(p["layer_id"], json!(self.layer_id(1)));
+                // Le paramètre `layer_id` doit être une couche de CETTE session.
+                let source = p["layer_id"].as_str().unwrap();
+                assert!(
+                    self.created.borrow().iter().any(|(l, _)| l == source),
+                    "couche d'une autre session : {source}"
+                );
                 let bytes = if self.empty_output {
                     String::new()
                 } else {
                     format!("gpkg-{}", self.generation)
                 };
-                fs::write(p["out"].as_str().unwrap(), bytes).unwrap();
+                let out = p["out"].as_str().unwrap().to_string();
+                fs::write(&out, bytes).unwrap();
+                let layer = self.layer_id(n);
+                // Source absolue sous le dossier de sortie, comme le vrai QGIS.
+                self.created.borrow_mut().push((layer.clone(), out));
                 Ok(json!({
-                    "layer_id": self.layer_id(n),
+                    "layer_id": layer,
                     "feature_count": self.feature_count,
                 }))
             }
+            "project.inventory" => Ok(self.inventory()),
             other => panic!("commande inattendue : {other}"),
         }
     }
@@ -584,6 +642,82 @@ fn qgis_journal(project: &Path) {
     let l = lines(&s);
     assert_eq!(l[0]["layer_id"], json!("couche_g1_1"));
     assert_eq!(l[1]["layer_id"], json!("couche_g1_2"));
+}
+
+/// Journal de 5.30 en petit : inventaire, couche, tampon, inventaire qui liste les
+/// couches créées. Rend la taille gardée du dernier inventaire au journal.
+fn inventory_journal(project: &Path, short: bool) -> Value {
+    let registry = Registry::standard();
+    let mut qgis = SessionQgis::new(1);
+    qgis.short_inventory = short;
+    let mut s = Session::open(&registry, project).unwrap().with_qgis(qgis);
+    s.call("project.inventory", json!({})).unwrap();
+    let added = s
+        .call("layer.add", json!({"path": "pts.csv", "crs": "EPSG:2154"}))
+        .unwrap();
+    let first = added["layer_id"].as_str().unwrap().to_string();
+    s.call(
+        "analysis.buffer",
+        json!({"layer_id": first, "distance": {"value": 500, "unit": "m"}}),
+    )
+    .unwrap();
+    s.call("project.inventory", json!({})).unwrap();
+    lines(&s)[3]["result"].clone()
+}
+
+fn replay_inventory(
+    short: bool,
+    tweak: impl FnOnce(&mut SessionQgis),
+) -> Result<ReplayReport, ErrorReport> {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let kept = inventory_journal(&project, short);
+    assert_eq!(kept.get("truncated") == Some(&json!(true)), !short);
+    if short {
+        assert!(kept.to_string().contains("couche_g1_3"));
+    }
+    let mut qgis = SessionQgis::new(2);
+    qgis.short_inventory = short;
+    tweak(&mut qgis);
+    let outcome = Replay::load(&registry, &project)
+        .unwrap()
+        .run(&Router::new(&registry).with_qgis(qgis));
+    let _ = fs::remove_dir_all(dir);
+    outcome
+}
+
+#[test]
+fn an_inventory_after_created_layers_replays_identically() {
+    for short in [false, true] {
+        assert_eq!(
+            replay_inventory(short, |_| {}).unwrap(),
+            ReplayReport {
+                steps: 4,
+                identical: true
+            },
+            "inventaire court : {short}"
+        );
+    }
+}
+
+#[test]
+fn an_inventory_with_a_layer_without_equivalent_diverges() {
+    for short in [false, true] {
+        let err = replay_inventory(short, |q| q.stranger = true).unwrap_err();
+        assert_eq!(err.code, "replay.diverged");
+        assert_eq!(err.step, Some(4));
+        assert!(err.message.contains("project.inventory"));
+    }
+}
+
+#[test]
+fn an_inventory_with_another_feature_count_diverges() {
+    for short in [false, true] {
+        let err = replay_inventory(short, |q| q.inventory_feature_count = 5).unwrap_err();
+        assert_eq!(err.code, "replay.diverged");
+        assert_eq!(err.step, Some(4));
+        assert!(err.message.contains("project.inventory"));
+    }
 }
 
 #[test]
