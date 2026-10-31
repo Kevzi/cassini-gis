@@ -30,7 +30,7 @@ from qgis.PyQt.QtWidgets import (
     QWidget,
 )
 
-from . import agentview, client, form, models, runlog, summary, texts
+from . import agentview, client, external, form, models, runlog, summary, texts
 
 
 class LayerCombo(QComboBox):
@@ -114,6 +114,7 @@ class RequestEdit(QPlainTextEdit):
 
 LANG_KEY = "cassini/lang"
 EXPERT_KEY = "cassini/expert_open"
+EXTERNAL_ASK_KEY = "cassini/external_ask"  # case « Me demander avant chaque appel »
 ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 
 # Bandeaux : clé de texte, action proposée ("choose", "relaunch" ou aucune).
@@ -203,9 +204,13 @@ class CassiniPanel(QWidget):
 
     def __init__(self, actions):
         super().__init__()
-        # run(cmd, params), stop(), choose_core(), relaunch(), propose(text), approve(), reject()
+        # run(cmd, params), stop(), choose_core(), relaunch(), propose(text), approve(), reject(),
+        # set_external(enabled, ask), stop_external(call_id), answer_approval(request_id, approved)
         self._actions = actions
         settings = QSettings()
+        # Interrupteur éteint à chaque démarrage ; seule la case est retenue.
+        ask = external.ask_setting(settings.value(EXTERNAL_ASK_KEY, "false"))
+        self.external = external.ExternalState(ask=ask)
         self.lang = texts.normalize(str(settings.value(LANG_KEY, texts.DEFAULT_LANG)))
         self.log = runlog.RunLog()
         self.agent = agentview.AgentView()
@@ -293,6 +298,20 @@ class CassiniPanel(QWidget):
         sl.addWidget(self.model_label)
         sl.addWidget(self.model_box)
         sl.addWidget(self.model_reason)
+        # IA externe (AD-29) : interrupteur éteint par défaut, case retenue.
+        self.external_switch = QCheckBox()
+        self.external_switch.clicked.connect(self._switch_clicked)
+        self.external_ask = QCheckBox()
+        self.external_ask.clicked.connect(self._ask_clicked)
+        self.external_reason = QLabel()
+        self.external_reason.setTextFormat(Qt.TextFormat.PlainText)  # message venu du noyau
+        self.external_reason.setWordWrap(True)
+        self.external_reason.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        sl.addWidget(self.external_switch)
+        sl.addWidget(self.external_ask)
+        sl.addWidget(self.external_reason)
 
         # Bandeau d'état : un seul à la fois.
         self.banner_zone = QWidget()
@@ -307,6 +326,50 @@ class CassiniPanel(QWidget):
         bl.addWidget(self.banner_text, 1)
         bl.addWidget(self.banner_button)
         col.addWidget(self.banner_zone)
+
+        # Bandeau de l'IA externe, distinct de celui du noyau : Couper, Arrêter l'appel en vol.
+        self.external_zone = QWidget()
+        xl = QVBoxLayout(self.external_zone)
+        xl.setContentsMargins(0, 0, 0, 0)
+        xrow = QHBoxLayout()
+        self.external_icon = QLabel("⇄")
+        self.external_text = QLabel()
+        self.external_text.setWordWrap(True)
+        self.external_cut = QPushButton()
+        self.external_cut.clicked.connect(self._cut_external)
+        self.external_stop = QPushButton()
+        self.external_stop.clicked.connect(self._stop_external)
+        xrow.addWidget(self.external_icon)
+        xrow.addWidget(self.external_text, 1)
+        xrow.addWidget(self.external_stop)
+        xrow.addWidget(self.external_cut)
+        self.external_stop_reason = QLabel()
+        self.external_stop_reason.setWordWrap(True)
+        xl.addLayout(xrow)
+        xl.addWidget(self.external_stop_reason)
+        col.addWidget(self.external_zone)
+
+        # Question d'accord de l'IA externe : une seule, sans fenêtre modale.
+        self.approval_zone = QWidget()
+        al = QVBoxLayout(self.approval_zone)
+        al.setContentsMargins(0, 0, 0, 0)
+        self.approval_text = QLabel()
+        # Paramètres écrits par l'IA externe : jamais interprétés comme du texte riche.
+        self.approval_text.setTextFormat(Qt.TextFormat.PlainText)
+        self.approval_text.setWordWrap(True)
+        self.approval_text.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self.approval_allow = QPushButton()
+        self.approval_allow.clicked.connect(lambda _=False: self._answer(True))
+        self.approval_deny = QPushButton()
+        self.approval_deny.clicked.connect(lambda _=False: self._answer(False))
+        arow = QHBoxLayout()
+        arow.addWidget(self.approval_allow)
+        arow.addWidget(self.approval_deny)
+        al.addWidget(self.approval_text)
+        al.addLayout(arow)
+        col.addWidget(self.approval_zone)
 
         # Saisie principale en langage naturel [Epic 5].
         self.input = RequestEdit(self._send)
@@ -439,7 +502,9 @@ class CassiniPanel(QWidget):
 
         # Ordre de tabulation = ordre vertical.
         order = [
-            self.settings_button, self.lang_box, self.model_box, self.banner_button, self.input,
+            self.settings_button, self.lang_box, self.model_box, self.external_switch,
+            self.external_ask, self.banner_button, self.external_stop, self.external_cut,
+            self.approval_allow, self.approval_deny, self.input,
             self.send_button, self.plan_list, self.approve_button, self.reject_button,
             self.plan_stop_button, self.plan_details.button, self.details.button, self.log_list,
             self.expert.button, self.command_list, self.run_button, self.stop_button,
@@ -467,6 +532,8 @@ class CassiniPanel(QWidget):
         if self.running:
             self.running = False
             self.log.finish(runlog.CANCELLED)
+        # Interrupteur éteint, question fermée, appels externes en cours annulés.
+        self.external.lost(self.log)
         plan_in_flight = self.agent.phase != agentview.IDLE
         self._close_plan_entry(runlog.ERROR)
         self.agent.forget()
@@ -585,8 +652,29 @@ class CassiniPanel(QWidget):
             self.models_error = (payload.get("code", ""), payload.get("message", ""))
         self._render_models()
 
+    def _on_external_event(self, kind, payload):
+        """Réponses de `session.external`, appels de l'IA externe et question d'accord.
+
+        La logique est dans `external.apply` ; ici, seulement l'annonce et le rendu.
+        """
+        out = external.apply(
+            self.external, self.log, kind, payload, self.catalogue, self.lang,
+            time.strftime("%H:%M"),
+        )
+        if out["resend_ask"]:  # case changée avant la réponse du noyau
+            self._actions.set_external(True, self.external.ask)
+        if out["announce"]:
+            where = {"log": self.log_list, "approval": self.approval_text}.get(
+                out["where"], self.external_text
+            )
+            _announce(where, out["announce"])
+        self.render()
+
     def on_event(self, kind, payload):
-        """Événements RUN_*, PLAN_* et des modèles du client."""
+        """Événements RUN_*, PLAN_*, des modèles et de l'IA externe du client."""
+        if kind in client.EXTERNAL_EVENTS:
+            self._on_external_event(kind, payload or {})
+            return
         if kind in client.MODEL_EVENTS:
             self.on_models(kind, payload or {})
             return
@@ -649,6 +737,8 @@ class CassiniPanel(QWidget):
             self.banner_button.setAccessibleName(self.banner_button.text())
             self.banner_zone.setVisible(True)
 
+        self._render_external()
+
         self.input.setPlaceholderText(t("input_hint"))
         self.input.setAccessibleName(t("input_name"))
         self.send_button.setText(t("send"))
@@ -665,7 +755,13 @@ class CassiniPanel(QWidget):
         self.log_list.setVisible(bool(self.log.entries))
         self.log_list.clear()
         for entry in self.log.entries:
-            self.log_list.addItem(runlog.line_text(entry, t(entry.status)))
+            if entry.origin == runlog.EXTERNAL:  # marquée « IA externe », dans la langue choisie
+                entry.label = external.label(entry.command, self.catalogue, self.lang)
+            self.log_list.addItem(
+                runlog.line_text(
+                    entry, t(entry.status), external.duration_text(entry.duration_ms, self.lang)
+                )
+            )
         self.log_list.setAccessibleName(t("log_title"))
         self.log_list.scrollToBottom()
 
@@ -791,6 +887,7 @@ class CassiniPanel(QWidget):
             self.running,
             bool(self.input.toPlainText().strip()),
             self.catalogue,
+            external.busy(self.external),
         )
         self.input.setEnabled(c["input_enabled"])
         self.send_button.setEnabled(c["send_enabled"])
@@ -855,6 +952,7 @@ class CassiniPanel(QWidget):
             self.running,
             bool(self.input.toPlainText().strip()),
             self.catalogue,
+            external.busy(self.external),
         )
         self.send_button.setEnabled(c["send_enabled"])
 
@@ -891,6 +989,7 @@ class CassiniPanel(QWidget):
             bool(entry and entry.get("available")),
             self.running,
             bool(entry and entry.get("cancellable")),
+            external.busy(self.external),
         )
         self.run_button.setText(self.t("run"))
         self.stop_button.setText(self.t("stop"))
@@ -903,6 +1002,8 @@ class CassiniPanel(QWidget):
             reason = self.t(c["stop_reason"])
         elif self.running:
             reason = self.t("busy")
+        elif external.busy(self.external):
+            reason = self.t("input_reason_external")
         elif entry is not None and not entry.get("available"):
             reason = self.t("unavailable", reason=self.t("unavailable_reason"))
         self.reason.setText(reason)
@@ -1013,7 +1114,12 @@ class CassiniPanel(QWidget):
     def _send(self):
         text = self.input.toPlainText().strip()
         c = agentview.controls(
-            self.agent, self.ready and self.banner is None, self.running, bool(text), self.catalogue
+            self.agent,
+            self.ready and self.banner is None,
+            self.running,
+            bool(text),
+            self.catalogue,
+            external.busy(self.external),
         )
         if not c["send_enabled"]:
             return
@@ -1091,7 +1197,92 @@ class CassiniPanel(QWidget):
         self.model = name
         QSettings().setValue(models.SETTING_KEY, name)  # le choix survit à QGIS
 
+    def _render_external(self):
+        """Réglages, bandeau et question de l'IA externe (logique dans `external`)."""
+        t = self.t
+        state = self.external
+        c = external.controls(state, self.ready and self.banner is None, self.catalogue)
+
+        self.external_switch.setText(t("external_switch"))
+        self.external_switch.setAccessibleName(t("external_switch"))
+        self.external_switch.setChecked(c["switch_checked"])  # l'état répondu par le noyau
+        self.external_switch.setEnabled(c["switch_enabled"])
+        self.external_ask.setText(t("external_ask"))
+        self.external_ask.setAccessibleName(t("external_ask"))
+        self.external_ask.setChecked(c["ask_checked"])
+        if c["switch_reason"]:
+            reason = t(c["switch_reason"])
+        elif c["switch_error"]:
+            code, message = c["switch_error"]
+            reason = t("external_error", code=code, message=runlog.redact(message))
+        else:
+            reason = ""
+        self.external_reason.setText(reason)
+        self.external_reason.setVisible(bool(reason))
+        self.external_switch.setAccessibleDescription(reason)
+
+        self.external_text.setText(t("external_banner"))
+        self.external_text.setAccessibleName(t("external_banner"))
+        self.external_cut.setText(t("external_cut"))
+        self.external_cut.setAccessibleName(t("external_cut"))
+        self.external_cut.setEnabled(c["cut_enabled"])
+        stop_reason = t(c["stop_reason"]) if c["stop_reason"] else ""
+        self.external_stop.setText(t("stop"))
+        self.external_stop.setAccessibleName(
+            "%s, %s" % (t("stop"), stop_reason) if stop_reason else t("stop")
+        )
+        self.external_stop.setVisible(c["stop_visible"])
+        self.external_stop.setEnabled(c["stop_enabled"])
+        self.external_stop_reason.setText(stop_reason)
+        self.external_stop_reason.setVisible(bool(stop_reason))
+        self.external_zone.setVisible(c["banner_visible"] or c["stop_visible"])
+
+        question = external.question_text(state, self.catalogue, self.lang)
+        self.approval_text.setText(question or "")
+        self.approval_allow.setText(t("approval_allow"))
+        self.approval_allow.setAccessibleName(t("approval_allow"))
+        self.approval_allow.setEnabled(c["answer_enabled"])
+        self.approval_deny.setText(t("approval_deny"))
+        self.approval_deny.setAccessibleName(t("approval_deny"))
+        self.approval_deny.setEnabled(c["answer_enabled"])
+        self.approval_zone.setVisible(c["question_visible"])
+
+    def _switch_clicked(self, checked):
+        """L'interrupteur ne change qu'à la réponse du noyau : on le remet à l'état connu."""
+        self._actions.set_external(bool(checked), self.external.ask)
+        self.render()
+
+    def _ask_clicked(self, checked):
+        self.external.ask = bool(checked)
+        try:
+            QSettings().setValue(EXTERNAL_ASK_KEY, "true" if checked else "false")
+        except Exception:
+            pass
+        if self.external.enabled:  # la case ne vaut que pour les appels suivants
+            self._actions.set_external(True, self.external.ask)
+        self.render()
+
+    def _cut_external(self):
+        self._actions.set_external(False, self.external.ask)
+
+    def _stop_external(self):
+        running = self.external.running_call()
+        if running is not None:
+            self._actions.stop_external(running[0])  # request.cancel {id: call_id}
+
+    def _answer(self, approved):
+        approval = self.external.approval
+        if approval is None:
+            return  # question déjà retirée : rien n'est envoyé
+        if self._actions.answer_approval(approval["request_id"], approved):
+            self.external.answered()
+        else:
+            self.external.approval_withdrawn(approval["request_id"])
+        self.render()
+
     def _open_settings(self):
+        self.external.settings_opened()  # un canal pris redevient cliquable
+        self.render()
         self._actions.list_models()  # liste fraîche si le client est libre
         self.settings_zone.setWindowTitle(self.t("settings"))
         self.settings_zone.exec()

@@ -133,6 +133,23 @@ _FR = {
     "unit_points_one": "{n} point",
     "unit_points_many": "{n} points",
     "focus_status": "{label} : {status}.",
+    # Canal d'IA externe (AD-29, flux 4).
+    "external_switch": "Autoriser une IA externe",
+    "external_ask": "Me demander avant chaque appel",
+    "external_taken": "Une autre session QGIS accepte déjà l'IA externe.",
+    "external_error": "L'IA externe n'a pas pu être autorisée ({code}) : {message}",
+    "external_banner": "Une IA externe peut agir sur ce projet.",
+    "external_cut": "Couper",
+    "external_tag": "IA externe",
+    "input_reason_external": "L'IA externe travaille.",
+    "approval_question": "L'IA externe demande à lancer : {description} Paramètres : {params}",
+    "approval_allow": "Autoriser",
+    "approval_deny": "Refuser",
+    "duration_ms": "{n} ms",
+    "duration_s": "{n} s",
+    "live_external_on": "Une IA externe peut agir sur ce projet.",
+    "live_external_off": "L'IA externe est coupée.",
+    "live_approval": "L'IA externe demande votre accord.",
 }
 
 _EN = {
@@ -261,6 +278,22 @@ _EN = {
     "unit_points_one": "{n} point",
     "unit_points_many": "{n} points",
     "focus_status": "{label}: {status}.",
+    "external_switch": "Allow an external AI",
+    "external_ask": "Ask me before each call",
+    "external_taken": "Another QGIS session already accepts the external AI.",
+    "external_error": "The external AI could not be allowed ({code}): {message}",
+    "external_banner": "An external AI can act on this project.",
+    "external_cut": "Cut off",
+    "external_tag": "External AI",
+    "input_reason_external": "The external AI is working.",
+    "approval_question": "The external AI asks to run: {description} Parameters: {params}",
+    "approval_allow": "Allow",
+    "approval_deny": "Deny",
+    "duration_ms": "{n} ms",
+    "duration_s": "{n} s",
+    "live_external_on": "An external AI can act on this project.",
+    "live_external_off": "The external AI is cut off.",
+    "live_approval": "The external AI asks for your approval.",
 }
 
 TEXTS = {"fr": _FR, "en": _EN}

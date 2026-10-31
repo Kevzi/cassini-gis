@@ -362,8 +362,18 @@ panneau arrête l'appel en le renvoyant dans `request.cancel`.
 
 `finished` porte `result`, ou `error {code, message}`. Un appel refusé avant l'exécution
 (occupation, accord non donné, chemin, commande inconnue ou indisponible, paramètres mal formés)
-n'est pas annoncé : `started` ne part qu'après l'accord. L'extension, qui ne connaît pas encore
-cette notification, l'ignore.
+n'est pas annoncé : `started` ne part qu'après l'accord.
+
+Côté extension (ticket 5.26), chaque `call_id` fait une ligne du journal du panneau, marquée
+« IA externe » : `started` l'ouvre « En cours… », `finished` la ferme en « Terminée », « Erreur »
+ou, sur `registry.cancelled`, « Annulée », avec sa durée ; un `finished` sans `started` crée une
+ligne déjà close. Un clic sur la ligne montre la commande, ses paramètres et son résultat, chemins
+masqués. **Arrêter** envoie `request.cancel {"id": <call_id>}` et reste grisé, avec sa raison, sur
+une commande non annulable. Tant qu'un appel est en vol, la saisie, Envoyer, Lancer, Valider le
+plan et Refuser sont grisés (« L'IA externe travaille. »). L'interrupteur « Autoriser une IA
+externe » des Réglages envoie `session.external` ; il est éteint à chaque démarrage du noyau et
+n'affiche que l'état répondu. La case « Me demander avant chaque appel » est retenue d'une session
+QGIS à l'autre ; la changer interrupteur allumé renvoie `session.external {enabled: true, ask}`.
 
 ### `external.approve` (noyau vers extension, requête)
 
@@ -397,6 +407,15 @@ envoyés** (relatifs au projet, AD-9) :
   parti).
 - Le noyau lit toutes ses connexions pendant l'attente (AD-4) : l'attente occupe la session (voir
   « Occupation »), `session.external` reste servi. Aucun appel n'est mis en file derrière elle.
+- **Côté extension** : la question s'affiche dans le panneau, sans fenêtre modale, avec la
+  description de la commande et ses paramètres (chemins masqués), et **Autoriser** / **Refuser**,
+  qui répondent `{"approved": true}` ou `{"approved": false}` à son `id`. Une seule question à la
+  fois : une seconde demande fait répondre `{"approved": false}` à la première. Le retrait par
+  `request.cancel {"id": "core-<n>"}` ferme la question sans réponse, et un clic tardif n'envoie
+  rien. Rien n'est jamais accordé par défaut. Tant que la fenêtre Réglages (modale) est ouverte, la
+  question n'est pas cliquable ; elle expire alors au délai du noyau, ce qui vaut refus. Noyau
+  arrêté, mort ou relancé : interrupteur éteint, question fermée, lignes externes en cours
+  « Annulée ».
 
 ### Occupation
 
