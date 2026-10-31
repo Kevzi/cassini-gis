@@ -444,8 +444,8 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-plusieurs-phrases-enchainees-dans-une-session-sans-saturer-l-plan.md`
   summary: Les couches de resultat retirees de la vue du modele par le budget d'inventaire (5.18) ne sont signalees ni au modele ni a l'utilisateur ; une phrase qui en cite une (« la zone tampon de tout a l'heure ») finit en question ou en plan sans explication.
   evidence: relecture de 5.18 (blind-hunter) ; ni `plan.propose` ni le panneau ne portent de compte des couches retirees.
-  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
-  resolution: Reporté, ticket à créer : signaler au modèle et à l'utilisateur les couches retirées par le budget (nouvelle fonction, hors du ménage).
+  status: ticket, 2026-10-31, entrée 5.33 (`epic-agent-et-mcp/tickets.toml`)
+  resolution: Devenu le ticket 5.33 « Couches retirées par le budget d'inventaire signalées » ; après 5.9.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-plusieurs-phrases-enchainees-dans-une-session-sans-saturer-l-plan.md`
   summary: Non verifie (medium s'il est vrai) : la date d'un fichier de resultat GeoPackage pourrait changer quand QGIS l'ouvre ou le ferme (journal WAL), et fausser l'ordre « plus recents d'abord » du budget d'inventaire.
   evidence: relecture de 5.18 (edge-case-hunter). A trancher : comparer la date d'un `.gpkg` du dossier de travail avant et apres ouverture et fermeture dans QGIS.
@@ -485,8 +485,8 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-phrase-qui-suit-un-plan-a-plusieurs-resultats-sous-30-s-sur-plan.md`
   summary: Retrouver les couches intermédiaires après une relance du noyau ou un journal.replay (par exemple depuis le journal), pour qu'elles ne réapparaissent pas toute la session.
   evidence: State.intermediates est en mémoire et n'est alimenté que par plan.execute ; après relance ou rejeu, les intermédiaires sont vus et peuvent ramener le retrait par paquets de 5.19.
-  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
-  resolution: Reporté, ticket à créer : retrouver les intermédiaires après une relance du noyau ou un rejeu (nouvelle fonction, hors du ménage).
+  status: ticket, 2026-10-31, entrée 5.34 (`epic-agent-et-mcp/tickets.toml`)
+  resolution: Devenu le ticket 5.34 « Couches intermédiaires retrouvées après une relance du noyau ou un rejeu » ; après 5.9.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-phrase-qui-suit-un-plan-a-plusieurs-resultats-sous-30-s-sur-plan.md`
   summary: Famille d'entraînement (5.10) « couche citée introuvable → question sur la couche », pour une phrase qui cite une couche cachée.
   evidence: Recette 5.22, phrase 11 « Montre le tampon de 500 m. » : question hors de propos sur des coordonnées X/Y.
@@ -572,5 +572,5 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-rejeu-d-un-inventaire-demande-apres-la-creation-de-couches-plan.md`
   summary: L'ouverture d'un projet dans QGIS ajoute au journal la poignée de main du client (`system.about`) ; rejouer un journal le modifie donc et allonge son nombre d'étapes.
   evidence: Recette 5.31 (2026-10-31) : rejeu des journaux Antigravity et Claude Code de 5.30 en 20 et 10 étapes au lieu de 19 et 9, journaux remis depuis une copie ; relecture `thorough` de 5.31, constat 9 (medium).
-  status: report, 2026-10-31, entrée 5.8 (`epic-agent-et-mcp/story-refactor-sweep-plan.md`)
-  resolution: Reporté, ticket à créer (décision du propriétaire, 2026-10-31) : poignée de main `system.about` journalisée ; la règle du journal ne change pas en 5.8.
+  status: ticket, 2026-10-31, entrée 5.32 (`epic-agent-et-mcp/tickets.toml`)
+  resolution: Devenu le ticket 5.32 « Rejeu sans poignée de main » ; 5.9 l'attend.

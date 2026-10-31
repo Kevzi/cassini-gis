@@ -9,6 +9,7 @@
 # une variante de plan `question`, a mesurer ; les entrees a risque high passent en relecture
 # a plusieurs lentilles (CLAUDE.md §8).
 
+
 [[entry]]
 id = 1
 type = "story"
@@ -318,15 +319,73 @@ hitl = false
 risk = "low"
 
 [[entry]]
+id = 32
+type = "story"
+title = "Rejeu sans poignee de main : system.about ne s'ajoute plus au journal"
+description = "A l'ouverture d'un projet, l'extension appelle system.about pour lire les versions du noyau, et cet appel s'ecrit au journal comme une etape. Un rejeu dans QGIS rouvre donc le projet et allonge le journal d'une ligne a chaque fois (19 etapes devenues 20 a la recette de 5.31). Apres ce ticket, ouvrir un projet et rejouer son journal ne changent plus le nombre d'etapes du journal ; les journaux deja ecrits, qui portent ces lignes, restent rejouables a l'identique."
+verify = "Tests du noyau sans QGIS : une session qui fait la poignee de main puis une commande journalise une seule ligne ; un journal ancien qui porte une ligne system.about, ecrit par la meme version du noyau, rejoue avec identical: true. Recette dans QGIS : ouvrir un projet, rejouer deux fois son journal, le nombre d'etapes ne bouge pas."
+covers = ["CAP-4", "CAP-8"]
+after = []
+hitl = false
+risk = "high"
+references = [
+  "../deferred-work.md — entree « L'ouverture d'un projet dans QGIS ajoute au journal la poignee de main du client (system.about) »",
+  "story-rejeu-d-un-inventaire-demande-apres-la-creation-de-couches-plan.md — recette, rejeux en 20 et 10 etapes",
+  "../deferred-work.md — entree « Une montee de version du noyau casse sans le dire tout rejeu contenant system.about » (core_version dans le resultat)",
+]
+notes = [
+  "Decision: 2026-10-31 — demande du proprietaire apres 5.8 : ticket a faire avant 5.9, qui l'attend (5.9 prouve un rejeu identique).",
+  "Open question: le noyau cesse de journaliser system.about, ou l'extension prend les versions dans la reponse de session.hello et n'appelle plus system.about (touche le protocole du canal) ; a trancher avec le proprietaire au demarrage, en pesant l'entree sur la montee de version (core_version) : le choix dit si elle est aussi reglee pour les nouveaux journaux.",
+  "Decision: 2026-10-31 — risque high (journal et rejeu) : relecture thorough ; controle exterieur, le proprietaire rejoue lui-meme un journal dans QGIS.",
+]
+
+[[entry]]
 id = 9
 type = "story"
 title = "Suite de bout en bout : phrase, plan valide, execution, rejeu sans l'IA"
 description = "Prouve par un test commite le parcours de la phrase de demo : plan compose, valide, execute par le canal, puis rejoue sans charger le modele avec un resultat identique ; garde reseau sur l'agent et le serveur MCP ; un appel externe passe par le relais (25), journalise avec l'origine external, puis rejoue a l'identique ; re-mesure du taux sur le registre reel (sur GPU) et de la duree par phrase (sur processeur, comme l'entree 11)."
 verify = "La suite passe hors ligne, le rejeu d'un plan s'execute sans que le modele soit charge et rend identical: true, et le taux de plans conformes est consigne."
 covers = ["CAP-4", "CAP-8"]
-after = [8]
+after = [8, 32]
 hitl = false
 risk = "medium"
+
+[[entry]]
+id = 33
+type = "story"
+title = "Couches retirees par le budget d'inventaire signalees"
+description = "Le budget d'inventaire (5.18) retire de la vue du modele les couches de resultat les plus anciennes quand la session s'allonge. Ni le modele ni l'utilisateur ne le savent : une phrase qui cite une de ces couches (« la zone tampon de tout a l'heure ») finit en question ou en plan sans explication. Apres ce ticket, le panneau dit a l'utilisateur combien de couches de resultat le modele ne voit plus, et lesquelles. Dire au modele lui-meme qu'une couche est absente releve d'une famille d'entrainement, hors de ce ticket."
+verify = "Tests du noyau sans QGIS : une session au-dela du budget rend avec plan.propose le compte et les noms des couches retirees ; une session sous le budget n'en rend aucune. Tests de l'extension sans Qt : le panneau affiche la mention quand il y en a, rien sinon."
+covers = ["CAP-4"]
+after = []
+hitl = false
+risk = "low"
+references = [
+  "../deferred-work.md — entree « Les couches de resultat retirees de la vue du modele par le budget d'inventaire (5.18) »",
+  "../deferred-work.md — entree « la date d'un fichier de resultat GeoPackage pourrait changer quand QGIS l'ouvre ou le ferme » (ordre du budget, non verifie)",
+]
+notes = [
+  "Decision: 2026-10-31 — demande du proprietaire apres 5.8 : ticket place apres 5.9 dans l'ordre, sans en dependre.",
+]
+
+[[entry]]
+id = 34
+type = "story"
+title = "Couches intermediaires retrouvees apres une relance du noyau ou un rejeu"
+description = "Le noyau cache au modele les couches intermediaires d'un plan execute (5.22), mais il ne les connait qu'en memoire, d'apres plan.execute. Apres une relance du noyau ou un journal.replay, elles redeviennent visibles toute la session, alourdissent l'inventaire et la duree par phrase. Apres ce ticket, le noyau les retrouve d'apres le journal du projet, et elles restent cachees apres une relance comme apres un rejeu."
+verify = "Tests du noyau sans QGIS : un plan a plusieurs etapes execute, puis une nouvelle session sur le meme projet, cache les memes couches intermediaires ; idem apres journal.replay ; une couche de l'utilisateur n'est jamais cachee."
+covers = ["CAP-4"]
+after = [32]
+hitl = false
+risk = "medium"
+references = [
+  "../deferred-work.md — entree « Retrouver les couches intermediaires apres une relance du noyau ou un journal.replay »",
+  "story-phrase-qui-suit-un-plan-a-plusieurs-resultats-sous-30-s-sur-plan.md — intermediaires caches",
+]
+notes = [
+  "Decision: 2026-10-31 — demande du proprietaire apres 5.8 : ticket place apres 5.9 dans l'ordre, sans en dependre.",
+  "Open question: les identifiants de couche changent d'une session a l'autre ; le lien entre une etape du journal et la couche rechargee se fait par sa source (fichier de sortie), a confirmer au demarrage.",
+]
 
 [[entry]]
 id = 10
