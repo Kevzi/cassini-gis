@@ -446,7 +446,11 @@ que pour Claude Desktop, et ses outils s'autorisent dans
 Antigravity préfixe chaque outil par `mcp_cassini_` et refuse tout nom hors
 `^[a-zA-Z0-9_-]{1,64}$` ; les noms sans point de Cassini y passent. Les outils de Cassini sont bien chargés, mais en `agy -p` le
 modèle commence par une commande shell (`RunCommand`), refusée sans demande dans ce mode, et
-le tour s'arrête sans aucun appel à Cassini. Préférer une session interactive.
+le tour s'arrête sans aucun appel à Cassini. Préférer une session interactive, ou, en
+`agy -p`, interdire les commandes système pour la seule session :
+`agy --settings <fichier.json> -p "<demande>"`, le fichier contenant
+`{"permissions": {"allow": ["mcp(cassini/*)"], "deny": ["command(*)"]}}`. Le modèle se
+rabat alors sur les outils de Cassini.
 
 **Claude Code** ([documentation](https://code.claude.com/docs/en/mcp)) : `claude mcp add cassini -- C:/Users/<vous>/AppData/Local/Cassini/bin/cassini.exe mcp`.
 
