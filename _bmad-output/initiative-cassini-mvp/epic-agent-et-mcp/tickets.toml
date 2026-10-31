@@ -266,13 +266,34 @@ notes = [
 ]
 
 [[entry]]
+id = 30
+type = "story"
+title = "Noms d'outils MCP sans point, acceptes par tous les clients"
+description = "cassini mcp expose chaque commande sous un nom d'outil sans point (analysis.buffer devient analysis_buffer), le meme pour tous les clients, en relais comme en autonome, et ramene ce nom a l'identifiant du registre a l'appel. Le registre, le canal, le journal et le rejeu gardent l'identifiant a point ; l'ancien nom a point reste accepte en appel. docs/canal-local.md (relais vu de cassini mcp) et le README (fiche Antigravity CLI) suivent. Corrige le refus d'Antigravity CLI, successeur de Gemini CLI, qui ecarte les 11 outils de Cassini (motif ^[a-zA-Z0-9_-]{1,64}$), et finit la recette Gemini laissee par 5.27."
+verify = "Tests : chaque nom du catalogue, dans les deux modes, respecte ^[a-zA-Z0-9_-]+$ et tient en 52 caracteres (64 moins le prefixe mcp_cassini_ ajoute par Antigravity) ; deux identifiants du registre ne donnent jamais le meme nom ; un appel par le nom sans point execute la commande et la journalise sous son identifiant a point ; un appel par l'ancien nom a point s'execute aussi, et tools/list ne le montre jamais. Recette avec la sonde probe_external.py : Antigravity CLI joue la phrase de demo (couche, PDF lisible, rejeu identical: true) et Claude Code, rejoue, reste vert."
+covers = ["CAP-8"]
+after = [27]
+hitl = false
+risk = "medium"
+references = [
+  "../deferred-work.md — entree « Noms d'outils MCP sans point »",
+  "../deferred-work.md — entree de 5.7 « Verifier que les clients MCP vises acceptent des noms d'outils avec un point »",
+  "story-recette-claude-gpt-et-gemini-sur-la-phrase-de-demo-qgis-ouve-plan.md — Implementation Notes, apres cloture",
+]
+notes = [
+  "Decision: 2026-10-31 — demande du proprietaire apres la recette de 5.27 : ticket a faire avant 5.8.",
+  "Decision: 2026-10-31 — un seul nom pour tous les clients, aucune ligne propre a un fournisseur (AD-29).",
+  "Decision: 2026-10-31 — l'ancien nom a point reste accepte en appel, pour les clients deja configures ; le catalogue ne montre que le nom sans point.",
+]
+
+[[entry]]
 id = 8
 type = "story"
 title = "Refactor sweep"
 description = "Nettoie ce que l'epic a laisse : doublons entre ai/, serve.rs et le serveur MCP, constats de revue reportes dans deferred-work.md ; le perimetre est fixe au demarrage d'apres les plans et les constats."
 verify = "cargo test, clippy et fmt propres, les constats reportes de l'epic sont traites ou re-reportes avec leur raison."
 covers = []
-after = [1, 2, 3, 4, 5, 6, 7, 11, 12, 13, 14, 16, 18, 19, 20, 21, 24, 28, 25, 29, 26]
+after = [1, 2, 3, 4, 5, 6, 7, 11, 12, 13, 14, 16, 18, 19, 20, 21, 24, 28, 25, 29, 26, 30]
 hitl = false
 risk = "low"
 
