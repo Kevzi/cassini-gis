@@ -425,3 +425,11 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-relais-cassini-mcp-pilote-la-session-qgis-quand-elle-l-autor-plan.md`
   summary: Tester `ping` et l'annulation pendant un appel autonome de `cassini mcp` en vol (moitié autonome de « runtime non bloquant », 5.25).
   evidence: Aucune commande `core` du binaire n'est assez lente pour tenir un appel en vol de façon déterministe ; un retour à une attente bloquante dans `call_autonomous` passerait inaperçu. À faire avec les commandes de terrain (étape 6).
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-recette-claude-gpt-et-gemini-sur-la-phrase-de-demo-qgis-ouve-plan.md`
+  summary: Finir la recette Gemini CLI sur la phrase de démo (sonde `probe_external.py`, nom `gemini`) : couche, PDF et rejeu identique.
+  evidence: Le 2026-10-31, le relais est prouvé avec Gemini CLI 0.66 (catalogue reçu, `project.inventory` réussi, rejeu identique), mais l'API de Google a rendu des 503 « high demand », puis un 429 (quota gratuit de 20 requêtes par jour épuisé). Le propriétaire clôt 5.27 ainsi. À rejouer quand le quota revient, ou avec une clé facturée.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-recette-claude-gpt-et-gemini-sur-la-phrase-de-demo-qgis-ouve-plan.md`
+  summary: Champ `instructions` du serveur MCP (`get_info` de `cassini mcp`) qui dit en quelques phrases que Cassini pilote le projet QGIS ouvert, pour que les clients le prennent d'eux-mêmes.
+  evidence: Recette 5.27 : Codex CLI n'a pas employé Cassini avec la phrase seule (recherche sur le web) et ne l'a fait qu'en nommant QGIS et Cassini ; sa documentation dit qu'il lit `instructions`. Claude Code, lui, l'a pris de lui-même.
