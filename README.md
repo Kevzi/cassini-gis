@@ -376,6 +376,11 @@ Toutes les fiches ci-dessous lancent la même commande : le chemin complet du bi
 `mcp`. On peut ajouter `--project C:/chemin/vers/projet.qgz` : il ne sert qu'en mode
 autonome, pour journaliser chaque appel à côté du projet, comme `cassini run`.
 
+Les outils portent le nom de la commande, le point remplacé par un souligné :
+`analysis_buffer` pour `analysis.buffer`, `system_about` pour `system.about`. C'est le même
+nom pour tous les clients, certains refusant le point. Le journal et le rejeu gardent le nom
+à point de la commande ; un client qui appelle encore l'ancien nom est servi.
+
 **Claude Desktop** ([documentation](https://modelcontextprotocol.io/docs/develop/connect-local-servers)).
 Réglages › Développeur › *Modifier la configuration* ouvre `claude_desktop_config.json`
 (`%APPDATA%\Claude\` ; l'application du Microsoft Store le range sous
@@ -424,6 +429,25 @@ Code Assist for individuals »), et une clé d'API de Google AI Studio, posée d
 `GEMINI_API_KEY`, a servi à la place.
 Les avertissements « unknown format "uint64" ignored » au démarrage sont sans effet.
 
+**Antigravity CLI** (`agy`, successeur de Gemini CLI). Constaté lors de la recette du
+31 octobre 2026 avec `agy` 1.4.12 (pas dans une documentation de Google) : le serveur se
+déclare dans `%USERPROFILE%\.gemini\config\mcp_config.json`, la même entrée `mcpServers`
+que pour Claude Desktop, et ses outils s'autorisent dans
+`%USERPROFILE%\.gemini\antigravity-cli\settings.json` :
+
+```json
+{
+  "permissions": {
+    "allow": ["mcp(cassini/*)"]
+  }
+}
+```
+
+Antigravity préfixe chaque outil par `mcp_cassini_` et refuse tout nom hors
+`^[a-zA-Z0-9_-]{1,64}$` ; les noms sans point de Cassini y passent. Les outils de Cassini sont bien chargés, mais en `agy -p` le
+modèle commence par une commande shell (`RunCommand`), refusée sans demande dans ce mode, et
+le tour s'arrête sans aucun appel à Cassini. Préférer une session interactive.
+
 **Claude Code** ([documentation](https://code.claude.com/docs/en/mcp)) : `claude mcp add cassini -- C:/Users/<vous>/AppData/Local/Cassini/bin/cassini.exe mcp`.
 
 **La recette, avec n'importe lequel de ces clients :**
@@ -432,7 +456,7 @@ Les avertissements « unknown format "uint64" ignored » au démarrage sont sans
    « Autoriser une IA externe » : le bandeau « Une IA externe peut agir sur ce projet »
    apparaît.
 2. Lancer le client (ou le redémarrer s'il était ouvert) et vérifier qu'il voit les
-   outils de Cassini — dont `project.inventory`, `analysis.buffer`, `layout.export_pdf`.
+   outils de Cassini — dont `project_inventory`, `analysis_buffer`, `layout_export_pdf`.
 3. Lui donner la phrase de démo. Chaque appel défile au journal du panneau, marqué
    « IA externe », et les couches produites apparaissent sur la carte.
 4. Couper l'IA externe par **Couper** dans le bandeau.
@@ -449,13 +473,13 @@ appel d'un outil) :
 - **Relais**, quand une session QGIS a allumé le canal d'IA externe dans le panneau :
   `cassini mcp` s'y branche et pilote cette session. Les outils sont alors les
   commandes disponibles de la session, **commandes exécutées par QGIS comprises**
-  (`layer.describe`, `analysis.buffer`…), avec leurs schémas ; chaque appel est
+  (`layer_describe`, `analysis_buffer`…), avec leurs schémas ; chaque appel est
   exécuté et journalisé par la session, avec l'origine `external`, sous les yeux de
   l'utilisateur. Le relais ne décide rien et n'exécute rien lui-même ; `--project`
   n'est pas transmis à la session, et aucun chemin absolu ne passe sur le canal,
   dans aucun sens.
-- **Autonome** sinon : seules les commandes du noyau sont exposées (`system.about`,
-  `model.list`), sans QGIS.
+- **Autonome** sinon : seules les commandes du noyau sont exposées (`system_about`,
+  `model_list`), sans QGIS.
 
 Tout changement de mode ou de catalogue est annoncé au client par
 `notifications/tools/list_changed`, qu'il suit en relisant la liste des outils. Un

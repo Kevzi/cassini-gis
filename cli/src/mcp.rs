@@ -51,45 +51,98 @@ struct Job {
     reply: oneshot::Sender<Reply>,
 }
 
-/// Le catalogue d'outils autonome : une entrée par commande `runs_in: core`, schémas du registre.
-pub(crate) fn catalogue(registry: &Registry) -> Vec<Tool> {
-    registry
-        .specs()
-        .filter(|s| s.runs_in == Some(RunsIn::Core))
-        .map(|s| {
-            let description = format!("{}\n{}", s.description_fr, s.description_en);
-            Tool::new(
-                s.id.clone(),
-                description,
-                Arc::new(object(&s.params_schema)),
-            )
-            .with_raw_output_schema(Arc::new(object(&s.output_schema)))
-        })
+/// Un outil servi et l'identifiant du registre qu'il appelle : le nom exposé n'est pas
+/// réversible en général (`a_b.c` et `a.b_c`), d'où la table tenue avec le catalogue servi.
+#[derive(Clone)]
+pub(crate) struct Exposed {
+    pub(crate) id: String,
+    pub(crate) tool: Tool,
+}
+
+/// Le nom MCP d'une commande : son identifiant, le point remplacé par un souligné
+/// (`analysis.buffer` → `analysis_buffer`). Un seul nom pour tous les clients et les deux modes
+/// (AD-29) : certains clients refusent tout nom hors `^[a-zA-Z0-9_-]{1,64}$`. Le registre, le
+/// canal d'IA externe, le journal et le rejeu gardent l'identifiant à point.
+pub(crate) fn tool_name(id: &str) -> String {
+    id.replace('.', "_")
+}
+
+/// Ne garde, pour un même nom exposé, que la première commande : deux identifiants donnant le
+/// même nom ne peuvent pas être servis sous ce nom à la fois.
+fn first_per_name(entries: impl Iterator<Item = Exposed>) -> Vec<Exposed> {
+    let mut seen = std::collections::HashSet::new();
+    entries
+        .filter(|e| seen.insert(e.tool.name.to_string()))
         .collect()
 }
 
+/// Le catalogue d'outils autonome : une entrée par commande `runs_in: core`, schémas du registre.
+pub(crate) fn catalogue(registry: &Registry) -> Vec<Exposed> {
+    first_per_name(
+        registry
+            .specs()
+            .filter(|s| s.runs_in == Some(RunsIn::Core))
+            .map(|s| {
+                let description = format!("{}\n{}", s.description_fr, s.description_en);
+                let tool = Tool::new(
+                    tool_name(&s.id),
+                    description,
+                    Arc::new(object(&s.params_schema)),
+                )
+                .with_raw_output_schema(Arc::new(object(&s.output_schema)));
+                Exposed {
+                    id: s.id.clone(),
+                    tool,
+                }
+            }),
+    )
+}
+
 /// Le catalogue d'outils du relais, tiré du catalogue d'`external.attach` : une entrée par
-/// commande `available`, de même forme que le catalogue autonome (nom `id`, description en
-/// français puis en anglais, schémas de la session). Le registre propre du relais n'est jamais lu.
-pub(crate) fn catalogue_from_session(commands: &[Value]) -> Vec<Tool> {
-    commands
+/// commande `available`, de même forme que le catalogue autonome (nom tiré de l'`id`, description
+/// en français puis en anglais, schémas de la session). Le registre propre du relais n'est jamais
+/// lu.
+pub(crate) fn catalogue_from_session(commands: &[Value]) -> Vec<Exposed> {
+    first_per_name(
+        commands
+            .iter()
+            .filter(|entry| entry["available"] == json!(true))
+            .filter_map(|entry| {
+                let id = entry["id"].as_str()?;
+                let text = |key: &str| entry[key].as_str().unwrap_or_default().to_string();
+                let description = format!("{}\n{}", text("description_fr"), text("description_en"));
+                let tool = Tool::new(
+                    tool_name(id),
+                    description,
+                    Arc::new(object(&entry["params_schema"])),
+                );
+                let tool = match entry["output_schema"].as_object() {
+                    Some(output) => tool.with_raw_output_schema(Arc::new(output.clone())),
+                    None => tool,
+                };
+                Some(Exposed {
+                    id: id.to_string(),
+                    tool,
+                })
+            }),
+    )
+}
+
+/// L'identifiant du registre qu'appelle `name` dans le catalogue servi : le nom exposé d'abord,
+/// puis l'ancien nom à point, accepté en appel sans figurer au catalogue. Un identifiant du
+/// registre a exactement un point (contrat `domaine.verbe`), et la session tire son catalogue du
+/// registre : un nom exposé n'est donc jamais un identifiant, et l'ordre ne peut pas se tromper.
+pub(crate) fn resolve<'a>(served: &'a [Exposed], name: &str) -> Option<&'a str> {
+    served
         .iter()
-        .filter(|entry| entry["available"] == json!(true))
-        .filter_map(|entry| {
-            let id = entry["id"].as_str()?;
-            let text = |key: &str| entry[key].as_str().unwrap_or_default().to_string();
-            let description = format!("{}\n{}", text("description_fr"), text("description_en"));
-            let tool = Tool::new(
-                id.to_string(),
-                description,
-                Arc::new(object(&entry["params_schema"])),
-            );
-            Some(match entry["output_schema"].as_object() {
-                Some(output) => tool.with_raw_output_schema(Arc::new(output.clone())),
-                None => tool,
-            })
-        })
-        .collect()
+        .find(|e| e.tool.name == name)
+        .or_else(|| served.iter().find(|e| e.id == name))
+        .map(|e| e.id.as_str())
+}
+
+/// Les seuls outils, tels que le client les lit.
+fn tools(served: &[Exposed]) -> Vec<Tool> {
+    served.iter().map(|e| e.tool.clone()).collect()
 }
 
 /// Le schéma en objet JSON ; un schéma qui n'est pas un objet ne devrait pas exister (schemars
@@ -181,15 +234,15 @@ struct Modes {
 /// Le gestionnaire MCP : le catalogue autonome, l'émetteur vers le fil qui tient le registre (et
 /// la session, qui n'est pas `Send`), et le canal d'IA externe de l'utilisateur.
 struct CassiniMcp {
-    autonomous: Vec<Tool>,
+    autonomous: Vec<Exposed>,
     jobs: mpsc::Sender<Job>,
     /// `None` : le nom du canal n'a pas pu être résolu, le serveur reste autonome.
     channel: Option<ChannelName>,
     modes: Arc<Mutex<Modes>>,
 }
 
-fn fingerprint(tools: &[Tool]) -> Value {
-    serde_json::to_value(tools).unwrap_or(Value::Null)
+fn fingerprint(served: &[Exposed]) -> Value {
+    serde_json::to_value(tools(served)).unwrap_or(Value::Null)
 }
 
 impl CassiniMcp {
@@ -205,7 +258,7 @@ impl CassiniMcp {
     /// Choisit le mode de la requête (AD-13) : connexion vivante, relais ; sinon tentative de
     /// branchement, relais ou autonome. Annonce `list_changed` si le catalogue servi diffère du
     /// dernier annoncé.
-    async fn decide(&self, peer: &Peer<RoleServer>) -> (Mode, Vec<Tool>) {
+    async fn decide(&self, peer: &Peer<RoleServer>) -> (Mode, Vec<Exposed>) {
         let mut modes = self.modes.lock().await;
         modes.peer = Some(peer.clone());
         let mode = match modes.relay.clone().filter(|r| r.alive()) {
@@ -222,16 +275,16 @@ impl CassiniMcp {
                 }
             }
         };
-        let tools = match &mode {
+        let served = match &mode {
             Mode::Relay(relay) => catalogue_from_session(relay.commands()),
             Mode::Autonomous | Mode::Mismatch(_) => self.autonomous.clone(),
         };
-        let served = fingerprint(&tools);
-        if modes.announced.as_ref().is_some_and(|a| *a != served) {
+        let print = fingerprint(&served);
+        if modes.announced.as_ref().is_some_and(|a| *a != print) {
             let _ = peer.notify_tool_list_changed().await;
         }
-        modes.announced = Some(served);
-        (mode, tools)
+        modes.announced = Some(print);
+        (mode, served)
     }
 
     /// Tente le branchement au canal, hors du runtime (la connexion et la poignée de main sont
@@ -261,14 +314,14 @@ impl CassiniMcp {
         request: CallToolRequestParams,
         context: &RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
-        let (mode, tools) = self.decide(&context.peer).await;
+        let (mode, served) = self.decide(&context.peer).await;
         // Versions différentes : chaque appel est refusé par le message qui nomme le binaire à
         // mettre à jour, quel que soit l'outil.
         if let Mode::Mismatch(report) = &mode {
             return Ok(tool_error(report));
         }
         let name = request.name.to_string();
-        if !tools.iter().any(|t| t.name == name) {
+        let Some(id) = resolve(&served, &name).map(str::to_string) else {
             let scope = match mode {
                 Mode::Relay(_) => "les commandes disponibles de la session QGIS",
                 _ => {
@@ -280,11 +333,11 @@ impl CassiniMcp {
                 format!("Outil inconnu : « {name} » (seules {scope} sont exposées)."),
                 None,
             ));
-        }
+        };
         let params = request.arguments.map(Value::Object).unwrap_or(json!({}));
         match mode {
-            Mode::Autonomous => self.call_autonomous(name, params, context).await,
-            Mode::Relay(relay) => call_relay(&relay, &name, params, context).await,
+            Mode::Autonomous => self.call_autonomous(id, params, context).await,
+            Mode::Relay(relay) => call_relay(&relay, &id, params, context).await,
             Mode::Mismatch(report) => Ok(tool_error(&report)),
         }
     }
@@ -316,11 +369,11 @@ impl CassiniMcp {
 /// client, qui devient `request.cancel` ; la réponse est alors attendue jusqu'au bout.
 async fn call_relay(
     relay: &Relay,
-    name: &str,
+    command: &str,
     params: Value,
     context: &RequestContext<RoleServer>,
 ) -> Result<CallToolResult, McpError> {
-    let (id, mut answer) = relay.run(name, params);
+    let (id, mut answer) = relay.run(command, params);
     let outcome = match first(&mut answer, context.ct.cancelled()).await {
         Either::Left(outcome) => outcome,
         Either::Right(()) => {
@@ -372,8 +425,8 @@ impl ServerHandler for CassiniMcp {
         _request: Option<PaginatedRequestParams>,
         context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
-        let (_, tools) = self.decide(&context.peer).await;
-        Ok(ListToolsResult::with_all_items(tools))
+        let (_, served) = self.decide(&context.peer).await;
+        Ok(ListToolsResult::with_all_items(tools(&served)))
     }
 
     /// Chaque requête est une tâche du runtime : l'attente de l'appel le laisse libre de servir
@@ -524,19 +577,32 @@ fn io_failure(err: &mut dyn Write, detail: &str) -> i32 {
 mod tests {
     use super::*;
 
+    /// Les entrées d'un `external.attach` tirées du registre, toutes disponibles.
+    fn attach_entries(registry: &Registry) -> Vec<Value> {
+        registry
+            .specs()
+            .map(|s| {
+                let mut entry = serde_json::to_value(s).unwrap();
+                entry["available"] = json!(true);
+                entry
+            })
+            .collect()
+    }
+
     #[test]
     fn the_catalogue_holds_every_core_command_and_no_qgis_one() {
         let registry = Registry::standard();
-        let tools = catalogue(&registry);
+        let served = catalogue(&registry);
         let core: Vec<&str> = registry
             .specs()
             .filter(|s| s.runs_in == Some(RunsIn::Core))
             .map(|s| s.id.as_str())
             .collect();
-        let names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
-        assert_eq!(names, core);
-        for tool in &tools {
-            let spec = registry.spec(&tool.name).unwrap();
+        let ids: Vec<&str> = served.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, core);
+        for Exposed { id, tool } in &served {
+            assert_eq!(tool.name, tool_name(id));
+            let spec = registry.spec(id).unwrap();
             assert_eq!(
                 Value::Object((*tool.input_schema).clone()),
                 spec.params_schema
@@ -552,7 +618,7 @@ mod tests {
         }
         assert!(registry
             .specs()
-            .any(|s| s.runs_in == Some(RunsIn::Qgis) && !names.contains(&s.id.as_str())));
+            .any(|s| s.runs_in == Some(RunsIn::Qgis) && !ids.contains(&s.id.as_str())));
     }
 
     /// Le catalogue d'un `external.attach`, tel que la session le rend : chaque entrée
@@ -561,25 +627,22 @@ mod tests {
     #[test]
     fn the_relay_catalogue_comes_from_the_attach_entries() {
         let registry = Registry::standard();
-        let mut commands: Vec<Value> = registry
-            .specs()
-            .map(|s| {
-                let mut entry = serde_json::to_value(s).unwrap();
-                entry["available"] = json!(s.id != "analysis.intersect");
-                entry
-            })
-            .collect();
+        let mut commands = attach_entries(&registry);
+        for entry in &mut commands {
+            entry["available"] = json!(entry["id"] != "analysis.intersect");
+        }
         commands.push(json!({"id": "x.unavailable", "available": false}));
-        let tools = catalogue_from_session(&commands);
-        let names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
+        let served = catalogue_from_session(&commands);
+        let ids: Vec<&str> = served.iter().map(|e| e.id.as_str()).collect();
         let expected: Vec<&str> = registry
             .specs()
             .map(|s| s.id.as_str())
             .filter(|id| *id != "analysis.intersect")
             .collect();
-        assert_eq!(names, expected);
-        for tool in &tools {
-            let spec = registry.spec(&tool.name).unwrap();
+        assert_eq!(ids, expected);
+        for Exposed { id, tool } in &served {
+            assert_eq!(tool.name, tool_name(id));
+            let spec = registry.spec(id).unwrap();
             assert_eq!(
                 Value::Object((*tool.input_schema).clone()),
                 spec.params_schema
@@ -596,14 +659,72 @@ mod tests {
         // Le catalogue autonome est le sous-ensemble `core` de la même forme.
         let core: Vec<Value> = catalogue(&registry)
             .iter()
-            .map(|t| serde_json::to_value(t).unwrap())
+            .map(|e| serde_json::to_value(&e.tool).unwrap())
             .collect();
-        let relayed: Vec<Value> = tools
+        let relayed: Vec<Value> = served
             .iter()
-            .filter(|t| registry.spec(&t.name).unwrap().runs_in == Some(RunsIn::Core))
-            .map(|t| serde_json::to_value(t).unwrap())
+            .filter(|e| registry.spec(&e.id).unwrap().runs_in == Some(RunsIn::Core))
+            .map(|e| serde_json::to_value(&e.tool).unwrap())
             .collect();
         assert_eq!(core, relayed);
+    }
+
+    /// Les noms servis, dans les deux modes, passent chez tous les clients : motif
+    /// `^[a-zA-Z0-9_-]+$`, aucun point, 52 caractères au plus (64 moins `mcp_cassini_`).
+    #[test]
+    fn every_served_name_fits_every_client() {
+        let registry = Registry::standard();
+        let relay = catalogue_from_session(&attach_entries(&registry));
+        assert_eq!(relay.len(), registry.specs().count());
+        for Exposed { tool, .. } in catalogue(&registry).iter().chain(&relay) {
+            let name = tool.name.as_ref();
+            assert!(!name.is_empty() && name.len() <= 52, "{name}");
+            assert!(
+                name.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'),
+                "{name}"
+            );
+        }
+    }
+
+    /// Deux identifiants du registre ne donnent jamais le même nom : aucune commande n'est
+    /// écartée du catalogue par une collision.
+    #[test]
+    fn no_two_registry_ids_share_a_name() {
+        let registry = Registry::standard();
+        let names: std::collections::HashSet<String> =
+            registry.specs().map(|s| tool_name(&s.id)).collect();
+        assert_eq!(names.len(), registry.specs().count());
+    }
+
+    /// Le nom exposé et l'ancien nom à point appellent la même commande ; un nom inconnu, sous
+    /// l'une ou l'autre forme, n'en appelle aucune.
+    #[test]
+    fn both_names_resolve_to_the_registry_id() {
+        let served = catalogue(&Registry::standard());
+        assert_eq!(resolve(&served, "system_about"), Some("system.about"));
+        assert_eq!(resolve(&served, "system.about"), Some("system.about"));
+        assert_eq!(resolve(&served, "foo_bar"), None);
+        assert_eq!(resolve(&served, "foo.bar"), None);
+        // Hors catalogue du mode courant : une commande QGIS n'est pas servie en autonome.
+        assert_eq!(resolve(&served, "analysis_buffer"), None);
+        assert_eq!(resolve(&served, "analysis.buffer"), None);
+    }
+
+    /// Deux entrées de session donnant le même nom : seule la première est servie, et le nom
+    /// l'appelle ; l'ancien nom de chacune reste celui de sa propre entrée.
+    #[test]
+    fn a_session_name_collision_keeps_the_first_entry() {
+        let commands = vec![
+            json!({"id": "a_b.c", "available": true}),
+            json!({"id": "a.b_c", "available": true}),
+        ];
+        let served = catalogue_from_session(&commands);
+        assert_eq!(served.len(), 1);
+        assert_eq!(served[0].tool.name, "a_b_c");
+        assert_eq!(resolve(&served, "a_b_c"), Some("a_b.c"));
+        assert_eq!(resolve(&served, "a_b.c"), Some("a_b.c"));
+        assert_eq!(resolve(&served, "a.b_c"), None);
     }
 
     #[test]
