@@ -1,8 +1,9 @@
 """Client du canal local : JSON-RPC 2.0, un objet JSON par ligne.
 
 Le client ne contient aucune logique métier. Il lance le noyau (processus
-enfant), envoie `session.hello` puis `command.run` de `system.about`, rend le
-résultat par un rappel, puis sert d'exécutant au noyau : il traite
+enfant), envoie `session.hello` et rend sa réponse (versions et catalogue, ou
+refus si la session est en lecture seule) par un rappel, sans lancer aucune
+commande journalisée ; il sert ensuite d'exécutant au noyau : il traite
 `order.execute` en lançant le geste enregistré et relaie `request.cancel`.
 Il porte aussi les plans de l'agent (`plan.propose`, `plan.execute`,
 `plan.reject`, notification `plan.step`) sans jamais les composer ni les
@@ -24,7 +25,7 @@ import json
 PROTOCOL_VERSION = 2
 
 # Événements rendus au rappel `on_event(kind, payload)`.
-READY = "ready"  # payload : {"core_version", "protocol_version"}
+READY = "ready"  # payload : {"core_version", "protocol_version", "commands"}
 FAILED = "failed"  # payload : message à afficher tel quel
 DIED = "died"  # payload : message
 ORDER_STARTED = "order_started"  # payload : id de la commande
@@ -473,12 +474,19 @@ class CoreClient:
         elif "error" in msg:
             self._fail(self._error_message(msg["error"]))
         elif step == "hello":
-            result = msg.get("result") or {}
+            # Versions et lecture seule viennent de la poignée de main : aucune
+            # commande n'est lancée au démarrage, le journal reste intact (5.32).
+            result = msg.get("result")
+            if not isinstance(result, dict):
+                result = {}
+            if result.get("read_only") is True:
+                message = result.get("message")
+                if not isinstance(message, str) or not message:
+                    message = "Le journal de ce projet est tenu par une autre session : cette session est en lecture seule."
+                self._fail(message)
+                return
             commands = result.get("commands")
             self._catalogue = [c for c in commands if isinstance(c, dict)] if isinstance(commands, list) else []
-            self._request("command.run", {"command": "system.about", "params": {}}, "about")
-        elif step == "about":
-            result = msg.get("result") or {}
             self._ready = True
             self._finish(
                 READY,

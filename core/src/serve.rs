@@ -34,7 +34,7 @@ use serde_json::{json, Map, Value};
 use crate::error::ErrorReport;
 use crate::exec::{Executor, Router};
 pub use crate::external::ChannelName;
-use crate::journal::{Replay, Session};
+use crate::journal::{JournalError, Mode, Replay, Session};
 use crate::registry::{Registry, RegistryError, RunsIn, PROTOCOL_VERSION};
 
 const PARSE_ERROR: i64 = -32700;
@@ -867,6 +867,9 @@ fn hello(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, RpcErro
         .with_qgis(Channel {
             link: state.link.clone(),
         });
+    // La session dit dès la poignée de main si elle est en lecture seule : l'extension
+    // n'a plus à lancer une commande pour le découvrir (ticket 5.32).
+    let read_only = session.mode() == Mode::ReadOnly;
     state.session = Some(session);
     state.project = Some(project.to_string());
     state.announced = commands;
@@ -876,11 +879,16 @@ fn hello(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, RpcErro
         .filter(|entry| entry["available"] == json!(true))
         .collect();
     state.link.external.set_catalogue(available);
-    Ok(json!({
+    let mut result = json!({
         "protocol_version": PROTOCOL_VERSION,
         "core_version": crate::VERSION,
+        "read_only": read_only,
         "commands": catalogue(state),
-    }))
+    });
+    if read_only {
+        result["message"] = json!(JournalError::ReadOnly.to_string());
+    }
+    Ok(result)
 }
 
 fn is_available(state: &State<'_>, id: &str, runs_in: Option<RunsIn>) -> bool {
@@ -1039,6 +1047,72 @@ mod tests {
         assert_eq!(r[1]["result"]["core_version"], crate::VERSION);
         let journal = std::fs::read_to_string(dir.join("p.cassini/journal.jsonl")).unwrap();
         assert_eq!(journal.lines().count(), 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn hello_alone_writes_no_journal_and_says_the_session_writes() {
+        let dir = temp_dir();
+        let project = project_in(&dir);
+        let journal = dir.join("p.cassini/journal.jsonl");
+        let r = exchange(&[hello_line(2, &[], &project)]);
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0]["result"]["read_only"], false);
+        assert!(r[0]["result"].get("message").is_none());
+        assert_eq!(r[0]["result"]["core_version"], crate::VERSION);
+        assert_eq!(r[0]["result"]["protocol_version"], 2);
+        // La poignée de main seule n'écrit aucune étape : le fichier n'existe pas.
+        assert!(!journal.exists());
+        let r = exchange(&[
+            hello_line(2, &[], &project),
+            run_line(2, "system.about", json!({})),
+        ]);
+        assert!(r[1]["result"].is_object());
+        assert_eq!(
+            std::fs::read_to_string(&journal).unwrap().lines().count(),
+            1
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn replaying_twice_leaves_the_journal_byte_for_byte() {
+        let dir = temp_dir();
+        let project = project_in(&dir);
+        let journal = dir.join("p.cassini/journal.jsonl");
+        // Un ancien journal : le system.about d'accueil, puis une commande.
+        exchange(&[
+            hello_line(2, &[], &project),
+            run_line(2, "system.about", json!({})),
+            run_line(3, "system.about", json!({})),
+        ]);
+        let before = std::fs::read(&journal).unwrap();
+        assert_eq!(String::from_utf8_lossy(&before).lines().count(), 2);
+        for _ in 0..2 {
+            let r = exchange(&[
+                hello_line(2, &[], &project),
+                json!({"jsonrpc":"2.0","id":2,"method":"journal.replay"}).to_string(),
+            ]);
+            assert_eq!(r[1]["result"], json!({"steps": 2, "identical": true}));
+            assert_eq!(std::fs::read(&journal).unwrap(), before);
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_second_session_says_read_only_at_hello() {
+        let dir = temp_dir();
+        let project = project_in(&dir);
+        let registry = Registry::standard();
+        let first = Session::open(&registry, Path::new(&project)).unwrap();
+        assert_eq!(first.mode(), Mode::Write);
+        let r = exchange(&[hello_line(2, &[], &project)]);
+        assert_eq!(r[0]["result"]["read_only"], true);
+        // Le texte même que rend toute commande de cette session (`journal.read_only`).
+        let refusal = ErrorReport::from(JournalError::ReadOnly);
+        assert_eq!(refusal.code, "journal.read_only");
+        assert_eq!(r[0]["result"]["message"], json!(refusal.message));
+        drop(first);
         let _ = std::fs::remove_dir_all(dir);
     }
 

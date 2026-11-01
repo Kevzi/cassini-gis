@@ -140,7 +140,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 
 - source_plan: `epic-registre-projet-import/epic-registre-projet-import-retrospective.md`
   summary: Une montée de version du noyau casse sans le dire tout rejeu contenant `system.about` ; `versions` du journal n'est jamais relu au rejeu.
-  evidence: F12 de la rétro de l'epic 2 (action R8, non reportée à la rétro de l'epic 9). `core_version` figure dans le résultat de `system.about`, qui est journalisé à chaque démarrage du client ; au rejeu après une montée de version, la comparaison diverge sur cette étape. Remède possible : ne pas comparer `core_version` (masque, comme `layer_id`), ou lire `versions` et le dire.
+  evidence: F12 de la rétro de l'epic 2 (action R8, non reportée à la rétro de l'epic 9). `core_version` figure dans le résultat de `system.about`, qui est journalisé à chaque démarrage du client ; au rejeu après une montée de version, la comparaison diverge sur cette étape. Remède possible : ne pas comparer `core_version` (masque, comme `layer_id`), ou lire `versions` et le dire. Annotation 5.32 (2026-10-31) : les journaux ouverts par l'extension 5.32 n'ont plus de `system.about` d'accueil, l'extension lisant les versions dans la réponse de `session.hello`. Restent exposés : les anciens journaux, qui portent cette ligne dès l'étape 1 et divergeront à la première montée de version ; un `system.about` lancé à la main (mode expert, CLI, MCP), journalisé comme toute commande ; une extension antérieure à 5.32 couplée à un noyau neuf, qui lance encore ce `system.about` au démarrage.
 
 - source_plan: `epic-registre-projet-import/epic-registre-projet-import-retrospective.md`
   summary: `p.qgz` et `p.qgs` côte à côte partagent le même dossier `p.cassini` (journal et verrou) ; un `p.cassini` en lien symbolique écrit hors du dossier de travail (AD-10).
@@ -574,3 +574,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
   evidence: Recette 5.31 (2026-10-31) : rejeu des journaux Antigravity et Claude Code de 5.30 en 20 et 10 étapes au lieu de 19 et 9, journaux remis depuis une copie ; relecture `thorough` de 5.31, constat 9 (medium).
   status: ticket, 2026-10-31, entrée 5.32 (`epic-agent-et-mcp/tickets.toml`)
   resolution: Devenu le ticket 5.32 « Rejeu sans poignée de main » ; 5.9 l'attend.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-rejeu-sans-poignee-de-main-system-about-ne-s-ajoute-plus-au-plan.md`
+  summary: Une seconde fenêtre QGIS en lecture seule montre le bandeau `refused` avec le bouton « Choisir le noyau », qui ne sert à rien, et sans « Relancer » une fois la première fenêtre fermée.
+  evidence: `panel.py:126` (`"refused": ("refused", "choose")`) ; avant 5.32 la lecture seule tombait déjà sur ce bandeau ; depuis 5.32 le message du noyau y est affiché, mais l'action reste celle d'un refus de version (relecture `thorough` de 5.32, passe 3).

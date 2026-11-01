@@ -123,18 +123,45 @@ class ClientTest(unittest.TestCase):
         self.assertEqual(hello["method"], "session.hello")
         self.assertEqual(hello["params"]["project"], "C:/a/p.qgz")
         self.assertEqual(hello["params"]["protocol_version"], 2)
-        data = reply(1, {"protocol_version": 2, "core_version": "0.1", "commands": []})
+        catalogue = [{"id": "system.about", "available": True}]
+        data = reply(1, {"protocol_version": 2, "core_version": "0.1.0",
+                         "read_only": False, "commands": catalogue})
         self.p.feed(data[:10])  # réponse coupée : le cadrage par ligne tient
-        self.assertEqual(len(self.p.written), 1)
+        self.assertEqual(self.events, [])
         self.p.feed(data[10:])
-        run = self.sent()[1]
-        self.assertEqual(run["method"], "command.run")
-        self.assertEqual(run["params"], {"command": "system.about", "params": {}})
-        self.p.feed(reply(2, {"core_version": "0.1.0", "protocol_version": 2}))
+        # Les versions viennent du hello : aucun command.run, rien de journalisé.
+        self.assertEqual(len(self.p.written), 1)
         self.assertEqual(
             self.events,
-            [(client.READY, {"core_version": "0.1.0", "protocol_version": 2, "commands": []})],
+            [(client.READY, {"core_version": "0.1.0", "protocol_version": 2,
+                             "commands": catalogue})],
         )
+
+    def test_hello_without_versions_is_ready_with_none(self):
+        self.c.start("cassini", "/p.qgz")
+        self.p.feed(reply(1, {"commands": []}))
+        self.assertEqual(
+            self.events,
+            [(client.READY, {"core_version": None, "protocol_version": None, "commands": []})],
+        )
+        self.assertEqual(len(self.p.written), 1)
+        self.assertFalse(self.p.closed)
+
+    def test_writing_session_is_ready(self):
+        self.c.start("cassini", "/p.qgz")
+        self.p.feed(reply(1, {"protocol_version": 2, "core_version": "0.1.0",
+                              "read_only": False, "commands": []}))
+        self.assertEqual([k for k, _ in self.events], [client.READY])
+        self.assertFalse(self.p.closed)
+
+    def test_read_only_session_fails_at_hello_with_the_core_message(self):
+        self.c.start("cassini", "/p.qgz")
+        message = "Le journal de ce projet est tenu par une autre session : lecture seule."
+        self.p.feed(reply(1, {"protocol_version": 2, "core_version": "0.1.0",
+                              "read_only": True, "message": message, "commands": []}))
+        self.assertEqual(self.events, [(client.FAILED, message)])
+        self.assertTrue(self.p.closed)  # noyau arrêté
+        self.assertEqual(len(self.p.written), 1)
 
     def test_mismatch_shown_as_is_and_core_stopped(self):
         self.c.start("cassini", "/p.qgz")
@@ -210,7 +237,6 @@ class OrderTest(unittest.TestCase):
         )
         self.c.start("cassini", "/p.qgz")
         self.p.feed(reply(1, {"protocol_version": 2, "core_version": "0.1", "commands": []}))
-        self.p.feed(reply(2, {"core_version": "0.1.0", "protocol_version": 2}))
         self.base = len(self.p.written)
 
     def order(self, ident="core-1", command="test.qgis_probe", params=None):
@@ -350,7 +376,6 @@ class RunTest(unittest.TestCase):
     def ready(self):
         self.p.feed(reply(1, {"protocol_version": 2, "core_version": "0.1",
                               "commands": self.CATALOGUE}))
-        self.p.feed(reply(2, {"core_version": "0.1.0", "protocol_version": 2}))
         self.base = len(self.p.written)
 
     def new(self):
@@ -501,11 +526,13 @@ class FakePanel:
     def __init__(self, actions):
         self.lang = "fr"
         self.banners = []
+        self.messages = []
         self.ready = None
         self.events = []
 
-    def set_banner(self, kind):
+    def set_banner(self, kind, message=None):
         self.banners.append(kind)
+        self.messages.append(message)
 
     def set_ready(self, catalogue):
         self.ready = catalogue
@@ -537,6 +564,142 @@ def load_plugin():
         sys.modules["cassini_stub." + n] = sys.modules[n]
     mod("cassini_stub.panel", CassiniPanel=FakePanel)
     return importlib.import_module("cassini_stub.plugin")
+
+
+class Recorder:
+    """Widget muet : tout attribut est un enregistreur appelable ; `calls` garde ses appels."""
+
+    def __init__(self, name=None, parent=None):
+        self.__dict__["calls"] = []
+        self.__dict__["_name"] = name
+        self.__dict__["_parent"] = parent
+
+    def __getattr__(self, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        child = Recorder(name, self)
+        self.__dict__[name] = child
+        return child
+
+    def __call__(self, *args):
+        if self._parent is not None:
+            self._parent.calls.append((self._name, args))
+        return Recorder()
+
+
+def load_panel():
+    """Charge le vrai panneau, Qt remplacé par des doubles muets."""
+    import importlib
+    import types
+
+    class Stub:
+        def __init__(self, *a, **k):
+            pass
+
+    def mod(name):
+        m = types.ModuleType(name)
+        m.__getattr__ = lambda attr: Stub
+        sys.modules[name] = m
+
+    for name in ("qgis", "qgis.PyQt", "qgis.PyQt.QtCore", "qgis.PyQt.QtGui",
+                 "qgis.PyQt.QtWidgets"):
+        mod(name)
+    pkg = types.ModuleType("cassini_panel_stub")
+    pkg.__path__ = [PKG]
+    sys.modules["cassini_panel_stub"] = pkg
+    return importlib.import_module("cassini_panel_stub.panel")
+
+
+class PanelBannerTest(unittest.TestCase):
+    """Le bandeau `refused` montre le message du noyau tel quel (5.32)."""
+
+    def setUp(self):
+        def stubbed(k):
+            return k in ("qgis", "cassini_panel_stub") or k.startswith(
+                ("qgis.", "cassini_panel_stub."))
+
+        saved = {k: v for k, v in sys.modules.items() if stubbed(k)}
+
+        def restore():
+            for k in [k for k in sys.modules if stubbed(k)]:
+                del sys.modules[k]
+            sys.modules.update(saved)
+
+        self.addCleanup(restore)
+        self.mod = load_panel()
+        cls = self.mod.CassiniPanel
+        self.panel = cls.__new__(cls)
+        self.panel.lang = "fr"
+        self.panel.banner = None
+        self.panel.banner_message = None
+        self.panel.focus = None
+        self.panel.ready = True
+        self.panel.title = None
+        self.panel.banner_text = None
+        self.panel.render = lambda: None
+        self.panel._drop_stale_run = lambda: None
+        self.announced = []
+        real = self.mod._announce
+        self.addCleanup(setattr, self.mod, "_announce", real)
+        self.mod._announce = lambda widget, text: self.announced.append(text)
+
+    def test_read_only_message_shown_as_is(self):
+        message = "Le journal de ce projet est tenu par une autre session : lecture seule."
+        self.panel.set_banner("refused", message)
+        self.assertEqual(self.panel.banner, "refused")
+        self.assertFalse(self.panel.ready)
+        self.assertEqual(self.panel._banner_text(self.panel.t), message)
+        self.assertEqual(self.announced, [message])
+
+    def rendered_banner(self, message):
+        """Lance le vrai `render()` (widgets enregistreurs) et rend les appels du bandeau."""
+        import types
+
+        panel = self.panel
+        panel.set_banner("refused", message)
+        del panel.render  # le vrai render de la classe
+        for name in ("title", "settings_button", "settings_zone", "lang_label", "lang_box",
+                     "model_label", "banner_zone", "banner_text", "banner_button", "input",
+                     "send_button", "result_title", "details", "log_title", "log_empty",
+                     "log_list", "expert", "footer"):
+            setattr(panel, name, Recorder())
+        for name in ("_render_models", "_render_external", "_render_agent", "_render_result",
+                     "_render_commands", "_render_buttons"):
+            setattr(panel, name, lambda: None)
+        panel.log = types.SimpleNamespace(entries=[])
+        panel.agent = types.SimpleNamespace(phase=self.mod.agentview.IDLE)
+        panel.render()
+        self.assertIn(("setVisible", (True,)), panel.banner_zone.calls)
+        return panel.banner_text.calls
+
+    def test_render_shows_the_core_message_in_the_banner(self):
+        message = "Le journal de ce projet est tenu par une autre session : lecture seule."
+        calls = self.rendered_banner(message)
+        self.assertIn(("setText", (message,)), calls)
+        self.assertIn(("setAccessibleName", (message,)), calls)
+
+    def test_render_falls_back_to_refused_on_empty_message(self):
+        refused = texts.tr("fr", "refused")
+        calls = self.rendered_banner("")
+        self.assertIn(("setText", (refused,)), calls)
+        self.assertIn(("setAccessibleName", (refused,)), calls)
+
+    def test_empty_or_missing_message_falls_back_to_refused(self):
+        refused = texts.tr("fr", "refused")
+        for message in ("", None):
+            self.announced.clear()
+            self.panel.set_banner("refused", message)
+            self.assertIsNone(self.panel.banner_message)
+            self.assertEqual(self.panel._banner_text(self.panel.t), refused)
+            self.assertEqual(self.announced, [refused])
+
+    def test_set_ready_clears_the_message(self):
+        self.panel.set_banner("refused", "lecture seule")
+        self.panel.set_ready([])
+        self.assertIsNone(self.panel.banner)
+        self.assertIsNone(self.panel.banner_message)
+        self.panel.set_banner("died")
+        self.assertEqual(self.panel._banner_text(self.panel.t), texts.tr("fr", "died"))
 
 
 class PluginBehaviourTest(unittest.TestCase):
@@ -587,6 +750,24 @@ class PluginBehaviourTest(unittest.TestCase):
         self.p._refresh()
         self.p._on_event(self.mod.client.FAILED, "versions")
         self.assertEqual(self.p.panel.banners[-1], "refused")
+        self.assertEqual(self.p.panel.messages[-1], "versions")
+
+    def test_read_only_refusal_shows_the_core_message(self):
+        StubProject.name = "/a/p.qgz"
+        self.mod.locator.locate = lambda s: ("/x/cassini", "PATH")
+        self.fake_client()
+        self.p._refresh()
+        message = "Le journal de ce projet est tenu par une autre session : lecture seule."
+        self.p._on_event(self.mod.client.FAILED, message)
+        self.assertEqual(self.p.panel.banners[-1], "refused")
+        self.assertEqual(self.p.panel.messages[-1], message)
+        self.assertIsNone(self.p.client)
+        self.assertIsNone(self.p.panel.ready)  # jamais dit prêt
+
+    def test_death_keeps_its_own_banner_text(self):
+        self.p._on_event(self.mod.client.DIED, "mort")
+        self.assertEqual(self.p.panel.banners[-1], "died")
+        self.assertIsNone(self.p.panel.messages[-1])
 
     def test_ready_and_run_events_reach_the_panel(self):
         self.p._on_event(self.mod.client.READY, {"commands": [{"id": "a"}]})
@@ -706,7 +887,6 @@ class ReplayTest(unittest.TestCase):
         c = client.CoreClient(self.p, lambda k, v: self.events.append((k, v)), registry)
         c.start("cassini", "/p.qgz")
         self.p.feed(reply(1, {"protocol_version": 2, "core_version": "0.1", "commands": []}))
-        self.p.feed(reply(2, {"core_version": "0.1.0", "protocol_version": 2}))
         base = len(self.p.written)
         self.assertTrue(c.replay())
         self.p.feed((json.dumps({"jsonrpc": "2.0", "id": "core-1", "method": "order.execute",

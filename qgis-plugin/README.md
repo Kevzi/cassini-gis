@@ -34,10 +34,12 @@ Sonde de bout en bout sous le vrai QGIS et le vrai binaire (fixture synthétique
 `python-qgis-ltr.bat qgis-plugin/tests/probe_end_to_end.py` -> `RÉSULTAT : OK`. Elle
 enchaîne `layer.add` (points et réseau), `analysis.buffer`, `analysis.select_by_attribute`,
 `analysis.intersect`, `analysis.isochrone` (à pied, puis en voiture) et `layout.export_pdf`, ferme et rouvre le projet,
-puis `replay()` demande au noyau `journal.replay` : toutes les étapes sont refaites
-(`system.about` du démarrage comprises, sorties des analyses sous `replay/`), le CSV et le
-réseau d'origine sont inchangés (empreinte), puis
-un résultat du journal est altéré et le rejeu s'arrête en nommant l'étape. Il n'y a pas de
+puis `replay()` demande au noyau `journal.replay` : toutes les étapes sont refaites,
+et les sorties des analyses vont sous `replay/`. Le journal garde le même nombre
+d'étapes après le rejeu. Le démarrage n'y ajoute rien : l'extension lit les versions
+du noyau dans la réponse de `session.hello`. Le CSV et le réseau d'origine sont
+inchangés (empreinte). Enfin, un résultat du journal est altéré et le rejeu s'arrête
+en nommant l'étape. Il n'y a pas de
 bouton de rejeu dans le panneau : il viendra avec l'agent (epic 5).
 
 Garde statique (imports réseau et PyQt directs interdits, taille, versions de
@@ -55,6 +57,9 @@ Recette manuelle du panneau [9.4] (dans QGIS, avec un noyau installé) :
    couverts par `qgis-plugin/tests/test_tracer.py`.
 4. Réglages (engrenage) : basculez FR / EN, les textes changent aussitôt.
 5. Sans noyau installé : le bandeau propose « Choisir le noyau ».
+6. Ouvrez le même projet dans une seconde fenêtre QGIS. La réponse de
+   `session.hello` dit que la session est en lecture seule (`read_only`). Le
+   panneau de la seconde fenêtre affiche le message du noyau et ne se dit pas prêt.
 
 Recette manuelle de `layer.add` [9.5] (dans QGIS, avec un noyau qui annonce la
 commande) :
