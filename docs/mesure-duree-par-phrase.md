@@ -563,3 +563,37 @@ lentement qu'en 5.20. Les issues sont les mêmes dans les trois colonnes (phrase
 
 **Justesse sur la carte** (paquet, `--features gpu`) : `plan_reel` 25/25, `question_reel` 12/12,
 `ecart_reel` 32/40 (plans 18/26, questions 8/8, refus 6/6) — les seuils du ticket.
+
+## Re-mesure du ticket 5.9 (2026-11-01)
+
+Révision du commit du ticket 5.9 (base `88251ab`, aucun code produit changé). Modèle livré,
+déclaration `cassini-composition-4b.modele.json` (prompt court), RTX 3070 Ti et Ryzen 7 5800X.
+
+**Justesse sur la carte** (`cargo test -p cassini-ai --release --features cuda --test plan_reel
+-- --ignored plan_reel`) : **25 / 25** plans conformes, 0 question, 0 du garde-fou (78 s).
+
+**Durée par phrase sur processeur** (`duree_reel`, construit sans CUDA, `CASSINI_TEST_THREADS=4`,
+masque `0x55`, phrases A0 à E sur l'inventaire traduit du projet réel, hors dépôt), à côté de la
+mesure précédente du noyau processeur seul (5.20, même masque) :
+
+| id | 5.20, `0x55` (s) | 5.9, `0x55` (s) | issue (5.9) |
+|---|---|---|---|
+| amorce, lecture | 28,5 | 25,6 | plan, 1 étape |
+| A0 (phrase de démo) | 29,8 | **27,9** | plan, 5 étapes |
+| A | 29,5 | 27,8 | plan, 5 étapes |
+| B1 | — | 7,0 | plan, 1 étape |
+| B2 | — | 16,0 | plan, 3 étapes |
+| B3 | — | 3,9 | plan, 1 étape |
+| C | — | 10,4 | plan, 2 étapes |
+| D | — | 4,8 | question |
+| E | — | 15,3 | question |
+| moyenne A0 à E | 15,1 | **14,1** | |
+
+L'écriture domine toujours (moyenne 13,3 s, A0 : 26,8 s pour 165 jetons) ; la lecture de l'invite
+est reprise de l'instantané (1 554 jetons repris sur environ 1 600). A0 passe sous 30 s sur 4 cœurs,
+de peu. Mesure seule : aucun seuil n'est vérifié par un test.
+
+**Bout en bout au vrai modèle** (`cargo test -p cassini --release --features gpu --test
+bout_en_bout -- --ignored`, voir `docs/entrainement-du-modele.md`) : plan de démo à 5 étapes,
+conforme, composé en 16,5 s (chargement compris), exécuté, puis rejoué dans une seconde session
+sans modèle : `{"steps": 5, "identical": true}`.

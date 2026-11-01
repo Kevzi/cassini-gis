@@ -104,6 +104,11 @@ impl McpClient {
         }
     }
 
+    /// Le pid du processus `cassini mcp`.
+    pub fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
     fn send(&mut self, message: &Value) {
         let stdin = self.stdin.as_mut().expect("entrée ouverte");
         writeln!(stdin, "{message}").unwrap();
