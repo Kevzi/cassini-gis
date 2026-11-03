@@ -28,6 +28,9 @@ class FakeBackend:
     def visible_layers(self):
         return list(self.layers)
 
+    def id_of(self, layer):
+        return layer.lid
+
     def source_of(self, layer):
         return layer.source
 
@@ -143,6 +146,41 @@ class LayoutExportTest(unittest.TestCase):
         layers = [FakeLayer("v", "/d/vide.gpkg", None)]
         (_, error), _ = run(FakeBackend(layers), {"title": "Carte", "out": self.out})
         self.assertEqual(error.code, "layout.empty")
+
+    def test_leave_out_removes_the_layer_its_source_and_its_count(self):
+        backend = FakeBackend(TWO)
+        params = {"title": "Carte", "out": self.out, "leave_out": ["a", "inconnue"]}
+        (result, error), _ = run(backend, params)
+        self.assertIsNone(error)
+        self.assertEqual(result["layer_count"], 1)
+        self.assertEqual(result["sources"], ["communes.shp"])
+        layers, _, sources_text, _, _, box = backend.exported
+        self.assertEqual([layer.lid for layer in layers], ["b"])
+        self.assertEqual(sources_text, "Sources : communes.shp")
+        # Emprise de « b » seule (5, -10, 30, 8), marge de 5 % du plus grand côté (25 → 1,25).
+        self.assertEqual(box, (3.75, -11.25, 31.25, 9.25))
+        # La couche laissée hors de la carte reste dans le projet.
+        self.assertEqual([layer.lid for layer in backend.layers], ["a", "b"])
+
+    def test_empty_or_absent_leave_out_changes_nothing(self):
+        for extra in ({}, {"leave_out": []}):
+            backend = FakeBackend(TWO)
+            (result, error), _ = run(backend, dict({"title": "Carte", "out": self.out}, **extra))
+            self.assertIsNone(error)
+            self.assertEqual(result["layer_count"], 2)
+            self.assertEqual(result["sources"], ["gares.gpkg", "communes.shp"])
+
+    def test_all_layers_left_out_is_empty(self):
+        params = {"title": "Carte", "out": self.out, "leave_out": ["a", "b"]}
+        (_, error), _ = run(FakeBackend(TWO), params)
+        self.assertEqual(error.code, "layout.empty")
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_bad_leave_out_is_refused(self):
+        for bad in ("a", [3], None):
+            params = {"title": "Carte", "out": self.out, "leave_out": bad}
+            (_, error), _ = run(FakeBackend(TWO), params)
+            self.assertEqual(error.code, "layout.bad_params")
 
     def test_expected_items_are_the_five_plus_title(self):
         self.assertEqual(

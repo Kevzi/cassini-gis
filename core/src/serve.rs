@@ -251,6 +251,9 @@ struct State<'a> {
     /// une étape exécutée du même plan, cachées au modèle. En mémoire seulement, le temps du
     /// processus : à la relance du noyau, tout résultat est revu une fois.
     intermediates: HashSet<String>,
+    /// Ids des couches posées par les `journal.replay` de ce processus (ticket 5.36) : un rejeu
+    /// suivant les laisse hors de sa carte. En mémoire seulement, perdue à la relance du noyau.
+    replayed_layers: HashSet<String>,
 }
 
 /// Sert le canal jusqu'à la fermeture de l'entrée. Rend une erreur si la sortie
@@ -348,6 +351,7 @@ fn serve_with<'a>(
             next_plan: 0,
             next_call: 0,
             intermediates: HashSet::new(),
+            replayed_layers: HashSet::new(),
         };
         let outcome = loop {
             // Entrée fermée pendant un ordre : la fin a déjà été lue.
@@ -968,7 +972,9 @@ fn journal_replay(state: &mut State<'_>) -> Result<Value, RpcError> {
             link: state.link.clone(),
         },
     });
-    let report = replay.run(&router).map_err(RpcError::business)?;
+    let report = replay
+        .run(&router, &mut state.replayed_layers)
+        .map_err(RpcError::business)?;
     Ok(serde_json::to_value(report).expect("un bilan se sérialise"))
 }
 
@@ -1879,7 +1885,9 @@ mod tests {
         c.close().1.unwrap();
         let registry = scripted_registry();
         let replay = crate::journal::Replay::load(&registry, Path::new(&c.project)).unwrap();
-        let report = replay.run(&crate::exec::Router::new(&registry)).unwrap();
+        let report = replay
+            .run(&crate::exec::Router::new(&registry), &mut HashSet::new())
+            .unwrap();
         assert_eq!(report.steps, 1);
         assert!(report.identical);
     }
@@ -1930,6 +1938,58 @@ mod tests {
         let done = c.recv();
         assert_eq!(code_of(&done), "replay.diverged");
         assert_eq!(done["error"]["data"]["step"], 1);
+        c.close().1.unwrap();
+    }
+
+    /// Répond à l'ordre d'export comme le geste : écrit le PDF, rend un résultat fixe.
+    fn answer_export(c: &Client, order: &Value) {
+        assert_eq!(order["params"]["command"], "layout.export_pdf");
+        let out = order["params"]["params"]["out"].as_str().unwrap();
+        std::fs::write(out, "pdf").unwrap();
+        c.send(reply(
+            &order["id"],
+            json!({"file": out, "page_count": 1, "layer_count": 1,
+                "sources": ["pts.csv"], "truncated": false}),
+        ));
+    }
+
+    #[test]
+    fn a_second_journal_replay_leaves_the_first_one_s_layers_out_of_the_export() {
+        let mut c = Client::start(CANCEL_GRACE);
+        c.hello_with(&["test.make", "layout.export_pdf"]);
+        // Session d'origine : une couche, puis l'export, sans `leave_out`.
+        c.send(json!({"jsonrpc":"2.0","id":2,"method":"command.run",
+            "params":{"command":"test.make","params":{"layer":"src"}}}));
+        let order = c.recv();
+        c.send(reply(&order["id"], json!({"layer_id": "orig"})));
+        assert!(c.recv()["result"].is_object());
+        c.send(json!({"jsonrpc":"2.0","id":3,"method":"command.run",
+            "params":{"command":"layout.export_pdf","params":{"title":"Carte"}}}));
+        let order = c.recv();
+        assert!(order["params"]["params"].get("leave_out").is_none());
+        answer_export(&c, &order);
+        assert!(c.recv()["result"].is_object());
+
+        // Deux rejeux de suite : le second reçoit aussi l'id posé par le premier.
+        let expected = [json!(["orig"]), json!(["orig", "replay-1"])];
+        for (n, leave_out) in expected.iter().enumerate() {
+            let id = 4 + n as u64;
+            c.send(json!({"jsonrpc":"2.0","id":id,"method":"journal.replay"}));
+            let order = c.recv();
+            assert_eq!(order["params"]["command"], "test.make");
+            assert!(order["params"]["params"].get("leave_out").is_none());
+            c.send(reply(
+                &order["id"],
+                json!({"layer_id": format!("replay-{}", n + 1)}),
+            ));
+            let order = c.recv();
+            assert_eq!(order["params"]["params"]["leave_out"], *leave_out);
+            answer_export(&c, &order);
+            let done = c.recv();
+            assert_eq!(done["id"], id);
+            assert_eq!(done["result"], json!({"steps": 2, "identical": true}));
+        }
+        assert_eq!(c.journal().len(), 2);
         c.close().1.unwrap();
     }
 

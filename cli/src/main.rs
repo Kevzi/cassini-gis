@@ -454,7 +454,7 @@ fn replay(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         for warning in replay.warnings() {
             let _ = writeln!(err, "Avertissement : {warning}");
         }
-        replay.run(&Router::new(&registry))
+        replay.run(&Router::new(&registry), &mut Default::default())
     });
     match outcome {
         Ok(report) => {

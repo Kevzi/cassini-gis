@@ -598,3 +598,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-deux-rejeux-de-suite-dans-la-meme-session-qgis-plan.md`
   summary: La sortie `journal.io` de `fresh_replay_dir` (tous les dossiers en échec, `replay/` sans fichier) n'est couverte par aucun test.
   evidence: relecture thorough de 5.35 (verification-gap) ; seul le cas `replay.output_locked` est testé.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-second-rejeu-dans-la-meme-session-qgis-l-export-pdf-voit-les-plan.md`
+  summary: Un export journalisé après un rejeu, dans la même session QGIS, dessine et compte les couches posées par ce rejeu ; un rejeu suivant les laisse hors de la carte (mémoire du noyau) et diverge à l'export.
+  evidence: Relecture 5.36 (edge-case et blind hunter). Les exports hors rejeu ne reçoivent jamais `leave_out` ; le cas divergeait déjà avant 5.36, donc hors de l'intention de ce ticket.

@@ -4,7 +4,8 @@ Le noyau décide ; ce module exécute. Il monte en mémoire une mise en page A4 
 (carte, titre, légende, barre d'échelle, flèche du nord, sources), l'exporte dans le
 fichier `out` nommé par le noyau (AD-10) puis la jette : rien n'est ajouté au projet,
 aucune couche n'est modifiée. La carte montre les couches visibles du projet, cadrée sur
-leur emprise réunie dans le SCR du projet. Les sources sont des noms de fichiers
+leur emprise réunie dans le SCR du projet, sauf celles que le noyau nomme dans `leave_out`
+(au rejeu seulement). Les sources sont des noms de fichiers
 (`source_name`), jamais un chemin absolu ni une URI à identifiants.
 
 La mise en page de QGIS ne tourne pas hors du fil principal : l'export est synchrone
@@ -164,8 +165,14 @@ class LayoutExportGesture(_ReadGesture):
         out = params.get("out")
         if not isinstance(out, str) or not out:
             raise GestureError(BAD_PARAMS, "Le fichier de sortie n'est pas fourni.")
+        leave_out = params.get("leave_out", [])
+        if not isinstance(leave_out, list) or not all(isinstance(i, str) for i in leave_out):
+            raise GestureError(BAD_PARAMS, "La liste des couches à laisser hors de la carte est invalide.")
         backend = self._backend
-        layers = backend.visible_layers()
+        # Au rejeu, le noyau nomme les couches posées par une exécution précédente du même
+        # journal : elles restent dans le projet, intactes, mais hors de la carte (ticket 5.36).
+        leave_out = set(leave_out)
+        layers = [layer for layer in backend.visible_layers() if backend.id_of(layer) not in leave_out]
         if not layers:
             raise GestureError(EMPTY, "Aucune couche visible : il n'y a rien à mettre sur la carte.")
         crs = backend.project_crs()
