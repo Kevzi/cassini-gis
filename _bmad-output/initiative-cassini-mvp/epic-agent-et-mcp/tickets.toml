@@ -672,3 +672,18 @@ notes = [
   "Decision: 2026-11-03 — la famille du generateur est ecrite ici ; le re-entrainement se fait en une passe groupee apres 37 et 38 (Notes de l'epique).",
   "Risque high : changement de la ligne d'export de l'extension (version de chaine, AD-24) et du rejeu ; controle hors du ticket : recette QGIS par le proprietaire, un PDF ouvert et mesure a l'echelle.",
 ]
+
+[[entry]]
+id = 39
+type = "story"
+title = "Re-entrainement groupe : point en UTM et echelle de l'export PDF"
+description = "Regenere le jeu du generateur civil avec les familles isochrone_utm (37) et export_pdf_scale (38), re-entraine par la commande unique (meme base Qwen3.5-4B, meme methode), fusionne en GGUF et l'installe sous la declaration retenue par le panneau, l'ancien modele garde sous le nom cassini-composition-4b-5-17 ; ajoute un court essai reel de phrases a l'echelle (« au 1:25 000 », « 1/25000 », « au 25 000e », « 1:25k ») et de points en UTM (« UTM 31N »)."
+verify = "Sur GPU, par ai/ et la declaration du modele livre : plan_reel au moins 24/25, jeu tenu a l'ecart au moins 32/40, question_reel au moins 11/12, et les phrases du nouvel essai rendent le plan attendu (scale entier, epsg 326xx) ; demo dans QGIS avec la phrase de demo, « Exporte la carte au 1:25 000 » et une isochrone en UTM, puis rejeu identical: true ; chiffres consignes dans docs/entrainement-du-modele.md."
+covers = ["CAP-4"]
+after = [37, 38]
+hitl = true
+risk = "high"
+notes = [
+  "Decision: 2026-11-03 — proprietaire : barres de non-recul par rapport a 5.17 (plan_reel >= 24/25, tenu a l'ecart >= 32/40, question_reel >= 11/12).",
+  "hitl : l'entrainement occupe la carte graphique du proprietaire environ 5 h 30 ; il se lance quand le proprietaire le dit.",
+]
