@@ -3,7 +3,7 @@ title: "Couches retirées par le budget d'inventaire signalées"
 type: 'feature'
 ticket: '33'
 created: '2026-11-03'
-status: 'built'
+status: done
 baseline_revision: '10f5cd0ee5859bab8c31b1e431a6e80f2bc631a3'
 route: 'full'
 route_source: 'auto'
