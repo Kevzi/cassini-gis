@@ -84,6 +84,12 @@ _FR = {
         "prendre plusieurs minutes."
     ),
     "question_title": "Cassini vous pose une question :",
+    "left_out_one": (
+        "Le modèle ne voit plus 1 couche de résultat de cette session : {names}."
+    ),
+    "left_out_many": (
+        "Le modèle ne voit plus {n} couches de résultat de cette session : {names}."
+    ),
     "propose_error": "La demande n'a pas abouti ({code}) : {message}",
     "plan_done": "Plan exécuté. Étapes terminées : {n}.",
     "plan_cancelled": "Étape {n} annulée : les étapes suivantes n'ont pas été lancées.",
@@ -230,6 +236,10 @@ _EN = {
         "several minutes."
     ),
     "question_title": "Cassini asks you a question:",
+    "left_out_one": "The model no longer sees 1 result layer from this session: {names}.",
+    "left_out_many": (
+        "The model no longer sees {n} result layers from this session: {names}."
+    ),
     "propose_error": "The request did not succeed ({code}): {message}",
     "plan_done": "Plan run. Steps done: {n}.",
     "plan_cancelled": "Step {n} cancelled: the following steps were not started.",

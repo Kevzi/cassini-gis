@@ -7,8 +7,9 @@ son `plan_id`. Aucun chemin absolu ni code n'est produit ici (AD-9, AD-23).
 """
 
 try:  # importé à plat par les tests, en paquet par QGIS
-    from . import runlog, texts
+    from . import client, runlog, texts
 except ImportError:  # pragma: no cover
+    import client
     import runlog
     import texts
 
@@ -53,6 +54,8 @@ class AgentView:
         self.rejecting = False
         # Vrai après une question du garde-fou : la phrase d'origine revient à la saisie.
         self.restore_request = False
+        # Couches de résultat hors de la vue du modèle (ticket 5.33), [{"layer_id", "name"}].
+        self.left_out = []
 
     # -- événements -----------------------------------------------------
     def generating(self):
@@ -60,8 +63,9 @@ class AgentView:
         self.phase = GENERATING
         self.notice = ("generating", {})
 
-    def proposed(self, plan_id, plan):
+    def proposed(self, plan_id, plan, left_out=None):
         self.reset()
+        self.left_out = client.left_out_of({"left_out": left_out})
         calls = plan.get("calls") if isinstance(plan, dict) else None
         calls = calls if isinstance(calls, list) else []
         for number, call in enumerate(calls, start=1):
@@ -74,13 +78,14 @@ class AgentView:
         self.plan_id = plan_id
         self.plan = plan
 
-    def question(self, text, source="model"):
+    def question(self, text, source="model", left_out=None):
         """La question est une réplique : rien n'attend, la saisie est rendue.
 
         Une question du garde-fou (`source` « guard » : un point du plan ne venait pas de la
         demande) demande de compléter la phrase : le panneau la remet dans la saisie.
         """
         self.reset()
+        self.left_out = client.left_out_of({"left_out": left_out})
         self.notice = ("question", {"text": text})
         self.restore_request = source == "guard"
 
@@ -224,6 +229,24 @@ def request_to_restore(view, last_request, current_input):
     if current_input and current_input.strip():
         return None
     return last_request
+
+
+def left_out_text(view, lang):
+    """Mention des couches que le modèle ne voit plus (ticket 5.33), ou None.
+
+    Noms distincts dans l'ordre d'arrivée, suffixés « ×k » quand ils se répètent.
+    """
+    layers = client.left_out_of({"left_out": getattr(view, "left_out", None)})
+    if not layers:
+        return None
+    counts = {}
+    for layer in layers:
+        counts[layer["name"]] = counts.get(layer["name"], 0) + 1
+    names = ", ".join(
+        name if k == 1 else "%s ×%d" % (name, k) for name, k in counts.items()
+    )
+    key = "left_out_one" if len(layers) == 1 else "left_out_many"
+    return texts.tr(lang, key, n=len(layers), names=names)
 
 
 def notice_text(view, lang):

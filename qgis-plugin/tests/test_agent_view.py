@@ -355,5 +355,82 @@ class PlanTextsTest(unittest.TestCase):
         self.assertEqual(texts.tr("en", "approve"), "Approve plan")
 
 
+INTERSECTIONS = [{"layer_id": "Intersection_%d" % k, "name": "Intersection"} for k in range(1, 6)]
+
+
+class LeftOutTest(unittest.TestCase):
+    """Ticket 5.33 : couches de résultat que le budget laisse hors de la vue du modèle."""
+
+    def setUp(self):
+        self.v = av.AgentView()
+
+    def test_nothing_left_out_shows_nothing(self):
+        self.v.proposed("plan-1", PLAN)
+        self.assertEqual(self.v.left_out, [])
+        self.assertIsNone(av.left_out_text(self.v, "fr"))
+        self.v.question("Laquelle ?", "model", [])
+        self.assertIsNone(av.left_out_text(self.v, "en"))
+
+    def test_repeated_names_are_counted(self):
+        self.v.proposed("plan-1", PLAN, INTERSECTIONS)
+        self.assertEqual(
+            av.left_out_text(self.v, "fr"),
+            "Le modèle ne voit plus 5 couches de résultat de cette session : "
+            "Intersection ×5.",
+        )
+        self.assertEqual(
+            av.left_out_text(self.v, "en"),
+            "The model no longer sees 5 result layers from this session: Intersection ×5.",
+        )
+
+    def test_distinct_names_keep_their_order_and_one_is_singular(self):
+        layers = [{"layer_id": "a", "name": "Tampon"}, {"layer_id": "b", "name": "Intersection"},
+                  {"layer_id": "c", "name": "Tampon"}]
+        self.v.question("Laquelle ?", "model", layers)
+        self.assertEqual(
+            av.left_out_text(self.v, "fr"),
+            "Le modèle ne voit plus 3 couches de résultat de cette session : "
+            "Tampon ×2, Intersection.",
+        )
+        self.v.question("Laquelle ?", "model", layers[:1])
+        self.assertEqual(
+            av.left_out_text(self.v, "fr"),
+            "Le modèle ne voit plus 1 couche de résultat de cette session : Tampon.",
+        )
+        self.assertEqual(
+            av.left_out_text(self.v, "en"),
+            "The model no longer sees 1 result layer from this session: Tampon.",
+        )
+
+    def test_a_new_proposal_a_refusal_or_an_error_clears_the_mention(self):
+        for clear in (lambda: self.v.proposed("plan-2", PLAN),
+                      lambda: self.v.question("Laquelle ?"),
+                      lambda: self.v.rejected(),
+                      lambda: self.v.failed("agent.refused", "Non."),
+                      lambda: self.v.generating()):
+            self.v.proposed("plan-1", PLAN, INTERSECTIONS)
+            self.assertIsNotNone(av.left_out_text(self.v, "fr"))
+            clear()
+            self.assertIsNone(av.left_out_text(self.v, "fr"))
+
+    def test_malformed_left_out_never_raises(self):
+        for given in (None, "Intersection", 3, {"name": "x"},
+                      [None, 3, "x", {}, {"name": ""}, {"name": 4}, {"layer_id": "a"}]):
+            self.v.proposed("plan-1", PLAN, given)
+            self.assertEqual(self.v.left_out, [], given)
+            self.assertIsNone(av.left_out_text(self.v, "fr"))
+        self.v.proposed("plan-1", PLAN, [{"name": "Tampon"}, "x", {"layer_id": 3, "name": "Zone"}])
+        self.assertEqual(self.v.left_out,
+                         [{"layer_id": None, "name": "Tampon"}, {"layer_id": None, "name": "Zone"}])
+        self.assertTrue(av.left_out_text(self.v, "fr").endswith(": Tampon, Zone."))
+        # Une vue d'avant, sans l'attribut : rien, sans exception.
+        self.assertIsNone(av.left_out_text(object(), "fr"))
+
+    def test_both_languages_have_the_keys(self):
+        for key in ("left_out_one", "left_out_many"):
+            self.assertIn(key, texts.TEXTS["fr"])
+            self.assertIn(key, texts.TEXTS["en"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2571,18 +2571,11 @@ mod tests {
         c.close().1.unwrap();
     }
 
-    /// Tickets 5.18 et 5.19 : dix couches de résultat dont les fichiers sont au dossier de travail
-    /// dépassent le budget d'inventaire ; le compositeur reçoit toutes les couches de
-    /// l'utilisateur, puis les résultats les plus récents gardés par paquets, les plus anciens absents.
-    #[test]
-    fn the_composer_sees_an_inventory_reduced_to_the_budget() {
-        use crate::agent_inventory::INVENTORY_BUDGET_CHARS;
+    /// Dix couches de résultat dont les fichiers sont au dossier de travail, datées de l'étape 1
+    /// (la plus ancienne) à la 10, et trois couches de l'utilisateur : `plan.propose` (id `id`)
+    /// reçoit cet inventaire, qui dépasse le budget ; rend la réponse du noyau.
+    fn propose_over_the_budget(c: &mut Client, id: u64) -> Value {
         use std::time::{Duration, SystemTime};
-        let composer = composer(three_steps()).unwrap();
-        let seen = composer.seen.clone();
-        let mut c = Client::start_with(CANCEL_GRACE, Some(composer));
-        c.hello_with(&ALL);
-        // Les fichiers des dix résultats, datés de l'étape 1 (la plus ancienne) à la 10.
         let work = c.dir.join("p.cassini");
         let base = SystemTime::now() - Duration::from_secs(3_600);
         for k in 1..=10u64 {
@@ -2614,7 +2607,7 @@ mod tests {
             })
             .collect();
         layers.extend([user("plu"), user("gares"), user("parcelles")]);
-        c.send(json!({"jsonrpc":"2.0","id":2,"method":"plan.propose","params":{"request":"x"}}));
+        c.send(json!({"jsonrpc":"2.0","id":id,"method":"plan.propose","params":{"request":"x"}}));
         let order = c.recv();
         assert_eq!(order["params"]["command"], "project.inventory");
         c.send(reply(
@@ -2622,7 +2615,34 @@ mod tests {
             json!({"project_name": "p", "project_crs": "EPSG:2154", "extent": null,
                 "layers": layers}),
         ));
-        assert!(c.recv()["result"]["plan_id"].is_string());
+        let answer = c.recv();
+        assert_eq!(answer["id"], id);
+        answer
+    }
+
+    /// Ticket 5.33 : les couches retirées par le budget, telles que rendues avec la réponse.
+    fn left_out_one_to_five() -> Value {
+        Value::Array(
+            (1..=5)
+                .map(|k| json!({"layer_id": format!("Intersection_{k}"), "name": "Intersection"}))
+                .collect(),
+        )
+    }
+
+    /// Tickets 5.18 et 5.19 : dix couches de résultat dont les fichiers sont au dossier de travail
+    /// dépassent le budget d'inventaire ; le compositeur reçoit toutes les couches de
+    /// l'utilisateur, puis les résultats les plus récents gardés par paquets, les plus anciens absents.
+    /// Ticket 5.33 : la réponse les signale, du plus ancien au plus récent, aux vrais identifiants.
+    #[test]
+    fn the_composer_sees_an_inventory_reduced_to_the_budget() {
+        use crate::agent_inventory::INVENTORY_BUDGET_CHARS;
+        let composer = composer(three_steps()).unwrap();
+        let seen = composer.seen.clone();
+        let mut c = Client::start_with(CANCEL_GRACE, Some(composer));
+        c.hello_with(&ALL);
+        let answer = propose_over_the_budget(&mut c, 2);
+        assert!(answer["result"]["plan_id"].is_string(), "{answer}");
+        assert_eq!(answer["result"]["left_out"], left_out_one_to_five());
         let seen = seen.lock().unwrap();
         let inventory = &seen[0];
         let ids: Vec<&str> = inventory["layers"]
@@ -2654,7 +2674,37 @@ mod tests {
             inventory["layers"][3]["fields"].as_array().unwrap().len(),
             34
         );
+        // Le modèle ne voit rien du constat : l'inventaire n'a pas de clé `left_out`.
+        assert!(inventory.get("left_out").is_none());
         drop(seen);
+        c.close().1.unwrap();
+    }
+
+    /// Ticket 5.33 : au-delà du budget, une question porte aussi les couches retirées ; le
+    /// journal n'en garde rien.
+    #[test]
+    fn a_question_over_the_budget_carries_the_layers_left_out() {
+        let plan = json!({"kind":"question","question":"Quelle zone tampon ?"});
+        let mut c = Client::start_with(CANCEL_GRACE, composer(plan));
+        c.hello_with(&ALL);
+        let answer = propose_over_the_budget(&mut c, 2);
+        assert_eq!(
+            answer["result"],
+            json!({"question": "Quelle zone tampon ?", "source": "model",
+                "left_out": left_out_one_to_five()})
+        );
+        assert!(c.journal().is_empty());
+        c.close().1.unwrap();
+    }
+
+    /// Ticket 5.33 : sous le budget, la réponse d'un plan est celle d'avant, sans clé `left_out`.
+    #[test]
+    fn under_the_budget_a_plan_carries_no_left_out_key() {
+        let mut c = Client::start_with(CANCEL_GRACE, composer(three_steps()));
+        c.hello_with(&ALL);
+        let r = c.propose(2);
+        assert!(r["result"]["plan_id"].is_string(), "{r}");
+        assert!(r["result"].get("left_out").is_none(), "{r}");
         c.close().1.unwrap();
     }
 

@@ -364,10 +364,14 @@ impl ShortIds {
 
 /// L'inventaire montré au modèle, et le nombre de couches de l'utilisateur, qui viennent en tête
 /// (le moteur garde un instantané juste avant la dernière clé de la dernière d'entre elles).
+/// `left_out` : les couches de résultat que le budget a laissées hors de sa vue (ticket 5.33),
+/// `{"layer_id", "name"}` aux vrais identifiants QGIS, de la plus ancienne à la plus récente ;
+/// jamais montré au modèle, seulement rendu à l'utilisateur.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModelInventory {
     pub inventory: Value,
     pub user_layers: usize,
+    pub left_out: Vec<Value>,
 }
 
 /// De `project.inventory` à l'inventaire montré au modèle, avec la table pour retraduire son plan :
@@ -388,14 +392,54 @@ pub fn model_inventory(
         without_intermediates(ordered, work_files, intermediates),
         work_files,
     );
-    let inventory = within_budget_by_batches(ids.shorten(lighter), work_files, budget, low);
+    let inventory = within_budget_by_batches(ids.shorten(lighter.clone()), work_files, budget, low);
+    let left_out = left_out_by_budget(&lighter, &inventory, &ids, work_files);
     (
         ModelInventory {
             inventory,
             user_layers,
+            left_out,
         },
         ids,
     )
+}
+
+/// Les couches de résultat de `lighter` (identifiants complets, avant le budget) absentes de
+/// `kept` (identifiants courts, après le budget), dans l'ordre de `lighter` : de la plus ancienne
+/// à la plus récente (ticket 5.33). Les intermédiaires de 5.22 sont déjà hors de `lighter`, elles
+/// ne comptent donc pas.
+fn left_out_by_budget(
+    lighter: &Value,
+    kept: &Value,
+    ids: &ShortIds,
+    work_files: &[WorkFile],
+) -> Vec<Value> {
+    fn layers(v: &Value) -> impl Iterator<Item = &Value> {
+        v.get("layers")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+    }
+    let shown: HashSet<&str> = layers(kept)
+        .filter_map(|l| l.get("layer_id").and_then(Value::as_str))
+        .collect();
+    layers(lighter)
+        .filter(|layer| result_date(layer, work_files).is_some())
+        .filter_map(|layer| {
+            let id = layer.get("layer_id").and_then(Value::as_str)?;
+            let short = ids.short.get(id).map_or(id, String::as_str);
+            if shown.contains(short) {
+                return None;
+            }
+            // Un nom absent ou blanc serait ignoré par l'extension : l'identifiant le remplace.
+            let name = layer
+                .get("name")
+                .and_then(Value::as_str)
+                .filter(|n| !n.trim().is_empty())
+                .unwrap_or(id);
+            Some(json!({"layer_id": id, "name": name}))
+        })
+        .collect()
 }
 
 /// L'inventaire sans les couches de résultat dont l'identifiant est dans `intermediates` (ticket
@@ -1364,5 +1408,103 @@ mod tests {
         );
         assert_eq!(ids(&view.inventory), ["plu", "r3", "r6", "r9", "r12"]);
         assert!(json_chars(&view.inventory) <= INVENTORY_BUDGET_CHARS);
+    }
+
+    // -- couches retirées par le budget, signalées (ticket 5.33) --
+
+    /// Douze résultats lourds aux identifiants QGIS (`intersection_<uuid>`, tous nommés
+    /// « Intersection »), plus le PLU de l'utilisateur.
+    fn heavy_results() -> (Value, Vec<WorkFile>) {
+        let fields: Vec<Value> = (0..20)
+            .map(|i| json!({"name": format!("champ_long_numero_{i:02}"), "type": "String"}))
+            .collect();
+        let uuid = |k: u64| format!("intersection_{k:08x}_aaaa_bbbb_cccc_{k:012x}");
+        let mut layers: Vec<Value> = (1..=12u64)
+            .rev()
+            .map(|k| {
+                let mut l = raw_layer(&uuid(k), &format!("{k}-analysis.intersect.gpkg"));
+                l["name"] = json!("Intersection");
+                l["fields"] = json!(fields);
+                l
+            })
+            .collect();
+        layers.push(raw_layer("plu", "plu.gpkg"));
+        let raw = json!({"project_name": "p", "project_crs": "EPSG:2154", "layers": layers});
+        let files = (1..=12u64)
+            .map(|k| WorkFile {
+                name: format!("{k}-analysis.intersect.gpkg"),
+                modified: UNIX_EPOCH + Duration::from_secs(k),
+            })
+            .collect();
+        (raw, files)
+    }
+
+    #[test]
+    fn the_results_left_out_by_the_budget_are_noted_with_their_real_ids() {
+        let (raw, files) = heavy_results();
+        let (view, table) = model_inventory(&raw, &files, &HashSet::new(), 6_000, 3_000);
+        let shown = ids(&view.inventory);
+        assert!(shown.len() < 13, "le budget doit retirer : {shown:?}");
+        assert!(!view.left_out.is_empty());
+        // Vrais identifiants QGIS, du plus ancien au plus récent, et rien de ce qui est vu.
+        let expected: Vec<Value> = (1..=12u64)
+            .map(|k| format!("intersection_{k:08x}_aaaa_bbbb_cccc_{k:012x}"))
+            .filter(|id| !shown.contains(table.short.get(id).unwrap()))
+            .map(|id| json!({"layer_id": id, "name": "Intersection"}))
+            .collect();
+        assert_eq!(view.left_out, expected);
+        assert_eq!(view.left_out.len() + shown.len(), 13);
+        // Un nom vide ou blanc est remplacé par l'identifiant.
+        let mut blank = raw.clone();
+        for (layer, name) in blank["layers"].as_array_mut().unwrap()[10..]
+            .iter_mut()
+            .zip(["", "  "])
+        {
+            layer["name"] = json!(name);
+        }
+        let (view, _) = model_inventory(&blank, &files, &HashSet::new(), 6_000, 3_000);
+        for k in [1u64, 2] {
+            let id = format!("intersection_{k:08x}_aaaa_bbbb_cccc_{k:012x}");
+            assert!(
+                view.left_out.contains(&json!({"layer_id": id, "name": id})),
+                "{:?}",
+                view.left_out
+            );
+        }
+        assert_eq!(
+            view.left_out[0]["layer_id"],
+            "intersection_00000001_aaaa_bbbb_cccc_000000000001"
+        );
+    }
+
+    #[test]
+    fn under_the_budget_nothing_is_left_out_and_intermediates_do_not_count() {
+        let (raw, files) = heavy_results();
+        let (view, _) = model_inventory(&raw, &files, &HashSet::new(), 100_000, 50_000);
+        assert_eq!(ids(&view.inventory).len(), 13);
+        assert!(view.left_out.is_empty());
+        // Résultats cachés par 5.22, le reste sous le budget : rien n'est signalé.
+        let hidden: HashSet<String> = (1..=10u64)
+            .map(|k| format!("intersection_{k:08x}_aaaa_bbbb_cccc_{k:012x}"))
+            .collect();
+        let (view, _) = model_inventory(
+            &raw,
+            &files,
+            &hidden,
+            INVENTORY_BUDGET_CHARS,
+            INVENTORY_LOW_CHARS,
+        );
+        assert_eq!(ids(&view.inventory).len(), 3);
+        assert!(view.left_out.is_empty());
+        // La démo, sous le budget : rien non plus.
+        let (raw, files) = demo();
+        let (view, _) = model_inventory(
+            &raw,
+            &files,
+            &set(&["r1", "r2", "r3"]),
+            INVENTORY_BUDGET_CHARS,
+            INVENTORY_LOW_CHARS,
+        );
+        assert!(view.left_out.is_empty());
     }
 }

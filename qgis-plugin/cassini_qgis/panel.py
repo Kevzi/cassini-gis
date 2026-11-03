@@ -394,6 +394,13 @@ class CassiniPanel(QWidget):
         self.plan_notice.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
+        # Couches de résultat que le modèle ne voit plus (ticket 5.33).
+        self.left_out_note = QLabel()
+        self.left_out_note.setWordWrap(True)
+        self.left_out_note.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self.left_out_note.setVisible(False)
         self.plan_progress = QProgressBar()
         self.plan_progress.setRange(0, 0)  # indéterminée : la composition ne se mesure pas
         self.plan_progress.setTextVisible(False)
@@ -425,6 +432,8 @@ class CassiniPanel(QWidget):
         pl.addWidget(self.plan_progress)
         pl.addWidget(self.plan_title)
         pl.addWidget(self.plan_list)
+        # Sous le plan, ou sous la question quand la liste des étapes est cachée.
+        pl.addWidget(self.left_out_note)
         pl.addLayout(plan_buttons)
         pl.addWidget(self.plan_reason)
         pl.addWidget(self.plan_details)
@@ -587,10 +596,14 @@ class CassiniPanel(QWidget):
         if kind == client.PLAN_PROPOSED:
             self._plan_entries = {}
             self._plan_refs = {}
-            agent.proposed(payload.get("plan_id"), payload.get("plan"))
+            agent.proposed(payload.get("plan_id"), payload.get("plan"), payload.get("left_out"))
             _announce(self.plan_title, self.t("live_plan"))
         elif kind == client.PLAN_QUESTION:
-            agent.question(payload.get("question", ""), payload.get("source", "model"))
+            agent.question(
+                payload.get("question", ""),
+                payload.get("source", "model"),
+                payload.get("left_out"),
+            )
             restored = agentview.request_to_restore(
                 agent, self._last_request, self.input.toPlainText()
             )
@@ -912,6 +925,9 @@ class CassiniPanel(QWidget):
             notice = "%s %s" % (t("question_title"), notice)
         self.plan_notice.setText(notice or "")
         self.plan_notice.setVisible(bool(notice))
+        left_out = agentview.left_out_text(agent, self.lang)
+        self.left_out_note.setText(left_out or "")
+        self.left_out_note.setVisible(bool(left_out))
         self.plan_progress.setVisible(c["progress_visible"])
         self.plan_progress.setAccessibleName(t("generating"))
 
