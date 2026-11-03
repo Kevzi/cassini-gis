@@ -609,3 +609,9 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-l-export-pdf-prend-une-echelle-demandee-plan.md`
   summary: `LayoutBackend.canvas_center` (centre de la vue QGIS réelle, reprojeté) n'est exécuté par aucun test ni sonde.
   evidence: la sonde tourne sans `iface` ; seule l'étape 4 de la recette du README le couvre ; une sonde avec fenêtre QGIS le vérifierait (relecture 5.38, constat 22).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-l-export-pdf-prend-une-echelle-demandee-plan.md`
+  summary: Un journal qui contient une etape deleguee en erreur (ex. export PDF refuse) ne se rejoue pas : `Replay::run` reclame quand meme le fichier de sortie de l'etape et rend `replay.diverged`.
+  evidence: recette 5.38 du 2026-11-03 (projet-sonde-5-38) : etape 2 `layout.export_pdf` en `layout.bad_params`, rejeu « la sortie out ... est absente ou vide » ; dans `core/src/journal/mod.rs`, la boucle `for name in &spec.output_params` ne saute pas les lignes portant `error`. Anterieur a 5.38.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-l-export-pdf-prend-une-echelle-demandee-plan.md`
+  summary: Le schema de `layout.export_pdf` admet un titre vide, que le geste refuse ensuite (`layout.bad_params`) : le modele de base a ecrit `"title": ""` pour « Exporte la carte au 1:25 000 ».
+  evidence: recette 5.38 (Qwen3.5-9B) ; `LayoutExportPdfParams.title` sans longueur minimale ni controle a la deserialisation, contrairement a `scale`. Anterieur a 5.38.
