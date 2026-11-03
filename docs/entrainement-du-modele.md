@@ -1048,7 +1048,7 @@ retenu (`cassini-composition-4b.modele.json`) ; celui de 5.15 y reste sous le no
 
 ## Suite de bout en bout (ticket 5.9, 2026-11-01)
 
-Révision du commit du ticket 5.9 (base `88251ab`, aucun code produit changé), modèle livré (`cassini-composition-4b.modele.json`,
+Révision `bf24d56`, commit des tests du ticket 5.9 (base `88251ab`, aucun code produit changé), modèle livré (`cassini-composition-4b.modele.json`,
 prompt court), RTX 3070 Ti, paquet `--features gpu`.
 
 - `plan_reel` (`--features cuda`) : **25 / 25**, 0 fausse question.

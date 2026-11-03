@@ -566,7 +566,7 @@ lentement qu'en 5.20. Les issues sont les mêmes dans les trois colonnes (phrase
 
 ## Re-mesure du ticket 5.9 (2026-11-01)
 
-Révision du commit du ticket 5.9 (base `88251ab`, aucun code produit changé). Modèle livré,
+Révision `bf24d56`, commit des tests du ticket 5.9 (base `88251ab`, aucun code produit changé). Modèle livré,
 déclaration `cassini-composition-4b.modele.json` (prompt court), RTX 3070 Ti et Ryzen 7 5800X.
 
 **Justesse sur la carte** (`cargo test -p cassini-ai --release --features cuda --test plan_reel
@@ -588,6 +588,9 @@ mesure précédente du noyau processeur seul (5.20, même masque) :
 | D | — | 4,8 | question |
 | E | — | 15,3 | question |
 | moyenne A0 à E | 15,1 | **14,1** | |
+
+La moyenne de 5.20 (15,1 s) est celle du tableau complet du 2026-10-30 (section du ticket 5.21,
+ligne « noyau processeur seul de 5.20 ») ; ses durées de B1 à E n'y sont pas répétées ici.
 
 L'écriture domine toujours (moyenne 13,3 s, A0 : 26,8 s pour 165 jetons) ; la lecture de l'invite
 est reprise de l'instantané (1 554 jetons repris sur environ 1 600). A0 passe sous 30 s sur 4 cœurs,

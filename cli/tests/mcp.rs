@@ -408,25 +408,38 @@ fn a_relayed_call_is_journaled_external_replays_and_holds_no_network_socket() {
     session.close();
 }
 
-/// La garde réseau n'est pas aveugle : une socket UDP sur la boucle locale, tenue par ce
-/// processus de test, est vue (aucun paquet n'est envoyé).
+/// La garde réseau n'est pas aveugle : une socket UDP et une socket TCP sur la boucle locale,
+/// tenues par ce processus de test, sont vues à leur port local (aucun paquet n'est envoyé).
 #[cfg(any(target_os = "linux", windows))]
 #[test]
 fn the_network_guard_sees_a_socket_held_by_the_process() {
-    let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-    let port = socket.local_addr().unwrap().port();
+    let udp = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    let tcp = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let found = reseau::inet_sockets(std::process::id());
-    // `netstat` écrit le port en décimal, `/proc/net/udp` en hexadécimal sur 4 chiffres.
-    let named = if cfg!(windows) {
-        format!(":{port}")
-    } else {
-        format!(":{port:04X}")
-    };
-    assert!(
-        found.iter().any(|line| line.contains(&named)),
-        "la garde réseau n'a pas vu la socket UDP du port {port} tenue par le test : {found:?}"
-    );
-    drop(socket);
+    for (kind, port) in [
+        ("UDP", udp.local_addr().unwrap().port()),
+        ("TCP", tcp.local_addr().unwrap().port()),
+    ] {
+        // Colonne de l'adresse locale seule : `netstat` écrit « TCP 127.0.0.1:port … » (port en
+        // décimal), `reseau.rs` sous Linux « tcp local 0100007F:PORT … » (hexadécimal, 4 chiffres).
+        let (named, column) = if cfg!(windows) {
+            (format!(":{port}"), 1)
+        } else {
+            (format!(":{port:04X}"), 2)
+        };
+        let seen = found.iter().any(|line| {
+            let cols: Vec<&str> = line.split_whitespace().collect();
+            cols[0].to_ascii_uppercase().starts_with(kind)
+                && cols
+                    .get(column)
+                    .is_some_and(|local| local.ends_with(&named))
+        });
+        assert!(
+            seen,
+            "la garde réseau n'a pas vu la socket {kind} du port {port} tenue par le test : {found:?}"
+        );
+    }
+    drop((udp, tcp));
 }
 
 #[test]

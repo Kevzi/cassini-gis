@@ -155,6 +155,13 @@ fn the_demo_sentence_runs_on_the_real_model_and_replays_without_it() {
         eprintln!("CASSINI_TEST_MODEL absent : essai ignoré.");
         return;
     };
+    // Un nom de fichier nu n'a pas de dossier utilisable : le chemin est d'abord rendu absolu.
+    let model = std::fs::canonicalize(&model).unwrap_or_else(|e| {
+        panic!(
+            "le modèle de CASSINI_TEST_MODEL est introuvable : {} ({e})",
+            model.display()
+        )
+    });
     let folder = model.parent().expect("le modèle est dans un dossier");
     let name = model.file_name().unwrap().to_string_lossy().into_owned();
     let mut session = QgisSession::start(false, &folder.to_string_lossy(), &ANNOUNCED);
@@ -198,8 +205,10 @@ fn the_demo_sentence_runs_on_the_real_model_and_replays_without_it() {
     // 2. Le plan validé est exécuté, un ordre à la fois.
     let plan_id = proposed["result"]["plan_id"].clone();
     let execute = session.start_request("plan.execute", json!({"plan_id": plan_id}));
-    for _ in 0..5 {
+    let calls = plan["calls"].as_array().unwrap().clone();
+    for call in &calls {
         let order = session.wait_order();
+        assert_eq!(order["params"]["command"], call["command"], "{order}");
         answer_step(&mut session, &order, "l");
     }
     let done = session.wait_reply("plan.execute", execute);
@@ -210,6 +219,11 @@ fn the_demo_sentence_runs_on_the_real_model_and_replays_without_it() {
     );
     let journal = session.journal();
     assert_eq!(journal.len(), 5, "{journal:?}");
+    // Le journal garde les ids résolus, jamais une référence `step:k`.
+    assert!(
+        journal.iter().all(|l| !l.to_string().contains("step:")),
+        "{journal:?}"
+    );
     let before = std::fs::read(session.journal_path()).unwrap();
 
     // 3. Rejeu dans une seconde session dont le dossier des modèles est vide.

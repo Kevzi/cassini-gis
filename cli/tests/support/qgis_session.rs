@@ -231,9 +231,23 @@ impl QgisSession {
         assert!(self.child.wait().unwrap().success());
     }
 
-    /// Ferme la session et efface le projet.
+    /// Ferme la session et efface le projet (par `Drop`).
     pub fn close(mut self) {
         self.end();
-        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+/// Une assertion qui échoue ne laisse ni `cassini serve` vivant (modèle chargé, mémoire de la
+/// carte) ni le projet temporaire. Un dossier vide est celui que `reopen` a passé à la suite.
+impl Drop for QgisSession {
+    fn drop(&mut self) {
+        drop(self.stdin.take());
+        if matches!(self.child.try_wait(), Ok(None)) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+        if !self.dir.as_os_str().is_empty() {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
     }
 }

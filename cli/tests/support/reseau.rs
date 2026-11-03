@@ -1,6 +1,8 @@
 //! Garde réseau à l'exécution : les sockets TCP et UDP qu'un processus tient. Le canal local
 //! (socket Unix sous Linux, tube nommé sous Windows) n'en est pas une, et reste permis (AD-29).
-//! Aucune dépendance : `/proc` sous Linux, `netstat -ano` sous Windows.
+//! Aucune dépendance : `/proc` sous Linux, `netstat -ano` sous Windows. C'est un instantané pris
+//! aux moments où les tests l'appellent : une socket ouverte puis fermée entre deux appels n'est
+//! pas vue ; le contrôle statique des imports (`hors_ligne.rs`) couvre le binaire entier.
 
 #![allow(dead_code)]
 
@@ -48,9 +50,9 @@ fn sockets_of(pid: u32) -> Vec<String> {
     }
     // Les tables réseau de l'espace de noms du processus ; colonne 10 : l'inode.
     for table in ["tcp", "tcp6", "udp", "udp6"] {
-        let Ok(text) = std::fs::read_to_string(format!("/proc/{pid}/net/{table}")) else {
-            continue;
-        };
+        let path = format!("/proc/{pid}/net/{table}");
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("impossible de lire {path} : {e}"));
         for line in text.lines().skip(1) {
             let cols: Vec<&str> = line.split_whitespace().collect();
             if cols.len() > 9 && inodes.contains(cols[9]) {
@@ -70,6 +72,12 @@ fn sockets_of(pid: u32) -> Vec<String> {
         .arg("-ano")
         .output()
         .expect("netstat se lance");
+    assert!(
+        out.status.success(),
+        "netstat -ano a échoué ({}) : {}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
     let text = String::from_utf8_lossy(&out.stdout);
     let pid = pid.to_string();
     text.lines()

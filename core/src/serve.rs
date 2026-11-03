@@ -2083,18 +2083,21 @@ mod tests {
     }
 
     /// Rejoue le journal par le canal ; l'étape `odd` (si donnée) rend 99 entités au lieu de 7.
-    fn replay_demo(c: &Client, id: u64, odd: Option<u64>) -> Value {
+    /// Rend aussi les paramètres de chaque ordre rejoué, dans l'ordre.
+    fn replay_demo(c: &Client, id: u64, odd: Option<u64>) -> (Value, Vec<Value>) {
         c.send(json!({"jsonrpc":"2.0","id":id,"method":"journal.replay"}));
+        let mut params = Vec::new();
         for step in 1..=5 {
             let order = c.recv();
             assert_eq!(order["method"], "order.execute", "{order}");
+            params.push(order["params"]["params"].clone());
             let count = if odd == Some(step) { 99 } else { 7 };
             c.send(demo_answer(&order, step, "r", count));
             if odd == Some(step) {
                 break;
             }
         }
-        c.recv()
+        (c.recv(), params)
     }
 
     /// Exécute le plan de démo dans une première session, et rend le client fermé.
@@ -2148,7 +2151,14 @@ mod tests {
         again.send(json!({"jsonrpc":"2.0","id":2,"method":"plan.propose",
             "params":{"request":"Fais-le."}}));
         assert_eq!(code_of(&again.recv()), "agent.unavailable");
-        let replayed = replay_demo(&again, 3, None);
+        let (replayed, params) = replay_demo(&again, 3, None);
+        // Les couches sources restent ; chaque référence est liée à l'id neuf de son étape.
+        assert_eq!(params[0]["layer_id"], "plu");
+        assert_eq!(params[1]["layer_id"], "gares");
+        assert_eq!(params[2]["layer_id"], "parcelles");
+        assert_eq!(params[2]["overlay_layer_id"], "r_1");
+        assert_eq!(params[3]["layer_id"], "r_3");
+        assert_eq!(params[3]["overlay_layer_id"], "r_2");
         assert_eq!(replayed["id"], 3);
         assert_eq!(replayed["result"], json!({"steps": 5, "identical": true}));
         // Le rejeu n'écrit pas le journal : identique octet pour octet.
@@ -2159,10 +2169,14 @@ mod tests {
     #[test]
     fn a_demo_replay_that_differs_names_the_step() {
         let c = run_demo_plan();
+        let journal = c.dir.join("p.cassini/journal.jsonl");
+        let before = std::fs::read(&journal).unwrap();
         let mut again = c.reopen(None);
         again.hello_with(&DEMO);
         // Un autre id de couche ne compte pas (valeur de session) ; un autre résultat, si.
-        let replayed = replay_demo(&again, 2, Some(3));
+        let (replayed, _) = replay_demo(&again, 2, Some(3));
+        // Le rejeu arrêté n'a pas écrit le journal.
+        assert_eq!(std::fs::read(&journal).unwrap(), before);
         assert_eq!(code_of(&replayed), "replay.diverged", "{replayed}");
         assert_eq!(replayed["error"]["data"]["step"], 3);
         assert!(replayed["error"]["data"]["message"]

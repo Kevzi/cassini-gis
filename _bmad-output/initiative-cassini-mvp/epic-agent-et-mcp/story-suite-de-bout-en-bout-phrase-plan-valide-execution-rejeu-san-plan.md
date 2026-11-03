@@ -3,14 +3,14 @@ title: "Suite de bout en bout : phrase, plan valide, exécution, rejeu sans l'IA
 type: 'feature'
 ticket: '9'
 created: '2026-11-01'
-status: 'built'
+status: 'in-review'
 baseline_revision: '88251ab07994982c0ce9f891722c40075a8bf746'
 route: 'full'
 route_source: 'auto'
 risk: 'medium'
-review: 'quick'
+review: 'thorough'
 review_source: 'pinned'
-lenses_ran: [quick]
+lenses_ran: [quick, blind-hunter, edge-case-hunter, verification-gap, intent-alignment]
 review_loop_iteration: 0
 context: []
 ---
@@ -98,7 +98,7 @@ context: []
   `cargo fmt --check` verts ; `plan_reel` (cuda) 25/25 ; `bout_en_bout` (gpu) plan conforme en
   16,5 s, rejeu sans modèle `identical: true` ; `duree_reel` `0x55` : A0 27,9 s, moyenne 14,1 s.
   Consigné dans `docs/mesure-duree-par-phrase.md` et `docs/entrainement-du-modele.md`.
-- Non fait : la vérification manuelle dans QGIS (`probe_demo.py`), hors de cette exécution.
+- Vérification manuelle QGIS faite le 2026-11-03 par Claude : noyau installé (5.32, code produit inchangé) et extension identique au dépôt ; `probe_demo.py` sur une copie neuve du projet Villeneuve-le-Roi, modèle livré seul : plan conforme composé en ~17 s, exécuté en 8,3 s, PDF lisible. Rejeu sous QGIS dans une session sans modèle, deux fois avec le projet rouvert entre les deux : `identical: true`, journal inchangé. Sans rouvrir le projet, le second rejeu diverge (défaut antérieur, au report).
 
 ## Plan Change Log
 
@@ -114,6 +114,31 @@ Passe 1 (2026-11-01, lentille quick) — high 0, medium 2, low 5, false 0, maybe
 - low, patch — docs 5.9 : la révision `88251ab` ne contient pas les tests ; reformulé en « commit du ticket 5.9, base `88251ab` ».
 - low, rejeté — `a_demo_replay_that_differs_names_the_step` : `analysis.intersect` vaut aussi pour l'étape 4 ; `data.step == 3` fixe déjà l'étape.
 - low, rejeté — `Client::reopen` repart avec `CANCEL_GRACE` : tous les appelants l'emploient, aucun défaut atteignable.
+
+Passe 2 (2026-11-03, thorough à la demande du propriétaire : blind-hunter, edge-case-hunter, verification-gap, intent-alignment) — high 0, medium 1, low 13 corrigés, 11 rejetés, 1 report.
+
+- medium, patch — `serve.rs` `replay_demo` : les paramètres rejoués ne sont pas vérifiés (des ids périmés ou une seule des deux références de l'étape 4 reliée resteraient verts) ; assertions `r_1`, `r_3`, `r_2`, couches sources.
+- low, patch — rejeu divergent : journal non vérifié après l'erreur ; comparaison octet pour octet.
+- low, patch — `reseau.rs` Windows : statut de `netstat` ignoré ; assertion de succès.
+- low, patch — `reseau.rs` Linux : table `/proc/<pid>/net/*` illisible sautée ; échec explicite.
+- low, patch — `reseau.rs` : garde par instantanés (aussi intent-alignment 2, verification-gap) ; dit dans la doc du module.
+- low, patch — garde « pas aveugle » : port cherché dans toute la ligne, UDP v4 seul ; colonne locale, et une socket TCP aussi.
+- low, patch — `QgisSession` sans `Drop` (et dossier perdu si `reopen` échoue) : processus `serve` orphelin, modèle chargé ; `Drop` qui tue l'enfant et efface le projet.
+- low, patch — `bout_en_bout.rs` : `CASSINI_TEST_MODEL` relatif nu → `CASSINI_MODELS` vide ; chemin canonique. Ordre des commandes et `step:` résolus non vérifiés sur le binaire ; assertions ajoutées.
+- low, patch — docs : pas de hash ; `bf24d56` nommé ; moyenne 5.20 rapportée au tableau complet.
+- false — réglage `quick` contre `CLAUDE.md` §8 : cette passe thorough le règle.
+- false — vérification QGIS non faite : faite le 2026-11-03 (voir Implementation Notes).
+- false — `bout_en_bout` vert sans `CASSINI_TEST_MODEL` : voulu par la matrice (« sans la variable, l'essai ne fait rien »).
+- false — « A0 sous 30 s » lu comme exigence i5 : l'epic fixe la machine de mesure au 5800X bridé à 4 cœurs.
+- low, rejeté — tables `raw`/`icmp`/`udplite` non lues : aucun composant n'ouvre ce genre de socket, et ajouter des tables parfois absentes complique la garde.
+- low, rejeté — erreurs de `read_link` sur un fd ignorées : le fd fermé entre-temps n'est plus une socket tenue ; garde inutilement plus lourde.
+- low, rejeté — garde vide hors Linux et Windows : le produit et la CI ne visent que ces deux systèmes ; une note est imprimée.
+- low, rejeté — ordre inattendu pendant `plan.propose` : l'assertion échoue bruyamment, comportement voulu (le `Drop` ajouté évite l'orphelin).
+- low, rejeté — `v as u64` sature sur une distance négative : normalisation de comparaison seulement, sans effet.
+- low, rejeté — `gaps` strict : voulu, même règle que le plan attendu S17 de `plan_reel`.
+- low, rejeté — deux écritures de la commande `plan_reel` : équivalentes.
+- low, rejeté (intent-alignment 1, 3, 4) — la chaîne phrase → plan sur le binaire n'existe qu'avec le vrai modèle (essai ignoré) ; « identical » se juge contre la fausse extension par construction ; le point 4 suit le périmètre de l'Intent.
+- report — deux rejeux de suite dans la même session QGIS : le second diverge (dossier `replay/` non vidé, fichiers tenus par QGIS) ; défaut antérieur, `deferred-work.md`.
 
 ## Design Notes
 

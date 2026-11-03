@@ -578,3 +578,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-rejeu-sans-poignee-de-main-system-about-ne-s-ajoute-plus-au-plan.md`
   summary: Une seconde fenêtre QGIS en lecture seule montre le bandeau `refused` avec le bouton « Choisir le noyau », qui ne sert à rien, et sans « Relancer » une fois la première fenêtre fermée.
   evidence: `panel.py:126` (`"refused": ("refused", "choose")`) ; avant 5.32 la lecture seule tombait déjà sur ce bandeau ; depuis 5.32 le message du noyau y est affiché, mais l'action reste celle d'un refus de version (relecture `thorough` de 5.32, passe 3).
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-suite-de-bout-en-bout-phrase-plan-valide-execution-rejeu-san-plan.md`
+  summary: Deux rejeux de suite dans la même session QGIS, sans rouvrir le projet : le second rend `replay.diverged` à l'étape 1, alors que le journal est bon.
+  evidence: recette QGIS de 5.9 (2026-11-03, noyau installé de 5.32, sonde hors dépôt `donnees-test-cassini/mesure-5-9/probe_replay_5_9.py`) — GDAL « A file system object called '…\replay\1-analysis.select_by_attribute.gpkg' already exists » ; `core/src/journal/mod.rs:636` vide `replay/` par `let _ = fs::remove_dir_all(...)`, erreur ignorée, et QGIS tient encore ouverts les fichiers du premier rejeu. Avec le projet rouvert entre les deux rejeux : deux fois `identical: true`. Défaut antérieur à 5.9 ; ticket à créer (risque high, rejeu).
