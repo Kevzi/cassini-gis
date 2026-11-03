@@ -633,3 +633,42 @@ notes = [
   "Decision: 2026-10-30 — sorties par defaut : l'adaptateur GGUF et sa declaration seulement, sans fusion ; la base GGUF est deja dans le dossier des modeles.",
   "Aucun vocabulaire de domaine dans ce depot : les tests n'utilisent qu'un fichier d'exemples synthetique.",
 ]
+
+[[entry]]
+id = 37
+type = "story"
+title = "Le garde-fou des coordonnees lit la zone UTM ecrite dans la demande"
+description = "Le garde-fou des coordonnees ne relie a un code EPSG que Lambert-93 (2154) et WGS84 (4326). Une demande claire qui donne un point en UTM, par exemple « X 412300 Y 1652800 en UTM 31N », recoit donc une question au lieu de son plan : le code 32631 du plan n'est pas dans la demande, et le garde-fou le prend pour une valeur inventee. Apres ce ticket, une zone UTM du WGS84 ecrite avec son hemisphere (« UTM 31N », « UTM 31 N », « UTM zone 31 Nord », « UTM31N ») donne 32600 + zone, et l'hemisphere sud (« S », « Sud ») donne 32700 + zone, pour les zones 1 a 60 seulement. Sans hemisphere, aucun code n'est deduit et le systeme reste a demander."
+verify = "Tests du noyau sans QGIS : « ... X 412300 Y 1652800 en UTM 31N » et un plan a epsg 32631 passent le garde-fou ; « UTM 31S » donne 32731 ; « UTM 61N » et « UTM 31 » sans hemisphere ne donnent aucun code ; les essais existants du garde-fou restent verts. Une famille du generateur civil donne un point en UTM (31N ou 32N)."
+covers = ["CAP-4"]
+after = [16]
+hitl = false
+risk = "medium"
+references = [
+  "plan — story-garde-fou-une-coordonnee-du-plan-vient-de-la-demande-jamais-plan.md, regle du garde-fou",
+]
+notes = [
+  "Decision: 2026-11-03 — demande du proprietaire ; seul le WGS84 UTM (326xx, 327xx) est vise, aucun autre systeme nomme.",
+  "Decision: 2026-11-03 — la famille du generateur est ecrite ici ; le re-entrainement se fait en une passe groupee apres 37 et 38 (Notes de l'epique).",
+]
+
+[[entry]]
+id = 38
+type = "story"
+title = "L'export PDF prend une echelle demandee"
+description = "layout.export_pdf ne prend qu'un titre : une demande claire comme « une carte au 1:25 000 » ne peut pas etre tenue, et le modele refuse ou exporte a une autre echelle. Apres ce ticket, la commande accepte un parametre facultatif scale (denominateur entier, par exemple 25000). L'extension pose cette echelle a la carte de la mise en page, centree sur le centre de l'emprise que montre la carte de QGIS, et le resultat rend l'echelle utilisee. Sans scale, le cadrage reste celui d'aujourd'hui. Le modele apprend les formes courantes d'ecriture de l'echelle : « 1:25 000 », « 1/25000 », « au 25 000e », « 1:25k »."
+verify = "Tests du noyau et de l'extension : un export a scale 25000 produit une carte de mise en page a l'echelle 25000 et rend 25000 ; un export sans scale ne change pas ; le garde-fou ne compte pas scale comme une coordonnee ; un journal ecrit avant ce ticket rejoue identical: true. Recette QGIS : « Exporte la carte au 1:25 000 » donne un plan a scale 25000 et un PDF a cette echelle."
+covers = ["CAP-4", "CAP-5"]
+after = [37]
+hitl = false
+risk = "high"
+references = [
+  "spec — ../spec-cassini-mvp/spec-cassini-mvp.md, CAP-5",
+  "architecture — ../architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md, AD-24 (version de chaine)",
+]
+notes = [
+  "Decision: 2026-11-03 — proprietaire : l'entree vit dans cette epique et couvre CAP-4 et CAP-5 ; l'epique de la facade QGIS, qui porte CAP-5, reste close.",
+  "Decision: 2026-11-03 — proprietaire : scale est un entier strictement positif ; les bornes exactes, refusees par le schema au-dela, sont fixees au plan.",
+  "Decision: 2026-11-03 — la famille du generateur est ecrite ici ; le re-entrainement se fait en une passe groupee apres 37 et 38 (Notes de l'epique).",
+  "Risque high : changement de la ligne d'export de l'extension (version de chaine, AD-24) et du rejeu ; controle hors du ticket : recette QGIS par le proprietaire, un PDF ouvert et mesure a l'echelle.",
+]

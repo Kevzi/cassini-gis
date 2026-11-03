@@ -1281,3 +1281,135 @@ fn a_leave_out_from_the_caller_is_dropped_outside_replay() {
     assert!(lines(&s)[0]["params"].get("leave_out").is_none());
     let _ = fs::remove_dir_all(dir);
 }
+
+// -- couches intermédiaires déduites du journal (ticket 5.34) --
+
+#[test]
+fn a_plan_step_is_written_only_by_a_plan_and_replay_ignores_it() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, &project).unwrap();
+    s.call_in_plan("test.write_output", json!({"text": "a"}), 1)
+        .unwrap();
+    s.call_in_plan("test.read_file", json!({"path": "out:1.1"}), 2)
+        .unwrap();
+    s.call("system.about", json!({})).unwrap();
+    let l = lines(&s);
+    assert_eq!(l[0]["plan_step"], 1);
+    assert_eq!(l[1]["plan_step"], 2);
+    assert!(l[2].get("plan_step").is_none());
+    let (report, _) = replay_of(&registry, &project).unwrap();
+    assert_eq!(
+        report,
+        ReplayReport {
+            steps: 3,
+            identical: true
+        }
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn intermediate_files_follow_the_rule_of_an_executed_plan() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let ok = |id: &str, plan_step: Option<u64>, params: Value, layer: Option<&str>| {
+        let mut row = json!({"id": id, "params": params, "result": {}});
+        if let Some(n) = plan_step {
+            row["plan_step"] = json!(n);
+        }
+        if let Some(layer) = layer {
+            row["layer_id"] = json!(layer);
+        }
+        row
+    };
+    let rows = [
+        // Plan 1 : sélection, tampon, intersection, intersection, PDF.
+        ok(
+            "analysis.select_by_attribute",
+            Some(1),
+            json!({"layer_id": "plu"}),
+            Some("r1"),
+        ),
+        ok(
+            "analysis.buffer",
+            Some(2),
+            json!({"layer_id": "r1"}),
+            Some("r2"),
+        ),
+        ok(
+            "analysis.intersect",
+            Some(3),
+            json!({"input_layer_id": "r2", "overlay_layer_id": "gares", "n": 3}),
+            Some("r3"),
+        ),
+        // Une sortie entière (`step:k` nu) consomme aussi la couche qu'elle porte.
+        ok(
+            "analysis.intersect",
+            Some(4),
+            json!({"input_layer_id": {"layer_id": "r3", "feature_count": 2}}),
+            Some("r4"),
+        ),
+        // Une étape sans couche (PDF) ne consomme rien.
+        ok(
+            "layout.export_pdf",
+            Some(5),
+            json!({"layer_id": "r4"}),
+            None,
+        ),
+        // Ligne illisible : ignorée.
+        json!("pas un objet"),
+        // Plan 2 (phrase suivante) : reprend r4, puis s'arrête sur une erreur.
+        ok(
+            "analysis.buffer",
+            Some(1),
+            json!({"layer_id": "r4"}),
+            Some("r7"),
+        ),
+        json!({"id": "analysis.intersect", "plan_step": 2,
+            "params": {"input_layer_id": "r7"}, "error": "qgis.failed"}),
+        // Plan 3 : `layer.add` puis une étape qui reprend la couche ouverte.
+        ok("layer.add", Some(1), json!({"path": "a.gpkg"}), Some("a1")),
+        ok(
+            "analysis.buffer",
+            Some(2),
+            json!({"layer_id": "a1"}),
+            Some("r10"),
+        ),
+        // Journal ancien, sans `plan_step` : rien n'est caché.
+        ok(
+            "analysis.buffer",
+            None,
+            json!({"layer_id": "plu"}),
+            Some("x1"),
+        ),
+        ok(
+            "analysis.intersect",
+            None,
+            json!({"input_layer_id": "x1"}),
+            Some("x2"),
+        ),
+    ];
+    hand_journal(&project, &rows);
+    let journal = dir.join("p.cassini").join(JOURNAL_FILE);
+    let mut got: Vec<String> = intermediate_files(&registry, &journal)
+        .into_iter()
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        [
+            "1-analysis.select_by_attribute.gpkg",
+            "2-analysis.buffer.gpkg",
+            "3-analysis.intersect.gpkg"
+        ]
+    );
+    // Une ligne au JSON invalide au milieu d'un plan ne casse rien d'autre.
+    let mut text = fs::read_to_string(&journal).unwrap();
+    text = text.replacen("\"pas un objet\"", "{pas du json", 1);
+    fs::write(&journal, text).unwrap();
+    assert_eq!(intermediate_files(&registry, &journal).len(), 3);
+    // Journal absent : rien.
+    assert!(intermediate_files(&registry, &dir.join("absent.jsonl")).is_empty());
+    let _ = fs::remove_dir_all(dir);
+}

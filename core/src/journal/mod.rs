@@ -228,6 +228,28 @@ impl<'a> Session<'a> {
         params: Value,
         origin: Option<&str>,
     ) -> Result<Value, ErrorReport> {
+        self.call_logged(id, params, origin, None)
+    }
+
+    /// Comme `call`, pour l'étape `plan_step` (à partir de 1) d'un plan exécuté : la ligne porte
+    /// la clé `"plan_step"` (AD-11, ticket 5.34), d'où le noyau déduit les couches intermédiaires.
+    /// Le rejeu l'ignore.
+    pub fn call_in_plan(
+        &mut self,
+        id: &str,
+        params: Value,
+        plan_step: usize,
+    ) -> Result<Value, ErrorReport> {
+        self.call_logged(id, params, None, Some(plan_step))
+    }
+
+    fn call_logged(
+        &mut self,
+        id: &str,
+        params: Value,
+        origin: Option<&str>,
+        plan_step: Option<usize>,
+    ) -> Result<Value, ErrorReport> {
         if self.mode == Mode::ReadOnly {
             return Err(JournalError::ReadOnly.into());
         }
@@ -269,6 +291,9 @@ impl<'a> Session<'a> {
         line.insert("inputs".into(), Value::Array(inputs));
         if let Some(origin) = origin {
             line.insert("origin".into(), json!(origin));
+        }
+        if let Some(plan_step) = plan_step {
+            line.insert("plan_step".into(), json!(plan_step));
         }
         let cancelled = matches!(outcome, Err(RegistryError::Cancelled(_)));
         match &outcome {
@@ -381,6 +406,70 @@ fn output_file(step: usize, id: &str, outputs: &[String], name: &str, ext: &str)
     } else {
         format!("{step}-{id}-{name}{ext}")
     }
+}
+
+/// Noms des fichiers de sortie intermédiaires d'après le journal `journal` (ticket 5.34) : les
+/// sorties d'une étape de plan qu'une étape réussie du même plan, qui rend une couche, a consommées.
+///
+/// Un plan est une suite de lignes portant `plan_step`, qui commence à 1 ; une ligne sans la clé
+/// (appel hors plan, journal ancien) n'appartient à aucun plan. Une étape consomme une sortie
+/// antérieure du même plan quand une valeur de premier niveau de ses `params` (où le noyau a déjà
+/// résolu `step:k` ou `step:k.layer_id`) est le `layer_id` rendu par cette étape antérieure, ou une
+/// sortie entière qui le porte. Les noms sont ceux de `output_file`, que le rejeu reprend sous
+/// `replay/`. Journal absent ou illisible : aucun nom ; une ligne illisible ne cache rien.
+pub fn intermediate_files(registry: &Registry, journal: &Path) -> HashSet<String> {
+    let mut hidden = HashSet::new();
+    let Ok(bytes) = fs::read(journal) else {
+        return hidden;
+    };
+    let text = String::from_utf8_lossy(&bytes);
+    // Couches rendues par les étapes déjà lues du plan en cours : id -> fichiers de sortie.
+    let mut produced: HashMap<String, Vec<String>> = HashMap::new();
+    for (i, raw) in content_lines(&text).enumerate() {
+        let step = i + 1;
+        let Ok(line) = serde_json::from_str::<Value>(raw) else {
+            continue;
+        };
+        let plan_step = line.get("plan_step").and_then(Value::as_u64);
+        if plan_step.is_none_or(|n| n <= 1) {
+            produced.clear();
+        }
+        if plan_step.is_none() {
+            continue;
+        }
+        let Some(layer_id) = line.get("layer_id").and_then(Value::as_str) else {
+            continue;
+        };
+        if line.get("error").is_some() || line.get("cancelled").is_some() {
+            continue;
+        }
+        if let Some(Value::Object(params)) = line.get("params") {
+            for value in params.values() {
+                let consumed = match value {
+                    Value::String(s) => Some(s.as_str()),
+                    Value::Object(output) => output.get("layer_id").and_then(Value::as_str),
+                    _ => None,
+                };
+                if let Some(files) = consumed.and_then(|id| produced.get(id)) {
+                    hidden.extend(files.iter().cloned());
+                }
+            }
+        }
+        let Some(id) = line.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        let files = registry
+            .spec(id)
+            .map(|spec| {
+                spec.output_params
+                    .iter()
+                    .map(|name| output_file(step, id, &spec.output_params, name, &spec.output_ext))
+                    .collect()
+            })
+            .unwrap_or_default();
+        produced.insert(layer_id.to_string(), files);
+    }
+    hidden
 }
 
 /// Paramètres d'un appel, tels que journalisés et tels que donnés à l'exécutant.
