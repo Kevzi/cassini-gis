@@ -11,7 +11,7 @@
 //! par une session en lecture seule, y compris sous Windows, où un verrou pris sur
 //! un fichier en interdit la lecture aux autres.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::Write;
@@ -249,6 +249,11 @@ impl<'a> Session<'a> {
             project_dir: &self.project_dir,
             out_dir: &self.work_dir,
         };
+        // Le paramètre que seul le rejeu remplit n'est jamais celui de l'appelant (ticket 5.36).
+        let mut params = params;
+        if let (Some(name), Value::Object(map)) = (&spec.leave_out_param, &mut params) {
+            map.remove(name);
+        }
         let Resolved {
             logged,
             exec,
@@ -668,7 +673,29 @@ impl<'a> Replay<'a> {
     }
 
     /// Réexécute chaque étape par `router`, dans l'ordre ; s'arrête au premier écart.
-    pub fn run(&self, router: &Router) -> Result<ReplayReport, ErrorReport> {
+    ///
+    /// `replayed_layers` : ids des couches posées par les rejeux précédents dans la même
+    /// session de l'appelant (ensemble vide s'il n'en garde pas la mémoire). Avec les ids du
+    /// journal, ils sont passés au paramètre `leave_out_param` d'une commande qui le déclare :
+    /// la carte du rejeu ne montre que ce que l'exécution d'origine montrait (ticket 5.36).
+    /// Les ids des couches posées par ce rejeu y sont ajoutés, qu'il réussisse ou non.
+    pub fn run(
+        &self,
+        router: &Router,
+        replayed_layers: &mut HashSet<String>,
+    ) -> Result<ReplayReport, ErrorReport> {
+        // Couches d'une exécution précédente : session d'origine (ids du journal) et rejeux
+        // antérieurs. Figé avant la première étape : jamais les ids de ce rejeu.
+        let leave_out: Vec<Value> = self
+            .lines
+            .iter()
+            .filter_map(|line| line.get("layer_id").and_then(Value::as_str))
+            .chain(replayed_layers.iter().map(String::as_str))
+            .collect::<BTreeSet<&str>>()
+            .into_iter()
+            .map(|id| json!(id))
+            .collect();
+        let leave_out = Value::Array(leave_out);
         // Un rejeu précédent ne doit pas laisser de fichier qu'un autre pourrait reprendre.
         let out_dir = self.fresh_replay_dir()?;
         let resolver = Resolver {
@@ -697,10 +724,23 @@ impl<'a> Replay<'a> {
                 .map_err(|e| ErrorReport::from(e).at_step(step))?;
             let mut params = line.get("params").cloned().unwrap_or_else(|| json!({}));
             substitute(&mut params, &bound);
+            // Après la substitution : les ids du journal ne doivent pas devenir ceux de ce rejeu.
+            if let (Some(name), Value::Object(map)) = (&spec.leave_out_param, &mut params) {
+                map.insert(name.clone(), leave_out.clone());
+            }
             let resolved = resolver
                 .resolve_call(id, spec, step, params, &self.ids[..i])
                 .map_err(|e| e.at_step(step))?;
             let outcome = router.call(id, resolved.exec);
+            // La couche est dans le projet même si l'étape diverge : on s'en souvient.
+            if let Some(new) = outcome
+                .as_ref()
+                .ok()
+                .and_then(|v| v.get("layer_id"))
+                .and_then(Value::as_str)
+            {
+                replayed_layers.insert(new.to_string());
+            }
             if let Err(e @ crate::registry::RegistryError::Unavailable(_)) = &outcome {
                 return Err(ErrorReport::from(e).at_step(step));
             }

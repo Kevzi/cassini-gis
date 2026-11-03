@@ -227,22 +227,25 @@ fn examples() -> Vec<(Value, &'static str, Value)> {
 
 /// Le catalogue montré au modèle : identifiant, description française et
 /// schéma des paramètres, tirés du registre. Les paramètres de sortie sont
-/// ôtés : le noyau les décide (AD-10), le modèle n'a pas à les connaître.
+/// ôtés : le noyau les décide (AD-10), le modèle n'a pas à les connaître. De même pour le
+/// paramètre que seul le rejeu remplit (ticket 5.36).
 fn catalog_entry(spec: &CommandSpec) -> Value {
     let mut params = spec.params_schema.clone();
+    let hidden: Vec<&String> = spec
+        .output_params
+        .iter()
+        .chain(spec.leave_out_param.as_ref())
+        .collect();
     if let Value::Object(map) = &mut params {
         map.remove("$schema");
         map.remove("title");
         if let Some(Value::Object(props)) = map.get_mut("properties") {
-            for name in &spec.output_params {
-                props.remove(name);
+            for name in &hidden {
+                props.remove(name.as_str());
             }
         }
         if let Some(Value::Array(required)) = map.get_mut("required") {
-            required.retain(|r| {
-                r.as_str()
-                    .is_none_or(|n| !spec.output_params.iter().any(|o| o == n))
-            });
+            required.retain(|r| r.as_str().is_none_or(|n| !hidden.iter().any(|o| *o == n)));
         }
     }
     strip_marks(&mut params);
@@ -483,7 +486,7 @@ fn judge(registry: &Registry, completion: &Completion) -> Result<Plan, Vec<Strin
                     continue; // `check_plan` le signale
                 };
                 if let Value::Object(params) = &call.params {
-                    for name in &spec.output_params {
+                    for name in spec.output_params.iter().chain(&spec.leave_out_param) {
                         if params.contains_key(name) {
                             errors.push(format!(
                                 "étape {} : le paramètre « {name} » est décidé par le noyau, ne l'écris pas",
@@ -881,6 +884,19 @@ mod tests {
     }
 
     #[test]
+    fn a_leave_out_chosen_by_the_model_is_rejected() {
+        let bad = r#"{"kind":"calls","calls":[{"command":"layout.export_pdf","params":{"title":"Carte","leave_out":["gares_1"]}}]}"#;
+        let (result, seen) = compose(vec![done(bad), done(GOOD)]);
+        assert!(result.is_ok());
+        assert!(
+            seen[1][3].text.contains("« leave_out »"),
+            "{}",
+            seen[1][3].text
+        );
+        assert!(seen[1][3].text.contains("décidé par le noyau"));
+    }
+
+    #[test]
     fn too_many_steps_are_invalid() {
         let step = r#"{"command":"project.inventory","params":{}}"#;
         let many = format!(
@@ -928,6 +944,10 @@ mod tests {
         let buffer = catalog_entry(reg.spec("analysis.buffer").unwrap());
         assert!(buffer["params"]["properties"].get("out").is_none());
         assert!(buffer["params"]["properties"].get("layer_id").is_some());
+        // Le paramètre que seul le rejeu remplit reste caché au modèle (ticket 5.36).
+        let export = catalog_entry(reg.spec("layout.export_pdf").unwrap());
+        assert!(export["params"]["properties"].get("leave_out").is_none());
+        assert!(export["params"]["properties"].get("title").is_some());
         // La marque du `Point` reste au noyau : le modèle ne la voit pas.
         assert!(!text.contains("x-cassini"));
         let isochrone = catalog_entry(reg.spec("analysis.isochrone").unwrap());

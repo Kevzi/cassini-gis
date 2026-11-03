@@ -51,6 +51,11 @@ pub struct CommandSpec {
     /// sortie est une couche déclare `.gpkg`. Métadonnée interne : jamais sérialisée.
     #[serde(skip)]
     pub output_ext: String,
+    /// Paramètre qui reçoit, au rejeu seulement, les ids des couches posées par une exécution
+    /// précédente du même journal, à laisser hors du résultat (ticket 5.36). Rempli par le
+    /// noyau, jamais par l'appelant. Métadonnée interne : jamais sérialisée.
+    #[serde(skip)]
+    pub leave_out_param: Option<String>,
     /// Schéma JSON des paramètres, engendré depuis le type Rust.
     pub params_schema: Value,
     /// Schéma JSON du résultat, engendré depuis le type Rust.
@@ -76,6 +81,7 @@ impl CommandSpec {
             path_params: Vec::new(),
             output_params: Vec::new(),
             output_ext: ".out".to_string(),
+            leave_out_param: None,
             params_schema: schema_value::<P>(),
             output_schema: schema_value::<O>(),
             examples: Vec::new(),
@@ -115,6 +121,12 @@ impl CommandSpec {
     /// Déclare l'extension des fichiers de sortie (point compris, ex. `.gpkg`).
     pub fn output_ext(mut self, ext: &str) -> Self {
         self.output_ext = ext.to_string();
+        self
+    }
+
+    /// Déclare le paramètre que le rejeu remplit des ids de couche à laisser hors du résultat.
+    pub fn leave_out_param(mut self, name: &str) -> Self {
+        self.leave_out_param = Some(name.to_string());
         self
     }
 

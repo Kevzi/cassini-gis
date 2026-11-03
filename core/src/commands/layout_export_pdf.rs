@@ -20,6 +20,11 @@ pub struct LayoutExportPdfParams {
     /// Fichier de sortie : fourni par le noyau, dans le dossier de travail.
     #[serde(default)]
     pub out: String,
+    /// Ids de couche à laisser hors de la carte : fournis par le noyau au rejeu seulement,
+    /// ce sont les couches posées par une exécution précédente du même journal (ticket 5.36).
+    /// Layer ids to leave out of the map: given by the core on replay only.
+    #[serde(default)]
+    pub leave_out: Vec<String>,
 }
 
 /// Résultat de `layout.export_pdf`.
@@ -55,6 +60,7 @@ impl Delegated for LayoutExportPdf {
         .cancellable(false)
         .output_params(&["out"])
         .output_ext(".pdf")
+        .leave_out_param("leave_out")
         .example(serde_json::json!({"title": "Parcelles constructibles à moins de 500 m d'une gare"}))
         .example(serde_json::json!({"title": "Réseau ferré de Villeneuve-le-Roi"}))
         .tests(&[
@@ -62,6 +68,7 @@ impl Delegated for LayoutExportPdf {
             "layout_export_pdf_needs_a_title",
             "layout_export_pdf_output_is_a_pdf_named_by_the_core",
             "layout_export_pdf_sources_are_bounded",
+            "layout_export_pdf_leave_out_is_an_optional_list_of_ids",
         ])
     }
 }
@@ -118,5 +125,30 @@ mod tests {
         let sources = &spec.output_schema["properties"]["sources"];
         assert_eq!(sources["maxItems"], json!(super::MAX_SOURCES));
         assert!(registry.check_contract().is_empty());
+    }
+
+    #[test]
+    fn layout_export_pdf_leave_out_is_an_optional_list_of_ids() {
+        let registry = Registry::standard();
+        let spec = registry.spec("layout.export_pdf").unwrap();
+        assert_eq!(spec.leave_out_param.as_deref(), Some("leave_out"));
+        let schema = &spec.params_schema;
+        assert_eq!(schema["properties"]["leave_out"]["type"], json!("array"));
+        assert_eq!(
+            schema["properties"]["leave_out"]["items"]["type"],
+            json!("string")
+        );
+        let required = schema["required"].as_array().unwrap();
+        assert!(!required.contains(&json!("leave_out")));
+        assert!(registry
+            .validate_params(
+                "layout.export_pdf",
+                &json!({"title": "Carte", "leave_out": ["a", "b"]})
+            )
+            .is_ok());
+        let err = registry
+            .validate_params("layout.export_pdf", &json!({"title": "Carte", "leave_out": "a"}))
+            .unwrap_err();
+        assert_eq!(err.code(), "registry.invalid_params");
     }
 }

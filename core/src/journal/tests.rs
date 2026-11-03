@@ -263,7 +263,7 @@ fn replay_of(
     let replay = Replay::load(registry, project)?;
     let warnings = replay.warnings().to_vec();
     replay
-        .run(&Router::new(registry))
+        .run(&Router::new(registry), &mut HashSet::new())
         .map(|report| (report, warnings))
 }
 
@@ -502,7 +502,10 @@ fn a_project_copied_with_its_journal_folder_replays_identically() {
     let replay = Replay::load(&registry, &moved_project).unwrap();
     assert!(replay.warnings().is_empty());
     let report = replay
-        .run(&Router::new(&registry).with_qgis(InventoryQgis))
+        .run(
+            &Router::new(&registry).with_qgis(InventoryQgis),
+            &mut HashSet::new(),
+        )
         .unwrap();
     assert_eq!(
         report,
@@ -681,7 +684,7 @@ fn replay_inventory(
     tweak(&mut qgis);
     let outcome = Replay::load(&registry, &project)
         .unwrap()
-        .run(&Router::new(&registry).with_qgis(qgis));
+        .run(&Router::new(&registry).with_qgis(qgis), &mut HashSet::new());
     let _ = fs::remove_dir_all(dir);
     outcome
 }
@@ -727,7 +730,10 @@ fn a_replay_binds_new_layer_ids_and_accepts_other_qgis_bytes() {
     qgis_journal(&project);
     let replay = Replay::load(&registry, &project).unwrap();
     let report = replay
-        .run(&Router::new(&registry).with_qgis(SessionQgis::new(2)))
+        .run(
+            &Router::new(&registry).with_qgis(SessionQgis::new(2)),
+            &mut HashSet::new(),
+        )
         .unwrap();
     assert_eq!(
         report,
@@ -757,7 +763,10 @@ fn a_qgis_step_with_another_result_stops_the_replay_naming_the_step() {
     other.feature_count = 5;
     let err = Replay::load(&registry, &project)
         .unwrap()
-        .run(&Router::new(&registry).with_qgis(other))
+        .run(
+            &Router::new(&registry).with_qgis(other),
+            &mut HashSet::new(),
+        )
         .unwrap_err();
     assert_eq!(err.code, "replay.diverged");
     assert_eq!(err.step, Some(2));
@@ -774,7 +783,10 @@ fn an_empty_qgis_output_diverges() {
     other.empty_output = true;
     let err = Replay::load(&registry, &project)
         .unwrap()
-        .run(&Router::new(&registry).with_qgis(other))
+        .run(
+            &Router::new(&registry).with_qgis(other),
+            &mut HashSet::new(),
+        )
         .unwrap_err();
     assert_eq!(err.code, "replay.diverged");
     assert_eq!(err.step, Some(2));
@@ -1039,9 +1051,10 @@ fn a_qgis_journal_replays_identically_into_a_fallback_folder() {
     fs::write(&stale, "périmé").unwrap();
     set_mode(&work.join("replay"), 0o555);
 
-    let outcome = Replay::load(&registry, &project)
-        .unwrap()
-        .run(&Router::new(&registry).with_qgis(SessionQgis::new(2)));
+    let outcome = Replay::load(&registry, &project).unwrap().run(
+        &Router::new(&registry).with_qgis(SessionQgis::new(2)),
+        &mut HashSet::new(),
+    );
     set_mode(&work.join("replay"), 0o755);
     assert_eq!(
         outcome.unwrap(),
@@ -1055,5 +1068,216 @@ fn a_qgis_journal_replays_identically_into_a_fallback_folder() {
         "gpkg-2"
     );
     assert_eq!(fs::read_to_string(&stale).unwrap(), "périmé");
+    let _ = fs::remove_dir_all(dir);
+}
+
+// ---- Ticket 5.36 : rejeux de suite sans rouvrir le projet ----
+
+/// Faux projet QGIS, qui survit d'une exécution à l'autre comme la session QGIS de
+/// l'utilisateur : ses couches visibles, (id, fichier source), dans l'ordre d'ajout.
+#[derive(Default)]
+struct OpenProject {
+    layers: std::cell::RefCell<Vec<(String, String)>>,
+}
+
+impl OpenProject {
+    fn with_base() -> std::rc::Rc<Self> {
+        let project = OpenProject::default();
+        project
+            .layers
+            .borrow_mut()
+            .push(("communes_0".into(), "communes.gpkg".into()));
+        std::rc::Rc::new(project)
+    }
+}
+
+/// QGIS de test dont l'export compte les couches visibles du faux projet, sauf celles
+/// que `leave_out` nomme, comme le geste de l'extension.
+struct ProjectQgis {
+    project: std::rc::Rc<OpenProject>,
+    generation: u32,
+    count: std::cell::Cell<u32>,
+    /// `leave_out` reçu par chaque export, dans l'ordre.
+    seen: std::rc::Rc<std::cell::RefCell<Vec<Value>>>,
+}
+
+impl ProjectQgis {
+    fn new(project: &std::rc::Rc<OpenProject>, generation: u32) -> Self {
+        ProjectQgis {
+            project: project.clone(),
+            generation,
+            count: std::cell::Cell::new(0),
+            seen: Default::default(),
+        }
+    }
+}
+
+impl Executor for ProjectQgis {
+    fn execute(&self, id: &str, p: Value) -> Result<Value, RegistryError> {
+        let n = self.count.get() + 1;
+        self.count.set(n);
+        match id {
+            "layer.add" => {
+                let layer = format!("pts_g{}_{n}", self.generation);
+                self.project
+                    .layers
+                    .borrow_mut()
+                    .push((layer.clone(), "pts.csv".into()));
+                Ok(json!({
+                    "layer_id": layer, "name": "pts", "source_crs": "EPSG:2154",
+                    "project_crs": "EPSG:2154", "reprojected": false
+                }))
+            }
+            "layout.export_pdf" => {
+                self.seen
+                    .borrow_mut()
+                    .push(p.get("leave_out").cloned().unwrap_or(Value::Null));
+                let leave_out: Vec<&str> = p
+                    .get("leave_out")
+                    .and_then(Value::as_array)
+                    .map(|a| a.iter().filter_map(Value::as_str).collect())
+                    .unwrap_or_default();
+                let layers = self.project.layers.borrow();
+                let drawn: Vec<&(String, String)> = layers
+                    .iter()
+                    .filter(|(id, _)| !leave_out.contains(&id.as_str()))
+                    .collect();
+                let sources: BTreeSet<&str> = drawn.iter().map(|(_, s)| s.as_str()).collect();
+                let out = p["out"].as_str().unwrap().to_string();
+                fs::write(&out, format!("pdf-{}", self.generation)).unwrap();
+                Ok(json!({
+                    "file": out, "page_count": 1, "layer_count": drawn.len(),
+                    "sources": sources, "truncated": false
+                }))
+            }
+            other => panic!("commande inattendue : {other}"),
+        }
+    }
+}
+
+/// Session d'origine : ouvre une couche, exporte la carte. Le projet reste ouvert.
+fn export_journal(project_file: &Path, project: &std::rc::Rc<OpenProject>) {
+    let registry = Registry::standard();
+    let qgis = ProjectQgis::new(project, 1);
+    let seen = qgis.seen.clone();
+    let mut s = Session::open(&registry, project_file)
+        .unwrap()
+        .with_qgis(qgis);
+    s.call("layer.add", json!({"path": "pts.csv", "crs": "EPSG:2154"}))
+        .unwrap();
+    s.call("layout.export_pdf", json!({"title": "Carte"}))
+        .unwrap();
+    let l = lines(&s);
+    assert_eq!(l[1]["result"]["layer_count"], json!(2));
+    // Hors rejeu, l'export ne reçoit aucun `leave_out` et le journal n'en garde pas.
+    assert_eq!(*seen.borrow(), vec![Value::Null]);
+    assert!(l[1]["params"].get("leave_out").is_none());
+}
+
+fn replay_in(
+    project_file: &Path,
+    project: &std::rc::Rc<OpenProject>,
+    generation: u32,
+    replayed_layers: &mut HashSet<String>,
+) -> (Result<ReplayReport, ErrorReport>, Vec<Value>) {
+    let registry = Registry::standard();
+    let qgis = ProjectQgis::new(project, generation);
+    let seen = qgis.seen.clone();
+    let outcome = Replay::load(&registry, project_file)
+        .unwrap()
+        .run(&Router::new(&registry).with_qgis(qgis), replayed_layers);
+    let seen = seen.borrow().clone();
+    (outcome, seen)
+}
+
+#[test]
+fn two_replays_in_a_row_leave_earlier_layers_out_of_the_map() {
+    let (dir, project_file, _) = temp_project();
+    let project = OpenProject::with_base();
+    export_journal(&project_file, &project);
+    let journal = fs::read_to_string(dir.join("p.cassini/journal.jsonl")).unwrap();
+    let mut replayed = HashSet::new();
+    let identical = ReplayReport {
+        steps: 2,
+        identical: true,
+    };
+
+    // Premier rejeu, projet resté ouvert : la couche de la session d'origine est laissée hors.
+    let (outcome, seen) = replay_in(&project_file, &project, 2, &mut replayed);
+    assert_eq!(outcome.unwrap(), identical);
+    assert_eq!(seen, vec![json!(["pts_g1_1"])]);
+    assert_eq!(replayed, HashSet::from(["pts_g2_1".to_string()]));
+
+    // Second rejeu : celles du premier aussi, triées ; jamais celle de ce rejeu.
+    let (outcome, seen) = replay_in(&project_file, &project, 3, &mut replayed);
+    assert_eq!(outcome.unwrap(), identical);
+    assert_eq!(seen, vec![json!(["pts_g1_1", "pts_g2_1"])]);
+
+    // Les couches laissées hors de la carte restent dans le projet ; le journal est intact.
+    assert_eq!(project.layers.borrow().len(), 4);
+    assert_eq!(
+        fs::read_to_string(dir.join("p.cassini/journal.jsonl")).unwrap(),
+        journal
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_replay_with_a_project_reopened_draws_the_same_map() {
+    let (dir, project_file, _) = temp_project();
+    export_journal(&project_file, &OpenProject::with_base());
+    // Projet rouvert sans les couches de la session d'origine.
+    let reopened = OpenProject::with_base();
+    let (outcome, _) = replay_in(&project_file, &reopened, 2, &mut HashSet::new());
+    assert!(outcome.unwrap().identical);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_layer_added_or_removed_by_hand_still_diverges_at_the_export() {
+    for change in ["added", "removed"] {
+        let (dir, project_file, _) = temp_project();
+        let project = OpenProject::with_base();
+        export_journal(&project_file, &project);
+        let mut replayed = HashSet::new();
+        let (first, _) = replay_in(&project_file, &project, 2, &mut replayed);
+        assert!(first.unwrap().identical);
+        let mut layers = project.layers.borrow_mut();
+        if change == "added" {
+            layers.push(("main_1".into(), "main.gpkg".into()));
+        } else {
+            layers.retain(|(id, _)| id != "communes_0");
+        }
+        drop(layers);
+        let (outcome, _) = replay_in(&project_file, &project, 3, &mut replayed);
+        let err = outcome.unwrap_err();
+        assert_eq!(err.code, "replay.diverged", "{change}");
+        assert_eq!(err.step, Some(2), "{change}");
+        assert!(err.message.contains("layout.export_pdf"), "{change}");
+        // Même un rejeu qui diverge laisse la mémoire de ses couches.
+        assert!(replayed.contains("pts_g3_1"), "{change}");
+        let _ = fs::remove_dir_all(dir);
+    }
+}
+
+#[test]
+fn a_leave_out_from_the_caller_is_dropped_outside_replay() {
+    let (dir, project_file, _) = temp_project();
+    let project = OpenProject::with_base();
+    let registry = Registry::standard();
+    let qgis = ProjectQgis::new(&project, 1);
+    let seen = qgis.seen.clone();
+    let mut s = Session::open(&registry, &project_file)
+        .unwrap()
+        .with_qgis(qgis);
+    let result = s
+        .call(
+            "layout.export_pdf",
+            json!({"title": "Carte", "leave_out": ["communes_0"]}),
+        )
+        .unwrap();
+    assert_eq!(result["layer_count"], json!(1));
+    assert_eq!(*seen.borrow(), vec![Value::Null]);
+    assert!(lines(&s)[0]["params"].get("leave_out").is_none());
     let _ = fs::remove_dir_all(dir);
 }
