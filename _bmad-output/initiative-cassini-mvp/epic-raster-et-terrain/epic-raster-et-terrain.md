@@ -29,8 +29,12 @@ ligne, avec une provenance de code documentée.
 
 ## Requirements
 
-À compléter à l'inception de cet epic. La source est la spec de l'initiative,
-`../spec-cassini-mvp/spec-cassini-mvp.md`, section Capabilities, CAP-11.
+La source est la spec de l'initiative, `../spec-cassini-mvp/spec-cassini-mvp.md`, CAP-11,
+citée telle quelle par les entrées de `tickets.toml` (inception du 2026-11-03) : à partir d'un
+modèle numérique d'élévation ouvert dans le projet, champ de vision, ligne de vue entre deux
+points et pente s'exécutent dans le noyau Rust, hors ligne, sans dépendance GPL ni LGPL, chacune
+avec un résultat vérifiable par un test. Contraintes : AD-1, AD-8, AD-9, AD-10, AD-19, AD-20,
+AD-22 du contrat d'architecture.
 
 ## Done when
 
@@ -70,5 +74,10 @@ pour l'usage militaire : elles sont hors de ce dépôt.
 - Decision: GRASS et SAGA restent exclus du noyau car sous GPL ; les algorithmes de visibilité sont repris du code MIT de Whitebox ou réimplémentés depuis la littérature publique (2026-10-09).
 - Decision: `whitebox_next_gen` n'expose pas son champ de vision comme bibliothèque, seul le substrat raster l'est sur crates.io. Les trois commandes sont réimplémentées dans le noyau, le portage avec attribution restant permis, et le noyau lit lui-même le MNT dans un unique module remplaçable. Contrat d'architecture, AD-20 (propriétaire, 2026-10-14).
 - Unknown: la maturité de `wbgeotiff` 0.1.2 et `wbraster` 0.2.1, bibliothèques jeunes. À trancher par un cas d'essai compilé en première entrée, avant de s'engager sur CAP-11.
-- Unknown: quels systèmes de coordonnées le noyau doit savoir lire dans un MNT — Lambert-93 et WGS84 seuls, ou aussi les Lambert zones et NTF. Le noyau refuse une coordonnée hors du système du MNT au lieu de la convertir (AD-19). Question ouverte de la spec.
+- Decision: 2026-11-03 — propriétaire : le noyau accepte tout MNT en système projeté métrique doté d'un code EPSG (Lambert-93, UTM, Lambert zones…) et refuse un MNT en degrés (WGS84) avec une erreur typée ; les points restent dans le système du MNT (AD-19). Tranche la question ouverte de la spec ; « WGS84 au minimum » de CLAUDE.md §5 vaut pour les couches vecteur, pas pour le MNT.
 - Waits on epic 2 because: les trois commandes sont des commandes du registre et ont besoin de son contrat.
+- Decision: 2026-11-03 — inception : huit entrées en une piste dans `core/` ; traceur = lecture et écriture d'un MNT GeoTIFF dans un module unique, qui tranche la maturité de `wbgeotiff`/`wbraster` (entrée 1, hitl : approbation des dépendances) ; puis pente, chargement des sorties raster dans QGIS, ligne de vue, champ de vision, familles du générateur, comparaison à QGIS/GRASS, ménage.
+- Decision: 2026-11-03 — propriétaire : le MNT se désigne par un chemin relatif au projet (AD-9, AD-20), recopié par le modèle depuis l'inventaire, pas par un id de couche.
+- Decision: 2026-11-03 — propriétaire : la ligne de vue rend verdict, premier obstacle (Point) et profil d'altitudes borné (AD-8).
+- Decision: 2026-11-03 — propriétaire : une entrée apprend les trois commandes au modèle ; le ré-entraînement se fait à part, dans la passe groupée de l'epic agent-et-mcp.
+- Decision: 2026-11-03 — propriétaire : pour la démo, le MNT entre dans le projet QGIS à la main ; l'ouverture d'un raster par `layer.add` reste l'entrée 20 de l'epic 10, qui réutilise les MNT de recette (4.1) et l'inventaire des rasters (4.3).

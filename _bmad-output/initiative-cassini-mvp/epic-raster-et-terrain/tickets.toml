@@ -1,0 +1,106 @@
+# tickets.toml — epic 4, analyse de terrain dans le noyau.
+# L'ordre des tables est l'ordre de construction. `id` nomme une entree pour de bon.
+# Une seule piste dans core/ (lecture du MNT puis trois commandes natives), puis l'extension
+# (chargement des sorties raster du noyau) et le generateur. Aucune dependance GPL ni LGPL,
+# aucun GDAL (AD-1, AD-20). Inception le 2026-11-03.
+# Decisions du proprietaire (2026-11-03) : le MNT se designe par un chemin relatif au projet ;
+# seuls les MNT en systeme projete metrique a code EPSG sont acceptes ; une entree apprend les
+# trois commandes au modele ; la ligne de vue rend verdict, premier obstacle et profil ; le MNT
+# entre dans le projet QGIS a la main pour la demo (layer.add raster reste l'entree 10.20).
+
+[[entry]]
+id = 1
+type = "story"
+title = "Traceur : le noyau lit et ecrit un MNT GeoTIFF dans un module unique"
+description = "Tranche la maturite de wbgeotiff 0.1.2 et wbraster 0.2.1 par un cas d'essai compile (Windows et Linux, sans GDAL, licences verifiees par cargo-deny) et cree l'unique module de lecture du MNT du noyau (AD-20) : altitudes, taille de cellule, emprise, code EPSG, valeur sans donnee ; ecriture d'un GeoTIFF deterministe ; refus type d'un MNT non projete metrique ou sans code EPSG ; deux MNT synthetiques de recette dans /fixtures (plan incline de pente connue, colline)."
+verify = "cargo test du noyau sans QGIS : les MNT de recette sont relus avec leurs altitudes, leur emprise et leur EPSG, un GeoTIFF ecrit deux fois est identique octet pour octet, un MNT en WGS84 est refuse avec une erreur typee, et cargo deny ne trouve ni GPL ni LGPL."
+covers = ["CAP-11"]
+after = []
+hitl = true
+risk = "high"
+notes = [
+  "hitl : le proprietaire approuve les dependances et leurs licences avant l'ajout (CLAUDE.md §8).",
+  "Decision: 2026-11-03 — seuls les MNT en systeme projete metrique a code EPSG sont acceptes ; un MNT en degres est refuse.",
+]
+unknown = "Si wbgeotiff ou wbraster ne tient pas (compilation, licence, lecture), quelle voie de repli : une autre crate MIT/Apache (tiff) ou un lecteur GeoTIFF minimal ecrit dans le noyau ?"
+
+[[entry]]
+id = 2
+type = "story"
+title = "terrain.slope : pente d'un MNT, en degres ou en pourcentage"
+description = "Premiere commande native de terrain : terrain.slope prend dem (chemin relatif au projet) et unit (degres ou pourcentage), calcule la pente par la methode de Horn et ecrit un GeoTIFF nomme par le noyau dans le dossier de travail (AD-10) ; resultat type (file : chemin du GeoTIFF relatif au projet, unite, min, max, cellules sans donnee) ; executable depuis la CLI sans QGIS."
+verify = "Sur le plan incline de recette, la pente rendue vaut la pente connue en degres et en pourcentage ; cassini run terrain.slope sans QGIS ecrit le GeoTIFF ; un rejeu du journal rend identical: true avec les memes octets."
+covers = ["CAP-11"]
+after = [1, "2.3"]
+hitl = false
+risk = "medium"
+notes = ["Decision: 2026-11-03 — le MNT se designe par un chemin relatif au projet (AD-9, AD-20), pas par un id de couche."]
+
+[[entry]]
+id = 3
+type = "story"
+title = "Les sorties raster du noyau s'ouvrent dans le projet QGIS"
+description = "L'extension ajoute au projet, comme couche, le GeoTIFF que nomme le champ file du resultat d'une commande native du noyau (aujourd'hui seules les sorties deleguees sont ajoutees), et l'inventaire du projet donne aux seules couches raster leur chemin relatif au projet (les couches vecteur gardent le nom de fichier seul), pour que le modele puisse le recopier dans dem."
+verify = "Tests de l'extension sans QGIS et sonde sous QGIS : apres terrain.slope sur le MNT de recette, une couche raster nommee apparait dans le projet ; l'inventaire d'un projet qui contient un MNT donne son chemin relatif, jamais absolu."
+covers = ["CAP-11"]
+after = [2]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 4
+type = "story"
+title = "terrain.line_of_sight : ligne de vue entre deux points"
+description = "terrain.line_of_sight prend dem, deux Point dans le systeme du MNT (AD-19 : tout autre systeme est refuse), la hauteur de l'observateur et celle de la cible au-dessus du sol, et une option de courbure terrestre et de refraction (coefficient 0,13 par defaut) ; rend visible oui/non, le premier point d'obstruction (Point) et le profil d'altitudes echantillonne, borne (AD-8)."
+verify = "Sur la colline de recette, deux points de part et d'autre sont masques avec l'obstacle au sommet, deux points du meme versant sont visibles, la courbure masque un point lointain qu'un calcul sans courbure voit ; un point en 4326 sur un MNT en 2154 est refuse ; cassini run terrain.line_of_sight tourne sans QGIS et son rejeu rend identical: true."
+covers = ["CAP-11"]
+after = [2]
+hitl = false
+risk = "medium"
+notes = ["Decision: 2026-11-03 — la ligne de vue rend verdict, premier obstacle et profil."]
+
+[[entry]]
+id = 5
+type = "story"
+title = "terrain.viewshed : champ de vision depuis un point"
+description = "terrain.viewshed prend dem, un Point observateur dans le systeme du MNT, la hauteur de l'observateur et celle de la cible, un rayon maximal et l'option de courbure et refraction ; ecrit un GeoTIFF visible / non visible (1 / 0, sans donnee hors rayon) nomme par le noyau ; algorithme reimplemente depuis la litterature publique ou porte de whitebox avec attribution ; la provenance du code de visibilite est documentee commit par commit, au fil de l'ecriture."
+verify = "Sur la colline de recette, le versant oppose a l'observateur est non visible et le sien visible ; chaque cellule du champ de vision concorde avec terrain.line_of_sight vers son centre sur un echantillon ; cassini run terrain.viewshed tourne sans QGIS et son rejeu rend identical: true avec un GeoTIFF identique octet pour octet ; le temps d'un rayon de 10 km sur un MNT a 25 m genere dans le test est mesure et consigne, a titre d'information."
+covers = ["CAP-11"]
+after = [4]
+hitl = false
+risk = "high"
+
+[[entry]]
+id = 6
+type = "story"
+title = "Le modele apprend les trois commandes de terrain"
+description = "Familles du generateur civil pour terrain.slope, terrain.line_of_sight et terrain.viewshed (MNT nomme par son chemin dans l'inventaire, points en Lambert-93 ou UTM, hauteurs et rayon ecrits dans la demande, question quand le MNT ou un point manque) ; aucun re-entrainement ici."
+verify = "Tests de cassini-training : chaque famille a des exemples gardes qui passent check_plan et le garde-fou des coordonnees ; un trajet sans point ecrit devient une question."
+covers = ["CAP-11"]
+after = [3, 5]
+hitl = false
+risk = "medium"
+notes = ["Decision: 2026-11-03 — une entree de cet epic apprend les trois commandes au modele ; le re-entrainement se fait a part, dans la passe groupee de l'epic agent-et-mcp, et la demo reelle dans le panneau vient apres ce re-entrainement (ou dans l'epic 6)."]
+
+[[entry]]
+id = 7
+type = "story"
+title = "Comparaison a QGIS et provenance du code de visibilite"
+description = "Compare, sur un meme MNT reel, la pente et le champ de vision du noyau a ceux de QGIS (native:slope, r.viewshed par GRASS) et explique l'ecart ; relit la provenance ecrite par l'entree 5."
+verify = "Une note de comparaison donne, pour chaque commande, l'ecart mesure (proportion de cellules qui different, ecart moyen de pente) et son explication ; la provenance cite chaque source publique ou fichier porte."
+covers = ["CAP-11"]
+after = [2, 5]
+hitl = true
+risk = "low"
+notes = ["hitl : le proprietaire lance le calcul de QGIS par GRASS sur son jeu de donnees hors depot."]
+
+[[entry]]
+id = 8
+type = "story"
+title = "Refactor sweep"
+description = "Nettoyage de fin d'epic : sa portee est fixee au demarrage, depuis les plans et les constats de relecture reportes pendant l'epic ; aucune portee repoussee d'une autre entree."
+verify = "Tests du noyau, de l'extension et du generateur verts apres le nettoyage, sans changement de comportement."
+covers = ["CAP-11"]
+after = [1, 2, 3, 4, 5, 6, 7]
+hitl = false
+risk = "low"
