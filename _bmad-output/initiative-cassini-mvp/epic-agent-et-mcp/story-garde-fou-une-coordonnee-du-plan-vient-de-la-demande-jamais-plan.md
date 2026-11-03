@@ -121,6 +121,33 @@ Passe 1 (2026-10-23, lentilles blind-hunter, edge-case-hunter, verification-gap,
 | 16 | Code postal repris en x/y, contrôle d'étendue (edge) | low | reject | il faut aussi le système dans la demande ; contrôle d'étendue hors règle |
 | 17 | Fiche incohérente (« À confirmer », journaux vides) (blind) | low | reject | correctif = éditer ce plan ; journal rempli ici |
 
+Passe 2 (2026-11-03, mêmes lentilles, diff 921a7c7..4ff027d, correctif de recette compris ; code vérifié sur main) : high 0, medium 1, low 1 corrigés ; le reste rejeté ou reporté.
+
+| # | Constat | Verdict | Route | Preuve / action |
+|---|---------|---------|-------|-----------------|
+| 18 | Un même point littéral repris par deux étapes (isochrones à pied et en voiture) devient une question (edge) | medium | patch | `invents_a_point` prenait x, y, epsg deux fois au multiensemble ; points identiques dédoublonnés, test `the_same_given_point_reused_by_two_steps…` |
+| 19 | Docs du placement du garde-fou périmées : en-tête de `point.rs`, doc de `compose_plan`, `canal-local.md` muets sur la sortie rejetée (blind, edge) | low | patch | les trois textes disent maintenant que `guard_rejected` rend la question sans redemande |
+| 20 | `$defs/Origin` devient `$defs/Point` au long prompt (blind, intent) | low | reject | carried : ligne 2, renommage inhérent au type unique ; le prompt court ne change pas |
+| 21 | Exemples d'entraînement non passés au garde-fou (blind) | false | reject | `training/src/families.rs` applique `guard_coordinates` aux exemples engendrés (ticket suivant) |
+| 22 | « 652000,6850000 » lu comme une décimale (blind) | low | reject | décision du propriétaire : virgule suivie d'un chiffre = décimale ; sens sûr (question) |
+| 23 | Tout nombre de la demande peut tenir lieu d'epsg, x/y inversés (blind) | low | reject | carried : lignes 9 et 16, la règle porte sur la provenance |
+| 24 | `bare_coordinate` limité à `x`/`y` (blind, edge) | false | reject | carried : ligne 10 |
+| 25 | Question en français seul (blind) | low | reject | carried : ligne 13 |
+| 26 | Deux parcours de schéma, profondeurs 8 et 16 (blind, edge) | low | reject | carried : ligne 15 |
+| 27 | Référence `step:` imbriquée ou vers `Vec<Point>` toujours refusée (blind, edge) | low | reject | aucune commande du registre ne l'emploie ; sens sûr |
+| 28 | Aucun test du vrai compositeur par le canal ou la CLI (blind, intent) | low | reject | le câblage est testé dans `ai` (`compose_plan_with`) ; démo et recette QGIS faites |
+| 29 | `source` écrit toujours au canal, seulement pour `guard` à la CLI (blind, intent) | false | reject | voulu (Code Map) : complétions d'entraînement identiques à l'octet |
+| 30 | Questions `guard` comptées comme réussies aux essais réels (blind) | low | reject | carried : ligne 12 |
+| 31 | Séparateurs de nom de système limités (« Lambert  93 », « WGS:84 ») ; « Lambert 652 000 » coupé (blind, edge) | low | reject | nom non reconnu, donc question de toute façon ; sens sûr |
+| 32 | Une chaîne numérique hors `Point` consomme un nombre (edge) | low | reject | aucun paramètre texte du registre ne prend de nombre en pratique |
+| 33 | Référence mal formée ou en avant dans une sortie rejetée : question au lieu de redemande (edge) | low | reject | le point ne vient alors ni de la demande ni d'une étape ; sens sûr voulu |
+| 34 | `source` perdu après un aller-retour JSON (edge) | false | reject | `serve/plans.rs` l.202 écrit `source` depuis la valeur en mémoire, sans relecture |
+| 35 | Doc de `point.rs` « appliquée une fois » (edge, claim) | low | patch | même entrée que 19 |
+| 36 | Branche `PLAN_QUESTION` de `panel.py` sans test (verification-gap) | low | reject | carried : ligne 7 ; recette du propriétaire dans QGIS faite et bonne |
+| 37 | Le rejet court-circuite la redemande, contre « une seule fois après la redemande » (intent) | false | reject | décision du propriétaire du 2026-10-23, écrite dans l'intention |
+
+Recette du propriétaire dans QGIS (phrase E, puis une phrase avec des coordonnées données), après le correctif de recette : faite et bonne, confirmée le 2026-11-03.
+
 ## Design Notes
 
 Consommation des nombres. On lit les nombres de la demande dans un multiensemble. Chaque nombre littéral du plan hors `Point` (durée, distance) retire d'abord une occurrence égale s'il en trouve une. Ensuite, pour chaque `Point`, x, y et epsg retirent chacun une occurrence distincte. S'il en manque une, le garde-fou rend la question.

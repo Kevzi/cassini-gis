@@ -515,8 +515,9 @@ fn judge(registry: &Registry, completion: &Completion) -> Result<Plan, Vec<Strin
 /// sans redemande ; une question (un mot de la demande ne désigne rien de
 /// l'inventaire) est un résultat, `Ok(Plan::Question)`, rendue sans redemande ; un plan dont
 /// un point ne vient ni de `request` ni d'une étape devient la question du garde-fou
-/// (`cassini_core::point::guard_coordinates`) ;
-/// deux sorties rejetées rendent `agent.plan_invalid`. Aucun plan invalide n'est
+/// (`cassini_core::point::guard_coordinates`), et une sortie rejetée qui porte un tel point
+/// rend cette question tout de suite, sans redemande (`guard_rejected`) ;
+/// sinon deux sorties rejetées rendent `agent.plan_invalid`. Aucun plan invalide n'est
 /// jamais rendu.
 pub fn compose_plan(
     registry: &Registry,

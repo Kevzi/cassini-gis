@@ -211,7 +211,9 @@ posée) ou `guard` (le garde-fou du noyau, AD-23). Le garde-fou s'applique à to
 par le modèle local : une coordonnée du plan (un `Point` : x, y et code EPSG) doit venir de
 la demande — x, y et le système y figurent tous trois, comme nombres, ou le système par son
 nom (Lambert-93, WGS84) — ou d'une étape précédente (`step:<k>.<champ>` vers un champ déclaré
-`Point`). Sinon le plan n'est pas montré et le noyau rend sa question :
+`Point`). Sinon le plan n'est pas montré et le noyau rend sa question. Il en va de même d'une
+sortie du modèle que la validation rejette : si elle porte un tel point, la question est rendue
+tout de suite, sans redemande au modèle :
 
 ```json
 {"jsonrpc":"2.0","id":5,"result":{"question":"Il manque à la demande un point en coordonnées : quels sont x, y et le système (code EPSG, par exemple 2154 pour le Lambert-93) ?","source":"guard"}}

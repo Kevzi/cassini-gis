@@ -4,11 +4,13 @@
 //! engendré par l'extension `x-cassini: point`. Le contrôle de contrat refuse un champ `x` ou
 //! `y` numérique hors de ce type (`contract.bare_coordinate`).
 //!
-//! [`guard_coordinates`] est une fonction pure, appliquée une fois à la fin de la composition
-//! d'un plan par le modèle local : tout `Point` du plan doit venir de la demande (x, y et
-//! système y figurent, comme nombres) ou d'une étape précédente (référence `step:` vers un
-//! champ déclaré `Point`). Sinon le plan n'est pas montré : le garde-fou rend une question à
-//! provenance `guard`. En cas de doute, c'est la question.
+//! [`guard_coordinates`] est une fonction pure, appliquée au plan que la composition par le
+//! modèle local a validé : tout `Point` du plan doit venir de la demande (x, y et système y
+//! figurent, comme nombres) ou d'une étape précédente (référence `step:` vers un champ déclaré
+//! `Point`). Sinon le plan n'est pas montré : le garde-fou rend une question à provenance
+//! `guard`. En cas de doute, c'est la question. [`guard_rejected`] applique la même règle à
+//! une sortie que la validation a rejetée : un point inventé y rend la question tout de suite,
+//! sans redemande.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -434,7 +436,15 @@ fn invents_a_point(
     for number in &found.numbers {
         take(&mut pool, *number);
     }
-    found.points.iter().any(|point| {
+    // Un même point repris tel quel par plusieurs étapes (isochrones à pied puis en voiture
+    // depuis le même lieu) ne prend ses nombres à la demande qu'une fois.
+    let mut points: Vec<&Value> = Vec::new();
+    for point in found.points {
+        if !points.contains(&point) {
+            points.push(point);
+        }
+    }
+    points.iter().any(|point| {
         ["x", "y", "epsg"].iter().any(|key| {
             let given = point.get(*key).and_then(Value::as_f64);
             !given.is_some_and(|v| take(&mut pool, v))
@@ -594,6 +604,29 @@ mod tests {
             plan,
             request
         )));
+    }
+
+    #[test]
+    fn the_same_given_point_reused_by_two_steps_leaves_the_plan_unchanged() {
+        let registry = Registry::standard();
+        let step = |mode: &str| {
+            json!({"command": "analysis.isochrone", "params": {
+                "layer_id": ROUTES, "mode": mode,
+                "origin": {"x": 652000, "y": 6850000, "epsg": 2154},
+                "duration": {"value": 10, "unit": "min"}}})
+        };
+        let plan = calls(json!([step("walk"), step("car")]));
+        let request =
+            "Zones à 10 min à pied et en voiture depuis x 652 000, y 6 850 000 en EPSG:2154.";
+        assert_eq!(guard_coordinates(&registry, plan.clone(), request), plan);
+        // Deux points différents demandent chacun leurs nombres.
+        let other = calls(
+            json!([step("walk"), {"command": "analysis.isochrone", "params": {
+            "layer_id": ROUTES, "mode": "car",
+            "origin": {"x": 655700, "y": 6849023, "epsg": 2154},
+            "duration": {"value": 10, "unit": "min"}}}]),
+        );
+        assert!(is_guard(&guard_coordinates(&registry, other, request)));
     }
 
     #[test]
