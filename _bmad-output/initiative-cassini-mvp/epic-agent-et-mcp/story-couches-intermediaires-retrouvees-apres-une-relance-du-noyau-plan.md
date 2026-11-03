@@ -3,7 +3,7 @@ title: 'Couches intermédiaires retrouvées après une relance du noyau ou un re
 type: 'feature'
 ticket: '34'
 created: '2026-11-03'
-status: 'built'
+status: 'done'
 baseline_revision: '4c7e65b08d7ebca085b9e4276672d01339979701'
 route: 'full'
 route_source: 'auto'
