@@ -7,6 +7,7 @@ pub mod agent_inventory;
 pub mod basemap;
 pub mod commands;
 pub mod contract;
+pub mod dem;
 pub mod error;
 pub mod exec;
 pub mod external;

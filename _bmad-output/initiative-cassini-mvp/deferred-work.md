@@ -615,3 +615,6 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-l-export-pdf-prend-une-echelle-demandee-plan.md`
   summary: Le schema de `layout.export_pdf` admet un titre vide, que le geste refuse ensuite (`layout.bad_params`) : le modele de base a ecrit `"title": ""` pour « Exporte la carte au 1:25 000 ».
   evidence: recette 5.38 (Qwen3.5-9B) ; `LayoutExportPdfParams.title` sans longueur minimale ni controle a la deserialisation, contrairement a `scale`. Anterieur a 5.38.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-raster-et-terrain/story-traceur-le-noyau-lit-et-ecrit-un-mnt-geotiff-dans-un-module-plan.md`
+  summary: Le module `dem` hérite de la limite de décodage par défaut de `tiff` (environ 256 Mo) : un très grand MNT (1 m sur une commune) est refusé en `dem.unsupported` sans seuil annoncé.
+  evidence: relecture 4.1, constat 8 ; fixer `Limits` et documenter la taille maximale avec la première commande de terrain (4.2).

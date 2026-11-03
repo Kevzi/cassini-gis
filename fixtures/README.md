@@ -17,6 +17,21 @@ avec une exception pour ce dossier.
 | `points-2154.csv` | 4 points en Lambert-93 (colonnes `X`, `Y`, `name`), sans SCR dans le fichier | **Synthétique**, écrit à la main (valeurs inventées) | La sonde de bout en bout : `layer.add` avec `crs`, puis `analysis.buffer`, qui exige un SCR métrique |
 | `reseau-grille-2154.geojson` | Grille de rues en Lambert-93 : 220 tronçons de 100 m (11 rues dans chaque sens), carré de 1 km de côté d'origine (652000, 6850000), sans nom de rue réel | **Synthétique**, calculé (aucune donnée réelle) | La sonde `probe_isochrone.py` et la recette de `analysis.isochrone` : origine au centre (652500, 6850500), 3 min à pied donnent un polygone d'emprise 500 m sur 500 m |
 | `parcelles-test.geojson` | Une parcelle carrée en WGS84, 1 entité | **Synthétique**, écrit à la main | Les tests du geste `layer.add` et sa recette |
+| `mnt-plan-incline-2154.tif` | MNT GeoTIFF Float32 deflate, EPSG:2154, 40 × 30 cellules de 10 m, coin haut-gauche (652000, 6850300), sans-donnée -9999 : plan de pente 10 % descendant vers l'est, altitude `99,5 - colonne` au centre de chaque cellule | **Synthétique**, calculé et écrit par `Dem::write_geotiff` (`core/src/dem.rs`) | La lecture des MNT (entrée 4.1), puis les commandes de terrain (4.2 à 4.5, 10.20) |
+| `mnt-colline-2154.tif` | MNT GeoTIFF Float32 deflate, EPSG:2154, 50 × 50 cellules de 10 m, coin haut-gauche (652000, 6850500), sans-donnée -9999 : colline lisse `50 + 100 / (1 + d² / 150²)`, sommet au centre (652250, 6850250) | **Synthétique**, calculé et écrit par `Dem::write_geotiff` | Idem |
+
+## Les MNT de recette
+
+Les deux MNT sont **régénérés à chaque passage des tests** de `cassini-core`
+(`dem::tests::fixtures_regenerate_identically`) et comparés, octet pour octet, aux
+fichiers versionnés : c'est la preuve que l'écriture est déterministe. Le calcul
+n'emploie que des opérations exactement arrondies (addition, multiplication,
+division), pour donner les mêmes octets sous Linux et sous Windows. Pour les
+réécrire après un changement voulu :
+
+```bash
+CASSINI_REGENERER_FIXTURES=1 cargo test -p cassini-core dem::tests::fixtures_regenerate_identically
+```
 
 ## Le fond de carte de recette
 
