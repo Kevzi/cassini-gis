@@ -21,8 +21,8 @@ risk = "high"
 notes = [
   "hitl : le proprietaire approuve les dependances et leurs licences avant l'ajout (CLAUDE.md §8).",
   "Decision: 2026-11-03 — seuls les MNT en systeme projete metrique a code EPSG sont acceptes ; un MNT en degres est refuse.",
+  "Decision: 2026-11-03 — cas d'essai : wbgeotiff refuse par deny.toml (IJG) ; crate tiff (MIT) et georeferencement decode par core/src/dem.rs. Le MNT de demo est reprojete une fois en Lambert-93 dans QGIS.",
 ]
-unknown = "Si wbgeotiff ou wbraster ne tient pas (compilation, licence, lecture), quelle voie de repli : une autre crate MIT/Apache (tiff) ou un lecteur GeoTIFF minimal ecrit dans le noyau ?"
 
 [[entry]]
 id = 2
