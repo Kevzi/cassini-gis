@@ -3,7 +3,7 @@ title: "Second rejeu dans la même session QGIS : l'export PDF voit les couches 
 type: 'bugfix'
 ticket: '36'
 created: '2026-11-03'
-status: 'built'
+status: done
 baseline_revision: '92e9d19cb544c655d1e61c5db983f68fecbf7935'
 route: 'full'
 route_source: 'auto'
