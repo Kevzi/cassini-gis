@@ -3,7 +3,7 @@ title: "Suite de bout en bout : phrase, plan valide, exécution, rejeu sans l'IA
 type: 'feature'
 ticket: '9'
 created: '2026-11-01'
-status: 'built'
+status: done
 baseline_revision: '88251ab07994982c0ce9f891722c40075a8bf746'
 route: 'full'
 route_source: 'auto'
