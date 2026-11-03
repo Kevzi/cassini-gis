@@ -68,8 +68,8 @@ pub const INVENTORY_BUDGET_CHARS: usize = 14_000;
 /// n'ajoutent que leurs couches, jusqu'au prochain dépassement.
 pub const INVENTORY_LOW_CHARS: usize = 7_000;
 
-/// Un fichier du dossier de travail Cassini du projet (`<projet>.cassini/`, ou de son dossier
-/// de rejeu `replay/`) et sa date de
+/// Un fichier du dossier de travail Cassini du projet (`<projet>.cassini/`, ou de ses dossiers
+/// de rejeu `replay/` et `replay-<n>/`) et sa date de
 /// modification : une couche dont la source porte ce nom est une couche de résultat.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkFile {

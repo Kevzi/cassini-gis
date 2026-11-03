@@ -69,6 +69,10 @@ pub enum JournalError {
     /// Une ligne du journal est illisible (JSON invalide ou sans `id`) : `step`
     /// est son rang parmi les lignes écrites, à partir de 1.
     UnreadableLine { step: usize },
+    /// Aucun dossier de sortie du rejeu n'a pu être vidé : un fichier d'un rejeu
+    /// précédent est encore tenu. Porte son chemin relatif au dossier de travail,
+    /// en écriture POSIX (AD-9).
+    OutputLocked(String),
 }
 
 impl JournalError {
@@ -82,6 +86,7 @@ impl JournalError {
             JournalError::BadReference(_) => "replay.bad_reference",
             JournalError::Diverged { .. } => "replay.diverged",
             JournalError::UnreadableLine { .. } => "replay.unreadable_line",
+            JournalError::OutputLocked(_) => "replay.output_locked",
         }
     }
 }
@@ -113,6 +118,10 @@ impl fmt::Display for JournalError {
             JournalError::UnreadableLine { step } => write!(
                 f,
                 "La ligne du journal à l'étape {step} est illisible : le journal ne peut pas être rejoué."
+            ),
+            JournalError::OutputLocked(file) => write!(
+                f,
+                "Le rejeu ne trouve aucun dossier de sortie vide : le fichier « {file} » d'un rejeu précédent est encore tenu (par QGIS ?). Fermez les couches du rejeu précédent ou rouvrez le projet, puis relancez."
             ),
         }
     }
@@ -381,7 +390,8 @@ struct Resolved {
 struct Resolver<'a> {
     registry: &'a Registry,
     project_dir: &'a Path,
-    /// Dossier où l'exécutant écrit ses sorties : le dossier de travail, ou `replay/`.
+    /// Dossier où l'exécutant écrit ses sorties : le dossier de travail, ou celui du
+    /// rejeu (`replay/`, ou un repli `replay-<n>/` si `replay/` ne se vide pas).
     out_dir: &'a Path,
 }
 
@@ -512,7 +522,8 @@ pub struct ReplayReport {
 }
 
 /// Rejeu d'un journal : même résolution, même `Router`, comparaison à ce que le
-/// journal a gardé. N'écrit pas le journal ; ses sorties vont sous `replay/`.
+/// journal a gardé. N'écrit pas le journal ; ses sorties vont sous `replay/`, ou sous
+/// un repli `replay-<n>/` quand `replay/` ne se vide pas (fichier tenu par QGIS).
 pub struct Replay<'a> {
     registry: &'a Registry,
     project_dir: PathBuf,
@@ -630,15 +641,40 @@ impl<'a> Replay<'a> {
         Ok(())
     }
 
+    /// Dossier de sortie du rejeu, vide : `replay/` s'il se vide, sinon le premier
+    /// repli `replay-<n>/` (n = 2 à `REPLAY_FALLBACKS + 1`) absent ou vidable. Un
+    /// fichier tenu par un autre programme (QGIS sous Windows) n'est ainsi jamais
+    /// dans le dossier où le rejeu écrit et relit. Seul le dossier qu'on s'apprête à
+    /// utiliser est vidé. Si aucun ne convient : `replay.output_locked`, qui nomme un
+    /// fichier resté dans `replay/`.
+    fn fresh_replay_dir(&self) -> Result<PathBuf, ErrorReport> {
+        let fallbacks =
+            (2..=REPLAY_FALLBACKS + 1).map(|n| self.work_dir.join(format!("replay-{n}")));
+        let mut last_error = None;
+        for dir in std::iter::once(self.replay_dir.clone()).chain(fallbacks) {
+            match empty_dir(&dir) {
+                Ok(()) => return Ok(dir),
+                Err(e) => last_error = Some(e),
+            }
+        }
+        if let Some(file) = first_file(&self.replay_dir) {
+            let relative = relative_to(&self.work_dir, &file)
+                .map(|r| posix(&r))
+                .unwrap_or_else(|| "replay".to_string());
+            return Err(JournalError::OutputLocked(relative).into());
+        }
+        let kind = last_error.map_or(std::io::ErrorKind::Other, |e| e.kind());
+        Err(JournalError::Io(kind.to_string()).into())
+    }
+
     /// Réexécute chaque étape par `router`, dans l'ordre ; s'arrête au premier écart.
     pub fn run(&self, router: &Router) -> Result<ReplayReport, ErrorReport> {
         // Un rejeu précédent ne doit pas laisser de fichier qu'un autre pourrait reprendre.
-        let _ = fs::remove_dir_all(&self.replay_dir);
-        fs::create_dir_all(&self.replay_dir).map_err(io_error)?;
+        let out_dir = self.fresh_replay_dir()?;
         let resolver = Resolver {
             registry: self.registry,
             project_dir: &self.project_dir,
-            out_dir: &self.replay_dir,
+            out_dir: &out_dir,
         };
         let mut replayed = 0;
         // Ids de couche de la session d'origine -> ids obtenus par ce rejeu. Sert dans les
@@ -676,7 +712,7 @@ impl<'a> Replay<'a> {
                         .iter()
                         .map(|(old, new)| (new.clone(), old.clone()))
                         .collect();
-                    let mut again = relativize(value, &self.replay_dir);
+                    let mut again = relativize(value, &out_dir);
                     substitute(&mut again, &back);
                     same_result(&again, kept)
                 }
@@ -696,7 +732,7 @@ impl<'a> Replay<'a> {
             }
             for name in &spec.output_params {
                 let file = output_file(step, id, &spec.output_params, name, &spec.output_ext);
-                let again = fs::read(self.replay_dir.join(&file)).ok();
+                let again = fs::read(out_dir.join(&file)).ok();
                 if spec.runs_in == Some(crate::registry::RunsIn::Qgis) {
                     // GeoPackage et PDF portent dates et identifiants : la fidélité d'une
                     // sortie de QGIS tient au résultat typé, pas aux octets.
@@ -717,6 +753,45 @@ impl<'a> Replay<'a> {
             identical: true,
         })
     }
+}
+
+/// Nombre de dossiers de repli `replay-<n>/` essayés après `replay/` : un plafond,
+/// pour ne jamais boucler sans fin.
+const REPLAY_FALLBACKS: usize = 20;
+
+/// Vide `dir` (ou le crée) et vérifie qu'il ne reste rien dedans.
+fn empty_dir(dir: &Path) -> std::io::Result<()> {
+    // Absent (NotFound) ou suppression partielle : le contrôle de vide qui suit tranche.
+    let _ = fs::remove_dir_all(dir);
+    fs::create_dir_all(dir)?;
+    if fs::read_dir(dir)?.next().is_some() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::DirectoryNotEmpty,
+            "dossier de sortie non vide",
+        ));
+    }
+    Ok(())
+}
+
+/// Premier fichier trouvé sous `dir`, en descendant dans les vrais sous-dossiers
+/// (les liens symboliques ne sont pas suivis, mais un lien compte comme fichier) ;
+/// `None` s'il n'y en a aucun.
+fn first_file(dir: &Path) -> Option<PathBuf> {
+    let mut entries: Vec<(PathBuf, bool)> = fs::read_dir(dir)
+        .ok()?
+        .filter_map(|e| {
+            let e = e.ok()?;
+            Some((e.path(), e.file_type().ok()?.is_dir()))
+        })
+        .collect();
+    entries.sort();
+    entries.into_iter().find_map(|(path, is_dir)| {
+        if is_dir {
+            first_file(&path)
+        } else {
+            Some(path)
+        }
+    })
 }
 
 /// Remplace, dans toutes les chaînes entières de `value`, une clé de `bound` par sa valeur

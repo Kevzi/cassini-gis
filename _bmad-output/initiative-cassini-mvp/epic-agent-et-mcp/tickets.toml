@@ -373,6 +373,27 @@ notes = [
 ]
 
 [[entry]]
+id = 36
+type = "story"
+title = "Second rejeu dans la meme session QGIS : l'export PDF voit les couches du rejeu precedent"
+description = "Depuis 5.35, un second rejeu sans rouvrir le projet ecrit ses sorties sous replay-2/ et passe les etapes de selection, de zone tampon et d'intersection. Il rend pourtant replay.diverged a l'etape de l'export PDF : le geste compte les couches visibles du projet, et les couches ajoutees par le premier rejeu y sont restees. Le second rejeu exporte donc plus de couches que l'execution d'origine. Apres ce ticket, deux rejeux de suite du journal de demo dans la meme session rendent deux fois identical: true, sans que le rejeu perde la capacite de voir une carte exportee avec une couche en trop ou en moins par rapport au journal."
+verify = "Tests du noyau ou de l'extension sur le cas : un projet qui porte deja les couches d'un rejeu precedent, puis un rejeu de l'export PDF. Recette QGIS : rejeu.bat (deux rejeux de suite du journal de demo, sans rouvrir le projet) rend deux fois identical: true."
+covers = ["CAP-4", "CAP-8"]
+after = [35]
+hitl = false
+risk = "high"
+references = [
+  "story-deux-rejeux-de-suite-dans-la-meme-session-qgis-plan.md — Implementation Notes, recette QGIS du 2026-11-03",
+  "story-suite-de-bout-en-bout-phrase-plan-valide-execution-rejeu-san-plan.md — recette QGIS du rejeu",
+]
+notes = [
+  "Decision: 2026-11-03 — demande du proprietaire a la recette de 5.35 : 5.35 se clot sur la correction des fichiers tenus ; le critere « deux fois identical: true » passe ici.",
+  "Decision: 2026-11-03 — controle exterieur (risque high) : Claude refait lui-meme la recette QGIS avec la sonde hors depot donnees-test-cassini/mesure-5-9/probe_replay_5_9.py (rejeu.bat), noyau et extension installes.",
+  "Open question: le remede — remettre le projet dans son etat d'origine avant un rejeu, comparer l'export sans compter les couches ajoutees par un rejeu, ou autre ; le dechargement de couches par l'extension avait ete ecarte en 5.35 (logique metier dans l'extension).",
+  "Path: qgis-plugin/cassini_qgis/layout_export.py — le resultat du geste porte layer_count, le nombre de couches visibles.",
+]
+
+[[entry]]
 id = 33
 type = "story"
 title = "Couches retirees par le budget d'inventaire signalees"
