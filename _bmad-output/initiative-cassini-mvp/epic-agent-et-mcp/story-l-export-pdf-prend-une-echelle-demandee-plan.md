@@ -3,7 +3,7 @@ title: "L'export PDF prend une échelle demandée"
 type: 'feature'
 ticket: '38'
 created: '2026-11-03'
-status: 'built'
+status: 'done'
 baseline_revision: 'ad273b627b292855df8372bc729effabcf119d63'
 route: 'full'
 route_source: 'auto'
