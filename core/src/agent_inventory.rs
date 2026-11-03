@@ -37,7 +37,8 @@
 //! **Résultats allégés** (ticket 5.22). Une couche de résultat coûte cher à relire : un plan de
 //! démo en produit quatre, et une sélection porte tous les champs de sa couche, valeurs comprises.
 //! `without_intermediates` retire de la vue les sorties qu'une étape exécutée du même plan a
-//! consommées (le noyau les retient en mémoire, le temps de son processus), et
+//! consommées, reconnues par leur fichier source (le noyau les déduit du journal du projet, ticket
+//! 5.34 : elles restent cachées après une relance ou un rejeu, sous de nouveaux ids), et
 //! `results_without_values` ôte la clé `values` des champs des résultats. Les couches de
 //! l'utilisateur ne changent pas ; QGIS, le journal et le plan gardé non plus.
 
@@ -377,7 +378,8 @@ pub struct ModelInventory {
 /// De `project.inventory` à l'inventaire montré au modèle, avec la table pour retraduire son plan :
 /// forme de l'entraînement, ordre stable, identifiants courts (table faite sur toutes les couches,
 /// pour qu'un court ne change pas quand une couche sort de la vue), couches intermédiaires
-/// (`intermediates`, identifiants complets) retirées et résultats sans valeurs (ticket 5.22), puis
+/// (`intermediates`, noms de fichier de sortie, ticket 5.34) retirées et résultats sans valeurs
+/// (ticket 5.22), puis
 /// budget par paquets (`budget`, seuil bas `low`).
 pub fn model_inventory(
     raw: &Value,
@@ -442,10 +444,12 @@ fn left_out_by_budget(
         .collect()
 }
 
-/// L'inventaire sans les couches de résultat dont l'identifiant est dans `intermediates` (ticket
-/// 5.22) : les sorties d'une étape qu'une étape exécutée du même plan a consommées (`step:k`). Une
-/// couche de l'utilisateur n'est jamais retirée, même citée par l'ensemble (une couche ouverte par
-/// `layer.add` puis reprise par l'étape suivante reste vue). Ordre et couches gardées intacts.
+/// L'inventaire sans les couches de résultat dont le fichier source est dans `intermediates`
+/// (tickets 5.22 et 5.34) : les sorties d'une étape qu'une étape exécutée du même plan a
+/// consommées (`step:k`). Le lien passe par le fichier, jamais par l'id, que QGIS renouvelle à
+/// chaque ouverture ; une copie du rejeu (`replay/`, même nom) est reconnue de même. Une couche de
+/// l'utilisateur (source hors des fichiers de travail) n'est jamais retirée, même citée par
+/// l'ensemble. Ordre et couches gardées intacts.
 pub fn without_intermediates(
     mut inventory: Value,
     work_files: &[WorkFile],
@@ -456,11 +460,8 @@ pub fn without_intermediates(
     }
     if let Some(layers) = inventory.get_mut("layers").and_then(Value::as_array_mut) {
         layers.retain(|layer| {
-            let hidden = layer
-                .get("layer_id")
-                .and_then(Value::as_str)
-                .is_some_and(|id| intermediates.contains(id));
-            !(hidden && result_date(layer, work_files).is_some())
+            !result_date(layer, work_files)
+                .is_some_and(|(_, source)| intermediates.contains(source))
         });
     }
     inventory
@@ -1272,7 +1273,11 @@ mod tests {
     #[test]
     fn a_chained_plan_shows_only_its_last_result_without_values() {
         let (raw, files) = demo();
-        let hidden = set(&["r1", "r2", "r3"]);
+        let hidden = set(&[
+            "1-analysis.select_by_attribute.gpkg",
+            "2-analysis.buffer.gpkg",
+            "3-analysis.intersect.gpkg",
+        ]);
         let (view, table) = model_inventory(
             &raw,
             &files,
@@ -1315,7 +1320,7 @@ mod tests {
     fn a_user_layer_named_as_intermediate_stays_whole() {
         // `layer.add` puis une étape qui reprend la couche ouverte : elle reste vue, valeurs comprises.
         let (raw, files) = demo();
-        let hidden = set(&["plu", "r2"]);
+        let hidden = set(&["plu.gpkg", "2-analysis.buffer.gpkg"]);
         let shaped = stable_order(agent_inventory(&raw), &files).0;
         let out = without_intermediates(shaped.clone(), &files, &hidden);
         assert_eq!(ids(&out), ["plu", "gares", "r1", "r3", "r4"]);
@@ -1332,7 +1337,11 @@ mod tests {
     #[test]
     fn with_the_same_results_the_view_does_not_change_and_a_new_plan_only_adds() {
         let (raw, mut files) = demo();
-        let mut hidden = set(&["r1", "r2", "r3"]);
+        let mut hidden = set(&[
+            "1-analysis.select_by_attribute.gpkg",
+            "2-analysis.buffer.gpkg",
+            "3-analysis.intersect.gpkg",
+        ]);
         let view = |raw: &Value, files: &[WorkFile], hidden: &HashSet<String>| {
             model_inventory(
                 raw,
@@ -1360,7 +1369,7 @@ mod tests {
                 modified: UNIX_EPOCH + Duration::from_secs(100 + k),
             });
         }
-        hidden.insert("r5".to_string());
+        hidden.insert("5-analysis.buffer.gpkg".to_string());
         let after = view(&next, &files, &hidden);
         let before = before["layers"].as_array().unwrap();
         let after = after["layers"].as_array().unwrap();
@@ -1397,7 +1406,7 @@ mod tests {
         assert!(json_chars(&agent_inventory(&raw)) > INVENTORY_BUDGET_CHARS);
         let hidden: HashSet<String> = [1, 2, 4, 5, 7, 8, 10, 11]
             .iter()
-            .map(|k| format!("r{k}"))
+            .map(|k| format!("{k}-analysis.intersect.gpkg"))
             .collect();
         let (view, _) = model_inventory(
             &raw,
@@ -1485,7 +1494,7 @@ mod tests {
         assert!(view.left_out.is_empty());
         // Résultats cachés par 5.22, le reste sous le budget : rien n'est signalé.
         let hidden: HashSet<String> = (1..=10u64)
-            .map(|k| format!("intersection_{k:08x}_aaaa_bbbb_cccc_{k:012x}"))
+            .map(|k| format!("{k}-analysis.intersect.gpkg"))
             .collect();
         let (view, _) = model_inventory(
             &raw,
@@ -1501,7 +1510,11 @@ mod tests {
         let (view, _) = model_inventory(
             &raw,
             &files,
-            &set(&["r1", "r2", "r3"]),
+            &set(&[
+                "1-analysis.select_by_attribute.gpkg",
+                "2-analysis.buffer.gpkg",
+                "3-analysis.intersect.gpkg",
+            ]),
             INVENTORY_BUDGET_CHARS,
             INVENTORY_LOW_CHARS,
         );

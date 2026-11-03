@@ -263,6 +263,12 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   à `session.hello` ; le rejeu signale toute différence avant de commencer, sans
   refuser. Les marqueurs d'un résultat résumé dans le journal vivent sous une clé
   réservée, qu'aucun résultat de commande ne peut porter.
+- **Complété (2026-11-03, ticket 5.34) :** chaque ligne écrite par `plan.execute`
+  porte une clé facultative `plan_step`, la place de l'étape dans son plan (un
+  nouveau plan recommence à 1), comme `origin`. Le noyau en déduit les couches
+  intermédiaires cachées au modèle, reconnues par leur fichier de sortie ; le
+  rejeu ne la lit pas. Une ligne sans la clé (journal ancien, appel hors plan)
+  ne cache rien.
 
 ### AD-12 — Toute étape est annulable par message, jamais en tuant le processus
 

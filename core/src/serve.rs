@@ -247,10 +247,6 @@ struct State<'a> {
     next_plan: u64,
     /// Compteur des appels des relais, pour les identifiants `external-<n>`.
     next_call: u64,
-    /// Identifiants des couches intermédiaires (ticket 5.22) : sorties d'une étape consommées par
-    /// une étape exécutée du même plan, cachées au modèle. En mémoire seulement, le temps du
-    /// processus : à la relance du noyau, tout résultat est revu une fois.
-    intermediates: HashSet<String>,
     /// Ids des couches posées par les `journal.replay` de ce processus (ticket 5.36) : un rejeu
     /// suivant les laisse hors de sa carte. En mémoire seulement, perdue à la relance du noyau.
     replayed_layers: HashSet<String>,
@@ -350,7 +346,6 @@ fn serve_with<'a>(
             pending: None,
             next_plan: 0,
             next_call: 0,
-            intermediates: HashSet::new(),
             replayed_layers: HashSet::new(),
         };
         let outcome = loop {
@@ -1432,11 +1427,41 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Deserialize, JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    #[allow(dead_code)]
+    struct ChainParams {
+        layer: String,
+        #[serde(default)]
+        out: String,
+    }
+
+    /// Commande qgis qui rend une couche écrite dans un fichier de sortie, comme une analyse
+    /// (ticket 5.34 : les intermédiaires se reconnaissent par ce fichier).
+    struct Chain;
+    impl Delegated for Chain {
+        type Params = ChainParams;
+        type Output = Made;
+        fn spec() -> crate::registry::CommandSpec {
+            crate::registry::CommandSpec::new::<ChainParams, Made>(
+                "test.chain",
+                "Enchaîne.",
+                "Chains.",
+            )
+            .runs_in(RunsIn::Qgis)
+            .cancellable(true)
+            .output_params(&["out"])
+            .output_ext(".gpkg")
+            .tests(&["t"])
+        }
+    }
+
     fn scripted_registry() -> Registry {
         let mut r = Registry::standard();
         r.register_delegated::<Render>();
         r.register_delegated::<Fixed>();
         r.register_delegated::<Make>();
+        r.register_delegated::<Chain>();
         r
     }
 
@@ -2708,89 +2733,235 @@ mod tests {
         c.close().1.unwrap();
     }
 
-    /// Ticket 5.22 : un plan à résultats chaînés exécuté, puis un plan arrêté en cours ; à la
-    /// proposition suivante, le compositeur ne voit que les sorties qu'aucune étape exécutée n'a
-    /// consommées, sans valeurs, et les couches de l'utilisateur intactes.
-    #[test]
-    fn the_composer_no_longer_sees_the_intermediates_of_an_executed_plan() {
-        let chained = json!({"kind":"calls","calls":[
-            {"command":"test.make","params":{"layer":"src"}},
-            {"command":"test.make","params":{"layer":"step:1.layer_id"}},
-            {"command":"test.make","params":{"layer":"step:2.layer_id"}},
-            {"command":"test.fixed","params":{"layer":"step:3.layer_id"}}
-        ]});
-        let stopped = json!({"kind":"calls","calls":[
-            {"command":"test.make","params":{"layer":"src"}},
-            {"command":"test.make","params":{"layer":"step:1.layer_id"}}
-        ]});
-        let composer = composer(three_steps()).unwrap();
-        composer.first.borrow_mut().extend([chained, stopped]);
-        let seen = composer.seen.clone();
-        let mut c = Client::start_with(CANCEL_GRACE, Some(composer));
-        c.hello_with(&ALL);
-        // Plan à trois résultats chaînés : r1 et r2 consommés, r3 final, cité ensuite par une
-        // étape qui ne produit aucune couche (comme une description) : r3 reste vu.
-        assert_eq!(c.propose(2)["result"]["plan_id"], "plan-1");
-        c.execute(3, "plan-1");
-        for (step, id) in [(1, "r1"), (2, "r2"), (3, "r3")] {
-            let order = c.expect_step("plan-1", step, "test.make");
-            c.send(reply(&order["id"], json!({"layer_id": id})));
-        }
-        let order = c.expect_step("plan-1", 4, "test.fixed");
-        c.send(reply(&order["id"], json!({"feature_count": 3})));
-        assert_eq!(c.recv()["id"], 3);
-        // Plan arrêté à l'étape 2 : r4 n'a été consommé par aucune étape exécutée.
-        assert_eq!(c.propose(4)["result"]["plan_id"], "plan-2");
-        c.execute(5, "plan-2");
-        let order = c.expect_step("plan-2", 1, "test.make");
-        c.send(reply(&order["id"], json!({"layer_id": "r4"})));
-        let order = c.expect_step("plan-2", 2, "test.make");
-        c.send(
-            json!({"jsonrpc":"2.0","id":order["id"],"error":{"code":-32000,
-            "message":"Raté.","data":{"code":"qgis.failed","message":"Raté."}}}),
-        );
-        assert!(c.recv()["error"].is_object());
-        // Les fichiers des résultats au dossier de travail, comme les écrit une exécution.
-        let work = c.dir.join("p.cassini");
-        for k in 1..=4 {
-            std::fs::write(work.join(format!("{k}-test.make.gpkg")), b"gpkg").unwrap();
-        }
-        let layer = |id: &str, source: &str| {
-            json!({"layer_id": id, "name": id, "source": source, "crs": "EPSG:2154",
-                "kind": "vector", "geometry": "MultiPolygon", "feature_count": 3,
-                "fields": [{"name": "typezone", "type": "String", "values": ["U", "N"]}]})
-        };
-        let mut layers: Vec<Value> = (1..=4)
-            .rev()
-            .map(|k| layer(&format!("r{k}"), &format!("{k}-test.make.gpkg")))
-            .collect();
-        layers.push(layer("plu", "plu.gpkg"));
-        c.send(json!({"jsonrpc":"2.0","id":6,"method":"plan.propose","params":{"request":"x"}}));
+    // ---- Couches intermédiaires déduites du journal (tickets 5.22 et 5.34) ----
+
+    const CHAIN: [&str; 4] = ["test.chain", "test.fixed", "test.make", "project.inventory"];
+
+    fn chain(layer: &str) -> Value {
+        json!({"command":"test.chain","params":{"layer":layer}})
+    }
+
+    /// Répond à l'étape `step` de `plan_id` (`test.chain`) comme QGIS : écrit le fichier de sortie
+    /// demandé, puis rend la couche `layer_id`.
+    fn answer_chain(c: &Client, plan_id: &str, step: u64, layer_id: &str) {
+        let order = c.expect_step(plan_id, step, "test.chain");
+        write_output(&order);
+        c.send(reply(&order["id"], json!({"layer_id": layer_id})));
+    }
+
+    fn write_output(order: &Value) {
+        let out = order["params"]["params"]["out"].as_str().unwrap();
+        std::fs::write(out, b"gpkg").unwrap();
+    }
+
+    /// Une couche de l'inventaire de QGIS ; `source` est son fichier, sans dossier.
+    fn inventory_layer(id: &str, source: &str) -> Value {
+        json!({"layer_id": id, "name": source, "source": source, "crs": "EPSG:2154",
+            "kind": "vector", "geometry": "MultiPolygon", "feature_count": 3,
+            "fields": [{"name": "typezone", "type": "String", "values": ["U", "N"]}]})
+    }
+
+    /// `plan.propose` sur un inventaire de `layers` ; rend l'inventaire vu par le compositeur.
+    fn proposed_view(c: &Client, id: u64, layers: Vec<Value>, seen: &SeenInventories) -> Value {
+        c.send(json!({"jsonrpc":"2.0","id":id,"method":"plan.propose","params":{"request":"x"}}));
         let order = c.recv();
         assert_eq!(order["params"]["command"], "project.inventory");
         c.send(reply(
             &order["id"],
             json!({"project_name": "p", "project_crs": "EPSG:2154", "layers": layers}),
         ));
-        assert!(c.recv()["result"]["plan_id"].is_string());
-        let seen = seen.lock().unwrap();
-        let inventory = &seen[2];
-        let ids: Vec<&str> = inventory["layers"]
+        let answer = c.recv();
+        assert_eq!(answer["id"], id, "{answer}");
+        assert!(answer["result"]["plan_id"].is_string(), "{answer}");
+        seen.lock().unwrap().last().unwrap().clone()
+    }
+
+    type SeenInventories = std::sync::Arc<std::sync::Mutex<Vec<Value>>>;
+
+    fn view_ids(view: &Value) -> Vec<String> {
+        view["layers"]
             .as_array()
             .unwrap()
             .iter()
-            .map(|l| l["layer_id"].as_str().unwrap())
-            .collect();
-        // Ordre stable : l'utilisateur, puis les résultats du plus ancien au plus récent.
-        assert_eq!(ids, ["plu", "r3", "r4"]);
+            .map(|l| l["layer_id"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    /// La vue sans les identifiants, que QGIS renouvelle à chaque ouverture.
+    fn without_ids(view: &Value) -> Value {
+        let mut view = view.clone();
+        for layer in view["layers"].as_array_mut().unwrap() {
+            layer.as_object_mut().unwrap().remove("layer_id");
+        }
+        view
+    }
+
+    /// Un compositeur qui rend `plans` dans l'ordre, puis un plan d'une étape sans couche.
+    fn composer_of(plans: Vec<Value>) -> (FixedComposer, SeenInventories) {
+        let last = json!({"kind":"calls","calls":[
+            {"command":"test.fixed","params":{"layer":"plu"}}]});
+        let composer = composer(last).unwrap();
+        composer.first.borrow_mut().extend(plans);
+        let seen = composer.seen.clone();
+        (composer, seen)
+    }
+
+    /// Ticket 5.22 : un plan à résultats chaînés exécuté, puis un plan arrêté en cours ; à la
+    /// proposition suivante, le compositeur ne voit que les sorties qu'aucune étape exécutée n'a
+    /// consommées, sans valeurs, et les couches de l'utilisateur intactes. Ticket 5.34 : après une
+    /// relance du noyau, les mêmes fichiers rechargés sous de nouveaux ids donnent la même vue.
+    #[test]
+    fn the_intermediates_of_an_executed_plan_stay_hidden_after_a_restart() {
+        let chained = json!({"kind":"calls","calls":[
+            chain("src"), chain("step:1.layer_id"), chain("step:2.layer_id"),
+            {"command":"test.fixed","params":{"layer":"step:3.layer_id"}}
+        ]});
+        let stopped = json!({"kind":"calls","calls":[chain("src"), chain("step:1.layer_id")]});
+        let (composer, seen) = composer_of(vec![chained, stopped]);
+        let c = Client::start_with(CANCEL_GRACE, Some(composer));
+        c.hello_with(&CHAIN);
+        // Plan à trois résultats chaînés (journal 1 à 3) : r1 et r2 consommés, r3 final, cité
+        // ensuite par une étape qui ne produit aucune couche (comme une description) : r3 reste vu.
+        assert_eq!(c.propose(2)["result"]["plan_id"], "plan-1");
+        c.execute(3, "plan-1");
+        for (step, id) in [(1, "r1"), (2, "r2"), (3, "r3")] {
+            answer_chain(&c, "plan-1", step, id);
+        }
+        let order = c.expect_step("plan-1", 4, "test.fixed");
+        c.send(reply(&order["id"], json!({"ok": true})));
+        assert_eq!(c.recv()["id"], 3);
+        // Plan arrêté à l'étape 2 (journal 5 et 6) : r4 n'a été consommé par aucune étape exécutée.
+        assert_eq!(c.propose(4)["result"]["plan_id"], "plan-2");
+        c.execute(5, "plan-2");
+        answer_chain(&c, "plan-2", 1, "r4");
+        let order = c.expect_step("plan-2", 2, "test.chain");
+        c.send(
+            json!({"jsonrpc":"2.0","id":order["id"],"error":{"code":-32000,
+            "message":"Raté.","data":{"code":"qgis.failed","message":"Raté."}}}),
+        );
+        assert!(c.recv()["error"].is_object());
+        let journal = c.journal();
+        let steps: Vec<&Value> = journal.iter().map(|l| &l["plan_step"]).collect();
         assert_eq!(
-            inventory["layers"][0]["fields"][0]["values"],
+            steps,
+            [
+                &json!(1),
+                &json!(2),
+                &json!(3),
+                &json!(4),
+                &json!(1),
+                &json!(2)
+            ]
+        );
+        let files = [
+            "1-test.chain.gpkg",
+            "2-test.chain.gpkg",
+            "3-test.chain.gpkg",
+            "5-test.chain.gpkg",
+        ];
+        let layers = |ids: [&str; 4]| -> Vec<Value> {
+            let mut layers: Vec<Value> = ids
+                .iter()
+                .zip(files)
+                .rev()
+                .map(|(id, f)| inventory_layer(id, f))
+                .collect();
+            layers.push(inventory_layer("plu", "plu.gpkg"));
+            layers
+        };
+        let before = proposed_view(&c, 6, layers(["r1", "r2", "r3", "r4"]), &seen);
+        // Ordre stable : l'utilisateur, puis les résultats du plus ancien au plus récent.
+        assert_eq!(view_ids(&before), ["plu", "r3", "r4"]);
+        assert_eq!(
+            before["layers"][0]["fields"][0]["values"],
             json!(["N", "U"])
         );
-        for l in &inventory["layers"].as_array().unwrap()[1..] {
+        for l in &before["layers"].as_array().unwrap()[1..] {
             assert_eq!(l["fields"], json!([{"name": "typezone", "type": "string"}]));
         }
-        drop(seen);
+        // Relance : nouveau noyau sur le même projet, QGIS rouvert avec de nouveaux ids.
+        let (composer, seen) = composer_of(Vec::new());
+        let mut c = c.reopen(Some(composer));
+        c.hello_with(&CHAIN);
+        let after = proposed_view(&c, 2, layers(["n1", "n2", "n3", "n4"]), &seen);
+        assert_eq!(view_ids(&after), ["plu", "n3", "n4"]);
+        assert_eq!(without_ids(&after), without_ids(&before));
+        c.close().1.unwrap();
+    }
+
+    /// Ticket 5.34 : la sortie finale d'un plan reprise par la phrase suivante reste vue, et les
+    /// copies des intermédiaires posées par `journal.replay` sous `replay/` sont cachées comme
+    /// leurs originaux, dans la même session comme après une relance.
+    #[test]
+    fn the_next_sentence_keeps_its_input_and_replayed_intermediates_stay_hidden() {
+        let first = json!({"kind":"calls","calls":[chain("src"), chain("step:1.layer_id")]});
+        // La phrase suivante reprend la sortie finale du plan 1 par son id.
+        let next = json!({"kind":"calls","calls":[chain("a2"), chain("step:1.layer_id")]});
+        let (composer, seen) = composer_of(vec![first, next]);
+        let c = Client::start_with(CANCEL_GRACE, Some(composer));
+        c.hello_with(&CHAIN);
+        assert_eq!(c.propose(2)["result"]["plan_id"], "plan-1");
+        c.execute(3, "plan-1");
+        answer_chain(&c, "plan-1", 1, "a1");
+        answer_chain(&c, "plan-1", 2, "a2");
+        assert_eq!(c.recv()["id"], 3);
+        assert_eq!(c.propose(4)["result"]["plan_id"], "plan-2");
+        c.execute(5, "plan-2");
+        answer_chain(&c, "plan-2", 1, "b1");
+        answer_chain(&c, "plan-2", 2, "b2");
+        assert_eq!(c.recv()["id"], 5);
+        // Rejeu : les quatre étapes repassent par QGIS, leurs sorties vont sous `replay/`.
+        c.send(json!({"jsonrpc":"2.0","id":6,"method":"journal.replay"}));
+        for id in ["p1", "p2", "p3", "p4"] {
+            let order = c.recv();
+            assert_eq!(order["params"]["command"], "test.chain", "{order}");
+            let out = order["params"]["params"]["out"].as_str().unwrap();
+            assert!(out.replace('\\', "/").contains("/replay/"), "{out}");
+            write_output(&order);
+            c.send(reply(&order["id"], json!({"layer_id": id})));
+        }
+        let report = c.recv();
+        assert_eq!(report["result"]["identical"], true, "{report}");
+        let files = [
+            "1-test.chain.gpkg",
+            "2-test.chain.gpkg",
+            "3-test.chain.gpkg",
+            "4-test.chain.gpkg",
+        ];
+        // Originaux et copies du rejeu (même nom de fichier), puis la couche de l'utilisateur.
+        let layers = |ids: [&str; 8]| -> Vec<Value> {
+            let mut layers: Vec<Value> = ids
+                .iter()
+                .zip(files.iter().chain(files.iter()))
+                .map(|(id, f)| inventory_layer(id, f))
+                .collect();
+            layers.reverse();
+            layers.push(inventory_layer("plu", "plu.gpkg"));
+            layers
+        };
+        let sorted = |view: &Value| {
+            let mut ids = view_ids(view);
+            ids.sort();
+            ids
+        };
+        let view = proposed_view(
+            &c,
+            7,
+            layers(["a1", "a2", "b1", "b2", "p1", "p2", "p3", "p4"]),
+            &seen,
+        );
+        assert_eq!(sorted(&view), ["a2", "b2", "p2", "p4", "plu"]);
+        // Après une relance : mêmes fichiers, nouveaux ids, même règle.
+        let (composer, seen) = composer_of(Vec::new());
+        let mut c = c.reopen(Some(composer));
+        c.hello_with(&CHAIN);
+        let view = proposed_view(
+            &c,
+            2,
+            layers(["c1", "c2", "c3", "c4", "q1", "q2", "q3", "q4"]),
+            &seen,
+        );
+        assert_eq!(sorted(&view), ["c2", "c4", "plu", "q2", "q4"]);
         c.close().1.unwrap();
     }
 
