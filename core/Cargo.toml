@@ -15,6 +15,10 @@ schemars = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 inventory = "0.3"
+# tiff (MIT), acceptee par le proprietaire le 2026-11-03 (entree 4.1) : lecture et ecriture
+# des MNT GeoTIFF dans core/src/dem.rs, sans GDAL (AD-1). Fonctions JPEG, WebP et fax
+# desactivees : seules les compressions deflate et LZW, en pur Rust, sont tirees.
+tiff = { version = "=0.11.3", default-features = false, features = ["deflate", "lzw"] }
 
 # windows-sys (MIT OR Apache-2.0), acceptee par le proprietaire le 2026-10-30 (ticket 5.24) :
 # l'API Win32 des tubes nommes du canal d'IA externe (AD-14), compilee seulement sous Windows.
