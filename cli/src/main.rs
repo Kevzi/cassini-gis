@@ -801,6 +801,48 @@ mod tests {
     }
 
     #[test]
+    fn terrain_slope_runs_without_qgis_and_replays_identically() {
+        let (dir, project) = temp_project();
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/mnt-plan-incline-2154.tif");
+        std::fs::create_dir_all(dir.join("dem")).unwrap();
+        std::fs::copy(&fixture, dir.join("dem/plan-incline.tif")).unwrap();
+        let (code, out, err) = call(&[
+            "run",
+            "terrain.slope",
+            r#"{"dem":"dem/plan-incline.tif","unit":"percent"}"#,
+            "--project",
+            &project,
+        ]);
+        assert_eq!((code, err.as_str()), (0, ""));
+        let result: Value = serde_json::from_str(out.trim()).unwrap();
+        // La réponse porte le chemin absolu, comme `command.run` à l'extension ; le journal le
+        // garde relatif au dossier de travail.
+        let file = Path::new(result["file"].as_str().unwrap());
+        assert!(file.is_absolute(), "{}", file.display());
+        assert_eq!(file, dir.join("p.cassini/1-terrain.slope.tif"));
+        assert_eq!(result["nodata_cells"], 136);
+        // Le journal garde la sortie relative au dossier de travail.
+        let journal = std::fs::read_to_string(dir.join("p.cassini/journal.jsonl")).unwrap();
+        let line: Value = serde_json::from_str(journal.trim()).unwrap();
+        assert_eq!(line["result"]["file"], "1-terrain.slope.tif");
+        assert_eq!(line["params"]["dem"], "dem/plan-incline.tif");
+
+        let written = dir.join("p.cassini/1-terrain.slope.tif");
+        let grid = cassini_core::dem::Dem::open(&written).unwrap();
+        let v = grid.value(10, 10).unwrap();
+        assert!((f64::from(v) - 10.0).abs() < 1e-4, "{v}");
+        let before = std::fs::read(&written).unwrap();
+
+        let (code, out, err) = call(&["replay", &project]);
+        assert_eq!((code, err.as_str()), (0, ""));
+        assert_eq!(out.trim(), r#"{"steps":1,"identical":true}"#);
+        let replayed = dir.join("p.cassini/replay/1-terrain.slope.tif");
+        assert_eq!(std::fs::read(&replayed).unwrap(), before);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn replay_without_a_journal_is_refused() {
         let (dir, project) = temp_project();
         let (code, out, err) = call(&["replay", &project]);

@@ -3334,6 +3334,14 @@ mod tests {
         let registry = cassini_core::registry::Registry::standard();
         for spec in registry.specs() {
             let id = spec.id.as_str();
+            // `terrain.slope` est arrivé (4.2) : le refus `NO_SLOPE` est désormais faux, mais
+            // la commande s'apprend au modèle dans l'entrée dédiée de l'epic raster-et-terrain
+            // (« Le modèle apprend les trois commandes de terrain »), qui retire ce refus.
+            // Retirer `NO_SLOPE` doit retirer cette exception : la référence ci-dessous casse
+            // la compilation si l'un part sans l'autre.
+            if id == "terrain.slope" && !NO_SLOPE.is_empty() {
+                continue;
+            }
             assert!(!id.starts_with("terrain."), "{id}");
             for word in ["zoom", "frame", "extent", "pan", "center", "centre", "cadr"] {
                 assert!(!id.contains(word), "{id}");

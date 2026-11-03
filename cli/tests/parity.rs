@@ -36,6 +36,25 @@ fn canonical(value: &Value) -> String {
     }
 }
 
+/// Copie où un chemin sous le dossier du projet de test devient `<projet>/…` : chaque point
+/// d'entrée a son projet, et une sortie du noyau (`file`) y est nommée en absolu.
+fn in_project(value: &Value, project: &str) -> Value {
+    let dir = project.rsplit_once('/').map_or(project, |(d, _)| d);
+    match value {
+        Value::String(s) => match s.replace('\\', "/").strip_prefix(&format!("{dir}/")) {
+            Some(rest) => Value::String(format!("<projet>/{rest}")),
+            None => value.clone(),
+        },
+        Value::Array(items) => Value::Array(items.iter().map(|v| in_project(v, project)).collect()),
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(k, v)| (k.clone(), in_project(v, project)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
 /// Dossier de modèles vide, commun aux deux points d'entrée : `model.list` rend le même `folder`.
 fn models_dir() -> String {
     let dir = std::env::temp_dir().join(format!("cassini-parity-models-{}", std::process::id()));
@@ -51,6 +70,11 @@ fn temp_project(label: &str) -> (PathBuf, String) {
         N.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     ));
     std::fs::create_dir_all(&dir).unwrap();
+    // Les MNT de la recette, pour les exemples des commandes de terrain qui en lisent un.
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures");
+    for name in ["mnt-plan-incline-2154.tif", "mnt-colline-2154.tif"] {
+        std::fs::copy(fixtures.join(name), dir.join(name)).unwrap();
+    }
     let project = dir.join("p.qgz").to_string_lossy().replace('\\', "/");
     (dir, project)
 }
@@ -68,7 +92,7 @@ fn via_run(id: &str, params: &Value, project: &str) -> String {
         String::from_utf8_lossy(&out.stderr)
     );
     let value: Value = serde_json::from_slice(&out.stdout).expect("run rend du JSON");
-    canonical(&value)
+    canonical(&in_project(&value, project))
 }
 
 /// Résultat canonique de la même commande par `cassini serve` : hello, puis `command.run`.
@@ -98,7 +122,7 @@ fn via_serve(id: &str, params: &Value, project: &str) -> String {
         .map(|l| serde_json::from_str(l).expect("serve rend du JSON"))
         .expect("serve répond à command.run");
     assert!(reply.get("error").is_none(), "serve {id} : {reply}");
-    canonical(&reply["result"])
+    canonical(&in_project(&reply["result"], project))
 }
 
 /// Résultat canonique de la même commande par `cassini mcp --project` : `tools/call`.
@@ -109,7 +133,7 @@ fn via_mcp(id: &str, params: &Value, project: &str) -> String {
     let (status, _) = client.close();
     assert!(status.success(), "mcp a échoué");
     assert_eq!(reply["result"]["isError"], false, "mcp {id} : {reply}");
-    canonical(&reply["result"]["structuredContent"])
+    canonical(&in_project(&reply["result"]["structuredContent"], project))
 }
 
 /// Toutes les paires (commande, paramètres) à comparer ; échoue si une commande
