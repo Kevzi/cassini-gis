@@ -118,6 +118,11 @@ pub static FAMILIES: &[Family] = &[
         make: isochrone,
     },
     Family {
+        name: "isochrone_utm",
+        weight: 3,
+        make: isochrone_utm,
+    },
+    Family {
         name: "isochrone_vers_cible",
         weight: 5,
         make: isochrone_vers_cible,
@@ -1651,6 +1656,38 @@ fn origin_point(rng: &mut Rng) -> Option<Origin> {
     })
 }
 
+/// Un point donné en UTM du WGS84, zone 31N ou 32N (la France métropolitaine) : le garde-fou
+/// lit la zone avec son hémisphère (« UTM 31N » : 32631). Pas de zone sud au générateur.
+fn utm_origin(rng: &mut Rng) -> Option<Origin> {
+    let (zone, x) = if rng.chance(1, 2) {
+        (31, rng.range(40_000, 70_000) * 10)
+    } else {
+        (32, rng.range(28_000, 45_000) * 10)
+    };
+    let y = rng.range(530_000, 550_000) * 10;
+    let (xs, ys) = if rng.chance(1, 2) {
+        (thousands(x), thousands(y))
+    } else {
+        (x.to_string(), y.to_string())
+    };
+    let crs = match rng.below(4) {
+        0 => format!("UTM {zone}N"),
+        1 => format!("UTM {zone} N"),
+        2 => format!("UTM zone {zone} Nord"),
+        _ => format!("UTM{zone}N"),
+    };
+    let place = match rng.below(3) {
+        0 => format!("le point {xs} / {ys} ({crs})"),
+        1 => format!("le point X = {xs}, Y = {ys} en {crs}"),
+        _ => format!("le point ({xs} ; {ys}), {crs}"),
+    };
+    Some(Origin {
+        point: json!({"x": x, "y": y, "epsg": 32600 + zone}),
+        coords: format!(" ({xs} / {ys}, {crs})"),
+        place,
+    })
+}
+
 /// Le réseau d'une isochrone : une seule couche de lignes, qu'il ne soit pas ambigu.
 fn network(rng: &mut Rng, b: &mut Builder) -> Layer {
     let key = *rng.pick(&["routes", "reseau"]);
@@ -1697,10 +1734,24 @@ fn travel_clause(rng: &mut Rng, noun: &Noun, tr: &Travel, from: &str) -> String 
 }
 
 fn isochrone(rng: &mut Rng) -> Option<Example> {
+    isochrone_from(rng, "isochrone", origin_point)
+}
+
+/// L'isochrone depuis un point donné en UTM (« UTM 31N ») : même plan, code 326xx.
+fn isochrone_utm(rng: &mut Rng) -> Option<Example> {
+    isochrone_from(rng, "isochrone_utm", utm_origin)
+}
+
+/// Une isochrone depuis un point donné en coordonnées, tiré par `origin`.
+fn isochrone_from(
+    rng: &mut Rng,
+    name: &'static str,
+    origin: fn(&mut Rng) -> Option<Origin>,
+) -> Option<Example> {
     let mut b = Builder::new();
     let network = network(rng, &mut b);
     let tr = travel(rng);
-    let origin = origin_point(rng)?;
+    let origin = origin(rng)?;
     let place = &origin.place;
     let (duration, mode) = (&tr.duration, tr.mode);
     let via = if rng.chance(1, 3) {
@@ -1731,7 +1782,7 @@ fn isochrone(rng: &mut Rng) -> Option<Example> {
     };
     let request = finish(rng, &body, q, false);
     let expected = calls(vec![isochrone_call(&network.id, &origin.point, &tr)]);
-    Some(example("isochrone", b, rng, request, expected))
+    Some(example(name, b, rng, request, expected))
 }
 
 /// Lieux qui sont aussi des couches de points : l'origine d'un trajet, et le thème de sa
@@ -2928,6 +2979,27 @@ mod tests {
             (e.request.contains("la gare ") || e.request.contains("l'école Jean Moulin"))
                 && !e.request.contains(" point ")
         }));
+    }
+
+    #[test]
+    fn a_point_given_in_utm_is_an_isochrone_left_unchanged_by_the_guard() {
+        // 5.37 : la zone UTM écrite avec son hémisphère donne le code du plan (32631, 32632).
+        let registry = cassini_core::registry::Registry::standard();
+        let examples = valid(isochrone_utm, 400);
+        for e in &examples {
+            assert_eq!(e.family, "isochrone_utm");
+            assert_eq!(commands(e), ["analysis.isochrone"], "{}", e.request);
+            let epsg = &e.expected["calls"][0]["params"]["origin"]["epsg"];
+            assert!(epsg == 32631 || epsg == 32632, "{epsg} {}", e.request);
+            let plan: cassini_core::plan::Plan =
+                serde_json::from_value(e.expected.clone()).unwrap();
+            let guarded =
+                cassini_core::point::guard_coordinates(&registry, plan.clone(), &e.request);
+            assert_eq!(guarded, plan, "{}", e.request);
+        }
+        for form in ["UTM 31N", "UTM 32 N", "UTM zone 31 Nord", "UTM32N"] {
+            assert!(examples.iter().any(|e| e.request.contains(form)), "{form}");
+        }
     }
 
     #[test]

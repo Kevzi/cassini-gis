@@ -8,9 +8,10 @@
 //! modèle local a validé : tout `Point` du plan doit venir de la demande (x, y et système y
 //! figurent, comme nombres) ou d'une étape précédente (référence `step:` vers un champ déclaré
 //! `Point`). Sinon le plan n'est pas montré : le garde-fou rend une question à provenance
-//! `guard`. En cas de doute, c'est la question. [`guard_rejected`] applique la même règle à
-//! une sortie que la validation a rejetée : un point inventé y rend la question tout de suite,
-//! sans redemande.
+//! `guard`. Le système compte s'il est écrit en code EPSG ou nommé : Lambert-93, WGS84, ou
+//! une zone UTM du WGS84 avec son hémisphère (« UTM 31N »). En cas de doute, c'est la
+//! question. [`guard_rejected`] applique la même règle à une sortie que la validation a
+//! rejetée : un point inventé y rend la question tout de suite, sans redemande.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -191,7 +192,9 @@ const NAMED_SYSTEMS: [(&str, &str, f64); 2] = [("lambert", "93", 2154.0), ("wgs"
 /// `2.458` et `2,458` (virgule suivie d'un chiffre = décimale) ; groupes de trois chiffres
 /// séparés par une espace, une espace insécable ou une espace fine (`6 850 000`) lus comme un
 /// seul nombre ; signe moins accepté devant un nombre détaché d'un mot. S'y ajoutent les codes
-/// des systèmes nommés (Lambert-93 : 2154, WGS84 : 4326). Toute autre forme n'est pas lue.
+/// des systèmes nommés (Lambert-93 : 2154, WGS84 : 4326) et des zones UTM du WGS84 écrites
+/// avec leur hémisphère (« UTM 31N » : 32631, « UTM 31 Sud » : 32731).
+/// Toute autre forme n'est pas lue.
 pub fn request_numbers(request: &str) -> Vec<f64> {
     let chars: Vec<char> = request.chars().collect();
     let digit = |i: usize| chars.get(i).is_some_and(char::is_ascii_digit);
@@ -259,7 +262,119 @@ pub fn request_numbers(request: &str) -> Vec<f64> {
             }
         }
     }
+    numbers.extend(utm_codes(&lower));
     numbers
+}
+
+/// Datums dont le nom, écrit juste avant « UTM » ou juste après la zone, en fait une autre
+/// projection que le WGS84 UTM : la zone n'est alors pas lue (décision du propriétaire,
+/// 2026-11-03). Nom et numéro, écrits collés ou séparés (« ED50 », « ED 50 »).
+const OTHER_UTM_DATUMS: [(&str, &str); 3] = [("ed", "50"), ("etrs", "89"), ("ntf", "")];
+
+/// Codes EPSG des zones UTM du WGS84 écrites dans la demande (en minuscules), décision du
+/// propriétaire du 2026-11-03 : « utm » en début de mot, séparateur facultatif, « zone » et
+/// séparateur facultatifs, un ou deux chiffres de 1 à 60, séparateur facultatif, puis
+/// l'hémisphère « n », « nord », « s » ou « sud » qui finit le mot (une apostrophe ne le finit
+/// pas : « 31 n'importe »). Nord : 32600 + zone ; sud : 32700 + zone. Sans hémisphère, ou avec
+/// un autre datum juste avant ou juste après (« ED50 UTM 31N », « UTM 31N (ED50) »), aucun
+/// code : en cas de doute, c'est la question.
+fn utm_codes(lower: &[char]) -> Vec<f64> {
+    let at = |j: usize, word: &str| {
+        let word: Vec<char> = word.chars().collect();
+        lower.get(j..).is_some_and(|rest| rest.starts_with(&word))
+    };
+    let skip_separator = |j: usize| {
+        if lower.get(j).is_some_and(|c| is_name_separator(*c)) {
+            j + 1
+        } else {
+            j
+        }
+    };
+    let ends_word = |k: usize| {
+        !lower
+            .get(k)
+            .is_some_and(|c| c.is_alphanumeric() || matches!(c, '\'' | '\u{2019}'))
+    };
+    let mut codes = Vec::new();
+    for start in 0..lower.len() {
+        if !at(start, "utm")
+            || (start > 0 && lower[start - 1].is_alphanumeric())
+            || follows_other_datum(lower, start)
+        {
+            continue;
+        }
+        let mut j = skip_separator(start + 3);
+        if at(j, "zone") {
+            j = skip_separator(j + 4);
+        }
+        let digits = lower[j..].iter().take_while(|c| c.is_ascii_digit()).count();
+        if !(1..=2).contains(&digits) {
+            continue;
+        }
+        let zone: u32 = lower[j..j + digits]
+            .iter()
+            .fold(0, |n, c| n * 10 + c.to_digit(10).unwrap_or(0));
+        if !(1..=60).contains(&zone) {
+            continue;
+        }
+        j = skip_separator(j + digits);
+        let hemisphere = [("nord", 32600), ("sud", 32700), ("n", 32600), ("s", 32700)]
+            .into_iter()
+            .map(|(word, base)| (j + word.chars().count(), word, base))
+            .find(|(end, word, _)| at(j, word) && ends_word(*end));
+        if let Some((end, _, base)) = hemisphere {
+            if !precedes_other_datum(lower, end) {
+                codes.push(f64::from(base + zone));
+            }
+        }
+    }
+    codes
+}
+
+/// Le mot (suite de caractères alphanumériques) qui finit avant `end`, en sautant tout ce qui
+/// n'est pas alphanumérique : son début et son texte.
+fn word_before(lower: &[char], mut end: usize) -> (usize, String) {
+    while end > 0 && !lower[end - 1].is_alphanumeric() {
+        end -= 1;
+    }
+    let mut start = end;
+    while start > 0 && lower[start - 1].is_alphanumeric() {
+        start -= 1;
+    }
+    (start, lower[start..end].iter().collect())
+}
+
+/// Le mot qui commence après `start`, en sautant tout ce qui n'est pas alphanumérique : sa fin
+/// et son texte.
+fn word_after(lower: &[char], mut start: usize) -> (usize, String) {
+    while start < lower.len() && !lower[start].is_alphanumeric() {
+        start += 1;
+    }
+    let mut end = start;
+    while end < lower.len() && lower[end].is_alphanumeric() {
+        end += 1;
+    }
+    (end, lower[start..end].iter().collect())
+}
+
+/// Le « utm » qui commence en `start` suit-il le nom d'un autre datum, quoi qu'il y ait entre
+/// eux hors lettres et chiffres (« ED50 UTM », « ETRS89/UTM », « ED 50 (UTM ») ?
+fn follows_other_datum(lower: &[char], start: usize) -> bool {
+    let (before, word) = word_before(lower, start);
+    OTHER_UTM_DATUMS.iter().any(|(name, number)| {
+        word == format!("{name}{number}")
+            || (!number.is_empty() && word == *number && word_before(lower, before).1 == *name)
+    })
+}
+
+/// L'hémisphère qui finit en `end` est-il suivi du nom d'un autre datum (« UTM 31N (ED50) »,
+/// « UTM 31 Nord, ETRS 89 ») ?
+fn precedes_other_datum(lower: &[char], end: usize) -> bool {
+    let (after, word) = word_after(lower, end);
+    OTHER_UTM_DATUMS.iter().any(|(name, number)| {
+        word == format!("{name}{number}")
+            || (!number.is_empty() && word == *name && word_after(lower, after).1 == *number)
+    })
 }
 
 /// Deux nombres égaux, à l'arrondi du flottant près.
@@ -754,6 +869,155 @@ mod tests {
         );
         assert_eq!(request_numbers("WGS 84 652 000"), [84.0, 652000.0, 4326.0]);
         assert_eq!(request_numbers("le 93 652 000"), [93652000.0]);
+    }
+
+    #[test]
+    fn a_utm_zone_with_its_hemisphere_is_read_as_its_code() {
+        let utm = |request: &str| -> Vec<f64> {
+            request_numbers(request)
+                .into_iter()
+                .filter(|n| (32600.0..32800.0).contains(n))
+                .collect()
+        };
+        for request in [
+            "en UTM 31N",
+            "en UTM 31 N",
+            "en UTM zone 31 Nord",
+            "en UTM31N",
+            "en utm 31n",
+            "(UTM-31N)",
+        ] {
+            assert_eq!(utm(request), [32631.0], "{request}");
+        }
+        for request in ["en UTM 31S", "en UTM 31 Sud", "UTM zone 31 sud."] {
+            assert_eq!(utm(request), [32731.0], "{request}");
+        }
+        assert_eq!(utm("UTM 1N, UTM 60S"), [32601.0, 32760.0]);
+        for request in [
+            "UTM 61N",
+            "UTM 0N",
+            "UTM 310N",
+            "UTM 31",
+            "UTM zone 31",
+            "UTM 31 Nantes",
+            "UTM 31 Sudouest",
+            "ED50 UTM 31N",
+            "ETRS89 / UTM 31N",
+            "ETRS89/UTM 31N",
+            "NTF UTM 31N",
+            "ed50-utm 31n",
+            "ed50utm 31n",
+            "gutm 31n",
+            "ED50 – UTM 31N",
+            "ED50 (UTM 31N)",
+            "ED50, UTM 31N",
+            "ETRS89 : UTM 31N",
+            "ED50\u{2009}UTM 31N",
+            "ED 50 UTM 31N",
+            "ETRS 89 UTM 31N",
+            "UTM 31N (ED50)",
+            "UTM 31N ED50",
+            "UTM 31 Nord, ETRS89",
+            "UTM 31N, ED 50",
+            "UTM 31 S (ETRS 89)",
+            "UTM 31N NTF",
+            "UTM 31 n'importe",
+            "UTM 31 s'il te plaît",
+            "UTM 31 s\u{2019}il te plaît",
+        ] {
+            assert!(utm(request).is_empty(), "{request}");
+        }
+        // Le numéro de la zone reste un nombre ordinaire, comme le 93 de « Lambert-93 ».
+        assert_eq!(
+            request_numbers("X 412300 Y 1652800 en UTM 31N"),
+            [412300.0, 1652800.0, 31.0, 32631.0]
+        );
+    }
+
+    #[test]
+    fn a_point_given_in_utm_leaves_the_plan_unchanged() {
+        let registry = Registry::standard();
+        let plan = isochrone(json!({"x": 412300, "y": 1652800, "epsg": 32631}), json!(10));
+        for request in [
+            "Zone à 10 min à pied depuis X 412300 Y 1652800 en UTM 31N.",
+            "Zone à 10 min à pied depuis X 412 300, Y 1 652 800 (UTM zone 31 Nord).",
+            "Zone à 10 min à pied depuis le point 412300 / 1652800, UTM31N.",
+        ] {
+            assert_eq!(
+                guard_coordinates(&registry, plan.clone(), request),
+                plan,
+                "{request}"
+            );
+        }
+        let south = isochrone(json!({"x": 412300, "y": 1652800, "epsg": 32731}), json!(10));
+        let request = "Zone à 10 min à pied depuis X 412300 Y 1652800 en UTM 31 Sud.";
+        assert_eq!(guard_coordinates(&registry, south.clone(), request), south);
+    }
+
+    #[test]
+    fn a_utm_zone_not_read_is_a_guard_question() {
+        let registry = Registry::standard();
+        let point =
+            |epsg: u32| isochrone(json!({"x": 412300, "y": 1652800, "epsg": epsg}), json!(10));
+        for (epsg, request) in [
+            (32661, "10 min à pied depuis X 412300 Y 1652800 en UTM 61N"),
+            (32600, "10 min à pied depuis X 412300 Y 1652800 en UTM 0N"),
+            (32631, "10 min à pied depuis X 412300 Y 1652800 en UTM 31"),
+            (
+                32631,
+                "10 min à pied depuis X 412300 Y 1652800 en UTM zone 31",
+            ),
+            (
+                32631,
+                "10 min à pied depuis X 412300 Y 1652800 en UTM 31 Nantes",
+            ),
+            (
+                32631,
+                "10 min à pied depuis X 412300 Y 1652800 en UTM 31 Sudouest",
+            ),
+            (32632, "10 min à pied depuis X 412300 Y 1652800 en UTM 31N"),
+            (
+                32631,
+                "10 min à pied depuis X 412300 Y 1652800 en ED50 UTM 31N",
+            ),
+            (
+                32631,
+                "10 min à pied depuis X 412300 Y 1652800 en ETRS89 / UTM 31N",
+            ),
+            (
+                32631,
+                "10 min à pied depuis X 412300 Y 1652800 en NTF UTM 31N",
+            ),
+            (
+                32631,
+                "10 min à pied depuis X 412300 Y 1652800 en ED 50 (UTM 31N)",
+            ),
+            (
+                32631,
+                "10 min à pied depuis X 412300 Y 1652800 en ETRS 89 UTM 31N",
+            ),
+            (
+                32631,
+                "10 min à pied depuis X 412300 Y 1652800 en UTM 31N (ED50)",
+            ),
+            (
+                32631,
+                "10 min à pied depuis X 412300 Y 1652800, UTM 31 Nord, ETRS89",
+            ),
+            (
+                32631,
+                "10 min à pied depuis X 412300 Y 1652800 UTM 31 n'importe",
+            ),
+            (
+                32731,
+                "10 min à pied depuis X 412300 Y 1652800 UTM 31 s'il te plaît",
+            ),
+        ] {
+            assert!(
+                is_guard(&guard_coordinates(&registry, point(epsg), request)),
+                "{epsg} {request}"
+            );
+        }
     }
 
     #[test]
