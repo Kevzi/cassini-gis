@@ -73,6 +73,11 @@ context: []
 - `consumed_layers` et son test retirés de `plans.rs` : la règle vit dans le journal, testée par `intermediate_files_follow_the_rule_of_an_executed_plan`.
 - `cli/src/main.rs` : signature de `model_inventory` inchangée (`&HashSet<String>`, désormais des noms de fichier) ; l'appel du test, avec un ensemble vide, n'a pas eu à changer.
 - Tests bout en bout : nouvelle commande de test `test.chain` (couche + fichier `.gpkg`), car `test.make` n'écrit aucun fichier ; le test 5.22 est devenu `the_intermediates_of_an_executed_plan_stay_hidden_after_a_restart`, plus `the_next_sentence_keeps_its_input_and_replayed_intermediates_stay_hidden` (phrase suivante, rejeu, relance).
+- Recette QGIS par Claude (2026-11-03, sonde jetable `%LOCALAPPDATA%\Temp\sonde-5-34\`, projet `projet-sonde-5-34.qgz`, modèle `cassini-composition-4b`, paquet `--features gpu` installé, ancien noyau gardé en `cassini.exe.avant-5-34`). Plan de démo exécuté (5 étapes, journal `plan_step` 1 à 5), projet enregistré, puis « Garde les zones U du PLU. » composée sans exécution, en jetons lus par le modèle :
+  - même session : 1 967 ;
+  - après relance, nouveau noyau : 1 967 (vue identique) ; ancien noyau : 2 680 (les trois intermédiaires revus) ;
+  - après `journal.replay` (`identical: true`, 14 couches), nouveau noyau : 2 355 (seule la copie de la couche finale s'ajoute) ; ancien : 3 784.
+  QGIS garde les ids de couche dans le projet enregistré : la relance prouve surtout la perte de la mémoire du noyau ; le rejeu prouve la reconnaissance par le fichier (copies sous `replay/`, ids neufs).
 
 ## Plan Change Log
 
