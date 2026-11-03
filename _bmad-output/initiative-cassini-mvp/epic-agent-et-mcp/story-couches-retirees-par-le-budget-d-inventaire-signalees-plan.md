@@ -78,6 +78,8 @@ context: []
 - Mention dans `left_out_note`, placé après `plan_list` (sous le plan, ou sous la question quand la liste est cachée, critère d'acceptation 1) ; effacée par `reset()` (nouvelle proposition, question, refus, erreur, nouvelle demande).
 - `cargo test -p cassini` et la clippy de l'espace de travail passent par PowerShell (`LIBCLANG_PATH`, `CARGO_TARGET_DIR=C:\ct`) : sous WSL, `cassini-ai` ne trouve pas libclang.
 
+- Recette QGIS (2026-11-03, Claude, noyau `--features gpu` installé, modèle ajusté 4b) : 20 phrases enchaînées sur une copie du projet de Villeneuve. Phrases 1-15 sous le budget : aucune clé `left_out`, aucune mention. Phrase 16 et suivantes : 8 couches hors de vue (étapes 4, 6, 9, 10, 11, 13, 14, 18), conformes à la mesure hors QGIS des inventaires relevés une fois les intermédiaires de 5.22 ôtées ; mention FR/EN affichée sur plans et questions. Phrase 20 (« la zone tampon de 200 m … de tout à l'heure ») : question du modèle, et la mention cite `10-analysis.buffer`. Une recette de 12 phrases n'avait pas atteint le budget (vue allégée sous 14 000 car.).
+
 ## Plan Change Log
 
 ## Review Triage Log
