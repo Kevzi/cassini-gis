@@ -358,6 +358,25 @@ mod tests {
     }
 
     #[test]
+    fn the_utm_isochrones_of_the_default_set_pass_the_guard() {
+        // 5.37 : au jeu par défaut, la famille est là et le garde-fou laisse ses plans.
+        let registry = Registry::standard();
+        let (examples, _) = generate(DEFAULT_SEED, DEFAULT_COUNT);
+        let utm: Vec<_> = examples
+            .iter()
+            .filter(|e| e.family == "isochrone_utm")
+            .collect();
+        assert!(!utm.is_empty());
+        for e in utm {
+            let plan: cassini_core::plan::Plan =
+                serde_json::from_value(e.expected.clone()).unwrap();
+            let guarded =
+                cassini_core::point::guard_coordinates(&registry, plan.clone(), &e.request);
+            assert_eq!(guarded, plan, "{}", e.request);
+        }
+    }
+
+    #[test]
     fn the_decided_families_and_vocabulary_are_present() {
         let (examples, summary) = generate(DEFAULT_SEED, DEFAULT_COUNT);
         assert_eq!(examples.len(), DEFAULT_COUNT);
@@ -483,7 +502,9 @@ mod tests {
         for e in &examples {
             let r = e.request.to_lowercase();
             let travel = modes.iter().any(|m| r.contains(m));
-            let coordinates = ["lambert", "epsg", "wgs"].iter().any(|c| r.contains(c));
+            let coordinates = ["lambert", "epsg", "wgs", "utm"]
+                .iter()
+                .any(|c| r.contains(c));
             if travel && !coordinates {
                 travels += 1;
                 let refused = e.expected["reason"] == families::NO_MULTI_ORIGIN;
