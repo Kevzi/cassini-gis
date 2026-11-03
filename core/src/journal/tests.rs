@@ -902,3 +902,158 @@ fn an_external_origin_is_journaled_and_ignored_by_the_replay() {
     drop(s);
     let _ = fs::remove_dir_all(dir);
 }
+
+/// Journal de deux étapes : une sortie écrite par le noyau, puis relue par repère.
+#[cfg(unix)]
+fn journal_with_output(registry: &Registry, project: &Path) -> PathBuf {
+    let mut s = Session::open(registry, project).unwrap();
+    s.call("test.write_output", json!({"text": "salut"}))
+        .unwrap();
+    s.call("test.read_file", json!({"path": "out:1.1"}))
+        .unwrap();
+    s.work_dir().to_path_buf()
+}
+
+#[cfg(unix)]
+fn set_mode(path: &Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_held_replay_folder_falls_back_to_a_fresh_one() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let work = journal_with_output(&registry, &project);
+    // Fichier périmé, au contenu différent, que le rejeu ne peut pas supprimer.
+    let stale = work.join("replay/1-test.write_output.out");
+    fs::create_dir_all(stale.parent().unwrap()).unwrap();
+    fs::write(&stale, "périmé, plus long").unwrap();
+    set_mode(&work.join("replay"), 0o555);
+
+    let outcome = replay_of(&registry, &project);
+    set_mode(&work.join("replay"), 0o755);
+    let (report, _) = outcome.unwrap();
+    assert_eq!(
+        report,
+        ReplayReport {
+            steps: 2,
+            identical: true
+        }
+    );
+    assert_eq!(
+        fs::read_to_string(work.join("replay-2/1-test.write_output.out")).unwrap(),
+        "salut"
+    );
+    assert_eq!(fs::read_to_string(&stale).unwrap(), "périmé, plus long");
+    assert!(!work.join("replay-3").exists());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_held_first_fallback_moves_on_to_the_next() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let work = journal_with_output(&registry, &project);
+    for held in ["replay", "replay-2"] {
+        let stale = work.join(held).join("1-test.write_output.out");
+        fs::create_dir_all(stale.parent().unwrap()).unwrap();
+        fs::write(&stale, "périmé").unwrap();
+        set_mode(&work.join(held), 0o555);
+    }
+
+    let outcome = replay_of(&registry, &project);
+    set_mode(&work.join("replay"), 0o755);
+    set_mode(&work.join("replay-2"), 0o755);
+    assert!(outcome.unwrap().0.identical);
+    assert_eq!(
+        fs::read_to_string(work.join("replay-3/1-test.write_output.out")).unwrap(),
+        "salut"
+    );
+    assert!(!work.join("replay-4").exists());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn two_replays_in_a_row_reuse_the_replay_folder() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let work = journal_with_output(&registry, &project);
+    for _ in 0..2 {
+        let (report, _) = replay_of(&registry, &project).unwrap();
+        assert!(report.identical);
+        assert_eq!(
+            fs::read_to_string(work.join("replay/1-test.write_output.out")).unwrap(),
+            "salut"
+        );
+    }
+    assert!(!work.join("replay-2").exists());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn no_fresh_replay_folder_names_the_held_file() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let work = journal_with_output(&registry, &project);
+    let stale = work.join("replay/1-test.write_output.out");
+    fs::create_dir_all(stale.parent().unwrap()).unwrap();
+    fs::write(&stale, "périmé").unwrap();
+    let journal = fs::read_to_string(work.join(JOURNAL_FILE)).unwrap();
+    set_mode(&work.join("replay"), 0o555);
+    set_mode(&work, 0o555);
+
+    let outcome = replay_of(&registry, &project);
+    set_mode(&work, 0o755);
+    set_mode(&work.join("replay"), 0o755);
+    let err = outcome.unwrap_err();
+    assert_eq!(err.code, "replay.output_locked");
+    assert!(
+        err.message.contains("replay/1-test.write_output.out"),
+        "{}",
+        err.message
+    );
+    assert!(!err.message.contains(&*work.to_string_lossy()));
+    assert!(!work.join("replay-2").exists());
+    assert_eq!(fs::read_to_string(&stale).unwrap(), "périmé");
+    assert_eq!(
+        fs::read_to_string(work.join(JOURNAL_FILE)).unwrap(),
+        journal
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_qgis_journal_replays_identically_into_a_fallback_folder() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    inventory_journal(&project, false);
+    let work = dir.join("p.cassini");
+    let stale = work.join("replay/3-analysis.buffer.gpkg");
+    fs::create_dir_all(stale.parent().unwrap()).unwrap();
+    fs::write(&stale, "périmé").unwrap();
+    set_mode(&work.join("replay"), 0o555);
+
+    let outcome = Replay::load(&registry, &project)
+        .unwrap()
+        .run(&Router::new(&registry).with_qgis(SessionQgis::new(2)));
+    set_mode(&work.join("replay"), 0o755);
+    assert_eq!(
+        outcome.unwrap(),
+        ReplayReport {
+            steps: 4,
+            identical: true
+        }
+    );
+    assert_eq!(
+        fs::read_to_string(work.join("replay-2/3-analysis.buffer.gpkg")).unwrap(),
+        "gpkg-2"
+    );
+    assert_eq!(fs::read_to_string(&stale).unwrap(), "périmé");
+    let _ = fs::remove_dir_all(dir);
+}

@@ -209,12 +209,27 @@ pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<V
     Ok(json!({"plan_id": id, "plan": shown}))
 }
 
-/// Les fichiers du dossier de travail et de son dossier de rejeu (`replay/`, où un rejeu écrit
-/// ses résultats), avec leur date. Un dossier illisible ou absent n'en donne aucun (rien n'est
-/// alors reconnu comme résultat, rien n'est retiré) ; un fichier illisible est ignoré.
+/// Les fichiers du dossier de travail et de ses dossiers de rejeu (`replay/`, où un rejeu écrit
+/// ses résultats, et ses replis `replay-<n>/` quand `replay/` est tenu par QGIS), avec leur
+/// date. Un dossier illisible ou absent n'en donne aucun (rien n'est alors reconnu comme
+/// résultat, rien n'est retiré) ; un fichier illisible est ignoré.
 fn work_files(dir: &Path) -> Vec<WorkFile> {
     let mut files = files_in(dir);
     files.extend(files_in(&dir.join("replay")));
+    let fallbacks = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_ok_and(|t| t.is_dir()))
+        .filter(|entry| {
+            entry.file_name().to_str().is_some_and(|name| {
+                name.strip_prefix("replay-")
+                    .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+            })
+        });
+    for entry in fallbacks {
+        files.extend(files_in(&entry.path()));
+    }
     files
 }
 
@@ -357,6 +372,19 @@ mod tests {
         assert_eq!(
             names(&dir),
             ["1-analysis.intersect.gpkg", "3-analysis.buffer.gpkg"]
+        );
+        // Repli d'un rejeu dont `replay/` était tenu ; un dossier au nom voisin est ignoré.
+        std::fs::create_dir_all(dir.join("replay-2")).unwrap();
+        std::fs::write(dir.join("replay-2").join("2-analysis.buffer.gpkg"), b"x").unwrap();
+        std::fs::create_dir_all(dir.join("replay-x")).unwrap();
+        std::fs::write(dir.join("replay-x").join("9-autre.gpkg"), b"x").unwrap();
+        assert_eq!(
+            names(&dir),
+            [
+                "1-analysis.intersect.gpkg",
+                "2-analysis.buffer.gpkg",
+                "3-analysis.buffer.gpkg"
+            ]
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

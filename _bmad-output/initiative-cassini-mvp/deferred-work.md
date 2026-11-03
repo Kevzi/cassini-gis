@@ -586,3 +586,15 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
   evidence: recette QGIS de 5.9 (2026-11-03, noyau installé de 5.32, sonde hors dépôt `donnees-test-cassini/mesure-5-9/probe_replay_5_9.py`) — GDAL « A file system object called '…\replay\1-analysis.select_by_attribute.gpkg' already exists » ; `core/src/journal/mod.rs:636` vide `replay/` par `let _ = fs::remove_dir_all(...)`, erreur ignorée, et QGIS tient encore ouverts les fichiers du premier rejeu. Avec le projet rouvert entre les deux rejeux : deux fois `identical: true`. Défaut antérieur à 5.9 ; ticket à créer (risque high, rejeu).
   status: ticket, 2026-11-03, entrée 5.35 (`epic-agent-et-mcp/tickets.toml`)
   resolution: Devenu le ticket 5.35 « Deux rejeux de suite dans la même session QGIS » ; après 5.9, sans en dépendre.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-deux-rejeux-de-suite-dans-la-meme-session-qgis-plan.md`
+  summary: Les dossiers de repli `replay-<n>/` du rejeu ne sont jamais nettoyés une fois `replay/` redevenu libre.
+  evidence: relecture thorough de 5.35 ; `fresh_replay_dir` ne vide que le dossier qu'il va utiliser ; accumulation bornée à un dossier par rejeu tenu par QGIS, GeoPackage et PDF périmés restent sur disque. Remède possible : balayage best-effort des `replay-<n>/` inutilisés après un rejeu réussi.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-deux-rejeux-de-suite-dans-la-meme-session-qgis-plan.md`
+  summary: Le bilan du rejeu ne dit pas dans quel dossier (`replay/` ou `replay-<n>/`) les sorties ont été écrites.
+  evidence: relecture thorough de 5.35 ; `ReplayReport` reste `{steps, identical}` ; `qgis-plugin/tests/probe_end_to_end.py:235-239` lit `replay/` en dur. Ajouter le dossier (relatif, POSIX) au bilan touche la surface publique de `journal.replay`.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-deux-rejeux-de-suite-dans-la-meme-session-qgis-plan.md`
+  summary: La sortie `journal.io` de `fresh_replay_dir` (tous les dossiers en échec, `replay/` sans fichier) n'est couverte par aucun test.
+  evidence: relecture thorough de 5.35 (verification-gap) ; seul le cas `replay.output_locked` est testé.
