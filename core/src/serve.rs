@@ -1520,7 +1520,20 @@ mod tests {
 
         /// Démarre le noyau avec un compositeur de test (qui rend un plan fixe).
         fn start_with(grace: Duration, composer: Option<FixedComposer>) -> Client {
-            let dir = temp_dir();
+            Client::start_in(temp_dir(), grace, composer)
+        }
+
+        /// Ferme cette session, puis en ouvre une seconde sur **le même projet** (le verrou du
+        /// journal est relâché à la fin de la première). Le dossier passe à la seconde.
+        fn reopen(mut self, composer: Option<FixedComposer>) -> Client {
+            if self.server.is_some() {
+                self.close().1.unwrap();
+            }
+            let dir = std::mem::take(&mut self.dir);
+            Client::start_in(dir, CANCEL_GRACE, composer)
+        }
+
+        fn start_in(dir: PathBuf, grace: Duration, composer: Option<FixedComposer>) -> Client {
             let project = project_in(&dir);
             let (to, in_rx) = mpsc::channel();
             let (out_tx, from) = mpsc::channel();
@@ -1656,6 +1669,9 @@ mod tests {
     impl Drop for Client {
         fn drop(&mut self) {
             self.to = None;
+            if self.dir.as_os_str().is_empty() {
+                return;
+            }
             let _ = std::fs::remove_dir_all(&self.dir);
         }
     }
@@ -2027,6 +2043,151 @@ mod tests {
         let replayed = c.recv();
         assert_eq!(replayed["result"], json!({"steps": 3, "identical": true}));
         c.close().1.unwrap();
+    }
+
+    // ---- Parcours de la phrase de démo : plan, exécution, rejeu sans l'IA ----
+
+    /// Commandes de la phrase de démo, telles que l'extension les annonce.
+    const DEMO: [&str; 5] = [
+        "analysis.select_by_attribute",
+        "analysis.buffer",
+        "analysis.intersect",
+        "layout.export_pdf",
+        "project.inventory",
+    ];
+
+    /// Les 5 étapes de la phrase de démo (même forme que `demo_plan` d'`ai/tests/ecart_reel.rs`).
+    fn demo_plan() -> Value {
+        json!({"kind":"calls","calls":[
+            {"command":"analysis.select_by_attribute","params":{"layer_id":"plu","field":"typezone","operator":"eq","value":"U"}},
+            {"command":"analysis.buffer","params":{"layer_id":"gares","distance":{"value":500,"unit":"m"}}},
+            {"command":"analysis.intersect","params":{"layer_id":"parcelles","overlay_layer_id":"step:1.layer_id"}},
+            {"command":"analysis.intersect","params":{"layer_id":"step:3.layer_id","overlay_layer_id":"step:2.layer_id"}},
+            {"command":"layout.export_pdf","params":{"title":"Parcelles constructibles"}}
+        ]})
+    }
+
+    /// Fausse extension : écrit la sortie que le noyau a nommée, puis rend le résultat typé de
+    /// l'étape. `prefix` distingue les ids de couche d'une session à l'autre ; `count` est le
+    /// nombre d'entités rendu par chaque analyse.
+    fn demo_answer(order: &Value, step: u64, prefix: &str, count: u64) -> Value {
+        let out = order["params"]["params"]["out"].as_str().unwrap();
+        std::fs::write(out, b"sortie de la fausse extension").unwrap();
+        let result = match order["params"]["command"].as_str().unwrap() {
+            "layout.export_pdf" => json!({"file": out, "page_count": 1, "layer_count": 4,
+                "sources": ["plu.gpkg", "gares.gpkg", "parcelles.gpkg"], "truncated": false}),
+            _ => json!({"layer_id": format!("{prefix}_{step}"), "name": format!("Étape {step}"),
+                "feature_count": count, "crs": "EPSG:2154"}),
+        };
+        reply(&order["id"], result)
+    }
+
+    /// Rejoue le journal par le canal ; l'étape `odd` (si donnée) rend 99 entités au lieu de 7.
+    /// Rend aussi les paramètres de chaque ordre rejoué, dans l'ordre.
+    fn replay_demo(c: &Client, id: u64, odd: Option<u64>) -> (Value, Vec<Value>) {
+        c.send(json!({"jsonrpc":"2.0","id":id,"method":"journal.replay"}));
+        let mut params = Vec::new();
+        for step in 1..=5 {
+            let order = c.recv();
+            assert_eq!(order["method"], "order.execute", "{order}");
+            params.push(order["params"]["params"].clone());
+            let count = if odd == Some(step) { 99 } else { 7 };
+            c.send(demo_answer(&order, step, "r", count));
+            if odd == Some(step) {
+                break;
+            }
+        }
+        (c.recv(), params)
+    }
+
+    /// Exécute le plan de démo dans une première session, et rend le client fermé.
+    fn run_demo_plan() -> Client {
+        let mut c = Client::start_with(CANCEL_GRACE, composer(demo_plan()));
+        c.hello_with(&DEMO);
+        let proposed = c.propose(2);
+        assert_eq!(proposed["result"]["plan"], demo_plan(), "{proposed}");
+        let plan_id = proposed["result"]["plan_id"].as_str().unwrap().to_string();
+        assert!(c.journal().is_empty());
+        c.execute(3, &plan_id);
+        let calls = demo_plan()["calls"].as_array().unwrap().clone();
+        for (i, call) in calls.iter().enumerate() {
+            let step = i as u64 + 1;
+            let order = c.expect_step(&plan_id, step, call["command"].as_str().unwrap());
+            // Un seul ordre à la fois : rien ne part avant la réponse.
+            c.assert_silent();
+            c.send(demo_answer(&order, step, "l", 7));
+        }
+        let done = c.recv();
+        assert_eq!(done["id"], 3);
+        assert_eq!(
+            done["result"]["steps"].as_array().unwrap().len(),
+            5,
+            "{done}"
+        );
+        let journal = c.journal();
+        assert_eq!(journal.len(), 5);
+        // Les références `step:N` sont résolues au journal.
+        assert_eq!(
+            journal[2]["params"]["overlay_layer_id"], "l_1",
+            "{}",
+            journal[2]
+        );
+        assert_eq!(journal[3]["params"]["layer_id"], "l_3");
+        assert_eq!(journal[3]["params"]["overlay_layer_id"], "l_2");
+        assert!(journal.iter().all(|l| !l.to_string().contains("step:")));
+        c.close().1.unwrap();
+        c
+    }
+
+    #[test]
+    fn the_demo_plan_runs_then_replays_in_a_session_without_composer() {
+        let c = run_demo_plan();
+        let journal = c.dir.join("p.cassini/journal.jsonl");
+        let before = std::fs::read(&journal).unwrap();
+        // Seconde session du même projet, sans compositeur : aucun modèle ne peut y être chargé.
+        let mut again = c.reopen(None);
+        again.hello_with(&DEMO);
+        // La preuve que l'IA n'y est pas : composer est refusé.
+        again.send(json!({"jsonrpc":"2.0","id":2,"method":"plan.propose",
+            "params":{"request":"Fais-le."}}));
+        assert_eq!(code_of(&again.recv()), "agent.unavailable");
+        let (replayed, params) = replay_demo(&again, 3, None);
+        // Les couches sources restent ; chaque référence est liée à l'id neuf de son étape.
+        assert_eq!(params[0]["layer_id"], "plu");
+        assert_eq!(params[1]["layer_id"], "gares");
+        assert_eq!(params[2]["layer_id"], "parcelles");
+        assert_eq!(params[2]["overlay_layer_id"], "r_1");
+        assert_eq!(params[3]["layer_id"], "r_3");
+        assert_eq!(params[3]["overlay_layer_id"], "r_2");
+        assert_eq!(replayed["id"], 3);
+        assert_eq!(replayed["result"], json!({"steps": 5, "identical": true}));
+        // Le rejeu n'écrit pas le journal : identique octet pour octet.
+        assert_eq!(std::fs::read(&journal).unwrap(), before);
+        again.close().1.unwrap();
+    }
+
+    #[test]
+    fn a_demo_replay_that_differs_names_the_step() {
+        let c = run_demo_plan();
+        let journal = c.dir.join("p.cassini/journal.jsonl");
+        let before = std::fs::read(&journal).unwrap();
+        let mut again = c.reopen(None);
+        again.hello_with(&DEMO);
+        // Un autre id de couche ne compte pas (valeur de session) ; un autre résultat, si.
+        let (replayed, _) = replay_demo(&again, 2, Some(3));
+        // Le rejeu arrêté n'a pas écrit le journal.
+        assert_eq!(std::fs::read(&journal).unwrap(), before);
+        assert_eq!(code_of(&replayed), "replay.diverged", "{replayed}");
+        assert_eq!(replayed["error"]["data"]["step"], 3);
+        assert!(replayed["error"]["data"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("analysis.intersect"));
+        // La session reste debout.
+        again.send(json!({"jsonrpc":"2.0","id":4,"method":"command.run",
+            "params":{"command":"system.about","params":{}}}));
+        assert_eq!(again.recv()["result"]["protocol_version"], 2);
+        again.close().1.unwrap();
     }
 
     #[test]

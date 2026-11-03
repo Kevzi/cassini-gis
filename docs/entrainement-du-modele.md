@@ -1045,3 +1045,21 @@ Barre manquée sur E. Décision du propriétaire (2026-10-24) : garder quand mê
 installé dans le dossier des modèles du poste sous le nom de déclaration que le panneau a
 retenu (`cassini-composition-4b.modele.json`) ; celui de 5.15 y reste sous le nom
 `cassini-composition-4b-5-15`. La suite de E fera l'objet d'un autre ticket (`deferred-work.md`).
+
+## Suite de bout en bout (ticket 5.9, 2026-11-01)
+
+Révision `bf24d56`, commit des tests du ticket 5.9 (base `88251ab`, aucun code produit changé), modèle livré (`cassini-composition-4b.modele.json`,
+prompt court), RTX 3070 Ti, paquet `--features gpu`.
+
+- `plan_reel` (`--features cuda`) : **25 / 25**, 0 fausse question.
+- `cli/tests/bout_en_bout.rs`, sur le vrai binaire : la phrase de démo exacte de `CLAUDE.md`,
+  sur l'inventaire de l'épreuve (`tests/epreuve-modele-local/inventory.json`, traduit dans la forme
+  de `project.inventory`), devient par `plan.propose` le plan attendu — sélection `typezone = U`
+  du PLU, tampon de 500 m des gares, deux intersections, export PDF titré « Parcelles
+  constructibles du PLU à moins de 500 m d'une gare à Villeneuve-le-Roi » — en 16,5 s, chargement
+  compris. Aucune socket réseau tenue par `cassini serve` après la composition. Le plan est
+  exécuté par la fausse extension (5 lignes au journal), puis rejoué dans un second `cassini serve`
+  dont le dossier des modèles est vide (`agent.models` y rend une liste vide) :
+  `{"steps": 5, "identical": true}`, journal inchangé octet pour octet. Le rejeu se passe de l'IA.
+
+Durées sur processeur de la même révision : `docs/mesure-duree-par-phrase.md`, section du ticket 5.9.

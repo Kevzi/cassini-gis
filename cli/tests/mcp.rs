@@ -3,6 +3,10 @@
 
 #[path = "support/mcp_client.rs"]
 mod mcp_client;
+#[path = "support/qgis_session.rs"]
+mod qgis_session;
+#[path = "support/reseau.rs"]
+mod reseau;
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -243,13 +247,10 @@ fn closing_the_input_ends_the_server_with_code_0() {
 // test joue l'extension sur l'entrée et la sortie standard, nom isolé par
 // `CASSINI_EXTERNAL_TAG`.
 
-use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, ChildStdin, Stdio};
-use std::sync::mpsc::{self, Receiver};
 
-use cassini_core::registry::PROTOCOL_VERSION;
 use mcp_client::PATIENCE;
+use qgis_session::QgisSession;
 
 /// Les commandes QGIS que la session simulée annonce à `session.hello`.
 const ANNOUNCED: [&str; 2] = ["analysis.buffer", "layer.describe"];
@@ -261,161 +262,6 @@ fn buffer_params() -> Value {
 
 fn buffered() -> Value {
     json!({"layer_id": "tampon", "name": "Tampon", "feature_count": 3, "crs": "EPSG:2154"})
-}
-
-/// Une session QGIS simulée : `cassini serve`, et le test dans le rôle de l'extension.
-struct QgisSession {
-    child: Child,
-    stdin: Option<ChildStdin>,
-    lines: Receiver<Value>,
-    unread: VecDeque<Value>,
-    next_id: u64,
-    tag: String,
-    dir: PathBuf,
-}
-
-/// Lit les lignes JSON de `stdout` dans un fil, pour attendre avec une échéance.
-fn spawn_lines(stdout: impl std::io::Read + Send + 'static) -> Receiver<Value> {
-    let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        for line in BufReader::new(stdout).lines() {
-            let Ok(line) = line else { return };
-            if line.trim().is_empty() {
-                continue;
-            }
-            if tx.send(serde_json::from_str(&line).unwrap()).is_err() {
-                return;
-            }
-        }
-    });
-    rx
-}
-
-impl QgisSession {
-    /// Lance la session, ouvre le projet par `session.hello`, et allume le canal d'IA externe
-    /// si `external` est vrai.
-    fn start(external: bool) -> QgisSession {
-        let (dir, project) = temp_project();
-        let tag = format!(
-            "relais-{}-{}",
-            std::process::id(),
-            dir.file_name().unwrap().to_string_lossy()
-        );
-        let mut child = Command::new(BIN)
-            .arg("serve")
-            .env("CASSINI_EXTERNAL_TAG", &tag)
-            .env("CASSINI_MODELS", models_dir())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("le binaire se lance");
-        let stdin = child.stdin.take();
-        let lines = spawn_lines(child.stdout.take().unwrap());
-        let mut session = QgisSession {
-            child,
-            stdin,
-            lines,
-            unread: VecDeque::new(),
-            next_id: 1,
-            tag,
-            dir,
-        };
-        let hello = session.request(
-            "session.hello",
-            json!({"protocol_version": PROTOCOL_VERSION, "commands": ANNOUNCED, "project": project}),
-        );
-        assert!(hello["result"].is_object(), "{hello}");
-        if external {
-            session.switch(true);
-        }
-        session
-    }
-
-    fn send(&mut self, message: &Value) {
-        let stdin = self.stdin.as_mut().unwrap();
-        writeln!(stdin, "{message}").unwrap();
-        stdin.flush().unwrap();
-    }
-
-    fn start_request(&mut self, method: &str, params: Value) -> u64 {
-        let id = self.next_id;
-        self.next_id += 1;
-        self.send(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}));
-        id
-    }
-
-    fn request(&mut self, method: &str, params: Value) -> Value {
-        let id = self.start_request(method, params);
-        self.wait_for(method, |m| {
-            m["id"] == json!(id) && m.get("method").is_none()
-        })
-    }
-
-    /// Lit ce qui arrive encore pendant 300 ms après le dernier message ; le garde à lire.
-    fn drain(&mut self) {
-        while let Ok(message) = self
-            .lines
-            .recv_timeout(std::time::Duration::from_millis(300))
-        {
-            self.unread.push_back(message);
-        }
-    }
-
-    fn wait_for(&mut self, what: &str, wanted: impl Fn(&Value) -> bool) -> Value {
-        if let Some(i) = self.unread.iter().position(&wanted) {
-            return self.unread.remove(i).unwrap();
-        }
-        loop {
-            let message = self
-                .lines
-                .recv_timeout(PATIENCE)
-                .unwrap_or_else(|e| panic!("la session n'a rien envoyé ({e}) : {what}"));
-            if wanted(&message) {
-                return message;
-            }
-            self.unread.push_back(message);
-        }
-    }
-
-    /// Allume ou éteint le canal d'IA externe (`session.external`).
-    fn switch(&mut self, enabled: bool) {
-        let reply = self.request(
-            "session.external",
-            json!({"enabled": enabled, "ask": false}),
-        );
-        assert_eq!(reply["result"]["enabled"], enabled, "{reply}");
-    }
-
-    /// Le prochain ordre `order.execute` dicté à l'extension.
-    fn wait_order(&mut self) -> Value {
-        self.wait_for("order.execute", |m| m["method"] == "order.execute")
-    }
-
-    fn answer(&mut self, order: &Value, outcome: Value) {
-        let mut reply = json!({"jsonrpc": "2.0", "id": order["id"]});
-        let key = if outcome.get("code").is_some() && outcome.get("data").is_some() {
-            "error"
-        } else {
-            "result"
-        };
-        reply[key] = outcome;
-        self.send(&reply);
-    }
-
-    fn journal(&self) -> Vec<Value> {
-        std::fs::read_to_string(self.dir.join("p.cassini/journal.jsonl"))
-            .unwrap_or_default()
-            .lines()
-            .map(|l| serde_json::from_str(l).unwrap())
-            .collect()
-    }
-
-    fn close(mut self) {
-        drop(self.stdin.take());
-        assert!(self.child.wait().unwrap().success());
-        let _ = std::fs::remove_dir_all(&self.dir);
-    }
 }
 
 fn described() -> Value {
@@ -448,7 +294,7 @@ fn tool_report(reply: &Value) -> Value {
 
 #[test]
 fn the_relay_serves_the_catalogue_of_the_session_and_runs_a_qgis_command() {
-    let mut session = QgisSession::start(false);
+    let mut session = QgisSession::start(false, &models_dir(), &ANNOUNCED);
     let mut client = McpClient::connect_tagged(&[], &models_dir(), &session.tag);
     // Canal éteint : autonome.
     let reply = client.request("tools/list", json!({}));
@@ -522,9 +368,83 @@ fn the_relay_serves_the_catalogue_of_the_session_and_runs_a_qgis_command() {
     session.close();
 }
 
+/// Done when de l'epic 5, point 4 : un appel relayé par `cassini mcp` est journalisé `external`
+/// et se rejoue à l'identique ; pendant l'appel, ni `serve` ni `mcp` ne tient de socket réseau
+/// (le canal local qui les relie n'en est pas une).
+#[test]
+fn a_relayed_call_is_journaled_external_replays_and_holds_no_network_socket() {
+    let mut session = QgisSession::start(true, &models_dir(), &ANNOUNCED);
+    let mut client = McpClient::connect_tagged(&[], &models_dir(), &session.tag);
+    let call = client.start_tool("layer_describe", json!({"layer_id": "l1"}));
+    let order = session.wait_order();
+    assert_eq!(order["params"]["command"], "layer.describe");
+    // L'appel est en vol : le canal local est ouvert entre les deux processus.
+    reseau::assert_offline("cassini serve", session.pid());
+    reseau::assert_offline("cassini mcp", client.pid());
+    session.answer(&order, described());
+    let reply = client.wait(call);
+    assert_eq!(reply["result"]["isError"], false, "{reply}");
+    let journal = session.journal();
+    let last = journal.last().expect("l'étape est journalisée");
+    assert_eq!(last["id"], "layer.describe");
+    assert_eq!(last["origin"], "external");
+    let before = std::fs::read(session.journal_path()).unwrap();
+
+    // L'extension rejoue le journal : l'ordre revient, le résultat est le même.
+    let replay = session.start_request("journal.replay", json!({}));
+    let order = session.wait_order();
+    assert_eq!(order["params"]["command"], "layer.describe");
+    assert_eq!(order["params"]["params"], json!({"layer_id": "l1"}));
+    session.answer(&order, described());
+    let done = session.wait_reply("journal.replay", replay);
+    assert_eq!(
+        done["result"],
+        json!({"steps": journal.len(), "identical": true}),
+        "{done}"
+    );
+    assert_eq!(std::fs::read(session.journal_path()).unwrap(), before);
+    client.assert_no_server_request();
+    assert_eq!(client.close().0.code(), Some(0));
+    session.close();
+}
+
+/// La garde réseau n'est pas aveugle : une socket UDP et une socket TCP sur la boucle locale,
+/// tenues par ce processus de test, sont vues à leur port local (aucun paquet n'est envoyé).
+#[cfg(any(target_os = "linux", windows))]
+#[test]
+fn the_network_guard_sees_a_socket_held_by_the_process() {
+    let udp = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    let tcp = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let found = reseau::inet_sockets(std::process::id());
+    for (kind, port) in [
+        ("UDP", udp.local_addr().unwrap().port()),
+        ("TCP", tcp.local_addr().unwrap().port()),
+    ] {
+        // Colonne de l'adresse locale seule : `netstat` écrit « TCP 127.0.0.1:port … » (port en
+        // décimal), `reseau.rs` sous Linux « tcp local 0100007F:PORT … » (hexadécimal, 4 chiffres).
+        let (named, column) = if cfg!(windows) {
+            (format!(":{port}"), 1)
+        } else {
+            (format!(":{port:04X}"), 2)
+        };
+        let seen = found.iter().any(|line| {
+            let cols: Vec<&str> = line.split_whitespace().collect();
+            cols[0].to_ascii_uppercase().starts_with(kind)
+                && cols
+                    .get(column)
+                    .is_some_and(|local| local.ends_with(&named))
+        });
+        assert!(
+            seen,
+            "la garde réseau n'a pas vu la socket {kind} du port {port} tenue par le test : {found:?}"
+        );
+    }
+    drop((udp, tcp));
+}
+
 #[test]
 fn a_busy_session_refuses_the_relay_at_once() {
-    let mut session = QgisSession::start(true);
+    let mut session = QgisSession::start(true, &models_dir(), &ANNOUNCED);
     let mut client = McpClient::connect_tagged(&[], &models_dir(), &session.tag);
     // L'extension tient l'exécutant : un ordre en vol.
     let run = session.start_request(
@@ -543,7 +463,7 @@ fn a_busy_session_refuses_the_relay_at_once() {
 
 #[test]
 fn a_cancelled_mcp_call_becomes_a_request_cancel_and_a_cancelled_step() {
-    let mut session = QgisSession::start(true);
+    let mut session = QgisSession::start(true, &models_dir(), &ANNOUNCED);
     let mut client = McpClient::connect_tagged(&[], &models_dir(), &session.tag);
     let call = client.start_tool("analysis_buffer", buffer_params());
     let order = session.wait_order();
@@ -579,7 +499,7 @@ fn a_cancelled_mcp_call_becomes_a_request_cancel_and_a_cancelled_step() {
 
 #[test]
 fn switching_the_channel_off_during_a_call_ends_it_and_falls_back_to_autonomous() {
-    let mut session = QgisSession::start(true);
+    let mut session = QgisSession::start(true, &models_dir(), &ANNOUNCED);
     let mut client = McpClient::connect_tagged(&[], &models_dir(), &session.tag);
     let call = client.start_tool("layer_describe", json!({"layer_id": "l1"}));
     let order = session.wait_order();

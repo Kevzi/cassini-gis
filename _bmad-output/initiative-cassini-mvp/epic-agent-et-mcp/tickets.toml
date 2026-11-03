@@ -351,6 +351,28 @@ hitl = false
 risk = "medium"
 
 [[entry]]
+id = 35
+type = "story"
+title = "Deux rejeux de suite dans la meme session QGIS"
+description = "Rejouer deux fois un journal sans rouvrir le projet echoue : le second rejeu rend replay.diverged a l'etape 1, alors que le journal est bon. Le noyau vide le dossier replay/ sans verifier que la suppression a reussi ; QGIS tient encore ouverts les fichiers du premier rejeu, Windows refuse de les supprimer, et GDAL refuse d'ecrire par-dessus. Apres ce ticket, un second rejeu dans la meme session rend identical: true ; un fichier de replay/ qui ne peut vraiment pas etre remplace donne une erreur qui le nomme, jamais une fausse divergence, et un fichier perime n'est jamais pris pour la sortie d'une etape."
+verify = "Tests du noyau sans QGIS : avec un fichier de replay/ impossible a supprimer, le rejeu ne reutilise jamais ce fichier perime et rend soit un rejeu reussi, soit une erreur qui nomme le fichier. Recette QGIS : deux rejeux de suite du journal de demo dans la meme session, sans rouvrir le projet, rendent deux fois identical: true."
+covers = ["CAP-4", "CAP-8"]
+after = []
+hitl = false
+risk = "high"
+references = [
+  "../deferred-work.md — entree « Deux rejeux de suite dans la meme session QGIS, sans rouvrir le projet » (recette 5.9)",
+  "../deferred-work.md — entree « Replay::run ignore l'echec de remove_dir_all(replay/) » (epic 9)",
+  "story-suite-de-bout-en-bout-phrase-plan-valide-execution-rejeu-san-plan.md — recette QGIS du rejeu",
+  "story-rejeu-d-un-inventaire-demande-apres-la-creation-de-couches-plan.md — chemins replay/ remplaces au rejeu",
+]
+notes = [
+  "Decision: 2026-11-03 — demande du proprietaire apres la recette de 5.9 : defaut anterieur a 5.9, ticket place apres 9 sans en dependre ; 9 est fusionne et clos sans l'attendre.",
+  "Decision: 2026-11-03 — controle exterieur (risque high) : Claude refait lui-meme la recette QGIS des deux rejeux de suite, avec la sonde de 5.9 hors depot (donnees-test-cassini/mesure-5-9/probe_replay_5_9.py), noyau et extension installes.",
+  "Open question: le remede — un dossier neuf par rejeu, le dechargement par l'extension des couches du rejeu precedent, ou la suppression de chaque fichier attendu avant son etape avec refus si elle echoue ; il doit rester compatible avec le remplacement des chemins replay/ de 5.31.",
+]
+
+[[entry]]
 id = 33
 type = "story"
 title = "Couches retirees par le budget d'inventaire signalees"
