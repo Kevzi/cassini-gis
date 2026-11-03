@@ -174,15 +174,30 @@ Recette manuelle de `analysis.isochrone` [ticket 11] (réseau apporté par l'uti
 
 Recette manuelle de `layout.export_pdf` [ticket 12] (jeu `../donnees-test-cassini/`) :
 
-1. Ouvrez `projet-test-villeneuve.qgz`. Choisissez `layout.export_pdf` : le seul champ est
-   `title` (le fichier `out` est nommé par le noyau, le panneau ne l'affiche pas).
+1. Ouvrez `projet-test-villeneuve.qgz`. Choisissez `layout.export_pdf` : les champs sont
+   `title` et, facultatif, `scale` (le fichier `out` est nommé par le noyau, le panneau ne
+   l'affiche pas).
 2. Lancez avec un titre : un PDF A4 paysage apparaît dans le dossier de travail ; ouvert
    dans un lecteur, il montre le titre, la carte des couches visibles, la légende, la barre
    d'échelle, la flèche du nord et la ligne « Sources » (noms de fichiers, jamais de chemin).
 3. Décochez toutes les couches puis relancez : `layout.empty`, aucun fichier. Un titre blanc
    donne `layout.bad_params`. Le projet ne gagne aucune mise en page.
-4. Sonde sous le vrai QGIS : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat"
-   qgis-plugin/tests/probe_layout_export.py` doit finir par `RÉSULTAT : OK`.
+4. Échelle [ticket 5.38] : déplacez la carte de QGIS sur un quartier, puis lancez avec
+   `scale` 25000. Le PDF est centré sur ce que montre la carte de QGIS, la barre d'échelle
+   correspond au 1:25 000 et le journal dit « exportée en PDF au 1:25 000 ». `scale` 99 ou
+   100000001 donne `registry.invalid_params`, sans fichier. Sans `scale`, le cadrage reste
+   l'emprise des couches visibles. Imprimé à 100 %, 1 cm sur la carte vaut 250 m.
+   Le journal garde le centre employé (`center`, dans le système du projet) : déplacez la
+   carte de QGIS ailleurs puis rejouez, le PDF rejoué montre le même endroit et le rejeu
+   reste `identical: true`. Le champ `center` n'est rempli que par le noyau, au rejeu : le
+   formulaire ne le montre pas. Le projet doit avoir un système à code EPSG, sinon
+   `layout.bad_params`.
+5. Cadre vide : déplacez la carte de QGIS loin de toute donnée, puis lancez avec `scale`
+   25000 : `layout.empty` (« déplacez la vue de QGIS sur les données »), aucun fichier.
+6. Sonde sous le vrai QGIS : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat"
+   qgis-plugin/tests/probe_layout_export.py` doit finir par `RÉSULTAT : OK` (elle exporte
+   aussi au 1:25 000 et relit l'échelle, repasse le centre en EPSG:4326 pour éprouver la
+   reprojection réelle, et vérifie qu'un cadre vide est refusé).
 
 Recette manuelle de la saisie en langage naturel et du plan [ticket 6] (QGIS 3.44, jeu
 `../donnees-test-cassini/`, un modèle GGUF dans le dossier des modèles : sans choix

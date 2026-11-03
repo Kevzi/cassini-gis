@@ -377,6 +377,27 @@ mod tests {
     }
 
     #[test]
+    fn the_exports_at_a_scale_of_the_default_set_pass_the_guard() {
+        // 5.38 : au jeu par défaut, la famille est là, ses plans passent `check_plan` et le
+        // garde-fou les laisse.
+        let registry = Registry::standard();
+        let (examples, _) = generate(DEFAULT_SEED, DEFAULT_COUNT);
+        let scaled: Vec<_> = examples
+            .iter()
+            .filter(|e| e.family == "export_pdf_scale")
+            .collect();
+        assert!(!scaled.is_empty());
+        for e in scaled {
+            let plan: cassini_core::plan::Plan =
+                serde_json::from_value(e.expected.clone()).unwrap();
+            assert_eq!(registry.check_plan(&plan), Ok(()), "{}", e.request);
+            let guarded =
+                cassini_core::point::guard_coordinates(&registry, plan.clone(), &e.request);
+            assert_eq!(guarded, plan, "{}", e.request);
+        }
+    }
+
+    #[test]
     fn the_decided_families_and_vocabulary_are_present() {
         let (examples, summary) = generate(DEFAULT_SEED, DEFAULT_COUNT);
         assert_eq!(examples.len(), DEFAULT_COUNT);

@@ -113,6 +113,11 @@ pub static FAMILIES: &[Family] = &[
         make: export_pdf,
     },
     Family {
+        name: "export_pdf_scale",
+        weight: 3,
+        make: export_pdf_scale,
+    },
+    Family {
         name: "isochrone",
         weight: 4,
         make: isochrone,
@@ -209,6 +214,11 @@ fn intersect(id: &str, overlay: &str) -> Value {
 
 fn pdf(title: &str) -> Value {
     json!({"command": "layout.export_pdf", "params": {"title": title}})
+}
+
+/// Export à une échelle demandée : `scale` est le dénominateur (25000 pour 1:25 000).
+fn pdf_at(title: &str, scale: u64) -> Value {
+    json!({"command": "layout.export_pdf", "params": {"title": title, "scale": scale}})
 }
 
 fn step(k: usize) -> String {
@@ -1486,6 +1496,102 @@ fn pdf_clause(rng: &mut Rng, d: &Draft) -> (String, String) {
         " et mets-moi ça dans un PDF",
     ]);
     (clause.to_string(), d.title())
+}
+
+/// Dénominateurs d'échelle courants (ticket 5.38).
+const SCALES: [u64; 12] = [
+    1000, 2000, 2500, 5000, 10000, 15000, 20000, 25000, 50000, 100000, 200000, 250000,
+];
+
+/// L'échelle telle qu'on l'écrit : « au 1:25 000 », « au 1/25000 », « au 25 000e »,
+/// « à l'échelle 1/25 000 », « au 1:25000 », « au 1 : 25 000 », « au 25 000ème »,
+/// « au 1:25k » (multiple de 1 000 seulement).
+fn scale_text(rng: &mut Rng, scale: u64) -> String {
+    let forms = if scale.is_multiple_of(1000) { 8 } else { 7 };
+    match rng.below(forms) {
+        0 => format!("au 1:{}", thousands(scale)),
+        1 => format!("au 1/{scale}"),
+        2 => format!("au {}e", thousands(scale)),
+        3 => format!("à l'échelle 1/{}", thousands(scale)),
+        4 => format!("au 1:{scale}"),
+        5 => format!("au 1 : {}", thousands(scale)),
+        6 => format!("au {}ème", thousands(scale)),
+        _ => format!("au 1:{}k", scale / 1000),
+    }
+}
+
+/// Export PDF à une échelle écrite dans la demande : la carte seule, ou au bout d'une
+/// recherche. Le plan porte `scale`, l'entier écrit.
+fn export_pdf_scale(rng: &mut Rng) -> Option<Example> {
+    let scale = *rng.pick(&SCALES);
+    let at = scale_text(rng, scale);
+    if rng.chance(2, 3) {
+        // La carte seule.
+        let mut b = Builder::new();
+        b.distract(rng, 2, vector);
+        let titled = rng.chance(1, 2);
+        let title = if titled {
+            (*rng.pick(USER_TITLES)).to_string()
+        } else {
+            "Carte du projet".to_string()
+        };
+        let head = match rng.below(5) {
+            0 => format!("Exporte la carte en PDF {at}"),
+            1 => format!("Sors la carte {at} en PDF"),
+            2 => format!("Fais-moi un PDF de la carte {at}"),
+            3 => format!("Produis la carte {at} au format PDF"),
+            _ => format!("Génère un PDF de la carte {at}"),
+        };
+        let body = if titled {
+            match rng.below(2) {
+                0 => format!("{head} avec le titre « {title} »"),
+                _ => format!("{head}, intitulé « {title} »"),
+            }
+        } else {
+            head
+        };
+        let request = finish(rng, &body, false, false);
+        return Some(example(
+            "export_pdf_scale",
+            b,
+            rng,
+            request,
+            calls(vec![pdf_at(&title, scale)]),
+        ));
+    }
+    let mut d = match rng.below(3) {
+        0 => draft_filter_eq(rng)?,
+        1 => draft_distance(rng)?,
+        _ => draft_zone(rng)?,
+    };
+    if d.calls.len() >= MAX_DRAFT_STEPS {
+        return None;
+    }
+    let (mut body, _) = open_find(rng, d.noun, &d.np, false);
+    let (clause, title) = if rng.chance(1, 3) {
+        let title = (*rng.pick(USER_TITLES)).to_string();
+        (
+            format!(", puis sors un PDF {at} intitulé « {title} »"),
+            title,
+        )
+    } else {
+        let clause = match rng.below(3) {
+            0 => format!(" et sors-moi la carte en PDF {at}"),
+            1 => format!(", puis exporte la carte {at} en PDF"),
+            _ => format!(" et fais-en une carte en PDF {at}"),
+        };
+        (clause, d.title())
+    };
+    body.push_str(&clause);
+    d.calls.push(pdf_at(&title, scale));
+    let request = finish(rng, &body, false, false);
+    Some(example(
+        "export_pdf_scale",
+        d.b,
+        rng,
+        request,
+        calls(d.calls),
+    ))
 }
 
 fn export_pdf(rng: &mut Rng) -> Option<Example> {
@@ -3242,6 +3348,70 @@ mod tests {
                 assert!(!name.contains(word), "{name}");
             }
         }
+    }
+
+    #[test]
+    fn an_export_at_a_scale_carries_the_written_number_and_passes_the_guard() {
+        // 5.38 : `scale` est l'entier écrit dans la demande, quelle que soit sa forme ; ce
+        // n'est pas un `Point`, le garde-fou laisse le plan.
+        let registry = cassini_core::registry::Registry::standard();
+        let examples = valid(export_pdf_scale, 400);
+        for e in &examples {
+            assert_eq!(e.family, "export_pdf_scale");
+            let calls = e.expected["calls"].as_array().unwrap();
+            let last = calls.last().unwrap();
+            assert_eq!(last["command"], "layout.export_pdf", "{}", e.request);
+            let scale = last["params"]["scale"].as_u64().expect("scale entier");
+            assert!(SCALES.contains(&scale), "{scale}");
+            let written = [
+                format!("1:{}", thousands(scale)),
+                format!("1/{scale}"),
+                format!("{}e", thousands(scale)),
+                format!("1/{}", thousands(scale)),
+                format!("1:{scale}"),
+                format!("1 : {}", thousands(scale)),
+                format!("{}ème", thousands(scale)),
+                format!("1:{}k", scale / 1000),
+            ];
+            assert!(
+                written.iter().any(|w| e.request.contains(w.as_str())),
+                "{scale} {}",
+                e.request
+            );
+            if e.request.contains(&format!("1:{}k", scale / 1000)) {
+                assert!(scale.is_multiple_of(1000), "{}", e.request);
+            }
+            let plan: cassini_core::plan::Plan =
+                serde_json::from_value(e.expected.clone()).unwrap();
+            let guarded =
+                cassini_core::point::guard_coordinates(&registry, plan.clone(), &e.request);
+            assert_eq!(guarded, plan, "{}", e.request);
+        }
+        assert!(examples.iter().any(|e| {
+            let scale = e.expected["calls"].as_array().unwrap().last().unwrap()["params"]["scale"]
+                .as_u64()
+                .unwrap();
+            e.request.contains(&format!("1:{}k", scale / 1000))
+        }));
+        for form in [
+            "au 1:",
+            "au 1/",
+            "000e",
+            "à l'échelle 1/",
+            "au 1 : ",
+            "000ème",
+        ] {
+            assert!(examples.iter().any(|e| e.request.contains(form)), "{form}");
+        }
+        // « au 1:25000 » : le nombre collé, sans espace de milliers.
+        assert!(examples.iter().any(|e| {
+            let scale = e.expected["calls"].as_array().unwrap().last().unwrap()["params"]["scale"]
+                .as_u64()
+                .unwrap();
+            scale >= 10000 && e.request.contains(&format!("au 1:{scale}"))
+        }));
+        assert!(examples.iter().any(|e| commands(e).len() > 1));
+        assert!(examples.iter().any(|e| commands(e).len() == 1));
     }
 
     #[test]

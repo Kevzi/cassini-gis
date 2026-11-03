@@ -1104,6 +1104,24 @@ mod tests {
     }
 
     #[test]
+    fn an_export_at_a_scale_is_left_unchanged() {
+        // `scale` est un nombre du plan, pas un `Point` : le garde-fou n'a rien à demander.
+        let plan = calls(json!([{"command": "layout.export_pdf", "params": {
+            "title": "Carte", "scale": 25000}}]));
+        for request in [
+            "Exporte la carte au 1:25 000",
+            "Exporte la carte au 1/25000",
+            "Exporte la carte",
+        ] {
+            assert_eq!(
+                guard_coordinates(&Registry::standard(), plan.clone(), request),
+                plan,
+                "{request}"
+            );
+        }
+    }
+
+    #[test]
     fn a_coordinate_outside_the_schema_is_still_guarded() {
         // Commande inconnue : rien n'est deviné.
         let unknown = calls(json!([{"command": "no.such", "params": {}}]));

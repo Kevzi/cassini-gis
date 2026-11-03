@@ -56,6 +56,13 @@ pub struct CommandSpec {
     /// noyau, jamais par l'appelant. Métadonnée interne : jamais sérialisée.
     #[serde(skip)]
     pub leave_out_param: Option<String>,
+    /// Paramètre que le rejeu remplit depuis le résultat journalisé : (paramètre, champ du
+    /// résultat). Ôté à l'appel ; le champ est journalisé sous la clé `replay` de la ligne, qui
+    /// survit au résumé du résultat, et recopié au rejeu quand il y est (ticket 5.38 : le
+    /// centre d'un export à l'échelle). Rempli par le noyau, jamais par l'appelant.
+    /// Métadonnée interne : jamais sérialisée.
+    #[serde(skip)]
+    pub replay_param: Option<(String, String)>,
     /// Schéma JSON des paramètres, engendré depuis le type Rust.
     pub params_schema: Value,
     /// Schéma JSON du résultat, engendré depuis le type Rust.
@@ -82,6 +89,7 @@ impl CommandSpec {
             output_params: Vec::new(),
             output_ext: ".out".to_string(),
             leave_out_param: None,
+            replay_param: None,
             params_schema: schema_value::<P>(),
             output_schema: schema_value::<O>(),
             examples: Vec::new(),
@@ -127,6 +135,12 @@ impl CommandSpec {
     /// Déclare le paramètre que le rejeu remplit des ids de couche à laisser hors du résultat.
     pub fn leave_out_param(mut self, name: &str) -> Self {
         self.leave_out_param = Some(name.to_string());
+        self
+    }
+
+    /// Déclare le paramètre que le rejeu recopie depuis le champ `field` du résultat journalisé.
+    pub fn replay_param(mut self, name: &str, field: &str) -> Self {
+        self.replay_param = Some((name.to_string(), field.to_string()));
         self
     }
 

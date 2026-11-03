@@ -14,7 +14,7 @@ use cassini_core::commands::model_list::PromptKind;
 use cassini_core::plan::Plan;
 use cassini_core::point::{guard_coordinates, guard_rejected};
 use cassini_core::registry::{CommandSpec, Registry};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 use crate::{generate_files, AiError, Completion, ModelFiles, Role, Turn};
 
@@ -235,6 +235,7 @@ fn catalog_entry(spec: &CommandSpec) -> Value {
         .output_params
         .iter()
         .chain(spec.leave_out_param.as_ref())
+        .chain(spec.replay_param.as_ref().map(|(name, _)| name))
         .collect();
     if let Value::Object(map) = &mut params {
         map.remove("$schema");
@@ -246,6 +247,25 @@ fn catalog_entry(spec: &CommandSpec) -> Value {
         }
         if let Some(Value::Array(required)) = map.get_mut("required") {
             required.retain(|r| r.as_str().is_none_or(|n| !hidden.iter().any(|o| *o == n)));
+        }
+        // Une définition que seul un paramètre caché employait (le `Point` du centre d'un
+        // export) n'a rien à faire dans le long prompt.
+        if let Some(Value::Object(defs)) = map.remove("$defs") {
+            let rest = Value::Object(map.clone()).to_string();
+            let kept: Map<String, Value> = defs
+                .iter()
+                .filter(|(key, _)| {
+                    let target = format!("\"#/$defs/{key}\"");
+                    rest.contains(&target)
+                        || defs
+                            .iter()
+                            .any(|(other, def)| other != *key && def.to_string().contains(&target))
+                })
+                .map(|(key, def)| (key.clone(), def.clone()))
+                .collect();
+            if !kept.is_empty() {
+                map.insert("$defs".into(), Value::Object(kept));
+            }
         }
     }
     strip_marks(&mut params);
@@ -486,7 +506,13 @@ fn judge(registry: &Registry, completion: &Completion) -> Result<Plan, Vec<Strin
                     continue; // `check_plan` le signale
                 };
                 if let Value::Object(params) = &call.params {
-                    for name in spec.output_params.iter().chain(&spec.leave_out_param) {
+                    let replay = spec.replay_param.as_ref().map(|(name, _)| name);
+                    for name in spec
+                        .output_params
+                        .iter()
+                        .chain(&spec.leave_out_param)
+                        .chain(replay)
+                    {
                         if params.contains_key(name) {
                             errors.push(format!(
                                 "étape {} : le paramètre « {name} » est décidé par le noyau, ne l'écris pas",
@@ -898,6 +924,22 @@ mod tests {
     }
 
     #[test]
+    fn a_center_chosen_by_the_model_is_rejected() {
+        let bad = r#"{"kind":"calls","calls":[{"command":"layout.export_pdf","params":{"title":"Carte","scale":25000,"center":{"x":650000,"y":6850000,"epsg":2154}}}]}"#;
+        let errors = judge(&registry(), &done(bad)).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("« center »") && e.contains("décidé par le noyau")),
+            "{errors:?}"
+        );
+        // Le centre est un `Point` que la demande n'écrit pas : le garde-fou pose sa question
+        // au lieu d'une redemande (AD-23), et le plan n'est jamais rendu.
+        let (result, _) = compose(vec![done(bad), done(GOOD)]);
+        assert!(matches!(result, Ok(Plan::Question { .. })), "{result:?}");
+    }
+
+    #[test]
     fn too_many_steps_are_invalid() {
         let step = r#"{"command":"project.inventory","params":{}}"#;
         let many = format!(
@@ -948,6 +990,11 @@ mod tests {
         // Le paramètre que seul le rejeu remplit reste caché au modèle (ticket 5.36).
         let export = catalog_entry(reg.spec("layout.export_pdf").unwrap());
         assert!(export["params"]["properties"].get("leave_out").is_none());
+        // Le centre d'un export à l'échelle, rempli au rejeu seulement, aussi (ticket 5.38).
+        assert!(export["params"]["properties"].get("center").is_none());
+        assert!(export["params"]["properties"].get("scale").is_some());
+        assert!(!export.to_string().contains("\"center\""), "{export}");
+        assert!(export["params"].get("$defs").is_none(), "{export}");
         assert!(export["params"]["properties"].get("title").is_some());
         // La marque du `Point` reste au noyau : le modèle ne la voit pas.
         assert!(!text.contains("x-cassini"));

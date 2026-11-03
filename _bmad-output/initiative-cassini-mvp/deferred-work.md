@@ -602,3 +602,10 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-second-rejeu-dans-la-meme-session-qgis-l-export-pdf-voit-les-plan.md`
   summary: Un export journalisé après un rejeu, dans la même session QGIS, dessine et compte les couches posées par ce rejeu ; un rejeu suivant les laisse hors de la carte (mémoire du noyau) et diverge à l'export.
   evidence: Relecture 5.36 (edge-case et blind hunter). Les exports hors rejeu ne reçoivent jamais `leave_out` ; le cas divergeait déjà avant 5.36, donc hors de l'intention de ce ticket.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-l-export-pdf-prend-une-echelle-demandee-plan.md`
+  summary: Le refus du cadre vide d'un export à l'échelle juge les emprises des couches, pas leurs entités : un cadre dans un trou d'une couche éparse sort un PDF vide.
+  evidence: `layout_export.py` `_touches` compare `carte.extent()` aux emprises ; une requête d'entités sur le cadre (limite 1) trancherait (relecture 5.38, constat 21).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-l-export-pdf-prend-une-echelle-demandee-plan.md`
+  summary: `LayoutBackend.canvas_center` (centre de la vue QGIS réelle, reprojeté) n'est exécuté par aucun test ni sonde.
+  evidence: la sonde tourne sans `iface` ; seule l'étape 4 de la recette du README le couvre ; une sonde avec fenêtre QGIS le vérifierait (relecture 5.38, constat 22).

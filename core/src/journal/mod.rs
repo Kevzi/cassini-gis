@@ -273,8 +273,13 @@ impl<'a> Session<'a> {
         };
         // Le paramètre que seul le rejeu remplit n'est jamais celui de l'appelant (ticket 5.36).
         let mut params = params;
-        if let (Some(name), Value::Object(map)) = (&spec.leave_out_param, &mut params) {
-            map.remove(name);
+        if let Value::Object(map) = &mut params {
+            if let Some(name) = &spec.leave_out_param {
+                map.remove(name);
+            }
+            if let Some((name, _)) = &spec.replay_param {
+                map.remove(name);
+            }
         }
         let Resolved {
             logged,
@@ -306,6 +311,13 @@ impl<'a> Session<'a> {
                     "result".into(),
                     summarize(&relativize(value, &self.work_dir)),
                 );
+                // Ce que le rejeu repassera est gardé à part, sous la clé réservée `replay` :
+                // un résultat résumé (plus de 200 octets) n'en garderait que taille et empreinte.
+                if let Some((name, field)) = &spec.replay_param {
+                    if let Some(kept) = value.get(field) {
+                        line.insert("replay".into(), json!({ name.as_str(): kept }));
+                    }
+                }
             }
             Err(RegistryError::Cancelled(_)) => {
                 line.insert("cancelled".into(), json!(true));
@@ -814,8 +826,19 @@ impl<'a> Replay<'a> {
             let mut params = line.get("params").cloned().unwrap_or_else(|| json!({}));
             substitute(&mut params, &bound);
             // Après la substitution : les ids du journal ne doivent pas devenir ceux de ce rejeu.
-            if let (Some(name), Value::Object(map)) = (&spec.leave_out_param, &mut params) {
-                map.insert(name.clone(), leave_out.clone());
+            if let Value::Object(map) = &mut params {
+                if let Some(name) = &spec.leave_out_param {
+                    map.insert(name.clone(), leave_out.clone());
+                }
+                // Ce que l'exécution d'origine a décidé (le centre d'un export à l'échelle) est
+                // repassé tel que journalisé : le rejeu reproduit, il ne redécide pas (AD-11).
+                // Lu sous la clé réservée `replay` de la ligne, qui survit au résumé du résultat.
+                if let Some((name, _)) = &spec.replay_param {
+                    map.remove(name);
+                    if let Some(kept) = line.get("replay").and_then(|r| r.get(name)) {
+                        map.insert(name.clone(), kept.clone());
+                    }
+                }
             }
             let resolved = resolver
                 .resolve_call(id, spec, step, params, &self.ids[..i])
