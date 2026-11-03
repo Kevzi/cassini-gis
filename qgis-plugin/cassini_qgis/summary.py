@@ -237,8 +237,21 @@ def _layer_describe(lang, p, r, names):
     return text
 
 
+def scale_number(lang, n):
+    """`25 000` en français, `25,000` en anglais."""
+    grouped = "{:,}".format(n)
+    return grouped.replace(",", " ") if texts.normalize(lang) == "fr" else grouped
+
+
 def _export_pdf(lang, p, r, names):
     text = texts.tr(lang, "sum_export_pdf", title=_text(p.get("title")))
+    # L'échelle tenue, rendue par le geste seulement si elle a été demandée (ticket 5.38) ;
+    # sans échelle lisible au résultat (absent ou incomplet), celle des paramètres.
+    scale = r.get("scale") if r else None
+    if not (_is_int(scale) and scale > 0):
+        scale = p.get("scale")
+    if _is_int(scale) and scale > 0:
+        text += texts.tr(lang, "sum_pdf_scale", scale=scale_number(lang, scale))
     if not r:
         return text
     try:

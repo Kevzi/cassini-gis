@@ -148,6 +148,13 @@ class FormTest(unittest.TestCase):
         self.assertFalse(fields["count"].required)
         self.assertEqual(fields["mode"].choices, ["a", "b"])
 
+    def test_core_filled_params_are_not_shown(self):
+        # `out`, `leave_out` et `center` sont remplis par le noyau : jamais saisis à la main.
+        schema = {"type": "object", "properties": {
+            "title": {"type": "string"}, "out": {"type": "string"},
+            "leave_out": {"type": "array"}, "center": {"type": "object"}}}
+        self.assertEqual([f.name for f in form.build_fields(schema)], ["title"])
+
     def test_no_properties_means_no_field(self):
         self.assertEqual(form.build_fields({"type": "object"}), [])
         self.assertEqual(form.build_fields(None), [])

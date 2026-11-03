@@ -120,6 +120,13 @@ et dont le message nomme la commande.
   substitue dans les paramètres des étapes suivantes, et ne le compare pas. C'est un
   écart assumé à AD-11, qui voulait des repères `out:k.n` : `layer.add` n'a pas de
   sortie fichier.
+- Ce que l'exécution d'origine a décidé et que le rejeu doit reprendre tel quel est gardé
+  sous la clé réservée `replay` de la ligne, à part du résultat, qui peut être résumé
+  (taille et empreinte au-delà de 200 octets). Seul cas : le centre d'un
+  `layout.export_pdf` à l'échelle, `"replay": {"center": {"x": …, "y": …, "epsg": …}}`.
+  Le rejeu le repasse en paramètre `center`, et l'export cadre au même endroit même si la
+  vue de QGIS a bougé. Ce paramètre n'est rempli que par le noyau : celui d'un appelant est
+  ôté. Une ligne sans la clé (export sans échelle, journal ancien) rejoue sans centre.
 - Les octets d'une sortie produite par QGIS (GeoPackage, PDF) portent dates et
   identifiants et ne sont pas comparés : le fichier doit exister et n'être pas vide, et
   le résultat typé doit être le même. Les sorties du noyau restent comparées octet par

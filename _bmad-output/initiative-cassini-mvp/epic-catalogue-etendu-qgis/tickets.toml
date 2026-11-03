@@ -143,12 +143,13 @@ references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qg
 id = 20
 type = "story"
 title = "Couches raster : ouverture et inventaire d'un MNT"
-description = "Elargit layer.add et project.inventory aux rasters (GeoTIFF), designes par leur identifiant de couche QGIS (AD-9), et verse un petit MNT synthetique dans /fixtures, que lit ensuite raster.zonal_statistics (entree 12)."
+description = "Elargit layer.add aux rasters (GeoTIFF), designes par leur identifiant de couche QGIS (AD-9), en reutilisant les MNT synthetiques de /fixtures (entree 4.1) et l'inventaire des rasters de l'entree 4.3 ; raster.zonal_statistics (entree 12) les lit ensuite."
 verify = "Test de l'extension : un GeoTIFF synthetique s'ouvre par layer.add, apparait dans project.inventory avec son systeme et ses dimensions, l'original intact ; l'agent compose son ouverture dans un plan valide."
 covers = ["CAP-14"]
-after = [11]
+after = [11, "4.3"]
 hitl = false
 risk = "medium"
+notes = ["Decision: 2026-11-03 — a l'inception de l'epic terrain : reutilise les MNT de recette (4.1) et l'inventaire des rasters (4.3) ; les commandes terrain.* prennent le MNT par chemin relatif au projet, raster.zonal_statistics par id de couche, les deux formes qu'admet AD-9."]
 references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-9", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-19"]
 
 [[entry]]

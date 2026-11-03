@@ -17,13 +17,33 @@ class FakeLayer:
 
 
 class FakeBackend:
-    def __init__(self, layers=(), fail=False, partial=False):
+    def __init__(self, layers=(), fail=False, partial=False, center=None, held=None, frame=None, crs="EPSG:2154"):
         self.layers = list(layers)
         self.fail, self.partial = fail, partial
+        self.center = center  # centre de la carte de QGIS ; None : pas de carte
+        self.held = held  # échelle relue sur la carte ; None : celle demandée
+        self.frame = frame  # emprise de la carte de mise en page ; None : voir `export_pdf`
+        self.crs = crs
         self.exported = None
+        self.scale = "jamais passée"
+        self.center_asked = []
+        self.reprojected = []
+
+    def canvas_center(self, authid):
+        self.center_asked.append(authid)
+        return self.center
+
+    def reproject_point(self, x, y, from_authid, to_authid):
+        """Doublure : décale de (+10, +5) d'un système à l'autre ; None hors domaine."""
+        self.reprojected.append((x, y, from_authid, to_authid))
+        if from_authid == to_authid:
+            return (x, y)
+        if from_authid == "EPSG:9999":
+            return None
+        return (x + 10.0, y + 5.0)
 
     def project_crs(self):
-        return "EPSG:2154"
+        return self.crs
 
     def visible_layers(self):
         return list(self.layers)
@@ -37,8 +57,10 @@ class FakeBackend:
     def extent_of(self, layer, to_authid=None):
         return layer.box
 
-    def export_pdf(self, layers, title, sources_text, out, authid, box):
+    def export_pdf(self, layers, title, sources_text, out, authid, box, **kwargs):
         self.exported = (layers, title, sources_text, out, authid, box)
+        self.kwargs = kwargs
+        scale = kwargs.get("scale")
         if self.partial:
             with open(out, "wb") as f:
                 f.write(b"%PD")  # fichier à demi écrit
@@ -46,7 +68,13 @@ class FakeBackend:
             raise RuntimeError("disque plein")
         with open(out, "wb") as f:
             f.write(b"%PDF-1.7")
-        return list(layout_export.EXPECTED_ITEMS)
+        held = self.held if self.held is not None else (scale if scale is not None else 31234.5)
+        frame = self.frame
+        if frame is None:
+            # Cadre à l'échelle : 2 km de côté autour du centre reçu ; sinon le rectangle reçu.
+            cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+            frame = (cx - 1000.0, cy - 1000.0, cx + 1000.0, cy + 1000.0) if scale is not None else box
+        return {"items": list(layout_export.EXPECTED_ITEMS), "scale": held, "extent": frame}
 
 
 def run(backend, params):
@@ -181,6 +209,182 @@ class LayoutExportTest(unittest.TestCase):
             params = {"title": "Carte", "out": self.out, "leave_out": bad}
             (_, error), _ = run(FakeBackend(TWO), params)
             self.assertEqual(error.code, "layout.bad_params")
+
+    def test_scale_is_held_centered_on_the_qgis_map(self):
+        backend = FakeBackend(TWO, center=(100.0, 200.0))
+        (result, error), gesture = run(backend, {"title": "Carte", "out": self.out, "scale": 25000})
+        self.assertIsNone(error)
+        self.assertEqual(result["scale"], 25000)
+        self.assertEqual(result["center"], {"x": 100.0, "y": 200.0, "epsg": 2154})
+        self.assertEqual(backend.kwargs, {"scale": 25000})
+        self.assertEqual(backend.center_asked, ["EPSG:2154"])
+        box = backend.exported[5]
+        self.assertEqual(((box[0] + box[2]) / 2, (box[1] + box[3]) / 2), (100.0, 200.0))
+        self.assertLess(box[0], box[2])
+        self.assertTrue(os.path.isfile(self.out))
+        self.assertEqual(gesture.items_placed, list(layout_export.EXPECTED_ITEMS))
+
+    def test_without_qgis_map_the_center_is_the_layers_one(self):
+        backend = FakeBackend(TWO)  # sans interface : pas de carte
+        (result, error), _ = run(backend, {"title": "Carte", "out": self.out, "scale": 25000})
+        self.assertIsNone(error)
+        self.assertEqual(result["scale"], 25000)
+        box = backend.exported[5]
+        # Emprise réunie (0, -10, 30, 20) : centre (15, 5).
+        self.assertEqual(((box[0] + box[2]) / 2, (box[1] + box[3]) / 2), (15.0, 5.0))
+        self.assertEqual(result["center"], {"x": 15.0, "y": 5.0, "epsg": 2154})
+
+    def test_without_scale_the_backend_gets_the_same_arguments_as_before(self):
+        for extra in ({}, {"scale": None}):
+            backend = FakeBackend(TWO, center=(100.0, 200.0))
+            (result, error), _ = run(backend, dict({"title": "Carte", "out": self.out}, **extra))
+            self.assertIsNone(error)
+            self.assertNotIn("scale", result)
+            self.assertNotIn("center", result)
+            self.assertEqual(backend.kwargs, {})
+            self.assertEqual(backend.center_asked, [])
+            # Cadrage d'avant : emprise réunie (0, -10, 30, 20) avec sa marge de 5 % (1,5).
+            self.assertEqual(backend.exported[5], (-1.5, -11.5, 31.5, 21.5))
+
+    def test_bad_scale_is_refused_before_qgis(self):
+        for bad in (0, -5, 99, 100000001, 2.5, "25000", True, [25000]):
+            backend = FakeBackend(TWO)
+            (result, error), _ = run(backend, {"title": "Carte", "out": self.out, "scale": bad})
+            self.assertIsNone(result)
+            self.assertEqual(error.code, "layout.bad_params", bad)
+            self.assertIsNone(backend.exported)
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_bounds_are_accepted(self):
+        for scale in (100, 100000000):
+            (result, error), _ = run(FakeBackend(TWO), {"title": "Carte", "out": self.out, "scale": scale})
+            self.assertIsNone(error)
+            self.assertEqual(result["scale"], scale)
+
+    def test_scale_not_held_leaves_no_file(self):
+        for held in (25001.0, 24000):
+            backend = FakeBackend(TWO, held=held)
+            (result, error), _ = run(backend, {"title": "Carte", "out": self.out, "scale": 25000})
+            self.assertIsNone(result)
+            self.assertEqual(error.code, "layout.export_failed")
+            self.assertFalse(os.path.exists(self.out))
+
+    def test_scale_read_back_is_rounded(self):
+        backend = FakeBackend(TWO, held=24999.9999)
+        (result, error), _ = run(backend, {"title": "Carte", "out": self.out, "scale": 25000})
+        self.assertIsNone(error)
+        self.assertEqual(result["scale"], 25000)
+
+    def test_a_given_center_wins_over_the_qgis_map(self):
+        # Au rejeu, le noyau repasse le centre journalisé : la vue de QGIS a bougé, peu importe.
+        backend = FakeBackend(TWO, center=(100.0, 200.0))
+        logged = {"x": 15.0, "y": 5.0, "epsg": 2154}
+        params = {"title": "Carte", "out": self.out, "scale": 25000, "center": logged}
+        (result, error), _ = run(backend, params)
+        self.assertIsNone(error)
+        self.assertEqual(backend.center_asked, [])
+        box = backend.exported[5]
+        self.assertEqual(((box[0] + box[2]) / 2, (box[1] + box[3]) / 2), (15.0, 5.0))
+        # Rendu inchangé : le rejeu compare un résultat identique.
+        self.assertEqual(result["center"], logged)
+        self.assertEqual(result["scale"], 25000)
+
+    def test_the_center_is_rounded_to_six_decimals(self):
+        # Un flottant à 17 chiffres pourrait être relu par le noyau à un ULP près : le centre
+        # est arrondi avant de cadrer et d'être rendu.
+        near = [FakeLayer("c", "/d/c.gpkg", (650000.0, 6850000.0, 655000.0, 6855000.0))]
+        backend = FakeBackend(near, center=(652341.1234567891, 6851234.9876543219))
+        (result, error), _ = run(backend, {"title": "Carte", "out": self.out, "scale": 25000})
+        self.assertIsNone(error)
+        self.assertEqual(result["center"], {"x": 652341.123457, "y": 6851234.987654, "epsg": 2154})
+        box = backend.exported[5]
+        self.assertAlmostEqual((box[0] + box[2]) / 2, 652341.123457, places=6)
+        # Au rejeu, le centre arrondi reçu est rendu tel quel.
+        backend = FakeBackend(near, center=(100.0, 200.0))
+        params = {"title": "Carte", "out": self.out, "scale": 25000, "center": result["center"]}
+        (again, error), _ = run(backend, params)
+        self.assertIsNone(error)
+        self.assertEqual(again["center"], result["center"])
+
+    def test_a_center_in_another_system_is_reprojected(self):
+        backend = FakeBackend(TWO)
+        params = {"title": "Carte", "out": self.out, "scale": 25000, "center": {"x": 2.4, "y": 48.7, "epsg": 4326}}
+        (result, error), _ = run(backend, params)
+        self.assertIsNone(error)
+        self.assertEqual(backend.reprojected, [(2.4, 48.7, "EPSG:4326", "EPSG:2154")])
+        self.assertEqual(result["center"], {"x": 12.4, "y": 53.7, "epsg": 2154})
+
+    def test_a_center_that_cannot_be_reprojected_is_refused(self):
+        params = {"title": "Carte", "out": self.out, "scale": 25000, "center": {"x": 1.0, "y": 2.0, "epsg": 9999}}
+        backend = FakeBackend(TWO)
+        (result, error), _ = run(backend, params)
+        self.assertIsNone(result)
+        self.assertEqual(error.code, "layout.bad_params")
+        self.assertIsNone(backend.exported)
+
+    def test_a_bad_center_is_refused_before_qgis(self):
+        for bad in (
+            {"x": 1.0, "y": 2.0},
+            {"x": 1.0, "y": 2.0, "epsg": 2154, "z": 0.0},
+            {"x": "1", "y": 2.0, "epsg": 2154},
+            {"x": True, "y": 2.0, "epsg": 2154},
+            {"x": float("nan"), "y": 2.0, "epsg": 2154},
+            {"x": 1.0, "y": 2.0, "epsg": 0},
+            {"x": 1.0, "y": 2.0, "epsg": "2154"},
+            [1.0, 2.0],
+            "ici",
+        ):
+            backend = FakeBackend(TWO)
+            params = {"title": "Carte", "out": self.out, "scale": 25000, "center": bad}
+            (result, error), _ = run(backend, params)
+            self.assertEqual(error.code, "layout.bad_params", bad)
+            self.assertIsNone(backend.exported)
+
+    def test_without_scale_a_center_changes_nothing(self):
+        backend = FakeBackend(TWO)
+        params = {"title": "Carte", "out": self.out, "center": {"x": 1.0, "y": 2.0, "epsg": 2154}}
+        (result, error), _ = run(backend, params)
+        self.assertIsNone(error)
+        self.assertNotIn("center", result)
+        self.assertEqual(backend.exported[5], (-1.5, -11.5, 31.5, 21.5))
+
+    def test_a_project_without_epsg_code_refuses_a_scale(self):
+        for crs in ("", "USER:100000", "IGNF:LAMB93"):
+            backend = FakeBackend(TWO, crs=crs)
+            (result, error), _ = run(backend, {"title": "Carte", "out": self.out, "scale": 25000})
+            self.assertEqual(error.code, "layout.bad_params", crs)
+            self.assertIsNone(backend.exported)
+        # Sans échelle, l'export d'avant reste permis.
+        (result, error), _ = run(FakeBackend(TWO, crs="USER:100000"), {"title": "Carte", "out": self.out})
+        self.assertIsNone(error)
+
+    def test_an_empty_frame_is_refused_without_file(self):
+        # La vue de QGIS montre une zone sans donnée : aucune couche ne touche le cadre.
+        backend = FakeBackend(TWO, center=(5000.0, 5000.0), frame=(4000.0, 4000.0, 6000.0, 6000.0))
+        (result, error), gesture = run(backend, {"title": "Carte", "out": self.out, "scale": 25000})
+        self.assertIsNone(result)
+        self.assertEqual(error.code, "layout.empty")
+        self.assertIn("déplacez la vue", error.message)
+        self.assertFalse(os.path.exists(self.out))
+        self.assertEqual(gesture.items_placed, [])
+
+    def test_a_frame_touching_one_layer_exports(self):
+        # Le cadre touche le bord de « b » (5, -10, 30, 8) : la carte n'est pas vide.
+        backend = FakeBackend(TWO, center=(35.0, 0.0), frame=(30.0, -5.0, 40.0, 5.0))
+        (result, error), _ = run(backend, {"title": "Carte", "out": self.out, "scale": 25000})
+        self.assertIsNone(error)
+        self.assertTrue(os.path.isfile(self.out))
+
+    def test_without_scale_the_frame_is_not_checked(self):
+        backend = FakeBackend(TWO, frame=(4000.0, 4000.0, 6000.0, 6000.0))
+        (result, error), _ = run(backend, {"title": "Carte", "out": self.out})
+        self.assertIsNone(error)
+
+    def test_scale_not_held_does_not_announce_items(self):
+        backend = FakeBackend(TWO, held=24000)
+        (_, error), gesture = run(backend, {"title": "Carte", "out": self.out, "scale": 25000})
+        self.assertEqual(error.code, "layout.export_failed")
+        self.assertEqual(gesture.items_placed, [])
 
     def test_expected_items_are_the_five_plus_title(self):
         self.assertEqual(

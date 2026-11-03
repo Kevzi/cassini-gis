@@ -76,6 +76,7 @@ title = "Catalogue etendu par les algorithmes de traitement de QGIS"
 covers = ["CAP-6", "CAP-14"]
 after = [
   { epic = 5, needs = "le cache de la partie fixe du prompt (5.12) et la chaine d'entrainement reproductible du modele (5.10)" },
+  { epic = 4, needs = "les MNT de recette (4.1) et l'inventaire des rasters (4.3), pour l'entree 20" },
   { epic = 6, needs = "le MVP complet et la demo, qui figent le registre et l'agent sur lesquels le catalogue s'etend" },
   { epic = 7, needs = "la chaine de publication de l'extension et du paquet, par laquelle le catalogue etendu est livre" },
 ]

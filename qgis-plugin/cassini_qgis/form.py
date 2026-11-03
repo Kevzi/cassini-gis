@@ -15,8 +15,9 @@ BOOLEAN = "boolean"
 ENUM = "enum"
 JSON = "json"
 
-# Paramètres remplis par le noyau (AD-10) : le formulaire ne les montre pas.
-CORE_FILLED = ("out",)
+# Paramètres remplis par le noyau (AD-10 ; au rejeu seulement : `leave_out`, ticket 5.36, et
+# `center`, ticket 5.38) : le formulaire ne les montre pas.
+CORE_FILLED = ("out", "leave_out", "center")
 
 
 class Field:

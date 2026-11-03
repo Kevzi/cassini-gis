@@ -1099,6 +1099,8 @@ struct ProjectQgis {
     count: std::cell::Cell<u32>,
     /// `leave_out` reçu par chaque export, dans l'ordre.
     seen: std::rc::Rc<std::cell::RefCell<Vec<Value>>>,
+    /// `center` reçu par chaque export, dans l'ordre (`Null` s'il n'y en a pas).
+    centers: std::rc::Rc<std::cell::RefCell<Vec<Value>>>,
 }
 
 impl ProjectQgis {
@@ -1108,6 +1110,7 @@ impl ProjectQgis {
             generation,
             count: std::cell::Cell::new(0),
             seen: Default::default(),
+            centers: Default::default(),
         }
     }
 }
@@ -1145,10 +1148,25 @@ impl Executor for ProjectQgis {
                 let sources: BTreeSet<&str> = drawn.iter().map(|(_, s)| s.as_str()).collect();
                 let out = p["out"].as_str().unwrap().to_string();
                 fs::write(&out, format!("pdf-{}", self.generation)).unwrap();
-                Ok(json!({
+                let mut result = json!({
                     "file": out, "page_count": 1, "layer_count": drawn.len(),
                     "sources": sources, "truncated": false
-                }))
+                });
+                let center = p.get("center").cloned().unwrap_or(Value::Null);
+                self.centers.borrow_mut().push(center.clone());
+                // Comme le geste : l'échelle et le centre ne sont rendus que si l'échelle a été
+                // demandée (`null` vaut absente). Le centre est celui reçu, sinon celui de la
+                // « vue » de QGIS, propre à chaque génération : elle a bougé d'une à l'autre.
+                if let Some(scale) = p.get("scale").filter(|v| !v.is_null()) {
+                    result["scale"] = scale.clone();
+                    result["center"] = if center.is_null() {
+                        json!({"x": 650000.0 + f64::from(self.generation) * 1000.0,
+                               "y": 6850000.0, "epsg": 2154})
+                    } else {
+                        center
+                    };
+                }
+                Ok(result)
             }
             other => panic!("commande inattendue : {other}"),
         }
@@ -1219,6 +1237,157 @@ fn two_replays_in_a_row_leave_earlier_layers_out_of_the_map() {
         fs::read_to_string(dir.join("p.cassini/journal.jsonl")).unwrap(),
         journal
     );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_export_without_scale_and_one_with_scale_replay_identically() {
+    let (dir, project_file, _) = temp_project();
+    let project = OpenProject::with_base();
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, &project_file)
+        .unwrap()
+        .with_qgis(ProjectQgis::new(&project, 1));
+    // Journal ancien : un export sans échelle ; puis un export à 1:25 000.
+    s.call("layout.export_pdf", json!({"title": "Carte"}))
+        .unwrap();
+    s.call(
+        "layout.export_pdf",
+        json!({"title": "Carte", "scale": 25000}),
+    )
+    .unwrap();
+    let l = lines(&s);
+    assert!(l[0]["params"].get("scale").is_none());
+    assert!(l[0]["result"].get("scale").is_none());
+    assert_eq!(l[1]["params"]["scale"], json!(25000));
+    assert_eq!(l[1]["result"]["scale"], json!(25000));
+    drop(s);
+    let (outcome, _) = replay_in(&project_file, &project, 2, &mut HashSet::new());
+    assert_eq!(
+        outcome.unwrap(),
+        ReplayReport {
+            steps: 2,
+            identical: true,
+        }
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_replay_after_the_view_moved_gets_the_logged_center() {
+    let (dir, project_file, _) = temp_project();
+    let project = OpenProject::with_base();
+    let registry = Registry::standard();
+    let qgis = ProjectQgis::new(&project, 1);
+    let centers = qgis.centers.clone();
+    let mut s = Session::open(&registry, &project_file)
+        .unwrap()
+        .with_qgis(qgis);
+    // `scale: null` vaut absente : ni échelle ni centre au résultat.
+    s.call(
+        "layout.export_pdf",
+        json!({"title": "Carte", "scale": null}),
+    )
+    .unwrap();
+    s.call(
+        "layout.export_pdf",
+        json!({"title": "Carte", "scale": 25000}),
+    )
+    .unwrap();
+    let l = lines(&s);
+    assert!(l[0]["result"].get("scale").is_none());
+    assert!(l[0]["result"].get("center").is_none());
+    let logged = json!({"x": 651000.0, "y": 6850000.0, "epsg": 2154});
+    assert_eq!(l[1]["result"]["center"], logged);
+    // Le centre est aussi gardé sous la clé réservée `replay` ; sans échelle, pas de clé.
+    assert_eq!(l[1]["replay"], json!({"center": logged}));
+    assert!(l[0].get("replay").is_none());
+    // Hors rejeu, le geste ne reçoit aucun centre, et le journal n'en garde pas en paramètre.
+    assert_eq!(*centers.borrow(), vec![Value::Null, Value::Null]);
+    assert!(l[1]["params"].get("center").is_none());
+    drop(s);
+    // Au rejeu, la « vue » de QGIS est ailleurs (génération 2) : le geste reçoit le centre du
+    // journal, cadre au même endroit, et le résultat est identique.
+    let qgis = ProjectQgis::new(&project, 2);
+    let replay_centers = qgis.centers.clone();
+    let outcome = Replay::load(&registry, &project_file)
+        .unwrap()
+        .run(&Router::new(&registry).with_qgis(qgis), &mut HashSet::new());
+    assert_eq!(
+        outcome.unwrap(),
+        ReplayReport {
+            steps: 2,
+            identical: true,
+        }
+    );
+    assert_eq!(*replay_centers.borrow(), vec![Value::Null, logged]);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn the_logged_center_survives_a_summarized_result() {
+    // Un vrai export cite plusieurs sources : son résultat dépasse 200 octets et le journal
+    // n'en garde que taille et empreinte. Le centre doit survivre, sous la clé `replay`.
+    let (dir, project_file, _) = temp_project();
+    let project = OpenProject::with_base();
+    for i in 0..10 {
+        project.layers.borrow_mut().push((
+            format!("couche_{i}"),
+            format!("donnees/source_numero_{i}.gpkg"),
+        ));
+    }
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, &project_file)
+        .unwrap()
+        .with_qgis(ProjectQgis::new(&project, 1));
+    s.call(
+        "layout.export_pdf",
+        json!({"title": "Carte", "scale": 25000}),
+    )
+    .unwrap();
+    let l = lines(&s);
+    let logged = json!({"x": 651000.0, "y": 6850000.0, "epsg": 2154});
+    // Résultat résumé : le centre n'y est plus, il est sous `replay`.
+    assert!(l[0]["result"].get("center").is_none(), "{}", l[0]["result"]);
+    assert_eq!(l[0]["replay"], json!({"center": logged}));
+    drop(s);
+    // Rejeu, « vue » ailleurs : le geste reçoit le centre du journal, résultat identique.
+    let qgis = ProjectQgis::new(&project, 2);
+    let replay_centers = qgis.centers.clone();
+    let outcome = Replay::load(&registry, &project_file)
+        .unwrap()
+        .run(&Router::new(&registry).with_qgis(qgis), &mut HashSet::new());
+    assert_eq!(
+        outcome.unwrap(),
+        ReplayReport {
+            steps: 1,
+            identical: true,
+        }
+    );
+    assert_eq!(*replay_centers.borrow(), vec![logged]);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_center_from_the_caller_is_dropped_outside_replay() {
+    let (dir, project_file, _) = temp_project();
+    let project = OpenProject::with_base();
+    let registry = Registry::standard();
+    let qgis = ProjectQgis::new(&project, 1);
+    let centers = qgis.centers.clone();
+    let mut s = Session::open(&registry, &project_file)
+        .unwrap()
+        .with_qgis(qgis);
+    s.call(
+        "layout.export_pdf",
+        json!({"title": "Carte", "scale": 25000,
+               "center": {"x": 1.0, "y": 2.0, "epsg": 4326}}),
+    )
+    .unwrap();
+    assert_eq!(*centers.borrow(), vec![Value::Null]);
+    let l = lines(&s);
+    assert!(l[0]["params"].get("center").is_none());
+    assert_eq!(l[0]["result"]["center"]["epsg"], json!(2154));
     let _ = fs::remove_dir_all(dir);
 }
 

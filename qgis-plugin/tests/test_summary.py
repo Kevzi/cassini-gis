@@ -140,6 +140,36 @@ class OtherCommandsTest(unittest.TestCase):
         text = say("layout.export_pdf", {"title": "T"}, windows, lang="en")
         self.assertEqual(text, 'Map "T" exported to PDF: file 2-layout.export_pdf.pdf, 2 pages.')
 
+    def test_export_pdf_names_the_scale_held(self):
+        out = {"file": "/home/c/3-layout.export_pdf.pdf", "page_count": 1, "scale": 25000}
+        self.assertEqual(
+            say("layout.export_pdf", {"title": "Gares", "scale": 25000}, out),
+            "Carte « Gares » exportée en PDF au 1:25 000 : fichier 3-layout.export_pdf.pdf, 1 page.",
+        )
+        self.assertEqual(
+            say("layout.export_pdf", {"title": "Gares", "scale": 1250000}, dict(out, scale=1250000), lang="en"),
+            'Map "Gares" exported to PDF at 1:1,250,000: file 3-layout.export_pdf.pdf, 1 page.',
+        )
+        # Sans échelle dans le résultat, rien n'est annoncé ; une valeur illisible non plus.
+        for result in (dict(out, scale=None), dict(out, scale="25000"), dict(out, scale=True)):
+            self.assertNotIn("1:", say("layout.export_pdf", {"title": "Gares"}, result))
+        self.assertEqual(
+            say("layout.export_pdf", {"title": "Gares", "scale": 500}, {"file": "a.pdf", "scale": 500}),
+            "Carte « Gares » exportée en PDF au 1:500 : fichier a.pdf.",
+        )
+        # Résultat absent : l'échelle des paramètres est dite quand même.
+        self.assertEqual(
+            say("layout.export_pdf", {"title": "Gares", "scale": 25000}, None),
+            "Carte « Gares » exportée en PDF au 1:25 000.",
+        )
+        self.assertNotIn("1:", say("layout.export_pdf", {"title": "Gares", "scale": None}, None))
+        # Résultat sans échelle lisible : celle des paramètres est dite.
+        for result in ({"file": "a.pdf"}, {"file": "a.pdf", "scale": None}):
+            self.assertEqual(
+                say("layout.export_pdf", {"title": "Gares", "scale": 25000}, result),
+                "Carte « Gares » exportée en PDF au 1:25 000 : fichier a.pdf.",
+            )
+
     def test_inventory_models_and_about(self):
         self.assertEqual(
             say("project.inventory", {}, {"layers": [{}, {}]}), "Inventaire du projet : 2 couches."
