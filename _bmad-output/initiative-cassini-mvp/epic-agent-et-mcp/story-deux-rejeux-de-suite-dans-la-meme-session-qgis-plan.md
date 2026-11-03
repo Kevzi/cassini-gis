@@ -3,7 +3,7 @@ title: 'Deux rejeux de suite dans la même session QGIS'
 type: 'bugfix'
 ticket: '35'
 created: '2026-11-03'
-status: 'built'
+status: done
 baseline_revision: '172f820df304388e587da3b72a1925a7d702c567'
 route: 'full'
 route_source: 'auto'
