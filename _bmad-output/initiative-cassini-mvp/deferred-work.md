@@ -129,6 +129,8 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-facade-qgis/story-suite-de-bout-en-bout-ouvrir-analyser-exporter-rejouer-plan.md`
   summary: `Replay::run` ignore l'échec de `remove_dir_all(replay/)` ; un fichier périmé non vide passerait la règle « sortie QGIS existe et non vide ».
   evidence: medium non vérifié ; il faudrait un échec de suppression sous Windows (fichier tenu par QGIS) et une étape QGIS qui n'écrit rien ; remède probable : supprimer le fichier attendu avant chaque étape et refuser si la suppression échoue.
+  status: ticket, 2026-11-03, entrée 5.35 (`epic-agent-et-mcp/tickets.toml`)
+  resolution: Confirmé par la recette QGIS de 5.9 (deux rejeux de suite) ; devenu le ticket 5.35 « Deux rejeux de suite dans la même session QGIS ».
 
 - source_plan: `epic-facade-qgis/epic-facade-qgis-retrospective.md`
   summary: Le rejeu est aveugle à la forme d'une sortie QGIS : seuls `feature_count` et « le GeoPackage existe et n'est pas vide » sont contrôlés.
@@ -582,3 +584,5 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-suite-de-bout-en-bout-phrase-plan-valide-execution-rejeu-san-plan.md`
   summary: Deux rejeux de suite dans la même session QGIS, sans rouvrir le projet : le second rend `replay.diverged` à l'étape 1, alors que le journal est bon.
   evidence: recette QGIS de 5.9 (2026-11-03, noyau installé de 5.32, sonde hors dépôt `donnees-test-cassini/mesure-5-9/probe_replay_5_9.py`) — GDAL « A file system object called '…\replay\1-analysis.select_by_attribute.gpkg' already exists » ; `core/src/journal/mod.rs:636` vide `replay/` par `let _ = fs::remove_dir_all(...)`, erreur ignorée, et QGIS tient encore ouverts les fichiers du premier rejeu. Avec le projet rouvert entre les deux rejeux : deux fois `identical: true`. Défaut antérieur à 5.9 ; ticket à créer (risque high, rejeu).
+  status: ticket, 2026-11-03, entrée 5.35 (`epic-agent-et-mcp/tickets.toml`)
+  resolution: Devenu le ticket 5.35 « Deux rejeux de suite dans la même session QGIS » ; après 5.9, sans en dépendre.
