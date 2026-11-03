@@ -141,8 +141,12 @@ pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<V
     let work_dir = state.session.as_ref().map(|s| s.work_dir().to_path_buf());
     // La table des identifiants courts montrés au modèle, pour retraduire son plan (ticket 5.19).
     let mut short_ids = ShortIds::default();
+    // Les couches de résultat que le budget a laissées hors de la vue du modèle (ticket 5.33) ;
+    // le dernier inventaire lu fait foi, comme pour la table.
+    let mut left_out: Vec<Value> = Vec::new();
     let mut plan = {
         let short_ids = &mut short_ids;
+        let left_out = &mut left_out;
         let link = state.link.clone();
         let announced = &state.announced;
         let intermediates = &state.intermediates;
@@ -171,6 +175,7 @@ pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<V
                 INVENTORY_LOW_CHARS,
             );
             *short_ids = ids;
+            left_out.clone_from(&view.left_out);
             Ok(view)
         };
         composer
@@ -189,7 +194,9 @@ pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<V
     // Sa provenance est toujours explicite : `model`, ou `guard` (AD-23, coordonnées).
     if let Plan::Question { question, source } = &plan {
         let question = short_ids.restore_text(question);
-        return Ok(json!({"question": question, "source": source.as_str()}));
+        let mut answer = json!({"question": question, "source": source.as_str()});
+        with_left_out(&mut answer, left_out);
+        return Ok(answer);
     }
     // Les identifiants courts du plan redeviennent ceux de QGIS, avant toute vérification : le
     // plan vérifié, gardé, montré et journalisé ne porte que les vrais identifiants.
@@ -206,7 +213,17 @@ pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<V
         id: id.clone(),
         plan,
     });
-    Ok(json!({"plan_id": id, "plan": shown}))
+    let mut answer = json!({"plan_id": id, "plan": shown});
+    with_left_out(&mut answer, left_out);
+    Ok(answer)
+}
+
+/// Ajoute à la réponse de `plan.propose` la clé `left_out` (ticket 5.33), seulement si le budget a
+/// retiré au moins une couche : sous le budget, la réponse reste celle d'avant.
+fn with_left_out(answer: &mut Value, left_out: Vec<Value>) {
+    if !left_out.is_empty() {
+        answer["left_out"] = Value::Array(left_out);
+    }
 }
 
 /// Les fichiers du dossier de travail et de ses dossiers de rejeu (`replay/`, où un rejeu écrit

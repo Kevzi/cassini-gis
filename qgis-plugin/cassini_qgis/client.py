@@ -37,8 +37,10 @@ RUN_FAILED = "run_failed"  # payload : {"command", "code", "message"}
 REPLAY_DONE = "replay_done"  # payload : {"steps", "identical"}
 REPLAY_FAILED = "replay_failed"  # payload : {"code", "message", "step"}
 # Plans de l'agent (docs/canal-local.md, « Plans de l'agent »).
-PLAN_PROPOSED = "plan_proposed"  # payload : {"plan_id", "plan"}
-PLAN_QUESTION = "plan_question"  # payload : {"question", "source"}
+# `left_out` (ticket 5.33), seulement quand le noyau en rend : les couches de résultat que le
+# budget d'inventaire a laissées hors de la vue du modèle, [{"layer_id", "name"}].
+PLAN_PROPOSED = "plan_proposed"  # payload : {"plan_id", "plan", "left_out"?}
+PLAN_QUESTION = "plan_question"  # payload : {"question", "source", "left_out"?}
 # Provenance d'une question : le modèle, ou le garde-fou du noyau sur les coordonnées.
 SOURCE_MODEL = "model"
 SOURCE_GUARD = "guard"
@@ -88,6 +90,26 @@ GESTURE_FAILED = "qgis.gesture_failed"
 BUSY = "qgis.busy"
 CORE_DIED = "client.core_died"
 CANCELLED = "registry.cancelled"
+
+
+def left_out_of(answer):
+    """Les couches `left_out` d'une réponse de `plan.propose` (ticket 5.33), filtrées.
+
+    Seuls les éléments objets au `name` texte non vide comptent ; une clé absente ou qui n'est
+    pas une liste n'en donne aucune. Jamais d'exception.
+    """
+    items = answer.get("left_out") if isinstance(answer, dict) else None
+    if not isinstance(items, list):
+        return []
+    kept = []
+    for item in items:
+        name = item.get("name") if isinstance(item, dict) else None
+        if isinstance(name, str) and name.strip():
+            layer_id = item.get("layer_id")
+            kept.append(
+                {"layer_id": layer_id if isinstance(layer_id, str) else None, "name": name}
+            )
+    return kept
 
 
 class _NoGestures:
@@ -573,6 +595,7 @@ class CoreClient:
             return
         result = result if isinstance(result, dict) else {}
         if kind == "propose":
+            left_out = left_out_of(result)
             question = result.get("question")
             plan_id = result.get("plan_id")
             plan = result.get("plan")
@@ -580,9 +603,15 @@ class CoreClient:
                 # Provenance : `model`, ou `guard` (garde-fou du noyau sur les coordonnées).
                 source = result.get("source")
                 source = source if source in (SOURCE_MODEL, SOURCE_GUARD) else SOURCE_MODEL
-                self._notify(PLAN_QUESTION, {"question": question, "source": source})
+                payload = {"question": question, "source": source}
+                if left_out:
+                    payload["left_out"] = left_out
+                self._notify(PLAN_QUESTION, payload)
             elif isinstance(plan_id, str) and isinstance(plan, dict):
-                self._notify(PLAN_PROPOSED, {"plan_id": plan_id, "plan": plan})
+                payload = {"plan_id": plan_id, "plan": plan}
+                if left_out:
+                    payload["left_out"] = left_out
+                self._notify(PLAN_PROPOSED, payload)
             else:
                 self._notify(
                     PLAN_FAILED,

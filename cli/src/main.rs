@@ -1324,6 +1324,7 @@ mod tests {
                     Ok(cassini_core::agent_inventory::ModelInventory {
                         inventory: json!({}),
                         user_layers: 0,
+                        left_out: Vec::new(),
                     })
                 })
                 .unwrap_err();

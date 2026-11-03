@@ -226,6 +226,25 @@ attendait : son `plan_id` ne s'exécute plus. La réponse de l'utilisateur est u
 envoyée par un nouveau `plan.propose`. Un refus (aucune commande ne fait la chose)
 reste l'erreur `agent.refused`.
 
+**Couches hors de la vue du modèle** (ticket 5.33). Quand l'inventaire dépasse le budget
+d'inventaire, le noyau laisse hors de la vue du modèle des couches de résultat (elles restent
+dans le projet QGIS) : d'ordinaire les plus anciennes, parfois la plus récente quand elle ne
+tient pas seule à côté des couches de l'utilisateur. Le plan comme la question portent alors une clé
+`left_out` : ces couches, de la plus ancienne à la plus récente, avec leur vrai identifiant QGIS
+et leur nom.
+
+```json
+{"jsonrpc":"2.0","id":5,"result":{"plan_id":"plan-2","plan":{"kind":"calls","calls":[…]},
+  "left_out":[{"layer_id":"Intersection_6c1f…","name":"Intersection"},
+              {"layer_id":"Tampon_0a9b…","name":"Tampon"}]}}
+```
+
+Sous le budget, la clé est **absente** : la réponse est celle d'avant, et une extension qui
+l'ignore continue de marcher. Les couches intermédiaires d'un plan exécuté, que le noyau cache
+volontairement (ticket 5.22), n'y figurent pas. Rien de cela n'est dit au modèle ni écrit au
+journal, et l'erreur `agent.refused` ne la porte pas. L'extension affiche, sous la réplique, le
+nombre de ces couches et leurs noms.
+
 La composition bloque le noyau jusqu'à sa fin et **n'est pas annulable** :
 `request.cancel` sur l'`id` de `plan.propose` répond `request.unknown`. Pendant
 l'ordre d'inventaire, les autres requêtes reçoivent `session.busy`.

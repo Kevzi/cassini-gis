@@ -146,6 +146,38 @@ class PlanClientTest(unittest.TestCase):
             self.assertEqual(self.events, [(client.PLAN_QUESTION,
                                             {"question": "Quel point ?", "source": expected})])
 
+    # -- couches hors de la vue du modèle (ticket 5.33) -------------------
+    def test_left_out_is_passed_with_a_plan_and_a_question(self):
+        left_out = [{"layer_id": "Intersection_%d" % k, "name": "Intersection"} for k in (1, 2)]
+        ident = self.propose()
+        self.p.feed(reply(ident, {"plan_id": "plan-1", "plan": PLAN, "left_out": left_out}))
+        self.assertEqual(self.events, [(client.PLAN_PROPOSED,
+                                        {"plan_id": "plan-1", "plan": PLAN, "left_out": left_out})])
+        self.events.clear()
+        ident = self.propose()
+        self.p.feed(reply(ident, {"question": "Laquelle ?", "source": "model",
+                                  "left_out": left_out}))
+        self.assertEqual(self.events, [(client.PLAN_QUESTION,
+                                        {"question": "Laquelle ?", "source": "model",
+                                         "left_out": left_out})])
+
+    def test_malformed_left_out_is_filtered_or_dropped(self):
+        for given, expected in (
+            ("Intersection", None),
+            ({"name": "x"}, None),
+            ([], None),
+            ([None, "x", {"name": ""}, {"layer_id": "a"}], None),
+            ([{"name": "Tampon"}, 3, {"layer_id": "b", "name": "Zone"}],
+             [{"layer_id": None, "name": "Tampon"}, {"layer_id": "b", "name": "Zone"}]),
+        ):
+            self.events.clear()
+            ident = self.propose()
+            self.p.feed(reply(ident, {"plan_id": "plan-1", "plan": PLAN, "left_out": given}))
+            self.assertEqual(len(self.events), 1, given)
+            kind, payload = self.events[0]
+            self.assertEqual(kind, client.PLAN_PROPOSED, given)
+            self.assertEqual(payload.get("left_out"), expected, given)
+
     def test_propose_failure_keeps_code_and_french_message(self):
         for code in ("agent.refused", "ai.no_model", "agent.plan_invalid"):
             self.events.clear()
