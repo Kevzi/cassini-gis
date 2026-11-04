@@ -19,7 +19,7 @@ pub enum DistanceUnit {
 }
 
 /// Distance mesurée, avec son unité (jamais de mesure nue).
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Distance {
     /// Valeur strictement positive.
@@ -28,6 +28,16 @@ pub struct Distance {
     pub value: f64,
     /// Unité de la valeur.
     pub unit: DistanceUnit,
+}
+
+impl Distance {
+    /// La distance en mètres.
+    pub fn metres(&self) -> f64 {
+        match self.unit {
+            DistanceUnit::M => self.value,
+            DistanceUnit::Km => self.value * 1000.0,
+        }
+    }
 }
 
 /// Refuse une valeur nulle, négative ou non finie, avant tout ordre à QGIS.

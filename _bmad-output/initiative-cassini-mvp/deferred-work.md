@@ -626,3 +626,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-raster-et-terrain/story-les-sorties-raster-du-noyau-s-ouvrent-dans-le-projet-qgis-plan.md`
   summary: Le générateur d'exemples doit montrer des sources raster relatives (`dem/mnt.tif`, `../donnees/mnt.tif`) dans l'inventaire et leur recopie dans `dem`, pour le ré-entraînement groupé.
   evidence: Depuis 4.3 l'inventaire donne aux rasters un chemin relatif au projet, mais le modèle ajusté n'a vu que des noms de fichier seuls (fixtures de `core/src/agent_inventory.rs`) ; 4.3 interdit d'apprendre quoi que ce soit au modèle.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-raster-et-terrain/story-terrain-viewshed-champ-de-vision-depuis-un-point-plan.md`
+  summary: Tester terrain.viewshed sur un MNT à cellules rectangulaires (borne et fenêtre prises sur la plus petite cellule, axes x et y séparés).
+  evidence: Tous les MNT des tests ont des cellules carrées ; remplacer `min(cell_size_x, cell_size_y)` par `cell_size_x` ne casserait aucun test (relecture thorough de 4.5, constat 12). À couvrir avec la comparaison de 4.7.

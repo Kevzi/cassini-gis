@@ -3346,6 +3346,10 @@ mod tests {
             if id == "terrain.line_of_sight" && !NO_LINE_OF_SIGHT.is_empty() {
                 continue;
             }
+            // Même cas pour `terrain.viewshed` (4.5) et son refus `NO_VIEWSHED`.
+            if id == "terrain.viewshed" && !NO_VIEWSHED.is_empty() {
+                continue;
+            }
             assert!(!id.starts_with("terrain."), "{id}");
             for word in ["zoom", "frame", "extent", "pan", "center", "centre", "cadr"] {
                 assert!(!id.contains(word), "{id}");
