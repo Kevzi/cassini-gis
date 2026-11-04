@@ -42,6 +42,17 @@ inchangés (empreinte). Enfin, un résultat du journal est altéré et le rejeu 
 en nommant l'étape. Il n'y a pas de
 bouton de rejeu dans le panneau : il viendra avec l'agent (epic 5).
 
+Sonde des sorties raster du noyau [ticket 4.3] sous le vrai QGIS et le vrai binaire (copie de
+`fixtures/mnt-plan-incline-2154.tif`, aucune donnée hors dépôt) : `cargo build --release` puis
+`python-qgis-ltr.bat qgis-plugin/tests/probe_raster_output.py` -> `RÉSULTAT : OK`. Elle lance
+`cassini run terrain.slope` dans un projet temporaire, ouvre la pente par `open_rasters` (une
+couche raster valide `1-terrain.slope`, une seule même reçue deux fois ; un GeoTIFF corrompu
+n'ajoute rien), puis vérifie que l'inventaire donne au MNT son chemin relatif au projet
+(`dem/plan-incline-2154.tif`). Dans le panneau, une commande du noyau qui rend un GeoTIFF
+(`terrain.slope`) ajoute sa sortie au projet, qu'elle soit lancée à la main, dans un plan ou
+par une IA externe ; un fichier absent ou illisible laisse une ligne en erreur dans le journal
+du panneau, qui ne nomme que le fichier.
+
 Garde statique (imports réseau et PyQt directs interdits, taille, versions de
 `metadata.txt`) : `python -I qgis-plugin/tests/check_extension.py`.
 

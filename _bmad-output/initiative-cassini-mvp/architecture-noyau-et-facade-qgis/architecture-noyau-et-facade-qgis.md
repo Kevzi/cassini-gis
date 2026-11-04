@@ -214,6 +214,11 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   sens : un paramètre de chemin absolu ou qui sort de l'arborescence du projet est
   refusé (`external.path_refused`), et aucune réponse n'en porte. Le chemin réel
   du poste ne part jamais chez un fournisseur d'IA.
+  **Complément (2026-11-04, ticket 4.3) :** sur le canal de l'extension, les
+  réponses de `command.run` et de `plan.execute` et la notification `external.call`
+  (`finished`) portent **le résultat brut, chemins absolus compris** : l'extension ouvre ainsi
+  dans le projet un raster écrit par le noyau. Le journal reste relatif ; ce qui
+  repart vers le relais d'IA externe reste relatif et nettoyé.
 
 ### AD-10 — Le noyau décide des chemins et des noms de sortie
 

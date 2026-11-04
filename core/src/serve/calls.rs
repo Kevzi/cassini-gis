@@ -4,7 +4,8 @@
 //!
 //! Le fil lecteur du relais a déjà réservé l'occupation : elle est libérée ici quelle que soit
 //! l'issue. L'appel est annoncé à l'extension par la notification `external.call`, au début
-//! (`started`) et à la fin (`finished`, résultat ou erreur, durée). Aucun chemin absolu ne passe
+//! (`started`) et à la fin (`finished`, résultat ou erreur, durée) ; le résultat annoncé à
+//! l'extension est brut, chemins absolus compris (2026-11-04). Aucun chemin absolu ne passe
 //! vers le relais (AD-9) : un paramètre de chemin absolu ou qui sort du projet est refusé avant
 //! toute exécution, et le résultat comme l'erreur sont réduits avant de partir.
 //!
@@ -113,17 +114,17 @@ fn call(
     let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     let work_dir = session.work_dir().to_path_buf();
     let dirs = known_dirs(&work_dir, Path::new(&project));
-    let outcome = match outcome {
-        Ok(value) => Ok(scrub(&relativize(&value, &work_dir), &dirs)),
-        Err(report) => Err(ErrorReport {
-            message: scrub_text(&report.message, &dirs),
-            ..report
-        }),
-    };
+    let outcome = outcome.map_err(|report| ErrorReport {
+        message: scrub_text(&report.message, &dirs),
+        ..report
+    });
     let mut finished = Map::new();
     finished.insert("call_id".into(), json!(call_id));
     finished.insert("event".into(), json!("finished"));
     finished.insert("command".into(), json!(command));
+    // L'extension reçoit le résultat brut, chemins absolus compris (AD-9, 2026-11-04) : elle
+    // ouvre ainsi un raster du noyau dans le projet. Le relais, lui, ne reçoit que des chemins
+    // relatifs et nettoyés.
     match &outcome {
         Ok(value) => finished.insert("result".into(), value.clone()),
         Err(report) => finished.insert(
@@ -133,7 +134,9 @@ fn call(
     };
     finished.insert("duration_ms".into(), json!(duration_ms));
     notify(state, Value::Object(finished));
-    outcome.map_err(RpcError::business)
+    outcome
+        .map(|value| scrub(&relativize(&value, &work_dir), &dirs))
+        .map_err(RpcError::business)
 }
 
 /// Demande à l'extension l'accord de l'utilisateur pour l'appel `call_id` (`external.approve`),

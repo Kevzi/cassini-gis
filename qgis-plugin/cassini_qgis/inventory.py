@@ -2,8 +2,9 @@
 
 Le noyau décide ; ces gestes exécutent seulement : ils demandent à QGIS ce que le
 projet contient et rendent des données simples (SCR en code explicite, AD-19).
-Aucune couche et aucun fichier n'est modifié. Une source de couche est rendue par
-son nom de fichier, jamais par un chemin absolu. Une couche se désigne par son id
+Aucune couche et aucun fichier n'est modifié. Une source de couche vecteur est rendue
+par son nom de fichier, une source raster par son chemin relatif au dossier du fichier de
+projet (le noyau la recopie dans `dem`), jamais par un chemin absolu. Une couche se désigne par son id
 QGIS, valable pour la session seulement (AD-9).
 
 L'inventaire rapporte aussi des faits bruts (sorte de couche, géométrie WKB, nombre
@@ -16,7 +17,10 @@ QGIS passe par un « fond » injectable : `QgisBackend` est le seul endroit qui
 importe `qgis.core`, les tests mettent une doublure.
 """
 
+import ntpath
 import os
+import posixpath
+import re
 
 try:  # `gestures` est importé à plat par les tests, en paquet par QGIS
     from .gestures import GestureError
@@ -39,6 +43,12 @@ class QgisBackend:
         from qgis.core import QgsProject
 
         return QgsProject.instance().crs().authid()
+
+    def project_dir(self):
+        """Dossier du fichier de projet ; vide si le projet n'est pas enregistré."""
+        from qgis.core import QgsProject
+
+        return QgsProject.instance().absolutePath()
 
     def project_name(self):
         """Nom du projet : nom de son fichier sans extension ; vide s'il n'est pas enregistré."""
@@ -148,6 +158,45 @@ def source_name(raw):
     return name if name and os.path.splitext(name)[1] else None
 
 
+_WINDOWS_ABSOLUTE = re.compile(r"^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/])")
+
+
+def _flavour(path):
+    """Module de chemins (`ntpath`, `posixpath`) d'un chemin absolu ; None s'il est relatif."""
+    if _WINDOWS_ABSOLUTE.match(path):
+        return ntpath
+    if path.startswith("/"):
+        return posixpath
+    return None
+
+
+def raster_source(raw, project_dir):
+    """Source d'une couche raster : chemin relatif au dossier du fichier de projet, séparateurs
+    `/`, `..` permis. Sans chemin relatif possible (projet non enregistré, autre lecteur sous
+    Windows, chemins de deux systèmes), le nom de fichier seul. Jamais un chemin absolu."""
+    name = source_name(raw)
+    if name is None or not isinstance(project_dir, str) or not project_dir:
+        return name
+    path = raw.split("|", 1)[0].split("?", 1)[0]
+    if path.startswith("file://"):
+        path = path[len("file://"):]
+        if re.match(r"^/[A-Za-z]:", path):  # `file:///C:/x.tif` -> `C:/x.tif`
+            path = path[1:]
+    if path.startswith("/vsi"):  # source virtuelle de GDAL (`/vsizip/`, `/vsicurl/`...)
+        return name
+    flavour = _flavour(path)
+    if flavour is None or _flavour(project_dir) is not flavour:
+        return name
+    try:
+        relative = flavour.relpath(path, project_dir)
+    except ValueError:  # autre lecteur sous Windows
+        return name
+    relative = relative.replace("\\", "/")
+    if not relative or relative == "." or _flavour(relative) is not None:
+        return name
+    return relative
+
+
 def _distinct_texts(found, limit):
     """Textes non vides de `found`, sans doublon, triés, au plus `limit` ; None s'il n'en
     reste aucun (champ booléen, champ tout nul)."""
@@ -223,16 +272,19 @@ class ProjectInventoryGesture(_ReadGesture):
     def _read(self):
         backend = self._backend
         project_crs = backend.project_crs()
+        project_dir = backend.project_dir()
         layers = []
         boxes = []
         for layer in backend.layers():
+            kind = backend.kind_of(layer)
+            raw = backend.source_of(layer)
             entry = {
                 "layer_id": backend.id_of(layer),
                 "name": backend.name_of(layer),
-                "source": source_name(backend.source_of(layer)),
+                "source": raster_source(raw, project_dir) if kind == "raster" else source_name(raw),
                 "crs": backend.crs_of(layer),
             }
-            entry.update(self._facts(layer))
+            entry.update(self._facts(layer, kind))
             layers.append(entry)
             boxes.append(backend.extent_of(layer, project_crs))
         return {
@@ -242,10 +294,9 @@ class ProjectInventoryGesture(_ReadGesture):
             "extent": _extent(_union(boxes), project_crs),
         }
 
-    def _facts(self, layer):
+    def _facts(self, layer, kind):
         """Faits bruts d'une couche : sorte, géométrie, nombre d'objets, champs."""
         backend = self._backend
-        kind = backend.kind_of(layer)
         if kind != "vector":
             return {"kind": kind, "geometry": None, "fields": []}
         fields = []

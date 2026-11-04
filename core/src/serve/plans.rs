@@ -18,7 +18,7 @@ use crate::agent_inventory::{
 };
 use crate::error::ErrorReport;
 use crate::exec::Executor;
-use crate::journal::{intermediate_files, relativize};
+use crate::journal::intermediate_files;
 use crate::plan::{resolve_references, Plan};
 use crate::registry::{Registry, RegistryError};
 
@@ -325,8 +325,9 @@ pub(super) fn execute(state: &mut State<'_>, params: Option<&Value>) -> Result<V
         let value = session
             .call_in_plan(&call.command, params, step)
             .map_err(|e| RpcError::business(e.at_step(step)))?;
-        let shown = relativize(&value, session.work_dir());
-        steps.push(json!({"step": step, "command": call.command, "result": shown}));
+        // Résultat brut, chemins absolus compris, vers l'extension (AD-9, 2026-11-04) : elle
+        // ouvre un raster du noyau dans le projet. Le journal, lui, reste relatif.
+        steps.push(json!({"step": step, "command": call.command, "result": value.clone()}));
         outputs.push(value);
     }
     Ok(json!({"plan_id": pending.id, "steps": steps}))

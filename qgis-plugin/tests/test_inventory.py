@@ -25,8 +25,9 @@ class FakeLayer:
 class FakeBackend:
     """Rend les couches dans l'ordre donné ; l'étendue est déjà « reprojetée »."""
 
-    def __init__(self, layers=(), project_crs="EPSG:2154", project_name="projet"):
+    def __init__(self, layers=(), project_crs="EPSG:2154", project_name="projet", project_dir=""):
         self.items = list(layers)
+        self.project_dir_value = project_dir
         self.project_crs_value = project_crs
         self.project_name_value = project_name
         self.value_reads = []  # (champ, plafond) de chaque lecture de valeurs
@@ -36,6 +37,9 @@ class FakeBackend:
 
     def project_name(self):
         return self.project_name_value
+
+    def project_dir(self):
+        return self.project_dir_value
 
     def kind_of(self, layer):
         return layer.kind
@@ -190,6 +194,47 @@ class InventoryTest(unittest.TestCase):
         self.assertEqual(layer["fields"], [])
         self.assertNotIn("feature_count", layer)
         self.assertEqual(backend.value_reads, [])
+
+    def test_a_raster_source_is_relative_to_the_project_file(self):
+        # Les quatre lignes d'inventaire de la matrice du ticket 4.3, Windows et POSIX.
+        cases = [
+            ("/home/k/proj/dem/mnt.tif", "/home/k/proj", "dem/mnt.tif"),
+            ("C:/Users/k/proj/dem/mnt.tif", "C:/Users/k/proj", "dem/mnt.tif"),
+            (r"C:\Users\k\proj\dem\mnt.tif", "C:/Users/k/proj", "dem/mnt.tif"),
+            ("/home/k/donnees/mnt.tif", "/home/k/proj", "../donnees/mnt.tif"),
+            (r"C:\Users\k\donnees\mnt.tif", "C:/Users/k/proj", "../donnees/mnt.tif"),
+            (r"c:\users\k\proj\dem\mnt.tif", "C:/Users/k/proj", "dem/mnt.tif"),
+            ("/vsizip//home/k/proj/dem.zip/mnt.tif", "/home/k/proj", "mnt.tif"),
+            ("/vsigzip//home/k/proj/dem/mnt.tif.gz", "/home/k/proj", "mnt.tif.gz"),
+            (r"D:\mnt.tif", "C:/Users/k/proj", "mnt.tif"),
+            ("/home/k/proj/dem/mnt.tif", "", "mnt.tif"),
+            ("/home/k/proj/dem/mnt.tif", None, "mnt.tif"),
+            ("/home/k/proj/dem/mnt.tif", "C:/Users/k/proj", "mnt.tif"),
+            ("file:///C:/Users/k/proj/dem/mnt.tif", "C:/Users/k/proj", "dem/mnt.tif"),
+            ("dem/mnt.tif", "/home/k/proj", "mnt.tif"),
+            ("/home/k/proj/p.cassini/1-terrain.slope.tif", "/home/k/proj", "p.cassini/1-terrain.slope.tif"),
+        ]
+        for raw, project_dir, expected in cases:
+            self.assertEqual(inventory.raster_source(raw, project_dir), expected, (raw, project_dir))
+        self.assertIsNone(inventory.raster_source("type=xyz&url=https://a/b/c.png", "/home/k/proj"))
+        self.assertIsNone(inventory.raster_source(None, "/home/k/proj"))
+        # Flux distant : jamais nommé (comme `source_name`), jamais un faux chemin relatif.
+        self.assertIsNone(inventory.raster_source("/vsicurl/https://h/mnt.tif", "/home/k/proj"))
+
+    def test_the_inventory_gives_rasters_a_relative_path_and_vectors_a_name(self):
+        layers = [
+            FakeLayer("r", "MNT", "/home/k/proj/dem/mnt.tif", "EPSG:2154", None, vector=False),
+            FakeLayer("s", "Voisin", "/home/k/donnees/mnt.tif", "EPSG:2154", None, vector=False),
+            FakeLayer("v", "PLU", "/home/k/proj/data/plu.gpkg|layername=zone", "EPSG:2154", None),
+        ]
+        result, _ = run(inventory.ProjectInventoryGesture, FakeBackend(layers, project_dir="/home/k/proj"), {})
+        self.assertEqual(
+            [l["source"] for l in result["layers"]], ["dem/mnt.tif", "../donnees/mnt.tif", "plu.gpkg"]
+        )
+        self.assertNotIn("/home", repr(result))
+        windows = [FakeLayer("w", "MNT", r"D:\mnt.tif", "EPSG:2154", None, vector=False)]
+        result, _ = run(inventory.ProjectInventoryGesture, FakeBackend(windows, project_dir="C:/proj"), {})
+        self.assertEqual(result["layers"][0]["source"], "mnt.tif")
 
     def test_a_failed_value_read_keeps_the_field_without_values(self):
         class Flaky(FakeBackend):

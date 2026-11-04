@@ -282,10 +282,13 @@ ne part qu'après la réponse au précédent. Réponse finale :
 ```json
 {"jsonrpc":"2.0","id":6,"result":{"plan_id":"plan-1","steps":[
   {"step":1,"command":"analysis.buffer","result":{"layer_id":"tampon_2","name":"Tampon","feature_count":18,"crs":"EPSG:2154"}},
-  {"step":2,"command":"layout.export_pdf","result":{"file":"2-layout.export_pdf.pdf","page_count":1,"layer_count":2,"sources":[],"truncated":false}}]}}
+  {"step":2,"command":"layout.export_pdf","result":{"file":"C:/Users/k/SIG/villeneuve.cassini/2-layout.export_pdf.pdf","page_count":1,"layer_count":2,"sources":[],"truncated":false}}]}}
 ```
 
-Un chemin sous le dossier de travail est rendu relatif à lui : aucun chemin absolu.
+Depuis le 2026-11-04 (ticket 4.3, exception de AD-9), chaque étape rend **le résultat brut,
+chemins absolus compris**, comme la réponse de `command.run` : l'extension a besoin du chemin
+réel pour ouvrir dans le projet un raster écrit par le noyau. Le journal, lui, garde les chemins relatifs
+au dossier de travail.
 
 - **Première erreur** : les étapes suivantes ne partent pas ; l'erreur garde le code
   de l'étape (celui de l'extension pour une commande QGIS) et porte `step`, le numéro
@@ -408,7 +411,9 @@ commande ou par une erreur AD-21.
   texte qui est en entier un chemin du projet devient relatif au projet, un autre chemin absolu
   entier son nom de fichier. Dans un message (d'erreur ou non), les dossiers du projet et de
   travail deviennent `.`, et tout autre chemin absolu cité est réduit à son nom de fichier. Même
-  règle pour `external.call`.
+  règle pour le message d'erreur de `external.call` ; son `result`, qui ne va qu'à l'extension,
+  est depuis le 2026-11-04 le résultat brut, chemins absolus compris (exception de AD-9,
+  ticket 4.3).
 - **Journal** : la ligne de l'étape porte `"origin": "external"`. Le rejeu l'ignore et rejoue
   l'étape à l'identique ; il n'écrit rien, les lignes gardent leur origine.
 
@@ -421,9 +426,12 @@ panneau arrête l'appel en le renvoyant dans `request.cancel`.
 ```json
 {"jsonrpc":"2.0","method":"external.call","params":{"call_id":"external-3","event":"started","command":"layer.describe","params":{"layer_id":"l1"}}}
 {"jsonrpc":"2.0","method":"external.call","params":{"call_id":"external-3","event":"finished","command":"layer.describe","result":{},"duration_ms":41}}
+{"jsonrpc":"2.0","method":"external.call","params":{"call_id":"external-4","event":"finished","command":"terrain.slope","result":{"file":"C:/Users/k/SIG/villeneuve.cassini/4-terrain.slope.tif","unit":"degrees"},"duration_ms":230}}
 ```
 
-`finished` porte `result`, ou `error {code, message}`. Un appel refusé avant l'exécution
+`finished` porte `result`, ou `error {code, message}`. Le `result` est le résultat brut, chemins
+absolus compris (2026-11-04) : l'extension y trouve le raster à ouvrir ; ce qui part au relais
+reste relatif et nettoyé. Un appel refusé avant l'exécution
 (occupation, accord non donné, chemin, commande inconnue ou indisponible, paramètres mal formés)
 n'est pas annoncé : `started` ne part qu'après l'accord.
 

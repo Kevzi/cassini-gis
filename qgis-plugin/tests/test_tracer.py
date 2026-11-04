@@ -610,6 +610,76 @@ def load_panel():
     return importlib.import_module("cassini_panel_stub.panel")
 
 
+class PanelCoreRasterTest(unittest.TestCase):
+    """Les trois branchements du panneau ouvrent le raster d'une commande du noyau (4.3)."""
+
+    def setUp(self):
+        import tempfile
+        import types
+
+        def stubbed(k):
+            return k in ("qgis", "cassini_panel_stub") or k.startswith(
+                ("qgis.", "cassini_panel_stub."))
+
+        saved = {k: v for k, v in sys.modules.items() if stubbed(k)}
+
+        def restore():
+            for k in [k for k in sys.modules if stubbed(k)]:
+                del sys.modules[k]
+            sys.modules.update(saved)
+
+        self.addCleanup(restore)
+        self.mod = load_panel()
+        mod = self.mod
+        cls = mod.CassiniPanel
+        panel = self.panel = cls.__new__(cls)
+        panel.lang = "fr"
+        panel.focus = None
+        panel.running = True
+        panel._run_params = None
+        panel.result_text = None
+        panel.render = lambda: None
+        panel.log = mod.runlog.RunLog()
+        panel.catalogue = [{"id": "terrain.slope", "runs_in": "core"}]
+        panel.agent = types.SimpleNamespace(done=lambda steps: None, steps=[])
+        panel._plan_refs = {}
+        panel._close_plan_entry = lambda *a: None
+        panel._keep_plan_results = lambda *a: None
+        panel.external = None
+        mod._announce = lambda widget, text: None
+        mod.agentview.outcome = lambda status, payload, agent: {"kind": status}
+        mod.external.apply = lambda *a: {"resend_ask": False, "announce": None, "where": None}
+        self.opened = []
+        mod.raster_output.open_rasters = lambda items: self.opened.extend(items) or []
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.dir = folder.name
+
+    def slope(self, step):
+        path = os.path.join(self.dir, "%d-terrain.slope.tif" % step)
+        with open(path, "wb") as f:
+            f.write(b"II*\x00")
+        return path
+
+    def test_run_done_opens_the_slope(self):
+        path = self.slope(1)
+        self.panel.on_event(client.RUN_DONE, {"command": "terrain.slope", "result": {"file": path}})
+        self.assertEqual(self.opened, [(path, "1-terrain.slope")])
+
+    def test_plan_done_opens_the_slope(self):
+        path = self.slope(2)
+        steps = [{"step": 2, "command": "terrain.slope", "result": {"file": path}}]
+        self.panel.on_event(client.PLAN_DONE, {"plan_id": "plan-1", "steps": steps})
+        self.assertEqual(self.opened, [(path, "2-terrain.slope")])
+
+    def test_external_call_finished_opens_the_slope(self):
+        path = self.slope(3)
+        payload = {"call_id": "external-1", "command": "terrain.slope", "result": {"file": path},
+                   "error": None, "duration_ms": 5}
+        self.panel.on_event(client.EXTERNAL_CALL_FINISHED, payload)
+        self.assertEqual(self.opened, [(path, "3-terrain.slope")])
+
+
 class PanelBannerTest(unittest.TestCase):
     """Le bandeau `refused` montre le message du noyau tel quel (5.32)."""
 
