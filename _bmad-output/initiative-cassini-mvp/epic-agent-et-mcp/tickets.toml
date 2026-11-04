@@ -687,3 +687,21 @@ notes = [
   "Decision: 2026-11-03 — proprietaire : barres de non-recul par rapport a 5.17 (plan_reel >= 24/25, tenu a l'ecart >= 32/40, question_reel >= 11/12).",
   "hitl : l'entrainement occupe la carte graphique du proprietaire environ 5 h 30 ; il se lance quand le proprietaire le dit.",
 ]
+
+[[entry]]
+id = 40
+type = "story"
+title = "Export a l'echelle sans le mot PDF"
+description = "Le modele de 5.39 refuse un export a l'echelle qui ne dit pas « PDF » : « Exporte la carte au 1:25 000. » rend le refus « seulement une page A4 paysage ». Toutes les tournures de la famille export_pdf_scale du generateur civil contiennent « PDF », et les refus de format (A3, portrait) appris par refus_hors_registre ressemblent a la demande. Apres ce ticket, export_pdf_scale ecrit aussi des demandes sans « PDF » (par exemple « Imprime la carte au 1/50000 », « Sors la carte au 25 000e »), qui rendent layout.export_pdf a scale ; les refus de format restent tels quels. Aucun re-entrainement ici : le modele l'apprend au prochain re-entrainement groupe."
+verify = "Tests du generateur (graine et taille par defaut) : la famille export_pdf_scale a des exemples gardes dont la demande ne contient pas « PDF », tous passent check_plan et rendent un seul export a scale ; les refus de format A3 et portrait gardent leur refus ; le test de recouvrement reste vert (aucune phrase des sources de ce test, echelle_utm_reel, plan_reel, question_reel, duree_reel et le jeu tenu a l'ecart, dans le jeu engendre) ; deux generations sont identiques a l'octet."
+covers = ["CAP-4"]
+after = [39]
+hitl = false
+risk = "medium"
+references = [
+  "doc — docs/entrainement-du-modele.md, Re-entrainement de 5.39",
+]
+notes = [
+  "Decision: 2026-11-04 — proprietaire : 5.39 clos avec le modele installe ; les tournures sans « PDF » font un ticket a part, apprises au prochain re-entrainement groupe.",
+  "Les tournures ne recopient pas E01 a E05 d'echelle_utm_reel : le test de recouvrement masque chiffres et communes, « Exporte la carte au 1:25 000 » ecrite telle quelle le ferait echouer.",
+]
