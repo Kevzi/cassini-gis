@@ -85,14 +85,14 @@ notes = ["Decision: 2026-11-03 — une entree de cet epic apprend les trois comm
 [[entry]]
 id = 7
 type = "story"
-title = "Comparaison a QGIS et provenance du code de visibilite"
-description = "Compare, sur un meme MNT reel, la pente et le champ de vision du noyau a ceux de QGIS (native:slope, r.viewshed par GRASS) et explique l'ecart ; relit la provenance ecrite par l'entree 5."
-verify = "Une note de comparaison donne, pour chaque commande, l'ecart mesure (proportion de cellules qui different, ecart moyen de pente) et son explication ; la provenance cite chaque source publique ou fichier porte."
+title = "Comparaison a QGIS : justesse et vitesse des commandes de terrain, provenance du code de visibilite"
+description = "Compare a QGIS, sur un meme MNT reel, chaque commande de terrain du noyau qui a un equivalent : la pente (native:slope), la ligne de vue (r.viewshed par GRASS, lu a la cellule de la cible, sur un jeu de couples de points) et le champ de vision (r.viewshed par GRASS) ; mesure et explique chaque ecart, pour s'assurer que le noyau est juste. Bonus : mesure le temps de calcul des deux outils sur le meme MNT et les memes parametres, le noyau visant a etre plus rapide. Relit la provenance ecrite par l'entree 5."
+verify = "Une note de comparaison donne, pour la pente, la ligne de vue et le champ de vision, l'ecart mesure (proportion de cellules ou de verdicts qui different, ecart moyen de pente) et son explication, chaque ecart etant nul ou explique ; elle donne aussi, pour chaque commande, le temps du noyau et celui de QGIS sur la meme machine (a titre d'information, pas de seuil) ; la provenance cite chaque source publique ou fichier porte."
 covers = ["CAP-11"]
-after = [2, 5]
+after = [2, 4, 5]
 hitl = true
 risk = "low"
-notes = ["hitl : le proprietaire lance le calcul de QGIS par GRASS sur son jeu de donnees hors depot."]
+notes = ["hitl : le proprietaire lance le calcul de QGIS par GRASS sur son jeu de donnees hors depot.", "Decision: 2026-11-04 — toutes les commandes de terrain comparables sont comparees (ligne de vue ajoutee) : la justesse est le but, la vitesse un bonus mesure sans seuil (proprietaire)."]
 
 [[entry]]
 id = 8
