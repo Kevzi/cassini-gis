@@ -167,6 +167,27 @@ pub static FAMILIES: &[Family] = &[
         weight: 7,
         make: refus_hors_registre,
     },
+    // Les trois commandes de terrain (4.6) : MNT désigné par sa source, points écrits.
+    Family {
+        name: "pente",
+        weight: 4,
+        make: pente,
+    },
+    Family {
+        name: "ligne_de_vue",
+        weight: 4,
+        make: ligne_de_vue,
+    },
+    Family {
+        name: "champ_de_vision",
+        weight: 4,
+        make: champ_de_vision,
+    },
+    Family {
+        name: "question_terrain",
+        weight: 4,
+        make: question_terrain,
+    },
     Family {
         name: "appartenance_commune",
         weight: 5,
@@ -184,10 +205,11 @@ pub static FAMILIES: &[Family] = &[
     },
     // Environ 5 % du jeu : un exemple d'une autre famille, vu au tour de redemande. Le poids
     // compte les tirages laissés (corruption acceptée par `check_plan`, premier essai qui
-    // n'est pas un plan d'appels) : un sur deux environ.
+    // n'est pas un plan d'appels) : un sur deux environ. Relevé de 20 à 24 en 4.6 : les plans
+    // de terrain, sans couche ni référence d'étape, ne se corrompent pas.
     Family {
         name: "redemande",
-        weight: 20,
+        weight: 24,
         make: redemande,
     },
 ];
@@ -1765,10 +1787,16 @@ fn origin_point(rng: &mut Rng) -> Option<Origin> {
 /// Un point donné en UTM du WGS84, zone 31N ou 32N (la France métropolitaine) : le garde-fou
 /// lit la zone avec son hémisphère (« UTM 31N » : 32631). Pas de zone sud au générateur.
 fn utm_origin(rng: &mut Rng) -> Option<Origin> {
-    let (zone, x) = if rng.chance(1, 2) {
-        (31, rng.range(40_000, 70_000) * 10)
+    let zone = if rng.chance(1, 2) { 31 } else { 32 };
+    utm_origin_in(rng, zone)
+}
+
+/// Un point en UTM du WGS84, dans la zone nord `zone` (31 ou 32).
+fn utm_origin_in(rng: &mut Rng, zone: u32) -> Option<Origin> {
+    let x = if zone == 31 {
+        rng.range(40_000, 70_000) * 10
     } else {
-        (32, rng.range(28_000, 45_000) * 10)
+        rng.range(28_000, 45_000) * 10
     };
     let y = rng.range(530_000, 550_000) * 10;
     let (xs, ys) = if rng.chance(1, 2) {
@@ -2332,107 +2360,30 @@ fn refus(rng: &mut Rng) -> Option<Example> {
 
 // -- hors registre ---------------------------------------------------------
 
-/// Un point en Lambert-93, écrit comme un utilisateur l'écrirait.
-fn lambert_point(rng: &mut Rng) -> String {
-    let x = rng.range(60_000, 70_000) * 10;
-    let y = rng.range(678_000, 690_000) * 10;
-    let (xs, ys) = if rng.chance(1, 2) {
-        (thousands(x), thousands(y))
-    } else {
-        (x.to_string(), y.to_string())
-    };
-    // Pas « le point X / Y (Lambert-93) » : c'est la forme des phrases de terrain des essais
-    // réels (`training/tests/recouvrement.rs`).
-    match rng.below(2) {
-        0 => format!("le point X = {xs}, Y = {ys} en EPSG:2154"),
-        _ => format!("le point ({xs} ; {ys}) en Lambert 93"),
-    }
-}
-
-const NO_VIEWSHED: &str = "Aucune commande du catalogue ne calcule de champ de vision.";
-const NO_LINE_OF_SIGHT: &str =
-    "Aucune commande du catalogue ne calcule de ligne de vue entre deux points.";
-const NO_SLOPE: &str = "Aucune commande du catalogue ne calcule de pente.";
 const NO_FRAMING: &str = "Aucune commande du catalogue ne cadre ni ne zoome la carte.";
 const ONLY_A4: &str = "L'export PDF du catalogue produit seulement une page A4 paysage.";
 const NO_RASTER_STATS: &str = "Aucune commande du catalogue ne calcule de statistiques sur un raster : le décompte par zone ne compte que des points.";
+/// Décision du propriétaire (2026-11-04) : « où la pente dépasse 15 % » est un refus, jamais
+/// une pente calculée à la place de la sélection demandée.
+const NO_RASTER_THRESHOLD: &str =
+    "Aucune commande du catalogue ne sélectionne les cellules d'un raster par leur valeur.";
 /// Décision du propriétaire (2026-10-23, option a) : « de chaque gare », « de toutes les
 /// gares », « des gares » ; l'isochrone du catalogue part d'un seul point en coordonnées.
 pub const NO_MULTI_ORIGIN: &str = "L'isochrone du catalogue part d'un seul point donné en coordonnées : elle ne se calcule pas depuis plusieurs lieux à la fois.";
 
 /// Ce que le registre ne sait pas encore faire, quoi que l'inventaire contienne (un MNT pour
-/// le terrain) : un refus affirmatif, jamais un plan de substitution (un tampon à la place d'un
-/// champ de vision, un décompte à la place d'une moyenne d'altitude).
+/// les statistiques et le seuil sur un raster) : un refus affirmatif, jamais un plan de
+/// substitution (un décompte à la place d'une moyenne d'altitude, une pente à la place d'une
+/// sélection des cellules).
 fn refus_hors_registre(rng: &mut Rng) -> Option<Example> {
     let mut b = Builder::new();
-    let roll = rng.below(7);
-    // Le terrain et les statistiques portent sur un MNT : il est là, ce n'est pas lui qui manque.
-    if matches!(roll, 0 | 1 | 2 | 5) {
+    let roll = rng.below(5);
+    // Les statistiques et le seuil portent sur un MNT : il est là, ce n'est pas lui qui manque.
+    if matches!(roll, 2 | 4) {
         b.add(rng, "mnt", &[], &[], &[]);
     }
     let (body, q, reason): (String, bool, &str) = match roll {
         0 => {
-            let pt = lambert_point(rng);
-            let h = *rng.pick(&[1u64, 2, 5, 10, 15, 30]);
-            let (body, q) = match rng.below(5) {
-                0 => (format!("Détermine la zone visible depuis {pt}"), false),
-                1 => (format!("Quelles zones sont visibles depuis {pt}"), true),
-                2 => (
-                    format!(
-                        "Fais une analyse de visibilité depuis {pt}, observateur à {h} m du sol"
-                    ),
-                    false,
-                ),
-                3 => (
-                    format!("Montre tout ce qu'on aperçoit depuis le clocher, {pt}"),
-                    false,
-                ),
-                _ => (
-                    format!("Jusqu'où porte la vue depuis {pt}, à {h} m de hauteur"),
-                    true,
-                ),
-            };
-            (body, q, NO_VIEWSHED)
-        }
-        1 => {
-            let (a, c) = (lambert_point(rng), lambert_point(rng));
-            let (body, q) = match rng.below(4) {
-                0 => (format!("Y a-t-il une ligne de vue entre {a} et {c}"), true),
-                1 => (format!("Vérifie si {a} est visible depuis {c}"), false),
-                2 => (
-                    format!(
-                        "Calcule la ligne de vue {} vers {c}",
-                        a.replacen("le point", "du point", 1)
-                    ),
-                    false,
-                ),
-                _ => (
-                    format!("Est-ce que {a} et {c} se voient l'un l'autre"),
-                    true,
-                ),
-            };
-            (body, q, NO_LINE_OF_SIGHT)
-        }
-        2 => {
-            let (body, q) = match rng.below(5) {
-                0 => (
-                    "Fais une carte des pentes à partir du MNT".to_string(),
-                    false,
-                ),
-                1 => ("Calcule les pentes du terrain en degrés".to_string(), false),
-                2 => (
-                    "Où la pente du terrain dépasse-t-elle 15 %".to_string(),
-                    true,
-                ),
-                3 => ("Génère la carte des pentes".to_string(), false),
-                _ => (
-                    "Calcule l'inclinaison du terrain à partir du modèle numérique".to_string(),
-                    false,
-                ),
-            };
-            (body, q, NO_SLOPE)
-        }
-        3 => {
             let t = pick_theme(rng, &b, ordinary)?;
             let layer = b.add(rng, t.key, &[], &[], &[]);
             let body = match rng.below(5) {
@@ -2448,7 +2399,7 @@ fn refus_hors_registre(rng: &mut Rng) -> Option<Example> {
             };
             (body, false, NO_FRAMING)
         }
-        4 => {
+        1 => {
             b.distract(rng, 1, vector);
             let body = match rng.below(6) {
                 0 => "Exporte la carte en PDF au format A3".to_string(),
@@ -2464,7 +2415,7 @@ fn refus_hors_registre(rng: &mut Rng) -> Option<Example> {
             (body, false, ONLY_A4)
         }
         // Un trajet depuis plusieurs lieux : refus, jamais un plan ni une question.
-        6 => {
+        3 => {
             network(rng, &mut b);
             let p = pick_theme(rng, &b, |t| ordinary(t) && t.geom == Geom::Point)?;
             b.add(rng, p.key, &[], &[], &[]);
@@ -2497,6 +2448,30 @@ fn refus_hors_registre(rng: &mut Rng) -> Option<Example> {
                 }
             };
             (body, q, NO_MULTI_ORIGIN)
+        }
+        // Un seuil sur la pente : aucune commande ne sélectionne des cellules par leur valeur.
+        4 => {
+            let n = *rng.pick(&[5u64, 10, 15, 20, 30]);
+            let (body, q) = match rng.below(5) {
+                0 => (format!("Où la pente dépasse-t-elle {n} %"), true),
+                1 => (
+                    format!("Montre les zones où la pente est supérieure à {n} degrés"),
+                    false,
+                ),
+                2 => (
+                    format!("Garde seulement les secteurs dont la pente fait plus de {n} %"),
+                    false,
+                ),
+                3 => (
+                    format!("Sélectionne les endroits du MNT où la pente reste sous {n} %"),
+                    false,
+                ),
+                _ => (
+                    format!("Quelles surfaces ont une pente de plus de {n} degrés"),
+                    true,
+                ),
+            };
+            (body, q, NO_RASTER_THRESHOLD)
         }
         _ => {
             let zkey = *rng.pick(&["communes", "quartiers", "parcelles"]);
@@ -2532,6 +2507,388 @@ fn refus_hors_registre(rng: &mut Rng) -> Option<Example> {
         request,
         refusal(reason),
     ))
+}
+
+// -- terrain ---------------------------------------------------------------
+
+/// Un point en Lambert-93, écrit comme un utilisateur l'écrirait. Pas « le point X / Y
+/// (Lambert-93) » : c'est la forme des phrases de terrain des essais réels
+/// (`training/tests/recouvrement.rs`).
+fn lambert_origin(rng: &mut Rng) -> Origin {
+    let x = rng.range(60_000, 70_000) * 10;
+    let y = rng.range(678_000, 690_000) * 10;
+    let (xs, ys) = if rng.chance(1, 2) {
+        (thousands(x), thousands(y))
+    } else {
+        (x.to_string(), y.to_string())
+    };
+    let crs = *rng.pick(&["Lambert-93", "Lambert 93", "EPSG:2154"]);
+    let place = match rng.below(2) {
+        0 => format!("le point X = {xs}, Y = {ys} en {crs}"),
+        _ => format!("le point ({xs} ; {ys}) en {crs}"),
+    };
+    Origin {
+        point: json!({"x": x, "y": y, "epsg": 2154}),
+        coords: format!(" ({xs} ; {ys}, {crs})"),
+        place,
+    }
+}
+
+/// Le système d'une demande de terrain, qui est aussi celui du MNT de l'inventaire : un point
+/// et un MNT de systèmes différents ne sont pas engendrés (le noyau rend son erreur typée).
+fn terrain_epsg(rng: &mut Rng) -> u32 {
+    match rng.below(4) {
+        0 | 1 => 2154,
+        2 => 32631,
+        _ => 32632,
+    }
+}
+
+/// Un point écrit dans le système `epsg` du MNT, son système écrit avec lui : le garde-fou
+/// demande une occurrence du système par point.
+fn terrain_point(rng: &mut Rng, epsg: u32) -> Option<Origin> {
+    match epsg {
+        2154 => Some(lambert_origin(rng)),
+        32631 => utm_origin_in(rng, 31),
+        _ => utm_origin_in(rng, 32),
+    }
+}
+
+/// « du MNT », « du modèle numérique de terrain », « de la couche « MNT 1 m » », ou rien
+/// (« du terrain ») : le MNT est le seul raster de l'inventaire.
+fn dem_words(rng: &mut Rng, dem: &Layer) -> String {
+    match rng.below(4) {
+        0 => "du MNT".to_string(),
+        1 => "du modèle numérique de terrain".to_string(),
+        2 => format!("de la couche « {} »", dem.name),
+        _ => "du terrain".to_string(),
+    }
+}
+
+/// Une hauteur au-dessus du sol écrite : valeur attendue et forme écrite du nombre.
+fn height(rng: &mut Rng, values: &[(f64, &'static str)]) -> (Value, &'static str) {
+    let (v, text) = *rng.pick(values);
+    let value = if v.fract() == 0.0 {
+        json!(v as u64)
+    } else {
+        json!(v)
+    };
+    (json!({"value": value, "unit": "m"}), text)
+}
+
+const EYE_HEIGHTS: &[(f64, &str)] = &[
+    (1.6, "1,6"),
+    (1.8, "1,8"),
+    (2.0, "2"),
+    (5.0, "5"),
+    (10.0, "10"),
+    (12.0, "12"),
+];
+const TARGET_HEIGHTS: &[(f64, &str)] = &[
+    (2.0, "2"),
+    (5.0, "5"),
+    (10.0, "10"),
+    (15.0, "15"),
+    (30.0, "30"),
+];
+
+/// La hauteur de l'œil, écrite (« , œil à 2 m »).
+fn eye_clause(rng: &mut Rng) -> (Value, String) {
+    let (h, n) = height(rng, EYE_HEIGHTS);
+    let text = match rng.below(4) {
+        0 => format!(", œil à {n} m"),
+        1 => format!(", observateur à {n} m du sol"),
+        2 => format!(" avec une hauteur d'œil de {n} m"),
+        _ => format!(", à {n} m de hauteur"),
+    };
+    (h, text)
+}
+
+/// La hauteur de la cible, écrite (« , cible à 10 m du sol »).
+fn target_clause(rng: &mut Rng, plural: bool) -> (Value, String) {
+    let (h, n) = height(rng, TARGET_HEIGHTS);
+    let text = match (plural, rng.below(2)) {
+        (false, 0) => format!(", cible à {n} m du sol"),
+        (false, _) => format!(" pour une cible haute de {n} m"),
+        (true, 0) => format!(", cibles à {n} m du sol"),
+        (true, _) => format!(" pour des cibles hautes de {n} m"),
+    };
+    (h, text)
+}
+
+/// Le rayon d'un champ de vision, écrit : valeur attendue et forme écrite.
+fn radius_clause(rng: &mut Rng) -> (Value, String) {
+    let (value, unit, forms): (Value, &str, &[&str]) = match rng.below(7) {
+        0 => (json!(300), "m", &["300 m", "300 mètres"]),
+        1 => (json!(500), "m", &["500 m", "500 mètres"]),
+        2 => (json!(800), "m", &["800 m"]),
+        3 => (json!(1), "km", &["1 km", "un kilomètre"]),
+        4 => (json!(1.5), "km", &["1,5 km"]),
+        5 => (json!(2), "km", &["2 km", "deux kilomètres"]),
+        _ => (json!(3), "km", &["3 km"]),
+    };
+    let d = *rng.pick(forms);
+    let text = match rng.below(3) {
+        0 => format!(" sur {d}"),
+        1 => format!(" dans un rayon de {d}"),
+        _ => format!(" jusqu'à {d}"),
+    };
+    (json!({"value": value, "unit": unit}), text)
+}
+
+/// Unité de pente écrite : `degrees` ou `percent`.
+fn slope_unit(rng: &mut Rng) -> (&'static str, &'static str) {
+    match rng.below(6) {
+        0 => ("degrees", "en degrés"),
+        1 => ("degrees", "exprimée en degrés"),
+        2 => ("degrees", "en °"),
+        3 => ("percent", "en pourcentage"),
+        4 => ("percent", "en %"),
+        _ => ("percent", "en pour cent"),
+    }
+}
+
+/// « Fais la carte des pentes du MNT en pourcentage » : `terrain.slope` sur le `source` du MNT,
+/// l'unité telle qu'écrite.
+fn pente(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let epsg = terrain_epsg(rng);
+    let dem = b.add_dem(rng, epsg);
+    let (unit, unit_text) = slope_unit(rng);
+    let of = dem_words(rng, &dem);
+    let (body, q) = match rng.below(6) {
+        // Pas « Calcule la pente du terrain en pourcentage » : c'est une phrase des essais
+        // réels (`training/tests/recouvrement.rs`).
+        0 => (format!("Calcule les pentes {of} {unit_text}"), false),
+        1 => (format!("Fais la carte des pentes {of} {unit_text}"), false),
+        2 => (
+            format!("Génère un raster de pente {unit_text} à partir {of}"),
+            false,
+        ),
+        3 => (format!("Peux-tu calculer la pente {of} {unit_text}"), true),
+        4 => (format!("Donne-moi l'inclinaison {of} {unit_text}"), false),
+        _ => (
+            format!("Produis la carte des pentes {unit_text} {of}"),
+            false,
+        ),
+    };
+    let request = finish(rng, &body, q, true);
+    let expected = calls(vec![json!({"command": "terrain.slope",
+        "params": {"dem": dem.source, "unit": unit}})]);
+    Some(example("pente", b, rng, request, expected))
+}
+
+/// « Y a-t-il une ligne de vue entre A et B, œil à 2 m » : `terrain.line_of_sight`, deux
+/// points écrits dans le système du MNT (chacun avec son système), hauteurs seulement si
+/// elles sont écrites. L'observateur est le point « depuis » ou le premier nommé.
+fn ligne_de_vue(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let epsg = terrain_epsg(rng);
+    let dem = b.add_dem(rng, epsg);
+    let a = terrain_point(rng, epsg)?;
+    let c = terrain_point(rng, epsg)?;
+    let (pa, pc) = (&a.place, &c.place);
+    let du_a = pa.replacen("le point", "du point", 1);
+    let (body, q) = match rng.below(5) {
+        0 => (
+            format!("Y a-t-il une ligne de vue entre {pa} et {pc}"),
+            true,
+        ),
+        1 => (format!("Vérifie si {pc} est visible depuis {pa}"), false),
+        2 => (format!("Calcule la ligne de vue {du_a} vers {pc}"), false),
+        3 => (format!("Est-ce qu'on voit {pc} depuis {pa}"), true),
+        _ => (
+            format!(
+                "Trace le profil de visibilité {du_a} jusqu'au point {}",
+                &pc["le point ".len()..]
+            ),
+            false,
+        ),
+    };
+    let mut body = body;
+    let mut params = json!({"dem": dem.source, "observer": a.point, "target": c.point});
+    if rng.chance(1, 2) {
+        let (h, text) = eye_clause(rng);
+        body.push_str(&text);
+        params["observer_height"] = h;
+    }
+    if rng.chance(1, 3) {
+        let (h, text) = target_clause(rng, false);
+        body.push_str(&text);
+        params["target_height"] = h;
+    }
+    if rng.chance(1, 4) {
+        body.push_str(&format!(
+            ", sur {}",
+            dem_words(rng, &dem)
+                .replacen("du ", "le ", 1)
+                .replacen("de la ", "la ", 1)
+        ));
+    }
+    let request = finish(rng, &body, q, false);
+    let expected = calls(vec![
+        json!({"command": "terrain.line_of_sight", "params": params}),
+    ]);
+    Some(example("ligne_de_vue", b, rng, request, expected))
+}
+
+/// « Calcule le champ de vision depuis le point ... (UTM 31N) sur 2 km » :
+/// `terrain.viewshed`, le point écrit dans le système du MNT, hauteurs et rayon seulement
+/// s'ils sont écrits.
+fn champ_de_vision(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let epsg = terrain_epsg(rng);
+    let dem = b.add_dem(rng, epsg);
+    let o = terrain_point(rng, epsg)?;
+    let p = &o.place;
+    let (mut body, q) = match rng.below(6) {
+        0 => (format!("Calcule le champ de vision depuis {p}"), false),
+        1 => (format!("Quelles zones sont visibles depuis {p}"), true),
+        2 => (format!("Détermine ce qu'on voit depuis {p}"), false),
+        3 => (format!("Fais une analyse de visibilité depuis {p}"), false),
+        4 => (format!("Montre la zone vue depuis {p}"), false),
+        _ => (format!("Qu'est-ce qui est visible depuis {p}"), true),
+    };
+    let mut params = json!({"dem": dem.source, "observer": o.point});
+    if rng.chance(1, 2) {
+        let (h, text) = eye_clause(rng);
+        body.push_str(&text);
+        params["observer_height"] = h;
+    }
+    if rng.chance(1, 6) {
+        let (h, text) = target_clause(rng, true);
+        body.push_str(&text);
+        params["target_height"] = h;
+    }
+    if rng.chance(1, 2) {
+        let (r, text) = radius_clause(rng);
+        body.push_str(&text);
+        params["radius"] = r;
+    }
+    let request = finish(rng, &body, q, false);
+    let expected = calls(vec![
+        json!({"command": "terrain.viewshed", "params": params}),
+    ]);
+    Some(example("champ_de_vision", b, rng, request, expected))
+}
+
+/// Lieux nommés sans coordonnées, d'où partirait une vue : aucune commande ne trouve un point
+/// à partir d'un nom.
+fn named_viewpoint(rng: &mut Rng) -> String {
+    let commune = *rng.pick(COMMUNES);
+    match rng.below(5) {
+        0 => format!("le clocher {}", de_place(commune)),
+        1 => format!("le château d'eau {}", de_place(commune)),
+        2 => format!("la mairie {}", de_place(commune)),
+        3 => "le sommet de la colline".to_string(),
+        _ => "le belvédère du parc".to_string(),
+    }
+}
+
+/// La question qui demande le point manquant, en X, Y et système.
+fn point_question(rng: &mut Rng, place: &str) -> String {
+    // « du clocher », « de la mairie » : jamais « de le ».
+    let of_place = match place.strip_prefix("le ") {
+        Some(rest) => format!("du {rest}"),
+        None => format!("de {place}"),
+    };
+    match rng.below(4) {
+        0 => format!(
+            "Je n'ai pas les coordonnées {of_place} : peux-tu donner ce point en X et Y, avec son système de coordonnées ?"
+        ),
+        1 => format!(
+            "Quelles sont les coordonnées {of_place} (X, Y et système, par exemple Lambert-93) ?"
+        ),
+        2 => "Il me faut le point en coordonnées : quelles sont ses valeurs X et Y, et dans quel système ?".to_string(),
+        _ => cassini_core::point::GUARD_QUESTION.to_string(),
+    }
+}
+
+/// Ce qui manque à une demande de terrain devient une question, jamais un plan deviné : le MNT
+/// absent de l'inventaire, un point sans coordonnées, l'unité d'une pente.
+fn question_terrain(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let roll = rng.below(4);
+    let (body, q, text) = if roll == 0 {
+        // Aucun raster : on demande d'ouvrir ou de nommer le MNT.
+        b.exclude("mnt");
+        let epsg = terrain_epsg(rng);
+        let (body, q) = match rng.below(3) {
+            0 => {
+                let (_, unit) = slope_unit(rng);
+                (format!("Calcule les pentes du terrain {unit}"), false)
+            }
+            1 => {
+                let p = terrain_point(rng, epsg)?;
+                (
+                    format!("Calcule le champ de vision depuis {}", p.place),
+                    false,
+                )
+            }
+            _ => {
+                let (a, c) = (terrain_point(rng, epsg)?, terrain_point(rng, epsg)?);
+                (
+                    format!("Y a-t-il une ligne de vue entre {} et {}", a.place, c.place),
+                    true,
+                )
+            }
+        };
+        let text = match rng.below(3) {
+            0 => "Aucun modèle numérique de terrain n'est ouvert dans le projet : quel fichier MNT faut-il ouvrir ?".to_string(),
+            1 => "Le projet ne contient pas de MNT. Peux-tu ouvrir le modèle numérique de terrain à utiliser, ou me dire lequel prendre ?".to_string(),
+            _ => missing_layer_question(rng, theme("mnt").of_none),
+        };
+        (body, q, text)
+    } else if roll == 1 {
+        // Pente sans unité : degrés ou pourcentage, jamais une unité devinée.
+        let epsg = terrain_epsg(rng);
+        let dem = b.add_dem(rng, epsg);
+        let of = dem_words(rng, &dem);
+        let body = match rng.below(3) {
+            0 => format!("Fais la carte des pentes {of}"),
+            1 => format!("Calcule la pente {of}"),
+            _ => format!("Génère un raster de pente à partir {of}"),
+        };
+        let text = match rng.below(2) {
+            0 => "Dans quelle unité faut-il calculer la pente : en degrés ou en pourcentage ?",
+            _ => "La pente en degrés ou en pourcentage ?",
+        };
+        (body, false, text.to_string())
+    } else {
+        // Un point sans coordonnées : un lieu nommé, ou une ligne de vue avec un seul point.
+        let epsg = terrain_epsg(rng);
+        b.add_dem(rng, epsg);
+        let place = named_viewpoint(rng);
+        let (body, q) = if roll == 2 {
+            match rng.below(3) {
+                0 => (format!("Calcule le champ de vision depuis {place}"), false),
+                1 => (format!("Quelles zones sont visibles depuis {place}"), true),
+                _ => (
+                    format!("Fais une analyse de visibilité depuis {place}"),
+                    false,
+                ),
+            }
+        } else {
+            let a = terrain_point(rng, epsg)?;
+            match rng.below(3) {
+                0 => (
+                    format!("Y a-t-il une ligne de vue entre {} et {place}", a.place),
+                    true,
+                ),
+                1 => (
+                    format!("Vérifie si {place} est visible depuis {}", a.place),
+                    false,
+                ),
+                _ => (
+                    format!("Est-ce qu'on voit {} depuis {place}", a.place),
+                    true,
+                ),
+            }
+        };
+        (body, q, point_question(rng, &place))
+    };
+    let request = finish(rng, &body, q, false);
+    Some(example("question_terrain", b, rng, request, question(text)))
 }
 
 // -- appartenance à une commune --------------------------------------------
@@ -2957,10 +3314,18 @@ mod tests {
 
     #[test]
     fn out_of_registry_requests_are_refused_never_planned() {
+        let registry = cassini_core::registry::Registry::standard();
         for e in valid(refus_hors_registre, 300) {
             assert_eq!(e.expected["kind"], "refusal", "{}", e.request);
             let reason = e.expected["reason"].as_str().unwrap();
-            if [NO_VIEWSHED, NO_LINE_OF_SIGHT, NO_SLOPE, NO_RASTER_STATS].contains(&reason) {
+            // Aucun refus ne nomme une commande du registre, ni le terrain qu'il calcule (4.6).
+            for spec in registry.specs() {
+                assert!(!reason.contains(spec.id.as_str()), "{reason}");
+            }
+            for word in ["champ de vision", "ligne de vue", "pente", "visib"] {
+                assert!(!reason.contains(word), "{reason}");
+            }
+            if [NO_RASTER_STATS, NO_RASTER_THRESHOLD].contains(&reason) {
                 assert!(has_theme(&e, "mnt"), "MNT présent : {}", e.request);
             }
         }
@@ -3334,23 +3699,10 @@ mod tests {
         let registry = cassini_core::registry::Registry::standard();
         for spec in registry.specs() {
             let id = spec.id.as_str();
-            // `terrain.slope` est arrivé (4.2) : le refus `NO_SLOPE` est désormais faux, mais
-            // la commande s'apprend au modèle dans l'entrée dédiée de l'epic raster-et-terrain
-            // (« Le modèle apprend les trois commandes de terrain »), qui retire ce refus.
-            // Retirer `NO_SLOPE` doit retirer cette exception : la référence ci-dessous casse
-            // la compilation si l'un part sans l'autre.
-            if id == "terrain.slope" && !NO_SLOPE.is_empty() {
-                continue;
+            // Ni seuil ni reclassement d'un raster.
+            for word in ["threshold", "reclass", "raster_calc"] {
+                assert!(!id.contains(word), "{id}");
             }
-            // Même cas pour `terrain.line_of_sight` (4.4) et son refus `NO_LINE_OF_SIGHT`.
-            if id == "terrain.line_of_sight" && !NO_LINE_OF_SIGHT.is_empty() {
-                continue;
-            }
-            // Même cas pour `terrain.viewshed` (4.5) et son refus `NO_VIEWSHED`.
-            if id == "terrain.viewshed" && !NO_VIEWSHED.is_empty() {
-                continue;
-            }
-            assert!(!id.starts_with("terrain."), "{id}");
             for word in ["zoom", "frame", "extent", "pan", "center", "centre", "cadr"] {
                 assert!(!id.contains(word), "{id}");
             }
@@ -3428,6 +3780,198 @@ mod tests {
         }));
         assert!(examples.iter().any(|e| commands(e).len() > 1));
         assert!(examples.iter().any(|e| commands(e).len() == 1));
+    }
+
+    /// Le MNT d'un plan de terrain : la couche raster dont `dem` est la `source`.
+    fn cited_dem(e: &Example) -> &Value {
+        let dem = e.expected["calls"][0]["params"]["dem"].as_str().unwrap();
+        e.inventory["layers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|l| l["kind"] == "raster" && l["source"] == dem)
+            .unwrap_or_else(|| panic!("MNT « {dem} » absent : {}", e.request))
+    }
+
+    /// Les exemples d'une famille de terrain : une étape, la commande attendue, le `dem` source
+    /// d'un raster de l'inventaire, aucun paramètre de plus que ceux qu'elle écrit, et le
+    /// garde-fou qui laisse le plan.
+    fn terrain_examples(
+        make: fn(&mut Rng) -> Option<Example>,
+        command: &str,
+        allowed: &[&str],
+    ) -> Vec<Example> {
+        let registry = cassini_core::registry::Registry::standard();
+        let examples = valid(make, 400);
+        for e in &examples {
+            assert_eq!(commands(e), [command], "{}", e.request);
+            cited_dem(e);
+            let params = e.expected["calls"][0]["params"].as_object().unwrap();
+            for key in params.keys() {
+                assert!(allowed.contains(&key.as_str()), "{key} : {}", e.request);
+            }
+            let plan: cassini_core::plan::Plan =
+                serde_json::from_value(e.expected.clone()).unwrap();
+            let guarded =
+                cassini_core::point::guard_coordinates(&registry, plan.clone(), &e.request);
+            assert_eq!(guarded, plan, "{}", e.request);
+        }
+        examples
+    }
+
+    /// Les points d'un plan de terrain sont dans le système du MNT, quand l'inventaire le
+    /// donne ; les deux zones UTM et le Lambert-93 sont vus.
+    fn points_in_the_dem_system(examples: &[Example], keys: &[&str]) {
+        let mut systems = std::collections::BTreeSet::new();
+        for e in examples {
+            let dem = cited_dem(e);
+            for key in keys {
+                let epsg = &e.expected["calls"][0]["params"][key]["epsg"];
+                if let Some(d) = dem.get("epsg") {
+                    assert_eq!(d, epsg, "{}", e.request);
+                }
+                systems.insert(epsg.as_u64().unwrap());
+            }
+        }
+        assert_eq!(
+            systems.into_iter().collect::<Vec<_>>(),
+            [2154, 32631, 32632]
+        );
+        for form in [
+            "UTM 31N",
+            "UTM 32 N",
+            "UTM zone 31 Nord",
+            "UTM32N",
+            "Lambert",
+        ] {
+            assert!(examples.iter().any(|e| e.request.contains(form)), "{form}");
+        }
+    }
+
+    /// Un paramètre facultatif n'est au plan que si la demande l'écrit.
+    fn written_only(examples: &[Example], key: &str, markers: &[&str]) {
+        let (mut with, mut without) = (0, 0);
+        for e in examples {
+            let written = markers.iter().any(|m| e.request.contains(m));
+            let planned = e.expected["calls"][0]["params"].get(key).is_some();
+            assert_eq!(written, planned, "{key} : {}", e.request);
+            if planned {
+                with += 1;
+            } else {
+                without += 1;
+            }
+        }
+        assert!(with > 0 && without > 0, "{key}");
+    }
+
+    const EYE_MARKERS: &[&str] = &["œil", "observateur", "de hauteur"];
+
+    #[test]
+    fn a_slope_carries_the_dem_source_and_the_written_unit() {
+        let examples = terrain_examples(pente, "terrain.slope", &["dem", "unit"]);
+        for e in &examples {
+            let unit = &e.expected["calls"][0]["params"]["unit"];
+            let r = &e.request;
+            let degrees = r.contains("degrés") || r.contains('°');
+            assert_eq!(unit == "degrees", degrees, "{r}");
+            assert_eq!(
+                unit == "percent",
+                r.contains("pourcentage") || r.contains('%') || r.contains("pour cent"),
+                "{r}"
+            );
+        }
+        assert!(examples.iter().any(|e| e.request.contains("« ")));
+    }
+
+    #[test]
+    fn a_line_of_sight_takes_two_written_points_and_only_the_written_heights() {
+        let examples = terrain_examples(
+            ligne_de_vue,
+            "terrain.line_of_sight",
+            &[
+                "dem",
+                "observer",
+                "target",
+                "observer_height",
+                "target_height",
+            ],
+        );
+        points_in_the_dem_system(&examples, &["observer", "target"]);
+        written_only(&examples, "observer_height", EYE_MARKERS);
+        written_only(&examples, "target_height", &["cible"]);
+    }
+
+    #[test]
+    fn a_viewshed_takes_the_written_point_and_only_the_written_radius() {
+        let examples = terrain_examples(
+            champ_de_vision,
+            "terrain.viewshed",
+            &[
+                "dem",
+                "observer",
+                "observer_height",
+                "target_height",
+                "radius",
+            ],
+        );
+        points_in_the_dem_system(&examples, &["observer"]);
+        written_only(&examples, "observer_height", EYE_MARKERS);
+        written_only(&examples, "target_height", &["cible"]);
+        written_only(&examples, "radius", &[" sur ", "rayon", "jusqu'à"]);
+        assert!(examples.iter().any(|e| {
+            let p = &e.expected["calls"][0]["params"];
+            p["observer"]["epsg"] == 32631 && p["radius"]["unit"] == "km"
+        }));
+    }
+
+    #[test]
+    fn what_a_terrain_request_lacks_is_asked() {
+        let examples = valid(question_terrain, 400);
+        let (mut no_dem, mut no_point, mut no_unit) = (0, 0, 0);
+        for e in &examples {
+            assert_eq!(e.expected["kind"], "question", "{}", e.request);
+            let q = e.expected["question"].as_str().unwrap();
+            assert!(!q.contains(" de le "), "{q}");
+            let rasters = e.inventory["layers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|l| l["kind"] == "raster")
+                .count();
+            if rasters == 0 {
+                no_dem += 1;
+                assert!(q.contains("MNT") || q.contains("modèle numérique"), "{q}");
+            } else if q.contains("degrés") {
+                no_unit += 1;
+                assert!(q.contains("pourcentage"), "{q}");
+            } else {
+                no_point += 1;
+                let q = q.to_lowercase();
+                assert!(
+                    q.contains('x') && q.contains('y') && q.contains("système"),
+                    "{q}"
+                );
+            }
+        }
+        assert!(no_dem > 0 && no_point > 0 && no_unit > 0);
+        // Une ligne de vue dont un seul point est écrit, un lieu nommé sans coordonnées.
+        assert!(examples
+            .iter()
+            .any(|e| e.request.contains("ligne de vue") && e.request.contains(" point ")));
+        assert!(examples.iter().any(|e| e.request.contains("clocher")));
+    }
+
+    #[test]
+    fn a_threshold_on_the_slope_is_refused() {
+        let examples = valid(refus_hors_registre, 300);
+        let thresholds: Vec<_> = examples
+            .iter()
+            .filter(|e| e.expected["reason"] == NO_RASTER_THRESHOLD)
+            .collect();
+        assert!(!thresholds.is_empty());
+        for e in thresholds {
+            assert!(e.request.contains("pente"), "{}", e.request);
+        }
     }
 
     #[test]
