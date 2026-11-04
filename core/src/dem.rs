@@ -13,7 +13,7 @@ use std::fs::File;
 use std::io::{BufReader, Cursor};
 use std::path::Path;
 
-use tiff::decoder::{Decoder, DecodingResult};
+use tiff::decoder::{Decoder, DecodingResult, Limits};
 use tiff::encoder::colortype::Gray32Float;
 use tiff::encoder::compression::DeflateLevel;
 use tiff::encoder::{Compression, TiffEncoder};
@@ -33,6 +33,14 @@ const RASTER_PIXEL_IS_AREA: u16 = 1;
 const RASTER_PIXEL_IS_POINT: u16 = 2;
 const USER_DEFINED: u16 = 32767;
 const LINEAR_METER: u16 = 9001;
+
+/// Plafond de la grille décodée, 1 Gio : un MNT de 1 m sur une commune passe (10 km × 10 km
+/// en Float32 font 400 Mo), la limite de `tiff` (256 Mo) ne le laissait pas. Il porte sur la
+/// grille seule : la mémoire de pointe est plus haute (grille décodée puis sa copie en f32).
+pub const MAX_DECODED_BYTES: usize = 1 << 30;
+
+/// Message commun des refus pour taille, avant décodage ou par la limite de `tiff`.
+const TOO_LARGE: &str = "dépasse le plafond de 1 Gio pour la grille ; découpez-le dans QGIS (Raster > Extraction > Découper un raster selon une emprise).";
 
 const REPROJECT_HINT: &str =
     "reprojetez-le dans QGIS (Raster > Projections > Reprojeter) vers un système projeté en mètres, Lambert-93 par exemple";
@@ -126,14 +134,25 @@ impl Dem {
                 path.display()
             ))
         })?;
-        let mut decoder = Decoder::new(BufReader::new(file)).map_err(|e| {
-            DemError::unreadable(format!(
-                "« {} » n'est pas un TIFF lisible : {e}.",
-                path.display()
-            ))
-        })?;
+        let mut limits = Limits::default();
+        limits.decoding_buffer_size = MAX_DECODED_BYTES;
+        limits.intermediate_buffer_size = MAX_DECODED_BYTES;
+        let mut decoder = Decoder::new(BufReader::new(file))
+            .map_err(|e| {
+                DemError::unreadable(format!(
+                    "« {} » n'est pas un TIFF lisible : {e}.",
+                    path.display()
+                ))
+            })?
+            .with_limits(limits);
 
         let (width, height) = decoder.dimensions().map_err(map_read_error)?;
+        let bits = decoder
+            .find_tag_unsigned_vec::<u16>(Tag::BitsPerSample)
+            .map_err(map_read_error)?
+            .and_then(|b| b.into_iter().max())
+            .unwrap_or(1);
+        check_size(width, height, bits)?;
         let samples = decoder
             .find_tag_unsigned::<u16>(Tag::SamplesPerPixel)
             .map_err(map_read_error)?
@@ -461,6 +480,18 @@ fn is_known_metric(epsg: u16) -> bool {
     )
 }
 
+/// Refuse un MNT dont la grille décodée, ou sa copie en f32, dépasserait `MAX_DECODED_BYTES`.
+fn check_size(width: u32, height: u32, bits_per_sample: u16) -> Result<(), DemError> {
+    let bytes_per_cell = (u64::from(bits_per_sample).div_ceil(8)).max(4);
+    let needed = u64::from(width) * u64::from(height) * bytes_per_cell;
+    if needed > MAX_DECODED_BYTES as u64 {
+        return Err(DemError::unsupported(format!(
+            "MNT trop grand : {width} × {height} cellules, il {TOO_LARGE}"
+        )));
+    }
+    Ok(())
+}
+
 fn to_f32(result: DecodingResult) -> Result<Vec<f32>, DemError> {
     Ok(match result {
         DecodingResult::U8(v) => v.into_iter().map(f32::from).collect(),
@@ -486,7 +517,7 @@ fn map_read_error(e: TiffError) -> DemError {
             DemError::unsupported(format!("Forme de TIFF non lue : {e}."))
         }
         TiffError::LimitsExceeded => {
-            DemError::unsupported("MNT trop grand pour être lu en mémoire.")
+            DemError::unsupported(format!("MNT trop grand : il {TOO_LARGE}"))
         }
         e => DemError::unreadable(format!("TIFF illisible : {e}.")),
     }
@@ -1018,6 +1049,47 @@ mod tests {
         assert_eq!(dem.value(0, 0), None);
         assert_eq!(dem.value(1, 0), None);
         assert_eq!(dem.value(2, 0), Some(5.0));
+    }
+
+    #[test]
+    fn a_dem_beyond_one_gibibyte_is_refused_as_too_large() {
+        // Un MNT de 1 m sur une commune (10 000 × 10 000 en Float32, 400 Mo) passe.
+        assert!(check_size(10_000, 10_000, 32).is_ok());
+        let e = check_size(20_000, 20_000, 32).unwrap_err();
+        assert_eq!(e.code, "dem.unsupported");
+        assert!(e.message.starts_with("MNT trop grand"), "{}", e.message);
+        assert!(e.message.contains("1 Gio pour la grille"), "{}", e.message);
+        assert!(e.message.contains("découpez-le dans QGIS"), "{}", e.message);
+        let limit = map_read_error(TiffError::LimitsExceeded);
+        assert_eq!(limit.code, "dem.unsupported");
+        assert!(
+            limit.message.starts_with("MNT trop grand"),
+            "{}",
+            limit.message
+        );
+        assert!(limit.message.ends_with(TOO_LARGE), "{}", limit.message);
+
+        // De bout en bout : un TIFF de 2 × 2 dont les dimensions annoncées deviennent
+        // 20 000 × 20 000 (1,6 Go en Float32), refusé avant tout décodage.
+        let dir = scratch("trop-grand");
+        let p = dir.join("grand.tif");
+        raw_tiff::<Gray32Float>(&p, 2, 2, &[1.0; 4], projected);
+        let mut bytes = std::fs::read(&p).unwrap();
+        for tag in [0x00u8, 0x01] {
+            // ImageWidth (256) puis ImageLength (257), type LONG, une valeur, 2.
+            let entry = [
+                tag, 0x01, 0x04, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
+            ];
+            let at = bytes
+                .windows(entry.len())
+                .position(|w| w == entry)
+                .expect("entrée de dimension");
+            bytes[at + 8..at + 12].copy_from_slice(&20_000u32.to_le_bytes());
+        }
+        std::fs::write(&p, bytes).unwrap();
+        let e = open_err(&p);
+        assert_eq!(e.code, "dem.unsupported", "{}", e.message);
+        assert!(e.message.starts_with("MNT trop grand"), "{}", e.message);
     }
 
     #[test]
