@@ -439,6 +439,67 @@ mod tests {
     }
 
     #[test]
+    fn exports_at_a_scale_without_the_word_pdf_are_one_export_at_that_scale() {
+        // 5.40 : au jeu par défaut, des exports à l'échelle ne disent pas « PDF » ; chacun
+        // passe `check_plan` et porte un seul `layout.export_pdf`, à `scale`.
+        let registry = Registry::standard();
+        let (examples, _) = generate(DEFAULT_SEED, DEFAULT_COUNT);
+        let bare: Vec<_> = examples
+            .iter()
+            .filter(|e| e.family == "export_pdf_scale" && !e.request.to_lowercase().contains("pdf"))
+            .collect();
+        assert!(!bare.is_empty());
+        // La carte seule (un appel) et au bout d'une recherche (plusieurs).
+        let lengths = |e: &&Example| e.expected["calls"].as_array().unwrap().len();
+        assert!(bare.iter().any(|e| lengths(e) == 1));
+        assert!(bare.iter().any(|e| lengths(e) > 1));
+        for e in bare {
+            let plan: cassini_core::plan::Plan =
+                serde_json::from_value(e.expected.clone()).unwrap();
+            assert_eq!(registry.check_plan(&plan), Ok(()), "{}", e.request);
+            let exports: Vec<&Value> = e.expected["calls"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|c| c["command"] == "layout.export_pdf")
+                .collect();
+            assert_eq!(exports.len(), 1, "{}", e.request);
+            assert!(
+                exports[0]["params"]["scale"].as_u64().is_some(),
+                "{}",
+                e.request
+            );
+        }
+    }
+
+    #[test]
+    fn paper_and_orientation_refusals_stay_refusals() {
+        // 5.40 : les refus de format (A3, A0, portrait) gardent leur refus, et aucun export à
+        // l'échelle ne nomme un papier ni une orientation.
+        let (examples, _) = generate(DEFAULT_SEED, DEFAULT_COUNT);
+        let formats: Vec<_> = examples
+            .iter()
+            .filter(|e| {
+                e.family == "refus_hors_registre"
+                    && e.expected["reason"]
+                        .as_str()
+                        .is_some_and(|r| r.contains("seulement une page A4 paysage"))
+            })
+            .collect();
+        for paper in ["A3", "A0", "portrait"] {
+            assert!(
+                formats.iter().any(|e| e.request.contains(paper)),
+                "refus {paper} absent"
+            );
+        }
+        for e in examples.iter().filter(|e| e.family == "export_pdf_scale") {
+            for paper in ["A3", "A0", "portrait"] {
+                assert!(!e.request.contains(paper), "{}", e.request);
+            }
+        }
+    }
+
+    #[test]
     fn the_decided_families_and_vocabulary_are_present() {
         let (examples, summary) = generate(DEFAULT_SEED, DEFAULT_COUNT);
         assert_eq!(examples.len(), DEFAULT_COUNT);
