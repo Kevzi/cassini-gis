@@ -705,3 +705,22 @@ notes = [
   "Decision: 2026-11-04 — proprietaire : 5.39 clos avec le modele installe ; les tournures sans « PDF » font un ticket a part, apprises au prochain re-entrainement groupe.",
   "Les tournures ne recopient pas E01 a E05 d'echelle_utm_reel : le test de recouvrement masque chiffres et communes, « Exporte la carte au 1:25 000 » ecrite telle quelle le ferait echouer.",
 ]
+
+[[entry]]
+id = 41
+type = "story"
+title = "Re-entrainement groupe : commandes de terrain et export a l'echelle sans PDF"
+description = "Regenere le jeu du generateur civil avec les familles de terrain de 4.6 (terrain.slope, terrain.line_of_sight, terrain.viewshed ; refus NO_SLOPE, NO_LINE_OF_SIGHT et NO_VIEWSHED retires) et les tournures d'export_pdf_scale sans « PDF » de 5.40, re-entraine par la commande unique (meme base Qwen3.5-4B, meme methode, sur GPU), fusionne en GGUF et l'installe sous la declaration retenue par le panneau, le modele de 5.39 garde sous son nom. Le proprietaire lance l'entrainement, qui occupe sa carte graphique plusieurs heures."
+verify = "Sur GPU, par ai/ et la declaration du modele livre : aucun recul par rapport aux chiffres de 5.39 consignes dans docs/entrainement-du-modele.md (plan_reel, jeu tenu a l'ecart, question_reel), et un essai reel de phrases de terrain et d'export a l'echelle sans « PDF » rend le plan attendu. Recette dans une seule session QGIS, une dizaine de phrases enchainees sur le MNT de Villeneuve-le-Roi : une pente, une ligne de vue, un champ de vision, un export « au 1:25 000 » sans le mot PDF, la phrase de demo ; rejeu identical: true ; chiffres consignes dans docs/entrainement-du-modele.md."
+covers = ["CAP-4"]
+after = [40, "4.6"]
+hitl = true
+risk = "high"
+references = [
+  "doc — docs/entrainement-du-modele.md, Re-entrainement de 5.39",
+]
+notes = [
+  "Decision: 2026-11-04 — proprietaire : ordre retenu 4.6, puis 5.40, puis ce re-entrainement groupe.",
+  "hitl : l'entrainement occupe la carte graphique du proprietaire ; il se lance quand le proprietaire le dit.",
+  "Risque high : le modele livre remplace celui du panneau ; controle hors du ticket : recette QGIS par le proprietaire.",
+]

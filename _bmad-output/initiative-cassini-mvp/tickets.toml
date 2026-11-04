@@ -42,6 +42,7 @@ after = [
   { epic = 2, needs = "le registre complet, pour que l'agent ait des verbes a composer et un inventaire a lire" },
   { epic = 8, needs = "le modele, la quantification et la forme de sollicitation retenus par l'epreuve" },
   { epic = 9, needs = "le panneau ou afficher le plan etape par etape et le faire valider" },
+  { epic = 4, needs = "les familles du generateur pour les trois commandes de terrain (4.6), apprises au re-entrainement groupe 5.41" },
 ]
 
 [[epic]]

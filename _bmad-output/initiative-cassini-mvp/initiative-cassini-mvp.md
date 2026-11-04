@@ -88,6 +88,7 @@ sorti en PDF — il traverse les epics 2, 9 et 5.
 
 ## Notes
 
+- Decision: l'epic agent-et-mcp (5) reste avant l'epic raster-et-terrain (4) dans l'ordre de construction : seule son entree 5.41, le re-entrainement groupe, attend 4.6, ses autres entrees sont faites ou independantes du terrain (proprietaire, 2026-11-04 : ordre 4.6, 5.40, 5.41).
 - Decision: au MVP, QGIS porte tout l'habillage (carte, ouverture des fichiers, projet, analyses vectorielles, export PDF) et le noyau ne porte que le registre, l'agent, le journal et le terrain. L'application autonome est reportée en V2 (propriétaire, 2026-10-14).
 - Decision: le concurrent est QGIS, pas ArcGIS Pro ; le fossé est l'interface en langage naturel hors ligne, pas la géométrie ni la visibilité (2026-10-14).
 - Decision: l'épreuve du modèle local (epic 8) passe en premier, avant le registre, parce que la promesse unique du produit était planifiée en dernier (2026-10-14).
