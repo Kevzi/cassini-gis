@@ -1,7 +1,7 @@
 //! Garde-fou du jeu tenu à l'écart (ticket 5.10) : aucune de ses phrases ne doit figurer
 //! dans le jeu engendré avec la graine par défaut. Depuis 5.15, il couvre aussi les phrases
-//! des essais réels de `ai/tests/` : `plan_reel` (les phrases de l'épreuve), `question_reel` et
-//! `duree_reel` (le scénario de démo et son amorce). Les familles visent leur sorte de demande
+//! des essais réels de `ai/tests/` : `plan_reel` (les phrases de l'épreuve), `question_reel`,
+//! `duree_reel` (le scénario de démo et son amorce) et, depuis 5.39, `echelle_utm_reel`. Les familles visent leur sorte de demande
 //! avec d'autres tournures ; elles ne les recopient jamais. Deux comparaisons, sur le texte normalisé
 //! (minuscules, sans accents ni ponctuation) : à l'identique, puis à un nombre ou une commune
 //! près (chiffres masqués, noms de communes remplacés par un même repère, des deux côtés).
@@ -22,6 +22,7 @@ const HELD_OUT: &str = include_str!("../../ai/tests/tenu_a_l_ecart/sentences.jso
 const PLAN_REEL: &str = include_str!("../../tests/epreuve-modele-local/sentences.json");
 const QUESTION_REEL: &str = include_str!("../../ai/tests/question_reel.rs");
 const DUREE_REEL: &str = include_str!("../../ai/tests/duree_reel.rs");
+const ECHELLE_UTM_REEL: &str = include_str!("../../ai/tests/echelle_utm_reel.rs");
 
 /// Texte normalisé, chiffres masqués et communes remplacées par un même repère.
 fn masked(text: &str) -> String {
@@ -117,7 +118,8 @@ fn pairs(source: &str, start: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Les phrases des essais réels de `ai/tests/` : `plan_reel`, `question_reel`, `duree_reel`.
+/// Les phrases des essais réels de `ai/tests/` : `plan_reel`, `question_reel`, `duree_reel`,
+/// `echelle_utm_reel`.
 fn real_trials() -> Vec<(String, String)> {
     let mut all = from_json(PLAN_REEL);
     let questions = pairs(QUESTION_REEL, "const AMBIGUOUS");
@@ -127,6 +129,9 @@ fn real_trials() -> Vec<(String, String)> {
     assert_eq!(scenario.len(), 8, "{scenario:?}");
     all.extend(scenario);
     all.extend(pairs(DUREE_REEL, "const WARMUP"));
+    let scale_utm = pairs(ECHELLE_UTM_REEL, "const SENTENCES");
+    assert_eq!(scale_utm.len(), 8, "{scale_utm:?}");
+    all.extend(scale_utm);
     all
 }
 
@@ -175,7 +180,7 @@ fn no_sentence_of_the_real_trials_appears_in_the_generated_set() {
 #[test]
 fn the_real_trials_are_read_whole() {
     let all = real_trials();
-    assert_eq!(all.len(), 25 + 12 + 8 + 1);
+    assert_eq!(all.len(), 25 + 12 + 8 + 1 + 8);
     let find = |id: &str| all.iter().find(|(i, _)| i == id).unwrap().1.clone();
     assert_eq!(
         find("Q11"),
@@ -183,6 +188,7 @@ fn the_real_trials_are_read_whole() {
     );
     assert!(find("A0").ends_with("et sors-moi la carte en PDF."));
     assert_eq!(find("amorce"), "Décris le projet.");
+    assert_eq!(find("E01"), "Exporte la carte au 1:25 000.");
 }
 
 #[test]

@@ -618,3 +618,6 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-raster-et-terrain/story-traceur-le-noyau-lit-et-ecrit-un-mnt-geotiff-dans-un-module-plan.md`
   summary: Le module `dem` hérite de la limite de décodage par défaut de `tiff` (environ 256 Mo) : un très grand MNT (1 m sur une commune) est refusé en `dem.unsupported` sans seuil annoncé.
   evidence: relecture 4.1, constat 8 ; fixer `Limits` et documenter la taille maximale avec la première commande de terrain (4.2).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-re-entrainement-groupe-point-en-utm-et-echelle-de-l-export-p-plan.md`
+  summary: Le modèle de 5.39 refuse un export à l'échelle qui ne dit pas « PDF » (« Exporte la carte au 1:25 000. ») : ajouter au générateur des tournures d'export à l'échelle sans ce mot, apprises au prochain ré-entraînement groupé.
+  evidence: essai `echelle_utm_reel` E01 et démo QGIS du 2026-11-04 (refus « seulement une page A4 paysage ») ; toutes les tournures de `export_pdf_scale` (`export_pdf_scale` dans `training/src/families.rs`) contiennent « PDF », et `refus_hors_registre` apprend des refus de format. Décision du propriétaire : 5.39 clos, ticket à part.
