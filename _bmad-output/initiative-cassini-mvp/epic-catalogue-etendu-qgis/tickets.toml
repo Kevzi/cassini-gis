@@ -33,7 +33,7 @@ risk = "medium"
 id = 3
 type = "story"
 title = "Geste a chaine fixe et invariants de la table fermee"
-description = "Fait de chaque ligne de la table de l'extension une chaine fixe d'algorithmes avec gardes, temporaires non journalises et version de chaine (AD-24), migre les lignes existantes, declare une commande annulable seulement si chaque algorithme l'est, et fait refuser par la recette toute ligne qui cite un algorithme de la liste noire reseau ; le genre vector et les sorties layer et file sont livres ici, les genres raster et layout et la sortie table par la premiere primitive qui en a besoin, apres le reordonnancement de l'entree 8 (aujourd'hui 10 pour table, 12 pour raster, 15 pour layout)."
+description = "Fait de chaque ligne de la table de l'extension une chaine fixe d'algorithmes avec gardes, temporaires non journalises et version de chaine (AD-24), migre les lignes existantes, declare une commande annulable seulement si chaque algorithme l'est, et fait refuser par la recette toute ligne qui cite un algorithme de la liste noire reseau ; le genre vector et les sorties layer et file sont livres ici, les genres raster et layout et la sortie table par la premiere primitive qui en a besoin, apres le reordonnancement de l'entree 8 (aujourd'hui 10 pour table, 12 pour raster, 15 pour layout ; la sortie raster d'une commande, d'abord en 25, est une sortie layer d'AD-24)."
 verify = "Tests de l'extension sur les deux series de QGIS : une chaine de deux algorithmes ecrit seulement la sortie nommee par le noyau, un test confronte la table au registre sur l'annulabilite, et la recette echoue sur une ligne de test qui nomme native:filedownloader."
 covers = ["CAP-6", "CAP-14"]
 after = [2]
@@ -104,13 +104,39 @@ risk = "medium"
 # ---- Primitives (E2, E3) : une voie, la table fermee etant partagee ----
 
 [[entry]]
+id = 21
+type = "story"
+title = "Difference de couches (analysis.difference)"
+description = "Ajoute analysis.difference, delegue a native:difference : les entites d'une couche privees de ce qui recouvre une couche de superposition (hors EBC, hors zones humides, parcelles moins un tampon du bati), sortie en couche nouvelle, original intact."
+verify = "Test de l'extension sur fixtures synthetiques : la difference de deux carres qui se recouvrent rend la partie attendue, un recouvrement total rend une couche vide nommee dans le resume ; l'agent compose « les parcelles hors zone N » dans un plan valide."
+covers = ["CAP-14"]
+after = [8]
+hitl = false
+risk = "medium"
+notes = ["Decision: 2026-11-04 — proprietaire : la difference et la surface passent en tete des primitives, juste apres la mesure de depart, parce qu'elles debloquent la densification et les demandes « hors de » ; la mesure de l'entree 8 peut encore les deplacer."]
+references = ["research-taches-sig-des-bureaux-d-etudes-et-analy/research-taches-sig-des-bureaux-d-etudes-et-analy.md", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-24"]
+
+[[entry]]
+id = 22
+type = "story"
+title = "Surface des entites (analysis.area)"
+description = "Ajoute analysis.area, delegue a native:fieldcalculator avec une formule fixe de la ligne de table (jamais ecrite par le modele, AD-23) : un champ de surface plane (area($geometry), dans le systeme projete de la couche, independante de l'ellipsoide du projet pour le rejeu, AD-11) dans l'unite demandee (m2 ou ha) sur une couche nouvelle, dont le resultat nomme le champ et son unite, que la selection numerique existante filtre ensuite (« de plus de 2 500 m2 ») ; le seuil est toujours un parametre ecrit par l'utilisateur."
+verify = "Test de l'extension sur fixtures synthetiques en Lambert-93 : un carre de 100 m de cote donne 10 000 m2 et 1 ha, une couche en degres est refusee par une erreur nommee ; l'agent compose « les parcelles de plus de 2 500 m2 en zone U » dans un plan valide."
+covers = ["CAP-14"]
+after = [21]
+hitl = false
+risk = "medium"
+notes = ["A regler au plan : la selection numerique existante prend une valeur sans unite ; « plus de 2 500 m2 » sur un champ en ha donnerait un plan faux sans signal. Le plan aligne l'unite du champ sur celle de la phrase, ou la selection compare dans l'unite nommee par le resultat."]
+references = ["research-taches-sig-des-bureaux-d-etudes-et-analy/research-taches-sig-des-bureaux-d-etudes-et-analy.md", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-23", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-24", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-11"]
+
+[[entry]]
 id = 9
 type = "story"
 title = "Conversion de format (data.convert)"
 description = "Ajoute data.convert, dont le format de sortie est une enumeration typee dont le noyau deduit l'extension du fichier (AD-10, AD-24)."
 verify = "Test de l'extension : une couche GeoJSON convertie en GeoPackage et en Shapefile ecrit exactement le fichier nomme par le noyau, l'original intact ; l'agent la compose dans un plan valide."
 covers = ["CAP-14"]
-after = [8]
+after = [22]
 hitl = false
 risk = "low"
 references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-24", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-10"]
@@ -140,13 +166,39 @@ risk = "low"
 references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-24", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-27"]
 
 [[entry]]
+id = 23
+type = "story"
+title = "Jointure d'une table a une couche (analysis.join_table)"
+description = "Ajoute analysis.join_table, delegue a native:joinattributestable : rattache a une couche les colonnes d'une table (CSV ou tableur sans geometrie, DVF, donnees INSEE) par un champ commun nomme dans l'inventaire, sortie en couche nouvelle ; ouvrir une table sans geometrie dans le projet fait partie de l'entree si layer.add ne le permet pas encore."
+verify = "Test de l'extension sur fixtures synthetiques : une couche de communes jointe a un CSV par code INSEE recoit les colonnes attendues, les lignes sans correspondance sont comptees dans le resume ; l'agent compose « joins le tableau des prix a la couche des parcelles » dans un plan valide."
+covers = ["CAP-14"]
+after = [11]
+hitl = false
+risk = "medium"
+unknown = "Table sans geometrie, a trancher par le proprietaire avant l'entree : nouveau genre d'entree table dans AD-24 ou couche vecteur sans geometrie, et formats retenus (CSV seul, ou aussi .xlsx, ce qui elargit CAP-14 au-dela du CSV a coordonnees de CAP-9)."
+references = ["research-taches-sig-des-bureaux-d-etudes-et-analy/research-taches-sig-des-bureaux-d-etudes-et-analy.md", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-24"]
+
+[[entry]]
+id = 24
+type = "story"
+title = "Fusion par champ (analysis.dissolve)"
+description = "Ajoute analysis.dissolve, delegue a native:dissolve : regroupe les entites d'une couche par un ou plusieurs champs (par commune, par zone), sortie en couche nouvelle."
+verify = "Test de l'extension sur fixtures synthetiques : quatre parcelles de deux communes fusionnees par code INSEE donnent deux entites dont la surface geometrique egale la somme des parcelles (fixture sans recouvrement), aucun champ n'etant agrege ; l'agent compose « fusionne les parcelles par commune » dans un plan valide."
+covers = ["CAP-14"]
+after = [23]
+hitl = false
+risk = "low"
+notes = ["Decision: 2026-11-04 — native:aggregate n'est pas retenu pour l'instant : il recoupe la fusion (24) et les statistiques par categorie (11)."]
+references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-24"]
+
+[[entry]]
 id = 20
 type = "story"
 title = "Couches raster : ouverture et inventaire d'un MNT"
-description = "Elargit layer.add aux rasters (GeoTIFF), designes par leur identifiant de couche QGIS (AD-9), en reutilisant les MNT synthetiques de /fixtures (entree 4.1) et l'inventaire des rasters de l'entree 4.3 ; raster.zonal_statistics (entree 12) les lit ensuite."
+description = "Elargit layer.add aux rasters (GeoTIFF), en reprenant layer.add tel que l'entree 23 l'aura laisse, designes par leur identifiant de couche QGIS (AD-9), en reutilisant les MNT synthetiques de /fixtures (entree 4.1) et l'inventaire des rasters de l'entree 4.3 ; raster.zonal_statistics (entree 12) les lit ensuite."
 verify = "Test de l'extension : un GeoTIFF synthetique s'ouvre par layer.add, apparait dans project.inventory avec son systeme et ses dimensions, l'original intact ; l'agent compose son ouverture dans un plan valide."
 covers = ["CAP-14"]
-after = [11, "4.3"]
+after = [24, "4.3"]
 hitl = false
 risk = "medium"
 notes = ["Decision: 2026-11-03 — a l'inception de l'epic terrain : reutilise les MNT de recette (4.1) et l'inventaire des rasters (4.3) ; les commandes terrain.* prennent le MNT par chemin relatif au projet, raster.zonal_statistics par id de couche, les deux formes qu'admet AD-9."]
@@ -156,7 +208,7 @@ references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qg
 id = 12
 type = "story"
 title = "Statistiques zonales d'un raster, altitudes d'un MNT par polygone"
-description = "Ajoute raster.zonal_statistics (moyenne, minimum, maximum d'un raster par polygone, MNT compris) et livre le genre raster du geste generique ; le raster se designe par son identifiant de couche et aucun calcul de terrain.* n'est refait."
+description = "Ajoute raster.zonal_statistics (moyenne, minimum, maximum d'un raster par polygone, MNT compris) et livre le genre raster du geste generique ; le raster se designe par son identifiant de couche et aucun calcul de terrain.* n'est refait ; retire le refus NO_RASTER_STATS du generateur et ajoute la famille d'exemples."
 verify = "Test de l'extension sur le MNT synthetique de l'entree 20 : les altitudes par polygone sont exactes, avec unite ; le noyau valide le resume au gabarit ; l'agent la compose dans un plan valide."
 covers = ["CAP-14"]
 after = [20]
@@ -165,13 +217,38 @@ risk = "medium"
 references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-24", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-27", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-9"]
 
 [[entry]]
+id = 25
+type = "story"
+title = "Reclassement et seuil d'un raster (raster.reclassify)"
+description = "Ajoute raster.reclassify, delegue a native:reclassifybytable : des classes de valeurs bornees (« pente de plus de 15 % », « altitude entre 100 et 200 m ») donnees en parametres types, jamais en expression, sortie en raster nouveau ouvert dans le projet ; remplace le refus NO_RASTER_THRESHOLD du generateur."
+verify = "Test de l'extension sur le MNT synthetique de l'entree 20 : un seuil a 15 donne les cellules attendues a 1 et le reste a 0 ; l'agent compose « ou la pente depasse 15 % » (pente puis reclassement) dans un plan valide."
+covers = ["CAP-14"]
+after = [12]
+hitl = false
+risk = "medium"
+unknown = "Enchainer pente puis reclassement, a trancher par le proprietaire avant l'entree : terrain.slope rend un chemin de fichier, AD-24 designe un raster delegue par son id de couche ; raster.reclassify accepte aussi un chemin relatif (AD-9), ou le resultat fournit l'id de la couche ouverte en 4.3, ou le verify se limite a un MNT ouvert par layer.add."
+references = ["research-taches-sig-des-bureaux-d-etudes-et-analy/research-taches-sig-des-bureaux-d-etudes-et-analy.md", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-23", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-24"]
+
+[[entry]]
+id = 26
+type = "story"
+title = "Courbes de niveau d'un MNT (raster.contour)"
+description = "Ajoute raster.contour, delegue a gdal:contour par le cadre de traitement de QGIS : courbes de niveau d'un MNT a l'equidistance ecrite par l'utilisateur (avec unite), sortie en couche de lignes nouvelle portant l'altitude."
+verify = "Test de l'extension sur le MNT synthetique de l'entree 20 : une equidistance de 5 m donne les courbes attendues, chacune avec son altitude, la traduction des parametres verifiee sur QGIS 3.44 et 4.x, et la commande non annoncee si gdal:contour manque (AD-25) ; l'agent compose « genere les courbes de niveau tous les 5 metres » dans un plan valide."
+covers = ["CAP-14"]
+after = [25]
+hitl = false
+risk = "low"
+references = ["research-taches-sig-des-bureaux-d-etudes-et-analy/research-taches-sig-des-bureaux-d-etudes-et-analy.md", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-24", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-25", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-18"]
+
+[[entry]]
 id = 13
 type = "story"
 title = "Plus court chemin sur reseau (network.shortest_path)"
 description = "Ajoute network.shortest_path entre deux points, sur le contrat de reseau de l'entree 6 (sens, vitesse, tolerance en parametres) ; chaque point est une geometrie ponctuelle GeoJSON avec son systeme (AD-8), donnee par le plan ou reprise d'une etape precedente par step:k."
 verify = "Test de l'extension sur un reseau synthetique : le chemin rendu est le plus court attendu, sa longueur et sa duree portent leur unite, et un point trop loin du reseau rend une erreur nommee ; l'agent la compose dans un plan valide."
 covers = ["CAP-14"]
-after = [6, 12]
+after = [6, 26]
 hitl = false
 risk = "medium"
 references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-24", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-28", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-8"]
@@ -221,7 +298,7 @@ id = 17
 type = "story"
 title = "Modele re-eprouve et couverture mesuree sur le catalogue etendu"
 description = "Re-entraine le modele par la chaine reproductible du 5.10 (ou le re-eprouve s'il suffit) sur le catalogue etendu, puis mesure avec le harnais de l'entree 8 la couverture des phrases reelles et le taux de plans conformes."
-verify = "Rapport consigne : au moins 70 % des phrases reelles couvertes, et un taux de plans conformes au moins egal a celui consigne par l'entree 8."
+verify = "Rapport consigne : au moins 70 % des phrases reelles couvertes, et un taux de plans conformes au moins egal a celui consigne par l'entree 8, et la duree d'une phrase longue sur processeur mesuree avec le catalogue complet, sous 30 s."
 covers = ["CAP-14"]
 after = [8, 16, "5.10"]
 hitl = false
@@ -234,7 +311,7 @@ title = "Refactor sweep"
 description = "Nettoyage seulement, dont la portee se fixe au demarrage a partir des plans et des constats de revue reportes pendant l'epic."
 verify = "Tests du noyau et de l'extension verts, cargo fmt et clippy sans avertissement, recette hors ligne verte."
 covers = ["CAP-6", "CAP-14"]
-after = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 20, 12, 13, 14, 15, 16, 17]
+after = [1, 2, 3, 4, 5, 6, 7, 8, 21, 22, 9, 10, 11, 23, 24, 20, 12, 25, 26, 13, 14, 15, 16, 17]
 hitl = false
 risk = "low"
 
