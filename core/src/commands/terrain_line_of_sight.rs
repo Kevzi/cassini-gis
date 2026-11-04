@@ -25,25 +25,25 @@ pub const MAX_PROFILE: usize = 256;
 /// Rayon terrestre moyen, en mètres.
 pub const EARTH_RADIUS: f64 = 6_371_000.0;
 
-fn default_observer_height() -> Height {
+pub(crate) fn default_observer_height() -> Height {
     Height {
         value: 1.6,
         unit: DistanceUnit::M,
     }
 }
 
-fn default_target_height() -> Height {
+pub(crate) fn default_target_height() -> Height {
     Height {
         value: 0.0,
         unit: DistanceUnit::M,
     }
 }
 
-fn default_curvature() -> bool {
+pub(crate) fn default_curvature() -> bool {
     true
 }
 
-fn default_refraction() -> f64 {
+pub(crate) fn default_refraction() -> f64 {
     0.13
 }
 
@@ -90,7 +90,7 @@ fn non_negative<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error>
 }
 
 /// Refuse un coefficient de réfraction hors de [0, 1).
-fn refraction<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
+pub(crate) fn refraction<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
     let v = f64::deserialize(d)?;
     if v.is_finite() && (0.0..1.0).contains(&v) {
         Ok(v)
@@ -173,7 +173,7 @@ fn refusal(code: &str, message: String) -> CommandFailure {
 /// `None` si l'une d'elles est sans donnée. Sur l'axe où le point tombe pile sur un centre, seule
 /// cette cellule compte : la voisine, de poids nul, n'est pas lue. Le point doit être dans
 /// l'emprise ; à moins d'une demi-cellule du bord, il prend la valeur du bord.
-fn bilinear(dem: &Dem, x: f64, y: f64) -> Option<f64> {
+pub(crate) fn bilinear(dem: &Dem, x: f64, y: f64) -> Option<f64> {
     let max_col = f64::from(dem.width - 1);
     let max_row = f64::from(dem.height - 1);
     let fc = ((x - dem.origin_x) / dem.cell_size_x - 0.5).clamp(0.0, max_col);
@@ -191,7 +191,7 @@ fn bilinear(dem: &Dem, x: f64, y: f64) -> Option<f64> {
 }
 
 /// Refuse un point qui n'est pas dans le système du MNT.
-fn check_crs(dem: &Dem, p: &Point, name: &str) -> Result<(), CommandFailure> {
+pub(crate) fn check_crs(dem: &Dem, p: &Point, name: &str) -> Result<(), CommandFailure> {
     if p.epsg == dem.epsg {
         return Ok(());
     }
@@ -205,7 +205,7 @@ fn check_crs(dem: &Dem, p: &Point, name: &str) -> Result<(), CommandFailure> {
 }
 
 /// Refuse un point hors de l'emprise du MNT (le bord est dedans).
-fn check_extent(dem: &Dem, p: &Point, name: &str) -> Result<(), CommandFailure> {
+pub(crate) fn check_extent(dem: &Dem, p: &Point, name: &str) -> Result<(), CommandFailure> {
     let e = dem.extent();
     if (e.min_x..=e.max_x).contains(&p.x) && (e.min_y..=e.max_y).contains(&p.y) {
         return Ok(());
@@ -222,7 +222,7 @@ fn check_extent(dem: &Dem, p: &Point, name: &str) -> Result<(), CommandFailure> 
 /// Altitude d'une extrémité, déjà dans l'emprise : interpolée de façon bilinéaire ; si une
 /// voisine est sans donnée, celle de la cellule qui contient le point. Refusée seulement si
 /// cette cellule-là est sans donnée.
-fn endpoint_elevation(dem: &Dem, p: &Point, name: &str) -> Result<f64, CommandFailure> {
+pub(crate) fn endpoint_elevation(dem: &Dem, p: &Point, name: &str) -> Result<f64, CommandFailure> {
     if let Some(z) = bilinear(dem, p.x, p.y) {
         return Ok(z);
     }
@@ -242,6 +242,114 @@ fn endpoint_elevation(dem: &Dem, p: &Point, name: &str) -> Result<f64, CommandFa
             ),
         )
     })
+}
+
+/// Segment échantillonné de l'observateur à la cible : au plus la plus petite taille de cellule
+/// entre deux échantillons.
+pub(crate) struct Line {
+    o: (f64, f64),
+    dx: f64,
+    dy: f64,
+    /// Distance horizontale de l'observateur à la cible, en mètres.
+    pub distance: f64,
+    /// Nombre d'intervalles entre échantillons (0 si les points sont confondus).
+    pub intervals: u64,
+}
+
+impl Line {
+    pub(crate) fn new(dem: &Dem, o: &Point, t: &Point) -> Line {
+        let (dx, dy) = (t.x - o.x, t.y - o.y);
+        // Racine carrée IEEE, correctement arrondie partout : `hypot` dépend de la libm de la
+        // plateforme, et un journal écrit sous Windows doit se rejouer à l'identique sous Linux.
+        let distance = (dx * dx + dy * dy).sqrt();
+        let step = dem.cell_size_x.min(dem.cell_size_y);
+        let intervals = if distance > 0.0 {
+            ((distance / step).ceil() as u64).max(1)
+        } else {
+            0
+        };
+        Line {
+            o: (o.x, o.y),
+            dx,
+            dy,
+            distance,
+            intervals,
+        }
+    }
+
+    /// Échantillon `i` sur `n` : distance à l'observateur, x, y.
+    pub(crate) fn at(&self, i: u64, n: u64) -> (f64, f64, f64) {
+        if n == 0 {
+            return (0.0, self.o.0, self.o.1);
+        }
+        // Multiplier avant de diviser : un échantillon tombe pile sur un centre quand il le doit.
+        let (i, n) = (i as f64, n as f64);
+        (
+            self.distance * i / n,
+            self.o.0 + self.dx * i / n,
+            self.o.1 + self.dy * i / n,
+        )
+    }
+}
+
+/// Verdict du calcul partagé par `terrain.line_of_sight` et `terrain.viewshed`.
+pub(crate) struct Sight {
+    /// Premier obstacle : distance, x, y. Absent si la cible est visible.
+    pub obstruction: Option<(f64, f64, f64)>,
+    /// Échantillons sans altitude parcourus (tous, sauf arrêt au premier obstacle).
+    pub nodata_samples: u64,
+}
+
+/// Le calcul de visibilité, unique pour les deux commandes : c'est ce qui garantit qu'une
+/// cellule du champ de vision a le verdict de la ligne de vue vers son centre. `eye` est
+/// l'altitude de l'œil (sol + hauteur), `z_tgt` celle du sol de la cible. Les échantillons
+/// intermédiaires sont interpolés de façon bilinéaire et abaissés de la chute due à la
+/// courbure corrigée de la réfraction ; un échantillon sans altitude ne masque rien. Avec
+/// `stop_at_first`, le parcours s'arrête au premier obstacle, sans changer le verdict.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn sight(
+    dem: &Dem,
+    line: &Line,
+    eye: f64,
+    z_tgt: f64,
+    target_height: f64,
+    curvature: bool,
+    refraction: f64,
+    stop_at_first: bool,
+) -> Sight {
+    let (distance, intervals) = (line.distance, line.intervals);
+    let drop = |d: f64| {
+        if curvature {
+            (1.0 - refraction) * d * d / (2.0 * EARTH_RADIUS)
+        } else {
+            0.0
+        }
+    };
+    let aim = z_tgt - drop(distance) + target_height;
+    let mut obstruction = None;
+    let mut nodata_samples = 0u64;
+    // Les extrémités ont leur altitude : seuls les échantillons intermédiaires sont lus.
+    for i in 1..intervals {
+        let (d, x, y) = line.at(i, intervals);
+        let Some(z) = bilinear(dem, x, y) else {
+            nodata_samples += 1;
+            continue;
+        };
+        if obstruction.is_none() {
+            let ground = z - drop(d);
+            let sightline = eye + (aim - eye) * d / distance;
+            if ground > sightline {
+                obstruction = Some((d, x, y));
+                if stop_at_first {
+                    break;
+                }
+            }
+        }
+    }
+    Sight {
+        obstruction,
+        nodata_samples,
+    }
 }
 
 /// Ligne de vue entre deux points sur un MNT déjà ouvert. Fonction pure et déterministe :
@@ -265,58 +373,19 @@ pub fn line_of_sight(
     let observer_height = params.observer_height.metres();
     let target_height = params.target_height.metres();
 
-    let (dx, dy) = (t.x - o.x, t.y - o.y);
-    // Racine carrée IEEE, correctement arrondie partout : `hypot` dépend de la libm de la
-    // plateforme, et un journal écrit sous Windows doit se rejouer à l'identique sous Linux.
-    let distance = (dx * dx + dy * dy).sqrt();
-    let step = dem.cell_size_x.min(dem.cell_size_y);
-    // Nombre d'intervalles : au plus la plus petite taille de cellule entre deux échantillons.
-    let intervals = if distance > 0.0 {
-        ((distance / step).ceil() as u64).max(1)
-    } else {
-        0
-    };
-    let drop = |d: f64| {
-        if params.curvature {
-            (1.0 - params.refraction) * d * d / (2.0 * EARTH_RADIUS)
-        } else {
-            0.0
-        }
-    };
-    let at = |i: u64, n: u64| -> (f64, f64, f64) {
-        if n == 0 {
-            return (0.0, o.x, o.y);
-        }
-        // Multiplier avant de diviser : un échantillon tombe pile sur un centre quand il le doit.
-        let (i, n) = (i as f64, n as f64);
-        (distance * i / n, o.x + dx * i / n, o.y + dy * i / n)
-    };
-
-    let eye = z_obs + observer_height;
-    let aim = z_tgt - drop(distance) + target_height;
-    let mut obstruction = None;
-    let mut nodata_samples = 0u64;
-    for i in 0..=intervals {
-        let (d, x, y) = at(i, intervals);
-        let z = if i == 0 {
-            Some(z_obs)
-        } else if i == intervals {
-            Some(z_tgt)
-        } else {
-            bilinear(dem, x, y)
-        };
-        let Some(z) = z else {
-            nodata_samples += 1;
-            continue;
-        };
-        if obstruction.is_none() && i > 0 && i < intervals {
-            let ground = z - drop(d);
-            let line = eye + (aim - eye) * d / distance;
-            if ground > line {
-                obstruction = Some((d, x, y));
-            }
-        }
-    }
+    let line = Line::new(dem, o, t);
+    let seen = sight(
+        dem,
+        &line,
+        z_obs + observer_height,
+        z_tgt,
+        target_height,
+        params.curvature,
+        params.refraction,
+        false,
+    );
+    let (distance, intervals) = (line.distance, line.intervals);
+    let (obstruction, nodata_samples) = (seen.obstruction, seen.nodata_samples);
 
     // Profil : tous les échantillons s'ils tiennent dans la borne, sinon 256 échantillons
     // également espacés, premier et dernier compris, interpolés aux mêmes règles.
@@ -327,7 +396,7 @@ pub fn line_of_sight(
     };
     let profile = (0..=shown)
         .map(|i| {
-            let (d, x, y) = at(i, shown);
+            let (d, x, y) = line.at(i, shown);
             let elevation = if i == 0 {
                 Some(z_obs)
             } else if i == shown {

@@ -876,6 +876,49 @@ mod tests {
     }
 
     #[test]
+    fn terrain_viewshed_runs_without_qgis_and_replays_identically() {
+        let (dir, project) = temp_project();
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/mnt-colline-2154.tif");
+        std::fs::create_dir_all(dir.join("dem")).unwrap();
+        std::fs::copy(&fixture, dir.join("dem/colline.tif")).unwrap();
+        let (code, out, err) = call(&[
+            "run",
+            "terrain.viewshed",
+            r#"{"dem":"dem/colline.tif","observer":{"x":652030,"y":6850250,"epsg":2154},"observer_height":{"value":2,"unit":"m"},"radius":{"value":1,"unit":"km"}}"#,
+            "--project",
+            &project,
+        ]);
+        assert_eq!((code, err.as_str()), (0, ""));
+        let result: Value = serde_json::from_str(out.trim()).unwrap();
+        let file = Path::new(result["file"].as_str().unwrap());
+        assert!(file.is_absolute(), "{}", file.display());
+        assert_eq!(file, dir.join("p.cassini/1-terrain.viewshed.tif"));
+        assert_eq!(result["nodata_cells"], 0);
+        assert_eq!(
+            result["visible_cells"].as_u64().unwrap() + result["hidden_cells"].as_u64().unwrap(),
+            2500
+        );
+        let journal = std::fs::read_to_string(dir.join("p.cassini/journal.jsonl")).unwrap();
+        let line: Value = serde_json::from_str(journal.trim()).unwrap();
+        assert_eq!(line["result"]["file"], "1-terrain.viewshed.tif");
+        assert_eq!(line["params"]["dem"], "dem/colline.tif");
+
+        let written = dir.join("p.cassini/1-terrain.viewshed.tif");
+        let grid = cassini_core::dem::Dem::open(&written).unwrap();
+        assert_eq!(grid.value(3, 25), Some(1.0));
+        assert_eq!(grid.value(40, 25), Some(0.0));
+        let before = std::fs::read(&written).unwrap();
+
+        let (code, out, err) = call(&["replay", &project]);
+        assert_eq!((code, err.as_str()), (0, ""));
+        assert_eq!(out.trim(), r#"{"steps":1,"identical":true}"#);
+        let replayed = dir.join("p.cassini/replay/1-terrain.viewshed.tif");
+        assert_eq!(std::fs::read(&replayed).unwrap(), before);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn replay_without_a_journal_is_refused() {
         let (dir, project) = temp_project();
         let (code, out, err) = call(&["replay", &project]);
