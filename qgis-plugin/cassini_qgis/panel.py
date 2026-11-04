@@ -30,7 +30,7 @@ from qgis.PyQt.QtWidgets import (
     QWidget,
 )
 
-from . import agentview, client, external, form, models, runlog, summary, texts
+from . import agentview, client, external, form, models, raster_output, runlog, summary, texts
 
 
 class LayerCombo(QComboBox):
@@ -643,6 +643,7 @@ class CassiniPanel(QWidget):
             self._close_plan_entry(runlog.DONE)
             self.last = agentview.outcome(runlog.DONE, payload, agent)
             agent.done(payload.get("steps"))
+            self._open_core_rasters(kind, payload)
             self._keep_plan_results()
             self.last["steps"] = list(agent.steps)
             self.last["refs"] = self._plan_refs
@@ -684,6 +685,7 @@ class CassiniPanel(QWidget):
             self.external, self.log, kind, payload, self.catalogue, self.lang,
             time.strftime("%H:%M"),
         )
+        self._open_core_rasters(kind, payload)
         if out["resend_ask"]:  # case changée avant la réponse du noyau
             self._actions.set_external(True, self.external.ask)
         if out["announce"]:
@@ -718,6 +720,7 @@ class CassiniPanel(QWidget):
             if entry is not None:
                 entry.result = payload.get("result")
             self.last = {"kind": runlog.DONE, "params": entry.params if entry else None, **payload}
+            self._open_core_rasters(kind, payload)
             _announce(self.result_text, self.t("live_done"))
         elif kind == client.RUN_CANCELLED:
             self.running = False
@@ -732,6 +735,11 @@ class CassiniPanel(QWidget):
             self.last = {"kind": runlog.ERROR, **payload}
             _announce(self.result_text, self.t("live_error"))
         self.render()
+
+    def _open_core_rasters(self, kind, payload):
+        """Ouvre dans le projet les rasters écrits par le noyau (ticket 4.3) ; ne lève jamais."""
+        outcomes = raster_output.open_rasters(raster_output.to_open(kind, payload, self.catalogue))
+        raster_output.report(self.log, outcomes, self.lang, time.strftime("%H:%M"))
 
     # -- affichage -----------------------------------------------------
     def render(self):

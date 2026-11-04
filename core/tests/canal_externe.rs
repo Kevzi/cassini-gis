@@ -1443,16 +1443,45 @@ fn absolute_paths_in_a_successful_result_do_not_reach_the_relay() {
     );
     let finished = s.expect_call("finished");
     let r = relay.recv();
-    for text in [finished["result"].to_string(), r["result"].to_string()] {
-        assert!(!text.contains("cassini-canal-externe"), "{text}");
-        for absolute in ["/ailleurs", "D:\\\\SIG", "SIG"] {
-            assert!(!text.contains(absolute), "{absolute} : {text}");
-        }
+    let text = r["result"].to_string();
+    assert!(!text.contains("cassini-canal-externe"), "{text}");
+    for absolute in ["/ailleurs", "D:\\\\SIG", "SIG"] {
+        assert!(!text.contains(absolute), "{absolute} : {text}");
     }
     assert_eq!(r["result"]["name"], "donnees/x.gpkg");
     assert_eq!(r["result"]["source"], "y.gpkg");
     assert_eq!(r["result"]["windows"], "cadastre.gpkg");
-    assert_eq!(r["result"], finished["result"]);
+    // L'extension, elle, reçoit le résultat tel quel dans `external.call` (AD-9, 2026-11-04).
+    assert_eq!(finished["result"]["name"], inside.as_str());
+    assert_eq!(finished["result"]["work"], work.as_str());
+}
+
+#[test]
+fn a_slope_from_the_relay_is_announced_absolute_and_answered_relative() {
+    let name = unique_name("pente");
+    let mut s = Session::start(&name);
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../fixtures/mnt-plan-incline-2154.tif");
+    std::fs::create_dir_all(s.dir.join("dem")).unwrap();
+    std::fs::copy(&fixture, s.dir.join("dem/plan-incline.tif")).unwrap();
+    s.hello(&[]);
+    s.switch_on();
+    let mut relay = Relay::attached(&name);
+    relay.run(
+        3,
+        "terrain.slope",
+        json!({"dem": "dem/plan-incline.tif", "unit": "degrees"}),
+    );
+    s.expect_call("started");
+    let finished = s.expect_call("finished");
+    let file = std::path::Path::new(finished["result"]["file"].as_str().unwrap()).to_path_buf();
+    assert!(file.is_absolute(), "{finished}");
+    assert_eq!(file, s.dir.join("p.cassini").join("1-terrain.slope.tif"));
+    assert!(file.is_file());
+    let r = relay.recv();
+    assert_eq!(r["result"]["file"], "1-terrain.slope.tif", "{r}");
+    assert!(!r.to_string().contains("cassini-canal-externe"), "{r}");
+    assert_eq!(s.journal()[0]["result"]["file"], "1-terrain.slope.tif");
 }
 
 #[test]

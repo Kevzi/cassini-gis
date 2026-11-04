@@ -622,3 +622,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
   summary: Le modèle de 5.39 refuse un export à l'échelle qui ne dit pas « PDF » (« Exporte la carte au 1:25 000. ») : ajouter au générateur des tournures d'export à l'échelle sans ce mot, apprises au prochain ré-entraînement groupé.
   evidence: essai `echelle_utm_reel` E01 et démo QGIS du 2026-11-04 (refus « seulement une page A4 paysage ») ; toutes les tournures de `export_pdf_scale` (`export_pdf_scale` dans `training/src/families.rs`) contiennent « PDF », et `refus_hors_registre` apprend des refus de format. Décision du propriétaire : 5.39 clos, ticket à part.
   status: ticket, 2026-11-04, entrée 5.40 (`epic-agent-et-mcp/tickets.toml`)
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-raster-et-terrain/story-les-sorties-raster-du-noyau-s-ouvrent-dans-le-projet-qgis-plan.md`
+  summary: Le générateur d'exemples doit montrer des sources raster relatives (`dem/mnt.tif`, `../donnees/mnt.tif`) dans l'inventaire et leur recopie dans `dem`, pour le ré-entraînement groupé.
+  evidence: Depuis 4.3 l'inventaire donne aux rasters un chemin relatif au projet, mais le modèle ajusté n'a vu que des noms de fichier seuls (fixtures de `core/src/agent_inventory.rs`) ; 4.3 interdit d'apprendre quoi que ce soit au modèle.

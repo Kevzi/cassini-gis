@@ -7,7 +7,9 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "cassini_qgis"))
 
+import client  # noqa: E402
 import form  # noqa: E402
+import raster_output  # noqa: E402
 import runlog  # noqa: E402
 import texts  # noqa: E402
 
@@ -25,6 +27,39 @@ class ResultFolderTest(unittest.TestCase):
     def test_no_folder_without_an_absolute_file(self):
         for result in (None, {}, {"file": 3}, {"file": "rel.pdf"}, {"layer_id": "x"}, "texte"):
             self.assertIsNone(runlog.result_folder(result))
+
+
+class CoreRasterEventsTest(unittest.TestCase):
+    """Les trois branchements du panneau (ticket 4.3) : ce que chaque événement porte."""
+
+    def test_run_done_plan_done_and_external_call_finished(self):
+        slope = {"file": "/p/p.cassini/1-terrain.slope.tif"}
+        self.assertEqual(
+            raster_output.outputs_of(client.RUN_DONE, {"command": "terrain.slope", "result": slope}),
+            [("terrain.slope", slope)],
+        )
+        steps = [
+            {"step": 1, "command": "analysis.buffer", "result": {"layer_id": "b"}},
+            {"step": 2, "command": "terrain.slope", "result": slope},
+        ]
+        self.assertEqual(
+            raster_output.outputs_of(client.PLAN_DONE, {"steps": steps}),
+            [("analysis.buffer", {"layer_id": "b"}), ("terrain.slope", slope)],
+        )
+        finished = {"call_id": "external-1", "command": "terrain.slope", "result": slope, "error": None}
+        self.assertEqual(
+            raster_output.outputs_of(client.EXTERNAL_CALL_FINISHED, finished),
+            [("terrain.slope", slope)],
+        )
+
+    def test_other_events_and_failures_carry_nothing(self):
+        failed = {"command": "terrain.slope", "result": None, "error": {"code": "x"}}
+        self.assertEqual(raster_output.outputs_of(client.EXTERNAL_CALL_FINISHED, failed), [])
+        for kind in (client.RUN_FAILED, client.RUN_CANCELLED, client.PLAN_EXEC_FAILED,
+                     client.EXTERNAL_CALL_STARTED):
+            self.assertEqual(raster_output.outputs_of(kind, {"command": "terrain.slope"}), [])
+        self.assertEqual(raster_output.outputs_of(client.PLAN_DONE, {"steps": None}), [])
+        self.assertEqual(raster_output.outputs_of(client.RUN_DONE, None), [])
 
 
 class RedactTest(unittest.TestCase):

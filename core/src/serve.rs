@@ -3142,7 +3142,9 @@ mod tests {
     }
 
     #[test]
-    fn a_plan_result_makes_an_output_path_relative_to_the_work_folder() {
+    fn a_plan_result_keeps_the_absolute_output_path_for_the_extension() {
+        // Décision du 2026-11-04 (AD-9) : la réponse de `plan.execute` porte les chemins de
+        // sortie absolus, comme `command.run` ; le journal les garde relatifs.
         let plan =
             json!({"kind":"calls","calls":[{"command":"test.fixed","params":{"layer":"x"}}]});
         let mut c = Client::start_with(CANCEL_GRACE, composer(plan));
@@ -3156,11 +3158,39 @@ mod tests {
         let done = c.recv();
         assert_eq!(
             done["result"]["steps"][0]["result"],
-            json!({"ok": true, "file": "1-carte.pdf"})
+            json!({"ok": true, "file": file})
         );
-        let text = done.to_string();
-        let work_text = work.to_string_lossy();
-        assert!(!text.contains(&*work_text) && !text.contains(&work_text.replace('\\', "/")));
+        assert_eq!(c.journal()[0]["result"]["file"], "1-carte.pdf");
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn a_slope_in_a_plan_returns_its_absolute_existing_file() {
+        let plan = json!({"kind":"calls","calls":[
+            {"command":"test.fixed","params":{"layer":"x"}},
+            {"command":"terrain.slope","params":{"dem":"dem/plan-incline.tif","unit":"degrees"}}]});
+        let mut c = Client::start_with(CANCEL_GRACE, composer(plan));
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/mnt-plan-incline-2154.tif");
+        std::fs::create_dir_all(c.dir.join("dem")).unwrap();
+        std::fs::copy(&fixture, c.dir.join("dem/plan-incline.tif")).unwrap();
+        c.hello_with(&ALL);
+        assert_eq!(c.propose(2)["result"]["plan_id"], "plan-1");
+        c.execute(3, "plan-1");
+        let order = c.expect_step("plan-1", 1, "test.fixed");
+        c.send(reply(&order["id"], json!({"ok": true})));
+        let notice = c.recv();
+        assert_eq!(notice["method"], "plan.step", "{notice}");
+        assert_eq!(notice["params"]["command"], "terrain.slope");
+        let done = c.recv();
+        let step = &done["result"]["steps"][1];
+        assert_eq!(step["command"], "terrain.slope", "{done}");
+        let file = Path::new(step["result"]["file"].as_str().unwrap());
+        assert!(file.is_absolute(), "{}", file.display());
+        assert_eq!(file, c.dir.join("p.cassini").join("2-terrain.slope.tif"));
+        assert!(file.is_file());
+        let journal = c.journal();
+        assert_eq!(journal[1]["result"]["file"], "2-terrain.slope.tif");
         c.close().1.unwrap();
     }
 

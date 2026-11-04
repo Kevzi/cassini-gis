@@ -74,7 +74,7 @@ pub const INVENTORY_LOW_CHARS: usize = 7_000;
 /// modification : une couche dont la source porte ce nom est une couche de résultat.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkFile {
-    /// Nom du fichier, sans dossier (la forme de `source` dans l'inventaire).
+    /// Nom du fichier, sans dossier (le dernier segment de `source` dans l'inventaire).
     pub name: String,
     pub modified: SystemTime,
 }
@@ -496,10 +496,15 @@ fn step_number(name: &str) -> Option<u64> {
 }
 
 /// Date et nom du fichier d'une couche de résultat ; `None` pour une couche de l'utilisateur.
+///
+/// Le lien passe par le nom du fichier, dernier segment de `source` : celle d'un vecteur est un
+/// nom seul, celle d'un raster un chemin relatif au projet (`p.cassini/1-terrain.slope.tif`,
+/// ticket 4.3).
 fn result_date<'a>(layer: &'a Value, work_files: &[WorkFile]) -> Option<(SystemTime, &'a str)> {
     let source = layer.get("source").and_then(Value::as_str)?;
-    let file = work_files.iter().find(|f| f.name == source)?;
-    Some((file.modified, source))
+    let name = source.rsplit('/').next().unwrap_or(source);
+    let file = work_files.iter().find(|f| f.name == name)?;
+    Some((file.modified, name))
 }
 
 /// L'inventaire de `project.inventory` dans la forme de l'entraînement.
@@ -1314,6 +1319,32 @@ mod tests {
                 assert!(field.get("values").is_none(), "{field}");
             }
         }
+    }
+
+    #[test]
+    fn a_raster_result_is_known_by_the_file_name_of_its_relative_source() {
+        // Ticket 4.3 : la source d'un raster est un chemin relatif au projet ; le dernier
+        // segment le relie au fichier de travail. Un raster de l'utilisateur n'est jamais retiré.
+        let files = [WorkFile {
+            name: "1-terrain.slope.tif".to_string(),
+            modified: UNIX_EPOCH + Duration::from_secs(5),
+        }];
+        let inventory = json!({"project": {}, "unloaded_files": [], "layers": [
+            {"layer_id": "pente", "kind": "raster", "source": "p.cassini/1-terrain.slope.tif",
+             "fields": [{"name": "v", "values": ["a"]}]},
+            {"layer_id": "mnt", "kind": "raster", "source": "dem/mnt.tif",
+             "fields": [{"name": "v", "values": ["a"]}]}]});
+        let (ordered, users) = stable_order(inventory.clone(), &files);
+        assert_eq!(users, 1);
+        assert_eq!(ids(&ordered), ["mnt", "pente"]);
+        let hidden = set(&["1-terrain.slope.tif", "mnt.tif"]);
+        assert_eq!(
+            ids(&without_intermediates(inventory.clone(), &files, &hidden)),
+            ["mnt"]
+        );
+        let bare = results_without_values(inventory, &files);
+        assert!(bare["layers"][0]["fields"][0].get("values").is_none());
+        assert_eq!(bare["layers"][1]["fields"][0]["values"], json!(["a"]));
     }
 
     #[test]
