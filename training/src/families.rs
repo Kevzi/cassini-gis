@@ -1557,12 +1557,20 @@ fn export_pdf_scale(rng: &mut Rng) -> Option<Example> {
         } else {
             "Carte du projet".to_string()
         };
-        let head = match rng.below(5) {
+        // 5.40 : une demande à l'échelle sans le mot « PDF » est un export, jamais un refus de
+        // format (ceux-là nomment un papier ou une orientation). Jamais la tête exacte
+        // « Exporte la carte {at} », phrase E01 d'`echelle_utm_reel`.
+        let head = match rng.below(10) {
             0 => format!("Exporte la carte en PDF {at}"),
             1 => format!("Sors la carte {at} en PDF"),
             2 => format!("Fais-moi un PDF de la carte {at}"),
             3 => format!("Produis la carte {at} au format PDF"),
-            _ => format!("Génère un PDF de la carte {at}"),
+            4 => format!("Génère un PDF de la carte {at}"),
+            5 => format!("Imprime la carte {at}"),
+            6 => format!("Sors-moi la carte {at}"),
+            7 => format!("Exporte-moi la carte {at}"),
+            8 => format!("Fais une mise en page de la carte {at}"),
+            _ => format!("Imprime-moi la carte du projet {at}"),
         };
         let body = if titled {
             match rng.below(2) {
@@ -1597,10 +1605,13 @@ fn export_pdf_scale(rng: &mut Rng) -> Option<Example> {
             title,
         )
     } else {
-        let clause = match rng.below(3) {
+        let clause = match rng.below(5) {
             0 => format!(" et sors-moi la carte en PDF {at}"),
             1 => format!(", puis exporte la carte {at} en PDF"),
-            _ => format!(" et fais-en une carte en PDF {at}"),
+            2 => format!(" et fais-en une carte en PDF {at}"),
+            // 5.40 : sans le mot « PDF ».
+            3 => format!(" et imprime la carte {at}"),
+            _ => format!(", puis sors la carte {at}"),
         };
         (clause, d.title())
     };
