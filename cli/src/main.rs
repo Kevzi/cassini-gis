@@ -843,6 +843,39 @@ mod tests {
     }
 
     #[test]
+    fn terrain_line_of_sight_runs_without_qgis_and_replays_identically() {
+        let (dir, project) = temp_project();
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/mnt-colline-2154.tif");
+        std::fs::create_dir_all(dir.join("dem")).unwrap();
+        std::fs::copy(&fixture, dir.join("dem/colline.tif")).unwrap();
+        let (code, out, err) = call(&[
+            "run",
+            "terrain.line_of_sight",
+            r#"{"dem":"dem/colline.tif","observer":{"x":652030,"y":6850250,"epsg":2154},"target":{"x":652470,"y":6850250,"epsg":2154},"observer_height":{"value":60,"unit":"m"},"target_height":{"value":0.06,"unit":"km"}}"#,
+            "--project",
+            &project,
+        ]);
+        assert_eq!((code, err.as_str()), (0, ""));
+        let result: Value = serde_json::from_str(out.trim()).unwrap();
+        assert_eq!(result["visible"], false);
+        assert_eq!(result["obstruction"]["epsg"], 2154);
+        assert_eq!(result["profile"].as_array().unwrap().len(), 45);
+        // Le journal garde le MNT relatif au projet ; le résultat, profil compris, dépasse le
+        // plafond du journal et y est résumé par son empreinte, que le rejeu compare.
+        let journal = std::fs::read_to_string(dir.join("p.cassini/journal.jsonl")).unwrap();
+        let line: Value = serde_json::from_str(journal.trim()).unwrap();
+        assert_eq!(line["params"]["dem"], "dem/colline.tif");
+        assert_eq!(line["result"]["truncated"], true);
+        assert!(line["result"]["fingerprint"].is_string());
+
+        let (code, out, err) = call(&["replay", &project]);
+        assert_eq!((code, err.as_str()), (0, ""));
+        assert_eq!(out.trim(), r#"{"steps":1,"identical":true}"#);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn replay_without_a_journal_is_refused() {
         let (dir, project) = temp_project();
         let (code, out, err) = call(&["replay", &project]);
