@@ -1065,3 +1065,81 @@ prompt court), RTX 3070 Ti, paquet `--features gpu`.
   `{"steps": 5, "identical": true}`, journal inchangé octet pour octet. Le rejeu se passe de l'IA.
 
 Durées sur processeur de la même révision : `docs/mesure-duree-par-phrase.md`, section du ticket 5.9.
+
+## Ré-entraînement de 5.39 : point en UTM et échelle de l'export PDF
+
+Le générateur de 5.37 (famille `isochrone_utm`) et de 5.38 (famille `export_pdf_scale`) a été
+entraîné par la commande unique, sans autre changement : commit `06d4608` (arbre propre),
+8 000 exemples, même base (`Qwen/Qwen3.5-4B` @ `851bf6e`), même méthode, même révision de
+llama.cpp (`d812350`), sortie `~/cassini-entrainement/5-39`.
+
+### Entraînement
+
+| Mesure | Valeur |
+|---|---|
+| Exemples | 8 000 d'entraînement, 300 de validation, aucun écarté car trop long |
+| Jetons par séquence | médiane 745, maximum 1 499 |
+| Perte finale | 0,0062 (500 pas) |
+| Validation (graine 2, glouton) | 296 / 300 : plans 234 / 238, questions 33 / 33, refus 29 / 29 |
+| Durée totale | 316 min, dont 48 min de validation (RTX 3070 Ti, WSL) |
+| Essai `llama-completion` | base + adaptateur et fusionné rendent le plan attendu |
+| Modèle fusionné | `cassini-composition-4b-Q4_K_M.gguf`, SHA-256 `b6fc49d029e258e47a916a0b89358ef046fb6453652564078085c36c03d2be37` |
+
+### Parité des découpeurs
+
+`parite_decoupeurs.py` : **300 / 300**, 0 écart (205 140 jetons).
+
+### Essais réels (GPU, modèle fusionné, prompt court)
+
+`cargo test -p cassini-ai --release --features cuda --test plan_reel --test question_reel
+--test ecart_reel --test echelle_utm_reel -- --ignored`, `CASSINI_TEST_MODEL` = la déclaration
+`cassini-composition-4b.modele.json` de 5.39.
+
+| Essai | Barre | 5.17 | 5.39 |
+|---|---|---|---|
+| `plan_reel` | ≥ 24 / 25 | 25 / 25 | **25 / 25**, 0 question, 0 du garde-fou |
+| `question_reel` | ≥ 11 / 12 | 12 / 12 | **12 / 12**, 0 du garde-fou |
+| `ecart_reel` | ≥ 32 / 40 | 33 / 40 | **34 / 40** (plans 20 / 26, questions 8 / 8, refus 6 / 6), 187 s |
+| `echelle_utm_reel` (nouveau) | ≥ 7 / 8 | — | **7 / 8** |
+
+Écarts du jeu tenu à l'écart : H08 et H23 (une question au lieu d'un plan), H17, H18, H19 (une
+étape de moins), H22 (une étape de plus). H13 et H20 deviennent justes ; H23 recule. Une
+phrase passée par la redemande (le second essai après un plan rejeté), sans être sauvée.
+
+`echelle_utm_reel` : les trois isochrones en UTM (31N à pied et en voiture, 32N) et quatre
+exports à l'échelle (« 1/25000 », « 25 000e », « 1:50k », et « … en PDF au 1:10 000 » au bout
+d'une sélection) rendent le plan attendu. **E01, « Exporte la carte au 1:25 000. », est
+refusé** (« L'export PDF du catalogue produit seulement une page A4 paysage. »). Cause : toutes
+les tournures de `export_pdf_scale` contiennent le mot « PDF » ; une demande d'export à
+l'échelle qui ne le dit pas ressemble aux refus de format (A3) appris par `refus_hors_registre`.
+
+### Installation
+
+Dossier des modèles du poste : le modèle de 5.39 sous la déclaration retenue par le panneau
+(`cassini-composition-4b.modele.json`, lien dur vers `ajuste-5-39`) ; celui de 5.17 gardé sous
+`cassini-composition-4b-5-17` (GGUF et déclaration). `cassini run model.list` voit les quatre
+modèles du dossier : Qwen3.5-9B, les ajustés de 5.15 et de 5.17, et celui de 5.39.
+
+### Démo dans QGIS
+
+Le 2026-11-04, sonde enchaînée sur une copie du projet réel (`projet-sonde-5-39.qgz`), noyau
+installé, déclaration `cassini-composition-4b.modele.json` :
+
+| Phrase | Résultat |
+|---|---|
+| phrase de démo de `CLAUDE.md` | plan de 5 étapes (sélection `typezone = U`, tampon 500 m, deux intersections, PDF titré), exécuté, PDF écrit ; 20,7 s |
+| « Exporte la carte au 1:25 000. » | **refus** du modèle, comme E01 |
+| « Calcule la zone atteignable en 10 minutes à pied depuis le point 456419 / 5397604 (UTM 31N). » | `analysis.isochrone` à `epsg` 32631, exécutée ; 5,9 s |
+| rejeu du journal | `{"steps": 6, "identical": true}` |
+
+Seconde sonde, sur une copie neuve (`projet-sonde-5-39b.qgz`), pour voir un export à l'échelle
+au bout de la chaîne : « Sors-moi la carte en PDF au 1/25000. » rend `layout.export_pdf` à
+`scale: 25000` (5,0 s), le PDF (1,9 Mo) est écrit, le centre de la vue est journalisé (clé
+`replay`) et le rejeu rend `{"steps": 1, "identical": true}`.
+
+### Bilan
+
+Les quatre barres sont tenues ; la démo manque la phrase sans « PDF ». Décision du propriétaire
+(2026-11-04) : garder le modèle de 5.39 et clore le ticket ; les tournures d'export à l'échelle
+sans le mot « PDF » vont au générateur dans un ticket à part, apprises au prochain
+ré-entraînement groupé (`deferred-work.md`).

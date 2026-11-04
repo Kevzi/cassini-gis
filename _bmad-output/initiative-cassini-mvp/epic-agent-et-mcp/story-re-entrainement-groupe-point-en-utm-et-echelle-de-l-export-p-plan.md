@@ -3,14 +3,14 @@ title: 'Ré-entraînement groupé : point en UTM et échelle de l''export PDF'
 type: 'feature'
 ticket: '39'
 created: '2026-11-03'
-status: 'in-progress'
+status: 'built'
 baseline_revision: '21eaf272805b8d48b27feac54d4797cd379a39e7'
 route: 'full'
 route_source: 'auto'
 risk: 'high'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'thorough'
+review_source: 'pinned'
+lenses_ran: ['blind-hunter', 'edge-case-hunter', 'verification-gap', 'intent-alignment']
 review_loop_iteration: 0
 context: []
 ---
@@ -55,11 +55,11 @@ context: []
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `ai/tests/echelle_utm_reel.rs` -- nouvel essai réel : 8 phrases (5 à l'échelle, dont une au bout d'une recherche, toutes les formes de la matrice ; 3 isochrones en UTM 31N ou 32N), seuil 7/8 -- mesure ce que 37 et 38 ont appris
-- [ ] (hitl, feu vert du propriétaire) entraînement par la commande unique vers `~/cassini-entrainement/5-39` -- le modèle
-- [ ] parité des découpeurs ; installation (ancien gardé en `-5-17`) ; `plan_reel`, `question_reel`, `ecart_reel`, `echelle_utm_reel` sur GPU -- les barres
-- [ ] démo dans QGIS (phrase de démo, « Exporte la carte au 1:25 000 », isochrone UTM) puis rejeu -- le produit
-- [ ] `docs/entrainement-du-modele.md` -- section « Ré-entraînement de 5.39 » sur le patron de 5.17, et lignes de famille déjà là -- la trace
+- [x] `ai/tests/echelle_utm_reel.rs` -- nouvel essai réel : 8 phrases (5 à l'échelle, dont une au bout d'une recherche, toutes les formes de la matrice ; 3 isochrones en UTM 31N ou 32N), seuil 7/8 -- mesure ce que 37 et 38 ont appris
+- [x] (hitl, feu vert du propriétaire) entraînement par la commande unique vers `~/cassini-entrainement/5-39` -- le modèle
+- [x] parité des découpeurs ; installation (ancien gardé en `-5-17`) ; `plan_reel`, `question_reel`, `ecart_reel`, `echelle_utm_reel` sur GPU -- les barres
+- [x] démo dans QGIS (phrase de démo, « Exporte la carte au 1:25 000 », isochrone UTM) puis rejeu -- le produit
+- [x] `docs/entrainement-du-modele.md` -- section « Ré-entraînement de 5.39 » sur le patron de 5.17, et lignes de famille déjà là -- la trace
 
 **Acceptance Criteria:**
 - Given le modèle entraîné et installé, when tournent les essais réels sur GPU, then les quatre barres sont tenues et chaque score est consigné.
@@ -67,9 +67,33 @@ context: []
 
 ## Implementation Notes
 
+- Feu vert GPU du propriétaire le 2026-11-03 (réponse directe). Branche rebasée sur main (4.1) avant de commencer ; `baseline_revision` gardée (`21eaf27`) : le diff du ticket se lit depuis `5b83b97`.
+- Essai `ai/tests/echelle_utm_reel.rs` (E01-E05, U01-U03) et ses phrases ajoutées à `training/tests/recouvrement.rs` (54 phrases), commités avant l'entraînement (`06d4608`) pour que `rapport.json` cite un arbre propre.
+- Entraînement : 316 min, validation 296/300 ; parité 300/300 ; modèle `b6fc49d0…`, copie dans `C:\Users\kevin\cassini-modeles\ajuste-5-39\`.
+- Mesures GPU : `plan_reel` 25/25, `question_reel` 12/12, `ecart_reel` 34/40, `echelle_utm_reel` 7/8 (E01 « Exporte la carte au 1:25 000. » refusé). Barres tenues → installé, 5.17 gardé en `-5-17`.
+- Démo QGIS (`%TEMP%\sonde-5-39\`, `projet-sonde-5-39.qgz`) : phrase de démo et isochrone UTM 31N justes, PDF écrit, rejeu `identical: true` ; « Exporte la carte au 1:25 000. » refusée → second critère d'acceptation manqué sur cette phrase. Cause : aucune tournure de `export_pdf_scale` sans « PDF ». Décision du propriétaire (2026-11-04) : clore 5.39, modèle gardé, entrée au report pour le générateur.
+
 ## Plan Change Log
 
 ## Review Triage Log
+
+Passe 1 (2026-11-04, lentilles thorough) : medium 1, low 4, false 3, rejets 9. Vérification : `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, `cargo test --workspace` verts (PowerShell).
+
+| # | Constat (lentille) | Verdict | Route | Preuve / action |
+|---|---------|---------|-------|-----------------|
+| 1 | La démo n'a jamais sorti un PDF à l'échelle avec le nouveau modèle : E01 refusée, la phrase de démo n'a pas d'échelle (blind) | medium | patch | Seconde sonde `projet-sonde-5-39b.qgz` : « Sors-moi la carte en PDF au 1/25000. » → `scale: 25000`, PDF 1,9 Mo, centre journalisé, rejeu `identical: true` ; consigné dans la doc |
+| 2 | « voit les quatre modèles » sans dire lesquels ; « Une redemande (0 sauvée) » obscur (blind) | low | patch | Doc précisée |
+| 3 | Entrée du report qui cite des numéros de ligne (blind) | low | patch | Nom de la famille à la place |
+| 4 | Barre 7/8 qui laisse passer E01, la phrase du problème ; matrice « Échelle seule » manquée ; critère 2 manqué sous tâches cochées (blind, edge, intent) | low | reject | Décision du propriétaire du 2026-11-04 (clore, ticket à part), écrite dans les Implementation Notes, la doc et `deferred-work.md` ; la corriger ici modifierait le générateur, interdit par l'intention |
+| 5 | Comparaison stricte des nombres : `452300.0` contre `452300` compterait faux (blind, edge) | low | reject | Le modèle écrit des entiers (E02-E05, U01-U03 justes) ; le correctif ajoute une normalisation pour un cas non observé ; écart possible seulement vers le bas (sens sûr) |
+| 6 | Paramètre facultatif ajouté par le modèle compté faux (edge) | false | reject | Même règle stricte que `plan_reel` ; aucun cas observé |
+| 7 | Deux formes de la commande de mesure (plan contre doc) (blind) | low | reject | La doc donne la commande lancée ; la ligne du plan est un filtre équivalent |
+| 8 | Nombre d'exemples `isochrone_utm` / `export_pdf_scale` non montré (blind) | false | reject | Les tests du générateur de 5.37 et 5.38 exigent ces familles dans le jeu par défaut ; l'essai réel prouve l'apprentissage |
+| 9 | H23 recule sans analyse (blind, intent) | low | reject | Barre totale tenue (34 ≥ 32, 33 en 5.17) ; recul nommé dans la doc ; H23 était fausse en 5.15 |
+| 10 | Pas d'UTM sud, un seul trajet en voiture (blind) | low | reject | Le générateur n'apprend que 31N/32N ; le sud est couvert par le garde-fou (5.37) |
+| 11 | Plans attendus vérifiés par `validate_params` sans `check_plan` (blind) | low | reject | Un plan attendu faux ferait échouer l'essai réel, visible au premier passage ; 7/8 rendus justes |
+| 12 | Plan `in-review` sans entrée au Plan Change Log ; triage vide (blind, edge) | false | reject | Aucun changement de plan (pas de boucle) ; triage écrit ici ; correctif = éditer ce plan |
+| 13 | Style : `eprintln!` multiligne, `7`/`8` en dur, ligne longue, `baseline_revision` (blind) | low | reject | Cosmétique ; `cargo fmt` et clippy verts ; base expliquée dans les notes |
 
 ## Verification
 
