@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::registry::{CommandSpec, Delegated, Registration, RunsIn};
 
 /// Unité d'une distance.
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DistanceUnit {
     /// Mètres.
