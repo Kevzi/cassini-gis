@@ -62,6 +62,9 @@ n'a été ajoutée.
    quelques gardes de plus : les couches citées existent dans l'inventaire, le fichier
    ouvert est parmi les fichiers non chargés, une question finit par « ? », un refus n'est
    jamais formulé en question. Un exemple écarté est compté dans le résumé, jamais écrit.
+   Depuis 4.6, le `dem` d'une commande de terrain doit être la `source` d'une couche raster de
+   l'inventaire ; le MNT qu'un plan cite garde toujours sa `source` (jamais la forme « couche
+   temporaire » de QGIS), son `epsg` pouvant manquer comme ailleurs.
 
 Les thèmes de couches sont tous civils : urbanisme (parcelles, zonage du PLU, bâtiments,
 espaces verts), environnement (rivières, zones humides, zones inondables, ZNIEFF,
@@ -98,7 +101,11 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `question_couche_absente` | une couche dont rien ne parle dans l'inventaire → question |
 | `question_champ_absent` | un critère qu'aucun champ ne porte → question, jamais un champ voisin deviné |
 | `refus` | courriel, suppression, reprojection, export de couche, style, itinéraire, téléchargement, 3D → refus affirmatif |
-| `refus_hors_registre` | champ de vision, ligne de vue, pente, cadrage ou zoom de la carte, PDF en A3, A0 ou portrait, altitude moyenne par zone (statistiques sur un raster), MNT présent pour le terrain, trajet depuis plusieurs lieux (« de chaque gare », « de toutes les gares », « des gares ») → refus affirmatif, jamais un plan de substitution |
+| `refus_hors_registre` | cadrage ou zoom de la carte, PDF en A3, A0 ou portrait, altitude moyenne par zone (statistiques sur un raster), seuil sur la pente (« où la pente dépasse 15 % » : aucune commande ne sélectionne des cellules d'un raster par leur valeur, depuis 4.6), MNT présent pour les deux derniers, trajet depuis plusieurs lieux (« de chaque gare », « de toutes les gares », « des gares ») → refus affirmatif, jamais un plan de substitution. Le champ de vision, la ligne de vue et la pente n'y sont plus depuis 4.6 : le registre les a |
+| `pente` | « fais la carte des pentes du MNT en pourcentage » → `terrain.slope`, `dem` recopié de la `source` du raster de l'inventaire, `unit` telle qu'écrite (`degrees` : « en degrés », « en ° » ; `percent` : « en pourcentage », « en % », « en pour cent ») (4.6) |
+| `ligne_de_vue` | « y a-t-il une ligne de vue entre le point (... ; ...) en Lambert-93 et le point (... ; ...) en Lambert-93, œil à 2 m » → `terrain.line_of_sight`, deux points écrits en Lambert-93 ou en UTM 31N/32N, le système écrit à chaque point (le garde-fou en demande une occurrence par point), le MNT dans ce même système ; `observer_height` et `target_height` seulement s'ils sont écrits, jamais courbure ni réfraction (4.6) |
+| `champ_de_vision` | « calcule le champ de vision depuis le point ... (UTM 31N) sur 2 km » → `terrain.viewshed`, même règle de points et de MNT ; hauteurs et `radius` seulement s'ils sont écrits (4.6) |
+| `question_terrain` | demande de terrain sans raster dans l'inventaire → question qui demande d'ouvrir ou de nommer le MNT ; vue depuis un lieu nommé sans coordonnées (« depuis le clocher de Thiais ») ou ligne de vue avec un seul point écrit → question qui demande le point en X, Y et système ; pente sans unité → question « degrés ou pourcentage » (4.6) |
 | `appartenance_commune` | « qui appartiennent à la commune de X », « sur le territoire de X » → sélection de la commune par son nom, puis intersection ; sans couche de communes, ou sans nom de commune, une question. Une commune citée seule (« à Orly ») reste un contexte sans effet |
 | `question_isochrone` | isochrone ou cible à une durée de trajet d'un lieu nommé (« depuis la mairie de X », « les parcelles à 10 min à pied de la gare de X »), sans coordonnées → question qui demande le point en X et Y avec son système ; « d'une gare » → question qui demande laquelle |
 | `etape_unique` | une seule opération demandée, une autre couche citée pour le contexte (« je m'occuperai des écoles plus tard ») → une étape |

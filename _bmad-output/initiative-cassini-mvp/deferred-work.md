@@ -630,3 +630,11 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-raster-et-terrain/story-terrain-viewshed-champ-de-vision-depuis-un-point-plan.md`
   summary: Tester terrain.viewshed sur un MNT à cellules rectangulaires (borne et fenêtre prises sur la plus petite cellule, axes x et y séparés).
   evidence: Tous les MNT des tests ont des cellules carrées ; remplacer `min(cell_size_x, cell_size_y)` par `cell_size_x` ne casserait aucun test (relecture thorough de 4.5, constat 12). À couvrir avec la comparaison de 4.7.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-raster-et-terrain/story-le-modele-apprend-les-trois-commandes-de-terrain-plan.md`
+  summary: Le garde-fou des coordonnées devrait accepter un système écrit une seule fois pour deux points (« entre 652 000 / 6 862 000 et 653 100 / 6 861 400, en Lambert-93 »).
+  evidence: Décision du propriétaire du 2026-11-04 (4.6) : `guard_coordinates` (`core/src/point.rs`) retire un `epsg` du multiensemble des nombres de la demande pour chaque `Point`, donc une ligne de vue dont le système n'est écrit qu'une fois rend la question du garde-fou. Le générateur écrit donc le système à chaque point (familles `ligne_de_vue`, `question_terrain`) ; le noyau n'est pas touché par 4.6.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-raster-et-terrain/story-le-modele-apprend-les-trois-commandes-de-terrain-plan.md`
+  summary: Avant de mesurer 5.41, mettre à jour les attendus de terrain de `plan_reel` (`ai/tests/plan_reel.rs` attend encore un refus pour S20, S21, S22 et S24 ; `tests/epreuve-modele-local/sentences.json` et `reading_independent.json` écrivent `dem` en id de couche et `from`/`to`).
+  evidence: Relecture de 4.6 : le générateur apprend désormais à planifier ces phrases (`dem` = `source` du raster, `observer`/`target`), donc un modèle ré-entraîné « échouerait » là où il a raison, et le `verify` de 5.41 exige aucun recul sur `plan_reel`. Attendu périmé depuis 4.2 (pente), 4.4 et 4.5, pas causé par 4.6. S21 écrit le système une seule fois pour deux points : il attend la question du garde-fou tant que l'entrée précédente n'est pas faite. S23 (moyenne de la pente par commune) reste un refus (statistiques sur un raster).

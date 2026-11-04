@@ -80,6 +80,15 @@ pub fn validate(registry: &Registry, example: &Example) -> Result<(), String> {
                 .flatten()
                 .filter_map(|l| l["layer_id"].as_str())
                 .collect();
+            // Le MNT d'une commande de terrain est un chemin recopié de l'inventaire : la
+            // `source` d'une couche raster, jamais un id de couche ni un chemin inventé.
+            let dems: HashSet<&str> = example.inventory["layers"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|l| l["kind"] == "raster")
+                .filter_map(|l| l["source"].as_str())
+                .collect();
             let files: HashSet<&str> = example.inventory["unloaded_files"]
                 .as_array()
                 .into_iter()
@@ -92,6 +101,11 @@ pub fn validate(registry: &Registry, example: &Example) -> Result<(), String> {
                         if !id.starts_with("step:") && !ids.contains(id) {
                             return Err(format!("étape {} : couche absente « {id} »", index + 1));
                         }
+                    }
+                }
+                if let Some(dem) = call.params.get("dem") {
+                    if !dem.as_str().is_some_and(|d| dems.contains(d)) {
+                        return Err(format!("étape {} : MNT absent « {dem} »", index + 1));
                     }
                 }
                 if let Some(path) = call.params["path"].as_str() {
@@ -337,6 +351,33 @@ mod tests {
     }
 
     #[test]
+    fn a_dem_path_must_be_the_source_of_a_raster_of_the_inventory() {
+        let registry = Registry::standard();
+        let inventory = json!({"layers": [
+            {"layer_id": "mnt_1", "kind": "raster", "source": "donnees/mnt_5m.tif"},
+            {"layer_id": "gares_1", "kind": "vector", "source": "donnees/gares.gpkg"},
+            {"layer_id": "mnt_tmp", "kind": "raster"}
+        ], "unloaded_files": []});
+        let slope = |dem: Value| Example {
+            family: "essai",
+            inventory: inventory.clone(),
+            request: "Carte des pentes du MNT en degrés.".into(),
+            expected: json!({"kind": "calls", "calls": [
+                {"command": "terrain.slope", "params": {"dem": dem, "unit": "degrees"}}]}),
+            retry: None,
+        };
+        assert_eq!(
+            validate(&registry, &slope(json!("donnees/mnt_5m.tif"))),
+            Ok(())
+        );
+        // Un chemin inventé, l'id de la couche, la source d'un vecteur : écartés.
+        for bad in ["donnees/mnt.tif", "mnt_1", "donnees/gares.gpkg"] {
+            let err = validate(&registry, &slope(json!(bad))).unwrap_err();
+            assert!(err.contains("MNT absent"), "{bad} : {err}");
+        }
+    }
+
+    #[test]
     fn every_family_gives_at_least_one_valid_example() {
         let registry = Registry::standard();
         for family in FAMILIES {
@@ -539,8 +580,14 @@ mod tests {
             let asks_point = e.expected["question"]
                 .as_str()
                 .is_some_and(|q| q.contains("coordonnées"));
+            // Depuis 4.6, une vue depuis un lieu nommé demande aussi son point (`question_terrain`).
             if asks_point {
-                assert!(travel && !has_distance(&e.request), "{}", e.request);
+                let terrain = e.family == "question_terrain";
+                assert!(
+                    (travel || terrain) && !has_distance(&e.request),
+                    "{}",
+                    e.request
+                );
             }
         }
         assert!(travels > 50, "{travels}");

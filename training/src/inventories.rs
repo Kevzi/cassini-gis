@@ -1277,6 +1277,9 @@ pub struct Builder {
     excluded: Vec<&'static str>,
     /// Rang des couches de distraction dans `layers` : aucun plan ne les cite.
     distractors: Vec<usize>,
+    /// Rang des couches dont le plan recopie la `source` (le MNT d'une commande de terrain) :
+    /// elle ne disparaît jamais, une couche temporaire n'a pas de fichier à recopier.
+    sourced: Vec<usize>,
 }
 
 impl Builder {
@@ -1368,6 +1371,31 @@ impl Builder {
         layer
     }
 
+    /// Ajoute le MNT qu'un plan de terrain cite par son `source`, dans le système `epsg`
+    /// (2154, 32631 ou 32632 : celui des points de la demande). Sa `source` est protégée des
+    /// formes de QGIS ; son `epsg` peut manquer, comme pour toute couche.
+    ///
+    /// La source prend les formes que rend l'extension depuis 4.3 (chemin relatif au projet) :
+    /// `donnees/x.tif`, `dem/x.tif`, `../donnees/x.tif` ou le nom seul. Le RGE ALTI n'existant
+    /// qu'en Lambert-93, un MNT en UTM porte un nom de fichier neutre.
+    pub fn add_dem(&mut self, rng: &mut Rng, epsg: u32) -> Layer {
+        self.sourced.push(self.layers.len());
+        let mut layer = self.add(rng, "mnt", &[], &[], &[]);
+        let file = if epsg == 2154 {
+            (*rng.pick(theme("mnt").files)).to_string()
+        } else {
+            (*rng.pick(&["mnt", "mnt_5m", "mnt_25m"])).to_string()
+        };
+        let dir = *rng.pick(&["donnees/", "donnees/", "dem/", "../donnees/", ""]);
+        layer.epsg = epsg;
+        layer.source = format!("{dir}{file}.tif");
+        if let Some(last) = self.layers.last_mut() {
+            last.epsg = epsg;
+            last.source = layer.source.clone();
+        }
+        layer
+    }
+
     /// Ajoute un fichier non ouvert du thème `key` ; rend son chemin.
     pub fn add_file(&mut self, rng: &mut Rng, key: &str, ext: Option<&str>) -> String {
         let t = theme(key);
@@ -1411,7 +1439,13 @@ impl Builder {
         let mut layers: Vec<Value> = self.layers.iter().map(Layer::to_json).collect();
         let mut project = json!({"name": rng.pick(PROJECTS), "epsg": 2154});
         if rng.chance(1, 3) {
-            qgis_shapes(rng, &mut layers, &self.distractors, &mut project);
+            qgis_shapes(
+                rng,
+                &mut layers,
+                &self.distractors,
+                &self.sourced,
+                &mut project,
+            );
         }
         rng.shuffle(&mut layers);
         let mut files: Vec<Value> = self
@@ -1437,8 +1471,14 @@ impl Builder {
 
 /// Formes d'inventaire que rend le produit depuis QGIS, posées sur un inventaire du jeu.
 /// Seule une couche de distraction perd sa géométrie : une couche citée par le plan doit en
-/// avoir une pour être tamponnée ou croisée.
-fn qgis_shapes(rng: &mut Rng, layers: &mut [Value], distractors: &[usize], project: &mut Value) {
+/// avoir une pour être tamponnée ou croisée. Une couche de `sourced` garde sa `source`.
+fn qgis_shapes(
+    rng: &mut Rng,
+    layers: &mut [Value],
+    distractors: &[usize],
+    sourced: &[usize],
+    project: &mut Value,
+) {
     let project = project.as_object_mut().expect("projet objet");
     if rng.chance(1, 4) {
         project.remove("name");
@@ -1446,13 +1486,14 @@ fn qgis_shapes(rng: &mut Rng, layers: &mut [Value], distractors: &[usize], proje
     if rng.chance(1, 8) {
         project.remove("epsg");
     }
-    for layer in layers.iter_mut() {
+    for (index, layer) in layers.iter_mut().enumerate() {
         let layer = layer.as_object_mut().expect("couche objet");
         if layer["kind"] == "raster" {
             // QGIS ne compte pas les objets d'un raster : la clé manque.
             layer.remove("feature_count");
         }
-        if rng.chance(1, 8) {
+        // Le tirage a lieu même pour une source protégée : les autres familles gardent leur suite.
+        if rng.chance(1, 8) && !sourced.contains(&index) {
             // Sortie temporaire d'une étape précédente : aucun fichier derrière.
             layer.remove("source");
         }
@@ -1561,6 +1602,46 @@ mod tests {
         assert!(no_name > 0 && no_source > 0 && no_epsg > 0 && table > 0);
         // La forme nominale reste majoritaire.
         assert!(raster_count > 300, "{raster_count}");
+    }
+
+    #[test]
+    fn the_cited_dem_keeps_its_source_and_takes_the_chosen_system() {
+        let mut rng = Rng::new(6);
+        let mut no_epsg = 0;
+        let mut sources = std::collections::BTreeSet::new();
+        for i in 0..600 {
+            let epsg = [2154, 32631, 32632][i % 3];
+            let mut b = Builder::new();
+            let dem = b.add_dem(&mut rng, epsg);
+            assert_eq!(dem.epsg, epsg);
+            assert!(dem.source.ends_with(".tif"), "{}", dem.source);
+            if epsg != 2154 {
+                assert!(!dem.source.contains("rge_alti"), "{}", dem.source);
+            }
+            sources.insert(
+                dem.source
+                    .rsplit_once('/')
+                    .map_or("", |(d, _)| d)
+                    .to_string(),
+            );
+            let inv = b.finish(&mut rng);
+            let layer = inv["layers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|l| l["layer_id"] == dem.id.as_str())
+                .unwrap();
+            assert_eq!(layer["kind"], "raster");
+            assert_eq!(layer["source"], dem.source.as_str());
+            match layer.get("epsg") {
+                Some(e) => assert_eq!(e, epsg),
+                None => no_epsg += 1,
+            }
+        }
+        assert!(no_epsg > 0);
+        // Les formes de chemin relatif que rend l'extension depuis 4.3, nom seul compris.
+        let dirs: Vec<&str> = sources.iter().map(String::as_str).collect();
+        assert_eq!(dirs, ["", "../donnees", "dem", "donnees"]);
     }
 
     #[test]
