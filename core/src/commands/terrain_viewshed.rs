@@ -117,6 +117,18 @@ fn index(v: f64, max: u32) -> u32 {
     v.floor().clamp(0.0, f64::from(max)) as u32
 }
 
+/// Longueur lisible en français, au dixième : « 11,8 km », « 23,7 m », « 5 km ». `arrondi` choisit
+/// le sens : la borne est arrondie vers le bas, pour qu'un rayon recopié du message soit accepté.
+fn length_fr(metres: f64, arrondi: fn(f64) -> f64) -> String {
+    let (v, unit) = if metres >= 1000.0 {
+        (arrondi(metres / 100.0) / 10.0, "km")
+    } else {
+        (arrondi(metres * 10.0) / 10.0, "m")
+    };
+    let text = format!("{v:.1}").replace('.', ",");
+    format!("{} {unit}", text.strip_suffix(",0").unwrap_or(&text))
+}
+
 /// Champ de vision sur un MNT déjà ouvert. Fonction pure et déterministe : calcul en f64,
 /// même entrée, même grille. La grille rendue est alignée sur celle du MNT et rognée au carré
 /// du cercle, intersecté avec le MNT.
@@ -136,8 +148,10 @@ pub fn viewshed(
             return Err(CommandFailure::new(
                 "terrain.viewshed_too_large",
                 format!(
-                    "Le rayon de {} m dépasse 500 cellules du MNT ({bound} m pour des cellules de {cell} m) : réduisez-le.",
-                    r.metres()
+                    "Le rayon de {} dépasse 500 cellules du MNT : au plus {} pour des cellules de {} ; réduisez-le.",
+                    length_fr(r.metres(), f64::round),
+                    length_fr(bound, f64::floor),
+                    length_fr(cell, f64::round),
                 ),
             ));
         }
@@ -614,6 +628,14 @@ mod tests {
     fn a_too_large_radius_writes_nothing() {
         let err = viewshed(&hill(), &params(pt(652030.0, 6850250.0), 20000.0)).unwrap_err();
         assert_eq!(err.code, "terrain.viewshed_too_large");
+        assert_eq!(
+            err.message,
+            "Le rayon de 20 km dépasse 500 cellules du MNT : au plus 5 km pour des cellules de 10 m ; réduisez-le."
+        );
+        // Lisible et arrondi vers le bas pour la borne : 11 828,2 m donnent « 11,8 km ».
+        assert_eq!(length_fr(11828.224, f64::floor), "11,8 km");
+        assert_eq!(length_fr(23.656, f64::round), "23,7 m");
+        assert_eq!(length_fr(15000.0, f64::round), "15 km");
         let err = viewshed(&hill(), &params(pt(652030.0, 6850250.0), 5000.1)).unwrap_err();
         assert_eq!(err.code, "terrain.viewshed_too_large");
         // 500 cellules de 10 m pile : accepté.
