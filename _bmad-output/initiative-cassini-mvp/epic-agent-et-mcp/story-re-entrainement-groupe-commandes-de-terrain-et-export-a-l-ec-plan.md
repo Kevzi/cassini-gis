@@ -27,7 +27,9 @@ context: []
 
 **Always:** les phrases de `tests/epreuve-modele-local/sentences.json` sont lues telles quelles et ne sont jamais modifiées : seuls les attendus de `ai/tests/plan_reel.rs` changent. Les essais réels se lancent avec `--features cuda`. Le modèle de 5.39 reste installé sous `cassini-composition-4b-5-39`. Une phrase mal comprise devient un constat consigné, jamais une règle de prompt.
 
-**Never:** lancer l'entraînement sans le feu vert du propriétaire (hitl : sa carte graphique est prise plusieurs heures). Ne pas toucher au générateur ni au garde-fou des coordonnées (`core/src/point.rs`, entrée au report séparée). Aucun vocabulaire défense.
+**Décision du propriétaire (2026-11-04, après le premier entraînement, `plan_reel` 22/25)** : compléter le générateur (terrain puis statistique par zone → refus ; point de terrain dans un autre système que le MNT → refus ; « dans un rayon de X autour du point » → champ de vision) et ré-entraîner.
+
+**Never:** lancer l'entraînement sans le feu vert du propriétaire (hitl : sa carte graphique est prise plusieurs heures). Ne pas toucher au générateur au-delà de la décision ci-dessus, ni au garde-fou des coordonnées (`core/src/point.rs`, entrée au report séparée). Aucun vocabulaire défense.
 
 ## I/O & Edge-Case Matrix
 
@@ -71,6 +73,12 @@ context: []
 - 2026-11-04 : `plan_reel` attend désormais `Want::{Plan, Refusal, GuardQuestion}`. S21 est juste si la question rendue a la source `Guard` ; elle n'entre pas dans `questions` ni `guarded` (le plafond). Tests sans modèle ajoutés : chaque plan attendu passe `check_plan` et le garde-fou ; le plan juste de S21 est bien gardé (un seul « Lambert-93 » pour deux points), ce qui confirme l'attendu.
 - `terrain_reel` : T01-T02 pentes, L01-L02 lignes de vue, V01-V02 champs de vision, X01-X02 exports sans « PDF » (5 000 et 10 000). Chaque attendu passe `check_plan` et le garde-fou des coordonnées ; aucune phrase n'est engendrée (recouvrement vert).
 - Arrêt avant l'entraînement : il attend le feu vert du propriétaire (hitl). Restent : entraînement, installation, mesures GPU, recette QGIS, section de `docs/entrainement-du-modele.md` (elle consigne les scores, donc après les mesures).
+
+- 2026-11-04, entraînement : commit `a30bf85` (arbre propre), 325 min, validation 299/300, parité 300/300. Copié dans `C:\Users\kevin\cassini-modeles\ajuste-5-41\`, **non installé**.
+- Essais GPU (`~/cassini-entrainement/5-41-mesures/essais.log`) : `plan_reel` **22/25** (barre 24, manquée), `question_reel` 12/12, `ecart_reel` 34/40, `echelle_utm_reel` 8/8 (E01 juste), `terrain_reel` 7/8.
+- Échecs de `plan_reel` : S23 et S24 (terrain puis moyenne par commune) donnent un plan invalide au lieu du refus ; S25 (point en WGS84 sur un MNT en Lambert-93) donne un champ de vision que le noyau refuserait à l'exécution (`terrain.crs_mismatch`). `terrain_reel` V02 (« dans un rayon de 800 m autour du point ») donne une zone tampon invalide. Le générateur n'a aucun exemple de ces trois sortes.
+- Le modèle 5.39 sur les mêmes attendus : `plan_reel` 22/25 (S20, S21, S22 manqués), `terrain_reel` 1/8. Même score, erreurs différentes. Arrêt avant installation : décision du propriétaire attendue.
+- Générateur complété (décision ci-dessus) : `refus_hors_registre` bras 5 (`NO_TERRAIN_CRS`, `foreign_point`, exemple écarté si le MNT a perdu son système), trois tournures de terrain puis statistique (`NO_RASTER_STATS`), rayon avant le point dans `champ_de_vision` (`radius_words`) ; trois tests ; recouvrement vert, génération identique à l'octet ; lignes de famille de la doc.
 
 ## Plan Change Log
 
