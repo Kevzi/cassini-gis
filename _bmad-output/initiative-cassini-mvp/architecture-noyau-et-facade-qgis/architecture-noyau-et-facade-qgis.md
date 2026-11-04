@@ -7,7 +7,7 @@ paradigm: 'hexagonal (ports et adaptateurs), avec un adaptateur sortant distant'
 scope: "Invariants du MVP Cassini : frontière entre le noyau Rust Apache-2.0 et l'extension QGIS GPL, contrat du registre de commandes, journal rejouable, agent local et serveur MCP, moteur de terrain, distribution et recette ; après le MVP, extension du catalogue par le cadre de traitement de QGIS (CAP-14)"
 status: final
 created: '2026-10-14'
-updated: '2026-10-30'
+updated: '2026-11-04'
 binds: [CAP-1, CAP-3, CAP-4, CAP-5, CAP-6, CAP-7, CAP-8, CAP-9, CAP-10, CAP-11, CAP-13, CAP-14]
 sources:
   - ../spec-cassini-mvp/spec-cassini-mvp.md
@@ -874,6 +874,17 @@ faire.
   un exécutant qui les sache faire. Un exécutant sans interface, bâti sur
   `qgis_process`, est possible plus tard ; AD-11 impose déjà d'échouer en les
   nommant plutôt que de sauter l'étape.
+- **Désigner un raster et enchaîner des étapes rejouables entre le noyau et
+  QGIS.** Ouvert le 2026-11-04, à trancher avant les entrées 12, 16 et 25 de
+  l'epic 10. Un amendement d'AD-24 (raster par identifiant de couche ou par
+  chemin sorti d'une étape du noyau) a été essayé puis retiré : un même paramètre
+  ne peut pas porter deux formes, une référence `step:k` vers un fichier du noyau
+  est journalisée comme un chemin et non comme un repère `out:k.n` d'AD-11, et la
+  couche ouverte par l'extension depuis 4.3 n'a pas de propriétaire au registre.
+  Pistes : une seule forme par genre (raster toujours par chemin relatif, comme
+  `terrain.*`), une règle de journal pour les références d'étape, un type de
+  chemin raster marqué dans le schéma. Relectures : `reviews/review-verification-2026-11-04.md`,
+  `reviews/review-adversaire-2026-11-04.md`.
 - **Les six autres commandes de terrain** et **l'application autonome de V2**
   (carte MapLibre, chaîne vectorielle propre, crate `geo`) : hors périmètre du
   MVP par la spec. AD-1 et AD-20 sont ce qui les garde possibles.

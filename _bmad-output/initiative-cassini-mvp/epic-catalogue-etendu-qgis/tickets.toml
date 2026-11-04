@@ -169,13 +169,13 @@ references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qg
 id = 23
 type = "story"
 title = "Jointure d'une table a une couche (analysis.join_table)"
-description = "Ajoute analysis.join_table, delegue a native:joinattributestable : rattache a une couche les colonnes d'une table (CSV ou tableur sans geometrie, DVF, donnees INSEE) par un champ commun nomme dans l'inventaire, sortie en couche nouvelle ; ouvrir une table sans geometrie dans le projet fait partie de l'entree si layer.add ne le permet pas encore."
+description = "Ajoute analysis.join_table, delegue a native:joinattributestable : rattache a une couche les colonnes d'une table CSV sans geometrie (DVF, donnees INSEE), ouverte comme couche vecteur sans geometrie, par un champ commun nomme dans l'inventaire, sortie en couche nouvelle ; ouvrir une table sans geometrie dans le projet fait partie de l'entree si layer.add ne le permet pas encore."
 verify = "Test de l'extension sur fixtures synthetiques : une couche de communes jointe a un CSV par code INSEE recoit les colonnes attendues, les lignes sans correspondance sont comptees dans le resume ; l'agent compose « joins le tableau des prix a la couche des parcelles » dans un plan valide."
 covers = ["CAP-14"]
 after = [11]
 hitl = false
 risk = "medium"
-unknown = "Table sans geometrie, a trancher par le proprietaire avant l'entree : nouveau genre d'entree table dans AD-24 ou couche vecteur sans geometrie, et formats retenus (CSV seul, ou aussi .xlsx, ce qui elargit CAP-14 au-dela du CSV a coordonnees de CAP-9)."
+notes = ["Decision: 2026-11-04 — proprietaire : la table sans geometrie s'ouvre comme une couche vecteur sans geometrie (genre vector d'AD-24, aucun nouveau genre) ; format retenu : CSV seul, pas de .xlsx."]
 references = ["research-taches-sig-des-bureaux-d-etudes-et-analy/research-taches-sig-des-bureaux-d-etudes-et-analy.md", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-24"]
 
 [[entry]]
@@ -214,6 +214,7 @@ covers = ["CAP-14"]
 after = [20]
 hitl = false
 risk = "medium"
+notes = ["A trancher avant cette entree : question Deferred du contrat d'architecture du 2026-11-04 sur la designation d'un raster et le rejeu des references d'etape (relectures dans architecture-noyau-et-facade-qgis/reviews/)."]
 references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-24", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-27", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-9"]
 
 [[entry]]
@@ -226,7 +227,7 @@ covers = ["CAP-14"]
 after = [12]
 hitl = false
 risk = "medium"
-unknown = "Enchainer pente puis reclassement, a trancher par le proprietaire avant l'entree : terrain.slope rend un chemin de fichier, AD-24 designe un raster delegue par son id de couche ; raster.reclassify accepte aussi un chemin relatif (AD-9), ou le resultat fournit l'id de la couche ouverte en 4.3, ou le verify se limite a un MNT ouvert par layer.add."
+unknown = "Enchainer pente puis reclassement : depend de la question Deferred du contrat d'architecture du 2026-11-04 (designer un raster et enchainer des etapes rejouables entre le noyau et QGIS), a trancher dans une session d'architecture avant cette entree."
 references = ["research-taches-sig-des-bureaux-d-etudes-et-analy/research-taches-sig-des-bureaux-d-etudes-et-analy.md", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-23", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-24"]
 
 [[entry]]
@@ -289,6 +290,7 @@ covers = ["CAP-14"]
 after = [15]
 hitl = true
 risk = "high"
+notes = ["A trancher avant cette entree : question Deferred du contrat d'architecture du 2026-11-04 sur la designation d'un raster et le rejeu des references d'etape (relectures dans architecture-noyau-et-facade-qgis/reviews/)."]
 references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-26", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-19"]
 
 # ---- Mesure finale, nettoyage, livraison ----
