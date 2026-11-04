@@ -54,9 +54,9 @@ context: []
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `ai/tests/plan_reel.rs` -- attendus S20, S22 (plans), S21 (question du garde-fou, hors plafond), commentaire d'en-tête et l.78 -- les attendus ne périment plus
-- [ ] `ai/tests/terrain_reel.rs` (nouveau) -- 8 phrases sur l'inventaire de l'épreuve : 2 pentes, 2 lignes de vue (système écrit à chaque point), 2 champs de vision, 2 exports à l'échelle sans « PDF » ; seuil 7/8 ; test sans modèle qui valide chaque attendu par `check_plan` -- mesure ce que 4.6 et 5.40 ont appris
-- [ ] `training/tests/recouvrement.rs` -- inclure `terrain_reel` -- aucune de ses phrases dans le jeu engendré
+- [x] `ai/tests/plan_reel.rs` -- attendus S20, S22 (plans), S21 (question du garde-fou, hors plafond), commentaire d'en-tête et l.78 -- les attendus ne périment plus
+- [x] `ai/tests/terrain_reel.rs` (nouveau) -- 8 phrases sur l'inventaire de l'épreuve : 2 pentes, 2 lignes de vue (système écrit à chaque point), 2 champs de vision, 2 exports à l'échelle sans « PDF » ; seuil 7/8 ; test sans modèle qui valide chaque attendu par `check_plan` -- mesure ce que 4.6 et 5.40 ont appris
+- [x] `training/tests/recouvrement.rs` -- inclure `terrain_reel` -- aucune de ses phrases dans le jeu engendré
 - [ ] (hitl, feu vert du propriétaire) entraînement par la commande unique vers `~/cassini-entrainement/5-41`, fusion GGUF, parité des découpeurs -- le modèle
 - [ ] installation (5.39 gardé en `-5-39`) ; `plan_reel`, `question_reel`, `ecart_reel`, `echelle_utm_reel`, `terrain_reel` sur GPU -- les barres
 - [ ] recette QGIS : une dizaine de phrases enchaînées (pente, ligne de vue, champ de vision, export « au 1:25 000 » sans PDF, phrase de démo), puis rejeu -- le produit
@@ -67,6 +67,10 @@ context: []
 - Given QGIS, le projet réel et le MNT de Villeneuve-le-Roi, when une dizaine de phrases s'enchaînent dans une seule session puis le journal est rejoué, then les plans sont justes et le rejeu rend `identical: true`.
 
 ## Implementation Notes
+
+- 2026-11-04 : `plan_reel` attend désormais `Want::{Plan, Refusal, GuardQuestion}`. S21 est juste si la question rendue a la source `Guard` ; elle n'entre pas dans `questions` ni `guarded` (le plafond). Tests sans modèle ajoutés : chaque plan attendu passe `check_plan` et le garde-fou ; le plan juste de S21 est bien gardé (un seul « Lambert-93 » pour deux points), ce qui confirme l'attendu.
+- `terrain_reel` : T01-T02 pentes, L01-L02 lignes de vue, V01-V02 champs de vision, X01-X02 exports sans « PDF » (5 000 et 10 000). Chaque attendu passe `check_plan` et le garde-fou des coordonnées ; aucune phrase n'est engendrée (recouvrement vert).
+- Arrêt avant l'entraînement : il attend le feu vert du propriétaire (hitl). Restent : entraînement, installation, mesures GPU, recette QGIS, section de `docs/entrainement-du-modele.md` (elle consigne les scores, donc après les mesures).
 
 ## Plan Change Log
 
