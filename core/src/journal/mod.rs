@@ -32,6 +32,7 @@ pub(crate) use paths::relativize;
 use paths::{normalize, posix, relative_to};
 use summary::{same_result, summarize};
 
+use crate::commands::layer_open_raster::OPEN_RASTER;
 use crate::error::ErrorReport;
 use crate::exec::{Executor, Router};
 use crate::registry::{Registry, RegistryError, PROTOCOL_VERSION};
@@ -40,6 +41,8 @@ use crate::registry::{Registry, RegistryError, PROTOCOL_VERSION};
 const JOURNAL_FILE: &str = "journal.jsonl";
 /// Nom du verrou, dans le dossier de travail.
 const LOCK_FILE: &str = "journal.lock";
+/// Extensions de sortie d'une commande du noyau dont la sortie est un raster à ouvrir (ticket 4.9).
+const RASTER_EXTENSIONS: [&str; 2] = [".tif", ".tiff"];
 
 /// Mode d'une session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,6 +147,9 @@ pub struct Session<'a> {
     _lock: File,
     next_step: usize,
     registry_version: String,
+    /// Vrai si l'exécutant QGIS annonce `layer.open_raster` : la session la dicte alors après
+    /// chaque étape du noyau qui écrit un raster (ticket 4.9). Faux sans QGIS (CLI, MCP autonome).
+    opens_rasters: bool,
 }
 
 impl<'a> Session<'a> {
@@ -181,6 +187,7 @@ impl<'a> Session<'a> {
             _lock: lock,
             next_step,
             registry_version: registry_version(registry),
+            opens_rasters: false,
         })
     }
 
@@ -188,6 +195,15 @@ impl<'a> Session<'a> {
     pub fn with_qgis(self, qgis: impl Executor + 'a) -> Self {
         Session {
             router: self.router.with_qgis(qgis),
+            ..self
+        }
+    }
+
+    /// Dit si l'exécutant QGIS sait ouvrir un raster du noyau (`layer.open_raster` annoncée) :
+    /// la session dicte alors cette ouverture après chaque sortie raster (ticket 4.9).
+    pub fn with_raster_opening(self, announced: bool) -> Self {
+        Session {
+            opens_rasters: announced,
             ..self
         }
     }
@@ -243,7 +259,46 @@ impl<'a> Session<'a> {
         self.call_logged(id, params, None, Some(plan_step))
     }
 
+    /// Exécute et journalise l'étape, puis, si elle a écrit un raster, dicte son ouverture.
+    ///
+    /// Une commande du noyau dont la sortie est un GeoTIFF est suivie, quand l'extension annonce
+    /// `layer.open_raster`, d'une étape `layer.open_raster {path: "out:<k>.<n>"}` par sortie, de
+    /// même `origin` et de même `plan_step` (ticket 4.9) : le raster entre au projet par une
+    /// étape journalisée, avec son `layer_id`, que le rejeu rejoue et sait laisser hors de la
+    /// carte. Une ouverture en échec est l'erreur de l'appel, nommée (AD-21). Le résultat rendu
+    /// est celui de l'étape demandée.
     fn call_logged(
+        &mut self,
+        id: &str,
+        params: Value,
+        origin: Option<&str>,
+        plan_step: Option<usize>,
+    ) -> Result<Value, ErrorReport> {
+        let step = self.next_step;
+        let value = self.call_step(id, params, origin, plan_step)?;
+        for path in self.rasters_written(id, step) {
+            self.call_step(OPEN_RASTER, json!({ "path": path }), origin, plan_step)?;
+        }
+        Ok(value)
+    }
+
+    /// Repères `out:<step>.<n>` des rasters que l'étape `step` (commande `id`, réussie) a écrits et
+    /// que la session doit faire ouvrir ; vide si l'extension n'annonce pas l'ouverture.
+    fn rasters_written(&self, id: &str, step: usize) -> Vec<String> {
+        let Some(spec) = self.registry.spec(id) else {
+            return Vec::new();
+        };
+        let raster = spec.runs_in == Some(crate::registry::RunsIn::Core)
+            && RASTER_EXTENSIONS.contains(&spec.output_ext.as_str());
+        if !self.opens_rasters || !raster || self.registry.spec(OPEN_RASTER).is_none() {
+            return Vec::new();
+        }
+        (1..=spec.output_params.len())
+            .map(|n| format!("out:{step}.{n}"))
+            .collect()
+    }
+
+    fn call_step(
         &mut self,
         id: &str,
         params: Value,
@@ -437,9 +492,20 @@ pub fn intermediate_files(registry: &Registry, journal: &Path) -> HashSet<String
     let text = String::from_utf8_lossy(&bytes);
     // Couches rendues par les étapes déjà lues du plan en cours : id -> fichiers de sortie.
     let mut produced: HashMap<String, Vec<String>> = HashMap::new();
+    // Ids des étapes déjà lues, pour lire un repère `out:<k>.<n>` (vide pour une ligne illisible).
+    let mut prior: Vec<String> = Vec::new();
     for (i, raw) in content_lines(&text).enumerate() {
         let step = i + 1;
-        let Ok(line) = serde_json::from_str::<Value>(raw) else {
+        let line = serde_json::from_str::<Value>(raw).ok();
+        let id_here = line
+            .as_ref()
+            .and_then(|l| l.get("id"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        prior.push(id_here);
+        let earlier = &prior[..i];
+        let Some(line) = line else {
             continue;
         };
         let plan_step = line.get("plan_step").and_then(Value::as_u64);
@@ -470,7 +536,7 @@ pub fn intermediate_files(registry: &Registry, journal: &Path) -> HashSet<String
         let Some(id) = line.get("id").and_then(Value::as_str) else {
             continue;
         };
-        let files = registry
+        let mut files: Vec<String> = registry
             .spec(id)
             .map(|spec| {
                 spec.output_params
@@ -479,9 +545,41 @@ pub fn intermediate_files(registry: &Registry, journal: &Path) -> HashSet<String
                     .collect()
             })
             .unwrap_or_default();
+        // Une couche ouverte sur la sortie d'une étape antérieure (`layer.open_raster` dictée
+        // après un raster du noyau, ticket 4.9) est reconnue par ce fichier-là.
+        if let (OPEN_RASTER, Some(Value::Object(params))) = (id, line.get("params")) {
+            files.extend(
+                params
+                    .values()
+                    .filter_map(Value::as_str)
+                    .filter_map(|r| reference_file(registry, r, earlier)),
+            );
+        }
         produced.insert(layer_id.to_string(), files);
     }
     hidden
+}
+
+/// Nom du fichier de sortie désigné par le repère `out:<k>.<n>`, d'après `prior`, les ids des
+/// étapes du journal (l'étape 1 en premier) ; `None` si le repère ne désigne aucune sortie.
+fn reference_file(registry: &Registry, reference: &str, prior: &[String]) -> Option<String> {
+    let (k, n) = reference
+        .strip_prefix("out:")
+        .and_then(|r| r.split_once('.'))
+        .filter(|(k, n)| {
+            [k, n]
+                .iter()
+                .all(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+        })
+        .and_then(|(k, n)| Some((k.parse::<usize>().ok()?, n.parse::<usize>().ok()?)))?;
+    if k == 0 || n == 0 {
+        return None;
+    }
+    let id = prior.get(k - 1)?;
+    let spec = registry.spec(id)?;
+    let outputs = &spec.output_params;
+    let name = outputs.get(n - 1)?;
+    Some(output_file(k, id, outputs, name, &spec.output_ext))
 }
 
 /// Paramètres d'un appel, tels que journalisés et tels que donnés à l'exécutant.
@@ -578,27 +676,9 @@ impl Resolver<'_> {
         reference: &str,
         prior: &[String],
     ) -> Result<PathBuf, JournalError> {
-        let bad = || JournalError::BadReference(reference.to_string());
-        let (k, n) = reference
-            .strip_prefix("out:")
-            .and_then(|r| r.split_once('.'))
-            .filter(|(k, n)| {
-                [k, n]
-                    .iter()
-                    .all(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
-            })
-            .and_then(|(k, n)| Some((k.parse::<usize>().ok()?, n.parse::<usize>().ok()?)))
-            .ok_or_else(bad)?;
-        if k == 0 || n == 0 {
-            return Err(bad());
-        }
-        let id = prior.get(k - 1).ok_or_else(bad)?;
-        let spec = self.registry.spec(id).ok_or_else(bad)?;
-        let outputs = &spec.output_params;
-        let name = outputs.get(n - 1).ok_or_else(bad)?;
-        Ok(self
-            .out_dir
-            .join(output_file(k, id, outputs, name, &spec.output_ext)))
+        let file = reference_file(self.registry, reference, prior)
+            .ok_or_else(|| JournalError::BadReference(reference.to_string()))?;
+        Ok(self.out_dir.join(file))
     }
 
     /// Forme relative POSIX, forme absolue et portabilité d'un chemin d'entrée.

@@ -63,6 +63,12 @@ pub struct CommandSpec {
     /// Métadonnée interne : jamais sérialisée.
     #[serde(skip)]
     pub replay_param: Option<(String, String)>,
+    /// Vrai pour une commande que seul le noyau appelle, de lui-même, après une autre étape
+    /// (ticket 4.9 : `layer.open_raster`). Elle n'est offerte ni au modèle, ni au client MCP, ni
+    /// au formulaire du panneau, et `command.run` la refuse. Sérialisé seulement quand il est
+    /// vrai : le catalogue des autres commandes reste celui d'avant.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub dictated_by_core: bool,
     /// Schéma JSON des paramètres, engendré depuis le type Rust.
     pub params_schema: Value,
     /// Schéma JSON du résultat, engendré depuis le type Rust.
@@ -90,6 +96,7 @@ impl CommandSpec {
             output_ext: ".out".to_string(),
             leave_out_param: None,
             replay_param: None,
+            dictated_by_core: false,
             params_schema: schema_value::<P>(),
             output_schema: schema_value::<O>(),
             examples: Vec::new(),
@@ -141,6 +148,12 @@ impl CommandSpec {
     /// Déclare le paramètre que le rejeu recopie depuis le champ `field` du résultat journalisé.
     pub fn replay_param(mut self, name: &str, field: &str) -> Self {
         self.replay_param = Some((name.to_string(), field.to_string()));
+        self
+    }
+
+    /// Déclare la commande dictée par le noyau seul (ticket 4.9).
+    pub fn dictated_by_core(mut self) -> Self {
+        self.dictated_by_core = true;
         self
     }
 
@@ -367,6 +380,14 @@ impl Registry {
 
     pub fn spec(&self, id: &str) -> Option<&CommandSpec> {
         self.entries.get(id).map(|e| &e.spec)
+    }
+
+    /// Retire une commande du registre ; vrai si elle y était. N'existe que pour le test
+    /// d'égalité à l'octet du prompt et de la grammaire du modèle (`cassini-ai`, ticket 4.9) :
+    /// aucun code du produit ne doit retirer une commande du registre unique.
+    #[doc(hidden)]
+    pub fn remove(&mut self, id: &str) -> bool {
+        self.entries.remove(id).is_some()
     }
 
     /// Appelle une commande avec ses paramètres en JSON.

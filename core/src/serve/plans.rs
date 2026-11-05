@@ -325,8 +325,9 @@ pub(super) fn execute(state: &mut State<'_>, params: Option<&Value>) -> Result<V
         let value = session
             .call_in_plan(&call.command, params, step)
             .map_err(|e| RpcError::business(e.at_step(step)))?;
-        // Résultat brut, chemins absolus compris, vers l'extension (AD-9, 2026-11-04) : elle
-        // ouvre un raster du noyau dans le projet. Le journal, lui, reste relatif.
+        // Résultat brut, chemins absolus compris, vers l'extension (AD-9, 2026-11-04). Un raster
+        // du noyau, lui, est ouvert par l'étape `layer.open_raster` que la session dicte
+        // (ticket 4.9). Le journal reste relatif.
         steps.push(json!({"step": step, "command": call.command, "result": value.clone()}));
         outputs.push(value);
     }

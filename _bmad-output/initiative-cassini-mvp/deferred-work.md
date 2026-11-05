@@ -646,3 +646,11 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-re-entrainement-groupe-commandes-de-terrain-et-export-a-l-ec-plan.md`
   summary: Au prochain ré-entraînement groupé, élargir `foreign_point` (point UTM d'un autre fuseau que le MNT, forme « X / Y (WGS84) » de S25) et ajouter à `terrain_reel` des phrases de refus (point hors système, terrain puis statistique) et une ligne de vue au système écrit une fois.
   evidence: Relecture thorough de 5.41 : `foreign_point` ne tire que Lambert-93/WGS84 autour de Paris, jamais 32N sur 31N ; S25 échoue encore ; `terrain_reel` n'attend que des plans. Changer le générateur maintenant désaccorderait le modèle installé.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-raster-et-terrain/bug-le-rejeu-diverge-quand-un-raster-de-terrain-precede-un-export-plan.md`
+  summary: Avant la publication (étape 7), empêcher qu'une extension d'après 4.9 tourne avec un noyau d'avant 4.9 (ou l'inverse) : les rasters du noyau ne s'ouvriraient plus, sans message ; monter la version du protocole ou vérifier au `session.hello` que le noyau dicte `layer.open_raster`.
+  evidence: Relecture thorough de 4.9 : le panneau n'ouvre plus de raster de lui-même, le noyau ne dicte l'ouverture que s'il la connaît ; AD-17 livre l'extension et le noyau à part. Sans utilisateur à ce jour (noyau et extension installés ensemble), le risque naît à la publication.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-raster-et-terrain/bug-le-rejeu-diverge-quand-un-raster-de-terrain-precede-un-export-plan.md`
+  summary: Un journal écrit avant 4.9 (raster de terrain sans ligne `layer.open_raster`) diverge toujours au rejeu en session neuve ; décider s'il faut le signaler avant de rejouer.
+  evidence: Relecture thorough de 4.9 : le correctif ne vaut que pour les journaux nouveaux ; aucun journal d'utilisateur n'existe encore, d'où le report.

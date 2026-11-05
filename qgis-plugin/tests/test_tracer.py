@@ -611,7 +611,8 @@ def load_panel():
 
 
 class PanelCoreRasterTest(unittest.TestCase):
-    """Les trois branchements du panneau ouvrent le raster d'une commande du noyau (4.3)."""
+    """Le panneau n'ouvre plus aucun raster de lui-même : le noyau dicte `layer.open_raster`
+    (ticket 4.9, qui retire le branchement du ticket 4.3)."""
 
     def setUp(self):
         import tempfile
@@ -649,8 +650,9 @@ class PanelCoreRasterTest(unittest.TestCase):
         mod._announce = lambda widget, text: None
         mod.agentview.outcome = lambda status, payload, agent: {"kind": status}
         mod.external.apply = lambda *a: {"resend_ask": False, "announce": None, "where": None}
-        self.opened = []
-        mod.raster_output.open_rasters = lambda items: self.opened.extend(items) or []
+        # Le panneau ne garde aucun branchement d'ouverture (ticket 4.9).
+        self.assertFalse(hasattr(mod, "raster_output"))
+        self.assertFalse(hasattr(cls, "_open_core_rasters"))
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         self.dir = folder.name
@@ -661,23 +663,14 @@ class PanelCoreRasterTest(unittest.TestCase):
             f.write(b"II*\x00")
         return path
 
-    def test_run_done_opens_the_slope(self):
+    def test_events_carrying_a_raster_are_handled_without_opening_it(self):
         path = self.slope(1)
         self.panel.on_event(client.RUN_DONE, {"command": "terrain.slope", "result": {"file": path}})
-        self.assertEqual(self.opened, [(path, "1-terrain.slope")])
-
-    def test_plan_done_opens_the_slope(self):
-        path = self.slope(2)
-        steps = [{"step": 2, "command": "terrain.slope", "result": {"file": path}}]
+        steps = [{"step": 2, "command": "terrain.slope", "result": {"file": self.slope(2)}}]
         self.panel.on_event(client.PLAN_DONE, {"plan_id": "plan-1", "steps": steps})
-        self.assertEqual(self.opened, [(path, "2-terrain.slope")])
-
-    def test_external_call_finished_opens_the_slope(self):
-        path = self.slope(3)
-        payload = {"call_id": "external-1", "command": "terrain.slope", "result": {"file": path},
-                   "error": None, "duration_ms": 5}
+        payload = {"call_id": "external-1", "command": "terrain.slope",
+                   "result": {"file": self.slope(3)}, "error": None, "duration_ms": 5}
         self.panel.on_event(client.EXTERNAL_CALL_FINISHED, payload)
-        self.assertEqual(self.opened, [(path, "3-terrain.slope")])
 
 
 class PanelBannerTest(unittest.TestCase):
@@ -783,8 +776,13 @@ class PluginBehaviourTest(unittest.TestCase):
     def fake_client(self):
         real = self.mod.client.CoreClient
         self.addCleanup(setattr, self.mod.client, 'CoreClient', real)
+        self.gestures = None
+
+        def init(s, proc, cb, reg=None):
+            self.gestures = reg
+
         self.mod.client.CoreClient = type("C", (), {
-            "__init__": lambda s, proc, cb, reg=None: None,
+            "__init__": init,
             "start": lambda s, prog, proj: None,
             "stop": lambda s: None})
 
@@ -812,6 +810,19 @@ class PluginBehaviourTest(unittest.TestCase):
         self.assertIsNone(self.p.project_path)
         self.p.relaunch()
         self.assertEqual(StubProcess.created, 2)
+
+    def test_launch_registers_the_raster_opening_gesture(self):
+        # Le noyau dicte `layer.open_raster` (ticket 4.9) : sans ce geste annoncé, plus aucun
+        # raster du noyau n'entrerait au projet.
+        StubProject.name = "/a/p.qgz"
+        self.mod.locator.locate = lambda s: ("/x/cassini", "PATH")
+        self.fake_client()
+        self.p._refresh()
+        self.assertIn("layer.open_raster", self.gestures.ids())
+        self.assertIsInstance(
+            self.gestures.create("layer.open_raster"),
+            self.mod.raster_output.LayerOpenRasterGesture,
+        )
 
     def test_protocol_refusal_is_not_a_relaunchable_death(self):
         StubProject.name = "/a/p.qgz"

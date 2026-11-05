@@ -286,9 +286,14 @@ ne part qu'après la réponse au précédent. Réponse finale :
 ```
 
 Depuis le 2026-11-04 (ticket 4.3, exception de AD-9), chaque étape rend **le résultat brut,
-chemins absolus compris**, comme la réponse de `command.run` : l'extension a besoin du chemin
-réel pour ouvrir dans le projet un raster écrit par le noyau. Le journal, lui, garde les chemins relatifs
-au dossier de travail.
+chemins absolus compris**, comme la réponse de `command.run`. Le journal, lui, garde les chemins
+relatifs au dossier de travail. Depuis le 2026-11-05 (ticket 4.9), l'extension n'ouvre plus de
+raster d'elle-même : après une étape du noyau qui écrit un GeoTIFF, le noyau dicte
+`layer.open_raster {path}` par un `order.execute` (chemin absolu de la sortie), avec le même
+`plan_step`, si l'extension annonce ce geste ; l'étape est journalisée avec son `layer_id`, et le
+rejeu la rejoue. Cet ordre n'est précédé d'aucune notification `plan.step`. La commande porte
+`dictated_by_core: true` au catalogue de `session.hello` (toujours `available: false`) : le
+panneau la cache, et `command.run` comme les relais la refusent (`registry.dictated`).
 
 - **Première erreur** : les étapes suivantes ne partent pas ; l'erreur garde le code
   de l'étape (celui de l'extension pour une commande QGIS) et porte `step`, le numéro
@@ -430,8 +435,9 @@ panneau arrête l'appel en le renvoyant dans `request.cancel`.
 ```
 
 `finished` porte `result`, ou `error {code, message}`. Le `result` est le résultat brut, chemins
-absolus compris (2026-11-04) : l'extension y trouve le raster à ouvrir ; ce qui part au relais
-reste relatif et nettoyé. Un appel refusé avant l'exécution
+absolus compris (2026-11-04) ; ce qui part au relais reste relatif et nettoyé. Un raster écrit
+par l'appel est ouvert par l'ordre `layer.open_raster` que le noyau dicte avant `finished`
+(ticket 4.9). Un appel refusé avant l'exécution
 (occupation, accord non donné, chemin, commande inconnue ou indisponible, paramètres mal formés)
 n'est pas annoncé : `started` ne part qu'après l'accord.
 
@@ -601,6 +607,7 @@ Seuls transports : l'entrée et la sortie standard côté client, le canal d'IA 
 | `models.unknown` | `plan.propose` : `model` n'est pas dans la liste d'`agent.models` ; rien n'est composé, aucun ordre d'inventaire |
 | `models.unusable` | `plan.propose` : `model` désigne un modèle à problème ; le message porte la raison ; aucun ordre d'inventaire |
 | `ai.empty_prompt` | `plan.propose` : la demande est vide ou blanche ; refusée avant toute recherche de modèle et sans ordre d'inventaire |
+| `registry.dictated` | `command.run` ou appel d'un relais visant une commande que le noyau dicte seul (`layer.open_raster`, ticket 4.9) ; rien n'est exécuté ni journalisé |
 | `registry.unavailable` | `plan.propose` : l'extension n'a pas annoncé `project.inventory` ; rien n'est composé |
 | `session.io` | `plan.execute` : la notification `plan.step` n'a pas pu être écrite ; l'étape `step` n'est pas lancée |
 | `ai.no_model`, `models.*`, `ai.*` | `plan.propose` (et `agent.models` pour `models.*`) : aucun modèle utilisable, dossier des modèles absent, ou échec du modèle ; le message ne porte aucun chemin absolu |
