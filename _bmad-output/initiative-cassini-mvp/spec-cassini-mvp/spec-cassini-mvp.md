@@ -4,7 +4,7 @@ companions:
   - ../../../CLAUDE.md
   - dossier de recherche initial, hors de ce dépôt (dépôt privé)
   - ../architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md
-  - catalogue-des-commandes.md (créé par l'entrée 1 de l'epic 11)
+  - catalogue-des-commandes.md
 sources: []
 ---
 
