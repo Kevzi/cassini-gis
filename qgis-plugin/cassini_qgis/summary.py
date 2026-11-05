@@ -12,6 +12,7 @@ Résultat absent ou illisible : phrase des seuls paramètres. Commande hors tabl
 paramètres illisibles : description du registre, puis « Terminée ».
 """
 
+import math
 import re
 
 try:  # importé à plat par les tests, en paquet par QGIS
@@ -282,7 +283,77 @@ def _model_list(lang, p, r, names):
     return text
 
 
+_FORMS = {"wgs84": "WGS84", "utm": "UTM", "mgrs": "MGRS"}
+
+
+def _degrees(lang, value, positive, negative):
+    """`48,8565567° N` : sept décimales (le centimètre), hémisphère en lettre."""
+    if not _is_number(value):
+        raise _Unreadable()
+    text = "%.7f" % abs(value)
+    if texts.normalize(lang) == "fr":
+        text = text.replace(".", ",")
+        negative = negative.replace("W", "O")
+    return "%s° %s" % (text, positive if value >= 0 else negative)
+
+
+def _metres(value):
+    """Mètres entiers, tronqués comme le MGRS rendu à côté (`5411750` pour 5411750,6)."""
+    if not _is_number(value):
+        raise _Unreadable()
+    return str(int(math.floor(value)))
+
+
+def _utm_zone(epsg):
+    """`31N` pour EPSG:32631, `31S` pour EPSG:32731."""
+    if _is_int(epsg) and 32601 <= epsg <= 32660:
+        return "%dN" % (epsg - 32600)
+    if _is_int(epsg) and 32701 <= epsg <= 32760:
+        return "%dS" % (epsg - 32700)
+    raise _Unreadable()
+
+
+def _coord_convert(lang, p, r, names):
+    """Les formes rendues, dans l'ordre demandé ; affichage seul, aucun calcul (AD-5)."""
+    to = p.get("to")
+    if not isinstance(to, list) or not to or any(f not in _FORMS for f in to):
+        raise _Unreadable()
+    asked = texts.tr(lang, "sum_convert", forms=", ".join(_FORMS[f] for f in to))
+    if not r:
+        return asked
+    parts = []
+    for form in to:
+        value = r.get(form)
+        if form == "mgrs" and isinstance(value, str) and value:
+            parts.append(texts.tr(lang, "sum_convert_mgrs", ref=value))
+        elif form == "wgs84" and isinstance(value, dict):
+            parts.append(
+                texts.tr(
+                    lang,
+                    "sum_convert_wgs84",
+                    lat=_degrees(lang, value.get("y"), "N", "S"),
+                    lon=_degrees(lang, value.get("x"), "E", "W"),
+                )
+            )
+        elif form == "utm" and isinstance(value, dict):
+            parts.append(
+                texts.tr(
+                    lang,
+                    "sum_convert_utm",
+                    zone=_utm_zone(value.get("epsg")),
+                    x=_metres(value.get("x")),
+                    y=_metres(value.get("y")),
+                )
+            )
+    if not parts:
+        return asked
+    return texts.tr(
+        lang, "sum_converted", parts=texts.tr(lang, "sum_convert_sep").join(parts)
+    )
+
+
 _SENTENCES = {
+    "coord.convert": _coord_convert,
     "analysis.buffer": _buffer,
     "analysis.intersect": _intersect,
     "analysis.select_by_attribute": _select,

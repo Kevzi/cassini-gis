@@ -87,6 +87,34 @@ fn tools_list_gives_every_core_command_with_its_schemas() {
 }
 
 #[test]
+fn coord_convert_is_listed_and_called_like_cassini_run() {
+    let mut client = McpClient::connect(&[], &models_dir());
+    let listed = client.request("tools/list", json!({}));
+    assert!(listed["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|t| t["name"] == "coord_convert"));
+    let params = json!({"point": {"x": 2.294481, "y": 48.85837, "epsg": 4326}, "to": ["mgrs"]});
+    let reply = client.call_tool("coord_convert", params.clone());
+    let result = &reply["result"];
+    assert_eq!(result["isError"], false);
+    assert_eq!(
+        result["structuredContent"],
+        json!({"mgrs": "31UDQ4825011951"})
+    );
+    let run = Command::new(BIN)
+        .args(["run", "coord.convert", &params.to_string()])
+        .output()
+        .unwrap();
+    assert!(run.status.success());
+    let expected: Value = serde_json::from_slice(&run.stdout).unwrap();
+    assert_eq!(result["structuredContent"], expected);
+    client.assert_no_server_request();
+    assert_eq!(client.close().0.code(), Some(0));
+}
+
+#[test]
 fn system_about_gives_the_same_result_as_cassini_run() {
     let mut client = McpClient::connect(&[], &models_dir());
     let reply = client.call_tool("system_about", json!({}));

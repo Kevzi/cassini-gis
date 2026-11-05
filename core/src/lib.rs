@@ -11,6 +11,7 @@ pub mod dem;
 pub mod error;
 pub mod exec;
 pub mod external;
+pub mod geodesy;
 pub mod journal;
 pub mod plan;
 pub mod point;

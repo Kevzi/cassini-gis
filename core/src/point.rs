@@ -13,6 +13,12 @@
 //! point du plan qui porte ce même epsg, alors que x et y sont lus pour chaque point. En cas de
 //! doute, c'est la question. [`guard_rejected`] applique la même règle à une sortie que la
 //! validation a rejetée : un point inventé y rend la question tout de suite, sans redemande.
+//!
+//! Une référence MGRS est le type [`MgrsRef`], marqué `x-cassini: mgrs` et soumis à la même
+//! garde (CAP-15) : elle figure dans la demande (espaces et casse ignorés, zone sur un ou deux
+//! chiffres) ou vient d'une référence `step:` vers un champ déclaré `MgrsRef`. Elle ne prend
+//! aucun nombre à la demande, et les chiffres de la demande qui lui appartiennent ne servent
+//! pas de x ou de y à un `Point`.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -43,6 +49,31 @@ pub struct Point {
     pub epsg: u32,
 }
 
+/// Valeur de la marque d'une [`MgrsRef`].
+pub const MGRS_MARK: &str = "mgrs";
+
+// Le commentaire de documentation ci-dessous devient la description du type dans le schéma,
+// lue par le modèle : il reste court. La marque (clé d'extension, valeur `mgrs`) soumet la
+// référence à la même garde de provenance qu'un `Point` (AD-23, CAP-15). La chaîne passe telle
+// quelle à la désérialisation et n'est validée par `MgrsRef::parse` que dans la commande qui la
+// lit, pour que le refus porte le code `coord.invalid_mgrs` et nomme la partie fautive (AD-21).
+/// Référence MGRS, recopiée de la demande.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[schemars(extend("x-cassini" = "mgrs"))]
+pub struct MgrsRef(pub String);
+
+impl MgrsRef {
+    /// Lit la référence selon la grammaire de la NGA.
+    pub fn parse(&self) -> Result<crate::geodesy::Mgrs, crate::geodesy::MgrsError> {
+        crate::geodesy::Mgrs::parse(&self.0)
+    }
+
+    /// La référence d'une case MGRS, sous sa forme canonique (`31UDQ4825111750`).
+    pub fn canonical(mgrs: &crate::geodesy::Mgrs) -> Self {
+        MgrsRef(mgrs.canonical())
+    }
+}
+
 /// Profondeur maximale de parcours d'un schéma (références circulaires comprises).
 const MAX_DEPTH: usize = 16;
 /// Alternatives d'un schéma.
@@ -63,35 +94,50 @@ fn resolve<'a>(schema: &'a Value, root: &'a Value) -> &'a Value {
     node
 }
 
-/// Le sous-schéma est-il, après ses `$ref`, celui d'un [`Point`] ?
-pub fn is_point(schema: &Value, root: &Value) -> bool {
-    resolve(schema, root).get(MARK_KEY).and_then(Value::as_str) == Some(POINT_MARK)
+/// Le sous-schéma porte-t-il, après ses `$ref`, la marque `mark` ?
+fn is_marked(schema: &Value, root: &Value, mark: &str) -> bool {
+    resolve(schema, root).get(MARK_KEY).and_then(Value::as_str) == Some(mark)
 }
 
-/// Le sous-schéma admet-il un [`Point`] : lui-même, ou l'une de ses alternatives
+/// Le sous-schéma est-il, après ses `$ref`, celui d'un [`Point`] ?
+pub fn is_point(schema: &Value, root: &Value) -> bool {
+    is_marked(schema, root, POINT_MARK)
+}
+
+/// Le sous-schéma est-il, après ses `$ref`, celui d'une [`MgrsRef`] ?
+pub fn is_mgrs(schema: &Value, root: &Value) -> bool {
+    is_marked(schema, root, MGRS_MARK)
+}
+
+/// Le sous-schéma admet-il un type marqué `mark` : lui-même, ou l'une de ses alternatives
 /// (`Option<Point>` s'engendre en `anyOf`).
-fn admits_point(schema: &Value, root: &Value, depth: usize) -> bool {
+fn admits(schema: &Value, root: &Value, mark: &str, depth: usize) -> bool {
     if depth > MAX_DEPTH {
         return false;
     }
-    if is_point(schema, root) {
+    if is_marked(schema, root, mark) {
         return true;
     }
     let node = resolve(schema, root);
     ALTERNATIVES.iter().any(|key| {
         node.get(*key)
             .and_then(Value::as_array)
-            .is_some_and(|alts| alts.iter().any(|a| admits_point(a, root, depth + 1)))
+            .is_some_and(|alts| alts.iter().any(|a| admits(a, root, mark, depth + 1)))
     })
 }
 
-/// Un [`Point`] apparaît-il quelque part sous ce sous-schéma (objets imbriqués, tableaux,
-/// alternatives) ?
-pub(crate) fn contains_point(schema: &Value, root: &Value, depth: usize) -> bool {
+/// Le sous-schéma admet-il un [`Point`] ?
+fn admits_point(schema: &Value, root: &Value, depth: usize) -> bool {
+    admits(schema, root, POINT_MARK, depth)
+}
+
+/// Un type marqué `mark` apparaît-il quelque part sous ce sous-schéma (objets imbriqués,
+/// tableaux, alternatives) ?
+fn contains(schema: &Value, root: &Value, mark: &str, depth: usize) -> bool {
     if depth > MAX_DEPTH {
         return false;
     }
-    if is_point(schema, root) {
+    if is_marked(schema, root, mark) {
         return true;
     }
     let node = resolve(schema, root);
@@ -102,13 +148,13 @@ pub(crate) fn contains_point(schema: &Value, root: &Value, depth: usize) -> bool
         if key == "properties" || key == "patternProperties" {
             value
                 .as_object()
-                .is_some_and(|m| m.values().any(|s| contains_point(s, root, depth + 1)))
+                .is_some_and(|m| m.values().any(|s| contains(s, root, mark, depth + 1)))
         } else if ALTERNATIVES.contains(&key.as_str()) || key == "prefixItems" {
             value
                 .as_array()
-                .is_some_and(|a| a.iter().any(|s| contains_point(s, root, depth + 1)))
+                .is_some_and(|a| a.iter().any(|s| contains(s, root, mark, depth + 1)))
         } else if key == "items" || key == "additionalProperties" {
-            contains_point(value, root, depth + 1)
+            contains(value, root, mark, depth + 1)
         } else {
             false
         }
@@ -434,17 +480,154 @@ fn take(pool: &mut Vec<f64>, value: f64) -> bool {
 
 // -- garde-fou ---------------------------------------------------------------
 
-/// Ce que porte un plan : ses nombres littéraux hors `Point`, et ses points littéraux.
+// -- références MGRS de la demande -------------------------------------------
+
+/// Forme comparable d'une référence MGRS écrite (CAP-15) : majuscules, sans espace, zone sur
+/// deux chiffres. Rien n'est validé ici : une référence mal formée mais recopiée de la demande
+/// passe la garde, et la commande la refuse en nommant la partie fautive.
+fn mgrs_key(text: &str) -> String {
+    let compact: String = text
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .map(|c| c.to_ascii_uppercase())
+        .collect();
+    let mut chars = compact.chars();
+    match (chars.next(), chars.next()) {
+        (Some(a), Some(b)) if a.is_ascii_digit() && !b.is_ascii_digit() => format!("0{compact}"),
+        _ => compact,
+    }
+}
+
+/// Une référence MGRS lue dans la demande : sa forme comparable et l'étendue de ses
+/// caractères.
+struct WrittenMgrs {
+    key: String,
+    span: std::ops::Range<usize>,
+}
+
+/// Les références de forme MGRS écrites dans la demande : un ou deux chiffres en début de mot,
+/// une lettre (la bande), deux lettres (le carré), des espaces facultatifs entre chacun, puis des
+/// groupes de chiffres séparés par des espaces, le dernier finissant le mot. Chaque suite de
+/// groupes en tête (« 48251 », « 48251 11750 », …) est une lecture possible : la demande
+/// « 31U DQ 48251 11750 10 min » se lit `31UDQ48251`, `31UDQ4825111750` ou `31UDQ482511175010`.
+fn written_mgrs(request: &str) -> Vec<WrittenMgrs> {
+    let chars: Vec<char> = request.chars().collect();
+    let digit = |i: usize| chars.get(i).is_some_and(char::is_ascii_digit);
+    let letter = |i: usize| chars.get(i).is_some_and(char::is_ascii_alphabetic);
+    let space = |i: usize| chars.get(i).is_some_and(|c| c.is_whitespace());
+    let mut found = Vec::new();
+    for start in 0..chars.len() {
+        if !digit(start) || (start > 0 && chars[start - 1].is_alphanumeric()) {
+            continue;
+        }
+        let mut i = start;
+        while digit(i) {
+            i += 1;
+        }
+        if i - start > 2 {
+            continue;
+        }
+        let zone: String = chars[start..i].iter().collect();
+        while space(i) {
+            i += 1;
+        }
+        if !letter(i) {
+            continue;
+        }
+        let band = chars[i];
+        i += 1;
+        while space(i) {
+            i += 1;
+        }
+        if !letter(i) {
+            continue;
+        }
+        let column = chars[i];
+        i += 1;
+        while space(i) {
+            i += 1;
+        }
+        if !letter(i) {
+            continue;
+        }
+        let head = format!("{zone}{band}");
+        let square = format!("{column}{}", chars[i]);
+        i += 1;
+        let mut digits = String::new();
+        loop {
+            let mut j = i;
+            while space(j) {
+                j += 1;
+            }
+            if !digit(j) {
+                break;
+            }
+            while digit(j) {
+                digits.push(chars[j]);
+                j += 1;
+            }
+            if chars.get(j).is_some_and(|c| c.is_alphanumeric()) {
+                break;
+            }
+            i = j;
+            found.push(WrittenMgrs {
+                key: mgrs_key(&format!("{head}{square}{digits}")),
+                span: start..j,
+            });
+        }
+    }
+    found
+}
+
+/// La demande, où les chiffres des références MGRS que le plan reprend sont effacés : ils ne
+/// servent ni de x, ni de y, ni de système à un `Point`.
+fn without_used_mgrs(request: &str, written: &[WrittenMgrs], used: &[usize]) -> String {
+    let mut chars: Vec<char> = request.chars().collect();
+    for index in used {
+        for c in &mut chars[written[*index].span.clone()] {
+            *c = ' ';
+        }
+    }
+    chars.into_iter().collect()
+}
+
+/// Une lecture bien formée (grammaire de la NGA) que le plan ne reprend pas n'efface pas le
+/// texte, qui peut porter d'autres nombres (« 25m de 652000 » se lit `25MDE652000`) : elle ôte
+/// seulement du multiensemble une occurrence de chacune de ses deux moitiés de chiffres, lues
+/// comme nombres, pour que « 31U DQ 48251 11750 » ne donne pas x = 48251, y = 11750 à un point.
+fn take_unused_mgrs(pool: &mut Vec<f64>, written: &[WrittenMgrs], used: &[usize]) {
+    for (index, w) in written.iter().enumerate() {
+        if used.contains(&index) {
+            continue;
+        }
+        if let Ok(mgrs) = crate::geodesy::Mgrs::parse(&w.key) {
+            take(pool, f64::from(mgrs.easting));
+            take(pool, f64::from(mgrs.northing));
+        }
+    }
+}
+
+/// Ce que porte un plan : ses nombres littéraux hors `Point`, ses points littéraux et ses
+/// références MGRS littérales.
 #[derive(Default)]
 struct Found<'a> {
     numbers: Vec<f64>,
     points: Vec<&'a Value>,
+    mgrs: Vec<&'a str>,
     /// Une coordonnée dont la provenance ne peut pas être établie.
     doubtful: bool,
 }
 
 /// Parcourt une valeur littérale avec son schéma (s'il est connu).
 fn walk<'a>(value: &'a Value, schema: Option<&Value>, root: &Value, found: &mut Found<'a>) {
+    if schema.is_some_and(|s| admits(s, root, MGRS_MARK, 0)) {
+        match value {
+            Value::String(text) => found.mgrs.push(text),
+            Value::Null => {}
+            _ => found.doubtful = true,
+        }
+        return;
+    }
     let point_here = schema.is_some_and(|s| admits_point(s, root, 0));
     match value {
         Value::Object(map) => {
@@ -484,21 +667,22 @@ fn walk<'a>(value: &'a Value, schema: Option<&Value>, root: &Value, found: &mut 
     }
 }
 
-/// La référence `value`, paramètre `name` d'une étape `step` de `calls`, désigne-t-elle un
-/// champ que le schéma de sortie de l'étape citée déclare `Point`, à la place d'un paramètre
-/// lui-même `Point` ?
-fn reference_is_a_point(
+/// La référence `value`, paramètre d'une étape `step` de `calls`, désigne-t-elle un champ que
+/// le schéma de sortie de l'étape citée déclare du type marqué `mark` (`Point` ou `MgrsRef`),
+/// à la place d'un paramètre lui-même de ce type ?
+fn reference_is_a(
     registry: &Registry,
     calls: &[PlannedCall],
     step: usize,
     param: &Value,
     params_root: &Value,
     value: &Value,
+    mark: &str,
 ) -> bool {
     let Some(Ok((k, field))) = parse_reference(value) else {
         return false;
     };
-    if k >= step || !admits_point(param, params_root, 0) {
+    if k >= step || !admits(param, params_root, mark, 0) {
         return false;
     }
     let Some(source) = registry.spec(&calls[k - 1].command) else {
@@ -506,9 +690,9 @@ fn reference_is_a_point(
     };
     let root = &source.output_schema;
     match field {
-        None => admits_point(root, root, 0),
+        None => admits(root, root, mark, 0),
         Some(f) => {
-            property_schema(root, root, &f, 0).is_some_and(|schema| admits_point(schema, root, 0))
+            property_schema(root, root, &f, 0).is_some_and(|schema| admits(schema, root, mark, 0))
         }
     }
 }
@@ -571,14 +755,17 @@ fn invents_a_point(
         for (name, value) in params {
             let schema = property_schema(root, root, name, 0);
             if parse_reference(value).is_some() {
-                // Une référence ne tient lieu de point que si elle désigne un `Point`.
-                let carries_point = schema.is_some_and(|s| contains_point(s, root, 0));
-                if carries_point
-                    && !schema.is_some_and(|s| {
-                        reference_is_a_point(registry, calls, step, s, root, value)
-                    })
-                {
-                    return true;
+                // Une référence ne tient lieu de point que si elle désigne un `Point`, ni de
+                // référence MGRS que si elle désigne une `MgrsRef`.
+                for mark in [POINT_MARK, MGRS_MARK] {
+                    let carries = schema.is_some_and(|s| contains(s, root, mark, 0));
+                    if carries
+                        && !schema.is_some_and(|s| {
+                            reference_is_a(registry, calls, step, s, root, value, mark)
+                        })
+                    {
+                        return true;
+                    }
                 }
                 continue;
             }
@@ -588,7 +775,22 @@ fn invents_a_point(
     if found.doubtful {
         return true;
     }
+    // Une référence MGRS du plan figure telle quelle dans la demande, espaces et casse ignorés
+    // (CAP-15). Elle ne prend aucun nombre à la demande, et ses chiffres n'y restent pas pour
+    // un `Point`.
+    let written = written_mgrs(request);
+    let mut used = Vec::new();
+    for literal in &found.mgrs {
+        let key = mgrs_key(literal);
+        let Some(index) = written.iter().position(|w| w.key == key) else {
+            return true;
+        };
+        used.push(index);
+    }
+    let request = without_used_mgrs(request, &written, &used);
+    let request = request.as_str();
     let mut pool = request_numbers(request);
+    take_unused_mgrs(&mut pool, &written, &used);
     for number in &found.numbers {
         take(&mut pool, *number);
     }
@@ -1248,6 +1450,208 @@ mod tests {
             source: QuestionSource::Model,
         };
         assert_eq!(guard_rejected(&registry, &empty, request), None);
+    }
+
+    fn convert(params: Value) -> Value {
+        json!({"command": "coord.convert", "params": params})
+    }
+
+    #[test]
+    fn the_mgrs_schema_is_marked_like_a_point() {
+        let registry = Registry::standard();
+        let spec = registry.spec("coord.convert").unwrap();
+        let root = &spec.params_schema;
+        assert!(is_mgrs(&root["properties"]["mgrs"], root));
+        assert!(!is_point(&root["properties"]["mgrs"], root));
+        assert_eq!(root["$defs"]["MgrsRef"]["x-cassini"], MGRS_MARK);
+        assert_eq!(root["$defs"]["MgrsRef"]["type"], "string");
+        // La chaîne passe telle quelle : sa grammaire est lue par la commande.
+        assert_eq!(
+            serde_json::from_value::<MgrsRef>(json!("31u dq 48251 11750")).unwrap(),
+            MgrsRef("31u dq 48251 11750".into())
+        );
+    }
+
+    #[test]
+    fn a_mgrs_absent_from_the_request_is_a_guard_question() {
+        let registry = Registry::standard();
+        let plan = calls(json!([convert(
+            json!({"mgrs": "31UDQ4825111750", "to": ["wgs84"]})
+        )]));
+        for request in [
+            "Convertis ce point en WGS84.",
+            // D'autres chiffres que ceux du plan.
+            "Convertis 31U DQ 48251 11751 en WGS84.",
+            // Une autre zone, ou une autre précision.
+            "Convertis 32U DQ 48251 11750 en WGS84.",
+            "Convertis 31U DQ 4825 1175 en WGS84.",
+        ] {
+            assert!(
+                is_guard(&guard_coordinates(&registry, plan.clone(), request)),
+                "{request}"
+            );
+            assert!(
+                guard_rejected(&registry, &plan, request).is_some(),
+                "{request}"
+            );
+        }
+        // Une référence qui n'est pas une chaîne n'est pas une référence recopiée.
+        let odd = calls(json!([convert(json!({"mgrs": 31, "to": ["wgs84"]}))]));
+        assert!(is_guard(&guard_coordinates(&registry, odd, "31 en WGS84")));
+    }
+
+    #[test]
+    fn a_mgrs_written_in_the_request_leaves_the_plan_unchanged() {
+        let registry = Registry::standard();
+        let plan = calls(json!([convert(
+            json!({"mgrs": "31UDQ4825111750", "to": ["wgs84", "utm"]})
+        )]));
+        for request in [
+            "Donne-moi 31U DQ 48251 11750 en WGS84 et en UTM.",
+            "Convertis 31u dq 48251 11750, puis montre-le en UTM.",
+            "Convertis 31UDQ4825111750 en WGS84 et UTM",
+            "Convertis 31UDQ 48251 11750 10 fois",
+            "Où est « 31U DQ 4825111750 » ?",
+        ] {
+            assert_eq!(
+                guard_coordinates(&registry, plan.clone(), request),
+                plan,
+                "{request}"
+            );
+        }
+        // Le modèle peut écrire la référence avec espaces ou en minuscules, et une zone sur un
+        // chiffre se compare à sa forme sur deux.
+        let spaced = calls(json!([convert(
+            json!({"mgrs": "31u dq 48251 11750", "to": ["wgs84"]})
+        )]));
+        assert_eq!(
+            guard_coordinates(&registry, spaced.clone(), "Convertis 31UDQ4825111750."),
+            spaced
+        );
+        let short = calls(json!([convert(
+            json!({"mgrs": "4QFJ1234567890", "to": ["wgs84"]})
+        )]));
+        for request in ["Où tombe 4QFJ 12345 67890 ?", "Où tombe 04QFJ1234567890 ?"] {
+            assert_eq!(
+                guard_coordinates(&registry, short.clone(), request),
+                short,
+                "{request}"
+            );
+        }
+        // Une référence mal formée mais recopiée passe la garde : la commande la refusera en
+        // nommant la partie fautive.
+        let bad = calls(json!([convert(
+            json!({"mgrs": "31IDQ4825111750", "to": ["wgs84"]})
+        )]));
+        assert_eq!(
+            guard_coordinates(&registry, bad.clone(), "Convertis 31I DQ 48251 11750."),
+            bad
+        );
+    }
+
+    #[test]
+    fn the_digits_of_a_mgrs_do_not_make_a_point() {
+        let registry = Registry::standard();
+        let request = "Convertis 31U DQ 48251 11750 en UTM 31N, puis en WGS84.";
+        for point in [
+            json!({"x": 48251, "y": 11750, "epsg": 32631}),
+            json!({"x": 48251, "y": 11750, "epsg": 31}),
+        ] {
+            let plan = calls(json!([convert(json!({"point": point, "to": ["wgs84"]}))]));
+            assert!(is_guard(&guard_coordinates(&registry, plan, request)));
+        }
+        // Les autres nombres de la demande restent lus.
+        let plan = calls(json!([
+            convert(json!({"mgrs": "31UDQ4825111750", "to": ["wgs84"]})),
+            convert(json!({"point": {"x": 2.4, "y": 48.7, "epsg": 4326}, "to": ["mgrs"]}))
+        ]));
+        let request = "Convertis 31U DQ 48251 11750 en WGS84, et 2,4 / 48,7 (WGS84) en MGRS.";
+        assert_eq!(guard_coordinates(&registry, plan.clone(), request), plan);
+    }
+
+    #[test]
+    fn a_number_after_a_mgrs_like_reading_stays_available_to_a_point() {
+        // « 25m de 652000 » se lit `25MDE652000`, bien formé : 652000 reste pour x.
+        let registry = Registry::standard();
+        let plan = calls(json!([{"command": "terrain.line_of_sight", "params": {
+            "dem": "mnt.tif",
+            "observer": {"x": 652000, "y": 6862000, "epsg": 2154},
+            "target": {"x": 653000, "y": 6863000, "epsg": 2154},
+            "observer_height": {"value": 25, "unit": "m"}}}]));
+        let request =
+            "Ligne de vue à 25m de 652000 6862000 vers 653000 6863000 en Lambert-93 sur mnt.tif";
+        assert_eq!(guard_coordinates(&registry, plan.clone(), request), plan);
+    }
+
+    #[test]
+    fn a_spaced_zone_band_or_square_is_still_read() {
+        let registry = Registry::standard();
+        let plan = calls(json!([convert(
+            json!({"mgrs": "31UDQ4825111750", "to": ["wgs84"]})
+        )]));
+        for request in [
+            "Convertis 31 U DQ 48251 11750 en WGS84",
+            "Convertis 31U D Q 48251 11750 en WGS84",
+            "Convertis 31 U D Q 4825111750 en WGS84",
+        ] {
+            assert_eq!(
+                guard_coordinates(&registry, plan.clone(), request),
+                plan,
+                "{request}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_digits_of_a_used_malformed_mgrs_do_not_make_a_point() {
+        let registry = Registry::standard();
+        let plan = calls(json!([
+            convert(json!({"mgrs": "31IDQ4825111750", "to": ["wgs84"]})),
+            convert(json!({"point": {"x": 48251, "y": 11750, "epsg": 32631}, "to": ["wgs84"]}))
+        ]));
+        let request = "Convertis 31I DQ 48251 11750, puis le point en UTM 31N.";
+        assert!(is_guard(&guard_coordinates(&registry, plan, request)));
+    }
+
+    #[test]
+    fn a_mgrs_from_a_step_leaves_the_plan_unchanged() {
+        let registry = Registry::standard();
+        let plan = calls(json!([
+            convert(json!({"point": {"x": 2.4, "y": 48.7, "epsg": 4326}, "to": ["mgrs", "wgs84"]})),
+            convert(json!({"mgrs": "step:1.mgrs", "to": ["utm"]})),
+            convert(json!({"point": "step:1.wgs84", "to": ["utm"]}))
+        ]));
+        let request = "Mets 2,4 / 48,7 (WGS84) en MGRS, puis la case en UTM.";
+        assert_eq!(guard_coordinates(&registry, plan.clone(), request), plan);
+    }
+
+    #[test]
+    fn a_reference_to_a_field_that_is_not_a_mgrs_is_a_guard_question() {
+        let registry = registry_with_locate();
+        let first = convert(json!({"point": {"x": 2.4, "y": 48.7, "epsg": 4326},
+            "to": ["mgrs", "utm"]}));
+        let request = "Mets 2,4 / 48,7 (WGS84) en MGRS.";
+        for (param, reference) in [
+            ("mgrs", "step:1.utm"),
+            ("mgrs", "step:1"),
+            ("mgrs", "step:3.mgrs"),
+            ("point", "step:1.mgrs"),
+        ] {
+            let plan = calls(json!([
+                first,
+                convert(json!({param: reference, "to": ["wgs84"]}))
+            ]));
+            assert!(
+                is_guard(&guard_coordinates(&registry, plan, request)),
+                "{param} {reference}"
+            );
+        }
+        // Un champ `Point` d'une autre commande ne tient pas lieu de référence MGRS.
+        let plan = calls(json!([
+            {"command": "test.locate", "params": {}},
+            convert(json!({"mgrs": "step:1.point", "to": ["wgs84"]}))
+        ]));
+        assert!(is_guard(&guard_coordinates(&registry, plan, "")));
     }
 
     #[test]

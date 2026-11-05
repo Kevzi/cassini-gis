@@ -128,7 +128,8 @@ sont ignorés. Les zones polaires (UPS, bandes A, B, Y, Z) sont hors du type. Ma
 le schéma engendré comme `Point`, et soumise à la même garde de provenance : elle figure
 telle quelle dans la demande, ou vient d'une référence `step:` vers un champ déclaré
 `MgrsRef`. Vers MGRS, la conversion **tronque** (convention de la NGA). Posée par
-l'entrée 2 de l'epic 11.
+l'entrée 2 de l'epic 11 (`core/src/point.rs`, marque `x-cassini: mgrs`) ; la chaîne passe
+telle quelle au schéma, sa grammaire est lue par la commande qui la reçoit.
 
 Une référence mal formée est refusée par l'erreur `coord.invalid_mgrs` (AD-21), qui
 nomme la partie fautive (zone, bande, carré de 100 km ou chiffres).
@@ -250,7 +251,7 @@ constante du noyau. Posé par l'entrée 1 de l'epic 10.
 | `terrain.slope` | faite | core | — |
 | `terrain.viewshed` | faite | core | — |
 | `terrain.line_of_sight` | faite | core | — |
-| `coord.convert` | planifiée | core | epic 11, entrée 2 |
+| `coord.convert` | faite | core | epic 11, entrée 2 |
 | `geo.distance_azimuth` | planifiée | core | epic 11, entrée 3 |
 | `geo.destination_point` | planifiée | core | epic 11, entrée 3 |
 | `geo.bearing_intersection` | planifiée | core | epic 11, entrée 3 |
@@ -708,10 +709,6 @@ Ligne de vue entre deux points sur un MNT. Mêmes erreurs que `terrain.viewshed`
  "planned_params": {"dem": {"type": "RasterPath", "required": true}}}
 ```
 
----
-
-## 6. Commandes planifiées — epic 11, géométrie et terrain étendu
-
 ### `coord.convert`
 
 Convertit **un** point entre WGS84 (EPSG:4326), UTM sur WGS84 (EPSG:32601 à 32660,
@@ -734,14 +731,19 @@ calcul : elle est une étape visible du plan. Plusieurs points font plusieurs é
 | `utm` | `Point` ou `null` | Présent si `utm` est demandé : x, y en mètres, `epsg` de la zone. |
 | `mgrs` | `MgrsRef` ou `null` | Présent si `mgrs` est demandé, forme canonique. |
 
-Chaque champ est utilisable comme référence d'étape (AD-23). Erreurs :
+Une référence MGRS lue donne le **coin sud-ouest** de sa case (convention de la NGA) ; la
+case doit toucher la bande annoncée, sinon `coord.invalid_mgrs` (« bande »). Le WGS84 rendu
+est arrondi au milliardième de degré, l'UTM au millimètre. Chaque champ est utilisable comme
+référence d'étape (AD-23) : `wgs84` et `utm` dans un paramètre `Point`, `mgrs` dans un
+paramètre `MgrsRef`. Livrée par l'entrée 2 de l'epic 11 (`core/src/commands/coord_convert.rs`,
+calculs dans `core/src/geodesy.rs`). Erreurs :
 `geo.unsupported_crs` (système hors liste, nomme l'étape `data.transform_point`),
 `coord.invalid_mgrs` (référence MGRS mal formée, partie fautive nommée),
 `coord.one_input` (ni `point` ni `mgrs`, ou les deux), `coord.out_of_range` (latitude
 hors de [-80, 84] pour UTM ou MGRS, ou zone imposée à plus d'une zone du point).
 
 ```json fiche
-{"id": "coord.convert", "status": "planifiee", "runs_in": "core", "dictated_by_core": false,
+{"id": "coord.convert", "status": "faite", "runs_in": "core", "dictated_by_core": false,
  "params": {"point": {"type": "Point", "required": false},
             "mgrs": {"type": "MgrsRef", "required": false},
             "to": {"type": "array", "required": true,
@@ -750,6 +752,10 @@ hors de [-80, 84] pour UTM ou MGRS, ou zone imposée à plus d'une zone du point
             "mgrs_precision": {"type": "integer", "required": false}},
  "result": ["wgs84", "utm", "mgrs"]}
 ```
+
+---
+
+## 6. Commandes planifiées — epic 11, géométrie et terrain étendu
 
 ### `geo.distance_azimuth`
 

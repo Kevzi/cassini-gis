@@ -183,6 +183,62 @@ class OtherCommandsTest(unittest.TestCase):
         )
 
 
+CONVERT = {"mgrs": "31UDQ4825111750", "to": ["mgrs", "utm"]}
+CONVERT_OUT = {
+    "mgrs": "31UDQ4825111750",
+    "utm": {"x": 448251.0, "y": 5411750.6, "epsg": 32631},
+}
+
+
+class CoordConvertTest(unittest.TestCase):
+    def test_the_rendered_forms_are_shown_in_the_asked_order(self):
+        self.assertEqual(
+            say("coord.convert", CONVERT, CONVERT_OUT),
+            "Point converti : en MGRS : 31UDQ4825111750 ; en UTM 31N : 448251 E, 5411750 N.",
+        )
+        self.assertEqual(
+            say("coord.convert", CONVERT, CONVERT_OUT, lang="en"),
+            "Point converted: in MGRS: 31UDQ4825111750; in UTM 31N: 448251 E, 5411750 N.",
+        )
+
+    def test_wgs84_shows_latitude_then_longitude_with_hemispheres(self):
+        params = {"point": {"x": -3, "y": -1, "epsg": 4326}, "to": ["wgs84", "utm"]}
+        result = {
+            "wgs84": {"x": -3.0, "y": -1.0, "epsg": 4326},
+            "utm": {"x": 500000.0, "y": 9889469.841, "epsg": 32730},
+        }
+        self.assertEqual(
+            say("coord.convert", params, result),
+            "Point converti : en WGS84 : 1,0000000° S, 3,0000000° O ; "
+            "en UTM 30S : 500000 E, 9889469 N.",
+        )
+        self.assertEqual(
+            say("coord.convert", params, result, lang="en"),
+            "Point converted: in WGS84: 1.0000000° S, 3.0000000° W; "
+            "in UTM 30S: 500000 E, 9889469 N.",
+        )
+
+    def test_without_result_only_the_asked_forms(self):
+        self.assertEqual(
+            say("coord.convert", CONVERT), "Conversion du point vers MGRS, UTM."
+        )
+        self.assertEqual(
+            say("coord.convert", CONVERT, {}, lang="en"), "Conversion of the point to MGRS, UTM."
+        )
+
+    def test_unreadable_values_fall_back(self):
+        catalogue = [{"id": "coord.convert", "description_fr": "Convertit un point."}]
+        for params, result in [
+            ({"to": ["lambert"]}, CONVERT_OUT),
+            ({"to": "mgrs"}, CONVERT_OUT),
+            (CONVERT, {"mgrs": "31UDQ", "utm": {"x": 1, "y": 2, "epsg": 2154}}),
+        ]:
+            self.assertEqual(
+                say("coord.convert", params, result, catalogue=catalogue),
+                "Convertit un point. Terminée.",
+            )
+
+
 class ReferencesTest(unittest.TestCase):
     def test_step_reference_uses_the_name_rendered_by_the_step(self):
         params = {"layer_id": "parcelles_2", "overlay_layer_id": "step:1.layer_id"}
