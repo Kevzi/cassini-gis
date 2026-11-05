@@ -106,12 +106,24 @@ risk = "low"
 notes = ["hitl : le proprietaire lance le calcul de QGIS par GRASS sur son jeu de donnees hors depot.", "Decision: 2026-11-04 — toutes les commandes de terrain comparables sont comparees (ligne de vue ajoutee) : la justesse est le but, la vitesse un bonus mesure sans seuil (proprietaire)."]
 
 [[entry]]
+id = 10
+type = "story"
+title = "Le garde-fou des coordonnées accepte un système écrit une seule fois pour plusieurs points"
+description = "Un système de coordonnées écrit une fois dans la demande vaut pour tous les points du plan (« voit-on 657 300 / 6 848 400 depuis 656 500 / 6 847 800, en Lambert-93 ? ») : le plan juste d'une ligne de vue passe le garde-fou au lieu de devenir sa question. Le x et le y de chaque point restent lus chacun dans la demande ; le système n'est toujours jamais pris au projet. L'attendu de S21 dans l'essai réel des plans redevient un plan."
+verify = "Tests du noyau : le plan juste d'une ligne de vue dont le système est écrit une fois passe le garde-fou ; un point dont le x ou le y manque à la demande rend toujours la question ; une demande sans système rend toujours la question ; deux points écrits dans deux systèmes différents passent comme avant. Le test du plan juste de S21 attend désormais ce plan, et l'attendu de S21 est un plan."
+covers = ["CAP-11"]
+after = []
+hitl = false
+risk = "high"
+notes = ["Decision: 2026-11-05 — un système écrit une fois dans la demande vaut pour tous ses points ; jamais pris au projet (propriétaire). Reprend l'entrée de deferred-work.md issue de 4.6.", "Contrôle hors du ticket (risque high) : l'essai réel des plans et l'essai réel du terrain repassés sur le modèle installé, sans nouvelle coordonnée arrêtée à tort ni coordonnée inventée laissée passer."]
+
+[[entry]]
 id = 8
 type = "story"
 title = "Refactor sweep"
 description = "Nettoyage de fin d'epic : sa portee est fixee au demarrage, depuis les plans et les constats de relecture reportes pendant l'epic ; aucune portee repoussee d'une autre entree."
 verify = "Tests du noyau, de l'extension et du generateur verts apres le nettoyage, sans changement de comportement."
 covers = ["CAP-11"]
-after = [1, 2, 3, 4, 5, 6, 7, 9]
+after = [1, 2, 3, 4, 5, 6, 7, 9, 10]
 hitl = false
 risk = "low"
