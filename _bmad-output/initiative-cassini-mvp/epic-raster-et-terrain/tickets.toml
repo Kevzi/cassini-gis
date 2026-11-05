@@ -127,3 +127,14 @@ covers = ["CAP-11"]
 after = [1, 2, 3, 4, 5, 6, 7, 9, 10]
 hitl = false
 risk = "low"
+
+[[entry]]
+id = 11
+type = "bug"
+title = "La pente d'un MNT en Web Mercator est fausse sans erreur, et la pente en degrés dépend de la plateforme"
+description = "Un MNT en EPSG:3857 est accepté comme métrique : la pente, les distances et le champ de vision sont faux sans erreur. La pente en degrés passe par l'arc tangente de la bibliothèque mathématique de la plateforme : un journal écrit sous Windows peut ne pas se rejouer à l'identique sous Linux."
+verify = "Tests du noyau sous Linux et sous Windows (CI) : un MNT en pseudo-mètres est refusé par une erreur typée ; les octets de la pente en degrés de la colline sont figés dans un test et identiques sur les deux plateformes."
+covers = ["CAP-11"]
+after = []
+hitl = false
+risk = "high"
