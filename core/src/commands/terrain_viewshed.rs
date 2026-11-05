@@ -32,7 +32,7 @@ use crate::commands::terrain_line_of_sight::{
     check_crs, check_extent, default_curvature, default_observer_height, default_refraction,
     default_target_height, endpoint_elevation, refraction, sight, Height, Line,
 };
-use crate::dem::{Dem, DemError};
+use crate::dem::Dem;
 use crate::point::Point;
 use crate::registry::{Command, CommandFailure, CommandSpec, Registration, RunsIn};
 
@@ -238,10 +238,6 @@ pub fn viewshed(
     Ok((out, stats))
 }
 
-fn failure(e: DemError) -> CommandFailure {
-    CommandFailure::new(e.code, e.message)
-}
-
 /// `terrain.viewshed` : commande du noyau.
 pub struct TerrainViewshed;
 
@@ -278,6 +274,7 @@ impl Command for TerrainViewshed {
             "the_agreement_holds_on_a_cropped_window_and_a_holed_dem",
             "the_observer_cell_is_visible_even_with_a_tiny_radius",
             "the_default_radius_is_capped_on_a_fine_dem",
+            "rectangular_cells_bound_on_the_smaller_and_crop_each_axis_apart",
             "a_hole_is_nodata_and_hides_nothing",
             "a_too_large_radius_writes_nothing",
             "a_bad_observer_writes_nothing",
@@ -288,10 +285,10 @@ impl Command for TerrainViewshed {
     }
 
     fn run(&self, params: TerrainViewshedParams) -> Result<TerrainViewshedOutput, CommandFailure> {
-        let dem = Dem::open(Path::new(&params.dem)).map_err(failure)?;
+        let dem = Dem::open(Path::new(&params.dem)).map_err(CommandFailure::from)?;
         let (grid, stats) = viewshed(&dem, &params)?;
         grid.write_geotiff(Path::new(&params.out))
-            .map_err(failure)?;
+            .map_err(CommandFailure::from)?;
         Ok(TerrainViewshedOutput {
             file: params.out,
             visible_cells: stats.visible_cells,
@@ -548,6 +545,50 @@ mod tests {
         // Donnés explicitement, 5 km sont refusés.
         let err = viewshed(&fine, &params(pt(550.5, 1.5), 5000.0)).unwrap_err();
         assert_eq!(err.code, "terrain.viewshed_too_large");
+    }
+
+    /// MNT plat à 50 m de 40 colonnes de 20 m sur 80 lignes de 10 m, coin haut-gauche (0, 800).
+    fn rectangular() -> Dem {
+        Dem {
+            width: 40,
+            height: 80,
+            origin_x: 0.0,
+            origin_y: 800.0,
+            cell_size_x: 20.0,
+            cell_size_y: 10.0,
+            epsg: 2154,
+            nodata: Some(-9999.0),
+            values: vec![50.0; 3200],
+        }
+    }
+
+    #[test]
+    fn rectangular_cells_bound_on_the_smaller_and_crop_each_axis_apart() {
+        let dem = rectangular();
+        // Centre de la cellule (20, 40).
+        let o = pt(410.0, 395.0);
+        let mut p = params(o, 200.0);
+        p.curvature = false;
+        let (grid, stats) = viewshed(&dem, &p).unwrap();
+        // 200 m font 10 colonnes de 20 m et 20 lignes de 10 m de chaque côté.
+        assert_eq!((grid.width, grid.height), (21, 41));
+        assert_eq!((grid.origin_x, grid.origin_y), (200.0, 600.0));
+        assert_eq!((grid.cell_size_x, grid.cell_size_y), (20.0, 10.0));
+        // L'observateur, au centre de la fenêtre ; un coin, à 283 m, hors du cercle.
+        assert_eq!(grid.value(10, 20), Some(1.0));
+        assert_eq!(grid.value(0, 0), None);
+        // Le long de chaque axe, jusqu'au rayon : visible.
+        assert_eq!(grid.value(0, 20), Some(1.0));
+        assert_eq!(grid.value(10, 0), Some(1.0));
+        assert_eq!(stats.hidden_cells, 0);
+        // La borne se prend sur la plus petite cellule : 500 × 10 m, pas 500 × 20 m.
+        let err = viewshed(&dem, &params(o, 5100.0)).unwrap_err();
+        assert_eq!(err.code, "terrain.viewshed_too_large");
+        assert_eq!(
+            err.message,
+            "Le rayon de 5,1 km dépasse 500 cellules du MNT : au plus 5 km pour des cellules de 10 m ; réduisez-le."
+        );
+        assert!(viewshed(&dem, &params(o, 5000.0)).is_ok());
     }
 
     #[test]

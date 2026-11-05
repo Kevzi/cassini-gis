@@ -16,7 +16,7 @@ use std::path::Path;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::dem::{Dem, DemError};
+use crate::dem::Dem;
 use crate::registry::{Command, CommandFailure, CommandSpec, Registration, RunsIn};
 
 /// Valeur sans-donnée de la pente écrite.
@@ -133,10 +133,6 @@ pub fn horn_slope(dem: &Dem, unit: SlopeUnit) -> (Dem, SlopeStats) {
     (out, stats)
 }
 
-fn failure(e: DemError) -> CommandFailure {
-    CommandFailure::new(e.code, e.message)
-}
-
 /// `terrain.slope` : commande du noyau.
 pub struct TerrainSlope;
 
@@ -171,11 +167,11 @@ impl Command for TerrainSlope {
     }
 
     fn run(&self, params: TerrainSlopeParams) -> Result<TerrainSlopeOutput, CommandFailure> {
-        let dem = Dem::open(Path::new(&params.dem)).map_err(failure)?;
+        let dem = Dem::open(Path::new(&params.dem)).map_err(CommandFailure::from)?;
         let (slope, stats) = horn_slope(&dem, params.unit);
         slope
             .write_geotiff(Path::new(&params.out))
-            .map_err(failure)?;
+            .map_err(CommandFailure::from)?;
         Ok(TerrainSlopeOutput {
             file: params.out,
             unit: params.unit,

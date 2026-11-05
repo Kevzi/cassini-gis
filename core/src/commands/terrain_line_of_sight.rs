@@ -27,7 +27,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::commands::analysis_buffer::DistanceUnit;
-use crate::dem::{Dem, DemError};
+use crate::dem::Dem;
 use crate::point::Point;
 use crate::registry::{Command, CommandFailure, CommandSpec, Registration, RunsIn};
 
@@ -443,10 +443,6 @@ pub fn line_of_sight(
     })
 }
 
-fn failure(e: DemError) -> CommandFailure {
-    CommandFailure::new(e.code, e.message)
-}
-
 /// `terrain.line_of_sight` : commande du noyau.
 pub struct TerrainLineOfSight;
 
@@ -486,6 +482,7 @@ impl Command for TerrainLineOfSight {
             "a_point_without_elevation_is_refused",
             "a_hole_on_the_line_hides_nothing_and_is_counted",
             "coincident_points_are_visible_with_one_sample",
+            "rectangular_cells_sample_at_the_smaller_cell",
             "a_long_line_gives_a_bounded_profile_and_a_verdict_on_every_sample",
             "defaults_and_invalid_params",
             "two_runs_give_identical_results",
@@ -497,7 +494,7 @@ impl Command for TerrainLineOfSight {
         &self,
         params: TerrainLineOfSightParams,
     ) -> Result<TerrainLineOfSightOutput, CommandFailure> {
-        let dem = Dem::open(Path::new(&params.dem)).map_err(failure)?;
+        let dem = Dem::open(Path::new(&params.dem)).map_err(CommandFailure::from)?;
         line_of_sight(&dem, &params)
     }
 }
@@ -697,6 +694,29 @@ mod tests {
         assert_eq!(r.profile[0].elevation, Some(100.0));
         let v = serde_json::to_value(&r).unwrap();
         assert_eq!(v["profile"][3]["elevation"], Value::Null);
+    }
+
+    #[test]
+    fn rectangular_cells_sample_at_the_smaller_cell() {
+        // MNT plat de 40 colonnes de 20 m sur 80 lignes de 10 m, coin haut-gauche (0, 800).
+        let dem = Dem {
+            width: 40,
+            height: 80,
+            origin_x: 0.0,
+            origin_y: 800.0,
+            cell_size_x: 20.0,
+            cell_size_y: 10.0,
+            epsg: 2154,
+            nodata: Some(-9999.0),
+            values: vec![50.0; 3200],
+        };
+        // 200 m le long des colonnes de 20 m : un échantillon tous les 10 m, pas tous les 20 m.
+        let mut p = params(pt(210.0, 395.0), pt(410.0, 395.0));
+        p.curvature = false;
+        let r = line_of_sight(&dem, &p).unwrap();
+        assert!(r.visible);
+        assert_eq!(r.profile_step, 10.0);
+        assert_eq!(r.profile.len(), 21);
     }
 
     #[test]

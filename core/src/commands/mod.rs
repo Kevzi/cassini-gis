@@ -5,6 +5,18 @@
 
 include!(concat!(env!("OUT_DIR"), "/commands_mods.rs"));
 
+use crate::dem::DemError;
+use crate::registry::CommandFailure;
+
+/// Une erreur du module `dem` devient l'échec typé de la commande qui l'a rencontrée, code et
+/// message tels quels. La conversion vit ici et non dans `dem.rs`, qui ne dépend pas du
+/// registre et reste remplaçable seul (AD-20).
+impl From<DemError> for CommandFailure {
+    fn from(e: DemError) -> Self {
+        CommandFailure::new(e.code, e.message)
+    }
+}
+
 // La logique de `build.rs` est incluse ici, et non dans `lib.rs`, pour être testée
 // par `cargo test` sans toucher un fichier partagé.
 #[cfg(test)]
