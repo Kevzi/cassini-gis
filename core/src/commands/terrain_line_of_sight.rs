@@ -9,6 +9,17 @@
 //! interpolée de façon bilinéaire, puis abaissée de la chute due à la courbure terrestre
 //! corrigée de la réfraction. Le premier échantillon intermédiaire au-dessus de la ligne de
 //! visée est le premier obstacle.
+//!
+//! Provenance : la méthode est le test direct de la ligne de visée, écrit sans aucune ligne de
+//! code de GRASS, de GDAL, de QGIS ni de Whitebox. La chute due à la courbure est la flèche
+//! d²/2R d'une sphère de rayon R, approximation de géodésie classique valable pour d ≪ R ; la
+//! réfraction la réduit du facteur (1 − k), k étant le coefficient de réfraction terrestre.
+//! R vaut 6 371 km, le rayon moyen R1 de l'ellipsoïde GRS80 (H. Moritz, « Geodetic Reference
+//! System 1980 », *Journal of Geodesy*, 74, 2000, p. 128-133 : 6 371 008,8 m) arrondi au
+//! kilomètre. k vaut par défaut 0,13, la valeur classique déterminée par C. F. Gauss lors de
+//! la triangulation du Hanovre (années 1820) ; GRASS prend 1/7 (0,14286) par défaut, d'où le
+//! coefficient passé explicitement à `r.viewshed` dans la comparaison
+//! (`docs/comparaison-terrain-qgis.md`).
 
 use std::path::Path;
 

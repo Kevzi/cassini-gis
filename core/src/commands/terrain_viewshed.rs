@@ -2,9 +2,13 @@
 //! Calculée dans le noyau, sans GDAL ni GRASS (AD-1).
 //!
 //! Provenance : le principe est celui de l'algorithme exact « R3 » décrit par W. R. Franklin
-//! et C. Ray, « Higher isn't necessarily better: visibility algorithms and experiments »
-//! (1994), repris d'après la publication seule, sans aucun code de Whitebox ni d'ailleurs :
+//! et C. Ray, « Higher isn't necessarily better: visibility algorithms and experiments », dans
+//! T. C. Waugh et R. G. Healey (dir.), *Advances in GIS Research: Sixth International
+//! Symposium on Spatial Data Handling*, Édimbourg, 1994, p. 751-770, repris d'après la
+//! publication seule, sans aucune ligne de code de Whitebox, de GRASS, de GDAL ni de QGIS :
 //! chaque cellule est jugée par une ligne de vue propre, de l'observateur vers son centre.
+//! Courbure et réfraction : voir `terrain_line_of_sight.rs`. Écarts mesurés contre
+//! `r.viewshed` de GRASS sur un MNT réel : `docs/comparaison-terrain-qgis.md`.
 //!
 //! Variante : l'échantillonnage de chaque ligne n'est pas celui du papier (interpolation aux
 //! croisements de la ligne avec la grille). C'est celui de `terrain.line_of_sight` (`sight`) :

@@ -33,5 +33,8 @@
   registre (commande de génération, familles, règle du jeu tenu à l'écart) et le score
   de référence de Qwen3.5-9B sur ce jeu.
 
+- `comparaison-terrain-qgis.md` — pente, ligne de vue et champ de vision du noyau
+  comparés à QGIS et GRASS sur un vrai MNT : écarts, temps et provenance du code.
+
 À remplir au fil des étapes : parité fonctionnelle visée et décisions
 d'architecture courtes (ADR).

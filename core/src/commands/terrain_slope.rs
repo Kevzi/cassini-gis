@@ -1,6 +1,12 @@
 //! Commande `terrain.slope` : pente d'un MNT, en degrés ou en pourcentage, calculée dans le
 //! noyau par la méthode de Horn (1981), sans GDAL ni GRASS (AD-1).
 //!
+//! Provenance : les différences finies pondérées sur la fenêtre 3 × 3 sont celles de
+//! B. K. P. Horn, « Hill shading and the reflectance map », *Proceedings of the IEEE*, 69(1),
+//! 1981, p. 14-47, écrites d'après la publication seule. Aucune ligne de code de GDAL, de
+//! GRASS, de QGIS ni de Whitebox n'est reprise. Résultat comparé à `gdaldem slope -alg Horn`
+//! (ticket 4.2) et à `native:slope` de QGIS (`docs/comparaison-terrain-qgis.md`).
+//!
 //! Le MNT est ouvert et la pente écrite par `dem.rs`, l'unique porte raster du noyau (AD-20).
 //! Aucune reprojection (AD-19) : la sortie garde l'emprise, la cellule et l'EPSG du MNT. Le
 //! noyau nomme le fichier de sortie dans le dossier de travail (AD-10).
