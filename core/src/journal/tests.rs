@@ -1131,6 +1131,16 @@ impl Executor for ProjectQgis {
                     "project_crs": "EPSG:2154", "reprojected": false
                 }))
             }
+            // Comme le geste : le raster du noyau entre au projet, nommé du radical du fichier.
+            "layer.open_raster" => {
+                let path = Path::new(p["path"].as_str().unwrap());
+                assert!(path.is_absolute() && path.is_file(), "{}", path.display());
+                let file = path.file_name().unwrap().to_string_lossy().into_owned();
+                let layer = format!("raster_g{}_{n}", self.generation);
+                self.project.layers.borrow_mut().push((layer.clone(), file));
+                let name = path.file_stem().unwrap().to_string_lossy().into_owned();
+                Ok(json!({"layer_id": layer, "name": name}))
+            }
             "layout.export_pdf" => {
                 self.seen
                     .borrow_mut()
@@ -1580,5 +1590,295 @@ fn intermediate_files_follow_the_rule_of_an_executed_plan() {
     assert_eq!(intermediate_files(&registry, &journal).len(), 3);
     // Journal absent : rien.
     assert!(intermediate_files(&registry, &dir.join("absent.jsonl")).is_empty());
+    let _ = fs::remove_dir_all(dir);
+}
+
+// ---- Ticket 4.9 : l'ouverture d'un raster du noyau est une étape dictée et journalisée ----
+
+/// Copie le MNT de test sous `dem/plan.tif` dans le dossier du projet.
+fn with_dem(dir: &Path) {
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/mnt-plan-incline-2154.tif");
+    fs::create_dir_all(dir.join("dem")).unwrap();
+    fs::copy(fixture, dir.join("dem/plan.tif")).unwrap();
+}
+
+fn slope_params() -> Value {
+    json!({"dem": "dem/plan.tif", "unit": "degrees"})
+}
+
+/// QGIS de test qui note chaque ordre reçu et ouvre un raster (ou échoue à l'ouvrir).
+struct RasterQgis {
+    calls: std::rc::Rc<std::cell::RefCell<Vec<(String, Value)>>>,
+    unreadable: bool,
+}
+
+impl RasterQgis {
+    fn new(unreadable: bool) -> Self {
+        RasterQgis {
+            calls: Default::default(),
+            unreadable,
+        }
+    }
+}
+
+impl Executor for RasterQgis {
+    fn execute(&self, id: &str, p: Value) -> Result<Value, RegistryError> {
+        self.calls.borrow_mut().push((id.to_string(), p.clone()));
+        assert_eq!(id, "layer.open_raster");
+        if self.unreadable {
+            return Err(RegistryError::Delegated {
+                code: "layer.invalid_source".into(),
+                message: "Le raster « 1-terrain.slope.tif » n'est pas lisible.".into(),
+            });
+        }
+        let n = self.calls.borrow().len();
+        let stem = Path::new(p["path"].as_str().unwrap())
+            .file_stem()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        Ok(json!({"layer_id": format!("r{n}"), "name": stem}))
+    }
+}
+
+#[test]
+fn a_core_raster_is_followed_by_a_dictated_opening_in_the_three_flows() {
+    let (dir, project, token) = temp_project();
+    with_dem(&dir);
+    let registry = Registry::standard();
+    let qgis = RasterQgis::new(false);
+    let calls = qgis.calls.clone();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(qgis)
+        .with_raster_opening(true);
+    // `command.run`, appel d'une IA externe, étape 2 d'un plan.
+    let by_hand = s.call("terrain.slope", slope_params()).unwrap();
+    s.call_from("terrain.slope", slope_params(), Some("external"))
+        .unwrap();
+    s.call_in_plan("terrain.slope", slope_params(), 2).unwrap();
+    // Le résultat rendu reste celui de la pente.
+    assert!(by_hand["file"]
+        .as_str()
+        .unwrap()
+        .ends_with("1-terrain.slope.tif"));
+    let l = lines(&s);
+    assert_eq!(l.len(), 6);
+    for (k, origin, plan_step) in [
+        (0, Value::Null, Value::Null),
+        (2, json!("external"), Value::Null),
+        (4, Value::Null, json!(2)),
+    ] {
+        let (slope, open) = (&l[k], &l[k + 1]);
+        assert_eq!(slope["id"], "terrain.slope");
+        assert_eq!(open["id"], "layer.open_raster");
+        assert_eq!(open["step"], json!(k + 2));
+        assert_eq!(open["params"], json!({"path": format!("out:{}.1", k + 1)}));
+        assert_eq!(open["inputs"], json!([]));
+        assert_eq!(open["layer_id"], json!(format!("r{}", k / 2 + 1)));
+        assert_eq!(
+            open["result"]["name"],
+            json!(format!("{}-terrain.slope", k + 1))
+        );
+        for line in [slope, open] {
+            assert_eq!(line.get("origin").cloned().unwrap_or(Value::Null), origin);
+            assert_eq!(
+                line.get("plan_step").cloned().unwrap_or(Value::Null),
+                plan_step
+            );
+        }
+    }
+    // L'extension reçoit le chemin absolu du raster écrit, qui existe ; le journal, aucun.
+    let calls = calls.borrow();
+    assert_eq!(calls.len(), 3);
+    for (i, (_, params)) in calls.iter().enumerate() {
+        let path = Path::new(params["path"].as_str().unwrap());
+        assert_eq!(
+            path,
+            s.work_dir()
+                .join(format!("{}-terrain.slope.tif", 2 * i + 1))
+        );
+        assert!(path.is_file());
+    }
+    assert!(!fs::read_to_string(s.journal_path())
+        .unwrap()
+        .contains(&token));
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_line_of_sight_or_a_session_without_qgis_dictates_nothing() {
+    let (dir, project, _) = temp_project();
+    fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/mnt-colline-2154.tif"),
+        dir.join("colline.tif"),
+    )
+    .unwrap();
+    with_dem(&dir);
+    let registry = Registry::standard();
+    let qgis = RasterQgis::new(false);
+    let calls = qgis.calls.clone();
+    {
+        // Ligne de vue : aucun fichier écrit, rien n'est dicté.
+        let mut s = Session::open(&registry, &project)
+            .unwrap()
+            .with_qgis(qgis)
+            .with_raster_opening(true);
+        s.call(
+            "terrain.line_of_sight",
+            json!({"dem": "colline.tif",
+                "observer": {"x": 652030, "y": 6850250, "epsg": 2154},
+                "target": {"x": 652130, "y": 6850250, "epsg": 2154},
+                "observer_height": {"value": 2, "unit": "m"},
+                "target_height": {"value": 2, "unit": "m"}}),
+        )
+        .unwrap();
+        assert_eq!(lines(&s).len(), 1);
+    }
+    assert!(calls.borrow().is_empty());
+    // Sans QGIS (CLI `run`, MCP autonome) ou sans le geste annoncé : la pente seule.
+    let mut s = Session::open(&registry, &project).unwrap();
+    s.call("terrain.slope", slope_params()).unwrap();
+    let ids: Vec<Value> = lines(&s).iter().map(|l| l["id"].clone()).collect();
+    assert_eq!(
+        ids,
+        [json!("terrain.line_of_sight"), json!("terrain.slope")]
+    );
+    drop(s);
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(RasterQgis::new(false))
+        .with_raster_opening(false);
+    s.call("terrain.slope", slope_params()).unwrap();
+    assert_eq!(lines(&s).len(), 3);
+    assert_eq!(lines(&s)[2]["id"], "terrain.slope");
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_unreadable_raster_is_a_named_error_journaled_at_its_step() {
+    let (dir, project, _) = temp_project();
+    with_dem(&dir);
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(RasterQgis::new(true))
+        .with_raster_opening(true);
+    let err = s.call("terrain.slope", slope_params()).unwrap_err();
+    assert_eq!(err.code, "layer.invalid_source");
+    assert!(
+        err.message.contains("1-terrain.slope.tif"),
+        "{}",
+        err.message
+    );
+    let l = lines(&s);
+    assert_eq!(l.len(), 2);
+    assert!(l[0]["result"].is_object());
+    assert_eq!(l[1]["id"], "layer.open_raster");
+    assert_eq!(l[1]["error"], "layer.invalid_source");
+    assert!(l[1].get("layer_id").is_none());
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+/// Session d'origine de la reproduction du ticket 4.9 : une pente, puis l'export. Le raster
+/// est ouvert par l'étape dictée ; l'export le montre.
+fn raster_export_journal(project_file: &Path, project: &std::rc::Rc<OpenProject>) {
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, project_file)
+        .unwrap()
+        .with_qgis(ProjectQgis::new(project, 1))
+        .with_raster_opening(true);
+    s.call("terrain.slope", slope_params()).unwrap();
+    s.call("layout.export_pdf", json!({"title": "Pente"}))
+        .unwrap();
+    let l = lines(&s);
+    let ids: Vec<&str> = l.iter().map(|l| l["id"].as_str().unwrap()).collect();
+    assert_eq!(
+        ids,
+        ["terrain.slope", "layer.open_raster", "layout.export_pdf"]
+    );
+    assert_eq!(l[1]["layer_id"], "raster_g1_1");
+    assert_eq!(l[2]["result"]["layer_count"], json!(2));
+    assert_eq!(
+        l[2]["result"]["sources"],
+        json!(["1-terrain.slope.tif", "communes.gpkg"])
+    );
+}
+
+#[test]
+fn a_raster_then_an_export_replays_identically_twice_in_the_same_session() {
+    let (dir, project_file, _) = temp_project();
+    with_dem(&dir);
+    let project = OpenProject::with_base();
+    raster_export_journal(&project_file, &project);
+    let identical = ReplayReport {
+        steps: 3,
+        identical: true,
+    };
+    let mut replayed = HashSet::new();
+    // Premier rejeu, sans rouvrir : le raster d'origine est laissé hors de la carte.
+    let (outcome, seen) = replay_in(&project_file, &project, 2, &mut replayed);
+    assert_eq!(outcome.unwrap(), identical);
+    assert_eq!(seen, vec![json!(["raster_g1_1"])]);
+    assert_eq!(replayed, HashSet::from(["raster_g2_1".to_string()]));
+    // Second rejeu : celui du premier aussi.
+    let (outcome, seen) = replay_in(&project_file, &project, 3, &mut replayed);
+    assert_eq!(outcome.unwrap(), identical);
+    assert_eq!(seen, vec![json!(["raster_g1_1", "raster_g2_1"])]);
+    // Aucune couche n'est retirée du projet.
+    assert_eq!(project.layers.borrow().len(), 4);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_raster_then_an_export_replays_identically_in_a_new_session() {
+    let (dir, project_file, _) = temp_project();
+    with_dem(&dir);
+    raster_export_journal(&project_file, &OpenProject::with_base());
+    // Projet rouvert sans le raster : le rejeu recalcule la pente et la rouvre avant l'export.
+    let reopened = OpenProject::with_base();
+    let (outcome, _) = replay_in(&project_file, &reopened, 2, &mut HashSet::new());
+    assert!(outcome.unwrap().identical);
+    let layers = reopened.layers.borrow();
+    assert_eq!(layers.len(), 2);
+    assert_eq!(
+        layers[1],
+        ("raster_g2_1".to_string(), "1-terrain.slope.tif".to_string())
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_opened_raster_consumed_by_a_later_plan_step_is_intermediate() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let rows = [
+        json!({"id": "terrain.slope", "plan_step": 1,
+            "params": {"dem": "dem/plan.tif", "unit": "degrees", "out": "1-terrain.slope.tif"},
+            "result": {}}),
+        json!({"id": "layer.open_raster", "plan_step": 1, "params": {"path": "out:1.1"},
+            "layer_id": "R", "result": {}}),
+        json!({"id": "analysis.zonal_statistics", "plan_step": 2,
+            "params": {"layer_id": "R", "points_layer_id": "p"}, "layer_id": "S",
+            "result": {}}),
+    ];
+    hand_journal(&project, &rows);
+    let journal = dir.join("p.cassini").join(JOURNAL_FILE);
+    let got: Vec<String> = intermediate_files(&registry, &journal)
+        .into_iter()
+        .collect();
+    assert_eq!(got, ["1-terrain.slope.tif"]);
+    // Ouvert sans être repris : rien n'est caché.
+    hand_journal(&project, &rows[..2]);
+    assert!(intermediate_files(&registry, &journal).is_empty());
+    // Seule l'ouverture dictée lit un repère `out:<k>.<n>` dans ses paramètres.
+    let mut other = rows.clone();
+    other[1]["id"] = json!("layer.add");
+    hand_journal(&project, &other);
+    assert!(intermediate_files(&registry, &journal).is_empty());
     let _ = fs::remove_dir_all(dir);
 }

@@ -20,6 +20,15 @@ JSON = "json"
 CORE_FILLED = ("out", "leave_out", "center")
 
 
+def offered(catalogue):
+    """Les entrées du catalogue offertes au formulaire : toutes, sauf celles que le noyau dicte
+    seul (`dictated_by_core`, ticket 4.9 : `layer.open_raster`)."""
+    return [
+        entry for entry in catalogue or []
+        if isinstance(entry, dict) and not entry.get("dictated_by_core")
+    ]
+
+
 class Field:
     def __init__(self, name, kind, required=False, choices=None, description=""):
         self.name = name

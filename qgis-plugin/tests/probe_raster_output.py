@@ -1,4 +1,4 @@
-"""Sonde manuelle sous le vrai QGIS : un raster du noyau s'ouvre dans le projet (ticket 4.3).
+"""Sonde manuelle sous le vrai QGIS : un raster du noyau s'ouvre dans le projet (tickets 4.3, 4.9).
 
 À lancer avec le Python de QGIS (pas par `unittest` : le nom ne commence pas par `test`),
 plateforme offscreen, après `cargo build --release` :
@@ -9,10 +9,10 @@ plateforme offscreen, après `cargo build --release` :
 Le noyau est cherché dans `CASSINI_CORE`, sinon `target/release/`, sinon `target/debug/`.
 
 Dans un projet temporaire, une copie de `fixtures/mnt-plan-incline-2154.tif` sous `dem/` ;
-`cassini run terrain.slope` y écrit la pente et rend son chemin absolu. `open_rasters`
-(le vrai `QgisBackend`) l'ajoute au projet : une couche raster valide nommée
-`1-terrain.slope`, une seule même reçue deux fois. Un GeoTIFF corrompu n'ajoute rien et ne
-lève pas. L'inventaire du projet donne au MNT `dem/plan-incline-2154.tif` et à la pente
+`cassini run terrain.slope` y écrit la pente et rend son chemin absolu. Le geste
+`layer.open_raster` (le vrai `QgisBackend`) l'ajoute au projet : une couche raster valide nommée
+`1-terrain.slope`, une couche neuve à chaque ordre. Un GeoTIFF corrompu est une erreur nommée, sans
+chemin, et n'ajoute rien. L'inventaire du projet donne au MNT `dem/plan-incline-2154.tif` et à la pente
 `p.cassini/1-terrain.slope.tif`, jamais de chemin absolu. Aucune donnée hors dépôt.
 """
 
@@ -32,12 +32,10 @@ from qgis.core import QgsApplication, QgsProject, QgsRasterLayer  # noqa: E402
 
 app = QgsApplication([], False)
 QgsApplication.initQgis()
-import client  # noqa: E402
 import inventory  # noqa: E402
 import raster_output  # noqa: E402
 
 FAILURES = []
-CATALOGUE = [{"id": "terrain.slope", "runs_in": "core"}]
 
 
 def check(label, got, expected):
@@ -63,6 +61,14 @@ def inventory_now():
     calls = []
     gesture = inventory.ProjectInventoryGesture(None, lambda fn: fn())
     gesture.start({}, lambda result=None, error=None: calls.append((result, error)))
+    return calls[0]
+
+
+def open_now(path):
+    """Le geste `layer.open_raster` avec le vrai fond QGIS ; rend (résultat, erreur)."""
+    calls = []
+    gesture = raster_output.LayerOpenRasterGesture(None, lambda fn: fn())
+    gesture.start({"path": path}, lambda result=None, error=None: calls.append((result, error)))
     return calls[0]
 
 
@@ -94,25 +100,25 @@ def main():
         path = result.get("file")
         check("file absolu", isinstance(path, str) and os.path.isabs(path), True)
 
-        payload = {"command": "terrain.slope", "result": result}
-        items = raster_output.to_open(client.RUN_DONE, payload, CATALOGUE)
-        check("à ouvrir", [name for _, name in items], ["1-terrain.slope"])
-        outcomes = raster_output.open_rasters(items)
-        check("ouverture", [o for _, o in outcomes], [raster_output.ADDED])
+        gesture_result, gesture_error = open_now(path)
+        check("ouverture sans erreur", gesture_error, None)
+        check("nom rendu", (gesture_result or {}).get("name"), "1-terrain.slope")
         layers = project.mapLayersByName("1-terrain.slope")
         check("une couche 1-terrain.slope", len(layers), 1)
         if layers:
             check("couche raster", isinstance(layers[0], QgsRasterLayer), True)
             check("couche valide", layers[0].isValid(), True)
-        again = raster_output.open_rasters(items)
-        check("reçue deux fois", [o for _, o in again], [raster_output.ALREADY_OPEN])
-        check("toujours une couche", len(project.mapLayersByName("1-terrain.slope")), 1)
+            check("id rendu", (gesture_result or {}).get("layer_id"), layers[0].id())
+        again, _ = open_now(path)
+        check("reçue deux fois : couche neuve", (again or {}).get("layer_id") != (gesture_result or {}).get("layer_id"), True)
+        check("deux couches", len(project.mapLayersByName("1-terrain.slope")), 2)
 
         broken = os.path.join(work, "p.cassini", "9-terrain.slope.tif")
         with open(broken, "wb") as f:
             f.write(b"II*\x00pas un GeoTIFF")
-        bad = raster_output.open_rasters([(broken, "9-terrain.slope")])
-        check("GeoTIFF corrompu", [o for _, o in bad], [raster_output.UNREADABLE])
+        _, bad = open_now(broken)
+        check("GeoTIFF corrompu", getattr(bad, "code", None), "layer.invalid_source")
+        check("message sans chemin", work in getattr(bad, "message", ""), False)
         check("rien d'ajouté", len(project.mapLayersByName("9-terrain.slope")), 0)
 
         result, error = inventory_now()

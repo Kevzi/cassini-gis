@@ -81,7 +81,7 @@ pub(crate) fn catalogue(registry: &Registry) -> Vec<Exposed> {
     first_per_name(
         registry
             .specs()
-            .filter(|s| s.runs_in == Some(RunsIn::Core))
+            .filter(|s| s.runs_in == Some(RunsIn::Core) && !s.dictated_by_core)
             .map(|s| {
                 let description = format!("{}\n{}", s.description_fr, s.description_en);
                 let tool = Tool::new(
@@ -107,6 +107,8 @@ pub(crate) fn catalogue_from_session(commands: &[Value]) -> Vec<Exposed> {
         commands
             .iter()
             .filter(|entry| entry["available"] == json!(true))
+            // Une commande que le noyau dicte seul (ticket 4.9) n'est jamais un outil.
+            .filter(|entry| entry["dictated_by_core"] != json!(true))
             .filter_map(|entry| {
                 let id = entry["id"].as_str()?;
                 let text = |key: &str| entry[key].as_str().unwrap_or_default().to_string();
@@ -645,6 +647,7 @@ mod tests {
         let ids: Vec<&str> = served.iter().map(|e| e.id.as_str()).collect();
         let expected: Vec<&str> = registry
             .specs()
+            .filter(|s| !s.dictated_by_core)
             .map(|s| s.id.as_str())
             .filter(|id| *id != "analysis.intersect")
             .collect();
@@ -684,7 +687,11 @@ mod tests {
     fn every_served_name_fits_every_client() {
         let registry = Registry::standard();
         let relay = catalogue_from_session(&attach_entries(&registry));
-        assert_eq!(relay.len(), registry.specs().count());
+        assert_eq!(
+            relay.len(),
+            registry.specs().filter(|s| !s.dictated_by_core).count()
+        );
+        assert!(!relay.iter().any(|e| e.id == "layer.open_raster"));
         for Exposed { tool, .. } in catalogue(&registry).iter().chain(&relay) {
             let name = tool.name.as_ref();
             assert!(!name.is_empty() && name.len() <= 52, "{name}");

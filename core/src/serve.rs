@@ -31,6 +31,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Map, Value};
 
+use crate::commands::layer_open_raster::OPEN_RASTER;
 use crate::error::ErrorReport;
 use crate::exec::{Executor, Router};
 pub use crate::external::ChannelName;
@@ -865,7 +866,9 @@ fn hello(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, RpcErro
         .map_err(|e| RpcError::business(ErrorReport::from(e)))?
         .with_qgis(Channel {
             link: state.link.clone(),
-        });
+        })
+        // L'extension sait ouvrir un raster du noyau : la session le lui dicte (ticket 4.9).
+        .with_raster_opening(commands.contains(OPEN_RASTER));
     // La session dit dès la poignée de main si elle est en lecture seule : l'extension
     // n'a plus à lancer une commande pour le découvrir (ticket 5.32).
     let read_only = session.mode() == Mode::ReadOnly;
@@ -890,7 +893,13 @@ fn hello(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, RpcErro
     Ok(result)
 }
 
+/// Une commande est offerte si elle s'exécute dans le noyau ou si l'extension l'annonce ; une
+/// commande dictée par le noyau seul (ticket 4.9) ne l'est jamais : ni au catalogue des relais, ni
+/// à un plan, ni à `command.run`.
 fn is_available(state: &State<'_>, id: &str, runs_in: Option<RunsIn>) -> bool {
+    if state.registry.spec(id).is_some_and(|s| s.dictated_by_core) {
+        return false;
+    }
     runs_in != Some(RunsIn::Qgis) || state.announced.contains(id)
 }
 
@@ -924,6 +933,15 @@ fn run_params(params: Option<&Value>) -> Result<(String, Value), RpcError> {
 /// Une commande du registre que l'extension n'a pas annoncée est indisponible (AD-7).
 fn check_available(state: &State<'_>, id: &str) -> Result<(), RpcError> {
     if let Some(spec) = state.registry.spec(id) {
+        if spec.dictated_by_core {
+            return Err(RpcError::coded(
+                "registry.dictated",
+                format!(
+                    "La commande « {id} » n'est appelée que par le noyau, après l'étape qui la \
+                     demande : rien n'est exécuté."
+                ),
+            ));
+        }
         if !is_available(state, id, spec.runs_in) {
             return Err(RpcError::business(ErrorReport::from(
                 RegistryError::Unavailable(id.to_string()),
@@ -3191,7 +3209,162 @@ mod tests {
         assert!(file.is_file());
         let journal = c.journal();
         assert_eq!(journal[1]["result"]["file"], "2-terrain.slope.tif");
+        // L'extension n'annonce pas `layer.open_raster` : rien n'est dicté (ticket 4.9).
+        assert_eq!(journal.len(), 2);
         c.close().1.unwrap();
+    }
+
+    // ---- Ticket 4.9 : l'ouverture d'un raster du noyau, dictée par le noyau ----
+
+    /// L'extension annonce l'ouverture d'un raster, l'export et l'inventaire.
+    const RASTER: [&str; 3] = [
+        "layer.open_raster",
+        "layout.export_pdf",
+        "project.inventory",
+    ];
+
+    /// Copie le MNT de test sous `dem/plan.tif` dans le dossier du projet de `c`.
+    fn with_dem(c: &Client) {
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/mnt-plan-incline-2154.tif");
+        std::fs::create_dir_all(c.dir.join("dem")).unwrap();
+        std::fs::copy(&fixture, c.dir.join("dem/plan.tif")).unwrap();
+    }
+
+    /// Attend l'ordre `layer.open_raster` sur la sortie `file` du dossier `dir`, y répond comme
+    /// le geste (couche `layer_id`, nommée du radical du fichier).
+    fn answer_open(c: &Client, dir: &Path, file: &str, layer_id: &str) {
+        let order = c.recv();
+        assert_eq!(order["method"], "order.execute", "{order}");
+        assert_eq!(order["params"]["command"], "layer.open_raster");
+        let path = Path::new(order["params"]["params"]["path"].as_str().unwrap());
+        assert_eq!(path, dir.join(file));
+        assert!(path.is_file(), "{}", path.display());
+        let stem = file.trim_end_matches(".tif");
+        c.send(reply(
+            &order["id"],
+            json!({"layer_id": layer_id, "name": stem}),
+        ));
+    }
+
+    #[test]
+    fn the_dictated_command_is_never_offered_and_command_run_refuses_it() {
+        let mut c = Client::start(CANCEL_GRACE);
+        c.send(json!({"jsonrpc":"2.0","id":1,"method":"session.hello",
+            "params":{"protocol_version":2,"commands":RASTER,"project":c.project}}));
+        let hello = c.recv();
+        let commands = hello["result"]["commands"].as_array().unwrap();
+        let entry = commands
+            .iter()
+            .find(|e| e["id"] == "layer.open_raster")
+            .unwrap();
+        // Annoncée, mais jamais offerte : le panneau la cache, les relais ne la voient pas.
+        assert_eq!(entry["dictated_by_core"], json!(true));
+        assert_eq!(entry["available"], json!(false));
+        assert!(commands
+            .iter()
+            .filter(|e| e["id"] != "layer.open_raster")
+            .all(|e| e.get("dictated_by_core").is_none()));
+        c.send(json!({"jsonrpc":"2.0","id":2,"method":"command.run",
+            "params":{"command":"layer.open_raster","params":{"path":"out:1.1"}}}));
+        let refused = c.recv();
+        assert_eq!(code_of(&refused), "registry.dictated");
+        assert!(c.journal().is_empty());
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn a_slope_run_by_hand_is_followed_by_the_dictated_opening() {
+        let mut c = Client::start(CANCEL_GRACE);
+        with_dem(&c);
+        c.hello_with(&RASTER);
+        c.send(json!({"jsonrpc":"2.0","id":2,"method":"command.run",
+            "params":{"command":"terrain.slope","params":{"dem":"dem/plan.tif","unit":"degrees"}}}));
+        let work = c.dir.join("p.cassini");
+        answer_open(&c, &work, "1-terrain.slope.tif", "raster_1");
+        let done = c.recv();
+        assert_eq!(done["id"], 2);
+        let file = done["result"]["file"].as_str().unwrap();
+        assert_eq!(Path::new(file), work.join("1-terrain.slope.tif"));
+        let journal = c.journal();
+        assert_eq!(journal.len(), 2);
+        assert_eq!(journal[1]["id"], "layer.open_raster");
+        assert_eq!(journal[1]["params"], json!({"path": "out:1.1"}));
+        assert_eq!(journal[1]["layer_id"], "raster_1");
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn a_slope_then_an_export_plan_replays_identically_in_the_same_and_a_new_session() {
+        let plan = json!({"kind":"calls","calls":[
+            {"command":"terrain.slope","params":{"dem":"dem/plan.tif","unit":"degrees"}},
+            {"command":"layout.export_pdf","params":{"title":"Pente"}}]});
+        let c = Client::start_with(CANCEL_GRACE, composer(plan));
+        with_dem(&c);
+        c.hello_with(&RASTER);
+        assert_eq!(c.propose(2)["result"]["plan_id"], "plan-1");
+        c.execute(3, "plan-1");
+        let notice = c.recv();
+        assert_eq!(notice["params"]["command"], "terrain.slope", "{notice}");
+        let work = c.dir.join("p.cassini");
+        // L'ouverture suit la pente, sans notification d'étape : elle n'est pas une étape du plan.
+        answer_open(&c, &work, "1-terrain.slope.tif", "orig");
+        let order = c.expect_step("plan-1", 2, "layout.export_pdf");
+        assert!(order["params"]["params"].get("leave_out").is_none());
+        answer_export(&c, &order);
+        let done = c.recv();
+        assert_eq!(done["id"], 3, "{done}");
+        assert_eq!(done["result"]["steps"].as_array().unwrap().len(), 2);
+        let journal = c.journal();
+        let ids: Vec<&str> = journal.iter().map(|l| l["id"].as_str().unwrap()).collect();
+        assert_eq!(
+            ids,
+            ["terrain.slope", "layer.open_raster", "layout.export_pdf"]
+        );
+        let steps: Vec<&Value> = journal.iter().map(|l| &l["plan_step"]).collect();
+        assert_eq!(steps, [&json!(1), &json!(1), &json!(2)]);
+
+        // Deux rejeux dans la même session : le raster d'origine, puis celui du premier rejeu,
+        // sont laissés hors de la carte ; chaque rejeu rouvre le sien avant l'export.
+        let expected = [json!(["orig"]), json!(["orig", "replay-1"])];
+        for (n, leave_out) in expected.iter().enumerate() {
+            let id = 4 + n as u64;
+            c.send(json!({"jsonrpc":"2.0","id":id,"method":"journal.replay"}));
+            let layer = format!("replay-{}", n + 1);
+            let order = c.recv();
+            assert_eq!(order["params"]["command"], "layer.open_raster", "{order}");
+            let path = Path::new(order["params"]["params"]["path"].as_str().unwrap());
+            assert_eq!(path.file_name().unwrap(), "1-terrain.slope.tif");
+            assert!(path.starts_with(&work) && path != work.join("1-terrain.slope.tif"));
+            assert!(path.is_file());
+            c.send(reply(
+                &order["id"],
+                json!({"layer_id": layer, "name": "1-terrain.slope"}),
+            ));
+            let order = c.recv();
+            assert_eq!(order["params"]["params"]["leave_out"], *leave_out);
+            answer_export(&c, &order);
+            let done = c.recv();
+            assert_eq!(done["id"], id);
+            assert_eq!(done["result"], json!({"steps": 3, "identical": true}));
+        }
+        assert_eq!(c.journal().len(), 3);
+
+        // Session neuve : le projet rouvert n'a plus le raster ; le rejeu le recalcule et le rouvre.
+        let c = c.reopen(None);
+        c.hello_with(&RASTER);
+        c.send(json!({"jsonrpc":"2.0","id":2,"method":"journal.replay"}));
+        let order = c.recv();
+        assert_eq!(order["params"]["command"], "layer.open_raster", "{order}");
+        c.send(reply(
+            &order["id"],
+            json!({"layer_id": "fresh", "name": "1-terrain.slope"}),
+        ));
+        let order = c.recv();
+        assert_eq!(order["params"]["params"]["leave_out"], json!(["orig"]));
+        answer_export(&c, &order);
+        let done = c.recv();
+        assert_eq!(done["result"], json!({"steps": 3, "identical": true}));
     }
 
     #[test]

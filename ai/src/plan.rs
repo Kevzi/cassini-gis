@@ -105,6 +105,12 @@ impl From<AiError> for AgentError {
 
 // -- grammaire -------------------------------------------------------------
 
+/// Les commandes offertes au modèle : toutes, sauf celles que le noyau dicte seul
+/// (`dictated_by_core`, ticket 4.9). Le prompt et la grammaire restent ceux d'avant à l'octet.
+fn offered(registry: &Registry) -> impl Iterator<Item = &CommandSpec> {
+    registry.specs().filter(|s| !s.dictated_by_core)
+}
+
 /// Grammaire GBNF d'un plan : `{"kind":"calls","calls":[{"command":<id du
 /// registre>,"params":<objet JSON>}, ...]}`, `{"kind":"refusal","reason":<texte>}` ou
 /// `{"kind":"question","question":<texte>}`.
@@ -113,8 +119,7 @@ impl From<AiError> for AgentError {
 /// références) étant vérifié ensuite par `check_plan`. Format compact, sans
 /// espaces : c'est celui des exemples du prompt.
 pub fn plan_grammar(registry: &Registry) -> String {
-    let commands = registry
-        .specs()
+    let commands = offered(registry)
         .map(|s| format!("\"\\\"{}\\\"\"", s.id))
         .collect::<Vec<_>>()
         .join(" | ");
@@ -288,7 +293,7 @@ fn strip_marks(node: &mut Value) {
 /// La partie fixe du message système : consignes, catalogue et exemples. Elle ne dépend
 /// que du registre : c'est elle que le moteur garde lue d'une demande à l'autre.
 fn fixed_system_text(registry: &Registry) -> String {
-    let catalog: Vec<Value> = registry.specs().map(catalog_entry).collect();
+    let catalog: Vec<Value> = offered(registry).map(catalog_entry).collect();
     let mut text = format!(
         "{SYSTEM}\n\nCATALOGUE :\n{}\n\nEXEMPLES :\n",
         Value::Array(catalog)
@@ -976,7 +981,7 @@ mod tests {
     fn the_catalog_comes_from_the_real_registry_and_hides_output_paths() {
         let text = system_text(&registry(), &inventory());
         let reg = registry();
-        for spec in reg.specs() {
+        for spec in offered(&reg) {
             assert!(
                 text.contains(&format!("\"id\":\"{}\"", spec.id)),
                 "{}",
@@ -1076,7 +1081,7 @@ mod tests {
     fn the_grammar_lists_every_command_and_the_three_plan_shapes() {
         let reg = registry();
         let g = plan_grammar(&reg);
-        for spec in reg.specs() {
+        for spec in offered(&reg) {
             assert!(
                 g.contains(&format!("\"\\\"{}\\\"\"", spec.id)),
                 "{}",
@@ -1105,6 +1110,32 @@ mod tests {
                 "{rule}"
             );
         }
+    }
+
+    /// Une commande que le noyau dicte seul (ticket 4.9) n'est jamais offerte au modèle : le
+    /// prompt et la grammaire sont, à l'octet, ceux d'un registre qui ne la connaît pas. Le modèle
+    /// installé reste donc valide.
+    #[test]
+    fn a_dictated_command_leaves_the_prompt_and_the_grammar_unchanged() {
+        let full = registry();
+        let dictated: Vec<String> = full
+            .specs()
+            .filter(|s| s.dictated_by_core)
+            .map(|s| s.id.clone())
+            .collect();
+        assert_eq!(dictated, ["layer.open_raster"]);
+        let mut bare = registry();
+        for id in &dictated {
+            assert!(bare.remove(id));
+        }
+        assert_eq!(plan_grammar(&full), plan_grammar(&bare));
+        assert_eq!(fixed_system_text(&full), fixed_system_text(&bare));
+        assert_eq!(
+            system_text(&full, &inventory()),
+            system_text(&bare, &inventory())
+        );
+        assert!(!plan_grammar(&full).contains("layer.open_raster"));
+        assert!(!fixed_system_text(&full).contains("layer.open_raster"));
     }
     // -- prompt court (ticket 5.10, tâche 3) ---------------------------------
 

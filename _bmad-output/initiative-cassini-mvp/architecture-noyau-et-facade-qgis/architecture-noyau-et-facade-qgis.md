@@ -219,6 +219,20 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   (`finished`) portent **le résultat brut, chemins absolus compris** : l'extension ouvre ainsi
   dans le projet un raster écrit par le noyau. Le journal reste relatif ; ce qui
   repart vers le relais d'IA externe reste relatif et nettoyé.
+  **Amendement (2026-11-05, ticket 4.9) :** l'extension n'ouvre plus de raster
+  d'elle-même. L'ouverture d'un raster du noyau est une commande du registre déléguée
+  à QGIS, `layer.open_raster {path: "out:<k>.<n>"}`, que **le noyau dicte lui-même**
+  juste après chaque étape `runs_in: core` dont la sortie est un GeoTIFF, avec le même
+  `origin` et le même `plan_step`, si l'extension l'annonce ; il la journalise avec le
+  `layer_id` rendu. Le rejeu la rejoue comme toute étape, et la couche d'origine est
+  laissée hors de la carte de l'export rejoué par le mécanisme de 5.36 ; dans une
+  session neuve, le rejeu rouvre le raster qu'il recalcule. Une ouverture en échec est
+  une étape en erreur, nommée (AD-21). La commande porte `dictated_by_core` : elle
+  n'est offerte ni au modèle (prompt et grammaire inchangés), ni au client MCP, ni au
+  formulaire du panneau, et `command.run` la refuse (`registry.dictated`). Sans QGIS
+  branché (CLI `run`, MCP autonome) ou sans le geste annoncé, rien n'est dicté. Les
+  résultats bruts du complément ci-dessus restent tels quels ; aucune méthode n'est
+  ajoutée au protocole.
 
 ### AD-10 — Le noyau décide des chemins et des noms de sortie
 
