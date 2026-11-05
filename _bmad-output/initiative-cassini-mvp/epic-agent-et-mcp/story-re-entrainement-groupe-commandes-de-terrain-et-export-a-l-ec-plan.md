@@ -3,7 +3,7 @@ title: 'Ré-entraînement groupé : commandes de terrain et export à l''échell
 type: 'feature'
 ticket: '41'
 created: '2026-11-04'
-status: 'built'
+status: 'done'
 baseline_revision: 'd5eed5b9e8d76c784fcf44a411f7fa1ee51f0483'
 route: 'full'
 route_source: 'auto'
