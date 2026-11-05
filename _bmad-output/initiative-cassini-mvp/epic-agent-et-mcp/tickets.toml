@@ -724,3 +724,14 @@ notes = [
   "hitl : l'entrainement occupe la carte graphique du proprietaire ; il se lance quand le proprietaire le dit.",
   "Risque high : le modele livre remplace celui du panneau ; controle hors du ticket : recette QGIS par le proprietaire.",
 ]
+
+[[entry]]
+id = 42
+type = "bug"
+title = "Le test de fermeture du canal d'IA externe echoue de temps en temps sous Linux"
+description = "Le test qui ferme la session avec deux relais branches echoue environ une fois sur huit dans le job Linux de la recette : un relais voit la connexion se fermer sans recevoir external.session_lost."
+verify = "La recette ne fait plus echouer ce test : la cause (le test ou le code) est nommee et corrigee, ou l'absence de defaut est prouvee."
+covers = []
+after = []
+hitl = false
+risk = "low"
