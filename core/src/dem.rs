@@ -458,8 +458,7 @@ fn check_crs(keys: &GeoKeys) -> Result<u32, DemError> {
                 "unité linéaire {unit}, pas le mètre"
             )))
         }
-        // GDAL omet souvent la clé d'unité : on n'accepte alors qu'une liste fermée de
-        // systèmes connus pour être en mètres (décision du propriétaire : métrique seulement).
+        // GDAL omet souvent la clé d'unité : le mètre ne se vérifie alors que par la liste.
         None if is_known_metric(epsg) => {}
         None => {
             return Err(DemError::not_projected(&format!(
@@ -467,11 +466,19 @@ fn check_crs(keys: &GeoKeys) -> Result<u32, DemError> {
             )))
         }
     }
+    // Clé au mètre ou non, seule la liste fermée passe (décision du propriétaire, 2026-11-05) :
+    // les « mètres » de Web Mercator (EPSG:3857) sont dilatés d'environ 1,5 fois en France.
+    if !is_known_metric(epsg) {
+        return Err(DemError::not_projected(&format!(
+            "EPSG:{epsg} n'est pas un système en vrais mètres connu de Cassini, ses distances seraient faussées"
+        )));
+    }
     Ok(u32::from(epsg))
 }
 
-/// Systèmes projetés connus pour être en mètres : Lambert-93, coniques conformes 9 zones,
-/// Lambert zones (NTF), UTM WGS84 nord et sud, UTM ETRS89.
+/// Liste fermée des systèmes projetés acceptés, connus pour être en vrais mètres :
+/// Lambert-93, coniques conformes 9 zones, Lambert zones (NTF), UTM WGS84 nord et sud,
+/// UTM ETRS89. Un système métrique légitime manquant s'y ajoute par un ticket.
 fn is_known_metric(epsg: u16) -> bool {
     matches!(
         epsg,
@@ -981,6 +988,55 @@ mod tests {
             &[(GT_MODEL_TYPE, 1), (PROJECTED_CS_TYPE, 32631)],
         );
         assert_eq!(Dem::open(&p).unwrap().epsg, 32631);
+    }
+
+    #[test]
+    fn pseudo_metre_systems_are_refused_even_with_a_metre_unit() {
+        let dir = scratch("pseudo-metres");
+        for (name, keys) in [
+            (
+                "3857.tif",
+                &[
+                    (GT_MODEL_TYPE, 1),
+                    (PROJECTED_CS_TYPE, 3857),
+                    (PROJ_LINEAR_UNITS, LINEAR_METER),
+                ],
+            ),
+            (
+                "3395.tif",
+                &[
+                    (GT_MODEL_TYPE, 1),
+                    (PROJECTED_CS_TYPE, 3395),
+                    (PROJ_LINEAR_UNITS, LINEAR_METER),
+                ],
+            ),
+        ] {
+            let e = open_err(&with_keys(&dir, name, keys));
+            assert_eq!(e.code, "dem.not_projected", "{name}");
+            let code = name.trim_end_matches(".tif");
+            assert!(e.message.contains(&format!("EPSG:{code}")), "{}", e.message);
+            assert!(
+                e.message.contains("reprojetez-le dans QGIS"),
+                "{}",
+                e.message
+            );
+        }
+        // Les systèmes de la liste restent acceptés avec la clé d'unité au mètre.
+        for code in [2154, 3944, 27572, 32631, 32730, 25831] {
+            let p = dir.join(format!("{code}.tif"));
+            raw_tiff::<GrayI16>(&p, 2, 2, &[1, 2, 3, 4], |d| {
+                georef(d)?;
+                geokeys(
+                    d,
+                    &[
+                        (GT_MODEL_TYPE, 1),
+                        (PROJECTED_CS_TYPE, code),
+                        (PROJ_LINEAR_UNITS, LINEAR_METER),
+                    ],
+                )
+            });
+            assert_eq!(Dem::open(&p).unwrap().epsg, u32::from(code));
+        }
     }
 
     #[test]

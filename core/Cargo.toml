@@ -19,6 +19,10 @@ inventory = "0.3"
 # des MNT GeoTIFF dans core/src/dem.rs, sans GDAL (AD-1). Fonctions JPEG, WebP et fax
 # desactivees : seules les compressions deflate et LZW, en pur Rust, sont tirees.
 tiff = { version = "=0.11.3", default-features = false, features = ["deflate", "lzw"] }
+# libm (MIT OR Apache-2.0, sans dependance), acceptee par le proprietaire le 2026-11-05
+# (ticket 4.11) : arc tangente en pur Rust pour la pente en degres, memes octets sous Windows
+# et sous Linux. Version figee : un changement d'arc tangente ferait diverger le rejeu.
+libm = "=0.2.15"
 
 # windows-sys (MIT OR Apache-2.0), acceptee par le proprietaire le 2026-10-30 (ticket 5.24) :
 # l'API Win32 des tubes nommes du canal d'IA externe (AD-14), compilee seulement sous Windows.

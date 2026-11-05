@@ -639,6 +639,26 @@ mod tests {
     }
 
     #[test]
+    fn a_pseudo_metre_dem_is_refused() {
+        let dir = std::env::temp_dir().join(format!("cassini-los-{}-pseudo", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for epsg in [3857, 3395] {
+            let input = dir.join(format!("{epsg}.tif"));
+            Dem { epsg, ..holed() }.write_geotiff(&input).unwrap();
+            let err = call(json!({
+                "dem": input.to_string_lossy(),
+                "observer": {"x": 15, "y": 35, "epsg": epsg},
+                "target": {"x": 55, "y": 35, "epsg": epsg},
+            }))
+            .unwrap_err();
+            assert_eq!(err.code(), "dem.not_projected");
+            assert!(err.to_string().contains(&format!("EPSG:{epsg}")), "{err}");
+            assert!(err.to_string().contains("QGIS"), "{err}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_point_outside_the_dem_is_refused() {
         for (o, t) in [
             (pt(651990.0, 6850250.0), pt(652130.0, 6850250.0)),

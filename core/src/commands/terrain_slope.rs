@@ -104,7 +104,9 @@ pub fn horn_slope(dem: &Dem, unit: SlopeUnit) -> (Dem, SlopeStats) {
             let p = (dx * dx + dy * dy).sqrt();
             let slope = match unit {
                 SlopeUnit::Percent => 100.0 * p,
-                SlopeUnit::Degrees => p.atan().to_degrees(),
+                // `libm::atan` plutôt que `f64::atan`, qui appelle la libm du système : les
+                // mêmes octets sur toutes les plateformes, condition du rejeu (AD-11).
+                SlopeUnit::Degrees => libm::atan(p).to_degrees(),
             } as f32;
             values[row as usize * w as usize + col as usize] = slope;
             let s = f64::from(slope);
@@ -486,6 +488,43 @@ mod tests {
             )
             .unwrap_err();
         assert_eq!(err.code(), "registry.invalid_params");
+    }
+
+    #[test]
+    fn a_pseudo_metre_dem_is_refused_and_nothing_is_written() {
+        let dir = Scratch::new("pseudo-metres");
+        let out = dir.join("pente.tif");
+        for epsg in [3857, 3395] {
+            let input = dir.join(&format!("{epsg}.tif"));
+            Dem { epsg, ..holed() }.write_geotiff(&input).unwrap();
+            let err = slope(&input, "degrees", &out).unwrap_err();
+            assert_eq!(err.code(), "dem.not_projected");
+            assert!(err.to_string().contains(&format!("EPSG:{epsg}")), "{err}");
+            assert!(err.to_string().contains("QGIS"), "{err}");
+            assert!(!out.exists());
+        }
+    }
+
+    /// Empreinte FNV-1a 64 bits des octets d'un fichier.
+    fn fnv1a(path: &Path) -> u64 {
+        std::fs::read(path).unwrap().iter().fold(0xcbf29ce484222325, |h, b| {
+            (h ^ u64::from(*b)).wrapping_mul(0x100000001b3)
+        })
+    }
+
+    /// Octets figés de la pente en degrés de la colline : la CI les vérifie sous Linux et sous
+    /// Windows (vérifiés aussi à la main sous Windows le 2026-11-05). Ce test échoue dès qu'une
+    /// valeur f32 écrite change, que la cause soit l'arc tangente, la méthode de Horn ou
+    /// l'écriture du GeoTIFF ; un tel changement fait diverger le rejeu des journaux existants.
+    /// Il ne prouve pas à lui seul l'usage de `libm` : un écart d'un ulp en f64 entre deux libm
+    /// de système disparaît le plus souvent à l'arrondi en f32. La version de `libm` est figée
+    /// dans `core/Cargo.toml`.
+    #[test]
+    fn the_hill_slope_in_degrees_has_frozen_bytes() {
+        let dir = Scratch::new("octets-figes");
+        let out = dir.join("pente.tif");
+        slope(&fixture("mnt-colline-2154.tif"), "degrees", &out).unwrap();
+        assert_eq!(format!("{:016x}", fnv1a(&out)), "287298aa0f719991");
     }
 
     #[test]
