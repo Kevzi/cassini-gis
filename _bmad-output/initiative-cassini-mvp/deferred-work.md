@@ -655,3 +655,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-raster-et-terrain/bug-le-rejeu-diverge-quand-un-raster-de-terrain-precede-un-export-plan.md`
   summary: Un journal écrit avant 4.9 (raster de terrain sans ligne `layer.open_raster`) diverge toujours au rejeu en session neuve ; décider s'il faut le signaler avant de rejouer.
   evidence: Relecture thorough de 4.9 : le correctif ne vaut que pour les journaux nouveaux ; aucun journal d'utilisateur n'existe encore, d'où le report.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-raster-et-terrain/story-le-garde-fou-des-coordonnees-accepte-un-systeme-ecrit-une-se-plan.md`
+  summary: Au prochain ré-entraînement groupé, apprendre au générateur (familles `ligne_de_vue`, `question_terrain`) des demandes dont le système n'est écrit qu'une fois pour deux points, que le garde-fou accepte depuis 4.10.
+  evidence: Relecture thorough de 4.10 : le générateur écrit encore le système à chaque point ; le changer maintenant désaccorderait le modèle installé.

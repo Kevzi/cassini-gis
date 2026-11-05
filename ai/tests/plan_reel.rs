@@ -8,18 +8,17 @@
 //! comprises. Là où le registre réel n'a pas la commande (retrait, reprojection, cadrage,
 //! statistiques sur un raster) ou ne sait pas porter une option demandée (papier A3, couches
 //! nommées du PDF), le refus est la réponse attendue. Depuis 5.41, le terrain a ses commandes
-//! (ticket 4.6) : S20 (champ de vision) et S22 (pente) attendent un plan sur la `source` du MNT ;
-//! S21 (ligne de vue), dont le système n'est écrit qu'une fois pour deux points, attend la
-//! question du garde-fou des coordonnées (décision du propriétaire, 2026-11-04) ; S23 et S24,
-//! terrain puis moyenne par commune, restent des refus (statistiques sur un raster).
+//! (ticket 4.6) : S20 (champ de vision), S21 (ligne de vue) et S22 (pente) attendent un plan sur
+//! la `source` du MNT ; S21 écrit le système une seule fois pour deux points, ce que le garde-fou
+//! des coordonnées accepte depuis le ticket 4.10 (décision du propriétaire, 2026-11-05) ; S23 et
+//! S24, terrain puis moyenne par commune, restent des refus (statistiques sur un raster).
 //! S25, un point écrit en WGS84 sur un MNT en Lambert-93, est un refus : le noyau ne reprojette
 //! pas un point de terrain (`terrain.crs_mismatch`).
 //!
 //! Une question rendue sur une phrase claire est un échec, et il en faut au plus deux sur les 25 :
 //! concession du propriétaire (2026-10-17) pour un GGUF seul au long prompt. Un modèle au prompt
 //! court (le modèle ajusté du ticket 5.10, déclaré par `*.modele.json`) tient le plafond strict :
-//! au plus une, avec au moins 9 questions sur 12 phrases ambiguës (`question_reel`). La question
-//! du garde-fou attendue sur S21 n'entre pas dans ce plafond.
+//! au plus une, avec au moins 9 questions sur 12 phrases ambiguës (`question_reel`).
 
 mod common;
 
@@ -62,8 +61,6 @@ enum Want {
     Plan(Value),
     /// Un refus : le registre n'a pas la commande ou l'option.
     Refusal,
-    /// La question du garde-fou des coordonnées (provenance `Guard`).
-    GuardQuestion,
 }
 
 /// Ce qu'attend une phrase de l'épreuve sur le registre réel.
@@ -103,8 +100,13 @@ fn expected(id: &str) -> Want {
             "observer_height": {"value": 25, "unit": "m"},
             "radius": {"value": 2, "unit": "km"}}}]),
         "S22" => json!([{"command": "terrain.slope", "params": {"dem": MNT, "unit": "percent"}}]),
-        // Deux points, un seul « Lambert-93 » : le garde-fou demande le système (2026-11-04).
-        "S21" => return Want::GuardQuestion,
+        // Deux points, un seul « Lambert-93 » : il vaut pour les deux (4.10, 2026-11-05).
+        "S21" => json!([{"command": "terrain.line_of_sight", "params": {
+            "dem": MNT,
+            "observer": {"x": 656300, "y": 6847500, "epsg": 2154},
+            "target": {"x": 657100, "y": 6848200, "epsg": 2154},
+            "observer_height": {"value": 2, "unit": "m"},
+            "target_height": {"value": 2, "unit": "m"}}}]),
         // S04 S05 S09 S10 S15 S18 S23 S24 S25 : refus.
         _ => return Want::Refusal,
     };
@@ -148,7 +150,6 @@ fn plan_reel_at_least_80_percent_of_the_plans_match() {
                 serde_json::to_value(calls).unwrap() == *plan
             }
             (Err(AgentError::Refused(_)), Want::Refusal) => true,
-            (_, Want::GuardQuestion) => guard_answer,
             _ => false,
         };
         // Score exact, phrase par phrase : jamais filtré.
@@ -163,11 +164,9 @@ fn plan_reel_at_least_80_percent_of_the_plans_match() {
             assert_eq!(registry.check_plan(plan), Ok(()), "{id}");
         }
         right += usize::from(ok);
-        // Une phrase claire ne doit pas devenir une question (déjà un échec ci-dessus). La
-        // question du garde-fou attendue (S21) est juste : hors du plafond.
-        let expected_question = ok && want == Want::GuardQuestion;
-        questions += usize::from(matches!(&got, Ok(Plan::Question { .. })) && !expected_question);
-        guarded += usize::from(guard_answer && !expected_question);
+        // Une phrase claire ne doit pas devenir une question (déjà un échec ci-dessus).
+        questions += usize::from(matches!(&got, Ok(Plan::Question { .. })));
+        guarded += usize::from(guard_answer);
     }
     eprintln!(
         "SCORE {right}/{total} plans conformes, {questions} fausses questions, dont {guarded} du garde-fou"
@@ -229,33 +228,26 @@ fn every_expected_plan_is_valid_and_passes_the_coordinate_guard() {
 }
 
 #[test]
-fn the_terrain_sentences_expect_plans_except_s21_and_the_raster_statistics() {
+fn the_terrain_sentences_expect_plans_except_the_raster_statistics() {
     assert!(matches!(expected("S20"), Want::Plan(_)));
+    assert!(matches!(expected("S21"), Want::Plan(_)));
     assert!(matches!(expected("S22"), Want::Plan(_)));
-    assert_eq!(expected("S21"), Want::GuardQuestion);
     assert_eq!(expected("S23"), Want::Refusal);
     assert_eq!(expected("S24"), Want::Refusal);
 }
 
 #[test]
-fn the_right_line_of_sight_for_s21_is_guarded() {
-    // Le système n'est écrit qu'une fois pour deux points : même le plan juste devient la
-    // question du garde-fou, d'où l'attendu de S21.
+fn the_right_line_of_sight_for_s21_passes_the_guard() {
+    // Le système n'est écrit qu'une fois pour deux points : il vaut pour les deux (4.10), et
+    // le plan juste, l'attendu de S21, passe le garde-fou inchangé.
     let registry = Registry::standard();
-    let plan: Plan = serde_json::from_value(json!({"kind": "calls", "calls": [
-        {"command": "terrain.line_of_sight", "params": {
-            "dem": MNT,
-            "observer": {"x": 656300, "y": 6847500, "epsg": 2154},
-            "target": {"x": 657100, "y": 6848200, "epsg": 2154},
-            "observer_height": {"value": 2, "unit": "m"},
-            "target_height": {"value": 2, "unit": "m"}}}]}))
-    .unwrap();
+    let Want::Plan(calls) = expected("S21") else {
+        panic!("S21 attend un plan");
+    };
+    let plan: Plan = serde_json::from_value(json!({"kind": "calls", "calls": calls})).unwrap();
     assert_eq!(registry.check_plan(&plan), Ok(()));
-    assert!(matches!(
-        guard_coordinates(&registry, plan, &sentence("S21")),
-        Plan::Question {
-            source: QuestionSource::Guard,
-            ..
-        }
-    ));
+    assert_eq!(
+        guard_coordinates(&registry, plan.clone(), &sentence("S21")),
+        plan
+    );
 }

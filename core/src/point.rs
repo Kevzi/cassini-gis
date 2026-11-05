@@ -9,9 +9,10 @@
 //! figurent, comme nombres) ou d'une étape précédente (référence `step:` vers un champ déclaré
 //! `Point`). Sinon le plan n'est pas montré : le garde-fou rend une question à provenance
 //! `guard`. Le système compte s'il est écrit en code EPSG ou nommé : Lambert-93, WGS84, ou
-//! une zone UTM du WGS84 avec son hémisphère (« UTM 31N »). En cas de doute, c'est la
-//! question. [`guard_rejected`] applique la même règle à une sortie que la validation a
-//! rejetée : un point inventé y rend la question tout de suite, sans redemande.
+//! une zone UTM du WGS84 avec son hémisphère (« UTM 31N ») ; écrit une fois, il vaut pour tout
+//! point du plan qui porte ce même epsg, alors que x et y sont lus pour chaque point. En cas de
+//! doute, c'est la question. [`guard_rejected`] applique la même règle à une sortie que la
+//! validation a rejetée : un point inventé y rend la question tout de suite, sans redemande.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -240,6 +241,14 @@ pub fn request_numbers(request: &str) -> Vec<f64> {
         }
     }
     let lower: Vec<char> = request.to_lowercase().chars().collect();
+    numbers.extend(named_codes(&lower));
+    numbers.extend(utm_codes(&lower));
+    numbers
+}
+
+/// Codes des systèmes nommés écrits dans la demande (en minuscules) : Lambert-93, WGS84.
+fn named_codes(lower: &[char]) -> Vec<f64> {
+    let mut codes = Vec::new();
     for (name, number, code) in NAMED_SYSTEMS {
         let name: Vec<char> = name.chars().collect();
         let number: Vec<char> = number.chars().collect();
@@ -258,12 +267,42 @@ pub fn request_numbers(request: &str) -> Vec<f64> {
                     .get(j + number.len())
                     .is_some_and(char::is_ascii_digit)
             {
-                numbers.push(code);
+                codes.push(code);
             }
         }
     }
-    numbers.extend(utm_codes(&lower));
-    numbers
+    codes
+}
+
+/// Systèmes écrits dans la demande : codes nommés, zones UTM, et nombres écrits juste après
+/// « EPSG » (« EPSG:2154 », « EPSG 4326 »). Sert à savoir si un système écrit est resté sans
+/// point (2026-11-05).
+fn request_systems(request: &str) -> Vec<f64> {
+    let lower: Vec<char> = request.to_lowercase().chars().collect();
+    let mut systems = named_codes(&lower);
+    systems.extend(utm_codes(&lower));
+    for start in 0..lower.len() {
+        if !lower[start..].starts_with(&['e', 'p', 's', 'g'])
+            || (start > 0 && lower[start - 1].is_alphanumeric())
+        {
+            continue;
+        }
+        let mut j = start + 4;
+        while lower
+            .get(j)
+            .is_some_and(|c| matches!(c, ':' | ' ' | '\u{a0}'))
+        {
+            j += 1;
+        }
+        let digits: String = lower[j..]
+            .iter()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
+        if let Ok(code) = digits.parse::<f64>() {
+            systems.push(code);
+        }
+    }
+    systems
 }
 
 /// Datums dont le nom, écrit juste avant « UTM » ou juste après la zone, en fait une autre
@@ -480,8 +519,10 @@ fn reference_is_a_point(
 ///
 /// Les nombres de la demande forment un multiensemble : chaque nombre littéral du plan hors
 /// `Point` (durée, distance) y retire d'abord une occurrence égale s'il en trouve une ; puis,
-/// pour chaque `Point`, x, y et epsg retirent chacun une occurrence distincte. S'il en manque
-/// une, c'est la question. Le système n'est jamais pris au projet.
+/// pour chaque `Point`, x et y retirent chacun une occurrence distincte, et l'epsg en retire
+/// une aussi, sauf s'il est égal à un système qu'un point précédent du plan a déjà retiré : un
+/// système écrit une fois vaut pour tous les points (2026-11-05). S'il en manque une, c'est la
+/// question. Le système n'est jamais pris au projet.
 pub fn guard_coordinates(registry: &Registry, plan: Plan, request: &str) -> Plan {
     match &plan {
         Plan::Calls { calls } if invents_a_point(registry, calls, request, true) => {
@@ -559,12 +600,37 @@ fn invents_a_point(
             points.push(point);
         }
     }
-    points.iter().any(|point| {
-        ["x", "y", "epsg"].iter().any(|key| {
-            let given = point.get(*key).and_then(Value::as_f64);
-            !given.is_some_and(|v| take(&mut pool, v))
-        })
-    })
+    // Un système écrit une fois dans la demande vaut pour tous les points du plan (décision du
+    // propriétaire, 2026-11-05) : un epsg déjà retiré de la demande par un point précédent est
+    // accepté sans en retirer une autre occurrence. x et y, eux, en retirent toujours une.
+    let mut systems: Vec<f64> = Vec::new();
+    let mut borrowed = false;
+    let invented = points.iter().any(|point| {
+        let invented = |key: &str, pool: &mut Vec<f64>| {
+            let given = point.get(key).and_then(Value::as_f64);
+            !given.is_some_and(|v| take(pool, v))
+        };
+        if invented("x", &mut pool) || invented("y", &mut pool) {
+            return true;
+        }
+        let Some(epsg) = point.get("epsg").and_then(Value::as_f64) else {
+            return true;
+        };
+        if take(&mut pool, epsg) {
+            systems.push(epsg);
+            return false;
+        }
+        borrowed = true;
+        !systems.iter().any(|s| same(*s, epsg))
+    });
+    // L'emprunt n'est permis que si chaque système écrit dans la demande a servi à un point :
+    // un système écrit resté sans point (« … en Lambert-93, … en WGS84 », deux points en
+    // Lambert-93) est un doute, donc la question (décision du propriétaire, 2026-11-05).
+    invented
+        || (borrowed
+            && request_systems(request)
+                .iter()
+                .any(|written| !systems.iter().any(|s| same(*s, *written))))
 }
 
 /// La question du garde-fou.
@@ -796,6 +862,97 @@ mod tests {
             plan,
             request
         )));
+    }
+
+    fn line_of_sight(observer: Value, target: Value) -> Plan {
+        calls(json!([{"command": "terrain.line_of_sight", "params": {
+            "dem": "dem/mnt.tif", "observer": observer, "target": target}}]))
+    }
+
+    #[test]
+    fn a_system_written_once_holds_for_every_point() {
+        let registry = Registry::standard();
+        let plan = line_of_sight(
+            json!({"x": 656500, "y": 6847800, "epsg": 2154}),
+            json!({"x": 657300, "y": 6848400, "epsg": 2154}),
+        );
+        for request in [
+            "Voit-on 657 300 / 6 848 400 depuis 656 500 / 6 847 800, en Lambert-93 ?",
+            "Depuis 656500 / 6847800 vers 657300 / 6848400 (EPSG:2154), la cible est-elle visible ?",
+        ] {
+            assert_eq!(
+                guard_coordinates(&registry, plan.clone(), request),
+                plan,
+                "{request}"
+            );
+        }
+        // Deux points dans deux systèmes, chacun écrit : inchangé, comme avant.
+        let mixed = line_of_sight(
+            json!({"x": 656500, "y": 6847800, "epsg": 2154}),
+            json!({"x": 2.4, "y": 48.7, "epsg": 4326}),
+        );
+        let request = "Depuis 656 500 / 6 847 800 en Lambert-93, voit-on 2,4 / 48,7 en WGS84 ?";
+        assert_eq!(guard_coordinates(&registry, mixed.clone(), request), mixed);
+        // La même règle vaut pour une sortie rejetée par la validation : pas de question.
+        let request = "Voit-on 657 300 / 6 848 400 depuis 656 500 / 6 847 800, en Lambert-93 ?";
+        assert_eq!(guard_rejected(&registry, &plan, request), None);
+    }
+
+    #[test]
+    fn a_system_written_once_does_not_excuse_a_missing_coordinate_or_system() {
+        let registry = Registry::standard();
+        let plan = line_of_sight(
+            json!({"x": 656500, "y": 6847800, "epsg": 2154}),
+            json!({"x": 657300, "y": 6848400, "epsg": 2154}),
+        );
+        for request in [
+            // y de la cible absent de la demande.
+            "Voit-on 657 300 depuis 656 500 / 6 847 800, en Lambert-93 ?",
+            // x de l'observateur absent.
+            "Voit-on 657 300 / 6 848 400 depuis 6 847 800, en Lambert-93 ?",
+            // Aucun système écrit : jamais pris au projet.
+            "Voit-on 657 300 / 6 848 400 depuis 656 500 / 6 847 800 ?",
+        ] {
+            assert!(
+                is_guard(&guard_coordinates(&registry, plan.clone(), request)),
+                "{request}"
+            );
+        }
+        // Un point dans un autre système que le seul écrit.
+        let other = line_of_sight(
+            json!({"x": 656500, "y": 6847800, "epsg": 2154}),
+            json!({"x": 657300, "y": 6848400, "epsg": 4326}),
+        );
+        let request = "Voit-on 657 300 / 6 848 400 depuis 656 500 / 6 847 800, en Lambert-93 ?";
+        assert!(is_guard(&guard_coordinates(&registry, other, request)));
+        // Deux systèmes écrits, le modèle met le premier aux deux points : le WGS84 écrit reste
+        // sans point, l'emprunt est refusé, quel que soit l'ordre des points.
+        let request = "Depuis 656 500 / 6 847 800 en Lambert-93, voit-on 2,4 / 48,7 en WGS84 ?";
+        for (observer, target) in [
+            (
+                json!({"x": 656500, "y": 6847800, "epsg": 2154}),
+                json!({"x": 2.4, "y": 48.7, "epsg": 2154}),
+            ),
+            (
+                json!({"x": 2.4, "y": 48.7, "epsg": 2154}),
+                json!({"x": 656500, "y": 6847800, "epsg": 2154}),
+            ),
+        ] {
+            let plan = line_of_sight(observer, target);
+            assert!(is_guard(&guard_coordinates(&registry, plan, request)));
+        }
+        let request = "Depuis 656 500 / 6 847 800 (EPSG:2154) vers 2,4 / 48,7 (EPSG 4326) ?";
+        let plan = line_of_sight(
+            json!({"x": 656500, "y": 6847800, "epsg": 2154}),
+            json!({"x": 2.4, "y": 48.7, "epsg": 2154}),
+        );
+        assert!(is_guard(&guard_coordinates(&registry, plan, request)));
+        // Un point sans epsg reste un point incomplet.
+        let bare = line_of_sight(
+            json!({"x": 656500, "y": 6847800, "epsg": 2154}),
+            json!({"x": 657300, "y": 6848400}),
+        );
+        assert!(guard_rejected(&registry, &bare, request).is_some());
     }
 
     #[test]
