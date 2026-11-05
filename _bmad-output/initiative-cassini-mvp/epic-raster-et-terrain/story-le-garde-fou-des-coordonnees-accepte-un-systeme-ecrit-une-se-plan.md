@@ -61,3 +61,7 @@ Tests à couvrir (`verify` du ticket) : plan juste d'une ligne de vue au systèm
 
 **Manual checks (if no CLI):**
 - Contrôle hors ticket (risque high), à proposer au propriétaire : `plan_reel` et `terrain_reel` repassés sur le modèle installé (`--features cuda`), sans nouvelle coordonnée arrêtée à tort ni coordonnée inventée laissée passer.
+
+## Contrôle sur le vrai modèle (2026-11-05)
+
+`cassini-composition-4b` installé, `--features cuda` : `plan_reel` 23/25, 0 fausse question, 0 du garde-fou ; S21 donne désormais le plan attendu. S24 et S25 échouent comme au 5.41 (renfort reporté, décision du propriétaire). `terrain_reel` 8/8. Aucune coordonnée arrêtée à tort, aucune coordonnée inventée laissée passer.
