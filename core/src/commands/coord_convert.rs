@@ -208,6 +208,7 @@ impl Command for CoordConvert {
             "geographiclib_references_are_found",
             "projection_references_are_found_to_the_millimetre",
             "the_special_zones_are_those_of_the_exception",
+            "geotrans_references_are_found",
             "an_imposed_zone_is_kept_when_it_is_a_neighbour",
             "the_mgrs_precision_truncates",
             "a_mgrs_reference_reads_as_the_south_west_corner",
@@ -397,6 +398,53 @@ mod tests {
         // Hors de l'exception, la zone normale : 2,9° E à 60,4° N reste en 31.
         let out = convert(json!({"point": wgs84(2.9, 60.4), "to": ["utm"]})).unwrap();
         assert_eq!(out["utm"]["epsg"], 32631);
+    }
+
+    // Jeu de référence 4 — GEOTRANS de la NGA (domaine public), lu par le paquet Python `mgrs`
+    // 1.7.0 (licence MIT), valeurs figées le 2026-11-05 : implémentation indépendante du MGRS.
+    // Points tirés au hasard dans le monde, en 31V/32V, au Svalbard et au bord des zones et des
+    // bandes, loin de plus de 5 mm de tout mètre entier en PROJ (là, GEOTRANS arrondit avant de
+    // tronquer et peut rendre le mètre suivant : la troncature exacte est celle du noyau).
+    // Contrôle croisé du 2026-11-05 sur 8 500 points : aucun écart hors de ces cas sub-millimétriques.
+    #[test]
+    fn geotrans_references_are_found() {
+        for (lon, lat, expected) in [
+            (-144.3036777, -67.607879, "06DXK1459498358"),
+            (-52.6953046, -73.1221623, "22CDD4506885114"),
+            (-161.217936, 73.892651, "04XDH3133001339"),
+            (-85.7807689, 50.1482275, "16UEA8710855823"),
+            (73.4480354, -53.3247044, "43FCA9663390484"),
+            (63.0407992, -69.4369913, "41DNC0159996909"),
+            (6.3356227, 12.3986362, "32PKU1029672081"),
+            (126.0975948, 54.5647725, "52UCF1235950235"),
+            (5.0217254, 62.7384361, "32VKQ9678462722"),
+            (9.3635763, 59.1796754, "32VNL2077960115"),
+            (3.0364814, 59.4287091, "32VJM6194602958"),
+            (0.9095442, 56.735837, "31VCC7212289932"),
+            (9.7750897, 63.8723028, "32VNR3808383015"),
+            (0.9599598, 58.1317739, "31VCE7986945197"),
+            (10.8319159, 56.8863918, "32VPJ1161606234"),
+            (3.7072022, 58.3609033, "32VJK9049981075"),
+            (24.83953, 81.7635812, "35XML6545479082"),
+            (19.316775, 74.638288, "33XXC2754487885"),
+            (1.6756448, 81.3265589, "31XDL7770529910"),
+            (1.8151759, 83.6194539, "31XDN8530085762"),
+            (38.8645734, 77.9950632, "37XDG9685557822"),
+            (22.1195978, 82.9101096, "35XMN3282809265"),
+            (10.0105563, 83.0147173, "33XVN3233821028"),
+            (4.0811639, 73.5886702, "31XEB3409366458"),
+            (9.0000769, -53.0890285, "32FNG0000517825"),
+            (8.9999067, -17.1311797, "32KMG9999005933"),
+            (162.0000777, -48.0000352, "58FBM7623079340"),
+            (-75.6376249, 48.4385331, "18UVU5284065239"),
+            (6.0000017, 63.5352986, "32VLR5087248729"),
+            (-3.8100907, 24.8519844, "30RVN1815448801"),
+        ] {
+            let out = convert(json!({"point": wgs84(lon, lat), "to": ["mgrs"]})).unwrap();
+            assert_eq!(out["mgrs"], expected, "{lon} {lat}");
+            // Et la référence de GEOTRANS se relit sans refus.
+            assert!(convert(json!({"mgrs": expected, "to": ["wgs84"]})).is_ok(), "{expected}");
+        }
     }
 
     #[test]

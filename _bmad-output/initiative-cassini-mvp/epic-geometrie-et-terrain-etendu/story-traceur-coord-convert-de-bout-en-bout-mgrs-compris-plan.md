@@ -85,6 +85,7 @@ context:
 
 - 2026-11-05 : relecture thorough (CLAUDE.md §8, entrée `high`) au lieu de la quick configurée. Sept correctifs appliqués ; écart accepté : un appel refusé est journalisé comme étape en erreur (AD-11), le test CLI le vérifie.
 - 2026-11-05 : démo dans QGIS 3.44 (paquet `--features gpu`, Qwen3.5-9B, sonde `C:\ct\probe-11-2.py`) sur un projet vide : deux phrases sur trois donnent un plan `coord.convert` exécuté et affiché (≈ 36 s) ; la troisième (« 31u dq 4825 1175 ») rend une question du modèle, à l'entraînement (entrées 12 et 16) ; rejeu `{"steps":4,"identical":true}`. Sur le projet de test, `ai.prompt_too_long`, antérieur au ticket (reporté).
+- 2026-11-05 : contrôle croisé MGRS demandé par le propriétaire, contre GEOTRANS de la NGA (paquet Python `mgrs` 1.7.0, hors du dépôt), sur 8 500 points (monde, 31V/32V, Svalbard, bords de zones et de bandes) : 8 490 identiques, 3 longitudes d'entrée invalides refusées des deux côtés, 7 écarts d'un mètre où la valeur exacte (PROJ) est à moins de 0,5 mm sous un mètre entier — GEOTRANS arrondit avant de tronquer, le noyau tronque la valeur exacte. Lecture : coin sud-ouest à moins de 0,71 m du centre de case de GEOTRANS. 30 références figées dans `geotrans_references_are_found`.
 - 2026-11-05 : précisions ajoutées à la fiche du catalogue sans changer identifiants ni paramètres : coin sud-ouest, case qui touche la bande, arrondis ; champs du résultat omis quand la forme n'est pas demandée.
 
 ## Review Triage Log
