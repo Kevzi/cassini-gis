@@ -673,3 +673,10 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
   evidence: Relecture thorough de 4.10 : le générateur écrit encore le système à chaque point ; le changer maintenant désaccorderait le modèle installé.
   status: report, 2026-11-05, entrée 4.8 (`epic-raster-et-terrain/story-refactor-sweep-plan.md`)
   resolution: Prochain ré-entraînement groupé (familles `ligne_de_vue`, `question_terrain` du générateur) ; le changer seul désaccorderait le modèle installé.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-raster-et-terrain/bug-la-pente-d-un-mnt-en-web-mercator-est-fausse-sans-erreur-et-la-pente-en-degres-depend-de-la-plateforme-plan.md`
+  summary: Compléter la liste fermée des systèmes métriques du MNT (EPSG:9794 RGF93 v2b Lambert-93 et ses coniques, 3035 LAEA, UTM outre-mer 5490, 2972, 2975) et documenter cette liste pour l'utilisateur.
+  evidence: Relecture de 4.11 — ces systèmes en vrais mètres sont désormais refusés par `is_known_metric` (core/src/dem.rs) ; le propriétaire a décidé qu'un système manquant s'ajoute par un ticket à part.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-raster-et-terrain/bug-la-pente-d-un-mnt-en-web-mercator-est-fausse-sans-erreur-et-la-pente-en-degres-depend-de-la-plateforme-plan.md`
+  summary: Un journal de pente en degrés écrit avant 4.11 peut rendre replay.diverged au rejeu si libm::atan diffère de la libm du système sur ce MNT.
+  evidence: Relecture de 4.11 — la pente en degrés passe de f64::atan à libm::atan ; la divergence, si elle survient, est signalée et non silencieuse.

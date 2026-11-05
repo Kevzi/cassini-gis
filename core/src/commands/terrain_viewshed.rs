@@ -699,6 +699,27 @@ mod tests {
     }
 
     #[test]
+    fn a_pseudo_metre_dem_is_refused_and_nothing_is_written() {
+        let dir = Scratch::new("pseudo-metres");
+        let out = dir.join("vue.tif");
+        for epsg in [3857, 3395] {
+            let input = dir.join(&format!("{epsg}.tif"));
+            Dem { epsg, ..holed() }.write_geotiff(&input).unwrap();
+            let err = call(json!({
+                "dem": input.to_string_lossy(),
+                "observer": {"x": 15, "y": 35, "epsg": epsg},
+                "radius": {"value": 100, "unit": "m"},
+                "out": out.to_string_lossy(),
+            }))
+            .unwrap_err();
+            assert_eq!(err.code(), "dem.not_projected");
+            assert!(err.to_string().contains(&format!("EPSG:{epsg}")), "{err}");
+            assert!(err.to_string().contains("QGIS"), "{err}");
+            assert!(!out.exists());
+        }
+    }
+
+    #[test]
     fn a_bad_observer_writes_nothing() {
         let dir = Scratch::new("observateur");
         let out = dir.join("vue.tif");
