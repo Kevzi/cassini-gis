@@ -33,7 +33,7 @@ windows-sys = { version = "0.61", features = [
   "Win32_System_Threading",
 ] }
 
-# Instrument de la comparaison du terrain à QGIS (ticket 7) : ses tests passent avec la recette.
+# Instrument de la comparaison du terrain aux outils de référence, natif et GRASS (ticket 7) : ses tests passent avec la recette.
 [[example]]
 name = "comparer_terrain"
 test = true

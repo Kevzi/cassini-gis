@@ -618,6 +618,8 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-raster-et-terrain/story-traceur-le-noyau-lit-et-ecrit-un-mnt-geotiff-dans-un-module-plan.md`
   summary: Le module `dem` hérite de la limite de décodage par défaut de `tiff` (environ 256 Mo) : un très grand MNT (1 m sur une commune) est refusé en `dem.unsupported` sans seuil annoncé.
   evidence: relecture 4.1, constat 8 ; fixer `Limits` et documenter la taille maximale avec la première commande de terrain (4.2).
+  status: close, 2026-11-05, entrée 4.8 (`epic-raster-et-terrain/story-refactor-sweep-plan.md`)
+  resolution: `Dem::open` fixe les `Limits` de `tiff` à `MAX_DECODED_BYTES` (1 Gio, documenté dans `core/src/dem.rs`) et refuse au-delà en `dem.unsupported` « MNT trop grand », seuil de 1 Gio annoncé dans le message (a378d094ff9e0c0c99e641477b71a34396b2630a, entrée 4.2).
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-re-entrainement-groupe-point-en-utm-et-echelle-de-l-export-p-plan.md`
   summary: Le modèle de 5.39 refuse un export à l'échelle qui ne dit pas « PDF » (« Exporte la carte au 1:25 000. ») : ajouter au générateur des tournures d'export à l'échelle sans ce mot, apprises au prochain ré-entraînement groupé.
   evidence: essai `echelle_utm_reel` E01 et démo QGIS du 2026-11-04 (refus « seulement une page A4 paysage ») ; toutes les tournures de `export_pdf_scale` (`export_pdf_scale` dans `training/src/families.rs`) contiennent « PDF », et `refus_hors_registre` apprend des refus de format. Décision du propriétaire : 5.39 clos, ticket à part.
@@ -626,10 +628,14 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-raster-et-terrain/story-les-sorties-raster-du-noyau-s-ouvrent-dans-le-projet-qgis-plan.md`
   summary: Le générateur d'exemples doit montrer des sources raster relatives (`dem/mnt.tif`, `../donnees/mnt.tif`) dans l'inventaire et leur recopie dans `dem`, pour le ré-entraînement groupé.
   evidence: Depuis 4.3 l'inventaire donne aux rasters un chemin relatif au projet, mais le modèle ajusté n'a vu que des noms de fichier seuls (fixtures de `core/src/agent_inventory.rs`) ; 4.3 interdit d'apprendre quoi que ce soit au modèle.
+  status: close, 2026-11-05, entrée 4.8 (`epic-raster-et-terrain/story-refactor-sweep-plan.md`)
+  resolution: `add_dem` du générateur tire une source `donnees/`, `dem/`, `../donnees/` ou le nom seul, avec un test des quatre formes (3dada665f617d58fd93ccba9f0b5e1dd75bcf84b, entrée 4.6) ; modèle ré-entraîné en 5.41.
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-raster-et-terrain/story-terrain-viewshed-champ-de-vision-depuis-un-point-plan.md`
   summary: Tester terrain.viewshed sur un MNT à cellules rectangulaires (borne et fenêtre prises sur la plus petite cellule, axes x et y séparés).
   evidence: Tous les MNT des tests ont des cellules carrées ; remplacer `min(cell_size_x, cell_size_y)` par `cell_size_x` ne casserait aucun test (relecture thorough de 4.5, constat 12). À couvrir avec la comparaison de 4.7.
+  status: close, 2026-11-05, entrée 4.8 (`epic-raster-et-terrain/story-refactor-sweep-plan.md`)
+  resolution: Tests `rectangular_cells_bound_on_the_smaller_and_crop_each_axis_apart` (champ de vision : borne sur la plus petite cellule, fenêtre par axe) et `rectangular_cells_sample_at_the_smaller_cell` (ligne de vue : pas d'échantillonnage) ; tous deux échouent si `min(cell_size_x, cell_size_y)` devient `cell_size_x`.
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-raster-et-terrain/story-le-modele-apprend-les-trois-commandes-de-terrain-plan.md`
   summary: Le garde-fou des coordonnées devrait accepter un système écrit une seule fois pour deux points (« entre 652 000 / 6 862 000 et 653 100 / 6 861 400, en Lambert-93 »).
@@ -639,6 +645,8 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-raster-et-terrain/story-le-modele-apprend-les-trois-commandes-de-terrain-plan.md`
   summary: Avant de mesurer 5.41, mettre à jour les attendus de terrain de `plan_reel` (`ai/tests/plan_reel.rs` attend encore un refus pour S20, S21, S22 et S24 ; `tests/epreuve-modele-local/sentences.json` et `reading_independent.json` écrivent `dem` en id de couche et `from`/`to`).
   evidence: Relecture de 4.6 : le générateur apprend désormais à planifier ces phrases (`dem` = `source` du raster, `observer`/`target`), donc un modèle ré-entraîné « échouerait » là où il a raison, et le `verify` de 5.41 exige aucun recul sur `plan_reel`. Attendu périmé depuis 4.2 (pente), 4.4 et 4.5, pas causé par 4.6. S21 écrit le système une seule fois pour deux points : il attend la question du garde-fou tant que l'entrée précédente n'est pas faite. S23 (moyenne de la pente par commune) reste un refus (statistiques sur un raster).
+  status: close, 2026-11-05, entrée 4.8 (`epic-raster-et-terrain/story-refactor-sweep-plan.md`)
+  resolution: `ai/tests/plan_reel.rs` attend un plan pour S20, S21 et S22 sur la `source` du MNT, S23 et S24 restant des refus (a30bf8559597eaf4778d6440199f0911fd305b34, entrée 5.41). `tests/epreuve-modele-local/sentences.json` et `reading_independent.json` ne sont pas réécrits : pièces de l'épreuve de l'étape 2, sur un catalogue factice (`catalog.json`) qui définit lui-même `dem` en id de couche et `from`/`to`, et dont les résultats archivés y renvoient.
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-re-entrainement-groupe-commandes-de-terrain-et-export-a-l-ec-plan.md`
   summary: Au prochain ré-entraînement groupé, renforcer deux refus du générateur : terrain puis statistique par zone (`NO_RASTER_STATS`, surtout après un champ de vision) et point de terrain écrit dans un autre système que le MNT (`NO_TERRAIN_CRS`, surtout en WGS84).
@@ -651,11 +659,17 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-raster-et-terrain/bug-le-rejeu-diverge-quand-un-raster-de-terrain-precede-un-export-plan.md`
   summary: Avant la publication (étape 7), empêcher qu'une extension d'après 4.9 tourne avec un noyau d'avant 4.9 (ou l'inverse) : les rasters du noyau ne s'ouvriraient plus, sans message ; monter la version du protocole ou vérifier au `session.hello` que le noyau dicte `layer.open_raster`.
   evidence: Relecture thorough de 4.9 : le panneau n'ouvre plus de raster de lui-même, le noyau ne dicte l'ouverture que s'il la connaît ; AD-17 livre l'extension et le noyau à part. Sans utilisateur à ce jour (noyau et extension installés ensemble), le risque naît à la publication.
+  status: report, 2026-11-05, entrée 4.8 (`epic-raster-et-terrain/story-refactor-sweep-plan.md`)
+  resolution: Liste de publication (étape 7) : version du protocole ou contrôle au `session.hello`. Aucun utilisateur n'a aujourd'hui un noyau et une extension de versions croisées.
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-raster-et-terrain/bug-le-rejeu-diverge-quand-un-raster-de-terrain-precede-un-export-plan.md`
   summary: Un journal écrit avant 4.9 (raster de terrain sans ligne `layer.open_raster`) diverge toujours au rejeu en session neuve ; décider s'il faut le signaler avant de rejouer.
   evidence: Relecture thorough de 4.9 : le correctif ne vaut que pour les journaux nouveaux ; aucun journal d'utilisateur n'existe encore, d'où le report.
+  status: report, 2026-11-05, entrée 4.8 (`epic-raster-et-terrain/story-refactor-sweep-plan.md`)
+  resolution: Décision du propriétaire avant la publication (étape 7) : signaler ou non un journal sans `layer.open_raster` avant de le rejouer. Aucun journal d'utilisateur n'existe encore.
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-raster-et-terrain/story-le-garde-fou-des-coordonnees-accepte-un-systeme-ecrit-une-se-plan.md`
   summary: Au prochain ré-entraînement groupé, apprendre au générateur (familles `ligne_de_vue`, `question_terrain`) des demandes dont le système n'est écrit qu'une fois pour deux points, que le garde-fou accepte depuis 4.10.
   evidence: Relecture thorough de 4.10 : le générateur écrit encore le système à chaque point ; le changer maintenant désaccorderait le modèle installé.
+  status: report, 2026-11-05, entrée 4.8 (`epic-raster-et-terrain/story-refactor-sweep-plan.md`)
+  resolution: Prochain ré-entraînement groupé (familles `ligne_de_vue`, `question_terrain` du générateur) ; le changer seul désaccorderait le modèle installé.
