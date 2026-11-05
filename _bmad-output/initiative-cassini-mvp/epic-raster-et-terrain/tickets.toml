@@ -83,6 +83,17 @@ risk = "medium"
 notes = ["Decision: 2026-11-03 — une entree de cet epic apprend les trois commandes au modele ; le re-entrainement se fait a part, dans la passe groupee de l'epic agent-et-mcp, et la demo reelle dans le panneau vient apres ce re-entrainement (ou dans l'epic 6)."]
 
 [[entry]]
+id = 9
+type = "bug"
+title = "Le rejeu diverge quand un raster de terrain précède un export PDF"
+description = "Un export PDF rejoue apres un raster de terrain du noyau ne montre pas les memes couches qu'a l'origine : replay.diverged dans la meme session et dans une session neuve."
+verify = "Tests du noyau et de l'extension, puis sonde QGIS reelle sur la chaine de la reproduction : les deux rejeux rendent identical: true."
+covers = ["CAP-7", "CAP-11"]
+after = []
+hitl = false
+risk = "high"
+
+[[entry]]
 id = 7
 type = "story"
 title = "Comparaison a QGIS : justesse et vitesse des commandes de terrain, provenance du code de visibilite"
@@ -101,6 +112,6 @@ title = "Refactor sweep"
 description = "Nettoyage de fin d'epic : sa portee est fixee au demarrage, depuis les plans et les constats de relecture reportes pendant l'epic ; aucune portee repoussee d'une autre entree."
 verify = "Tests du noyau, de l'extension et du generateur verts apres le nettoyage, sans changement de comportement."
 covers = ["CAP-11"]
-after = [1, 2, 3, 4, 5, 6, 7]
+after = [1, 2, 3, 4, 5, 6, 7, 9]
 hitl = false
 risk = "low"
