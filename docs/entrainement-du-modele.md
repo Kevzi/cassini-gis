@@ -1150,3 +1150,99 @@ Les quatre barres sont tenues ; la démo manque la phrase sans « PDF ». Décis
 (2026-11-04) : garder le modèle de 5.39 et clore le ticket ; les tournures d'export à l'échelle
 sans le mot « PDF » vont au générateur dans un ticket à part, apprises au prochain
 ré-entraînement groupé (`deferred-work.md`).
+
+## Ré-entraînement de 5.41 : commandes de terrain et export à l'échelle sans « PDF »
+
+Le générateur de 4.6 (familles `pente`, `ligne_de_vue`, `champ_de_vision` ; refus
+`NO_SLOPE`, `NO_LINE_OF_SIGHT`, `NO_VIEWSHED` retirés) et de 5.40 (tournures
+d'`export_pdf_scale` sans le mot « PDF ») a été entraîné par la commande unique : même base
+(`Qwen/Qwen3.5-4B` @ `851bf6e`), même méthode, même révision de llama.cpp (`d812350`),
+8 000 exemples. Avant tout entraînement, les attendus de terrain de `plan_reel` ont été remis
+à jour (S20 et S22 attendent un plan, S21 la question du garde-fou, hors du plafond des fausses
+questions ; S23 et S24 restent des refus) et un essai neuf, `terrain_reel`, a été ajouté
+(2 pentes, 2 lignes de vue, 2 champs de vision, 2 exports à l'échelle sans « PDF »).
+
+### Deux entraînements
+
+| | n° 1 | n° 2 (retenu) |
+|---|---|---|
+| Commit (arbre propre) | `a30bf85` | `f89fea4` |
+| Sortie | `~/cassini-entrainement/5-41` | `~/cassini-entrainement/5-41-b` |
+| Durée totale (RTX 3070 Ti, WSL) | 325 min | 281 min, dont 47 min de validation |
+| Perte finale (500 pas) | 0,0048 | 0,0067 |
+| Jetons par séquence | médiane 742, maximum 1 578 | médiane 742, maximum 1 540 |
+| Validation (graine 2, glouton) | 299 / 300 : plans 242 / 243, questions 37 / 37, refus 20 / 20 | 299 / 300 : plans 235 / 236, questions 40 / 40, refus 24 / 24 |
+| Parité des découpeurs | 300 / 300 | 300 / 300, 0 écart (203 135 jetons) |
+| Essai `llama-completion` | plan attendu | base + adaptateur et fusionné rendent le plan attendu |
+
+Le modèle n° 1 manquait trois sortes de phrases que le générateur ne montrait pas : un calcul
+de terrain suivi d'une statistique par zone (S23, S24), un point de terrain écrit dans un autre
+système que le MNT (S25), et « dans un rayon de X autour du point » (V02, rendu en zone tampon).
+Décision du propriétaire (2026-11-04) : compléter le générateur (`refus_hors_registre` :
+`NO_RASTER_STATS` après un calcul de terrain, `NO_TERRAIN_CRS` pour un point hors du système du
+MNT ; `champ_de_vision` : le rayon avant le point) et ré-entraîner.
+
+Modèle n° 2 fusionné : `cassini-composition-4b-Q4_K_M.gguf`, SHA-256
+`e335f6274af331919c76ab8638431278e821849374ad40f7fa3dd914f52991a0`.
+
+### Essais réels (GPU, modèle fusionné, prompt court)
+
+`cargo test -p cassini-ai --release --features cuda --test plan_reel --test question_reel
+--test ecart_reel --test echelle_utm_reel --test terrain_reel -- --ignored`,
+`CASSINI_TEST_MODEL` = la déclaration du modèle mesuré. La colonne 5.39 reprend son modèle sur
+les attendus mis à jour.
+
+| Essai | Barre | 5.39 | 5.41 n° 1 | 5.41 n° 2 |
+|---|---|---|---|---|
+| `plan_reel` | ≥ 24 / 25, puis 23 / 25 (décision du propriétaire) | 22 / 25 | 22 / 25 | **23 / 25**, 0 fausse question |
+| `question_reel` | ≥ 11 / 12 | 12 / 12 | 12 / 12 | **12 / 12** |
+| `ecart_reel` | ≥ 32 / 40 | 34 / 40 | 34 / 40 | **34 / 40** (plans 21 / 26, questions 8 / 8, refus 5 / 6), 263 s |
+| `echelle_utm_reel` | ≥ 7 / 8 | 7 / 8 | 8 / 8 | **8 / 8** (E01 « Exporte la carte au 1:25 000. » juste) |
+| `terrain_reel` (nouveau) | ≥ 7 / 8 | 1 / 8 | 7 / 8 | **8 / 8** |
+
+`plan_reel` : S23 et V02 deviennent justes. Restent **S24** (« … champ de vision …, puis sa
+moyenne par commune » : le champ de vision seul, la moyenne oubliée, au lieu du refus) et
+**S25** (point en WGS84 sur un MNT en Lambert-93 : un champ de vision en EPSG:4326, que le noyau
+refuse ensuite à l'exécution par `terrain.crs_mismatch`). Le jeu contient ces deux refus, mais
+quelques dizaines d'exemples sur 8 000 ne suffisent pas.
+
+Écarts du jeu tenu à l'écart : H08 et H23 (une question au lieu d'un plan), H17, H18, H19 (une
+étape de moins), H40 (un plan au lieu d'un refus). L'essai compte une phrase passée par la redemande sans être sauvée : elle est
+l'un de ces six écarts.
+
+**Décision du propriétaire (2026-11-05)** : après deux entraînements, accepter le modèle n° 2,
+meilleur que 5.39 sur chaque essai ; le renfort des refus de S24 et S25 va au prochain
+ré-entraînement groupé (`deferred-work.md`).
+
+### Installation
+
+Dossier des modèles du poste : le modèle n° 2 sous la déclaration retenue par le panneau
+(`cassini-composition-4b.modele.json`, lien dur vers `ajuste-5-41-b`) ; celui de 5.39 gardé
+sous `cassini-composition-4b-5-39` (GGUF et déclaration). `cassini run model.list` voit les
+cinq modèles du dossier.
+
+### Démo dans QGIS
+
+Le 2026-11-05, sonde enchaînée sur une copie du projet réel avec le MNT de Villeneuve-le-Roi en
+Lambert-93 (`projet-sonde-5-41.qgz`), noyau et extension installés, modèle installé : **dix
+phrases sur dix** rendent le plan juste, exécuté.
+
+| Phrase | Résultat |
+|---|---|
+| phrase de démo de `CLAUDE.md` | plan de 5 étapes, PDF écrit ; 17,2 s |
+| « Calcule la pente du terrain en degrés. » puis « … en pourcentage. » | `terrain.slope`, rasters ouverts (0–49,3° ; 0–116 %) |
+| deux lignes de vue en Lambert-93 | plateau masqué (obstacle à 2 854 m) ; pied du coteau visible, 2 m à chaque bout |
+| champ de vision à 25 m de haut sur 2 km | `terrain.viewshed`, raster ouvert |
+| « … dans un rayon de 800 m autour du point … » | `terrain.viewshed`, `radius` 800 m |
+| « Exporte la carte au 1:25 000. » | `layout.export_pdf` à `scale: 25000` |
+| zone atteignable à pied en 10 minutes | `analysis.isochrone` |
+| « Sors-moi la carte au 1/10 000. » | `layout.export_pdf` à `scale: 10000` |
+
+Compositions de 2,5 à 9,4 s hors phrase de démo.
+
+**Le rejeu diverge** (`replay.diverged`), à l'étape 5 dans la même session, à l'étape 12 dans
+une session neuve : un export rejoué ne retire de la carte que les couches à `layer_id` du
+journal (5.36), alors que les rasters du noyau, ouverts par le panneau (4.3), n'y figurent pas et
+ne sont pas rouverts au rejeu. Dès qu'un raster de terrain précède un export, le nombre de
+couches de l'export change. Défaut du rejeu, indépendant du modèle : bogue 4.9
+(`_bmad-output/initiative-cassini-mvp/epic-raster-et-terrain/bug-le-rejeu-diverge-quand-un-raster-de-terrain-precede-un-export.md`).

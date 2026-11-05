@@ -12,6 +12,8 @@
 //! S21 (ligne de vue), dont le système n'est écrit qu'une fois pour deux points, attend la
 //! question du garde-fou des coordonnées (décision du propriétaire, 2026-11-04) ; S23 et S24,
 //! terrain puis moyenne par commune, restent des refus (statistiques sur un raster).
+//! S25, un point écrit en WGS84 sur un MNT en Lambert-93, est un refus : le noyau ne reprojette
+//! pas un point de terrain (`terrain.crs_mismatch`).
 //!
 //! Une question rendue sur une phrase claire est un échec, et il en faut au plus deux sur les 25 :
 //! concession du propriétaire (2026-10-17) pour un GGUF seul au long prompt. Un modèle au prompt

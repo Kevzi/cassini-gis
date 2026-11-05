@@ -2378,17 +2378,19 @@ const NO_RASTER_STATS: &str = "Aucune commande du catalogue ne calcule de statis
 /// une pente calculée à la place de la sélection demandée.
 const NO_RASTER_THRESHOLD: &str =
     "Aucune commande du catalogue ne sélectionne les cellules d'un raster par leur valeur.";
-/// Décision du propriétaire (2026-10-23, option a) : « de chaque gare », « de toutes les
-/// gares », « des gares » ; l'isochrone du catalogue part d'un seul point en coordonnées.
 /// 5.41 : un point de terrain écrit dans un autre système que le MNT est un refus ; le noyau ne
 /// reprojette pas un point (`terrain.crs_mismatch`).
 const NO_TERRAIN_CRS: &str = "Les commandes de terrain du catalogue prennent un point écrit dans le système du MNT : aucune ne reprojette un point.";
+/// Décision du propriétaire (2026-10-23, option a) : « de chaque gare », « de toutes les
+/// gares », « des gares » ; l'isochrone du catalogue part d'un seul point en coordonnées.
 pub const NO_MULTI_ORIGIN: &str = "L'isochrone du catalogue part d'un seul point donné en coordonnées : elle ne se calcule pas depuis plusieurs lieux à la fois.";
 
 /// Ce que le registre ne sait pas encore faire, quoi que l'inventaire contienne (un MNT pour
 /// les statistiques et le seuil sur un raster) : un refus affirmatif, jamais un plan de
 /// substitution (un décompte à la place d'une moyenne d'altitude, une pente à la place d'une
-/// sélection des cellules).
+/// sélection des cellules). Depuis 5.41 : un calcul de terrain suivi d'une statistique par zone
+/// (refus entier, jamais le seul calcul de terrain) et un point de terrain écrit dans un autre
+/// système que le MNT (le bras ajoute lui-même son MNT par `add_dem`).
 fn refus_hors_registre(rng: &mut Rng) -> Option<Example> {
     let mut b = Builder::new();
     let roll = rng.below(6);
@@ -3505,6 +3507,32 @@ mod tests {
                 "{}",
                 e.request
             );
+            // Un seul rayon, celui écrit avant le point : aucune seconde clause après lui.
+            let text = e.request.to_lowercase();
+            let (before, after) = text.split_once(" autour d").unwrap();
+            let forms: &[&str] = match (
+                p["radius"]["value"].to_string().as_str(),
+                p["radius"]["unit"].as_str().unwrap(),
+            ) {
+                ("300", "m") => &["300 m", "300 mètres"],
+                ("500", "m") => &["500 m", "500 mètres"],
+                ("800", "m") => &["800 m"],
+                ("1", "km") => &["1 km", "un kilomètre"],
+                ("1.5", "km") => &["1,5 km"],
+                ("2", "km") => &["2 km", "deux kilomètres"],
+                ("3", "km") => &["3 km"],
+                other => panic!("rayon inattendu {other:?} : {}", e.request),
+            };
+            assert!(
+                forms
+                    .iter()
+                    .any(|f| before.ends_with(&format!("dans un rayon de {f}"))),
+                "{}",
+                e.request
+            );
+            for marker in ["rayon", " sur ", "jusqu'à"] {
+                assert!(!after.contains(marker), "{}", e.request);
+            }
         }
     }
 
