@@ -684,3 +684,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-socle-et-carte/story-maintenir-la-recette-github-actions-a-jour-plan.md`
   summary: Corriger le commentaire d'en-tête de .github/workflows/recette.yml, qui dit n'utiliser que des actions officielles de GitHub alors que le job noyau utilise EmbarkStudios/cargo-deny-action.
   evidence: Relecture de 1.11 — commentaire ligne 6, antérieur au ticket.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-traceur-coord-convert-de-bout-en-bout-mgrs-compris-plan.md`
+  summary: Avec Qwen3.5-9B (prompt long), toute phrase sur le projet de test projet-test-villeneuve.qgz échoue en ai.prompt_too_long : l'inventaire du projet et le catalogue ne tiennent pas dans le contexte.
+  evidence: Démo de 11.2 — l'ancien noyau installé, sans coord.convert, échoue de même sur ce projet ; la démo n'a réussi que sur un projet vide.

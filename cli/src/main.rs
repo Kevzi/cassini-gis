@@ -843,6 +843,58 @@ mod tests {
     }
 
     #[test]
+    fn coord_convert_runs_without_qgis_and_replays_identically() {
+        let (dir, project) = temp_project();
+        let (code, out, err) = call(&[
+            "run",
+            "coord.convert",
+            r#"{"mgrs":"31u dq 48251 11750","to":["mgrs","utm","wgs84"]}"#,
+            "--project",
+            &project,
+        ]);
+        assert_eq!((code, err.as_str()), (0, ""));
+        let result: Value = serde_json::from_str(out.trim()).unwrap();
+        assert_eq!(result["mgrs"], "31UDQ4825111750");
+        assert_eq!(
+            result["utm"],
+            json!({"x": 448251.0, "y": 5411750.0, "epsg": 32631})
+        );
+        assert_eq!(result["wgs84"]["epsg"], 4326);
+        let journal = std::fs::read_to_string(dir.join("p.cassini/journal.jsonl")).unwrap();
+        let line: Value = serde_json::from_str(journal.trim()).unwrap();
+        assert_eq!(line["id"], "coord.convert");
+        assert_eq!(line["result"], result);
+
+        let (code, out, err) = call(&["replay", &project]);
+        assert_eq!((code, err.as_str()), (0, ""));
+        assert_eq!(out.trim(), r#"{"steps":1,"identical":true}"#);
+        // Une référence mal formée échoue avec son code ; l'échec est journalisé comme une étape
+        // en erreur (AD-11), et le rejeu redonne la même erreur.
+        let (code, _, err) = call(&[
+            "run",
+            "coord.convert",
+            r#"{"mgrs":"31IDQ4825111750","to":["wgs84"]}"#,
+            "--project",
+            &project,
+        ]);
+        assert_eq!(code, 1);
+        assert_eq!(error_code(&err), "coord.invalid_mgrs");
+        let journal = std::fs::read_to_string(dir.join("p.cassini/journal.jsonl")).unwrap();
+        let lines: Vec<Value> = journal
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(lines.len(), 2, "{journal}");
+        assert_eq!(lines[0]["result"], result);
+        assert_eq!(lines[1]["error"], "coord.invalid_mgrs");
+        assert!(lines[1].get("result").is_none(), "{journal}");
+        let (code, out, err) = call(&["replay", &project]);
+        assert_eq!((code, err.as_str()), (0, ""));
+        assert_eq!(out.trim(), r#"{"steps":2,"identical":true}"#);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn terrain_line_of_sight_runs_without_qgis_and_replays_identically() {
         let (dir, project) = temp_project();
         let fixture =
