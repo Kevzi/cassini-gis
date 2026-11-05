@@ -4,6 +4,7 @@
 //! serveur MCP ne font qu'appeler ce moteur (CLAUDE.md §2.5).
 
 pub mod agent_inventory;
+pub mod angle;
 pub mod basemap;
 pub mod commands;
 pub mod contract;
@@ -11,6 +12,7 @@ pub mod dem;
 pub mod error;
 pub mod exec;
 pub mod external;
+pub mod geodesic;
 pub mod geodesy;
 pub mod journal;
 pub mod plan;

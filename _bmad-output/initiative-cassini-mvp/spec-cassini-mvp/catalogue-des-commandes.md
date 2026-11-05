@@ -147,7 +147,7 @@ nomme la partie fautive (zone, bande, carré de 100 km ou chiffres).
 
 Un azimut se compte depuis le **nord vrai**, dans le sens horaire, dans [0, 360) degrés
 ou [0, 400) grades ; un azimut rendu est ramené à cet intervalle. Posé par l'entrée 3 de
-l'epic 11.
+l'epic 11 (`core/src/angle.rs`) ; une valeur non finie est refusée.
 
 ```json type
 {"name": "Angle", "type": "object",
@@ -252,9 +252,9 @@ constante du noyau. Posé par l'entrée 1 de l'epic 10.
 | `terrain.viewshed` | faite | core | — |
 | `terrain.line_of_sight` | faite | core | — |
 | `coord.convert` | faite | core | epic 11, entrée 2 |
-| `geo.distance_azimuth` | planifiée | core | epic 11, entrée 3 |
-| `geo.destination_point` | planifiée | core | epic 11, entrée 3 |
-| `geo.bearing_intersection` | planifiée | core | epic 11, entrée 3 |
+| `geo.distance_azimuth` | faite | core | epic 11, entrée 3 |
+| `geo.destination_point` | faite | core | epic 11, entrée 3 |
+| `geo.bearing_intersection` | faite | core | epic 11, entrée 3 |
 | `data.transform_point` | planifiée | qgis | epic 11, entrée 4 |
 | `terrain.aspect` | planifiée | core | epic 11, entrée 6 |
 | `terrain.hillshade` | planifiée | core | epic 11, entrée 6 |
@@ -753,10 +753,6 @@ hors de [-80, 84] pour UTM ou MGRS, ou zone imposée à plus d'une zone du point
  "result": ["wgs84", "utm", "mgrs"]}
 ```
 
----
-
-## 6. Commandes planifiées — epic 11, géométrie et terrain étendu
-
 ### `geo.distance_azimuth`
 
 Distance géodésique et azimuts entre deux points, sur l'ellipsoïde WGS84 (Karney), AD-31.
@@ -773,12 +769,17 @@ Distance géodésique et azimuts entre deux points, sur l'ellipsoïde WGS84 (Kar
 | `azimuth` | `Angle` | Azimut au départ, de `from` vers `to`, nord vrai, sens horaire. |
 | `back_azimuth` | `Angle` | Azimut à l'arrivée, de `to` vers `from`. |
 
-Erreurs : `geo.unsupported_crs` (nomme `coord.convert` pour une référence MGRS,
-`data.transform_point` pour un autre système) ; `geo.coincident_points` (les deux points
-confondus : l'azimut n'est pas défini).
+Distance rendue au millimètre, azimuts au milliardième d'unité, dans [0, 360) degrés ou
+[0, 400) grades ; `back_azimuth` est l'azimut de marche à l'arrivée augmenté d'un demi-tour.
+Livrée par l'entrée 3 de l'epic 11 (`core/src/commands/geo_distance_azimuth.rs`, calculs dans
+`core/src/geodesic.rs`). Erreurs : `geo.unsupported_crs` (nomme `coord.convert` pour une
+référence MGRS, `data.transform_point` pour un autre système) ; `geo.coincident_points` (les
+deux points confondus, à moins d'un demi-millimètre : l'azimut n'est pas défini) ;
+`coord.out_of_range` (point d'entrée invalide : WGS84 hors de [-90, 90] ou [-180, 180],
+point UTM hors de sa zone, coordonnées non finies).
 
 ```json fiche
-{"id": "geo.distance_azimuth", "status": "planifiee", "runs_in": "core", "dictated_by_core": false,
+{"id": "geo.distance_azimuth", "status": "faite", "runs_in": "core", "dictated_by_core": false,
  "params": {"from": {"type": "Point", "required": true},
             "to": {"type": "Point", "required": true},
             "unit": {"type": "string", "required": false, "enum": ["deg", "gon"]}},
@@ -798,13 +799,18 @@ de Karney), AD-31.
 
 | Résultat | Type | Sens |
 |---|---|---|
-| `point` | `Point` | Point d'arrivée, dans le système de `from`. |
+| `point` | `Point` | Point d'arrivée, dans la zone UTM de `from` (l'hémisphère suit la latitude), ou en WGS84 si `from` l'est. |
 
-Erreurs : `geo.unsupported_crs` ; `coord.out_of_range` si le point d'arrivée sort de la
-zone UTM de `from` de plus d'une zone.
+Un départ UTM donne une arrivée dans la même zone, l'hémisphère suivant la latitude (comme
+`coord.convert`) ; WGS84 au milliardième de degré, UTM au millimètre. Un azimut hors de
+[0, 360) degrés vaut son équivalent dans un tour. Livrée par l'entrée 3 de l'epic 11
+(`core/src/commands/geo_destination_point.rs`). Erreurs : `geo.unsupported_crs` ;
+`coord.out_of_range` si le point d'arrivée sort de la zone UTM de `from` de plus d'une zone,
+ou de la grille UTM (80° S à 84° N), ou si `from` est invalide (WGS84 hors de [-90, 90] ou
+[-180, 180], point UTM hors de sa zone, coordonnées non finies).
 
 ```json fiche
-{"id": "geo.destination_point", "status": "planifiee", "runs_in": "core", "dictated_by_core": false,
+{"id": "geo.destination_point", "status": "faite", "runs_in": "core", "dictated_by_core": false,
  "params": {"from": {"type": "Point", "required": true},
             "azimuth": {"type": "Angle", "required": true},
             "distance": {"type": "Distance", "required": true}},
@@ -825,21 +831,32 @@ azimut, AD-31. Seule compte l'intersection en avant des deux points, la plus pro
 
 | Résultat | Type | Sens |
 |---|---|---|
-| `point` | `Point` | Intersection, dans le système de `first`. |
+| `point` | `Point` | Intersection, dans la zone UTM de `first` (l'hémisphère suit la latitude), ou en WGS84 si `first` l'est. |
 | `distance_from_first` | `Distance` | Distance géodésique de `first` à l'intersection, en `m`. |
 | `distance_from_second` | `Distance` | Distance géodésique de `second` à l'intersection, en `m`. |
 
-Erreurs : `geo.unsupported_crs` ; `geo.no_intersection` (visées parallèles, ou qui ne se
-coupent pas en avant des deux stations).
+Deux visées sont parallèles quand elles se coupent sous un angle inférieur à 1°, ou portent
+la même géodésique (décision du propriétaire, 2026-11-05). « En avant » s'entend à moins d'un
+demi-tour de la Terre : la visée doit rester la géodésique la plus courte de la station au
+point. Point rendu comme pour `geo.destination_point`, distances au millimètre. Livrée par
+l'entrée 3 de l'epic 11 (`core/src/commands/geo_bearing_intersection.rs`). Erreurs :
+`geo.unsupported_crs` ; `geo.no_intersection` (visées parallèles, le message donne l'angle, ou
+qui ne se coupent pas en avant des deux stations) ; `coord.out_of_range` (stations en UTM et
+point à plus d'une zone de celle de `first`, ou hors de la grille UTM ; ou station invalide :
+WGS84 hors de [-90, 90] ou [-180, 180], point UTM hors de sa zone, coordonnées non finies).
 
 ```json fiche
-{"id": "geo.bearing_intersection", "status": "planifiee", "runs_in": "core", "dictated_by_core": false,
+{"id": "geo.bearing_intersection", "status": "faite", "runs_in": "core", "dictated_by_core": false,
  "params": {"first": {"type": "Point", "required": true},
             "first_azimuth": {"type": "Angle", "required": true},
             "second": {"type": "Point", "required": true},
             "second_azimuth": {"type": "Angle", "required": true}},
  "result": ["point", "distance_from_first", "distance_from_second"]}
 ```
+
+---
+
+## 6. Commandes planifiées — epic 11, géométrie et terrain étendu
 
 ### `data.transform_point`
 
