@@ -114,3 +114,15 @@ hitl = false
 risk = "low"
 references = ["../architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md, AD-2, AD-3, AD-13, AD-17, AD-18, AD-20, Structural Seed et Arborescence"]
 notes = ["Le proprietaire, le 2026-10-14 : le README n'est pas a jour sur GitHub. A pousser avec le contrat, la spec et les tickets du meme jour."]
+
+[[entry]]
+id = 11
+type = "story"
+title = "Maintenir la recette GitHub Actions a jour"
+description = "Passe chaque action GitHub de la recette qui tourne encore sur Node.js 20 (actions/checkout, actions/setup-node, actions/setup-python, et toute autre action signalee) a une version majeure publiee qui tourne sur Node.js 24, et remplace l'etiquette ubuntu-latest par ubuntu-24.04 dans chaque job Linux, matrice du job extension comprise ; sans changer ce que la recette controle. EmbarkStudios/cargo-deny-action est une action Docker, hors du sujet Node.js."
+verify = "Une poussee sur main donne une recette verte sur ses cinq jobs, Linux et Windows, sans aucune annotation de GitHub sur Node.js 20 ni sur la migration d'ubuntu-latest, et chaque job Linux annonce l'image ubuntu-24.04 dans son journal."
+covers = ["E4"]
+after = []
+hitl = false
+risk = "low"
+notes = ["Decision (2026-11-05, proprietaire) : figer ubuntu-24.04 ; le passage a Ubuntu 26 fera l'objet d'un ticket a part.", "Decision (2026-11-05, proprietaire) : windows-latest reste tel quel, aucune annotation ne le signale.", "Constate le 2026-11-05 sur la recette 42032244055 : actions/checkout@v4, actions/setup-node@v4 et actions/setup-python@v5 forcees sur Node.js 24, image ubuntu-24.04 encore servie."]
