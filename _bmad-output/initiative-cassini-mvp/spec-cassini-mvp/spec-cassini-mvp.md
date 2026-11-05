@@ -4,6 +4,7 @@ companions:
   - ../../../CLAUDE.md
   - dossier de recherche initial, hors de ce dépôt (dépôt privé)
   - ../architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md
+  - catalogue-des-commandes.md (créé par l'entrée 1 de l'epic 11)
 sources: []
 ---
 
@@ -39,7 +40,7 @@ CAP-2 a été retirée (préparation des données d'une commune par code INSEE) 
 
 - **CAP-5** — Export PDF
   - **intent:** l'utilisateur sort une carte présentable à un tiers depuis ce qu'il voit à l'écran.
-  - **success:** une commande du registre fait produire par le moteur de mise en page de QGIS un PDF portant titre, légende, échelle, flèche du nord et mention des sources, qui s'ouvre dans un lecteur PDF standard.
+  - **success:** une commande du registre fait produire par le moteur de mise en page de QGIS un PDF portant titre, légende, échelle, flèche du nord et mention des sources, au format et à l'orientation demandés, avec un carroyage en option, qui s'ouvre dans un lecteur PDF standard.
 
 - **CAP-6** — Registre de commandes
   - **intent:** chaque fonction du produit est décrite une seule fois et appelable à l'identique par l'extension QGIS, la CLI, l'agent local et un client MCP.
@@ -68,6 +69,10 @@ CAP-2 a été retirée (préparation des données d'une commune par code INSEE) 
 - **CAP-13** — Façade QGIS
   - **intent:** l'utilisateur pilote Cassini depuis QGIS, sans quitter l'outil où ses données sont déjà ouvertes.
   - **success:** une extension QGIS installable ouvre un panneau Cassini, se connecte au noyau lancé comme **processus séparé**, et exécute une commande du registre de bout en bout en affichant son résultat dans le projet ; et le noyau se lance, s'exécute et se teste **sans QGIS installé**.
+
+- **CAP-15** — Géométrie et terrain étendu *(ajoutée le 2026-11-05, avant la démo)*
+  - **intent:** l'utilisateur convertit et mesure des coordonnées, et interroge le relief au-delà des trois commandes de CAP-11.
+  - **success:** conversion de coordonnées ponctuelles entre WGS84, UTM et MGRS, distance et azimut géodésiques, point par azimut et distance, recoupement, exposition, ombrage, champ de vision cumulé depuis plusieurs points, points hauts, surface de coût cumulé et chemin de moindre coût, superposition pondérée de rasters : chacune est une commande du registre exécutée **dans le noyau Rust**, hors ligne, sans dépendance GPL ou LGPL, testée sans QGIS sur des jeux de référence publics ou des fixtures synthétiques ; le modèle de composition les enchaîne dans un plan valide ; la recette hors ligne de CAP-1 reste verte. Ce sont des fonctions standard de SIG et de topographie ; les paramètres propres à un usage particulier ne sont pas portés par le noyau.
 
 - **CAP-14** — Catalogue étendu *(après le MVP)*
   - **intent:** l'utilisateur obtient en langage naturel une réponse à la plupart de ses questions SIG courantes, au-delà des cinq analyses de CAP-3 : comptage et somme pondérés dans un polygone, plus proche voisin et matrice de distances, plus court chemin sur réseau, statistiques par catégorie et longueurs, reprojection, conversion de format, atlas PDF, statistiques zonales d'un raster — moyenne, minimum et maximum des altitudes d'un MNT par polygone compris —, préparation d'un réseau d'itinéraires à partir de chemins bruts, géocodage d'adresses sur un fichier de la Base Adresse Nationale qu'il apporte, et, ajoutés le 2026-11-04 d'après la recherche sur les tâches des professionnels, différence de couches, surface des entités, jointure d'une table, fusion par champ, reclassement d'un raster et courbes de niveau.
@@ -99,7 +104,8 @@ CAP-2 a été retirée (préparation des données d'une commune par code INSEE) 
 - Tout seuil d'une commande de CAP-14 (distance réglementaire, pente, surface minimale) est un paramètre, jamais une constante.
 - Les fournisseurs de traitement sous GPL (GRASS, extensions tierces) ne s'exécutent que dans le processus de QGIS, jamais liés au noyau. Le géocodeur intégré de QGIS interroge un service en ligne : il est exclu.
 - Le géocodage est calculé par le noyau, l'appariement d'adresses étant un raisonnement et non un geste QGIS. Il ne lit que des CSV (adresses, Base Adresse Nationale) désignés par chemin relatif, écrit un seul CSV de résultat dans le dossier de travail sans toucher aux originaux, et ne reprojette pas : coordonnées `lon`/`lat` de la BAN en EPSG:4326, la couche étant ajoutée ensuite par QGIS.
-- Les statistiques zonales d'un raster, MNT compris, sont calculées par QGIS et non par le noyau : le calcul exige les polygones, que le canal ne transporte jamais. CAP-11 reste limitée à ses trois commandes de terrain.
+- Les statistiques zonales d'un raster, MNT compris, sont calculées par QGIS et non par le noyau : le calcul exige les polygones, que le canal ne transporte jamais. CAP-11 garde ses trois commandes de terrain ; les autres calculs de terrain relèvent de CAP-15.
+- Le catalogue des commandes (`catalogue-des-commandes.md`) fige l'identifiant, les paramètres et le résultat de chaque commande, faite, planifiée ou réservée ; un identifiant ou un paramètre n'y change que par un changement de cap (2026-11-05).
 - Aucune API ni aucun schéma de données n'est supposé : tout est vérifié dans la documentation officielle de la source.
 - Une étape de la feuille de route ne commence pas avant que la précédente soit testée et commitée.
 - Une tâche courte par session de travail ; une tâche qui paraît grosse est découpée avant d'être codée.
@@ -110,13 +116,12 @@ CAP-2 a été retirée (préparation des données d'une commune par code INSEE) 
 
 - Application de bureau autonome au MVP : la coquille Tauri, la carte MapLibre et une chaîne vectorielle propre sont reportées en V2. Le code déjà écrit reste au dépôt comme fondation.
 - Toute fonction spécialement conçue pour l'usage militaire, dans ce dépôt.
-- Les six commandes de terrain hors MVP : intervisibilité entre plusieurs points, exposition, ombrage, zones masquées, points dominants, franchissabilité. Reportées, pas abandonnées.
+- Hydrologie (écoulement, bassin versant, zone inondable) et couverture radio au MVP : identifiants réservés au catalogue, reportées après la démo. Les paramètres de mobilité propres à un véhicule : jamais dans le noyau, qui fournit surface de coût et chemin de moindre coût. (Changement du 2026-11-05 : l'intervisibilité multi-points, l'exposition, l'ombrage et les points dominants passent à CAP-15 ; les zones masquées sont rendues par le champ de vision.)
 - Parité fonctionnelle avec QGIS, mesurée ou revendiquée. Cassini ajoute une interface, il ne remplace pas l'outil.
 - Système de plugins **hébergé par** Cassini. À ne pas confondre avec le fait que Cassini **est** une extension au MVP.
 - Téléchargement, catalogue ou redistribution de données géographiques.
 - Lecture ou écriture des formats de projet Esri (`.aprx`, `.mxd`).
 - Formats et symbologies de défense au MVP : DTED, NITF, APP-6. Le profil GeoPackage du DGIWG, lui, est couvert par CAP-9 puisqu'il se lit comme un GeoPackage ordinaire.
-- MGRS au MVP : le noyau ne reprojette pas, QGIS porte les systèmes du vecteur.
 - Rejeu d'un journal sans QGIS au MVP : les commandes déléguées exigent QGIS pour être rejouées ; une étape impossible est nommée en échec, jamais sautée.
 - Édition avancée de données.
 - 3D.
@@ -131,9 +136,9 @@ Sur une machine débranchée du réseau, l'utilisateur ouvre QGIS sur un projet 
 ## Assumptions
 
 - Le projet est un projet QGIS ; le noyau n'invente pas de format de projet et écrit son journal à côté.
-- L'ordre de livraison est la séquence décidée le 2026-10-14 : socle et recette, épreuve du modèle local, registre et journal, façade QGIS, agent et MCP, terrain, démo, publication — celle que porte CLAUDE.md §7.
+- L'ordre de livraison est la séquence décidée le 2026-10-14 : socle et recette, épreuve du modèle local, registre et journal, façade QGIS, agent et MCP, terrain, géométrie et terrain étendu (epic 11, ajouté le 2026-11-05), démo, publication — celle que porte CLAUDE.md §7.
 - Le dérisquage précède l'engagement : qu'un modèle local quantifié sache composer une suite de commandes typées correcte est vérifié sur un registre factice avant que le registre réel ne soit écrit.
-- « Compléter QGIS pour les usages courants » signifie couvrir par le registre CAP-3, CAP-5, CAP-9 à CAP-11 au MVP, puis CAP-14 après le MVP, sans objectif de parité. Le signal de succès ci-dessus reste celui du MVP ; CAP-14 porte son propre seuil de couverture.
+- « Compléter QGIS pour les usages courants » signifie couvrir par le registre CAP-3, CAP-5, CAP-9 à CAP-11 et CAP-15 au MVP, puis CAP-14 après le MVP, sans objectif de parité. Le signal de succès ci-dessus reste celui du MVP ; CAP-14 porte son propre seuil de couverture.
 - Villeneuve-le-Roi reste le territoire de référence de la démo, avec des données apportées par l'utilisateur et non livrées.
 
 ## Open Questions

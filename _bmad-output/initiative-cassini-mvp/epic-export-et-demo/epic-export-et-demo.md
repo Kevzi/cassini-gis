@@ -74,6 +74,7 @@ qui manquerait ici est une entrée de l'epic 9, 5 ou 4, pas de celui-ci.
 - Decision (2026-11-05) : les entrees 1 a 5 s'enchainent en file (1→2→3→4→5) parce qu'elles modifient toutes `qgis-plugin/tests/probe_demo.py` ; c'est une collision, pas un simple ordre.
 - Decision (2026-11-05, proprietaire) : le hors-ligne se prouve deux fois — la sonde surveille les sockets du noyau (entree 5), et le proprietaire fait la demo machine debranchee (entree 6) ; les connexions propres a QGIS ne sont pas surveillees par la sonde.
 - Decision (2026-11-05, proprietaire) : les phrases de repetition A a E font partie de l'entree 6 de cet epic.
+- Waits on epic 11 because: changement de cap du 2026-11-05 — la géométrie et le terrain étendu passent avant la démo, et la démo part d'un catalogue des commandes figé ; elle peut montrer une commande de l'epic 11 en plus de la pente, sans obligation.
 - Waits on epic 9 because: la démo enchaîne des commandes exécutées par QGIS, export PDF compris.
 - Waits on epic 5 because: c'est l'agent qui transforme la phrase en plan et le fait valider.
 - Waits on epic 4 because: la démonstration sur poste isolé passe par une commande de terrain du noyau.

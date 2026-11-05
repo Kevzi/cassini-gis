@@ -208,10 +208,16 @@ Ce que **le noyau** porte :
 3. **Agent IA** : une demande en langage naturel devient une suite de commandes,
    affichée étape par étape, que l'utilisateur valide et peut rejouer.
 4. **Serveur MCP** : le même registre exposé à une IA externe, en option.
-5. **Analyse de terrain**, trois commandes et pas neuf : **champ de vision**,
-   **ligne de vue** entre deux points, **pente**. En Rust, sans aucune
-   dépendance GPL ou LGPL — c'est la seule base sur laquelle le module défense
-   privé pourra être construit.
+5. **Analyse de terrain** : **champ de vision**, **ligne de vue** entre deux
+   points, **pente** (epic 4), puis exposition, ombrage, champ de vision cumulé,
+   points hauts, surface de coût et chemin de moindre coût, superposition
+   pondérée (epic 11). **Géométrie** : conversion de coordonnées WGS84, UTM et
+   MGRS, distance et azimut, point par azimut et distance, recoupement (epic 11).
+   En Rust, sans aucune dépendance GPL ou LGPL — c'est la seule base sur
+   laquelle le module défense privé pourra être construit. Les identifiants et
+   paramètres de toutes les commandes sont figés dans le catalogue des commandes
+   (changement de cap du 2026-11-05) ; ils n'y changent que par un nouveau
+   changement de cap.
 
 Ce que **QGIS exécute**, orchestré par le registre à travers l'extension :
 
@@ -221,9 +227,10 @@ Ce que **QGIS exécute**, orchestré par le registre à travers l'extension :
    échelle, flèche du nord et sources.
 
 **Hors périmètre (V2 et plus)** : l'application de bureau autonome (carte
-MapLibre, chaîne vectorielle propre, format de projet Cassini) ; les six autres
-commandes de terrain (intervisibilité multi-points, exposition, ombrage, zones
-masquées, points dominants, franchissabilité) ; toute fonction spécialement
+MapLibre, chaîne vectorielle propre, format de projet Cassini) ; hydrologie et
+couverture radio (après la démo, identifiants réservés au catalogue) ; les
+paramètres propres à un usage particulier (classes de véhicules, seuils métier),
+que le noyau ne porte pas ; toute fonction spécialement
 conçue pour l'usage militaire (elle va au dépôt privé) ; téléchargement ou
 redistribution de données ; formats de projet Esri ; formats et symbologies de
 défense DTED, NITF et APP-6 ; édition avancée ; 3D ; IA sur images satellite ;
@@ -245,6 +252,8 @@ l'agent.
   QGIS.
 - **Étape 5** : agent IA local (llama.cpp) et serveur MCP.
 - **Étape 6** : analyse de terrain dans le noyau.
+- **Étape 6 bis** : géométrie et terrain étendu (epic 11), catalogue des
+  commandes figé (changement de cap du 2026-11-05).
 - **Étape 7** : scénario de démo complet, puis publication (dépôt d'extensions
   QGIS, installeurs, vidéo, README).
 

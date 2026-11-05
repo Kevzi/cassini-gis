@@ -2,7 +2,7 @@
 type: initiative
 title: "L'interface en langage naturel d'un SIG, hors ligne"
 parent: none
-covers: [CAP-1, CAP-3, CAP-4, CAP-5, CAP-6, CAP-7, CAP-8, CAP-9, CAP-10, CAP-11, CAP-13]
+covers: [CAP-1, CAP-3, CAP-4, CAP-5, CAP-6, CAP-7, CAP-8, CAP-9, CAP-10, CAP-11, CAP-13, CAP-15]
 after: []
 assignee: ""
 risk: high
@@ -32,12 +32,12 @@ puis rejouée à l'identique depuis le journal.
 ## Requirements
 
 Le contrat est la spec : `spec-cassini-mvp/spec-cassini-mvp.md`, sections
-Capabilities (CAP-1, CAP-3 à CAP-11, CAP-13), Constraints et Non-goals. Les
+Capabilities (CAP-1, CAP-3 à CAP-11, CAP-13, CAP-15), Constraints et Non-goals. Les
 epics citent ses identifiants dans leur `covers`.
 
 ## Done when
 
-1. CAP-1, CAP-3 à CAP-11 et CAP-13 fonctionnent depuis QGIS, sur une machine sans
+1. CAP-1, CAP-3 à CAP-11, CAP-13 et CAP-15 fonctionnent depuis QGIS, sur une machine sans
    accès réseau, et non derrière un drapeau de fonctionnalité.
 2. La phrase de démo de CLAUDE.md §1 passe de bout en bout sur des données
    apportées par l'utilisateur, et se rejoue à l'identique depuis le journal
@@ -105,6 +105,7 @@ sorti en PDF — il traverse les epics 2, 9 et 5.
 - Unknown: la maturité de `whitebox_next_gen` comme bibliothèque réutilisable ; l'epic 4 l'attend et doit la trancher avant de s'engager.
 - Unknown: le chemin de livraison du modèle GGUF sur un poste isolé, le dépôt d'extensions QGIS n'acceptant pas plusieurs Go. Les epics 5 et 7 l'attendent.
 - Decision: ajout de l'epic 10, catalogue étendu par les algorithmes de traitement de QGIS, après la démo (epic 6) : le propriétaire veut à terme un outil complet, sans parité revendiquée ; objectif d'au moins 70 % des demandes réelles couvertes (2026-10-17).
+- Decision: changement de cap du 2026-11-05 (`change-geometrie-et-terrain-avant-la-demo/`), approuvé par le propriétaire : un epic 11, géométrie et terrain étendu (CAP-15), s'insère avant la démo (epic 6) ; le catalogue des commandes est figé en une fois ; hydrologie et couverture radio sont réservées après la démo.
 - Waits on epic 1 because: le registre a besoin du workspace, du verrou hors ligne et de la recette.
 - Waits on epic 8 because: la forme des descriptions de commandes, puis l'agent lui-même, dépendent du verdict de l'épreuve.
 - Waits on epic 2 because: toute commande ajoutée ensuite a besoin du contrat du registre.
