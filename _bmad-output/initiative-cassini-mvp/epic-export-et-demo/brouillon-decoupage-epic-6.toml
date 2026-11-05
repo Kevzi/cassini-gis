@@ -1,0 +1,90 @@
+# tickets.toml — epic-export-et-demo (epic 6). Brouillon d'inception, 2026-11-05.
+# NON APPROUVE : brouillon d inception, ni verifie ni valide. Il ne devient tickets.toml qu apres la verification du decoupage et l accord du proprietaire.
+
+[[entry]]
+id = 1
+type = "story"
+title = "La sonde de demo juge la phrase de demo sur des fixtures synthetiques"
+description = "Ajoute aux fixtures un petit projet de demo synthetique en EPSG:2154 (zones du PLU de type U et N, parcelles, gares) et fait de la sonde de demo existante un juge : elle part de ce projet par defaut, ou d'un projet donne en argument, envoie la phrase de demo au vrai modele, valide le plan, l'execute et rend un verdict OK ou ECHEC avec la raison."
+verify = "Lancee sous le Python de QGIS sur le poste du proprietaire, la sonde rend OK sur les fixtures : un plan compose, chaque etape reussie, des parcelles en zone U retenues, un PDF qui commence par %PDF ; elle rend ECHEC, code de sortie non nul, quand une etape echoue."
+covers = ["D1", "D5"]
+after = []
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 2
+type = "story"
+title = "La sonde de demo rejoue le journal apres fermeture et reouverture du projet"
+description = "Apres la phrase de demo, la sonde ferme le projet, le rouvre et rejoue le journal sans le modele ; elle compare chaque etape et ajoute le rejeu a son verdict."
+verify = "Sur les fixtures, la sonde rend OK avec un rejeu identique etape par etape ; un journal altere a la main fait rendre ECHEC en nommant l'etape qui diverge."
+covers = ["D2", "D5"]
+after = [1]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 3
+type = "story"
+title = "La sonde de demo verifie le contenu du PDF"
+description = "La sonde controle que la mise en page exportee porte un titre, une legende, une echelle, une fleche du nord et les sources, et que le PDF n'est pas vide ; un element manquant fait echouer le verdict en le nommant."
+verify = "Sur les fixtures, la sonde rend OK et liste les cinq elements trouves ; une mise en page privee de sa legende fait rendre ECHEC en nommant la legende."
+covers = ["D3", "D5"]
+after = [1]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 4
+type = "story"
+title = "La demo passe par la pente du MNT"
+description = "Ajoute aux fixtures de demo un MNT synthetique en EPSG:2154 qui couvre leur emprise, et a la sonde une seconde phrase qui demande la pente du MNT en degres et l'ajoute a la carte ; la pente est rejouee avec le reste."
+verify = "Sur les fixtures, la sonde rend OK : la phrase de pente donne un plan avec terrain.slope, la couche de pente apparait dans le projet et dans le PDF, et le rejeu apres reouverture reste identique."
+covers = ["D4", "D5"]
+after = [2, 3]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 5
+type = "story"
+title = "La sonde de demo prouve qu'aucune sortie reseau n'a lieu"
+description = "Pendant toute la demo, la sonde releve les sockets ouvertes par le noyau et par le processus de QGIS vers une adresse non locale, et echoue si elle en trouve une."
+verify = "Sur les fixtures, la sonde rend OK avec zero connexion reseau relevee ; une connexion de test ouverte expres vers une adresse externe fait rendre ECHEC en la nommant."
+covers = ["D1", "D5"]
+after = [1]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 6
+type = "story"
+title = "Repetition de la demo sur les donnees reelles de Villeneuve-le-Roi"
+description = "Fait la copie du MNT de test en EPSG:2154 dans QGIS, lance la sonde sur le projet reel hors depot avec la phrase de demo, la pente et les phrases de repetition A a E, consigne verdicts et durees par phrase, puis le proprietaire refait la demo a la main dans le panneau."
+verify = "La sonde rend OK sur le projet reel pour la phrase de demo et la pente, les phrases A a E donnent le comportement attendu (plan ou question), les durees sont consignees, et le proprietaire confirme la demo faite dans le panneau."
+covers = ["D1", "D2", "D3", "D4"]
+after = [4, 5]
+hitl = true
+risk = "medium"
+
+[[entry]]
+id = 7
+type = "story"
+title = "Refactor sweep"
+description = "Menage de fin d'epic sur la sonde de demo et ses fixtures, a partir des plans et des constats de relecture reportes pendant l'epic."
+verify = "Les constats reportes de l'epic sont traites ou consignes, et la sonde rend toujours OK sur les fixtures."
+covers = []
+after = [1, 2, 3, 4, 5, 6]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 8
+type = "story"
+title = "Suite de demo complete en une commande"
+description = "Une seule commande lance toute la suite de demo et ecrit un rapport lisible ; une page de documentation dit comment la lancer sur les fixtures ou sur ses propres donnees."
+verify = "La commande documentee, lancee sur le poste du proprietaire, rend OK sur les fixtures et sur le projet reel, avec un rapport qui reprend chaque verdict de D1 a D4."
+covers = ["D1", "D2", "D3", "D4", "D5"]
+after = [7]
+hitl = false
+risk = "low"
