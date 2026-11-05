@@ -3,7 +3,7 @@ title: 'Comparaison à QGIS : justesse et vitesse des commandes de terrain, prov
 type: 'chore'
 ticket: '7'
 created: '2026-11-05'
-status: 'built'
+status: 'done'
 baseline_revision: 'd45d5a5cfd944fc06844e5da2794c284dd959583'
 route: 'full'
 route_source: 'auto'
