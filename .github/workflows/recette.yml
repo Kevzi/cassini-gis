@@ -27,9 +27,9 @@ env:
 jobs:
   noyau:
     name: Noyau Rust — fmt, tests, clippy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Outils Rust
         run: rustup component add rustfmt clippy
@@ -84,7 +84,7 @@ jobs:
       CARGO_TARGET_DIR: C:\ct
       LIBCLANG_PATH: C:\Program Files\LLVM\bin
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Aucun import réseau dans le binaire
         run: cargo test --release -p cassini --test hors_ligne --locked
@@ -96,14 +96,14 @@ jobs:
 
   interface:
     name: Interface — typage strict, garde hors ligne
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: app
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -132,11 +132,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-24.04, windows-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
