@@ -4,15 +4,16 @@ type: architecture-spine
 purpose: build-substrate
 altitude: initiative
 paradigm: 'hexagonal (ports et adaptateurs), avec un adaptateur sortant distant'
-scope: "Invariants du MVP Cassini : frontière entre le noyau Rust Apache-2.0 et l'extension QGIS GPL, contrat du registre de commandes, journal rejouable, agent local et serveur MCP, moteur de terrain, distribution et recette ; après le MVP, extension du catalogue par le cadre de traitement de QGIS (CAP-14)"
+scope: "Invariants du MVP Cassini : frontière entre le noyau Rust Apache-2.0 et l'extension QGIS GPL, contrat du registre de commandes, journal rejouable, agent local et serveur MCP, moteur de terrain, distribution et recette ; géométrie et terrain étendu dans le noyau (CAP-15) ; après le MVP, extension du catalogue par le cadre de traitement de QGIS (CAP-14)"
 status: final
 created: '2026-10-14'
-updated: '2026-11-04'
-binds: [CAP-1, CAP-3, CAP-4, CAP-5, CAP-6, CAP-7, CAP-8, CAP-9, CAP-10, CAP-11, CAP-13, CAP-14]
+updated: '2026-11-05'
+binds: [CAP-1, CAP-3, CAP-4, CAP-5, CAP-6, CAP-7, CAP-8, CAP-9, CAP-10, CAP-11, CAP-13, CAP-14, CAP-15]
 sources:
   - ../spec-cassini-mvp/spec-cassini-mvp.md
   - ../change-facade-qgis-avant-app-autonome/change-facade-qgis-avant-app-autonome.md
   - ../change-ia-externe-pilote-la-session-qgis-ouverte/change-ia-externe-pilote-la-session-qgis-ouverte.md
+  - ../change-geometrie-et-terrain-avant-la-demo/change-geometrie-et-terrain-avant-la-demo.md
   - ../initiative-cassini-mvp.md
 companions:
   - ../../../CLAUDE.md
@@ -145,6 +146,14 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   `command.run` et `request.cancel`. Un joker comme `session.*` ne couvre aucune
   méthode qui n'est pas nommée ici.
 
+- **Amendement (2026-11-05) — catalogue des commandes.** Le catalogue
+  (`../spec-cassini-mvp/catalogue-des-commandes.md`) fige l'identifiant, les
+  paramètres et le résultat de chaque commande faite, planifiée ou réservée. Un
+  test de la recette le confronte au registre : chaque commande enregistrée y
+  figure avec les mêmes identifiant, paramètres et résultat ; une entrée du
+  catalogue absente du registre y est marquée planifiée ou réservée. Un écart
+  fait échouer la recette ; le catalogue ne change que par un changement de cap.
+
 ### AD-7 — Annonce au branchement : refus net sur le protocole, dégradation sur les commandes
 
 - **Binds:** CAP-13, CAP-6, CAP-4
@@ -182,7 +191,9 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   — aucun schéma du registre ne déclare une collection de géométries non bornée.
   Ne traversent jamais : la géométrie d'une couche entière, un objet PyQGIS
   sérialisé, une structure de données interne du noyau. Au-delà du plafond, on
-  passe un chemin de fichier.
+  passe un chemin de fichier. Les listes de points d'entrée du terrain étendu
+  (observateurs d'un champ de vision cumulé, sources d'un coût cumulé) sont
+  bornées par leur schéma comme les autres (2026-11-05).
 
 ### AD-9 — Les couches se désignent par leur identifiant QGIS, les fichiers par un chemin relatif au projet
 
@@ -419,7 +430,7 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
 
 ### AD-19 — QGIS possède les systèmes de coordonnées ; le noyau ne reprojette pas
 
-- **Binds:** CAP-9, CAP-3, CAP-11
+- **Binds:** CAP-9, CAP-3, CAP-11, CAP-15
 - **Prevents:** deux moteurs de reprojection qui se contredisent sur les bords ;
   et une coordonnée sans système, interprétée différemment de chaque côté.
 - **Rule:** toute coordonnée qui traverse le canal porte son code EPSG explicite.
@@ -427,10 +438,18 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   dans le système du modèle d'élévation : le noyau **exige** les coordonnées
   d'observation dans ce système et refuse une coordonnée exprimée dans un autre
   au lieu de la convertir silencieusement.
+- **Amendement (2026-11-05, CAP-15) :** une seule exception, bornée. Le noyau
+  convertit des **coordonnées ponctuelles** entre WGS84 (EPSG:4326), UTM sur
+  WGS84 (EPSG:32601 à 32660 et 32701 à 32760) et MGRS, par des formules publiées
+  (NGA, Karney), testées sur jeux de référence publics. Il ne convertit jamais
+  une couche, ni vers ou depuis un autre système (Lambert-93 compris), et le
+  terrain continue d'exiger le système du MNT : une conversion n'est jamais
+  insérée en silence avant un calcul, elle est une étape `coord.convert`
+  visible du plan.
 
 ### AD-20 — Le noyau lit ses rasters lui-même, derrière un seul module remplaçable
 
-- **Binds:** CAP-11
+- **Binds:** CAP-11, CAP-15
 - **Prevents:** un noyau qui aurait besoin de QGIS pour analyser un relief, donc
   un module défense privé qui hériterait d'une dépendance à la GPL — ce que la
   séparation civil/défense interdit ; et une lecture de raster dispersée dans
@@ -442,6 +461,27 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   sont réimplémentées en Rust, avec attribution si du code de
   `whitebox_next_gen` est porté. L'epic terrain commence par compiler un cas
   d'essai sur `wbgeotiff` et `wbraster` avant d'engager CAP-11.
+- **Amendement (2026-11-05, CAP-15) :** le même module unique lit aussi les
+  rasters mono-bande de coût et de critères (`raster.reclassify`,
+  `raster.weighted_overlay`, `terrain.cost_distance`,
+  `terrain.least_cost_path`). Quand une commande prend plusieurs rasters, leurs
+  grilles doivent être identiques (système, taille de cellule, origine,
+  dimensions) : sinon l'erreur `raster.grid_mismatch` (AD-21) nomme l'écart, et
+  le noyau ne rééchantillonne jamais. L'alignement est un geste QGIS,
+  `raster.align` ; avant lui (epic 10), seuls se combinent des rasters de même
+  grille, ce qui est le cas de tous ceux dérivés d'un même MNT. Deux grilles sont
+  identiques quand leurs codes EPSG et leurs dimensions sont égaux et que taille
+  de cellule et origine diffèrent de moins d'un millionième de cellule. Une
+  cellule NoData en entrée donne NoData en sortie ; `raster.reclassify` garde le
+  NoData tel quel.
+- **Coût (2026-11-05, CAP-15).** Un seul module du noyau calcule le coût, pour
+  `terrain.cost_distance` et `terrain.least_cost_path`. La valeur d'une cellule
+  d'un raster de coût est un coût par mètre parcouru ; une cellule NoData, nulle
+  ou négative est infranchissable. Le déplacement se fait aux 8 voisins, au coût
+  moyen des deux cellules multiplié par la distance (taille de cellule, ou
+  taille × √2 en diagonale). Le coût cumulé rendu est dans l'unité du raster
+  multipliée par des mètres. La ligne de moindre coût va du départ à l'arrivée,
+  dans cet ordre.
 
 ### AD-21 — Une seule forme d'erreur, et aucun échec silencieux [ADOPTED]
 
@@ -501,7 +541,18 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
       comme nombres, x et y distincts l'un de l'autre et des autres nombres
       déjà pris par le plan (distance, durée). Un système absent de la demande
       n'est pas pris au projet : c'est la question. Un système nommé compte pour
-      son code, sur une liste fermée : Lambert-93 (2154) et WGS84 (4326).
+      son code, sur une liste fermée : Lambert-93 (2154), WGS84 (4326) et, depuis
+      le 2026-11-05, une zone UTM sur WGS84 nommée par son numéro et son
+      hémisphère (« UTM 31N » compte pour 32631, « UTM 31S » pour 32731).
+    - **MGRS (2026-11-05, CAP-15).** Une référence MGRS n'a pas de code EPSG : elle
+      est le type partagé `MgrsRef` du noyau (une chaîne validée par la grammaire
+      de la NGA, zone, bande, carré de 100 km, puis 1 à 5 chiffres par axe),
+      marqué dans le schéma engendré comme `Point`, et soumis à la même garde :
+      elle figure telle quelle dans la demande (espaces ignorés, casse
+      ignorée), ou vient d'une référence `step:` vers un champ déclaré `MgrsRef`.
+      `coord.convert` rend des `Point` et des `MgrsRef`, utilisables comme
+      références d'étape. Vers MGRS, la conversion tronque (convention de la
+      NGA), elle n'arrondit pas. En WGS84, x est la longitude et y la latitude.
     - **D'une étape.** Le paramètre entier est une référence `step:` vers un
       champ que le schéma de sortie de cette étape déclare `Point`. Une
       coordonnée lue dans l'inventaire du projet ne compte pas.
@@ -538,7 +589,8 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
     fois au geste générique de l'extension, jamais par un geste à part. Le nombre
     de sorties est fixe et déclaré au registre. Un format de sortie variable est
     une énumération typée, dont le noyau déduit l'extension du fichier (AD-10).
-    Un raster délégué se désigne par son identifiant de couche (AD-9) ; aucune
+    Un raster se désigne toujours par un chemin `RasterPath` (amendement du
+    2026-11-05 ci-dessous), jamais par son identifiant de couche ; aucune
     commande `raster.*` ne refait un calcul de `terrain.*`.
   - **Chaîne.** Une étape peut porter une garde, qui rend une erreur nommée
     (AD-21) ; aucune étape ne choisit entre deux suites. Toute valeur vient des
@@ -558,6 +610,19 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
     distance, durée, vitesse, pente, surface — et c'est toujours un paramètre.
     Sa valeur par défaut, s'il en a une, est déclarée dans le schéma Rust, jamais
     dans la ligne de table.
+
+- **Amendement (2026-11-05, CAP-15) — une seule forme de raster.** Tranche la
+  question « Désigner un raster » ouverte le 2026-11-04. Tout paramètre raster de
+  toute commande, du noyau ou déléguée, est du type partagé `RasterPath` marqué
+  dans le schéma : un chemin relatif au projet (AD-9), ou une référence `step:k`
+  vers la sortie raster d'une étape, journalisée comme le repère `out:k.n`
+  d'AD-11 et jamais comme un chemin résolu. Une commande déléguée qui produit un
+  raster l'écrit à l'emplacement décidé par le noyau (AD-10) ; le noyau dicte
+  ensuite `layer.open_raster`, comme pour un GeoTIFF du noyau (amendement 4.9
+  d'AD-9). Une recette vérifie que la table fermée de l'extension contient
+  exactement les commandes déclarées `runs_in: qgis` du registre, ni plus ni
+  moins : une ligne pour une commande calculée par le noyau (par exemple
+  `raster.reclassify`) la fait échouer.
 
 ### AD-25 — Une commande déléguée n'est annoncée que si toute sa chaîne existe chez l'utilisateur
 
@@ -704,12 +769,63 @@ flowchart LR
     client MCP local (Claude, ChatGPT pour ordinateur et Codex, Gemini CLI) est
     servi par le même code. Cassini n'appelle jamais l'API d'un fournisseur.
 
+### AD-30 — Le noyau rend ses entités dans un fichier GeoJSON qui déclare son système
+
+- **Binds:** CAP-15
+- **Prevents:** chaque commande du noyau qui rend des points ou des lignes
+  (points hauts, chemin de moindre coût) inventant sa propre sortie — CSV ici,
+  liste dans le résultat là — ; une géométrie de taille non bornée dans le canal
+  (AD-8) ; une sortie que QGIS lirait dans un autre système que celui du calcul.
+- **Rule:** une commande du noyau qui rend des entités écrit **un** fichier
+  GeoJSON au format de 2008, celui qu'écrit et lit par défaut le pilote GeoJSON
+  de GDAL, dans le système du raster source, déclaré par le membre
+  `"crs": {"type": "name", "properties": {"name": "urn:ogc:def:crs:EPSG::<code>"}}`.
+  L'écart à la RFC 7946, qui impose WGS84, est voulu : le noyau ne reprojette
+  pas (AD-19). Le fichier est placé et nommé par le noyau (AD-10) dans le
+  dossier de sortie, et ouvert dans QGIS par l'étape dictée ci-dessous,
+  jamais en silence. Le résultat du canal porte le chemin relatif, le nombre
+  d'entités et, au plus, une liste bornée par le schéma de la commande (AD-8),
+  dont les positions sont des `Point` (AD-23), utilisables comme références
+  d'étape. L'écriture se fait par `serde_json`, sans dépendance nouvelle.
+- **Un seul écrivain.** Un module unique du noyau écrit ces fichiers : les noms
+  et types des propriétés de chaque commande sont déclarés dans son schéma de
+  sortie et dans le catalogue des commandes ; la sortie est déterministe (ordre
+  des entités et des propriétés fixe, nombres écrits de la même façon, aucune
+  date), de sorte que le rejeu compare le fichier par son contenu.
+- **Ouverture dictée.** Comme un GeoTIFF du noyau (amendement 4.9 d'AD-9), le
+  fichier est ouvert par une commande déléguée que le noyau dicte lui-même juste
+  après l'étape, `layer.open_vector {path: "out:<k>.<n>"}`, portée
+  `dictated_by_core`, offerte ni au modèle ni au client MCP, avec le même
+  traitement au rejeu (couche d'origine hors de l'export rejoué, réécriture
+  selon AD-10 et AD-11).
+
+### AD-31 — Géodésie et angles : une seule convention
+
+- **Binds:** CAP-15
+- **Prevents:** deux commandes de `geo.*` ou de `terrain.*` qui rendent des
+  angles dans des unités ou depuis des nords différents, ou des distances
+  planes ici et géodésiques là, que l'agent enchaînerait sans le voir ; un point
+  dans un système que la géodésie du noyau ne sait pas traiter, converti en
+  silence.
+- **Rule:** les commandes `geo.*` n'acceptent que des `Point` en WGS84 (4326) ou
+  en UTM sur WGS84 (326NN, 327NN) ; une référence MGRS passe d'abord par une
+  étape `coord.convert`, un point dans un autre système par une étape
+  `data.transform_point`, déléguée à QGIS (AD-19). Tout autre système est refusé
+  par l'erreur `geo.unsupported_crs` (AD-21), qui nomme l'étape à ajouter.
+  Distances et azimuts sont géodésiques, sur l'ellipsoïde WGS84 (formules de
+  Karney), en mètres. Un angle est le type partagé `Angle {value, unit}`, unité
+  `deg` (par défaut) ou `gon` ; un azimut se compte depuis le nord vrai, dans le
+  sens horaire, dans [0, 360) degrés. Les rasters d'exposition et d'ombrage, eux,
+  se rapportent au nord du quadrillage du MNT, en degrés ; une cellule plate a
+  l'exposition NoData. Une même commande ne change jamais d'unité selon la
+  demande sans le paramètre `unit`.
+
 ## Consistency Conventions
 
 | Concern | Convention |
 | --- | --- |
 | Nommage des commandes | `domaine.verbe` en anglais, snake_case : `layer.add`, `layer.describe`, `analysis.buffer`, `project.inventory`, `layout.export_pdf`, `terrain.viewshed`, `terrain.line_of_sight`, `terrain.slope` |
-| Familles de commandes | `layer.*` et `project.*` ouvrir, décrire, inventorier ; `analysis.*` analyses vectorielles ; `network.*` réseau d'itinéraires ; `raster.*` analyses de raster déléguées ; `data.*` reprojection et conversion ; `layout.*` PDF et atlas ; `geocode.*` géocodage, dans le noyau (AD-26) ; `terrain.*` réservé au noyau, jamais délégué. Le comptage de points par polygone s'appelle `analysis.count_points_in_polygon` (ex-`analysis.zonal_statistics`), les statistiques d'un raster par polygone `raster.zonal_statistics` ; `analysis.isochrone` garde son nom |
+| Familles de commandes | `layer.*` et `project.*` ouvrir, décrire, inventorier ; `analysis.*` analyses vectorielles ; `network.*` réseau d'itinéraires ; `raster.*` analyses de raster déléguées ; `data.*` reprojection et conversion ; `layout.*` PDF et atlas ; `geocode.*` géocodage, dans le noyau (AD-26) ; `terrain.*` réservé au noyau, jamais délégué ; `coord.*` conversion de coordonnées ponctuelles WGS84, UTM et MGRS et `geo.*` géodésie (distance, azimut, point par azimut et distance, recoupement), dans le noyau (AD-19, AD-31, CAP-15) ; `data.transform_point`, reprojection d'un point dans un système quelconque, est déléguée à QGIS comme tout `data.*`. Dans `raster.*`, `raster.reclassify` et `raster.weighted_overlay` sont calculées par le noyau (AD-20), les autres sont déléguées à QGIS. Le catalogue des commandes (`../spec-cassini-mvp/catalogue-des-commandes.md`) fige identifiants, paramètres et résultats ; il fait foi sur cette liste. Le comptage de points par polygone s'appelle `analysis.count_points_in_polygon` (ex-`analysis.zonal_statistics`), les statistiques d'un raster par polygone `raster.zonal_statistics` ; `analysis.isochrone` garde son nom |
 | Nommage du code | crates `cassini-core`, `cassini-ai`, `cassini` ; paquet Python `cassini_qgis` — le nom ne répète pas le mot « plugin », le dépôt le demande ; noms de types et de variables en anglais, documentation et commentaires en français (CLAUDE.md §9) |
 | Identifiants | une couche : l'identifiant QGIS, opaque, jamais interprété par le noyau ; une étape : un entier croissant dans le journal ; une requête : l'`id` JSON-RPC |
 | Chemins | relatifs au fichier de projet, séparateurs POSIX, jamais d'absolu (AD-9) |
@@ -862,6 +978,7 @@ faire.
 | CAP-10 Projet | projet QGIS, journal à côté par `core` | AD-9, AD-10, AD-11 |
 | CAP-11 Analyse de terrain | `core` | AD-1, AD-19, AD-20, AD-22 |
 | CAP-13 Façade QGIS | `qgis-plugin` et le canal | AD-2, AD-3, AD-4, AD-7, AD-17, AD-18 |
+| CAP-15 Géométrie et terrain étendu | `core` (module de géodésie et de coordonnées, module raster unique, écriture GeoJSON) ; carroyage et format de page par la mise en page de QGIS | AD-6, AD-8, AD-9, AD-10, AD-11, AD-19, AD-20, AD-21, AD-22, AD-23, AD-24, AD-30, AD-31 |
 | CAP-14 Catalogue étendu (après le MVP) | registre dans `core`, table fermée dans `qgis-plugin` ; géocodage dans `core` | AD-6, AD-8, AD-10, AD-11, AD-12, AD-22, AD-23, AD-24, AD-25, AD-26, AD-27, AD-28 |
 | Frontière de licence et module défense privé | la frontière elle-même | AD-1, AD-8, AD-16, AD-20 |
 | Enveloppe d'exploitation : installation, recette, plateformes | paquet et recette | AD-14, AD-16, AD-17, AD-18 |
@@ -889,19 +1006,14 @@ faire.
   `qgis_process`, est possible plus tard ; AD-11 impose déjà d'échouer en les
   nommant plutôt que de sauter l'étape.
 - **Désigner un raster et enchaîner des étapes rejouables entre le noyau et
-  QGIS.** Ouvert le 2026-11-04, à trancher avant les entrées 12, 16 et 25 de
-  l'epic 10. Un amendement d'AD-24 (raster par identifiant de couche ou par
-  chemin sorti d'une étape du noyau) a été essayé puis retiré : un même paramètre
-  ne peut pas porter deux formes, une référence `step:k` vers un fichier du noyau
-  est journalisée comme un chemin et non comme un repère `out:k.n` d'AD-11, et la
-  couche ouverte par l'extension depuis 4.3 n'a pas de propriétaire au registre.
-  Pistes : une seule forme par genre (raster toujours par chemin relatif, comme
-  `terrain.*`), une règle de journal pour les références d'étape, un type de
-  chemin raster marqué dans le schéma. Relectures : `reviews/review-verification-2026-11-04.md`,
-  `reviews/review-adversaire-2026-11-04.md`.
-- **Les six autres commandes de terrain** et **l'application autonome de V2**
-  (carte MapLibre, chaîne vectorielle propre, crate `geo`) : hors périmètre du
-  MVP par la spec. AD-1 et AD-20 sont ce qui les garde possibles.
+  QGIS.** *Tranché le 2026-11-05 par l'amendement d'AD-24 (`RasterPath` unique,
+  référence d'étape journalisée comme repère `out:k.n`, ouverture dictée par le
+  noyau).* Relectures : `reviews/review-grille-2026-11-05.md`,
+  `reviews/review-adverse-2026-11-05.md`.
+- **Hydrologie et couverture radio** (identifiants réservés au catalogue) et
+  **l'application autonome de V2** (carte MapLibre, chaîne vectorielle propre,
+  crate `geo`) : hors périmètre du MVP par la spec ; les autres commandes de
+  terrain passent à CAP-15 (2026-11-05). AD-1 et AD-20 sont ce qui les garde possibles.
 - **Module défense privé.** Aucune fonction ici. Il s'appuiera sur
   `cassini-core` seul, ce que AD-1, AD-16 et AD-20 rendent praticable. Son
   périmètre reste indéterminé jusqu'à la réponse écrite à la demande de
@@ -909,7 +1021,8 @@ faire.
 - **Liste exacte des systèmes de coordonnées.** La question se dissout pour le
   vecteur, QGIS portant tout ce qu'il connaît (AD-19) ; elle reste ouverte pour
   le terrain, où le noyau lit le système du modèle d'élévation sans savoir le
-  convertir. MGRS reste hors périmètre.
+  convertir. Depuis le 2026-11-05, seule exception : la conversion de
+  coordonnées ponctuelles WGS84, UTM et MGRS (amendement d'AD-19, CAP-15).
 - **Jeu de recette.** Données fabriquées à la main ou échantillon réel sous
   licence ouverte : choix de l'epic de socle, sans effet sur les invariants.
 - **Reconnaissance des schémas français** (cadastre Etalab, zonage du GPU) et

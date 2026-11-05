@@ -278,7 +278,7 @@ Ne commence pas une étape tant que la précédente n'est pas testée et commit�
   militaire** (voir §2.9).
 - Sur GitHub, on ne pousse que `main` ; les branches d'entrée restent locales.
 - Les invariants d'architecture sont fixés dans le contrat d'architecture cité en
-  tête de ce fichier, sous des références stables (`AD-1` à `AD-23`). On les cite,
+  tête de ce fichier, sous des références stables (`AD-1` à `AD-31`). On les cite,
   on ne les re-décide pas : une décision qui en contredit une se signale avant
   d'agir.
 - Entrées de risque `high` (rejeu, canal, analyses) : relecture à plusieurs lentilles (`thorough`), pas la seule relecture `quick` (rétro de l'epic 9, A6).

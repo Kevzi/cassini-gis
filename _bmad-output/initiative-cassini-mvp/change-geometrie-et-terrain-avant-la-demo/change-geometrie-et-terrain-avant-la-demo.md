@@ -121,25 +121,28 @@ de nom ne passe que par un nouveau changement de cap.
 | `terrain.cost_distance` | raster de coût, source(s) bornées | raster de coût cumulé |
 | `terrain.least_cost_path` | raster de coût, départ, arrivée | fichier GeoJSON de la ligne, coût total |
 | `raster.weighted_overlay` | rasters alignés et poids, masques d'exclusion facultatifs | raster de score |
+| `raster.reclassify` | raster, table de classes (bornes et valeur) | raster reclassé — **déplacé de l'epic 10 (entrée 25, déléguée) vers le noyau, même identifiant** (décision d'architecture du 2026-11-05) |
 
 **Délégué à QGIS — mise en page (epic 11)**
 
 | Identifiant | Ajout | Note |
 |---|---|---|
-| `layout.export_pdf` | `page_size` (A4 à A0), `orientation`, `grid` (aucun, degrés, projeté avec intervalle, MGRS si QGIS le permet) | Le carroyage MGRS de la mise en page de QGIS est **à vérifier dans sa documentation** avant d'être promis ; sinon, carroyage UTM. Pas de nombre d'exemplaires : l'impression reste hors du produit. |
+| `layout.export_pdf` | `page_size` (A4 à A0), `orientation`, `grid` (aucun, degrés, projeté avec système et intervalle) | **Vérifié le 2026-11-05** : la grille de la mise en page de QGIS (`QgsLayoutItemMapGrid`) n'a pas d'étiquettes MGRS (décimal, DMS ou expression). Un carroyage UTM au kilomètre trace exactement les lignes MGRS ; seules les étiquettes diffèrent. Pas de nombre d'exemplaires : l'impression reste hors du produit. |
+| `data.transform_point` | point, système cible (code EPSG quelconque) | reprojection d'un point par QGIS (AD-19, AD-31), pour passer d'un point WGS84/UTM au système du MNT |
+| `layer.open_vector` | `path: out:k.n` | ouverture d'un GeoJSON du noyau, **dictée par le noyau**, jamais offerte au modèle (AD-30) |
 
 **Délégué à QGIS — ajoutés à l'epic 10, après la démo**
 
 | Identifiant | Algorithme visé (à vérifier) |
 |---|---|
 | `raster.polygonize` | `gdal:polygonize` |
-| `raster.align` | `native:alignrasters` |
+| `raster.align` | `native:alignrasters` — statut en 3.44 et 4.x incertain (réservé au modeleur en 3.40 selon sa doc) : repli `native:alignsingleraster`, à trancher au ticket |
 
 **Déjà au plan de l'epic 10, recopiés tels quels dans le catalogue** :
 `analysis.count_points_in_polygon` (renommage 10.2), `analysis.area`, `analysis.difference`,
 `analysis.join_table`, `analysis.dissolve`, `data.reproject`, `data.convert`, plus proche
 voisin et matrice, statistiques par catégorie, `raster.zonal_statistics`,
-`raster.reclassify`, `raster.contour`, `network.shortest_path`, `network.prepare`,
+`raster.contour`, `network.shortest_path`, `network.prepare`,
 `layout.export_atlas`, géocodage — identifiants exacts repris de
 `epic-catalogue-etendu-qgis/tickets.toml`.
 
@@ -188,7 +191,7 @@ usage particulier (classes de véhicules, seuils métier), que le noyau ne porte
 - **Companions** : ajouter `catalogue-des-commandes.md` (créé par l'entrée 1 de
   l'epic 11).
 
-### 4.4 Architecture (à écrire par `bmad-architecture`)
+### 4.4 Architecture (écrite le 2026-11-05 : AD-6, AD-19, AD-20, AD-23, AD-24 amendées ; AD-30 et AD-31 nouvelles)
 
 - **AD-19, amendement** : le noyau convertit des **coordonnées ponctuelles** entre WGS84,
   UTM et MGRS, par des formules publiées, et rien d'autre ; toute reprojection de couche
@@ -215,7 +218,7 @@ usage particulier (classes de véhicules, seuils métier), que le noyau ne porte
 - Notes : « Les contrats de cet epic sont recopiés dans le catalogue figé le 2026-11-05 ;
   un changement d'identifiant ou de paramètre passe par un changement de cap. »
 - Deux entrées ajoutées dans la voie des primitives : `raster.polygonize` et
-  `raster.align`, après `raster.reclassify` (25).
+  `raster.align`, après l'entrée 12 (genre raster) ; l'entrée 25 (`raster.reclassify` délégué) passe en `dropped`, la commande allant au noyau (epic 11).
 
 ## 5. Passage de relais
 
