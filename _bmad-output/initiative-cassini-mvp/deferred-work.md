@@ -680,3 +680,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-raster-et-terrain/bug-la-pente-d-un-mnt-en-web-mercator-est-fausse-sans-erreur-et-la-pente-en-degres-depend-de-la-plateforme-plan.md`
   summary: Un journal de pente en degrés écrit avant 4.11 peut rendre replay.diverged au rejeu si libm::atan diffère de la libm du système sur ce MNT.
   evidence: Relecture de 4.11 — la pente en degrés passe de f64::atan à libm::atan ; la divergence, si elle survient, est signalée et non silencieuse.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-socle-et-carte/story-maintenir-la-recette-github-actions-a-jour-plan.md`
+  summary: Corriger le commentaire d'en-tête de .github/workflows/recette.yml, qui dit n'utiliser que des actions officielles de GitHub alors que le job noyau utilise EmbarkStudios/cargo-deny-action.
+  evidence: Relecture de 1.11 — commentaire ligne 6, antérieur au ticket.
