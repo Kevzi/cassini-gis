@@ -3,7 +3,7 @@ title: 'Le garde-fou des coordonnées accepte un système écrit une seule fois 
 type: 'feature'
 ticket: '10'
 created: '2026-11-05'
-status: 'built'
+status: 'done'
 baseline_revision: '8d5443e3dca550591116faa900493b6ebca5f9e9'
 route: 'oneshot'
 route_source: 'auto'
