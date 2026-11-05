@@ -1,0 +1,188 @@
+# tickets.toml — epic-geometrie-et-terrain-etendu (epic 11). Decoupage approuve par le proprietaire le 2026-11-05.
+# Une seule voie : l ordre des tables est l ordre de construction (voir les Notes de l epic).
+
+[[entry]]
+id = 1
+type = "story"
+title = "Catalogue des commandes fige et confronte au registre"
+description = "Ecrit spec-cassini-mvp/catalogue-des-commandes.md : chaque commande faite, de cet epic, de l'epic 10 ou reservee, avec identifiant, parametres, resultat, execution (noyau ou QGIS) et statut (faite, planifiee, reservee), plus les types partages Point, MgrsRef, Angle et RasterPath ; ajoute la recette qui le confronte au registre (AD-6). Les entrees 2 a 12 implementent leurs commandes exactement comme le catalogue les decrit."
+verify = "La recette passe sur le registre actuel, echoue quand on change un parametre d'une commande faite sans toucher au catalogue, et le proprietaire approuve la liste des identifiants."
+covers = ["G1"]
+after = []
+hitl = true
+risk = "medium"
+references = ["../change-geometrie-et-terrain-avant-la-demo/change-geometrie-et-terrain-avant-la-demo.md, 4.1", "../architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md, AD-6"]
+
+[[entry]]
+id = 2
+type = "story"
+title = "Traceur : coord.convert de bout en bout, MGRS compris"
+description = "Ajoute au noyau le module de geodesie et de coordonnees, le type MgrsRef sous la garde de provenance (AD-23) et la commande coord.convert (WGS84, UTM, MGRS), appelable par cassini run, le canal et le serveur MCP ; le type Point existe deja (core/src/point.rs) ; l'entree 3 reprend ce module de geodesie et l'entree 5 pose RasterPath a cote de MgrsRef ; la licence de toute bibliotheque de geodesie est soumise au proprietaire avant ajout."
+verify = "Les tests du noyau, sans QGIS, retrouvent les jeux de reference publics de la NGA et de GeographicLib (zones speciales 32V et 31X a 37X comprises) ; une reference MGRS absente de la demande fait rendre une question ; dans le panneau QGIS, une demande de conversion donne un plan coord.convert execute."
+covers = ["G2"]
+after = [1]
+hitl = true
+risk = "high"
+unknown = "bibliotheque de geodesie (portage Rust de GeographicLib sous MIT) ou formules de Karney ecrites a la main"
+
+[[entry]]
+id = 3
+type = "story"
+title = "Distance, azimut, point projete et recoupement"
+description = "Ajoute geo.distance_azimuth, geo.destination_point et geo.bearing_intersection sur le module de geodesie de l'entree 2, avec le type Angle defini par le catalogue (entree 1) et l'erreur geo.unsupported_crs (AD-31)."
+verify = "Tests du noyau sans QGIS sur le jeu d'essai geodesique de GeographicLib ; un point en Lambert-93 est refuse avec l'erreur qui nomme data.transform_point ; deux visees paralleles rendent une erreur nommee."
+covers = ["G3"]
+after = [2]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 4
+type = "story"
+title = "Reprojection d'un point par QGIS (data.transform_point)"
+description = "Ajoute la commande deleguee data.transform_point : une ligne de la table fermee de l'extension reprojette un Point vers un code EPSG quelconque ; elle relie un point WGS84 ou UTM au systeme d'un MNT (AD-19, AD-31)."
+verify = "Test de l'extension : un point WGS84 reprojete en Lambert-93 rend les coordonnees attendues a 1 cm pres ; un code EPSG inconnu rend une erreur nommee."
+covers = ["G4"]
+after = [3]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 5
+type = "story"
+title = "Un seul type de raster : RasterPath partout"
+description = "Migre les parametres raster des commandes existantes (terrain.*, layer.open_raster) vers le type partage RasterPath, journalise les references d'etape comme reperes out:k.n, a cote du type MgrsRef pose par l'entree 2 et du type Point existant ; les entrees 6 a 10 s'appuient dessus et l'entree 17 ajoute la recette de la table fermee."
+verify = "Les tests existants du terrain et du rejeu passent avec RasterPath ; un plan pente puis champ de vision par reference d'etape se rejoue a l'identique."
+covers = ["G5"]
+after = [4, "4.9"]
+hitl = false
+risk = "high"
+
+[[entry]]
+id = 17
+type = "story"
+title = "La table fermee ne contient que les commandes deleguees"
+description = "Ajoute la recette qui verifie que la table fermee de l'extension contient exactement les commandes declarees runs_in: qgis du registre, ni plus ni moins (AD-24), apres la migration RasterPath de l'entree 5."
+verify = "La recette passe sur l'etat actuel ; une ligne ajoutee pour une commande du noyau, ou une commande deleguee sans ligne, la fait echouer en la nommant."
+covers = ["G5"]
+after = [5]
+hitl = false
+risk = "low"
+[[entry]]
+id = 6
+type = "story"
+title = "Exposition et ombrage d'un MNT"
+description = "Ajoute terrain.aspect et terrain.hillshade au noyau, sur le module raster unique (AD-20) et RasterPath (entree 5), au nord du quadrillage, cellule plate en NoData (AD-31)."
+verify = "Tests du noyau sans QGIS sur les MNT synthetiques de fixtures/ (plan incline d'exposition connue, colline) ; comparaison a QGIS consignee comme pour 4.7."
+covers = ["G6"]
+after = [17]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 7
+type = "story"
+title = "Champ de vision cumule depuis plusieurs points"
+description = "Ajoute terrain.viewshed_cumulative : le nombre d'observateurs, en liste bornee (AD-8), qui voient chaque cellule, en reutilisant le calcul de terrain.viewshed."
+verify = "Tests du noyau sans QGIS : deux observateurs de part et d'autre de la colline synthetique donnent les comptes 0, 1 et 2 attendus ; un observateur hors du MNT ou au-dela du plafond rend une erreur nommee."
+covers = ["G7"]
+after = [6]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 8
+type = "story"
+title = "Ecriture GeoJSON du noyau et ouverture dictee"
+description = "Ajoute l'ecrivain GeoJSON unique et deterministe et la commande dictee layer.open_vector (AD-30) ; l'entree 15 (terrain.peaks) en est la premiere utilisatrice et l'entree 10 le reutilise."
+verify = "Tests du noyau sans QGIS : deux ecritures des memes entites donnent des fichiers identiques octet pour octet ; test de l'extension et essai reel sur le poste : un GeoJSON 2008 en EPSG:2154 ouvert par layer.open_vector est dans le bon systeme dans QGIS 3.44 et 4.x."
+covers = ["G8"]
+after = [7]
+hitl = true
+risk = "high"
+
+[[entry]]
+id = 15
+type = "story"
+title = "Points hauts d'un MNT"
+description = "Ajoute terrain.peaks, qui rend les sommets d'une proeminence et d'un ecart minimaux, en nombre borne, par l'ecrivain GeoJSON de l'entree 8."
+verify = "Tests du noyau sans QGIS : les sommets de la colline synthetique sont trouves, aucun sur le plan incline ; dans QGIS, la couche de points s'ouvre et le rejeu la rouvre."
+covers = ["G8"]
+after = [8]
+hitl = false
+risk = "medium"
+[[entry]]
+id = 9
+type = "story"
+title = "Reclassement et superposition ponderee de rasters"
+description = "Ajoute raster.reclassify et raster.weighted_overlay au noyau, avec le controle de grilles identiques et l'erreur raster.grid_mismatch, et la propagation du NoData (AD-20) ; l'entree 10 prend un raster reclasse comme raster de cout."
+verify = "Tests du noyau sans QGIS : une pente reclassee en trois classes donne les comptes attendus ; deux criteres ponderes donnent le score attendu ; deux grilles decalees sont refusees en nommant l'ecart."
+covers = ["G9"]
+after = [15]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 10
+type = "story"
+title = "Cout de deplacement et chemin de moindre cout"
+description = "Ajoute le module de cout unique, terrain.cost_distance et terrain.least_cost_path (AD-20), la ligne etant ecrite par l'ecrivain GeoJSON de l'entree 8 et le raster de cout pouvant venir de raster.reclassify (entree 9)."
+verify = "Tests du noyau sans QGIS : sur un cout uniforme, le chemin est la droite et le cout total egal a la distance ; un obstacle infranchissable est contourne ; une pente reclassee sert de cout dans un plan qui se rejoue."
+covers = ["G10"]
+after = [9, 8]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 11
+type = "story"
+title = "Format, orientation et carroyage de la mise en page"
+description = "Ajoute a layout.export_pdf les parametres page_size (A4 a A0), orientation et grid (aucun, degres, projete avec systeme et intervalle), executes par la mise en page de QGIS."
+verify = "Test de l'extension : un export A3 paysage avec carroyage UTM au kilometre produit un PDF de la bonne taille de page dont la grille est presente ; sans ces parametres, l'export est inchange."
+covers = ["G11"]
+after = [10]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 12
+type = "story"
+title = "Familles du generateur pour les nouvelles commandes"
+description = "Ajoute au generateur civil une famille d'exemples par commande des entrees 2 a 11 et 15, et retire les refus devenus faux ; l'entree 16 s'en sert pour le re-entrainement groupe."
+verify = "Chaque nouvelle commande a sa famille, dont les exemples passent check_plan ; les tests du generateur passent et aucun refus devenu faux ne subsiste."
+covers = ["G12"]
+after = [11]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 16
+type = "story"
+title = "Re-entrainement groupe et recette du modele"
+description = "Lance le re-entrainement groupe sur la chaine de 5.10 avec les familles de l'entree 12, mesure le taux de plans conformes, installe le modele sur le poste et passe une recette en phrases enchainees dans QGIS."
+verify = "Le taux de plans conformes sur le jeu de reference ne baisse pas, chaque nouvelle commande a au moins un exemple compose correctement par le modele, et la recette en phrases enchainees passe dans QGIS."
+covers = ["G12"]
+after = [12, "5.10"]
+hitl = true
+risk = "high"
+[[entry]]
+id = 13
+type = "story"
+title = "Refactor sweep"
+description = "Menage de fin d'epic sur les modules de geodesie, de raster, de cout et d'ecriture GeoJSON, a partir des plans et des constats de relecture reportes pendant l'epic."
+verify = "Les constats reportes sont traites ou consignes ; cargo fmt, clippy et toute la recette passent, audit de licences compris (aucune GPL ni LGPL dans le noyau) et recette hors ligne verte."
+covers = []
+after = [1, 2, 3, 4, 5, 17, 6, 7, 8, 15, 9, 10, 11, 12, 16]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 14
+type = "story"
+title = "Demonstration de bout en bout dans QGIS"
+description = "Une sonde, lancee sous le Python de QGIS sur le poste du proprietaire, enchaine par le vrai modele une conversion MGRS, une reprojection vers le systeme du MNT, un champ de vision cumule et un PDF A3 carroye, puis rejoue le journal."
+verify = "Une seule demande en francais suffit a l'enchainement ; la sonde rend OK, le PDF porte le carroyage demande, le rejeu apres fermeture et reouverture du projet est identique, et le proprietaire confirme la demonstration."
+covers = ["G2", "G4", "G7", "G11", "G12"]
+after = [13]
+hitl = true
+risk = "medium"

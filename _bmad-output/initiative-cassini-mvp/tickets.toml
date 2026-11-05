@@ -53,6 +53,17 @@ covers = ["CAP-11"]
 after = [{ epic = 2, needs = "le contrat du registre de commandes" }]
 
 [[epic]]
+id = 11
+slug = "epic-geometrie-et-terrain-etendu"
+title = "Geometrie et terrain etendu, catalogue des commandes fige"
+covers = ["CAP-15", "CAP-5", "CAP-6"]
+after = [
+  { epic = 4, needs = "le module raster unique et les trois commandes de terrain, que cet epic prolonge" },
+  { epic = 5, needs = "la chaine d'entrainement reproductible (5.10) et le generateur d'exemples, pour le re-entrainement groupe" },
+  { epic = 9, needs = "la table fermee de l'extension et la mise en page, pour data.transform_point et les options d'export" },
+]
+
+[[epic]]
 id = 6
 slug = "epic-export-et-demo"
 title = "Scenario de demo de bout en bout"
@@ -61,6 +72,7 @@ after = [
   { epic = 9, needs = "les commandes executees par QGIS que la phrase de demo enchaine, export PDF compris" },
   { epic = 5, needs = "l'agent qui enchaine les commandes et les fait valider" },
   { epic = 4, needs = "les commandes de terrain du noyau, pour la demonstration sur poste isole" },
+  { epic = 11, needs = "le catalogue des commandes fige et la geometrie et le terrain etendu, ajoutes avant la demo par le changement de cap du 2026-11-05" },
 ]
 
 [[epic]]
