@@ -27,8 +27,8 @@ Ce qui n'existe nulle part, c'est un SIG de bureau hors ligne piloté par une IA
 locale. Au MVP, Cassini est donc une **extension QGIS posée sur un noyau
 indépendant** : QGIS exécute la carte, l'ouverture des fichiers, le projet, les
 analyses vectorielles et l'export PDF ; le noyau porte le registre de commandes,
-l'agent, le journal rejouable et, à venir, un moteur de terrain en licence
-permissive.
+l'agent, le journal rejouable et un moteur de terrain et de géométrie en licence
+permissive, écrit d'après les publications.
 
 Ce découpage date du 2026-10-14 et remplace un plan où Cassini était une
 application de bureau complète ; le raisonnement est écrit en entier dans
@@ -38,13 +38,23 @@ code déjà écrit pour elle reste au dépôt.
 
 La frontière entre le noyau et l'extension est fixée par
 [le contrat d'architecture](_bmad-output/initiative-cassini-mvp/architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md),
-en décisions numérotées (AD-1 et suivantes) ; ce README en résume ce qui change
+en décisions numérotées (AD-1 à AD-31) ; ce README en résume ce qui change
 la forme du produit.
+
+Depuis le 2026-11-05, la liste des commandes est **figée** dans
+[le catalogue des commandes](_bmad-output/initiative-cassini-mvp/spec-cassini-mvp/catalogue-des-commandes.md) :
+pour chaque commande — faite, planifiée ou réservée — son identifiant, ses
+paramètres et son résultat. Un identifiant ou un paramètre n'y change que par un
+changement de cap, pour ne plus avoir à ré-entraîner le modèle à chaque besoin
+découvert. La recette confronte le catalogue au registre.
+[Le changement de cap](_bmad-output/initiative-cassini-mvp/change-geometrie-et-terrain-avant-la-demo/change-geometrie-et-terrain-avant-la-demo.md)
+qui l'a décidé place aussi la géométrie et le terrain étendu **avant la démo**.
 
 ## Ce qui marche aujourd'hui
 
-Le projet a franchi les étapes 1 à 4 de `CLAUDE.md` §7 et l'essentiel de la
-cinquième : l'agent local tourne dans QGIS. Concrètement :
+Le projet a franchi les étapes 1 à 6 de `CLAUDE.md` §7, et l'essentiel de
+l'étape 6 bis : l'agent local tourne dans QGIS, et le noyau calcule lui-même le
+terrain et la géométrie. Concrètement :
 
 - **Le noyau** (`core/`, crate `cassini-core`) : le **registre de commandes**,
   où chaque commande s'inscrit seule et dont le registre contrôle lui-même le
@@ -75,15 +85,48 @@ cinquième : l'agent local tourne dans QGIS. Concrètement :
   | `analysis.zonal_statistics` | statistiques par zone |
   | `analysis.isochrone` | isochrones à pied et en voiture sur un réseau |
   | `layout.export_pdf` | carte en PDF avec titre, légende, échelle, flèche du nord et sources |
+  | `data.transform_point` | reprojette un seul point vers un code EPSG, par exemple un point Lambert-93 vers WGS84 avant une conversion MGRS |
 
-  S'y ajoutent deux commandes du noyau : `system.about` et `model.list`, qui liste
-  les modèles présents sur le poste.
+  Deux commandes de plus, `layer.open_raster` et `layer.open_vector`, ouvrent dans
+  le projet un raster ou un GeoJSON que le noyau vient d'écrire. Elles ne sont
+  **dictées que par le noyau**, après l'étape qui a produit le fichier, et ne sont
+  offertes ni au modèle, ni à une IA externe (AD-30).
+- **Les commandes calculées par le noyau**, en Rust, testées sans QGIS :
+
+  | Commande | Ce qu'elle fait |
+  |---|---|
+  | `terrain.slope` | pente d'un MNT, en degrés ou en pourcentage |
+  | `terrain.aspect`, `terrain.hillshade` | exposition et ombrage d'un MNT |
+  | `terrain.line_of_sight` | ligne de vue entre deux points, courbure et réfraction comprises |
+  | `terrain.viewshed` | champ de vision depuis un point |
+  | `terrain.viewshed_cumulative` | nombre d'observateurs qui voient chaque cellule |
+  | `terrain.peaks` | points hauts d'un MNT, par proéminence, rendus en GeoJSON |
+  | `raster.reclassify`, `raster.weighted_overlay` | reclassement d'un raster, superposition pondérée de plusieurs critères |
+  | `terrain.cost_distance`, `terrain.least_cost_path` | coût de déplacement cumulé, et chemin de moindre coût rendu en GeoJSON |
+  | `coord.convert` | conversion d'une coordonnée entre WGS84, UTM et MGRS |
+  | `geo.distance_azimuth` | distance géodésique, azimut et contre-azimut entre deux points |
+  | `geo.destination_point` | point placé à un azimut et une distance |
+  | `geo.bearing_intersection` | recoupement de deux visées |
+  | `system.about`, `model.list` | version du noyau, modèles présents sur le poste |
+
+  Aucune ligne n'en vient de GRASS, de Whitebox, de GDAL ni de QGIS : chaque calcul
+  est écrit d'après sa publication (Horn pour la pente, Franklin et Ray pour la
+  visibilité, Karney pour la géodésie, la spécification de la NGA pour MGRS), et
+  les GeoTIFF sont lus et écrits sans GDAL. Comparés à QGIS et à GRASS sur un vrai
+  MNT, les résultats concordent et le noyau répond 2,9 à 124 fois plus vite —
+  écarts, temps et sources dans
+  [`docs/comparaison-terrain-qgis.md`](docs/comparaison-terrain-qgis.md). Les
+  coordonnées sont contrôlées contre des jeux de référence publics (GeographicLib,
+  NGA).
 - **L'agent local** (`ai/`, crate `cassini-ai`) : un modèle quantifié au format
   GGUF, chargé **dans le processus du noyau** par llama.cpp lié en bibliothèque —
   jamais un serveur HTTP. Le modèle retenu est un Qwen3.5-4B (Apache-2.0) ajusté sur
   le registre de Cassini, choisi dans les Réglages du panneau ; il pose une question au lieu de deviner quand la demande
   est ambiguë, et enchaîne plusieurs phrases dans une même session sans saturer son
-  contexte.
+  contexte. Il connaît les commandes du MVP et les trois premières de terrain ; les
+  commandes ajoutées depuis le 2026-11-05 lui seront apprises en une seule fois, au
+  ré-entraînement groupé qui clôt l'étape 6 bis. D'ici là, c'est le Qwen3.5-9B non
+  ajusté, avec le registre entier dans son prompt, qui les compose.
 - **La chaîne d'entraînement** (`training/`) : le jeu d'exemples est engendré
   depuis le registre lui-même, l'entraînement et la fusion en GGUF se refont d'une
   seule commande, et un jeu tenu à l'écart mesure le modèle. Détail dans
@@ -119,13 +162,22 @@ commence avant que la précédente ne soit testée.
 | 2 | Épreuve du modèle local sur un registre factice | **faite** : verdict « oui sous conditions », dans `_bmad-output/initiative-cassini-mvp/epic-epreuve-du-modele-local/` |
 | 3 | Registre de commandes et journal rejouable | **faite**, suite de bout en bout comprise : exécuter, fermer, rouvrir, rejouer, comparer |
 | 4 | Façade QGIS — extension, canal local, commandes exécutées par QGIS | **faite**, suite de bout en bout comprise : ouvrir, analyser, exporter, rejouer |
-| 5 | Agent IA local et serveur MCP | **en cours** : l'agent est fait et tourne dans QGIS, sur carte graphique ou sur processeur ; le serveur MCP (`cassini mcp`) est écrit : relais vers la session QGIS quand l'utilisateur l'autorise, commandes du noyau seules sinon ; reste la suite de bout en bout |
-| 6 | Analyse de terrain dans le noyau — champ de vision, ligne de vue, pente | à venir |
-| 7 | Scénario de démo, puis publication : dépôt d'extensions QGIS, installeurs, vidéo | à venir |
+| 5 | Agent IA local et serveur MCP | **faite**, suite de bout en bout comprise : l'agent tourne dans QGIS, sur carte graphique ou sur processeur ; le serveur MCP (`cassini mcp`) relaie vers la session QGIS quand l'utilisateur l'autorise, et n'expose sinon que les commandes du noyau |
+| 6 | Analyse de terrain dans le noyau — pente, ligne de vue, champ de vision | **faite**, comparaison à QGIS et à GRASS comprise |
+| 6 bis | Géométrie et terrain étendu, catalogue des commandes figé | **en cours** : catalogue figé, quatorze commandes faites (tableaux ci-dessus) ; restent le format, l'orientation et le carroyage de la mise en page, l'apprentissage des nouvelles commandes par le modèle, le ménage de fin d'epic et la démonstration de bout en bout dans QGIS |
+| 7 | Scénario de démo complet, puis publication : dépôt d'extensions QGIS, installeurs, vidéo | à venir |
 
-Un catalogue étendu est déjà découpé pour l'après-MVP (epic 10) : reprojection,
-conversion de format, plus proche voisin, plus court chemin, atlas PDF,
-statistiques zonales sur un MNT, géocodage sur la Base Adresse Nationale.
+Un catalogue étendu est déjà découpé pour l'après-démo (epic 10), et ses contrats
+sont déjà figés au catalogue : reprojection et conversion de couches, plus proche
+voisin, plus court chemin sur un réseau, atlas PDF, statistiques zonales sur un
+MNT, vectorisation et alignement de rasters, courbes de niveau, géocodage sur la
+Base Adresse Nationale. Des identifiants sont aussi réservés, sans paramètres
+encore, pour l'hydrologie (écoulement, bassin versant, zone inondable) et la
+couverture radio d'un émetteur.
+
+Le noyau fournit des briques générales et ne porte aucun paramètre propre à un
+usage particulier — classes de véhicules, seuils métier, choix d'un emplacement :
+ces recettes se composent au-dessus de lui.
 
 Limite connue de la phrase de démo : « constructible » se traduit aujourd'hui par
 la zone urbaine `U` du standard du CNIG ; les zones `AUc` ne sont pas encore
@@ -134,8 +186,12 @@ couvertes, faute d'opérateur « parmi » dans le registre.
 Formats ouverts par QGIS pour le compte du registre : GeoPackage, Shapefile,
 GeoJSON, CSV à coordonnées, GeoParquet. Systèmes de coordonnées : Lambert-93
 (EPSG:2154) et WGS84 au minimum, avec reprojection quand la couche diffère du
-projet — reprojection exécutée par QGIS, jamais par le noyau (AD-19). Aucune
-parité avec QGIS n'est visée ni revendiquée.
+projet — reprojection exécutée par QGIS, jamais par le noyau. Le noyau ne
+convertit que des **coordonnées ponctuelles**, entre WGS84, UTM et MGRS, par des
+formules publiées ; tout autre système, et toute couche, restent à QGIS (AD-19).
+Raster : modèles numériques d'élévation et rasters de coût ou de critères en
+GeoTIFF à une bande. Aucune parité avec QGIS n'est visée
+ni revendiquée.
 
 Cassini se distribuera en deux artefacts : l'extension, légère et sans binaire,
 par le dépôt d'extensions QGIS ; le noyau et le modèle d'IA, par un paquet Cassini
@@ -168,7 +224,8 @@ Les principes complets, dont la règle de travail en salle blanche, sont dans
 
 ### L'architecture en couches
 
-Les cases vertes sont écrites et testées ; les grises n'existent pas encore.
+Les cases vertes sont écrites et testées ; la coquille de la V2, conservée, est
+hors du chemin du MVP.
 
 ```mermaid
 flowchart TB
@@ -183,7 +240,7 @@ flowchart TB
         binaire["Binaire cassini, sous cli/ — run, replay, serve, plan, mcp faits"]
         registre["Registre de commandes, qui tient la boucle d'exécution — fait"]
         binaire --> registre
-        terrain["Terrain sur MNT — champ de vision, ligne de vue, pente — prévu"]
+        terrain["Terrain et géométrie — MNT, coûts, coordonnées, GeoTIFF et GeoJSON sans GDAL — fait"]
         journal["Journal rejouable, écrit à côté du projet QGIS — fait"]
         ia["Couche IA — modèle local llama.cpp, lié au processus — fait"]
         registre --> terrain
@@ -200,11 +257,9 @@ flowchart TB
     registre -.->|"servira en V2"| v2
 
     classDef fait fill:#dcf2e3,stroke:#2f7a46,color:#13331f
-    classDef prevu fill:#f2f2f2,stroke:#8d8d8d,color:#333333
     classDef fourni fill:#e7eefb,stroke:#45659c,color:#1a2740
     classDef reporte fill:#f6eede,stroke:#9c7a45,color:#3d2f1a
-    class panneau,canal,binaire,registre,journal,ia fait
-    class terrain prevu
+    class panneau,canal,binaire,registre,journal,ia,terrain fait
     class moteurQgis fourni
     class v2 reporte
 ```
@@ -212,7 +267,7 @@ flowchart TB
 Trois conséquences de ce découpage :
 
 - **Aucune logique métier dans l'extension.** L'extension QGIS, la ligne de
-  commande, l'agent local et le futur serveur MCP appellent *les mêmes* commandes
+  commande, l'agent local et le serveur MCP appellent *les mêmes* commandes
   du registre.
 - **Chaque commande déclare son exécutant.** Soit une implémentation en Rust dans
   le noyau, soit une délégation déclarée à QGIS — jamais implicite, jamais les
@@ -232,8 +287,9 @@ structure interne (AD-8, AD-16). Le contrat des messages est dans
 ### Le trajet d'une demande en langage naturel
 
 Le panneau demande, le noyau décide et dicte une étape à la fois (AD-5). La branche
-« commande portée par le noyau » ne sert encore qu'à `system.about` et `model.list` ;
-le terrain y viendra à l'étape 6.
+« commande portée par le noyau » sert au terrain et à la géométrie. Quand elle écrit
+un fichier — un raster, ou un GeoJSON de points ou de ligne —, le noyau dicte
+aussitôt à QGIS l'étape qui l'ouvre dans le projet.
 
 ```mermaid
 sequenceDiagram
@@ -255,7 +311,9 @@ sequenceDiagram
     Panneau->>Registre: le plan validé
     loop le noyau dicte chaque étape, une à la fois
         alt commande portée par le noyau
-            Registre->>Registre: calcul en Rust
+            Registre->>Registre: calcul en Rust, raster ou GeoJSON écrit
+            Registre->>Panneau: ordre d'ouvrir le fichier produit
+            Panneau->>QGIS: couche ajoutée au projet
         else commande déléguée à QGIS
             Registre->>Panneau: ordre de l'étape, paramètres typés
             Panneau->>QGIS: exécution par le cadre de traitement
@@ -280,7 +338,8 @@ rejouée à l'identique.
 
 Le projet appartient à QGIS : Cassini n'a pas de format de projet et n'en aura
 pas au MVP. Ce qu'il écrit, c'est son journal, posé à côté du fichier de projet,
-et les couches produites par les analyses, dans un dossier `<projet>.cassini/`.
+et les couches produites par les analyses — couches de QGIS, rasters et GeoJSON
+du noyau —, dans un dossier `<projet>.cassini/`.
 
 ```mermaid
 stateDiagram-v2
@@ -314,7 +373,7 @@ stateDiagram-v2
 
 | Dossier | À quoi il sert |
 |---|---|
-| `core/` | Le noyau, crate `cassini-core` : registre de commandes, commandes, journal, canal local, validation des plans. Les tests unitaires sont à côté du code qu'ils couvrent. |
+| `core/` | Le noyau, crate `cassini-core` : registre de commandes, commandes, journal, canal local, validation des plans, terrain et géodésie, lecture et écriture des GeoTIFF, écriture des GeoJSON. Les tests unitaires sont à côté du code qu'ils couvrent. |
 | `ai/` | La couche IA, crate `cassini-ai` : le modèle local chargé dans le processus du noyau par llama.cpp, la composition du plan, le choix des fils de calcul. `cassini-core` n'en dépend jamais (AD-13). |
 | `cli/` | Le binaire unique `cassini`. Il vit à part parce qu'il a besoin du noyau **et** de la couche IA. Ses tests d'intégration lancent le vrai binaire. |
 | `qgis-plugin/` | L'extension QGIS en Python, sous GPL : le panneau, l'exécutant des gestes QGIS, et ses tests. Installation et recettes manuelles dans [`qgis-plugin/README.md`](qgis-plugin/README.md). |
@@ -323,7 +382,7 @@ stateDiagram-v2
 | `docs/` | La documentation. Index dans [`docs/README.md`](docs/README.md). |
 | `fixtures/` | Les jeux de test, légers et fabriqués par le dépôt lui-même — aucune donnée géographique tierce. Voir [`fixtures/README.md`](fixtures/README.md). |
 | `tests/` | Réservé aux tests qui traversent plusieurs briques ; les suites de bout en bout vivent pour l'instant dans `cli/tests/` et `qgis-plugin/tests/`. |
-| `_bmad-output/` | La planification : spécification, contrat d'architecture, epics, tickets, et le plan écrit de chaque entrée de travail. |
+| `_bmad-output/` | La planification : spécification et catalogue des commandes, contrat d'architecture, changements de cap, epics, tickets, et le plan écrit de chaque entrée de travail. |
 | `_bmad/` | L'outillage de planification qui produit ce qui précède. |
 
 À la racine : [`CLAUDE.md`](CLAUDE.md), la source de vérité du projet ;
@@ -527,7 +586,7 @@ le run passe au rouge.
 |---|---|
 | `cargo deny check` | Licences permissives seulement dans le noyau ; aucun client HTTP, aucune couche asynchrone, aucune couche TLS (AD-14). |
 | `cargo fmt --all --check` | La mise en forme du Rust. |
-| `cargo test -p cassini-core -p cassini-ai -p cassini -p cassini-training --locked` | Les tests du noyau, de la couche IA, du binaire et du générateur d'exemples, dont le refus de toute source réseau, la parité entre `run` et `serve`, le rejeu du journal et la suite de bout en bout. |
+| `cargo test -p cassini-core -p cassini-ai -p cassini -p cassini-training --locked` | Les tests du noyau, de la couche IA, du binaire et du générateur d'exemples, dont le refus de toute source réseau, la parité entre `run` et `serve`, le rejeu du journal, la suite de bout en bout et la confrontation du catalogue des commandes au registre. |
 | `cargo run --release -p cassini -- run system.about` | Le binaire de release connaît bien les commandes du noyau. |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | Zéro avertissement, coquille Tauri comprise. |
 | `cargo test --release -p cassini --test hors_ligne`, sous Windows | Ni le binaire ni les bibliothèques posées à côté de lui n'importent une bibliothèque réseau. Avec `--features gpu` (à la main, la CI n'a pas le SDK Vulkan), il vérifie aussi le contenu du paquet. |
