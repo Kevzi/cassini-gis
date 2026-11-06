@@ -735,3 +735,21 @@ covers = []
 after = []
 hitl = false
 risk = "low"
+
+[[entry]]
+id = 43
+type = "bug"
+title = "Le test d'extinction du canal d'IA externe avec des relais muets echoue sous Windows charge"
+description = "Le test qui coupe l'interrupteur de l'IA externe pendant que quatre relais ne lisent plus exige une extinction en moins de 1,5 s. Sous Windows, quand la machine est chargee, l'extinction prend 1,5 a 1,8 s et la recette echoue, sur GitHub comme en local pendant la suite complete ; lance seul, il passe. Le test doit distinguer une echeance des adieux commune a toutes les connexions (environ 0,5 s) d'une echeance par connexion (environ 2 s pour quatre), sans dependre de la vitesse de la machine."
+verify = "La recette Windows de GitHub passe ce test sur plusieurs executions de suite, et le test echoue toujours si l'echeance des adieux redevient une echeance par connexion ; ou bien la mesure prouve un vrai defaut du noyau, qui est alors nomme et corrige."
+covers = []
+after = []
+hitl = false
+risk = "high"
+notes = [
+  "Decision: 2026-11-06 — proprietaire : ticket separe, traite apres 11.9.",
+  "Releves : recette GitHub Windows 1,51 s, 1,66 s, 1,82 s ; local 1,63 s pendant cargo test --workspace ; 3/3 vert lance seul.",
+  "Test vise : a_relay_that_stops_reading_does_not_hold_the_switch_off, dans core/tests/canal_externe.rs.",
+  "Assumption: la cause est la charge de la machine, pas le noyau ; a confirmer par la mesure.",
+  "Risque high : canal d'IA externe (CLAUDE.md, relecture thorough) ; controle hors du ticket : la recette GitHub Windows verte sur plusieurs executions.",
+]
