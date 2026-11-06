@@ -49,12 +49,10 @@ tableau lisible, puis un bloc ` ```json fiche ` que lit la recette :
 
 ```json
 {"id": "terrain.slope", "status": "faite", "runs_in": "core", "dictated_by_core": false,
- "params": {"dem": {"type": "string", "required": true},
+ "params": {"dem": {"type": "RasterPath", "required": true},
             "unit": {"type": "string", "required": true, "enum": ["degrees", "percent"]},
             "out": {"type": "string", "required": false}},
- "result": ["file", "max", "min", "nodata_cells", "unit"],
- "planned_by": "epic 11, entrée 5",
- "planned_params": {"dem": {"type": "RasterPath", "required": true}}}
+ "result": ["file", "max", "min", "nodata_cells", "unit"]}
 ```
 
 - `params` : chaque paramètre a `type`, `required`, et au besoin `enum` (valeurs
@@ -158,9 +156,15 @@ l'epic 11 (`core/src/angle.rs`) ; une valeur non finie est refusée.
 **`RasterPath`** — désignation d'un raster, du noyau ou délégué (amendement du
 2026-11-05 d'AD-24). Chaîne : un chemin relatif au projet (AD-9), ou une référence
 `step:k` vers la sortie raster d'une étape, journalisée comme le repère `out:k.n` d'AD-11,
-jamais comme un chemin résolu. Marquée dans le schéma engendré. Un raster ne se désigne
-jamais par son identifiant de couche. Posé par l'entrée 5 de l'epic 11, qui y migre les
-paramètres raster des commandes faites (voir leurs `planned_params`).
+jamais comme un chemin résolu. Marquée dans le schéma engendré (`x-cassini: raster`). Un
+raster ne se désigne jamais par son identifiant de couche. La référence `step:k` n'est admise
+que si l'étape `k` écrit exactement un raster (`plan.type_mismatch`), et jamais sous la forme
+d'un champ de sa sortie, `step:k.file` (`plan.bad_reference`). Posé par l'entrée 5 de
+l'epic 11 (`core/src/raster_path.rs`), qui y a migré `dem` de `terrain.slope`,
+`terrain.viewshed`, `terrain.line_of_sight` et `path` de `layer.open_raster`. Le long prompt
+du modèle local le voit comme une chaîne. Hors d'un plan, `step:k` n'a pas de sens ; un appel
+direct (`command.run`, MCP) peut citer la sortie d'une ligne du journal par son repère
+`out:<k>.<n>`, résolu par le journal (`replay.bad_reference` s'il ne désigne aucune sortie).
 
 ```json type
 {"name": "RasterPath", "type": "string"}
@@ -413,7 +417,7 @@ après chaque sortie raster (amendement 4.9 d'AD-9) ; refusée par `command.run`
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
-| `path` | chaîne | oui | `out:<k>.<n>` | Sortie d'une étape précédente. Devient `RasterPath` (epic 11, entrée 5). |
+| `path` | `RasterPath` | oui | `out:<k>.<n>` | Sortie d'une étape précédente. |
 
 | Résultat | Type | Sens |
 |---|---|---|
@@ -422,10 +426,8 @@ après chaque sortie raster (amendement 4.9 d'AD-9) ; refusée par `command.run`
 
 ```json fiche
 {"id": "layer.open_raster", "status": "faite", "runs_in": "qgis", "dictated_by_core": true,
- "params": {"path": {"type": "string", "required": true}},
- "result": ["layer_id", "name"],
- "planned_by": "epic 11, entrée 5",
- "planned_params": {"path": {"type": "RasterPath", "required": true}}}
+ "params": {"path": {"type": "RasterPath", "required": true}},
+ "result": ["layer_id", "name"]}
 ```
 
 ### `analysis.buffer`
@@ -610,7 +612,7 @@ Pente de chaque cellule d'un MNT, méthode de Horn (3 × 3), en degrés ou en po
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
-| `dem` | chaîne | oui | GeoTIFF une bande, système projeté en mètres | MNT, chemin relatif au projet. Devient `RasterPath` (epic 11, entrée 5). |
+| `dem` | `RasterPath` | oui | GeoTIFF une bande, système projeté en mètres | MNT : chemin relatif au projet, ou `step:k`. |
 | `unit` | chaîne | oui | `degrees`, `percent` | Unité de la pente. |
 | `out` | chaîne | non | — | Fourni par le noyau. |
 
@@ -623,12 +625,10 @@ Pente de chaque cellule d'un MNT, méthode de Horn (3 × 3), en degrés ou en po
 
 ```json fiche
 {"id": "terrain.slope", "status": "faite", "runs_in": "core", "dictated_by_core": false,
- "params": {"dem": {"type": "string", "required": true},
+ "params": {"dem": {"type": "RasterPath", "required": true},
             "unit": {"type": "string", "required": true, "enum": ["degrees", "percent"]},
             "out": {"type": "string", "required": false}},
- "result": ["file", "max", "min", "nodata_cells", "unit"],
- "planned_by": "epic 11, entrée 5",
- "planned_params": {"dem": {"type": "RasterPath", "required": true}}}
+ "result": ["file", "max", "min", "nodata_cells", "unit"]}
 ```
 
 ### `terrain.viewshed`
@@ -639,7 +639,7 @@ valide (`terrain.no_elevation`) ; rayon d'au plus 500 cellules (`terrain.viewshe
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
-| `dem` | chaîne | oui | GeoTIFF une bande, projeté en mètres | MNT. Devient `RasterPath` (epic 11, entrée 5). |
+| `dem` | `RasterPath` | oui | GeoTIFF une bande, projeté en mètres | MNT : chemin relatif au projet, ou `step:k`. |
 | `observer` | `Point` | oui | système du MNT | Position de l'observateur. |
 | `observer_height` | `Height` | non | défaut 1,6 m | Hauteur de l'œil au-dessus du sol. |
 | `target_height` | `Height` | non | défaut 0 m | Hauteur des cibles au-dessus du sol. |
@@ -657,7 +657,7 @@ valide (`terrain.no_elevation`) ; rayon d'au plus 500 cellules (`terrain.viewshe
 
 ```json fiche
 {"id": "terrain.viewshed", "status": "faite", "runs_in": "core", "dictated_by_core": false,
- "params": {"dem": {"type": "string", "required": true},
+ "params": {"dem": {"type": "RasterPath", "required": true},
             "observer": {"type": "Point", "required": true},
             "observer_height": {"type": "Height", "required": false},
             "target_height": {"type": "Height", "required": false},
@@ -665,9 +665,7 @@ valide (`terrain.no_elevation`) ; rayon d'au plus 500 cellules (`terrain.viewshe
             "curvature": {"type": "boolean", "required": false},
             "refraction": {"type": "number", "required": false},
             "out": {"type": "string", "required": false}},
- "result": ["file", "hidden_cells", "nodata_cells", "visible_cells"],
- "planned_by": "epic 11, entrée 5",
- "planned_params": {"dem": {"type": "RasterPath", "required": true}}}
+ "result": ["file", "hidden_cells", "nodata_cells", "visible_cells"]}
 ```
 
 ### `terrain.line_of_sight`
@@ -676,7 +674,7 @@ Ligne de vue entre deux points sur un MNT. Mêmes erreurs que `terrain.viewshed`
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
-| `dem` | chaîne | oui | GeoTIFF une bande, projeté en mètres | MNT. Devient `RasterPath` (epic 11, entrée 5). |
+| `dem` | `RasterPath` | oui | GeoTIFF une bande, projeté en mètres | MNT : chemin relatif au projet, ou `step:k`. |
 | `observer` | `Point` | oui | système du MNT | Observateur. |
 | `target` | `Point` | oui | système du MNT | Cible. |
 | `observer_height` | `Height` | non | défaut 1,6 m | Hauteur de l'œil. |
@@ -697,16 +695,14 @@ Ligne de vue entre deux points sur un MNT. Mêmes erreurs que `terrain.viewshed`
 
 ```json fiche
 {"id": "terrain.line_of_sight", "status": "faite", "runs_in": "core", "dictated_by_core": false,
- "params": {"dem": {"type": "string", "required": true},
+ "params": {"dem": {"type": "RasterPath", "required": true},
             "observer": {"type": "Point", "required": true},
             "target": {"type": "Point", "required": true},
             "observer_height": {"type": "Height", "required": false},
             "target_height": {"type": "Height", "required": false},
             "curvature": {"type": "boolean", "required": false},
             "refraction": {"type": "number", "required": false}},
- "result": ["distance", "nodata_samples", "obstruction", "obstruction_distance", "profile", "profile_step", "unit", "visible"],
- "planned_by": "epic 11, entrée 5",
- "planned_params": {"dem": {"type": "RasterPath", "required": true}}}
+ "result": ["distance", "nodata_samples", "obstruction", "obstruction_distance", "profile", "profile_step", "unit", "visible"]}
 ```
 
 ### `coord.convert`
@@ -896,7 +892,7 @@ plate (gradient nul) a l'exposition NoData (AD-31).
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
-| `dem` | `RasterPath` | oui | GeoTIFF une bande, projeté en mètres | MNT. |
+| `dem` | `RasterPath` | oui | GeoTIFF une bande, projeté en mètres | MNT : chemin relatif au projet, ou `step:k`. |
 | `out` | chaîne | non | — | Fourni par le noyau. |
 
 | Résultat | Type | Sens |
@@ -919,7 +915,7 @@ rapporté au nord du quadrillage du MNT (AD-31).
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
-| `dem` | `RasterPath` | oui | GeoTIFF une bande, projeté en mètres | MNT. |
+| `dem` | `RasterPath` | oui | GeoTIFF une bande, projeté en mètres | MNT : chemin relatif au projet, ou `step:k`. |
 | `sun_azimuth` | `Angle` | non | défaut 315° | Direction d'où vient la lumière. |
 | `sun_altitude` | `Angle` | non | de 0 à 90°, défaut 45° | Hauteur du soleil au-dessus de l'horizon. |
 | `z_factor` | nombre | non | > 0, défaut 1 | Exagération verticale. |
@@ -951,7 +947,7 @@ d'observateurs bornée par le schéma (AD-8).
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
-| `dem` | `RasterPath` | oui | GeoTIFF une bande, projeté en mètres | MNT. |
+| `dem` | `RasterPath` | oui | GeoTIFF une bande, projeté en mètres | MNT : chemin relatif au projet, ou `step:k`. |
 | `observers` | liste de `Point` | oui | de 1 à 32, système du MNT | Observateurs. |
 | `observer_height` | `Height` | non | défaut 1,6 m | Hauteur de l'œil, pour chacun. |
 | `target_height` | `Height` | non | défaut 0 m | Hauteur des cibles. |
@@ -1021,7 +1017,7 @@ pour le plus haut), `elevation` et `prominence` (nombres, en mètres).
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
-| `dem` | `RasterPath` | oui | GeoTIFF une bande, projeté en mètres | MNT. |
+| `dem` | `RasterPath` | oui | GeoTIFF une bande, projeté en mètres | MNT : chemin relatif au projet, ou `step:k`. |
 | `min_prominence` | `Height` | non | défaut 10 m | Proéminence minimale. |
 | `min_distance` | `Distance` | non | défaut 100 m | Écart horizontal minimal entre deux sommets gardés. |
 | `max_count` | entier | non | 1 à 100, défaut 20 | Nombre maximal de sommets écrits. |

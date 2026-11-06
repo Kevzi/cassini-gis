@@ -95,7 +95,7 @@ fn resolve<'a>(schema: &'a Value, root: &'a Value) -> &'a Value {
 }
 
 /// Le sous-schéma porte-t-il, après ses `$ref`, la marque `mark` ?
-fn is_marked(schema: &Value, root: &Value, mark: &str) -> bool {
+pub(crate) fn is_marked(schema: &Value, root: &Value, mark: &str) -> bool {
     resolve(schema, root).get(MARK_KEY).and_then(Value::as_str) == Some(mark)
 }
 
@@ -111,7 +111,7 @@ pub fn is_mgrs(schema: &Value, root: &Value) -> bool {
 
 /// Le sous-schéma admet-il un type marqué `mark` : lui-même, ou l'une de ses alternatives
 /// (`Option<Point>` s'engendre en `anyOf`).
-fn admits(schema: &Value, root: &Value, mark: &str, depth: usize) -> bool {
+pub(crate) fn admits(schema: &Value, root: &Value, mark: &str, depth: usize) -> bool {
     if depth > MAX_DEPTH {
         return false;
     }

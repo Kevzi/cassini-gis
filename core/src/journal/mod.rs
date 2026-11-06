@@ -35,14 +35,13 @@ use summary::{same_result, summarize};
 use crate::commands::layer_open_raster::OPEN_RASTER;
 use crate::error::ErrorReport;
 use crate::exec::{Executor, Router};
+use crate::raster_path::RASTER_EXTENSIONS;
 use crate::registry::{Registry, RegistryError, PROTOCOL_VERSION};
 
 /// Nom du journal, dans le dossier de travail.
 const JOURNAL_FILE: &str = "journal.jsonl";
 /// Nom du verrou, dans le dossier de travail.
 const LOCK_FILE: &str = "journal.lock";
-/// Extensions de sortie d'une commande du noyau dont la sortie est un raster à ouvrir (ticket 4.9).
-const RASTER_EXTENSIONS: [&str; 2] = [".tif", ".tiff"];
 
 /// Mode d'une session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

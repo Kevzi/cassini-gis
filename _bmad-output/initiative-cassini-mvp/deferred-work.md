@@ -692,3 +692,10 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-reprojection-d-un-point-par-qgis-data-transform-point-plan.md`
   summary: Le geste data.transform_point ne vérifie pas QgsCoordinateTransform.isValid() ; une transformation invalide rendrait le point source étiqueté du code cible (medium, non vérifié).
   evidence: Relecture de 11.4 ; à établir par une sonde sous QGIS sur un projet dont le contexte de transformation nomme une grille absente.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-un-seul-type-de-raster-rasterpath-partout-plan.md`
+  summary: Apprendre au modèle local à citer un raster par `step:k` (sans champ) dans une chaîne pente → champ de vision.
+  evidence: Le long prompt et l'entraînement restent inchangés au ticket 11.5 (décision du propriétaire) ; `check_plan` refuse désormais `step:k.file` sur un `RasterPath` ; à porter au ré-entraînement groupé (entrées 12 et 16).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-un-seul-type-de-raster-rasterpath-partout-plan.md`
+  summary: Cacher à l'inventaire du modèle un raster intermédiaire consommé par `out:k.n` dans un plan.
+  evidence: `intermediate_files` (`core/src/journal/mod.rs`) ne reconnaît que les sorties consommées par `layer_id` ; une pente lue par `terrain.viewshed` via `out:3.1` reste montrée au modèle (comportement antérieur inchangé).

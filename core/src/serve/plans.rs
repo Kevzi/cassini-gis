@@ -5,7 +5,8 @@
 //! montré est le plan exécuté. Un seul plan attend à la fois ; une nouvelle proposition
 //! l'efface, `plan.execute` et `plan.reject` le consomment. Chaque étape passe par
 //! `Session::call` (journal, chemins, annulation), une à la fois, les références `step:k`
-//! étant résolues depuis les sorties déjà obtenues : le journal garde les valeurs résolues.
+//! étant résolues depuis les sorties déjà obtenues : le journal garde les valeurs résolues,
+//! sauf un raster (`RasterPath`), dont `step:k` devient le repère `out:<ligne du journal>.1`.
 
 use std::path::Path;
 
@@ -19,7 +20,7 @@ use crate::agent_inventory::{
 use crate::error::ErrorReport;
 use crate::exec::Executor;
 use crate::journal::intermediate_files;
-use crate::plan::{resolve_references, Plan};
+use crate::plan::{raster_markers, resolve_references, Plan};
 use crate::registry::{Registry, RegistryError};
 
 /// Ce qui compose un plan depuis une demande en langage naturel (port du noyau ; son
@@ -302,10 +303,17 @@ pub(super) fn execute(state: &mut State<'_>, params: Option<&Value>) -> Result<V
         return Err(plan_unknown());
     };
     let mut outputs: Vec<Value> = Vec::new();
+    // Ligne du journal de chaque étape déjà exécutée du plan : un raster cité par `step:k` y est
+    // journalisé par le repère de cette ligne, jamais par son chemin (amendement d'AD-24).
+    let mut journal_steps: Vec<usize> = Vec::new();
     let mut steps = Vec::new();
     for (index, call) in calls.iter().enumerate() {
         let step = index + 1;
-        let params = resolve_references(&call.params, &outputs, step)
+        let marked = match state.registry.spec(&call.command) {
+            Some(spec) => raster_markers(spec, &call.params, &journal_steps),
+            None => call.params.clone(),
+        };
+        let params = resolve_references(&marked, &outputs, step)
             .map_err(|e| RpcError::business(ErrorReport::from(e)))?;
         let notice = json!({"jsonrpc": "2.0", "method": "plan.step",
             "params": {"plan_id": pending.id, "step": step, "command": call.command}});
@@ -320,6 +328,7 @@ pub(super) fn execute(state: &mut State<'_>, params: Option<&Value>) -> Result<V
             ));
         }
         let session = state.session.as_mut().expect("session vérifiée");
+        journal_steps.push(session.next_step());
         // La ligne porte sa place dans le plan : le journal suffit à retrouver les couches
         // intermédiaires (`intermediate_files`, ticket 5.34).
         let value = session

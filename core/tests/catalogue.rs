@@ -1195,7 +1195,7 @@ fn a_retyped_parameter_fails_with_expected_and_found() {
     let errors = joined(&confront(&real_catalogue(), &commands));
     assert!(
         errors.contains(
-            "terrain.slope : paramètre « dem », type : attendu « string », trouvé « integer »"
+            "terrain.slope : paramètre « dem », type : attendu « RasterPath », trouvé « integer »"
         ),
         "{errors}"
     );

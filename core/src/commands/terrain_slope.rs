@@ -17,6 +17,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::dem::Dem;
+use crate::raster_path::RasterPath;
 use crate::registry::{Command, CommandFailure, CommandSpec, Registration, RunsIn};
 
 /// Valeur sans-donnée de la pente écrite.
@@ -38,7 +39,7 @@ pub enum SlopeUnit {
 pub struct TerrainSlopeParams {
     /// Fichier MNT (GeoTIFF à une bande, système projeté en mètres), chemin relatif au projet
     /// recopié de l'inventaire. DEM file path, relative to the project, copied from the inventory.
-    pub dem: String,
+    pub dem: RasterPath,
     /// Unité de la pente : `degrees` ou `percent`.
     pub unit: SlopeUnit,
     /// Fichier de sortie : fourni par le noyau, dans le dossier de travail.
@@ -169,7 +170,7 @@ impl Command for TerrainSlope {
     }
 
     fn run(&self, params: TerrainSlopeParams) -> Result<TerrainSlopeOutput, CommandFailure> {
-        let dem = Dem::open(Path::new(&params.dem)).map_err(CommandFailure::from)?;
+        let dem = Dem::open(Path::new(params.dem.as_str())).map_err(CommandFailure::from)?;
         let (slope, stats) = horn_slope(&dem, params.unit);
         slope
             .write_geotiff(Path::new(&params.out))

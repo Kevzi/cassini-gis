@@ -9,7 +9,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::registry::Registry;
+use crate::raster_path::{is_raster_path, writes_one_raster};
+use crate::registry::{CommandSpec, Registry};
 
 /// Une étape : une commande et ses paramètres (éventuellement des références).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -119,6 +120,35 @@ pub(crate) fn parse_reference(value: &Value) -> Option<Result<Reference, String>
     Some(k.and_then(|k| field.map(|f| (k, f))))
 }
 
+/// Traduit, dans les paramètres d'une étape de `spec`, chaque référence `step:k` d'un paramètre
+/// [`RasterPath`](crate::raster_path::RasterPath) en repère `out:<j>.1`, où `j` est la ligne du
+/// journal de l'étape `k` du plan (`journal_steps[k - 1]`) : les ouvertures dictées et les appels
+/// d'avant le plan décalent les numéros. Appliquée avant [`resolve_references`], qui laisse alors
+/// le repère intact ; le journal le garde, le rejeu le résout vers son dossier (AD-11). Toute
+/// autre valeur reste intacte ; une référence que le plan vérifié ne permet pas reste aussi,
+/// pour que `resolve_references` rende son erreur typée.
+pub fn raster_markers(spec: &CommandSpec, params: &Value, journal_steps: &[usize]) -> Value {
+    let Value::Object(map) = params else {
+        return params.clone();
+    };
+    let mut out = map.clone();
+    for (name, value) in map {
+        let Some(Ok((k, None))) = parse_reference(value) else {
+            continue;
+        };
+        let Some(schema) = param_schema(&spec.params_schema, name) else {
+            continue;
+        };
+        if !is_raster_path(&schema, &spec.params_schema) {
+            continue;
+        }
+        if let Some(line) = journal_steps.get(k - 1) {
+            out.insert(name.clone(), Value::String(format!("out:{line}.1")));
+        }
+    }
+    Value::Object(out)
+}
+
 /// Remplace, dans les paramètres de l'étape `step`, chaque référence de premier niveau par
 /// la valeur obtenue : `step:<k>` par la sortie entière de l'étape `k`, `step:<k>.<champ>`
 /// par ce champ de sa sortie. `outputs` porte les sorties déjà obtenues, l'étape 1 en
@@ -217,6 +247,32 @@ impl Registry {
                             ),
                         )
                     })?;
+                    // Un raster se désigne par `step:k`, l'étape k écrivant exactement un raster
+                    // (amendement du 2026-11-05 d'AD-24) ; jamais par un champ de sa sortie, qui
+                    // ferait journaliser un chemin résolu au lieu du repère `out:k.n`.
+                    if is_raster_path(&expected, &spec.params_schema) {
+                        if field.is_some() {
+                            return Err(error(
+                                "plan.bad_reference",
+                                step,
+                                format!(
+                                    "le paramètre « {name} » de {} est un raster : désignez le raster par step:{k}, sans champ.",
+                                    spec.id
+                                ),
+                            ));
+                        }
+                        if !writes_one_raster(source) {
+                            return Err(error(
+                                "plan.type_mismatch",
+                                step,
+                                format!(
+                                    "Le paramètre « {name} » de {} attend un raster, mais l'étape {k} ({}) n'en écrit pas.",
+                                    spec.id, source.id
+                                ),
+                            ));
+                        }
+                        continue;
+                    }
                     let given = match &field {
                         None => normalize(&source.output_schema, &source.output_schema, 0),
                         Some(f) => {
@@ -742,5 +798,86 @@ mod tests {
         let a = json!({"$ref": "#/$defs/A", "description": "d"});
         let b = json!({"type": "string", "$schema": "s"});
         assert_eq!(normalize(&a, &root, 0), normalize(&b, &b, 0));
+    }
+
+    // ---- `RasterPath` cité par `step:k` (ticket 11.5) ----
+
+    fn slope_then(second: Value) -> Plan {
+        plan(json!([
+            {"command": "terrain.slope", "params": {"dem": "mnt.tif", "unit": "degrees"}},
+            second
+        ]))
+    }
+
+    fn observer() -> Value {
+        json!({"x": 652030, "y": 6850250, "epsg": 2154})
+    }
+
+    #[test]
+    fn a_raster_is_cited_by_step_of_a_step_that_writes_one() {
+        let r = Registry::standard();
+        let p = slope_then(json!({"command": "terrain.viewshed",
+            "params": {"dem": "step:1", "observer": observer()}}));
+        assert_eq!(r.check_plan(&p), Ok(()));
+        let p = slope_then(json!({"command": "terrain.slope",
+            "params": {"dem": "step:1", "unit": "percent"}}));
+        assert_eq!(r.check_plan(&p), Ok(()));
+    }
+
+    #[test]
+    fn a_raster_cited_by_a_field_of_the_output_is_refused() {
+        let r = Registry::standard();
+        let p = slope_then(json!({"command": "terrain.viewshed",
+            "params": {"dem": "step:1.file", "observer": observer()}}));
+        let err = r.check_plan(&p).unwrap_err();
+        assert_eq!((err.code, err.step), ("plan.bad_reference", 2));
+        assert!(
+            err.message.contains("step:1, sans champ"),
+            "{}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn a_raster_cited_from_a_step_without_raster_is_a_type_mismatch() {
+        let r = Registry::standard();
+        let p = plan(json!([
+            {"command": "analysis.buffer", "params": {"layer_id": "a",
+                "distance": {"value": 10, "unit": "m"}}},
+            {"command": "terrain.slope", "params": {"dem": "step:1", "unit": "degrees"}}
+        ]));
+        let err = r.check_plan(&p).unwrap_err();
+        assert_eq!((err.code, err.step), ("plan.type_mismatch", 2));
+        assert!(err.message.contains("analysis.buffer"), "{}", err.message);
+        // Un point, ou une ligne de vue (qui n'écrit pas de raster), non plus.
+        let p = plan(json!([
+            {"command": "terrain.line_of_sight", "params": {"dem": "mnt.tif",
+                "observer": observer(), "target": observer()}},
+            {"command": "terrain.slope", "params": {"dem": "step:1", "unit": "degrees"}}
+        ]));
+        assert_eq!(r.check_plan(&p).unwrap_err().code, "plan.type_mismatch");
+    }
+
+    #[test]
+    fn raster_markers_use_the_journal_line_of_the_cited_step() {
+        let r = Registry::standard();
+        let spec = r.spec("terrain.viewshed").unwrap();
+        let params = json!({"dem": "step:1", "observer": observer()});
+        // L'étape 1 du plan est la ligne 3 du journal (deux lignes avant le plan).
+        let marked = raster_markers(spec, &params, &[3, 5]);
+        assert_eq!(marked["dem"], json!("out:3.1"));
+        assert_eq!(marked["observer"], observer());
+        // Un chemin, une étape pas encore exécutée, ou un autre paramètre restent intacts.
+        let path = json!({"dem": "mnt.tif", "observer": observer()});
+        assert_eq!(raster_markers(spec, &path, &[3]), path);
+        assert_eq!(raster_markers(spec, &params, &[]), params);
+        let point = r.spec("terrain.line_of_sight").unwrap();
+        let other = json!({"dem": "mnt.tif", "observer": "step:1", "target": observer()});
+        assert_eq!(raster_markers(point, &other, &[1]), other);
+        // Le repère passe ensuite intact par `resolve_references`.
+        assert_eq!(
+            resolve_references(&marked, &[json!({})], 2).unwrap(),
+            marked
+        );
     }
 }
