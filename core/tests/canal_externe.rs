@@ -622,7 +622,10 @@ fn a_relay_that_stops_reading_does_not_hold_the_switch_off() {
     s.switch_on();
     // Des relais qui demandent sans jamais lire : l'écrivain de chaque connexion finit bloqué,
     // le tampon du système plein de catalogues. L'échéance des adieux est commune : quatre
-    // relais muets retiennent l'extinction une demi-seconde, pas deux.
+    // relais muets retiennent l'extinction une demi-seconde, pas deux. Les lignes qu'un lecteur
+    // n'a pas encore traitées à l'extinction ne le sont plus (5.43). Le seuil d'une seconde passe
+    // entre l'échéance commune (≈ 0,5 s) et une échéance par connexion (≈ 2 s) ; il casse aussi,
+    // sous charge, si les lignes en file sont de nouveau traitées (1,2 à 1,5 s mesurées).
     let attach = json!({"jsonrpc":"2.0","id":1,"method":"external.attach",
         "params":{"protocol_version":PROTOCOL_VERSION}});
     let mutes: Vec<external::Stream> = (0..4)
@@ -634,14 +637,14 @@ fn a_relay_that_stops_reading_does_not_hold_the_switch_off() {
             mute
         })
         .collect();
-    // Un appel de l'extension passe après toutes ces lignes : elles sont traitées.
+    // Malgré ces lignes, l'extension reçoit sa réponse.
     let r = s.request("command.run", json!({"command": "system.about"}));
     assert!(r["result"].is_object(), "{r}");
     let started = std::time::Instant::now();
     let off = s.switch(json!({"enabled": false}));
     assert_eq!(off["result"], json!({"enabled": false}));
     assert!(
-        started.elapsed() < Duration::from_millis(1500),
+        started.elapsed() < Duration::from_millis(1000),
         "l'extinction a pris {:?}",
         started.elapsed()
     );
