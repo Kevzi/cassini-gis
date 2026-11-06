@@ -1031,6 +1031,7 @@ mod tests {
             "terrain.aspect",
             "terrain.hillshade",
             "terrain.viewshed_cumulative",
+            "terrain.peaks",
         ] {
             let spec = reg.spec(id).unwrap();
             let entry = catalog_entry(spec);
@@ -1051,6 +1052,11 @@ mod tests {
         let observers = &cumulative["params"]["properties"]["observers"];
         assert_eq!(observers["maxItems"], json!(32), "{cumulative}");
         assert_eq!(observers["minItems"], json!(1), "{cumulative}");
+        // Le nombre de points hauts reste borné pour le modèle (AD-8).
+        let peaks = catalog_entry(reg.spec("terrain.peaks").unwrap());
+        let max_count = &peaks["params"]["properties"]["max_count"];
+        assert_eq!(max_count["minimum"], json!(1), "{peaks}");
+        assert_eq!(max_count["maximum"], json!(100), "{peaks}");
         let isochrone = catalog_entry(reg.spec("analysis.isochrone").unwrap());
         assert!(isochrone["params"]["$defs"]["Point"].is_object());
         assert!(!isochrone.to_string().contains("x-cassini"));
