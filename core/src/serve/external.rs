@@ -50,11 +50,20 @@ struct Conn {
     /// Se ferme quand l'écrivain a fini (tout écrit, ou panne).
     written: Receiver<()>,
     stream: Stream,
+    /// Levé quand la boucle retire la connexion : le fil lecteur finit au plus la ligne en cours,
+    /// puis n'en traite plus aucune, même déjà reçue ; l'attente de sa fin ne dépend donc pas de
+    /// tout ce que le relais a envoyé.
+    retired: Arc<AtomicBool>,
     reader: JoinHandle<()>,
     writer: JoinHandle<()>,
 }
 
 impl Conn {
+    /// Le fil lecteur s'arrête avant sa prochaine ligne.
+    fn retire(&self) {
+        self.retired.store(true, Ordering::SeqCst);
+    }
+
     /// Confie `farewell` à l'écrivain et ferme sa file : il écrit ce qui reste, puis s'arrête.
     fn farewell(&mut self, farewell: &Value) {
         if let Some(out) = self.out.take() {
@@ -65,6 +74,7 @@ impl Conn {
     /// Laisse l'écrivain finir jusqu'à `deadline` (aucune attente sans échéance), puis coupe la
     /// connexion et attend ses deux fils, qui rendent aussitôt la main.
     fn finish(mut self, deadline: Option<Instant>) {
+        self.retire();
         drop(self.out.take());
         if let Some(deadline) = deadline {
             let _ = self
@@ -259,6 +269,11 @@ impl Hub {
             .unwrap_or_default();
         // Tous les adieux partent d'abord, puis une seule échéance vaut pour tous les relais :
         // ceux qui ne lisent plus retiennent la session au plus `FAREWELL` en tout (AD-4).
+        // Les lecteurs cessent d'abord de traiter les lignes en file : un relais qui a beaucoup
+        // envoyé ne retient pas l'extinction au-delà de l'échéance.
+        for conn in &conns {
+            conn.retire();
+        }
         let farewell = session_lost(why);
         for conn in &mut conns {
             conn.farewell(&farewell);
@@ -465,13 +480,21 @@ fn start_conn(stream: Stream, shared: &Arc<Shared>, tx: &Sender<Msg>) {
     });
     let tx = tx.clone();
     let reader_shared = shared.clone();
+    let retired = Arc::new(AtomicBool::new(false));
+    let reader_retired = retired.clone();
     let reader = thread::spawn(move || {
         let shared = reader_shared;
         let mut input = BufReader::new(read_half);
         let mut buf = Vec::new();
         loop {
             buf.clear();
-            match input.read_until(b'\n', &mut buf) {
+            let read = input.read_until(b'\n', &mut buf);
+            // Connexion retirée par la boucle : rien à traiter, et pas de `Msg::Detached`, même
+            // en fin de flux, puisque la connexion n'est déjà plus dans la table.
+            if reader_retired.load(Ordering::SeqCst) {
+                return;
+            }
+            match read {
                 Ok(0) | Err(_) => break,
                 Ok(_) => {
                     let text = String::from_utf8_lossy(&buf);
@@ -490,6 +513,7 @@ fn start_conn(stream: Stream, shared: &Arc<Shared>, tx: &Sender<Msg>) {
             out: Some(out),
             written,
             stream,
+            retired,
             reader,
             writer,
         },

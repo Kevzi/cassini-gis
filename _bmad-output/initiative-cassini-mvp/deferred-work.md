@@ -717,3 +717,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-reclassement-et-superposition-ponderee-de-rasters-plan.md`
   summary: Jusqu'à l'entrée qui traduira `step:k` dans les éléments d'une liste, la vérification du plan (`core/src/plan.rs`) accepte un `step:k` écrit dans `criteria[i].raster` ou `exclusions[i]`, que le journal ouvre ensuite comme un fichier du projet (erreur « fichier introuvable » tardive) ; à refuser tôt par `plan.bad_reference`, ou à traiter dans cette même entrée.
   evidence: relecture `thorough` de 11.9 (blind-hunter, edge-case-hunter) ; `raster_markers` ne lit que les paramètres de premier niveau, tandis que `resolve_param` du journal descend désormais dans `liste.champ`.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/bug-le-test-d-extinction-du-canal-d-ia-externe-avec-des-relais-m-plan.md`
+  summary: Le test a_relay_that_stops_reading_does_not_hold_the_switch_off ne prouve le garde-fou des lignes en file (5.43) que sous charge ; au repos, sa suppression passerait sous le seuil d'1 s.
+  evidence: Mesure du 2026-11-06 sous Windows : sans correctif, 0,79 s au repos, et de 1,27 à 1,49 s sous charge (la mutation échoue 3 fois sur 3). Il faudrait un test qui compte les réponses traitées après l'extinction, ou une inondation plus forte sans faire exploser la mémoire.
