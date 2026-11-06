@@ -266,7 +266,7 @@ constante du noyau. Posé par l'entrée 1 de l'epic 10.
 | `terrain.hillshade` | faite | core | epic 11, entrée 6 |
 | `terrain.viewshed_cumulative` | faite | core | epic 11, entrée 7 |
 | `layer.open_vector` | faite (dictée) | qgis | epic 11, entrée 8 |
-| `terrain.peaks` | planifiée | core | epic 11, entrée 15 |
+| `terrain.peaks` | faite | core | epic 11, entrée 15 |
 | `raster.reclassify` | planifiée | core | epic 11, entrée 9 |
 | `raster.weighted_overlay` | planifiée | core | epic 11, entrée 9 |
 | `terrain.cost_distance` | planifiée | core | epic 11, entrée 10 |
@@ -1012,10 +1012,6 @@ propriétaire, 2026-11-06 : gardé tel quel, et dit). Livrée par l'entrée 7 de
  "result": ["file", "max_count", "nodata_cells", "observer_count", "visible_cells"]}
 ```
 
----
-
-## 6. Commandes planifiées — epic 11, géométrie et terrain étendu
-
 ### `terrain.peaks`
 
 Sommets d'un MNT : cellules plus hautes que leurs 8 voisines, de proéminence et d'écart
@@ -1037,12 +1033,24 @@ pour le plus haut), `elevation` et `prominence` (nombres, en mètres).
 |---|---|---|
 | `file` | chaîne | GeoJSON écrit (format de 2008, `crs` du MNT). |
 | `feature_count` | entier | Sommets écrits. |
-| `peaks` | liste de `{point: Point, elevation, prominence}`, 100 au plus | Sommets, du plus haut au plus bas, utilisables comme références d'étape. |
+| `peaks` | liste de `{point: Point, elevation, prominence}`, 100 au plus | Sommets, du plus haut au plus bas ; la liste entière se cite par `step:k.peaks`, un sommet seul ne se cite pas. |
 | `truncated` | booléen | Vrai si des sommets au-delà de `max_count` ont été écartés. |
 | `unit` | chaîne | Toujours `m`. |
 
+Égalité : une cellule n'est sommet que si aucune voisine n'est plus haute et qu'aucune
+voisine de même altitude ne la précède dans l'ordre de lecture (ligne, puis colonne) ; un
+plateau donne un sommet, sa première cellule, sauf un plateau non convexe, qui peut donner un
+second candidat de proéminence nulle, gardé seulement si `min_prominence` vaut 0. Bord : une cellule du bord du MNT, ou voisine
+d'un trou, n'est jamais un sommet, mais compte comme terrain pour la proéminence. Ordre total
+pour le tri et les égalités : altitude décroissante, puis ordre de lecture. Point au centre de
+la cellule. Un résultat vide est un succès, qui écrit un GeoJSON sans entité. Erreurs : celles
+de `dem.rs` telles quelles, `geojson.unwritable` à l'écriture ; `max_count` hors de 1 à 100,
+une hauteur négative ou une distance nulle sont refusés (`registry.invalid_params`). Calcul
+non annulable : au pire environ 15 octets par cellule en plus du MNT, soit environ 3,7 Gio
+de plus et de l'ordre d'une à deux minutes au plafond de 1 Gio. Livrée par l'entrée 15 de l'epic 11 (`core/src/commands/terrain_peaks.rs`).
+
 ```json fiche
-{"id": "terrain.peaks", "status": "planifiee", "runs_in": "core", "dictated_by_core": false,
+{"id": "terrain.peaks", "status": "faite", "runs_in": "core", "dictated_by_core": false,
  "params": {"dem": {"type": "RasterPath", "required": true},
             "min_prominence": {"type": "Height", "required": false},
             "min_distance": {"type": "Distance", "required": false},
@@ -1050,6 +1058,10 @@ pour le plus haut), `elevation` et `prominence` (nombres, en mètres).
             "out": {"type": "string", "required": false}},
  "result": ["feature_count", "file", "peaks", "truncated", "unit"]}
 ```
+
+---
+
+## 6. Commandes planifiées — epic 11, géométrie et terrain étendu
 
 ### `raster.reclassify`
 

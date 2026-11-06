@@ -6,6 +6,7 @@
 include!(concat!(env!("OUT_DIR"), "/commands_mods.rs"));
 
 use crate::dem::DemError;
+use crate::geojson::GeojsonError;
 use crate::registry::CommandFailure;
 
 /// Une erreur du module `dem` devient l'échec typé de la commande qui l'a rencontrée, code et
@@ -13,6 +14,14 @@ use crate::registry::CommandFailure;
 /// registre et reste remplaçable seul (AD-20).
 impl From<DemError> for CommandFailure {
     fn from(e: DemError) -> Self {
+        CommandFailure::new(e.code, e.message)
+    }
+}
+
+/// Une erreur de l'écrivain GeoJSON devient l'échec typé de la commande, code
+/// (`geojson.unwritable`) et message tels quels, comme pour `dem` (AD-30).
+impl From<GeojsonError> for CommandFailure {
+    fn from(e: GeojsonError) -> Self {
         CommandFailure::new(e.code, e.message)
     }
 }
