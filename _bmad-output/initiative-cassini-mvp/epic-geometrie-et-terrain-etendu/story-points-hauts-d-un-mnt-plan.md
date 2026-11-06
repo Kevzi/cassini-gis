@@ -69,7 +69,7 @@ context:
 - [x] `core/src/commands/terrain_peaks.rs` -- commande, algorithme, tests de toute la matrice hors QGIS (dont le test « la commande court dans le noyau et le contrat l'accepte » des autres terrains, et deux exécutions identiques).
 - [x] `ai/src/plan.rs` -- commande vue par le prompt sans `RasterPath`, `max_count` borné.
 - [x] `catalogue-des-commandes.md`, `deferred-work.md` -- fiche en `faite`, même commit.
-- [ ] Poste du propriétaire -- installer noyau et extension (mémoire « Mettre à jour QGIS et le noyau »), lancer `terrain.peaks` sur le MNT du projet test dans QGIS 3.44, puis `journal.replay`.
+- [x] Poste du propriétaire -- installer noyau et extension (mémoire « Mettre à jour QGIS et le noyau »), lancer `terrain.peaks` sur le MNT du projet test dans QGIS 3.44, puis `journal.replay`.
 
 **Acceptance Criteria:**
 - Given le noyau sans QGIS, when `cargo test --workspace`, then tout passe, dont `catalogue` avec la fiche `faite`.
@@ -98,7 +98,7 @@ Boucle 0 (relecture quick) — high 0, medium 0, low 6, false 1, maybe-false 0, 
 | Règle du plateau énoncée sans l'exception du plateau non convexe | low | patch | Second candidat de proéminence 0 gardé si `min_prominence` = 0 ; une clause dans doc et fiche |
 | Ligne « MNT refusé » : aucun MNT géographique éprouvé | low | patch | Cas EPSG:4326 ajouté au test, `dem.not_projected`, rien d'écrit |
 | Proéminence du plus haut sommet retenu quand le culminant est au bord : deux lectures, test indiscernable | low | intent_gap → décision | Propriétaire : proéminence au col (lecture du catalogue, code inchangé) ; test refait avec col 13 m ≠ cellule basse −50 m, 17 m attendus |
-| Critère QGIS non joué avec le noyau installé | medium | reste à faire | Sonde jouée avec `C:\ct\release\cassini.exe` ; l'installation attend l'arrêt du `cassini.exe` qui verrouille le fichier |
+| Critère QGIS non joué avec le noyau installé | medium | reste à faire | Sonde jouée avec `C:\ct\release\cassini.exe` ; fait ensuite : `cassini.exe` arrêté par le propriétaire, noyau `--features gpu` installé (ancien en `cassini.exe.avant-11-15`), sonde rejouée sur `projet-sonde-11-15-installe.qgz` : 20 sommets, couche EPSG:2154, rejeu `identical: true`, mêmes entités |
 
 Vérification après patchs (WSL) : `cargo fmt --all --check` OK ; `cargo clippy -p cassini-core --all-targets -D warnings` OK ; `cargo test -p cassini-core` 493 + recettes vertes, sauf `canal_externe::closing_the_input_warns_the_relays_and_removes_the_channel`, délai dépassé sous charge, vert 3 fois sur 3 seul (fichier non touché par ce changement).
 
