@@ -7,7 +7,7 @@
 
 use std::fmt;
 
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::point::is_point;
 use crate::registry::{CommandSpec, Registry, RunsIn};
@@ -166,13 +166,25 @@ fn check_path_params(spec: &CommandSpec, out: &mut Vec<ContractViolation>) {
             &spec.output_params,
         ),
     ];
+    let root = &spec.params_schema;
     for (code, kind, names) in named {
         for name in names {
-            let property = spec
-                .params_schema
-                .get("properties")
-                .and_then(|p| p.get(name.as_str()));
+            let top = |n: &str| root.get("properties").and_then(|p| p.get(n));
+            // `liste.champ` (chemins seulement) : le champ des éléments du tableau `liste`.
+            let property = match name.split_once('.') {
+                Some((list, field)) if kind == "path_params" => top(list)
+                    .and_then(|l| find(l, root, 0, &|m| m.get("items")))
+                    .and_then(|items| {
+                        find(items, root, 0, &|m| {
+                            m.get("properties").and_then(|p| p.get(field))
+                        })
+                    }),
+                _ => top(name),
+            };
             let message = match property {
+                None if name.contains('.') && kind == "path_params" => format!(
+                    "`{kind}` nomme « {name} », dont le champ n'est pas celui des éléments d'un tableau du schéma des paramètres."
+                ),
                 None => format!(
                     "`{kind}` nomme « {name} », absent des propriétés du schéma des paramètres."
                 ),
@@ -184,6 +196,37 @@ fn check_path_params(spec: &CommandSpec, out: &mut Vec<ContractViolation>) {
             out.push(violation(code, &spec.id, &message));
         }
     }
+}
+
+/// Premier sous-schéma que `pick` trouve dans `schema`, en suivant les `$ref` internes et les
+/// alternatives `anyOf`/`oneOf`/`allOf` (un `Option<Vec<…>>` s'engendre en `anyOf`).
+fn find<'a>(
+    schema: &'a Value,
+    root: &'a Value,
+    depth: usize,
+    pick: &dyn Fn(&'a Map<String, Value>) -> Option<&'a Value>,
+) -> Option<&'a Value> {
+    if depth > 8 {
+        return None;
+    }
+    let Value::Object(map) = schema else {
+        return None;
+    };
+    if let Some(found) = pick(map) {
+        return Some(found);
+    }
+    if let Some(Value::String(target)) = map.get("$ref") {
+        if let Some(resolved) = target.strip_prefix('#').and_then(|p| root.pointer(p)) {
+            if let Some(found) = find(resolved, root, depth + 1, pick) {
+                return Some(found);
+            }
+        }
+    }
+    ["anyOf", "oneOf", "allOf"].iter().find_map(|key| {
+        map.get(*key)
+            .and_then(Value::as_array)
+            .and_then(|alts| alts.iter().find_map(|a| find(a, root, depth + 1, pick)))
+    })
 }
 
 /// Le sous-schéma accepte-t-il une chaîne (directement, en tableau de chaînes,
@@ -577,6 +620,44 @@ mod tests {
         });
         s.path_params(&["path", "inputs"]).output_params(&["out"])
     });
+    /// Schéma d'une liste de critères `{raster, weight}`, facultative ou non.
+    fn criteria_schema() -> Value {
+        json!({
+            "$schema": DIALECT,
+            "type": "object",
+            "properties": {
+                "criteria": {"type": "array", "items": {"$ref": "#/$defs/Criterion"}},
+                "masks": {"anyOf": [
+                    {"type": "array", "items": {"$ref": "#/$defs/Criterion"}},
+                    {"type": "null"}
+                ]},
+                "single": {"$ref": "#/$defs/Criterion"}
+            },
+            "$defs": {
+                "Criterion": {"type": "object", "properties": {
+                    "raster": {"$ref": "#/$defs/Name"},
+                    "weight": {"type": "number"}
+                }},
+                "Name": {"type": "string"}
+            }
+        })
+    }
+    command!(NestedPathParamsWellFormed, |mut s| {
+        s.params_schema = criteria_schema();
+        s.path_params(&["criteria.raster", "masks.raster"])
+    });
+    command!(NestedPathParamMissing, |mut s| {
+        s.params_schema = criteria_schema();
+        s.path_params(&["criteria.path"])
+    });
+    command!(NestedPathParamNotString, |mut s| {
+        s.params_schema = criteria_schema();
+        s.path_params(&["criteria.weight"])
+    });
+    command!(NestedPathParamNotInAList, |mut s| {
+        s.params_schema = criteria_schema();
+        s.path_params(&["single.raster"])
+    });
     command!(FirstOfTwin, |s| s);
     command!(SecondOfTwin, |mut s| {
         s.description_fr = "Une autre description.".into();
@@ -706,6 +787,30 @@ mod tests {
     fn a_path_param_must_accept_a_string() {
         assert_eq!(codes(&only(PathParamNotString)), ["contract.path_param"]);
         assert!(only(PathParamsWellFormed).check_contract().is_empty());
+    }
+
+    #[test]
+    fn a_nested_path_param_names_a_string_field_of_list_items() {
+        assert!(
+            only(NestedPathParamsWellFormed).check_contract().is_empty(),
+            "{:?}",
+            only(NestedPathParamsWellFormed).check_contract()
+        );
+        let missing = only(NestedPathParamMissing).check_contract();
+        assert_eq!(
+            codes(&only(NestedPathParamMissing)),
+            ["contract.path_param"]
+        );
+        assert!(missing[0].message.contains("criteria.path"), "{missing:?}");
+        assert_eq!(
+            codes(&only(NestedPathParamNotString)),
+            ["contract.path_param"]
+        );
+        // Un objet hors d'un tableau n'est pas une liste : refusé.
+        assert_eq!(
+            codes(&only(NestedPathParamNotInAList)),
+            ["contract.path_param"]
+        );
     }
 
     #[test]

@@ -658,8 +658,24 @@ impl Resolver<'_> {
 
         let mut inputs = Vec::new();
         for name in &spec.path_params {
-            if let (Some(l), Some(e)) = (logged.get_mut(name), exec.get_mut(name)) {
-                self.resolve_param(l, e, &mut inputs, prior)?;
+            match name.split_once('.') {
+                None => {
+                    if let (Some(l), Some(e)) = (logged.get_mut(name), exec.get_mut(name)) {
+                        self.resolve_param(l, e, &mut inputs, prior)?;
+                    }
+                }
+                // `liste.champ` : le champ de chaque objet du tableau, dans l'ordre (ticket 11.9).
+                Some((list, field)) => {
+                    if let (Some(Value::Array(ls)), Some(Value::Array(es))) =
+                        (logged.get_mut(list), exec.get_mut(list))
+                    {
+                        for (l, e) in ls.iter_mut().zip(es.iter_mut()) {
+                            if let (Some(l), Some(e)) = (l.get_mut(field), e.get_mut(field)) {
+                                self.resolve_param(l, e, &mut inputs, prior)?;
+                            }
+                        }
+                    }
+                }
             }
         }
         Ok(Resolved {

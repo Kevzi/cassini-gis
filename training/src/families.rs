@@ -3923,8 +3923,10 @@ mod tests {
         let registry = cassini_core::registry::Registry::standard();
         for spec in registry.specs() {
             let id = spec.id.as_str();
-            // Ni seuil ni reclassement d'un raster.
-            for word in ["threshold", "reclass", "raster_calc"] {
+            // Ni seuil ni calculatrice raster. `raster.reclassify` est arrivé à l'entrée 11.9 :
+            // le refus du seuil sur la pente (`NO_RASTER_THRESHOLD`) est à revoir au
+            // ré-entraînement (entrée 12), noté dans `deferred-work.md`.
+            for word in ["threshold", "raster_calc"] {
                 assert!(!id.contains(word), "{id}");
             }
             for word in ["zoom", "frame", "extent", "pan", "center", "centre", "cadr"] {

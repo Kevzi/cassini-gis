@@ -242,6 +242,56 @@ impl Dem {
         }
     }
 
+    /// Premier écart entre la grille de `other` et celle-ci, décrit en français, ou `None` si
+    /// les deux grilles sont identiques au sens d'AD-20 : mêmes code EPSG et dimensions, taille
+    /// de cellule et origine à moins d'un millionième de cellule (cellule de `self`). Ordre du
+    /// contrôle : système, dimensions, taille de cellule, origine. Aucune grille n'est
+    /// rééchantillonnée : la commande qui combine des rasters refuse l'écart (AD-19, AD-20).
+    pub fn grid_mismatch(&self, other: &Dem) -> Option<String> {
+        if self.epsg != other.epsg {
+            return Some(format!(
+                "système EPSG:{} au lieu d'EPSG:{}",
+                other.epsg, self.epsg
+            ));
+        }
+        if (self.width, self.height) != (other.width, other.height) {
+            return Some(format!(
+                "dimensions {} × {} cellules au lieu de {} × {}",
+                other.width, other.height, self.width, self.height
+            ));
+        }
+        let tolerance = |cell: f64| cell.abs() * 1e-6;
+        if (other.cell_size_x - self.cell_size_x).abs() > tolerance(self.cell_size_x)
+            || (other.cell_size_y - self.cell_size_y).abs() > tolerance(self.cell_size_y)
+        {
+            return Some(format!(
+                "taille de cellule {} × {} m au lieu de {} × {} m",
+                french(other.cell_size_x),
+                french(other.cell_size_y),
+                french(self.cell_size_x),
+                french(self.cell_size_y)
+            ));
+        }
+        for (axis, mine, theirs, cell) in [
+            ("x", self.origin_x, other.origin_x, self.cell_size_x),
+            ("y", self.origin_y, other.origin_y, self.cell_size_y),
+        ] {
+            let shift = theirs - mine;
+            if shift.abs() > tolerance(cell) {
+                let cells = shift / cell;
+                let plural = if cells.abs() >= 2.0 { "s" } else { "" };
+                return Some(format!(
+                    "origine {axis} décalée de {} m ({} cellule{plural}) : {} au lieu de {}",
+                    french(shift),
+                    french(cells),
+                    french(theirs),
+                    french(mine)
+                ));
+            }
+        }
+        None
+    }
+
     /// Écrit la grille en GeoTIFF Float32 compressé deflate. Déterministe : aucune date ni
     /// aucun logiciel n'est écrit, les octets ne dépendent que de la grille.
     pub fn write_geotiff(&self, path: &Path) -> Result<(), DemError> {
@@ -528,6 +578,14 @@ fn map_read_error(e: TiffError) -> DemError {
         }
         e => DemError::unreadable(format!("TIFF illisible : {e}.")),
     }
+}
+
+/// Nombre écrit à la française pour un message : arrondi au millionième, virgule décimale.
+fn french(v: f64) -> String {
+    let rounded = (v * 1e6).round() / 1e6;
+    // `-0` s'écrit `0`.
+    let rounded = if rounded == 0.0 { 0.0 } else { rounded };
+    format!("{rounded}").replace('.', ",")
 }
 
 #[cfg(test)]
@@ -1155,5 +1213,99 @@ mod tests {
             ..plan_incline()
         };
         assert_eq!(dem.value(5, 5), None);
+    }
+
+    #[test]
+    fn identical_grids_have_no_mismatch() {
+        let a = plan_incline();
+        let b = Dem {
+            values: vec![0.0; a.values.len()],
+            nodata: None,
+            ..a.clone()
+        };
+        assert_eq!(a.grid_mismatch(&b), None);
+        assert_eq!(b.grid_mismatch(&a), None);
+    }
+
+    #[test]
+    fn a_shift_below_a_millionth_of_a_cell_is_accepted() {
+        let a = plan_incline();
+        let tiny = a.cell_size_x * 5e-7;
+        let b = Dem {
+            origin_x: a.origin_x + tiny,
+            origin_y: a.origin_y - tiny,
+            cell_size_x: a.cell_size_x + tiny,
+            ..a.clone()
+        };
+        assert_eq!(a.grid_mismatch(&b), None);
+    }
+
+    #[test]
+    fn a_shifted_origin_is_named_with_its_size_and_values() {
+        let a = plan_incline();
+        let half = a.cell_size_x / 2.0;
+        let b = Dem {
+            origin_x: a.origin_x + half,
+            ..a.clone()
+        };
+        let message = a.grid_mismatch(&b).unwrap();
+        let expected = format!(
+            "origine x décalée de {} m (0,5 cellule) : {} au lieu de {}",
+            french(half),
+            french(b.origin_x),
+            french(a.origin_x)
+        );
+        assert_eq!(message, expected);
+        let c = Dem {
+            origin_y: a.origin_y - 2.0 * a.cell_size_y,
+            ..a.clone()
+        };
+        let message = a.grid_mismatch(&c).unwrap();
+        assert!(message.starts_with("origine y décalée de -"), "{message}");
+        assert!(message.contains("(-2 cellules)"), "{message}");
+    }
+
+    #[test]
+    fn other_differences_are_named_in_a_fixed_order() {
+        let a = plan_incline();
+        let dims = Dem {
+            width: a.width + 1,
+            values: vec![0.0; (a.width as usize + 1) * a.height as usize],
+            ..a.clone()
+        };
+        assert_eq!(
+            a.grid_mismatch(&dims).unwrap(),
+            format!(
+                "dimensions {} × {} cellules au lieu de {} × {}",
+                a.width + 1,
+                a.height,
+                a.width,
+                a.height
+            )
+        );
+        let cell = Dem {
+            cell_size_y: a.cell_size_y * 2.0,
+            ..a.clone()
+        };
+        let message = a.grid_mismatch(&cell).unwrap();
+        assert!(message.starts_with("taille de cellule "), "{message}");
+        // Système et dimensions différents : le système l'emporte.
+        let epsg = Dem {
+            epsg: 32631,
+            ..dims.clone()
+        };
+        assert_eq!(
+            a.grid_mismatch(&epsg).unwrap(),
+            "système EPSG:32631 au lieu d'EPSG:2154"
+        );
+    }
+
+    #[test]
+    fn numbers_in_messages_are_written_the_french_way() {
+        assert_eq!(french(0.5), "0,5");
+        assert_eq!(french(652000.0), "652000");
+        assert_eq!(french(-5.0), "-5");
+        assert_eq!(french(0.1 + 0.2), "0,3");
+        assert_eq!(french(-1e-9), "0");
     }
 }
