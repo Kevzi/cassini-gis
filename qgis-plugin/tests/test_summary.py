@@ -337,6 +337,71 @@ class GeoTest(unittest.TestCase):
         )
 
 
+TRANSFORM = {"point": {"x": 3, "y": 46.5, "epsg": 4326}, "target_epsg": 2154}
+TRANSFORM_OUT = {"point": {"x": 700000.0000004, "y": 6599999.99961, "epsg": 2154}}
+
+
+class TransformPointTest(unittest.TestCase):
+    def test_the_reprojected_point_is_shown_with_its_code(self):
+        self.assertEqual(
+            say("data.transform_point", TRANSFORM, TRANSFORM_OUT),
+            "Point reprojeté en EPSG:2154 : x 700000 ; y 6600000.",
+        )
+        self.assertEqual(
+            say("data.transform_point", TRANSFORM, TRANSFORM_OUT, lang="en"),
+            "Point reprojected to EPSG:2154: x 700000; y 6600000.",
+        )
+        decimals = {"point": {"x": 652000.25, "y": 6853000.5, "epsg": 2154}}
+        self.assertEqual(
+            say("data.transform_point", TRANSFORM, decimals),
+            "Point reprojeté en EPSG:2154 : x 652000,25 ; y 6853000,5.",
+        )
+
+    def test_wgs84_and_utm_targets_reuse_the_geo_forms(self):
+        back = {"point": {"x": 700000, "y": 6600000, "epsg": 2154}, "target_epsg": 4326}
+        self.assertEqual(
+            say("data.transform_point", back, {"point": {"x": 3.0, "y": 46.5, "epsg": 4326}}),
+            "Point reprojeté en EPSG:4326 : 46,5000000° N, 3,0000000° E.",
+        )
+        utm = dict(back, target_epsg=32631)
+        self.assertEqual(
+            say("data.transform_point", utm,
+                {"point": {"x": 500000.0, "y": 5150000.4, "epsg": 32631}}, lang="en"),
+            "Point reprojected to EPSG:32631: UTM 31N 500000 E, 5150000 N.",
+        )
+
+    def test_geographic_coordinates_of_another_system_keep_their_decimals(self):
+        rgf93 = dict(TRANSFORM, target_epsg=4171)
+        self.assertEqual(
+            say("data.transform_point", rgf93, {"point": {"x": 3.0, "y": 46.123456789, "epsg": 4171}},
+                lang="en"),
+            "Point reprojected to EPSG:4171: x 3; y 46.1234568.",
+        )
+
+    def test_without_result_only_the_target(self):
+        self.assertEqual(
+            say("data.transform_point", TRANSFORM), "Reprojection du point en EPSG:2154."
+        )
+        self.assertEqual(
+            say("data.transform_point", TRANSFORM, {}, lang="en"),
+            "Reprojection of the point to EPSG:2154.",
+        )
+
+    def test_unreadable_values_fall_back(self):
+        catalogue = [{"id": "data.transform_point", "description_fr": "Reprojette un point."}]
+        for params, result in [
+            ({"point": TRANSFORM["point"], "target_epsg": "2154"}, TRANSFORM_OUT),
+            (TRANSFORM, {"point": {"x": 1, "y": 2, "epsg": 4326}}),
+            (TRANSFORM, {"point": {"x": "1", "y": 2, "epsg": 2154}}),
+            (TRANSFORM, {"point": {"x": float("inf"), "y": 2, "epsg": 2154}}),
+            (TRANSFORM, {"point": [1, 2]}),
+        ]:
+            self.assertEqual(
+                say("data.transform_point", params, result, catalogue=catalogue),
+                "Reprojette un point. Terminée.",
+            )
+
+
 class ReferencesTest(unittest.TestCase):
     def test_step_reference_uses_the_name_rendered_by_the_step(self):
         params = {"layer_id": "parcelles_2", "overlay_layer_id": "step:1.layer_id"}

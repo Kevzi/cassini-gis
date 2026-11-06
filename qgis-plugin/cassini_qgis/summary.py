@@ -376,11 +376,23 @@ def _length(lang, value):
     return "%s m" % number(lang, round(metres, 3))
 
 
-def _point(lang, value):
-    """Un point rendu : latitude puis longitude en WGS84, ou zone et mètres en UTM."""
+def _point(lang, value, any_system=False):
+    """Un point rendu : latitude puis longitude en WGS84, ou zone et mètres en UTM ; avec
+    `any_system`, un autre système par x et y nommés (`x 700000 ; y 6600000`), son code étant
+    déjà nommé par la phrase."""
     if not isinstance(value, dict):
         raise _Unreadable()
-    if value.get("epsg") == 4326:
+    epsg = value.get("epsg")
+    if any_system and _is_int(epsg) and epsg != 4326 and not (
+        32601 <= epsg <= 32660 or 32701 <= epsg <= 32760
+    ):
+        return texts.tr(
+            lang,
+            "sum_point_xy",
+            x=_coordinate(lang, value.get("x")),
+            y=_coordinate(lang, value.get("y")),
+        )
+    if epsg == 4326:
         return "%s, %s" % (
             _degrees(lang, value.get("y"), "N", "S"),
             _degrees(lang, value.get("x"), "E", "W"),
@@ -392,6 +404,27 @@ def _point(lang, value):
         x=_metres(value.get("x")),
         y=_metres(value.get("y")),
     )
+
+
+def _coordinate(lang, value):
+    """Une coordonnée d'un système quelconque : au millimètre au-delà de 1000 (des mètres),
+    sinon à sept décimales (des degrés, le centimètre)."""
+    if not _is_number(value) or not math.isfinite(value):
+        raise _Unreadable()
+    return number(lang, round(float(value), 3 if abs(value) >= 1000 else 7))
+
+
+def _transform_point(lang, p, r, names):
+    """Le point reprojeté par QGIS ; affichage seul, aucun calcul (AD-5)."""
+    target = p.get("target_epsg")
+    if not _is_int(target):
+        raise _Unreadable()
+    if not r:
+        return texts.tr(lang, "sum_transform_point", epsg=target)
+    point = r.get("point")
+    if not isinstance(point, dict) or point.get("epsg") != target:
+        raise _Unreadable()
+    return texts.tr(lang, "sum_transformed_point", epsg=target, point=_point(lang, point, any_system=True))
 
 
 def _distance_azimuth(lang, p, r, names):
@@ -442,6 +475,7 @@ _SENTENCES = {
     "geo.distance_azimuth": _distance_azimuth,
     "geo.destination_point": _destination_point,
     "geo.bearing_intersection": _bearing_intersection,
+    "data.transform_point": _transform_point,
     "analysis.buffer": _buffer,
     "analysis.intersect": _intersect,
     "analysis.select_by_attribute": _select,

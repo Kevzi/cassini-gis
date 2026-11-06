@@ -255,7 +255,7 @@ constante du noyau. Posé par l'entrée 1 de l'epic 10.
 | `geo.distance_azimuth` | faite | core | epic 11, entrée 3 |
 | `geo.destination_point` | faite | core | epic 11, entrée 3 |
 | `geo.bearing_intersection` | faite | core | epic 11, entrée 3 |
-| `data.transform_point` | planifiée | qgis | epic 11, entrée 4 |
+| `data.transform_point` | faite | qgis | epic 11, entrée 4 |
 | `terrain.aspect` | planifiée | core | epic 11, entrée 6 |
 | `terrain.hillshade` | planifiée | core | epic 11, entrée 6 |
 | `terrain.viewshed_cumulative` | planifiée | core | epic 11, entrée 7 |
@@ -854,10 +854,6 @@ WGS84 hors de [-90, 90] ou [-180, 180], point UTM hors de sa zone, coordonnées 
  "result": ["point", "distance_from_first", "distance_from_second"]}
 ```
 
----
-
-## 6. Commandes planifiées — epic 11, géométrie et terrain étendu
-
 ### `data.transform_point`
 
 Reprojection d'un point vers un système quelconque, **par QGIS** (AD-19, AD-31) : relie un
@@ -872,14 +868,25 @@ point WGS84 ou UTM au système d'un MNT, ou un point Lambert-93 à la géodésie
 |---|---|---|
 | `point` | `Point` | Point reprojeté, `epsg` égal à `target_epsg`. |
 
-Erreurs : `data.unknown_crs` (code EPSG inconnu de QGIS, source ou cible).
+Même code source et cible : le point est rendu tel quel. La reprojection est celle de QGIS
+(`QgsCoordinateTransform`, contexte de transformation du projet), jamais du noyau ; aucune
+couche n'est créée, aucun fichier écrit. Livrée par l'entrée 4 de l'epic 11
+(`core/src/commands/data_transform_point.rs`, geste dédié `qgis-plugin/cassini_qgis/point_transform.py`).
+Erreurs : `data.unknown_crs` (code EPSG inconnu de QGIS, source ou cible ; le message nomme le
+code fautif) ; `data.transform_failed` (point que QGIS ne sait pas reprojeter : hors du
+domaine du système, ou résultat non fini) ; `registry.invalid_params` (paramètre absent,
+code négatif ou non entier, champ en trop).
 
 ```json fiche
-{"id": "data.transform_point", "status": "planifiee", "runs_in": "qgis", "dictated_by_core": false,
+{"id": "data.transform_point", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
  "params": {"point": {"type": "Point", "required": true},
             "target_epsg": {"type": "integer", "required": true}},
  "result": ["point"]}
 ```
+
+---
+
+## 6. Commandes planifiées — epic 11, géométrie et terrain étendu
 
 ### `terrain.aspect`
 
