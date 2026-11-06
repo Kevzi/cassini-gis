@@ -205,8 +205,13 @@ impl Relay {
     /// Écrit une ligne ; une écriture en panne coupe la connexion, et le fil lecteur solde alors
     /// les attentes par une perte.
     fn write(&self, message: &Value) {
+        // Le message et sa fin de ligne partent en une seule écriture : formatée sur la
+        // connexion, qui n'a pas de tampon, une valeur JSON partirait en un appel système par
+        // morceau (5.44).
+        let mut line = serde_json::to_vec(message).expect("une valeur JSON se sérialise toujours");
+        line.push(b'\n');
         let mut writer = lock(&self.writer);
-        if writeln!(writer, "{message}").is_err() {
+        if writer.write_all(&line).is_err() {
             self.stream.shutdown();
         }
     }

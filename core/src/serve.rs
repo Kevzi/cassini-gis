@@ -213,7 +213,7 @@ impl Link<'_> {
 
     fn send(&self, message: &Value) -> io::Result<()> {
         let mut out = self.out.borrow_mut();
-        writeln!(out, "{message}")?;
+        out.write_all(&line_of(message))?;
         out.flush()
     }
 
@@ -393,6 +393,16 @@ fn serve_with<'a>(
         link.external.close(external::Lost::SessionEnded);
         outcome
     })
+}
+
+/// Un message du canal, sérialisé d'un bloc et suivi de sa fin de ligne (AD-3) : il part en une
+/// seule écriture. Formaté sur la sortie, il partait en milliers de petits morceaux ; la sortie
+/// standard les regroupe, mais un écrivain sans tampon les reçoit un à un, et l'écrivain des
+/// tests y passait 3,4 s par réponse à `session.hello` (le catalogue entier, ticket 5.44).
+fn line_of(message: &Value) -> Vec<u8> {
+    let mut line = serde_json::to_vec(message).expect("une valeur JSON se sérialise toujours");
+    line.push(b'\n');
+    line
 }
 
 fn error_response(id: Value, e: RpcError) -> Value {
@@ -1044,6 +1054,53 @@ mod tests {
         response["error"]["data"]["code"].as_str().unwrap()
     }
 
+    /// Garde chaque appel à `write` à part, pour compter les morceaux d'un message.
+    struct Calls(Vec<Vec<u8>>);
+
+    impl Write for Calls {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0.push(bytes.to_vec());
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn each_message_leaves_in_a_single_write_with_its_end_of_line() {
+        // Ticket 5.44 : la réponse à session.hello porte tout le catalogue ; écrite en morceaux,
+        // elle coûtait 3,4 s de processeur à chaque poignée de main dans les tests.
+        let dir = temp_dir();
+        let project = project_in(&dir);
+        let registry = Registry::standard();
+        let input = Cursor::new(
+            [
+                hello_line(2, &[], &project),
+                run_line(2, "system.about", json!({})),
+            ]
+            .join("\n")
+                + "\n",
+        );
+        let mut out = Calls(Vec::new());
+        serve(&registry, input, &mut out).unwrap();
+        assert_eq!(out.0.len(), 2, "deux messages, deux écritures");
+        for call in &out.0 {
+            assert_eq!(call.iter().filter(|b| **b == b'\n').count(), 1);
+            assert!(call.ends_with(b"\n"));
+            let message: Value = serde_json::from_slice(call).unwrap();
+            assert!(message["result"].is_object());
+        }
+        let hello: Value = serde_json::from_slice(&out.0[0]).unwrap();
+        assert_eq!(
+            hello["result"]["commands"].as_array().unwrap().len(),
+            registry.specs().count(),
+            "le catalogue entier part dans la seule écriture"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn hello_then_about_journals_one_line() {
         let dir = temp_dir();
@@ -1356,12 +1413,16 @@ mod tests {
     }
 
     impl Write for ChanWriter {
+        /// Ne cherche la fin de ligne que dans les octets reçus, jamais dans tout le tampon : le
+        /// coût reste linéaire quelle que soit la façon dont le message arrive (5.44).
         fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-            self.buf.extend_from_slice(bytes);
-            while let Some(i) = self.buf.iter().position(|b| *b == b'\n') {
-                let line: Vec<u8> = self.buf.drain(..=i).collect();
-                let text = String::from_utf8_lossy(&line).trim().to_string();
-                let _ = self.tx.send(text);
+            for piece in bytes.split_inclusive(|b| *b == b'\n') {
+                self.buf.extend_from_slice(piece);
+                if piece.ends_with(b"\n") {
+                    let line = std::mem::take(&mut self.buf);
+                    let text = String::from_utf8_lossy(&line).trim().to_string();
+                    let _ = self.tx.send(text);
+                }
             }
             Ok(bytes.len())
         }
@@ -1369,6 +1430,22 @@ mod tests {
         fn flush(&mut self) -> io::Result<()> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn the_test_writer_rebuilds_lines_whatever_the_pieces() {
+        let (tx, rx) = mpsc::channel();
+        let mut w = ChanWriter {
+            tx,
+            buf: Vec::new(),
+        };
+        // Une ligne en trois morceaux, deux lignes d'un coup, un appel vide, une fin sans retour.
+        for piece in [&b"{\"a\""[..], b":1", b"}\n", b"x\ny\n", b"", b"z"] {
+            assert_eq!(w.write(piece).unwrap(), piece.len());
+        }
+        let lines: Vec<String> = rx.try_iter().collect();
+        assert_eq!(lines, ["{\"a\":1}", "x", "y"]);
+        assert_eq!(w.buf, b"z");
     }
 
     #[derive(Debug, Deserialize, JsonSchema)]

@@ -487,7 +487,10 @@ fn start_conn(stream: Stream, shared: &Arc<Shared>, tx: &Sender<Msg>) {
     let writer = thread::spawn(move || {
         let _done = done;
         for line in lines {
-            if writeln!(write_half, "{line}").is_err() {
+            // La ligne et sa fin partent en une seule écriture (5.44).
+            let mut bytes = line.into_bytes();
+            bytes.push(b'\n');
+            if write_half.write_all(&bytes).is_err() {
                 return;
             }
         }

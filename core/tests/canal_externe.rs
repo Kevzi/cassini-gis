@@ -64,13 +64,17 @@ struct ChanWriter {
 }
 
 impl Write for ChanWriter {
+    /// Ne cherche la fin de ligne que dans les octets reçus, jamais dans tout le tampon : le coût
+    /// reste linéaire quelle que soit la façon dont le message arrive (5.44).
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        self.buf.extend_from_slice(bytes);
-        while let Some(i) = self.buf.iter().position(|b| *b == b'\n') {
-            let line: Vec<u8> = self.buf.drain(..=i).collect();
-            let _ = self
-                .tx
-                .send(String::from_utf8_lossy(&line).trim().to_string());
+        for piece in bytes.split_inclusive(|b| *b == b'\n') {
+            self.buf.extend_from_slice(piece);
+            if piece.ends_with(b"\n") {
+                let line = std::mem::take(&mut self.buf);
+                let _ = self
+                    .tx
+                    .send(String::from_utf8_lossy(&line).trim().to_string());
+            }
         }
         Ok(bytes.len())
     }
