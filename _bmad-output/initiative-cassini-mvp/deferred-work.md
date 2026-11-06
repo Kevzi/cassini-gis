@@ -688,3 +688,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-traceur-coord-convert-de-bout-en-bout-mgrs-compris-plan.md`
   summary: Avec Qwen3.5-9B (prompt long), toute phrase sur le projet de test projet-test-villeneuve.qgz échoue en ai.prompt_too_long : l'inventaire du projet et le catalogue ne tiennent pas dans le contexte.
   evidence: Démo de 11.2 — l'ancien noyau installé, sans coord.convert, échoue de même sur ce projet ; la démo n'a réussi que sur un projet vide.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-reprojection-d-un-point-par-qgis-data-transform-point-plan.md`
+  summary: Le geste data.transform_point ne vérifie pas QgsCoordinateTransform.isValid() ; une transformation invalide rendrait le point source étiqueté du code cible (medium, non vérifié).
+  evidence: Relecture de 11.4 ; à établir par une sonde sous QGIS sur un projet dont le contexte de transformation nomme une grille absente.

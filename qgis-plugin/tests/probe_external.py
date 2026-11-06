@@ -81,6 +81,7 @@ import gestures  # noqa: E402
 import inventory  # noqa: E402
 import layer_add  # noqa: E402
 import layout_export  # noqa: E402
+import point_transform  # noqa: E402
 
 project = QgsProject.instance()
 if not project.read(SOURCE):
@@ -144,6 +145,7 @@ def new_client(on_event):
     registry.register("layer.describe", inventory.LayerDescribeGesture)
     analysis.register_all(registry)
     registry.register("layout.export_pdf", layout_export.LayoutExportGesture)
+    registry.register("data.transform_point", point_transform.PointTransformGesture)
     state["process"] = process  # garder la référence
     state["client"] = client.CoreClient(process, guarded(on_event), registry)
     state["client"].start(CORE, COPY)
