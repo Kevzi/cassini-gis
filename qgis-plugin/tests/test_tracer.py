@@ -821,7 +821,7 @@ class PluginBehaviourTest(unittest.TestCase):
         self.assertIn("layer.open_raster", self.gestures.ids())
         self.assertIsInstance(
             self.gestures.create("layer.open_raster"),
-            self.mod.raster_output.LayerOpenRasterGesture,
+            self.mod.delegated.raster_output.LayerOpenRasterGesture,
         )
 
     def test_protocol_refusal_is_not_a_relaunchable_death(self):
