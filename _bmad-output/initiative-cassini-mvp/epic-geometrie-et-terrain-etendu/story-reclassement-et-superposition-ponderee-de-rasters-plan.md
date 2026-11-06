@@ -75,7 +75,7 @@ context:
 - [x] `core/src/commands/raster_weighted_overlay.rs` -- commande et tests ; `path_params(&["criteria.raster", "exclusions"])`.
 - [x] `ai/src/plan.rs` -- assertions du prompt pour les deux commandes.
 - [x] `catalogue-des-commandes.md` -- fiches en `faite`, même commit.
-- [ ] Poste du propriétaire -- installer noyau et extension (mémoire « Mettre à jour QGIS et le noyau »), dans QGIS 3.44 : pente du MNT test, reclassement, superposition de deux critères, puis `journal.replay`.
+- [x] Poste du propriétaire -- installer noyau et extension (mémoire « Mettre à jour QGIS et le noyau »), dans QGIS 3.44 : pente du MNT test, reclassement, superposition de deux critères, puis `journal.replay`.
 
 **Acceptance Criteria:**
 - Given le noyau sans QGIS, when `cargo test --workspace`, then tout passe, dont `catalogue` avec les deux fiches `faite`.
@@ -89,7 +89,7 @@ context:
 - Exemples des deux commandes écrits sur les MNT de `/fixtures` : la recette de parité (`cli/tests/parity.rs`) exécute chaque exemple d'une commande du noyau.
 - Écart à la frontière « aucun changement de l'entraînement » : le garde-fou `what_is_refused_out_of_registry_is_still_missing_from_the_registry` (`training/src/families.rs`) échouait à l'arrivée de `raster.reclassify` (mot `reclass`) ; seul ce mot en est ôté, le générateur et ses exemples sont intacts, et le refus « seuil sur la pente » devenu faux est noté dans `deferred-work.md` pour l'entrée 12. Confirmé par le propriétaire à la relecture (Decision ci-dessus).
 - Vérifié sous Windows (`C:\ct`) : `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, `cargo test --workspace` verts. `canal_externe::a_relay_that_stops_reading_does_not_hold_the_switch_off` a échoué une fois sur délai (1,5 s), vert au passage suivant.
-- Non fait : installation sur le poste et essai dans QGIS 3.44 (dernière tâche).
+- Installé (2026-11-06) : noyau `--features gpu` dans `%LOCALAPPDATA%\Cassini\bin` (ancien en `cassini.exe.avant-11-9`), extension dans le profil. Sonde QGIS 3.44.15 (offscreen, noyau installé, copie `projet-sonde-11-9.qgz`, sonde `donnees-test-cassini/sonde_reclass_overlay_11_9.py`) : pente en degrés du MNT de Villeneuve-le-Roi (783 × 712), reclassement en 3 classes (488 594 / 57 594 / 538 cellules, 10 770 NoData, total = grille), superposition pente × 1 + reclassement × 2 (min 0,667, max 18,42) ; trois couches raster en EPSG:2154 ; journal à chemins relatifs dans `criteria` ; rejeu `identical: true` (6 étapes), mêmes couches.
 
 ## Plan Change Log
 
