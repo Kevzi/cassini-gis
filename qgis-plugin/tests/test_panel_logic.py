@@ -158,6 +158,22 @@ class FormTest(unittest.TestCase):
         for name in ("nested", "either", "ref"):
             self.assertEqual(k[name], form.JSON, name)
 
+    def test_a_ref_to_a_string_definition_is_a_text_field(self):
+        # Un `RasterPath` (ticket 11.5) : `$ref` vers une définition de type chaîne.
+        schema = {"type": "object", "required": ["dem"], "properties": {
+            "dem": {"$ref": "#/$defs/RasterPath", "description": "MNT"},
+            "observer": {"$ref": "#/$defs/Point"},
+            "lost": {"$ref": "#/$defs/Absent"}},
+            "$defs": {"RasterPath": {"type": "string", "x-cassini": "raster"},
+                      "Point": {"type": "object", "properties": {"x": {"type": "number"}}}}}
+        fields = {f.name: f for f in form.build_fields(schema)}
+        self.assertEqual(fields["dem"].kind, form.TEXT)
+        self.assertEqual(fields["dem"].description, "MNT")
+        self.assertTrue(fields["dem"].required)
+        self.assertEqual(fields["observer"].kind, form.JSON)
+        self.assertEqual(fields["lost"].kind, form.JSON)
+        self.assertEqual(form.build_params([fields["dem"]], {"dem": "mnt.tif"}), {"dem": "mnt.tif"})
+
     def test_required_flag_and_choices(self):
         fields = {f.name: f for f in form.build_fields(SCHEMA)}
         self.assertTrue(fields["name"].required)

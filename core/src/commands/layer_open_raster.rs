@@ -10,6 +10,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::raster_path::RasterPath;
 use crate::registry::{CommandSpec, Delegated, Registration, RunsIn};
 
 /// Identifiant de la commande, que la session dicte après une sortie raster.
@@ -20,7 +21,7 @@ pub const OPEN_RASTER: &str = "layer.open_raster";
 #[serde(deny_unknown_fields)]
 pub struct LayerOpenRasterParams {
     /// Raster à ouvrir : la sortie d'une étape précédente, désignée par `out:<k>.<n>`.
-    pub path: String,
+    pub path: RasterPath,
 }
 
 /// Résultat de `layer.open_raster`.

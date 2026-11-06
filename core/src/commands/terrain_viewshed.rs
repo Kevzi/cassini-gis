@@ -34,6 +34,7 @@ use crate::commands::terrain_line_of_sight::{
 };
 use crate::dem::Dem;
 use crate::point::Point;
+use crate::raster_path::RasterPath;
 use crate::registry::{Command, CommandFailure, CommandSpec, Registration, RunsIn};
 
 /// Valeur sans-donnée du champ de vision écrit.
@@ -58,7 +59,7 @@ fn given_radius<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Distanc
 pub struct TerrainViewshedParams {
     /// Fichier MNT (GeoTIFF à une bande, système projeté en mètres), chemin relatif au projet
     /// recopié de l'inventaire. DEM file path, relative to the project, copied from the inventory.
-    pub dem: String,
+    pub dem: RasterPath,
     /// Position de l'observateur, dans le système du MNT.
     pub observer: Point,
     /// Hauteur de l'œil au-dessus du sol, avec son unité (1,6 m par défaut).
@@ -285,7 +286,7 @@ impl Command for TerrainViewshed {
     }
 
     fn run(&self, params: TerrainViewshedParams) -> Result<TerrainViewshedOutput, CommandFailure> {
-        let dem = Dem::open(Path::new(&params.dem)).map_err(CommandFailure::from)?;
+        let dem = Dem::open(Path::new(params.dem.as_str())).map_err(CommandFailure::from)?;
         let (grid, stats) = viewshed(&dem, &params)?;
         grid.write_geotiff(Path::new(&params.out))
             .map_err(CommandFailure::from)?;
@@ -349,7 +350,7 @@ mod tests {
 
     fn params(observer: Point, radius_m: f64) -> TerrainViewshedParams {
         TerrainViewshedParams {
-            dem: String::new(),
+            dem: RasterPath(String::new()),
             observer,
             observer_height: m(1.6),
             target_height: m(0.0),
@@ -416,7 +417,7 @@ mod tests {
             let (col, row) = (k % 50, k / 50);
             let v = grid.value(col, row).unwrap();
             let los = TerrainLineOfSightParams {
-                dem: String::new(),
+                dem: RasterPath(String::new()),
                 observer: p.observer,
                 target: cell_centre(&dem, col, row),
                 observer_height: p.observer_height,
@@ -436,7 +437,7 @@ mod tests {
         for k in (1..2500u32).step_by(7) {
             let (col, row) = (k % 50, k / 50);
             let los = TerrainLineOfSightParams {
-                dem: String::new(),
+                dem: RasterPath(String::new()),
                 observer: p.observer,
                 target: cell_centre(&dem, col, row),
                 observer_height: p.observer_height,
@@ -453,7 +454,7 @@ mod tests {
     /// paramètres du champ de vision.
     fn los_verdict(dem: &Dem, p: &TerrainViewshedParams, col: u32, row: u32) -> bool {
         let los = TerrainLineOfSightParams {
-            dem: String::new(),
+            dem: RasterPath(String::new()),
             observer: p.observer,
             target: cell_centre(dem, col, row),
             observer_height: p.observer_height,

@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 use crate::commands::analysis_buffer::DistanceUnit;
 use crate::dem::Dem;
 use crate::point::Point;
+use crate::raster_path::RasterPath;
 use crate::registry::{Command, CommandFailure, CommandSpec, Registration, RunsIn};
 
 /// Nombre maximal d'échantillons du profil rendu, premier et dernier compris (AD-8).
@@ -118,7 +119,7 @@ pub(crate) fn refraction<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, 
 pub struct TerrainLineOfSightParams {
     /// Fichier MNT (GeoTIFF à une bande, système projeté en mètres), chemin relatif au projet
     /// recopié de l'inventaire. DEM file path, relative to the project, copied from the inventory.
-    pub dem: String,
+    pub dem: RasterPath,
     /// Position de l'observateur, dans le système du MNT.
     pub observer: Point,
     /// Position de la cible, dans le système du MNT.
@@ -494,7 +495,7 @@ impl Command for TerrainLineOfSight {
         &self,
         params: TerrainLineOfSightParams,
     ) -> Result<TerrainLineOfSightOutput, CommandFailure> {
-        let dem = Dem::open(Path::new(&params.dem)).map_err(CommandFailure::from)?;
+        let dem = Dem::open(Path::new(params.dem.as_str())).map_err(CommandFailure::from)?;
         line_of_sight(&dem, &params)
     }
 }
@@ -527,7 +528,7 @@ mod tests {
 
     fn params(observer: Point, target: Point) -> TerrainLineOfSightParams {
         TerrainLineOfSightParams {
-            dem: String::new(),
+            dem: RasterPath(String::new()),
             observer,
             target,
             observer_height: m(1.6),

@@ -3367,6 +3367,101 @@ mod tests {
         assert_eq!(done["result"], json!({"steps": 3, "identical": true}));
     }
 
+    /// Un point au centre du MNT de test, dans son système.
+    fn dem_center() -> Value {
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/mnt-plan-incline-2154.tif");
+        let e = crate::dem::Dem::open(&fixture).unwrap().extent();
+        json!({"x": (e.min_x + e.max_x) / 2.0, "y": (e.min_y + e.max_y) / 2.0, "epsg": 2154})
+    }
+
+    /// Plan pente puis champ de vision sur la pente, le raster cité par `step:1`.
+    fn slope_then_viewshed() -> Value {
+        json!({"kind":"calls","calls":[
+            {"command":"terrain.slope","params":{"dem":"dem/plan.tif","unit":"degrees"}},
+            {"command":"terrain.viewshed","params":{"dem":"step:1","observer":dem_center()}}]})
+    }
+
+    #[test]
+    fn a_raster_cited_by_step_is_journaled_as_a_marker_and_replays_on_the_new_raster() {
+        let mut c = Client::start_with(CANCEL_GRACE, composer(slope_then_viewshed()));
+        with_dem(&c);
+        c.hello_with(&RASTER);
+        let work = c.dir.join("p.cassini");
+        // Un appel avant le plan : la pente du plan est la ligne 3 du journal, pas la 1.
+        c.send(json!({"jsonrpc":"2.0","id":2,"method":"command.run",
+            "params":{"command":"terrain.slope","params":{"dem":"dem/plan.tif","unit":"degrees"}}}));
+        answer_open(&c, &work, "1-terrain.slope.tif", "hand");
+        assert_eq!(c.recv()["id"], 2);
+        assert_eq!(c.propose(3)["result"]["plan_id"], "plan-1");
+        c.execute(4, "plan-1");
+        assert_eq!(c.recv()["params"]["command"], "terrain.slope");
+        answer_open(&c, &work, "3-terrain.slope.tif", "slope");
+        assert_eq!(c.recv()["params"]["command"], "terrain.viewshed");
+        answer_open(&c, &work, "5-terrain.viewshed.tif", "view");
+        let done = c.recv();
+        assert_eq!(done["id"], 4, "{done}");
+        let journal = c.journal();
+        let ids: Vec<&str> = journal.iter().map(|l| l["id"].as_str().unwrap()).collect();
+        assert_eq!(
+            ids,
+            [
+                "terrain.slope",
+                "layer.open_raster",
+                "terrain.slope",
+                "layer.open_raster",
+                "terrain.viewshed",
+                "layer.open_raster"
+            ]
+        );
+        // Le raster cité est le repère de la ligne 3 : aucun chemin du dossier de travail.
+        assert_eq!(journal[4]["params"]["dem"], json!("out:3.1"));
+        assert_eq!(journal[4]["inputs"], json!([]));
+        assert_eq!(journal[5]["params"], json!({"path": "out:5.1"}));
+        let visible = journal[4]["result"]["visible_cells"].clone();
+        assert!(visible.as_u64().unwrap() > 0, "{}", journal[4]);
+
+        // Le rejeu résout `out:3.1` vers la pente qu'il vient de recalculer sous son dossier
+        // (`Resolver::resolve_reference`) ; la pente d'origine reste, ses octets étant comparés.
+        c.send(json!({"jsonrpc":"2.0","id":5,"method":"journal.replay"}));
+        for (k, file) in [
+            (1, "1-terrain.slope.tif"),
+            (3, "3-terrain.slope.tif"),
+            (5, "5-terrain.viewshed.tif"),
+        ] {
+            let order = c.recv();
+            assert_eq!(order["params"]["command"], "layer.open_raster", "{order}");
+            let path = Path::new(order["params"]["params"]["path"].as_str().unwrap());
+            assert_eq!(path.file_name().unwrap(), file);
+            assert!(path.starts_with(&work) && path.parent() != Some(work.as_path()));
+            c.send(reply(
+                &order["id"],
+                json!({"layer_id": format!("replay-{k}"), "name": file.trim_end_matches(".tif")}),
+            ));
+        }
+        let done = c.recv();
+        assert_eq!(done["id"], 5, "{done}");
+        assert_eq!(done["result"], json!({"steps": 6, "identical": true}));
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn a_raster_cited_by_step_is_a_marker_without_the_dictated_opening() {
+        let mut c = Client::start_with(CANCEL_GRACE, composer(slope_then_viewshed()));
+        with_dem(&c);
+        c.hello_with(&["project.inventory"]);
+        assert_eq!(c.propose(2)["result"]["plan_id"], "plan-1");
+        c.execute(3, "plan-1");
+        assert_eq!(c.recv()["params"]["command"], "terrain.slope");
+        assert_eq!(c.recv()["params"]["command"], "terrain.viewshed");
+        let done = c.recv();
+        assert_eq!(done["id"], 3, "{done}");
+        let journal = c.journal();
+        assert_eq!(journal.len(), 2);
+        assert_eq!(journal[1]["params"]["dem"], json!("out:1.1"));
+        c.close().1.unwrap();
+    }
+
     #[test]
     fn a_failed_proposal_still_erases_the_pending_plan() {
         let plan =

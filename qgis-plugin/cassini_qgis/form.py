@@ -100,6 +100,23 @@ def relative_path(chosen, project_file):
     return rel.replace("\\", "/")
 
 
+def _follow(prop, schema):
+    """Un `$ref` local vers une définition du schéma est remplacé par elle, les clés du champ
+    (sa description) gardées : un `RasterPath` reste un champ texte. Sinon `prop` inchangé."""
+    if not isinstance(prop, dict) or not isinstance(prop.get("$ref"), str):
+        return prop
+    for prefix, key in (("#/$defs/", "$defs"), ("#/definitions/", "definitions")):
+        name = prop["$ref"][len(prefix):] if prop["$ref"].startswith(prefix) else None
+        defs = schema.get(key)
+        if name and isinstance(defs, dict) and isinstance(defs.get(name), dict):
+            if "$ref" in defs[name]:
+                return prop
+            merged = dict(defs[name])
+            merged.update({k: v for k, v in prop.items() if k != "$ref"})
+            return merged
+    return prop
+
+
 def build_fields(schema):
     """Liste des champs d'un schéma d'objet (vide si aucune propriété)."""
     if not isinstance(schema, dict):
@@ -113,7 +130,7 @@ def build_fields(schema):
     for name in sorted(props):
         if name in CORE_FILLED:
             continue
-        prop = props[name]
+        prop = _follow(props[name], schema)
         kind, choices = _kind(prop)
         description = prop.get("description", "") if isinstance(prop, dict) else ""
         fields.append(Field(name, kind, name in required, choices, str(description)))

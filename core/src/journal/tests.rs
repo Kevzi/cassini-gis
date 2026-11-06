@@ -1607,6 +1607,35 @@ fn slope_params() -> Value {
     json!({"dem": "dem/plan.tif", "unit": "degrees"})
 }
 
+#[test]
+fn a_raster_marker_without_its_step_is_refused_and_not_journaled() {
+    // Ticket 11.5 : `dem` est un `RasterPath` ; un repère hors du journal reste refusé.
+    let (dir, project, _) = temp_project();
+    with_dem(&dir);
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, &project).unwrap();
+    let err = s
+        .call(
+            "terrain.slope",
+            json!({"dem": "out:9.1", "unit": "degrees"}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "replay.bad_reference");
+    assert!(lines(&s).is_empty());
+    // Sur la sortie d'une pente déjà journalisée, le repère est gardé tel quel.
+    s.call("terrain.slope", slope_params()).unwrap();
+    s.call(
+        "terrain.slope",
+        json!({"dem": "out:1.1", "unit": "percent"}),
+    )
+    .unwrap();
+    let l = lines(&s);
+    assert_eq!(l[1]["params"]["dem"], json!("out:1.1"));
+    assert_eq!(l[1]["inputs"], json!([]));
+    assert_eq!(l[0]["params"]["dem"], json!("dem/plan.tif"));
+    assert_eq!(l[0]["inputs"].as_array().unwrap().len(), 1);
+}
+
 /// QGIS de test qui note chaque ordre reçu et ouvre un raster (ou échoue à l'ouvrir).
 struct RasterQgis {
     calls: std::rc::Rc<std::cell::RefCell<Vec<(String, Value)>>>,

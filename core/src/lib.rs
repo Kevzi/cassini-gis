@@ -17,6 +17,7 @@ pub mod geodesy;
 pub mod journal;
 pub mod plan;
 pub mod point;
+pub mod raster_path;
 pub mod registry;
 pub mod serve;
 

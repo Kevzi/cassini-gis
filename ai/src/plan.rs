@@ -253,6 +253,10 @@ fn catalog_entry(spec: &CommandSpec) -> Value {
         if let Some(Value::Array(required)) = map.get_mut("required") {
             required.retain(|r| r.as_str().is_none_or(|n| !hidden.iter().any(|o| *o == n)));
         }
+        // Un `RasterPath` est montré en simple chaîne, avec la description du champ : le long
+        // prompt reste celui d'avant le type (ticket 11.5) ; la définition devenue inutile est
+        // ôtée ci-dessous.
+        map.values_mut().for_each(inline_raster_paths);
         // Une définition que seul un paramètre caché employait (le `Point` du centre d'un
         // export) n'a rien à faire dans le long prompt.
         if let Some(Value::Object(defs)) = map.remove("$defs") {
@@ -275,6 +279,22 @@ fn catalog_entry(spec: &CommandSpec) -> Value {
     }
     strip_marks(&mut params);
     json!({"id": spec.id, "description": spec.description_fr, "params": params})
+}
+
+/// Remplace toute référence à la définition `RasterPath` par `"type": "string"`, en gardant
+/// les autres clés (la description du champ).
+fn inline_raster_paths(node: &mut Value) {
+    match node {
+        Value::Object(map) => {
+            if map.get("$ref").and_then(Value::as_str) == Some("#/$defs/RasterPath") {
+                map.remove("$ref");
+                map.insert("type".into(), Value::String("string".into()));
+            }
+            map.values_mut().for_each(inline_raster_paths);
+        }
+        Value::Array(items) => items.iter_mut().for_each(inline_raster_paths),
+        _ => {}
+    }
 }
 
 /// Ôte du schéma montré au modèle toute marque `x-cassini` (`$defs` compris) : la marque sert
@@ -1003,6 +1023,22 @@ mod tests {
         assert!(export["params"]["properties"].get("title").is_some());
         // La marque du `Point` reste au noyau : le modèle ne la voit pas.
         assert!(!text.contains("x-cassini"));
+        // Un `RasterPath` reste une chaîne pour le modèle, sa description gardée (ticket 11.5).
+        for id in ["terrain.slope", "terrain.viewshed", "terrain.line_of_sight"] {
+            let spec = reg.spec(id).unwrap();
+            let entry = catalog_entry(spec);
+            let dem = &entry["params"]["properties"]["dem"];
+            let described = spec.params_schema["properties"]["dem"]["description"].clone();
+            assert_eq!(
+                dem,
+                &json!({"type": "string", "description": described}),
+                "{id}"
+            );
+            assert!(entry["params"]
+                .get("$defs")
+                .is_none_or(|d| d.get("RasterPath").is_none()));
+        }
+        assert!(!text.contains("RasterPath"));
         let isochrone = catalog_entry(reg.spec("analysis.isochrone").unwrap());
         assert!(isochrone["params"]["$defs"]["Point"].is_object());
         assert!(!isochrone.to_string().contains("x-cassini"));
