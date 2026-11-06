@@ -721,3 +721,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/bug-le-test-d-extinction-du-canal-d-ia-externe-avec-des-relais-m-plan.md`
   summary: Le test a_relay_that_stops_reading_does_not_hold_the_switch_off ne prouve le garde-fou des lignes en file (5.43) que sous charge ; au repos, sa suppression passerait sous le seuil d'1 s.
   evidence: Mesure du 2026-11-06 sous Windows : sans correctif, 0,79 s au repos, et de 1,27 à 1,49 s sous charge (la mutation échoue 3 fois sur 3). Il faudrait un test qui compte les réponses traitées après l'extinction, ou une inondation plus forte sans faire exploser la mémoire.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/bug-le-test-de-fermeture-du-canal-d-ia-externe-echoue-de-temps-e-plan.md`
+  summary: Sous Windows, si un relais prend la seule instance de tube en attente juste avant la fermeture, `wake` peut attendre jusqu'à ~5 s (WaitNamedPipeW) une instance qui ne viendra plus, et retarder l'extinction.
+  evidence: maybe-false, gravité medium non vérifiée ; existait avant 5.42 (relecture rapide de 5.42). Preuve : mesurer sous Windows le temps de `session.external {enabled:false}` avec un relais qui se connecte juste avant.
