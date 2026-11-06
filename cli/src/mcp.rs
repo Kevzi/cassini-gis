@@ -692,6 +692,10 @@ mod tests {
             registry.specs().filter(|s| !s.dictated_by_core).count()
         );
         assert!(!relay.iter().any(|e| e.id == "layer.open_raster"));
+        assert!(!relay.iter().any(|e| e.id == "layer.open_vector"));
+        assert!(!catalogue(&registry)
+            .iter()
+            .any(|e| e.id == "layer.open_vector"));
         for Exposed { tool, .. } in catalogue(&registry).iter().chain(&relay) {
             let name = tool.name.as_ref();
             assert!(!name.is_empty() && name.len() <= 52, "{name}");

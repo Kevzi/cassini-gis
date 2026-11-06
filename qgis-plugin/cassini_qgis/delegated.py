@@ -7,7 +7,16 @@ chargement : la recette construit la table sans QGIS.
 """
 
 try:  # importés à plat par les tests, en paquet par QGIS
-    from . import analysis, gestures, inventory, layer_add, layout_export, point_transform, raster_output
+    from . import (
+        analysis,
+        gestures,
+        inventory,
+        layer_add,
+        layout_export,
+        point_transform,
+        raster_output,
+        vector_output,
+    )
 except ImportError:  # pragma: no cover
     import analysis
     import gestures
@@ -16,6 +25,7 @@ except ImportError:  # pragma: no cover
     import layout_export
     import point_transform
     import raster_output
+    import vector_output
 
 PROBE_ID = "test.qgis_probe"
 
@@ -26,6 +36,7 @@ def build_registry(probe):
     registry.register(PROBE_ID, probe)
     registry.register("layer.add", layer_add.LayerAddGesture)
     registry.register("layer.open_raster", raster_output.LayerOpenRasterGesture)
+    registry.register("layer.open_vector", vector_output.LayerOpenVectorGesture)
     registry.register("project.inventory", inventory.ProjectInventoryGesture)
     registry.register("layer.describe", inventory.LayerDescribeGesture)
     analysis.register_all(registry)

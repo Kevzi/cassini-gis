@@ -699,3 +699,12 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-un-seul-type-de-raster-rasterpath-partout-plan.md`
   summary: Cacher à l'inventaire du modèle un raster intermédiaire consommé par `out:k.n` dans un plan.
   evidence: `intermediate_files` (`core/src/journal/mod.rs`) ne reconnaît que les sorties consommées par `layer_id` ; une pente lue par `terrain.viewshed` via `out:3.1` reste montrée au modèle (comportement antérieur inchangé).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-ecriture-geojson-du-noyau-et-ouverture-dictee-plan.md`
+  summary: Jouer la sonde `probe_vector_output.py` (GeoJSON 2008 en EPSG:2154 ouvert par `layer.open_vector`) sous QGIS 4.x.
+  evidence: le critère de l'entrée 11.8 nomme QGIS 3.44 et 4.x ; seul QGIS 3.44.15 est installé sur le poste (décision du propriétaire du 2026-11-06 : 3.44 seul, 4.x reporté).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-ecriture-geojson-du-noyau-et-ouverture-dictee-plan.md`
+  summary: Rendre le `layer_id` de l'ouverture dictée `layer.open_vector` citable par `step:k.layer_id` dans un plan, pour enchaîner une sortie vecteur du noyau dans une analyse QGIS.
+  evidence: `core/src/serve/plans.rs` (`execute`) ne garde dans `outputs[k]` que le résultat de la commande du noyau ; la couche ouverte par l'étape dictée n'y est pas. Parité avec le raster tenue, mais l'entrée 15 (`terrain.peaks`) en aura besoin.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-ecriture-geojson-du-noyau-et-ouverture-dictee-plan.md`
+  summary: Le refus d'un système non concordant par `QgisBackend.add_vector` (`vector_output.py`) n'est vérifié que par la sonde manuelle `probe_vector_output.py`.
+  evidence: les tests unitaires passent par `FakeBackend`, qui refait le refus lui-même ; rejouer la sonde à chaque changement de `vector_output.py`, ou l'automatiser si une recette sous QGIS voit le jour.

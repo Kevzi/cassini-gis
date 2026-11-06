@@ -34,6 +34,7 @@ class OfferedCommandsTest(unittest.TestCase):
         catalogue = [
             {"id": "layer.add", "available": True},
             {"id": "layer.open_raster", "available": False, "dictated_by_core": True},
+            {"id": "layer.open_vector", "available": False, "dictated_by_core": True},
             {"id": "terrain.slope", "available": True},
         ]
         self.assertEqual(

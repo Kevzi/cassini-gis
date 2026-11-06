@@ -32,6 +32,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Map, Value};
 
 use crate::commands::layer_open_raster::OPEN_RASTER;
+use crate::commands::layer_open_vector::OPEN_VECTOR;
 use crate::error::ErrorReport;
 use crate::exec::{Executor, Router};
 pub use crate::external::ChannelName;
@@ -868,7 +869,9 @@ fn hello(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, RpcErro
             link: state.link.clone(),
         })
         // L'extension sait ouvrir un raster du noyau : la session le lui dicte (ticket 4.9).
-        .with_raster_opening(commands.contains(OPEN_RASTER));
+        .with_raster_opening(commands.contains(OPEN_RASTER))
+        // De même pour un GeoJSON du noyau (AD-30, ticket 11.8).
+        .with_vector_opening(commands.contains(OPEN_VECTOR));
     // La session dit dès la poignée de main si elle est en lecture seule : l'extension
     // n'a plus à lancer une commande pour le découvrir (ticket 5.32).
     let read_only = session.mode() == Mode::ReadOnly;
@@ -1474,8 +1477,43 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Deserialize, JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    struct PointsParams {
+        #[serde(default)]
+        out: String,
+    }
+
+    /// Commande du noyau qui écrit les points de la fixture en GeoJSON (AD-30, ticket 11.8).
+    struct WritePoints;
+    impl crate::registry::Command for WritePoints {
+        type Params = PointsParams;
+        type Output = Done;
+        fn spec() -> crate::registry::CommandSpec {
+            crate::registry::CommandSpec::new::<PointsParams, Done>(
+                "test.write_points",
+                "Écrit des points.",
+                "Writes points.",
+            )
+            .runs_in(RunsIn::Core)
+            .cancellable(false)
+            .output_params(&["out"])
+            .output_ext(".geojson")
+            .tests(&["t"])
+        }
+        fn run(&self, p: PointsParams) -> Result<Done, crate::registry::CommandFailure> {
+            crate::geojson::write(Path::new(&p.out), 2154, &crate::geojson::fixture_points())
+                .map_err(|e| crate::registry::CommandFailure {
+                    code: e.code.to_string(),
+                    message: e.message,
+                })?;
+            Ok(Done { ok: true })
+        }
+    }
+
     fn scripted_registry() -> Registry {
         let mut r = Registry::standard();
+        r.register(WritePoints);
         r.register_delegated::<Render>();
         r.register_delegated::<Fixed>();
         r.register_delegated::<Make>();
@@ -3263,10 +3301,34 @@ mod tests {
         assert_eq!(entry["available"], json!(false));
         assert!(commands
             .iter()
-            .filter(|e| e["id"] != "layer.open_raster")
+            .filter(|e| e["id"] != "layer.open_raster" && e["id"] != "layer.open_vector")
             .all(|e| e.get("dictated_by_core").is_none()));
         c.send(json!({"jsonrpc":"2.0","id":2,"method":"command.run",
             "params":{"command":"layer.open_raster","params":{"path":"out:1.1"}}}));
+        let refused = c.recv();
+        assert_eq!(code_of(&refused), "registry.dictated");
+        assert!(c.journal().is_empty());
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn the_dictated_vector_opening_is_never_offered_and_command_run_refuses_it() {
+        // AD-30, ticket 11.8 : `layer.open_vector`, annoncée par l'extension, reste dictée.
+        let mut c = Client::start(CANCEL_GRACE);
+        c.send(json!({"jsonrpc":"2.0","id":1,"method":"session.hello",
+            "params":{"protocol_version":2,
+                "commands":["layer.open_raster", "layer.open_vector", "layout.export_pdf"],
+                "project":c.project}}));
+        let hello = c.recv();
+        let commands = hello["result"]["commands"].as_array().unwrap();
+        let entry = commands
+            .iter()
+            .find(|e| e["id"] == "layer.open_vector")
+            .unwrap();
+        assert_eq!(entry["dictated_by_core"], json!(true));
+        assert_eq!(entry["available"], json!(false));
+        c.send(json!({"jsonrpc":"2.0","id":2,"method":"command.run",
+            "params":{"command":"layer.open_vector","params":{"path":"out:1.1"}}}));
         let refused = c.recv();
         assert_eq!(code_of(&refused), "registry.dictated");
         assert!(c.journal().is_empty());
@@ -3291,6 +3353,36 @@ mod tests {
         assert_eq!(journal[1]["id"], "layer.open_raster");
         assert_eq!(journal[1]["params"], json!({"path": "out:1.1"}));
         assert_eq!(journal[1]["layer_id"], "raster_1");
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn a_geojson_run_by_hand_is_followed_by_the_dictated_vector_opening() {
+        // AD-30, ticket 11.8 : l'annonce de `layer.open_vector` à `session.hello` fait dicter
+        // l'ouverture après une sortie GeoJSON du noyau.
+        let mut c = Client::start(CANCEL_GRACE);
+        c.hello_with(&["layer.open_vector", "layout.export_pdf"]);
+        c.send(json!({"jsonrpc":"2.0","id":2,"method":"command.run",
+            "params":{"command":"test.write_points","params":{}}}));
+        let work = c.dir.join("p.cassini");
+        let order = c.recv();
+        assert_eq!(order["method"], "order.execute", "{order}");
+        assert_eq!(order["params"]["command"], "layer.open_vector");
+        let path = Path::new(order["params"]["params"]["path"].as_str().unwrap());
+        assert_eq!(path, work.join("1-test.write_points.geojson"));
+        assert!(path.is_file(), "{}", path.display());
+        c.send(reply(
+            &order["id"],
+            json!({"layer_id": "vector_1", "name": "1-test.write_points", "crs": "EPSG:2154"}),
+        ));
+        let done = c.recv();
+        assert_eq!(done["id"], 2);
+        assert_eq!(done["result"], json!({"ok": true}), "{done}");
+        let journal = c.journal();
+        assert_eq!(journal.len(), 2);
+        assert_eq!(journal[1]["id"], "layer.open_vector");
+        assert_eq!(journal[1]["params"], json!({"path": "out:1.1"}));
+        assert_eq!(journal[1]["layer_id"], "vector_1");
         c.close().1.unwrap();
     }
 

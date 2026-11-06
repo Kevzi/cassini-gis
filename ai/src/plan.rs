@@ -1171,7 +1171,7 @@ mod tests {
             .filter(|s| s.dictated_by_core)
             .map(|s| s.id.clone())
             .collect();
-        assert_eq!(dictated, ["layer.open_raster"]);
+        assert_eq!(dictated, ["layer.open_raster", "layer.open_vector"]);
         let mut bare = registry();
         for id in &dictated {
             assert!(bare.remove(id));
@@ -1182,8 +1182,11 @@ mod tests {
             system_text(&full, &inventory()),
             system_text(&bare, &inventory())
         );
-        assert!(!plan_grammar(&full).contains("layer.open_raster"));
-        assert!(!fixed_system_text(&full).contains("layer.open_raster"));
+        for id in ["layer.open_raster", "layer.open_vector"] {
+            assert!(!plan_grammar(&full).contains(id), "{id}");
+            assert!(!fixed_system_text(&full).contains(id), "{id}");
+            assert!(!system_text(&full, &inventory()).contains(id), "{id}");
+        }
     }
     // -- prompt court (ticket 5.10, tâche 3) ---------------------------------
 
