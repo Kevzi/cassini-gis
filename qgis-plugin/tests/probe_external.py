@@ -139,7 +139,7 @@ def read_journal():
 def new_client(on_event):
     process = QProcess()
     registry = gestures.GestureRegistry()
-    # Les mêmes gestes que l'extension (plugin.py), sauf la commande de test.
+    # Une partie des gestes de l'extension (table fermée : delegated.py), sans la commande de test.
     registry.register("layer.add", layer_add.LayerAddGesture)
     registry.register("project.inventory", inventory.ProjectInventoryGesture)
     registry.register("layer.describe", inventory.LayerDescribeGesture)
