@@ -33,8 +33,13 @@
   registre (commande de génération, familles, règle du jeu tenu à l'écart) et le score
   de référence de Qwen3.5-9B sur ce jeu.
 
-- `comparaison-terrain-qgis.md` — pente, ligne de vue et champ de vision du noyau
-  comparés à QGIS et GRASS sur un vrai MNT : écarts, temps et provenance du code.
+- `comparaison-terrain-qgis.md` — pente, exposition, ombrage, ligne de vue et champ
+  de vision du noyau comparés à QGIS et GRASS sur un vrai MNT : écarts, temps et
+  provenance du code.
+
+- `../_bmad-output/initiative-cassini-mvp/spec-cassini-mvp/catalogue-des-commandes.md` —
+  le catalogue figé des commandes : identifiant, paramètres et résultat de chaque
+  commande, faite, planifiée ou réservée.
 
 À remplir au fil des étapes : parité fonctionnelle visée et décisions
 d'architecture courtes (ADR).
