@@ -262,7 +262,7 @@ constante du noyau. Posé par l'entrée 1 de l'epic 10.
 | `data.transform_point` | faite | qgis | epic 11, entrée 4 |
 | `terrain.aspect` | faite | core | epic 11, entrée 6 |
 | `terrain.hillshade` | faite | core | epic 11, entrée 6 |
-| `terrain.viewshed_cumulative` | planifiée | core | epic 11, entrée 7 |
+| `terrain.viewshed_cumulative` | faite | core | epic 11, entrée 7 |
 | `layer.open_vector` | planifiée (dictée) | qgis | epic 11, entrée 8 |
 | `terrain.peaks` | planifiée | core | epic 11, entrée 15 |
 | `raster.reclassify` | planifiée | core | epic 11, entrée 9 |
@@ -939,10 +939,6 @@ l'entrée 6 de l'epic 11 (`core/src/commands/terrain_hillshade.rs`).
  "result": ["file", "nodata_cells"]}
 ```
 
----
-
-## 6. Commandes planifiées — epic 11, géométrie et terrain étendu
-
 ### `terrain.viewshed_cumulative`
 
 Nombre d'observateurs qui voient chaque cellule, par le calcul de `terrain.viewshed`
@@ -968,12 +964,16 @@ d'observateurs bornée par le schéma (AD-8).
 | `visible_cells` | entier | Cellules vues par au moins un observateur. |
 | `nodata_cells` | entier | Cellules sans donnée. |
 
-Erreurs (comme `terrain.viewshed`, l'observateur fautif nommé par son rang) :
-`terrain.crs_mismatch`, `terrain.outside_dem`, `terrain.no_elevation`,
-`terrain.viewshed_too_large`.
+Erreurs (comme `terrain.viewshed`, l'observateur fautif nommé par son rang,
+« observateur n° 2 ») : `terrain.crs_mismatch`, `terrain.outside_dem`,
+`terrain.no_elevation`, `terrain.viewshed_too_large`. Une liste vide ou de plus de 32
+observateurs est refusée (`registry.invalid_params`, qui nomme `observers`). Tous les
+observateurs sont contrôlés avant que rien ne soit écrit. Calcul non annulable : environ
+5 s au pire par observateur au rayon maximal, soit environ 2 min 30 s pour 32 (décision du
+propriétaire, 2026-11-06 : gardé tel quel, et dit). Livrée par l'entrée 7 de l'epic 11 (`core/src/commands/terrain_viewshed_cumulative.rs`).
 
 ```json fiche
-{"id": "terrain.viewshed_cumulative", "status": "planifiee", "runs_in": "core", "dictated_by_core": false,
+{"id": "terrain.viewshed_cumulative", "status": "faite", "runs_in": "core", "dictated_by_core": false,
  "params": {"dem": {"type": "RasterPath", "required": true},
             "observers": {"type": "array", "required": true, "items": "Point"},
             "observer_height": {"type": "Height", "required": false},
@@ -984,6 +984,10 @@ Erreurs (comme `terrain.viewshed`, l'observateur fautif nommé par son rang) :
             "out": {"type": "string", "required": false}},
  "result": ["file", "max_count", "nodata_cells", "observer_count", "visible_cells"]}
 ```
+
+---
+
+## 6. Commandes planifiées — epic 11, géométrie et terrain étendu
 
 ### `layer.open_vector`
 

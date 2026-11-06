@@ -1030,6 +1030,7 @@ mod tests {
             "terrain.line_of_sight",
             "terrain.aspect",
             "terrain.hillshade",
+            "terrain.viewshed_cumulative",
         ] {
             let spec = reg.spec(id).unwrap();
             let entry = catalog_entry(spec);
@@ -1045,6 +1046,11 @@ mod tests {
                 .is_none_or(|d| d.get("RasterPath").is_none()));
         }
         assert!(!text.contains("RasterPath"));
+        // La liste d'observateurs du champ de vision cumulé reste bornée pour le modèle (AD-8).
+        let cumulative = catalog_entry(reg.spec("terrain.viewshed_cumulative").unwrap());
+        let observers = &cumulative["params"]["properties"]["observers"];
+        assert_eq!(observers["maxItems"], json!(32), "{cumulative}");
+        assert_eq!(observers["minItems"], json!(1), "{cumulative}");
         let isochrone = catalog_entry(reg.spec("analysis.isochrone").unwrap());
         assert!(isochrone["params"]["$defs"]["Point"].is_object());
         assert!(!isochrone.to_string().contains("x-cassini"));
