@@ -2322,3 +2322,87 @@ fn an_opened_geojson_consumed_by_a_later_plan_step_is_intermediate() {
     assert!(intermediate_files(&registry, &journal).is_empty());
     let _ = fs::remove_dir_all(dir);
 }
+
+/// Un chemin rangé dans les éléments d'une liste (`criteria.raster`) est journalisé relatif au
+/// projet, exécuté absolu, listé dans `inputs`, et le rejeu le rend à l'identique (ticket 11.9).
+#[test]
+fn a_path_inside_a_list_of_objects_is_journaled_relative_and_replays_identically() {
+    use crate::dem::Dem;
+    let (dir, project, token) = temp_project();
+    fs::create_dir_all(dir.join("donnees")).unwrap();
+    let grid = |values: Vec<f32>| Dem {
+        width: 2,
+        height: 2,
+        origin_x: 652000.0,
+        origin_y: 6850020.0,
+        cell_size_x: 10.0,
+        cell_size_y: 10.0,
+        epsg: 2154,
+        nodata: Some(-9999.0),
+        values,
+    };
+    grid(vec![1.0, 2.0, 3.0, 4.0])
+        .write_geotiff(&dir.join("a.tif"))
+        .unwrap();
+    grid(vec![4.0, 3.0, 2.0, 1.0])
+        .write_geotiff(&dir.join("donnees/b.tif"))
+        .unwrap();
+    grid(vec![0.0, 0.0, 0.0, 1.0])
+        .write_geotiff(&dir.join("m.tif"))
+        .unwrap();
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, &project).unwrap();
+    // Le second critère est donné en absolu : journalisé en relatif aussi.
+    let absolute_b = dir.join("donnees/b.tif").to_string_lossy().into_owned();
+    let out = s
+        .call(
+            "raster.weighted_overlay",
+            json!({"criteria": [
+                {"raster": "a.tif", "weight": 1.0},
+                {"raster": absolute_b, "weight": 3.0}
+            ], "exclusions": ["m.tif"]}),
+        )
+        .unwrap();
+    assert_eq!(out["nodata_cells"], 1);
+    assert_eq!(out["min"], json!(2.25));
+    assert_eq!(out["max"], json!(3.25));
+    let raw = fs::read_to_string(s.journal_path()).unwrap();
+    assert!(
+        !raw.contains(&token),
+        "chemin absolu dans le journal : {raw}"
+    );
+    let l = lines(&s);
+    assert_eq!(
+        l[0]["params"]["criteria"],
+        json!([
+            {"raster": "a.tif", "weight": 1.0},
+            {"raster": "donnees/b.tif", "weight": 3.0}
+        ])
+    );
+    assert_eq!(l[0]["params"]["exclusions"], json!(["m.tif"]));
+    let inputs: Vec<&str> = l[0]["inputs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(inputs, ["a.tif", "donnees/b.tif", "m.tif"]);
+    assert!(s.work_dir().join("1-raster.weighted_overlay.tif").exists());
+
+    let (report, warnings) = replay_of(&registry, &project).unwrap();
+    assert_eq!(
+        report,
+        ReplayReport {
+            steps: 1,
+            identical: true
+        }
+    );
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(
+        fs::read(s.work_dir().join("1-raster.weighted_overlay.tif")).unwrap(),
+        fs::read(s.work_dir().join("replay/1-raster.weighted_overlay.tif")).unwrap()
+    );
+
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}

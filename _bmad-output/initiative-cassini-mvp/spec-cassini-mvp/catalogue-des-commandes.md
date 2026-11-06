@@ -267,8 +267,8 @@ constante du noyau. Posé par l'entrée 1 de l'epic 10.
 | `terrain.viewshed_cumulative` | faite | core | epic 11, entrée 7 |
 | `layer.open_vector` | faite (dictée) | qgis | epic 11, entrée 8 |
 | `terrain.peaks` | faite | core | epic 11, entrée 15 |
-| `raster.reclassify` | planifiée | core | epic 11, entrée 9 |
-| `raster.weighted_overlay` | planifiée | core | epic 11, entrée 9 |
+| `raster.reclassify` | faite | core | epic 11, entrée 9 |
+| `raster.weighted_overlay` | faite | core | epic 11, entrée 9 |
 | `terrain.cost_distance` | planifiée | core | epic 11, entrée 10 |
 | `terrain.least_cost_path` | planifiée | core | epic 11, entrée 10 |
 | `analysis.count_points_in_polygon` | planifiée | qgis | epic 10, entrée 2 |
@@ -1059,10 +1059,6 @@ de plus et de l'ordre d'une à deux minutes au plafond de 1 Gio. Livrée par l'e
  "result": ["feature_count", "file", "peaks", "truncated", "unit"]}
 ```
 
----
-
-## 6. Commandes planifiées — epic 11, géométrie et terrain étendu
-
 ### `raster.reclassify`
 
 Reclasse un raster mono-bande par une table de classes, **dans le noyau** (AD-20 ; déplacée
@@ -1070,7 +1066,7 @@ de l'entrée 25 de l'epic 10, même identifiant). Une classe couvre `[min, max[`
 `max` absent ouvre la borne. La première classe qui convient l'emporte ; une cellule hors
 de toute classe devient NoData ; une cellule NoData reste NoData. Une classe dont `min`
 est supérieur ou égal à `max` est refusée par l'erreur `raster.invalid_class`, qui nomme
-son rang.
+son rang ; une classe de valeur -9999 (le sans-donnée écrit) l'est aussi. Livrée par l'entrée 9 de l'epic 11 (`core/src/commands/raster_reclassify.rs`).
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
@@ -1085,7 +1081,7 @@ son rang.
 | `nodata_cells` | entier | Cellules sans donnée (entrée NoData ou hors classes). |
 
 ```json fiche
-{"id": "raster.reclassify", "status": "planifiee", "runs_in": "core", "dictated_by_core": false,
+{"id": "raster.reclassify", "status": "faite", "runs_in": "core", "dictated_by_core": false,
  "params": {"raster": {"type": "RasterPath", "required": true},
             "classes": {"type": "array", "required": true,
                         "items": {"type": "object",
@@ -1102,7 +1098,7 @@ Superposition pondérée de rasters de même grille, **dans le noyau** (AD-20) :
 somme des valeurs × poids, divisée par la somme des poids. Une cellule NoData dans un
 critère donne NoData ; une cellule non nulle d'un masque d'exclusion donne NoData. Grilles
 différentes : `raster.grid_mismatch`, qui nomme l'écart ; le noyau ne rééchantillonne
-jamais (aligner d'abord par `raster.align`).
+jamais (aligner d'abord par `raster.align`). Livrée par l'entrée 9 de l'epic 11 (`core/src/commands/raster_weighted_overlay.rs`).
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
@@ -1117,7 +1113,7 @@ jamais (aligner d'abord par `raster.align`).
 | `nodata_cells` | entier | Cellules sans donnée (critère NoData ou exclusion). |
 
 ```json fiche
-{"id": "raster.weighted_overlay", "status": "planifiee", "runs_in": "core", "dictated_by_core": false,
+{"id": "raster.weighted_overlay", "status": "faite", "runs_in": "core", "dictated_by_core": false,
  "params": {"criteria": {"type": "array", "required": true,
                          "items": {"type": "object",
                                    "fields": {"raster": {"type": "RasterPath", "required": true},
@@ -1126,6 +1122,10 @@ jamais (aligner d'abord par `raster.align`).
             "out": {"type": "string", "required": false}},
  "result": ["file", "max", "min", "nodata_cells"]}
 ```
+
+---
+
+## 6. Commandes planifiées — epic 11, géométrie et terrain étendu
 
 ### `terrain.cost_distance`
 

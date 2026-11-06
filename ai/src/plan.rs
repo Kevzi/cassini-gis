@@ -1057,6 +1057,37 @@ mod tests {
         let max_count = &peaks["params"]["properties"]["max_count"];
         assert_eq!(max_count["minimum"], json!(1), "{peaks}");
         assert_eq!(max_count["maximum"], json!(100), "{peaks}");
+        // Reclassement et superposition (ticket 11.9) : rasters en chaîne, listes bornées.
+        let reclassify = catalog_entry(reg.spec("raster.reclassify").unwrap());
+        let raster = &reclassify["params"]["properties"]["raster"];
+        assert_eq!(raster["type"], json!("string"), "{reclassify}");
+        assert!(raster.get("$ref").is_none(), "{reclassify}");
+        let classes = &reclassify["params"]["properties"]["classes"];
+        assert_eq!(classes["minItems"], json!(1), "{reclassify}");
+        assert_eq!(classes["maxItems"], json!(32), "{reclassify}");
+        assert!(reclassify["params"]["properties"].get("out").is_none());
+        let overlay = catalog_entry(reg.spec("raster.weighted_overlay").unwrap());
+        let props = &overlay["params"]["properties"];
+        assert_eq!(props["criteria"]["minItems"], json!(2), "{overlay}");
+        assert_eq!(props["criteria"]["maxItems"], json!(8), "{overlay}");
+        assert_eq!(props["exclusions"]["maxItems"], json!(8), "{overlay}");
+        assert_eq!(
+            props["exclusions"]["items"]["type"],
+            json!("string"),
+            "{overlay}"
+        );
+        let criterion = props["criteria"]["items"]["$ref"]
+            .as_str()
+            .and_then(|r| r.strip_prefix("#/$defs/"))
+            .map(|name| &overlay["params"]["$defs"][name])
+            .unwrap_or(&props["criteria"]["items"]);
+        assert_eq!(
+            criterion["properties"]["raster"]["type"],
+            json!("string"),
+            "{overlay}"
+        );
+        assert!(!overlay.to_string().contains("RasterPath"), "{overlay}");
+        assert!(props.get("out").is_none());
         let isochrone = catalog_entry(reg.spec("analysis.isochrone").unwrap());
         assert!(isochrone["params"]["$defs"]["Point"].is_object());
         assert!(!isochrone.to_string().contains("x-cassini"));

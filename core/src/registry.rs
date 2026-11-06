@@ -39,7 +39,8 @@ pub struct CommandSpec {
     /// Métadonnée interne : jamais sérialisée dans le catalogue (CLAUDE.md §2.3).
     #[serde(skip)]
     pub tests: Vec<String>,
-    /// Paramètres qui désignent un fichier d'entrée, relatif au projet (AD-9).
+    /// Paramètres qui désignent un fichier d'entrée, relatif au projet (AD-9) ; un nom
+    /// `liste.champ` désigne le champ `champ` de chaque objet du tableau `liste`.
     /// Métadonnée interne : jamais sérialisée dans le catalogue.
     #[serde(skip)]
     pub path_params: Vec<String>,
@@ -121,7 +122,10 @@ impl CommandSpec {
         self
     }
 
-    /// Déclare les paramètres qui sont des chemins d'entrée relatifs au projet.
+    /// Déclare les paramètres qui sont des chemins d'entrée relatifs au projet : une chaîne ou
+    /// un tableau de chaînes (`dem`, `exclusions`), ou, sous la forme `liste.champ`, le champ
+    /// `champ` de chaque objet du tableau `liste` (`criteria.raster`). Un seul niveau : ni
+    /// `a.b.c`, ni objet hors d'un tableau.
     pub fn path_params(mut self, names: &[&str]) -> Self {
         self.path_params = names.iter().map(|n| n.to_string()).collect();
         self

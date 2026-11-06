@@ -69,7 +69,7 @@ fn call(
     };
     check_available(state, &command)?;
     for name in &spec.path_params {
-        if args.get(name).is_some_and(escapes_project) {
+        if param_escapes_project(&args, name) {
             return Err(RpcError::coded(
                 "external.path_refused",
                 format!(
@@ -333,6 +333,22 @@ fn notify(state: &State<'_>, params: Value) {
     state.link.send_or_fail(&notice);
 }
 
+/// Le paramètre de chemin `name` des arguments sort-il du projet ? Un nom `liste.champ` vise le
+/// champ `champ` de chaque objet du tableau `liste` (ticket 11.9).
+fn param_escapes_project(args: &Value, name: &str) -> bool {
+    match name.split_once('.') {
+        None => args.get(name).is_some_and(escapes_project),
+        Some((list, field)) => args
+            .get(list)
+            .and_then(Value::as_array)
+            .is_some_and(|items| {
+                items
+                    .iter()
+                    .any(|item| item.get(field).is_some_and(escapes_project))
+            }),
+    }
+}
+
 /// Un paramètre de chemin (une chaîne ou une liste de chaînes) est-il absolu, ou sort-il du
 /// projet par `..` ? Toute autre valeur est laissée à la validation du schéma.
 fn escapes_project(value: &Value) -> bool {
@@ -517,6 +533,37 @@ mod tests {
         }
         assert!(!escapes_project(&json!(["a.gpkg", "b/c.gpkg"])));
         assert!(!escapes_project(&json!(3)));
+    }
+
+    #[test]
+    fn a_path_inside_a_list_of_objects_leaving_the_project_is_refused() {
+        let args = |raster: &str| {
+            json!({"criteria": [
+                {"raster": "a.tif", "weight": 1.0},
+                {"raster": raster, "weight": 2.0}
+            ], "exclusions": ["m.tif"]})
+        };
+        for bad in ["/abs/b.tif", "../b.tif", "C:\\b.tif"] {
+            assert!(
+                param_escapes_project(&args(bad), "criteria.raster"),
+                "{bad}"
+            );
+        }
+        assert!(!param_escapes_project(
+            &args("donnees/b.tif"),
+            "criteria.raster"
+        ));
+        assert!(!param_escapes_project(&args("/abs/b.tif"), "exclusions"));
+        assert!(param_escapes_project(
+            &json!({"exclusions": ["m.tif", "../n.tif"]}),
+            "exclusions"
+        ));
+        // Absent, ou pas un tableau d'objets : rien à refuser ici, la validation s'en charge.
+        assert!(!param_escapes_project(&json!({}), "criteria.raster"));
+        assert!(!param_escapes_project(
+            &json!({"criteria": "/abs/b.tif"}),
+            "criteria.raster"
+        ));
     }
 
     #[test]
