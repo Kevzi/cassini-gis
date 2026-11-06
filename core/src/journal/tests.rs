@@ -1141,6 +1141,16 @@ impl Executor for ProjectQgis {
                 let name = path.file_stem().unwrap().to_string_lossy().into_owned();
                 Ok(json!({"layer_id": layer, "name": name}))
             }
+            // Comme le geste : le GeoJSON du noyau entre au projet, dans le système qu'il déclare.
+            "layer.open_vector" => {
+                let path = Path::new(p["path"].as_str().unwrap());
+                assert!(path.is_absolute() && path.is_file(), "{}", path.display());
+                let file = path.file_name().unwrap().to_string_lossy().into_owned();
+                let layer = format!("vector_g{}_{n}", self.generation);
+                self.project.layers.borrow_mut().push((layer.clone(), file));
+                let name = path.file_stem().unwrap().to_string_lossy().into_owned();
+                Ok(json!({"layer_id": layer, "name": name, "crs": "EPSG:2154"}))
+            }
             "layout.export_pdf" => {
                 self.seen
                     .borrow_mut()
@@ -1908,6 +1918,407 @@ fn an_opened_raster_consumed_by_a_later_plan_step_is_intermediate() {
     let mut other = rows.clone();
     other[1]["id"] = json!("layer.add");
     hand_journal(&project, &other);
+    assert!(intermediate_files(&registry, &journal).is_empty());
+    let _ = fs::remove_dir_all(dir);
+}
+
+// ---- Ticket 11.8 : l'ouverture d'un GeoJSON du noyau est une étape dictée et journalisée ----
+
+/// Commande du noyau de test qui écrit, par l'écrivain unique, les points de la fixture
+/// `points-2154.geojson` dans la sortie que le noyau lui donne.
+struct TestWritePoints;
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct WritePointsParams {
+    #[serde(default)]
+    out: String,
+}
+
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+struct WritePointsOutput {
+    feature_count: usize,
+}
+
+impl crate::registry::Command for TestWritePoints {
+    type Params = WritePointsParams;
+    type Output = WritePointsOutput;
+
+    fn spec() -> crate::registry::CommandSpec {
+        crate::registry::CommandSpec::new::<WritePointsParams, WritePointsOutput>(
+            "test.write_points",
+            "Écrit trois points en GeoJSON (tests seulement).",
+            "Writes three points as GeoJSON (tests only).",
+        )
+        .runs_in(crate::registry::RunsIn::Core)
+        .cancellable(false)
+        .output_params(&["out"])
+        .output_ext(".geojson")
+        .tests(&["a_core_geojson_is_followed_by_a_dictated_opening_in_the_three_flows"])
+    }
+
+    fn run(
+        &self,
+        params: WritePointsParams,
+    ) -> Result<WritePointsOutput, crate::registry::CommandFailure> {
+        let points = crate::geojson::fixture_points();
+        crate::geojson::write(Path::new(&params.out), 2154, &points).map_err(|e| {
+            crate::registry::CommandFailure {
+                code: e.code.to_string(),
+                message: e.message,
+            }
+        })?;
+        Ok(WritePointsOutput {
+            feature_count: points.len(),
+        })
+    }
+}
+
+/// Le registre standard, plus la commande qui écrit un GeoJSON.
+fn vector_registry() -> Registry {
+    let mut registry = Registry::standard();
+    registry.register(TestWritePoints);
+    registry
+}
+
+fn points_fixture() -> Vec<u8> {
+    fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/points-2154.geojson")).unwrap()
+}
+
+/// QGIS de test qui note chaque ordre reçu et ouvre un GeoJSON (ou échoue à l'ouvrir).
+struct VectorQgis {
+    calls: std::rc::Rc<std::cell::RefCell<Vec<(String, Value)>>>,
+    unreadable: bool,
+}
+
+impl Executor for VectorQgis {
+    fn execute(&self, id: &str, p: Value) -> Result<Value, RegistryError> {
+        self.calls.borrow_mut().push((id.to_string(), p.clone()));
+        assert_eq!(id, "layer.open_vector");
+        if self.unreadable {
+            return Err(RegistryError::Delegated {
+                code: "layer.invalid_source".into(),
+                message: "Le fichier « 1-test.write_points.geojson » n'est pas lisible.".into(),
+            });
+        }
+        let n = self.calls.borrow().len();
+        let stem = Path::new(p["path"].as_str().unwrap())
+            .file_stem()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        Ok(json!({"layer_id": format!("v{n}"), "name": stem, "crs": "EPSG:2154"}))
+    }
+}
+
+#[test]
+fn a_core_geojson_is_followed_by_a_dictated_opening_in_the_three_flows() {
+    let (dir, project, token) = temp_project();
+    let registry = vector_registry();
+    let qgis = VectorQgis {
+        calls: Default::default(),
+        unreadable: false,
+    };
+    let calls = qgis.calls.clone();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(qgis)
+        .with_vector_opening(true);
+    let by_hand = s.call("test.write_points", json!({})).unwrap();
+    s.call_from("test.write_points", json!({}), Some("external"))
+        .unwrap();
+    s.call_in_plan("test.write_points", json!({}), 2).unwrap();
+    // Le résultat rendu reste celui de l'étape demandée.
+    assert_eq!(by_hand, json!({"feature_count": 3}));
+    let l = lines(&s);
+    assert_eq!(l.len(), 6);
+    for (k, origin, plan_step) in [
+        (0, Value::Null, Value::Null),
+        (2, json!("external"), Value::Null),
+        (4, Value::Null, json!(2)),
+    ] {
+        let (write, open) = (&l[k], &l[k + 1]);
+        assert_eq!(write["id"], "test.write_points");
+        assert_eq!(
+            write["params"]["out"],
+            json!(format!("{}-test.write_points.geojson", k + 1))
+        );
+        assert_eq!(open["id"], "layer.open_vector");
+        assert_eq!(open["step"], json!(k + 2));
+        assert_eq!(open["params"], json!({"path": format!("out:{}.1", k + 1)}));
+        assert_eq!(open["inputs"], json!([]));
+        assert_eq!(open["layer_id"], json!(format!("v{}", k / 2 + 1)));
+        assert_eq!(open["result"]["crs"], json!("EPSG:2154"));
+        assert_eq!(
+            open["result"]["name"],
+            json!(format!("{}-test.write_points", k + 1))
+        );
+        for line in [write, open] {
+            assert_eq!(line.get("origin").cloned().unwrap_or(Value::Null), origin);
+            assert_eq!(
+                line.get("plan_step").cloned().unwrap_or(Value::Null),
+                plan_step
+            );
+        }
+    }
+    // L'extension reçoit le chemin absolu du GeoJSON écrit, égal à la fixture ; le journal, aucun.
+    let calls = calls.borrow();
+    assert_eq!(calls.len(), 3);
+    for (i, (_, params)) in calls.iter().enumerate() {
+        let path = Path::new(params["path"].as_str().unwrap());
+        assert_eq!(
+            path,
+            s.work_dir()
+                .join(format!("{}-test.write_points.geojson", 2 * i + 1))
+        );
+        assert_eq!(fs::read(path).unwrap(), points_fixture());
+    }
+    assert!(!fs::read_to_string(s.journal_path())
+        .unwrap()
+        .contains(&token));
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_geojson_without_the_announced_gesture_dictates_nothing() {
+    let (dir, project, _) = temp_project();
+    with_dem(&dir);
+    let registry = vector_registry();
+    // Sans QGIS (CLI `run`, MCP autonome) : l'écriture seule.
+    {
+        let mut s = Session::open(&registry, &project).unwrap();
+        s.call("test.write_points", json!({})).unwrap();
+        assert_eq!(lines(&s).len(), 1);
+    }
+    // QGIS branché, seule l'ouverture raster annoncée : rien n'est dicté pour un GeoJSON.
+    let qgis = VectorQgis {
+        calls: Default::default(),
+        unreadable: false,
+    };
+    let calls = qgis.calls.clone();
+    {
+        let mut s = Session::open(&registry, &project)
+            .unwrap()
+            .with_qgis(qgis)
+            .with_raster_opening(true)
+            .with_vector_opening(false);
+        s.call("test.write_points", json!({})).unwrap();
+        assert_eq!(lines(&s).len(), 2);
+    }
+    assert!(calls.borrow().is_empty());
+    // L'ouverture vecteur annoncée seule ne dicte rien après un raster.
+    let qgis = VectorQgis {
+        calls: Default::default(),
+        unreadable: false,
+    };
+    let calls = qgis.calls.clone();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(qgis)
+        .with_vector_opening(true);
+    s.call("terrain.slope", slope_params()).unwrap();
+    let ids: Vec<Value> = lines(&s).iter().map(|l| l["id"].clone()).collect();
+    assert_eq!(
+        ids,
+        [
+            json!("test.write_points"),
+            json!("test.write_points"),
+            json!("terrain.slope")
+        ]
+    );
+    assert!(calls.borrow().is_empty());
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn both_openings_announced_dictate_the_right_one_after_each_output() {
+    let (dir, project, _) = temp_project();
+    with_dem(&dir);
+    let registry = vector_registry();
+    let opened = OpenProject::with_base();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(ProjectQgis::new(&opened, 1))
+        .with_raster_opening(true)
+        .with_vector_opening(true);
+    s.call("terrain.slope", slope_params()).unwrap();
+    s.call("test.write_points", json!({})).unwrap();
+    let l = lines(&s);
+    let ids: Vec<&str> = l.iter().map(|l| l["id"].as_str().unwrap()).collect();
+    assert_eq!(
+        ids,
+        [
+            "terrain.slope",
+            "layer.open_raster",
+            "test.write_points",
+            "layer.open_vector"
+        ]
+    );
+    assert_eq!(l[1]["params"], json!({"path": "out:1.1"}));
+    assert_eq!(l[3]["params"], json!({"path": "out:3.1"}));
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_unreadable_geojson_is_a_named_error_journaled_at_its_step() {
+    let (dir, project, _) = temp_project();
+    let registry = vector_registry();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(VectorQgis {
+            calls: Default::default(),
+            unreadable: true,
+        })
+        .with_vector_opening(true);
+    let err = s.call("test.write_points", json!({})).unwrap_err();
+    assert_eq!(err.code, "layer.invalid_source");
+    assert!(
+        err.message.contains("1-test.write_points.geojson"),
+        "{}",
+        err.message
+    );
+    let l = lines(&s);
+    assert_eq!(l.len(), 2);
+    assert!(l[0]["result"].is_object());
+    assert_eq!(l[1]["id"], "layer.open_vector");
+    assert_eq!(l[1]["error"], "layer.invalid_source");
+    assert!(l[1].get("layer_id").is_none());
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+/// Session d'origine : des points écrits par le noyau, puis l'export ; le GeoJSON est ouvert
+/// par l'étape dictée et l'export le montre.
+fn vector_export_journal(project_file: &Path, project: &std::rc::Rc<OpenProject>) {
+    let registry = vector_registry();
+    let mut s = Session::open(&registry, project_file)
+        .unwrap()
+        .with_qgis(ProjectQgis::new(project, 1))
+        .with_raster_opening(true)
+        .with_vector_opening(true);
+    s.call("test.write_points", json!({})).unwrap();
+    s.call("layout.export_pdf", json!({"title": "Points"}))
+        .unwrap();
+    let l = lines(&s);
+    let ids: Vec<&str> = l.iter().map(|l| l["id"].as_str().unwrap()).collect();
+    assert_eq!(
+        ids,
+        [
+            "test.write_points",
+            "layer.open_vector",
+            "layout.export_pdf"
+        ]
+    );
+    assert_eq!(l[1]["layer_id"], "vector_g1_1");
+    assert_eq!(l[2]["result"]["layer_count"], json!(2));
+    assert_eq!(
+        l[2]["result"]["sources"],
+        json!(["1-test.write_points.geojson", "communes.gpkg"])
+    );
+}
+
+fn replay_vector_in(
+    project_file: &Path,
+    project: &std::rc::Rc<OpenProject>,
+    generation: u32,
+    replayed_layers: &mut HashSet<String>,
+) -> (Result<ReplayReport, ErrorReport>, Vec<Value>) {
+    let registry = vector_registry();
+    let qgis = ProjectQgis::new(project, generation);
+    let seen = qgis.seen.clone();
+    let outcome = Replay::load(&registry, project_file)
+        .unwrap()
+        .run(&Router::new(&registry).with_qgis(qgis), replayed_layers);
+    let seen = seen.borrow().clone();
+    (outcome, seen)
+}
+
+#[test]
+fn a_geojson_then_an_export_replays_identically_twice_in_the_same_session() {
+    let (dir, project_file, _) = temp_project();
+    let project = OpenProject::with_base();
+    vector_export_journal(&project_file, &project);
+    let identical = ReplayReport {
+        steps: 3,
+        identical: true,
+    };
+    let mut replayed = HashSet::new();
+    // Premier rejeu, sans rouvrir : la couche d'origine est laissée hors de la carte.
+    let (outcome, seen) = replay_vector_in(&project_file, &project, 2, &mut replayed);
+    assert_eq!(outcome.unwrap(), identical);
+    assert_eq!(seen, vec![json!(["vector_g1_1"])]);
+    assert_eq!(replayed, HashSet::from(["vector_g2_1".to_string()]));
+    // Second rejeu : celle du premier aussi.
+    let (outcome, seen) = replay_vector_in(&project_file, &project, 3, &mut replayed);
+    assert_eq!(outcome.unwrap(), identical);
+    assert_eq!(seen, vec![json!(["vector_g1_1", "vector_g2_1"])]);
+    assert_eq!(project.layers.borrow().len(), 4);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_geojson_then_an_export_replays_identically_in_a_new_session() {
+    let (dir, project_file, _) = temp_project();
+    vector_export_journal(&project_file, &OpenProject::with_base());
+    // Projet rouvert sans la couche : le rejeu réécrit le GeoJSON et le rouvre avant l'export.
+    let reopened = OpenProject::with_base();
+    let (outcome, _) = replay_vector_in(&project_file, &reopened, 2, &mut HashSet::new());
+    assert!(outcome.unwrap().identical);
+    let layers = reopened.layers.borrow();
+    assert_eq!(layers.len(), 2);
+    assert_eq!(
+        layers[1],
+        (
+            "vector_g2_1".to_string(),
+            "1-test.write_points.geojson".to_string()
+        )
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_geojson_whose_bytes_differ_does_not_replay_identically() {
+    // Le rejeu compare le GeoJSON octet pour octet, comme toute sortie du noyau.
+    let (dir, project_file, _) = temp_project();
+    vector_export_journal(&project_file, &OpenProject::with_base());
+    let original = dir.join("p.cassini").join("1-test.write_points.geojson");
+    let mut bytes = fs::read(&original).unwrap();
+    bytes.insert(bytes.len() - 1, b' ');
+    fs::write(&original, bytes).unwrap();
+    let (outcome, _) = replay_vector_in(
+        &project_file,
+        &OpenProject::with_base(),
+        2,
+        &mut HashSet::new(),
+    );
+    let err = outcome.unwrap_err();
+    assert!(err.message.contains("mêmes octets"), "{}", err.message);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_opened_geojson_consumed_by_a_later_plan_step_is_intermediate() {
+    let (dir, project, _) = temp_project();
+    let registry = vector_registry();
+    let rows = [
+        json!({"id": "test.write_points", "plan_step": 1,
+            "params": {"out": "1-test.write_points.geojson"}, "result": {}}),
+        json!({"id": "layer.open_vector", "plan_step": 1, "params": {"path": "out:1.1"},
+            "layer_id": "V", "result": {}}),
+        json!({"id": "analysis.buffer", "plan_step": 2,
+            "params": {"layer_id": "V", "distance": {"value": 10, "unit": "m"}},
+            "layer_id": "B", "result": {}}),
+    ];
+    hand_journal(&project, &rows);
+    let journal = dir.join("p.cassini").join(JOURNAL_FILE);
+    let got: Vec<String> = intermediate_files(&registry, &journal)
+        .into_iter()
+        .collect();
+    assert_eq!(got, ["1-test.write_points.geojson"]);
+    hand_journal(&project, &rows[..2]);
     assert!(intermediate_files(&registry, &journal).is_empty());
     let _ = fs::remove_dir_all(dir);
 }

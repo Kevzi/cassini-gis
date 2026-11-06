@@ -92,7 +92,9 @@ tableau lisible, puis un bloc ` ```json fiche ` que lit la recette :
   (code explicite, `EPSG:2154`) et `feature_count`.
 - Une commande qui écrit un raster rend `file` (GeoTIFF Float32, sans-donnée -9999) ; le
   noyau dicte ensuite `layer.open_raster` (AD-9, AD-24). Une commande du noyau qui rend
-  des entités écrit un GeoJSON et le noyau dicte `layer.open_vector` (AD-30).
+  des entités écrit un GeoJSON et le noyau dicte `layer.open_vector` (AD-30). Un seul écrivain
+  du noyau écrit ces fichiers ; il refuse un nombre non fini ou un dossier absent par
+  `geojson.unwritable`, sans rien écrire.
 - Toute erreur suit l'enveloppe d'AD-21 (`domaine.cause`, message en français). Les
   erreurs du module raster unique (`dem.unreadable`, `dem.unsupported`, `dem.no_epsg`,
   `dem.not_projected`, `dem.unwritable`) valent pour toute commande qui lit un raster
@@ -263,7 +265,7 @@ constante du noyau. Posé par l'entrée 1 de l'epic 10.
 | `terrain.aspect` | faite | core | epic 11, entrée 6 |
 | `terrain.hillshade` | faite | core | epic 11, entrée 6 |
 | `terrain.viewshed_cumulative` | faite | core | epic 11, entrée 7 |
-| `layer.open_vector` | planifiée (dictée) | qgis | epic 11, entrée 8 |
+| `layer.open_vector` | faite (dictée) | qgis | epic 11, entrée 8 |
 | `terrain.peaks` | planifiée | core | epic 11, entrée 15 |
 | `raster.reclassify` | planifiée | core | epic 11, entrée 9 |
 | `raster.weighted_overlay` | planifiée | core | epic 11, entrée 9 |
@@ -428,6 +430,31 @@ après chaque sortie raster (amendement 4.9 d'AD-9) ; refusée par `command.run`
 {"id": "layer.open_raster", "status": "faite", "runs_in": "qgis", "dictated_by_core": true,
  "params": {"path": {"type": "RasterPath", "required": true}},
  "result": ["layer_id", "name"]}
+```
+
+### `layer.open_vector`
+
+Ouvre dans le projet un GeoJSON écrit par une étape du noyau. **Dictée par le noyau** juste
+après l'étape, avec le même `origin` et le même `plan_step`, jamais offerte au modèle ni au
+client MCP, refusée par `command.run` (AD-30). Même traitement au rejeu que
+`layer.open_raster`.
+
+| Paramètre | Type | Oblig. | Unité / valeurs | Sens |
+|---|---|---|---|---|
+| `path` | chaîne | oui | `out:<k>.<n>` | GeoJSON d'une étape précédente. |
+
+| Résultat | Type | Sens |
+|---|---|---|
+| `layer_id` | chaîne | Identifiant de la couche, valable pour la session. |
+| `name` | chaîne | Radical du fichier. |
+| `crs` | chaîne | Système lu par QGIS, code explicite (`EPSG:2154`) : celui que déclare le fichier. |
+
+Erreur : `layer.invalid_source` (fichier illisible ou système non reconnu).
+
+```json fiche
+{"id": "layer.open_vector", "status": "faite", "runs_in": "qgis", "dictated_by_core": true,
+ "params": {"path": {"type": "string", "required": true}},
+ "result": ["crs", "layer_id", "name"]}
 ```
 
 ### `analysis.buffer`
@@ -988,31 +1015,6 @@ propriétaire, 2026-11-06 : gardé tel quel, et dit). Livrée par l'entrée 7 de
 ---
 
 ## 6. Commandes planifiées — epic 11, géométrie et terrain étendu
-
-### `layer.open_vector`
-
-Ouvre dans le projet un GeoJSON écrit par une étape du noyau. **Dictée par le noyau** juste
-après l'étape, avec le même `origin` et le même `plan_step`, jamais offerte au modèle ni au
-client MCP, refusée par `command.run` (AD-30). Même traitement au rejeu que
-`layer.open_raster`.
-
-| Paramètre | Type | Oblig. | Unité / valeurs | Sens |
-|---|---|---|---|---|
-| `path` | chaîne | oui | `out:<k>.<n>` | GeoJSON d'une étape précédente. |
-
-| Résultat | Type | Sens |
-|---|---|---|
-| `layer_id` | chaîne | Identifiant de la couche, valable pour la session. |
-| `name` | chaîne | Radical du fichier. |
-| `crs` | chaîne | Système lu par QGIS, code explicite : celui que déclare le fichier. |
-
-Erreur : `layer.invalid_source` (fichier illisible ou système non reconnu).
-
-```json fiche
-{"id": "layer.open_vector", "status": "planifiee", "runs_in": "qgis", "dictated_by_core": true,
- "params": {"path": {"type": "string", "required": true}},
- "result": ["crs", "layer_id", "name"]}
-```
 
 ### `terrain.peaks`
 

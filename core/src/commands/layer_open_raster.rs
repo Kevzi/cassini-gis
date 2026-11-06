@@ -63,6 +63,7 @@ inventory::submit! { Registration(|r| r.register_delegated::<LayerOpenRaster>())
 #[cfg(test)]
 mod tests {
     use super::OPEN_RASTER;
+    use crate::commands::layer_open_vector::OPEN_VECTOR;
     use crate::registry::{Registry, RunsIn};
     use serde_json::json;
 
@@ -74,10 +75,14 @@ mod tests {
         assert_eq!(spec.cancellable, Some(false));
         assert_eq!(spec.path_params, vec!["path".to_string()]);
         assert!(spec.dictated_by_core);
-        // Le catalogue le dit ; aucune autre commande ne porte la marque.
+        // Le catalogue le dit ; aucune autre commande ne porte la marque, hormis sa sœur
+        // vecteur `layer.open_vector` (AD-30).
         let entry = serde_json::to_value(spec).unwrap();
         assert_eq!(entry["dictated_by_core"], json!(true));
-        for other in registry.specs().filter(|s| s.id != OPEN_RASTER) {
+        for other in registry
+            .specs()
+            .filter(|s| s.id != OPEN_RASTER && s.id != OPEN_VECTOR)
+        {
             assert!(!other.dictated_by_core, "{}", other.id);
             let entry = serde_json::to_value(other).unwrap();
             assert!(entry.get("dictated_by_core").is_none(), "{}", other.id);

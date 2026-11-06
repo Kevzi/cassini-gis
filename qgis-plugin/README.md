@@ -54,6 +54,14 @@ n'ouvre plus de raster de lui-même : après une commande du noyau qui rend un G
 `layer.open_raster` et la journalise (ticket 4.9) ; un fichier absent ou illisible est l'erreur de
 l'appel, montrée au panneau.
 
+Sonde des sorties vecteur du noyau [AD-30, ticket 11.8] sous le vrai QGIS (copie de
+`fixtures/points-2154.geojson`, aucune donnée hors dépôt) : `python-qgis-ltr.bat
+qgis-plugin/tests/probe_vector_output.py` -> `RÉSULTAT : OK`. Le geste `layer.open_vector` y
+ouvre le GeoJSON écrit par l'écrivain du noyau : une couche valide en `EPSG:2154`, ses 3 points
+et les champs `rank`, `elevation`, `prominence` ; un fichier corrompu ou sans système reconnu
+est l'erreur `layer.invalid_source`, sans chemin, et n'ajoute rien. Comme pour un raster, le
+noyau dicte ce geste après toute commande du noyau qui écrit un GeoJSON.
+
 Garde statique (imports réseau et PyQt directs interdits, taille, versions de
 `metadata.txt`) : `python -I qgis-plugin/tests/check_extension.py`.
 

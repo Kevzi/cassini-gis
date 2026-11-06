@@ -22,7 +22,7 @@ CORE_FILLED = ("out", "leave_out", "center")
 
 def offered(catalogue):
     """Les entrées du catalogue offertes au formulaire : toutes, sauf celles que le noyau dicte
-    seul (`dictated_by_core`, ticket 4.9 : `layer.open_raster`)."""
+    seul (`dictated_by_core` : `layer.open_raster`, ticket 4.9, et `layer.open_vector`, AD-30)."""
     return [
         entry for entry in catalogue or []
         if isinstance(entry, dict) and not entry.get("dictated_by_core")

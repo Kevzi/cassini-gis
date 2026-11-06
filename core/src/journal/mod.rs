@@ -33,8 +33,10 @@ use paths::{normalize, posix, relative_to};
 use summary::{same_result, summarize};
 
 use crate::commands::layer_open_raster::OPEN_RASTER;
+use crate::commands::layer_open_vector::OPEN_VECTOR;
 use crate::error::ErrorReport;
 use crate::exec::{Executor, Router};
+use crate::geojson::VECTOR_EXTENSIONS;
 use crate::raster_path::RASTER_EXTENSIONS;
 use crate::registry::{Registry, RegistryError, PROTOCOL_VERSION};
 
@@ -149,6 +151,9 @@ pub struct Session<'a> {
     /// Vrai si l'exécutant QGIS annonce `layer.open_raster` : la session la dicte alors après
     /// chaque étape du noyau qui écrit un raster (ticket 4.9). Faux sans QGIS (CLI, MCP autonome).
     opens_rasters: bool,
+    /// Vrai si l'exécutant QGIS annonce `layer.open_vector` : la session la dicte alors après
+    /// chaque étape du noyau qui écrit un GeoJSON (AD-30, ticket 11.8).
+    opens_vectors: bool,
 }
 
 impl<'a> Session<'a> {
@@ -187,6 +192,7 @@ impl<'a> Session<'a> {
             next_step,
             registry_version: registry_version(registry),
             opens_rasters: false,
+            opens_vectors: false,
         })
     }
 
@@ -203,6 +209,15 @@ impl<'a> Session<'a> {
     pub fn with_raster_opening(self, announced: bool) -> Self {
         Session {
             opens_rasters: announced,
+            ..self
+        }
+    }
+
+    /// Dit si l'exécutant QGIS sait ouvrir un GeoJSON du noyau (`layer.open_vector` annoncée) :
+    /// la session dicte alors cette ouverture après chaque sortie vecteur (AD-30, ticket 11.8).
+    pub fn with_vector_opening(self, announced: bool) -> Self {
+        Session {
+            opens_vectors: announced,
             ..self
         }
     }
@@ -258,14 +273,16 @@ impl<'a> Session<'a> {
         self.call_logged(id, params, None, Some(plan_step))
     }
 
-    /// Exécute et journalise l'étape, puis, si elle a écrit un raster, dicte son ouverture.
+    /// Exécute et journalise l'étape, puis, si elle a écrit un raster ou un GeoJSON, dicte son
+    /// ouverture.
     ///
     /// Une commande du noyau dont la sortie est un GeoTIFF est suivie, quand l'extension annonce
     /// `layer.open_raster`, d'une étape `layer.open_raster {path: "out:<k>.<n>"}` par sortie, de
-    /// même `origin` et de même `plan_step` (ticket 4.9) : le raster entre au projet par une
-    /// étape journalisée, avec son `layer_id`, que le rejeu rejoue et sait laisser hors de la
-    /// carte. Une ouverture en échec est l'erreur de l'appel, nommée (AD-21). Le résultat rendu
-    /// est celui de l'étape demandée.
+    /// même `origin` et de même `plan_step` (ticket 4.9) ; une sortie GeoJSON l'est de même par
+    /// `layer.open_vector`, si l'extension l'annonce (AD-30, ticket 11.8). La sortie entre au
+    /// projet par une étape journalisée, avec son `layer_id`, que le rejeu rejoue et sait laisser
+    /// hors de la carte. Une ouverture en échec est l'erreur de l'appel, nommée (AD-21). Le
+    /// résultat rendu est celui de l'étape demandée.
     fn call_logged(
         &mut self,
         id: &str,
@@ -275,23 +292,38 @@ impl<'a> Session<'a> {
     ) -> Result<Value, ErrorReport> {
         let step = self.next_step;
         let value = self.call_step(id, params, origin, plan_step)?;
-        for path in self.rasters_written(id, step) {
-            self.call_step(OPEN_RASTER, json!({ "path": path }), origin, plan_step)?;
+        if let Some(opener) = self.opener_of(id) {
+            for path in self.outputs_written(id, step) {
+                self.call_step(opener, json!({ "path": path }), origin, plan_step)?;
+            }
         }
         Ok(value)
     }
 
-    /// Repères `out:<step>.<n>` des rasters que l'étape `step` (commande `id`, réussie) a écrits et
-    /// que la session doit faire ouvrir ; vide si l'extension n'annonce pas l'ouverture.
-    fn rasters_written(&self, id: &str, step: usize) -> Vec<String> {
+    /// Commande d'ouverture que la session dicte après une étape de `id` : `layer.open_raster`
+    /// pour une sortie GeoTIFF, `layer.open_vector` pour une sortie GeoJSON, d'une commande du
+    /// noyau seulement, et si l'extension annonce le geste ; `None` sinon.
+    fn opener_of(&self, id: &str) -> Option<&'static str> {
+        let spec = self.registry.spec(id)?;
+        if spec.runs_in != Some(crate::registry::RunsIn::Core) {
+            return None;
+        }
+        let ext = spec.output_ext.as_str();
+        let opener = if RASTER_EXTENSIONS.contains(&ext) && self.opens_rasters {
+            OPEN_RASTER
+        } else if VECTOR_EXTENSIONS.contains(&ext) && self.opens_vectors {
+            OPEN_VECTOR
+        } else {
+            return None;
+        };
+        self.registry.spec(opener).map(|_| opener)
+    }
+
+    /// Repères `out:<step>.<n>` des sorties que l'étape `step` (commande `id`, réussie) a écrites.
+    fn outputs_written(&self, id: &str, step: usize) -> Vec<String> {
         let Some(spec) = self.registry.spec(id) else {
             return Vec::new();
         };
-        let raster = spec.runs_in == Some(crate::registry::RunsIn::Core)
-            && RASTER_EXTENSIONS.contains(&spec.output_ext.as_str());
-        if !self.opens_rasters || !raster || self.registry.spec(OPEN_RASTER).is_none() {
-            return Vec::new();
-        }
         (1..=spec.output_params.len())
             .map(|n| format!("out:{step}.{n}"))
             .collect()
@@ -545,8 +577,9 @@ pub fn intermediate_files(registry: &Registry, journal: &Path) -> HashSet<String
             })
             .unwrap_or_default();
         // Une couche ouverte sur la sortie d'une étape antérieure (`layer.open_raster` dictée
-        // après un raster du noyau, ticket 4.9) est reconnue par ce fichier-là.
-        if let (OPEN_RASTER, Some(Value::Object(params))) = (id, line.get("params")) {
+        // après un raster du noyau, ticket 4.9, `layer.open_vector` après un GeoJSON, AD-30) est
+        // reconnue par ce fichier-là.
+        if let (OPEN_RASTER | OPEN_VECTOR, Some(Value::Object(params))) = (id, line.get("params")) {
             files.extend(
                 params
                     .values()

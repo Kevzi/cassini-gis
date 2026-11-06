@@ -823,6 +823,12 @@ class PluginBehaviourTest(unittest.TestCase):
             self.gestures.create("layer.open_raster"),
             self.mod.delegated.raster_output.LayerOpenRasterGesture,
         )
+        # De même pour un GeoJSON du noyau, dicté par `layer.open_vector` (AD-30).
+        self.assertIn("layer.open_vector", self.gestures.ids())
+        self.assertIsInstance(
+            self.gestures.create("layer.open_vector"),
+            self.mod.delegated.vector_output.LayerOpenVectorGesture,
+        )
 
     def test_protocol_refusal_is_not_a_relaunchable_death(self):
         StubProject.name = "/a/p.qgz"

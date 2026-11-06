@@ -336,7 +336,8 @@ pub(super) fn execute(state: &mut State<'_>, params: Option<&Value>) -> Result<V
             .map_err(|e| RpcError::business(e.at_step(step)))?;
         // Résultat brut, chemins absolus compris, vers l'extension (AD-9, 2026-11-04). Un raster
         // du noyau, lui, est ouvert par l'étape `layer.open_raster` que la session dicte
-        // (ticket 4.9). Le journal reste relatif.
+        // (ticket 4.9), un GeoJSON du noyau par `layer.open_vector` (AD-30). Le journal reste
+        // relatif.
         steps.push(json!({"step": step, "command": call.command, "result": value.clone()}));
         outputs.push(value);
     }
