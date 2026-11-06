@@ -968,8 +968,9 @@ Erreurs (comme `terrain.viewshed`, l'observateur fautif nommé par son rang,
 « observateur n° 2 ») : `terrain.crs_mismatch`, `terrain.outside_dem`,
 `terrain.no_elevation`, `terrain.viewshed_too_large`. Une liste vide ou de plus de 32
 observateurs est refusée (`registry.invalid_params`, qui nomme `observers`). Tous les
-observateurs sont contrôlés avant que rien ne soit écrit. Livrée par l'entrée 7 de
-l'epic 11 (`core/src/commands/terrain_viewshed_cumulative.rs`).
+observateurs sont contrôlés avant que rien ne soit écrit. Calcul non annulable : environ
+5 s au pire par observateur au rayon maximal, soit environ 2 min 30 s pour 32 (décision du
+propriétaire, 2026-11-06 : gardé tel quel, et dit). Livrée par l'entrée 7 de l'epic 11 (`core/src/commands/terrain_viewshed_cumulative.rs`).
 
 ```json fiche
 {"id": "terrain.viewshed_cumulative", "status": "faite", "runs_in": "core", "dictated_by_core": false,

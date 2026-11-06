@@ -11,6 +11,10 @@
 //! La liste est bornée à 32 observateurs (AD-8), par le schéma et par la désérialisation. Tous
 //! les observateurs sont contrôlés, puis toutes les fenêtres calculées, avant d'écrire quoi que
 //! ce soit : la première erreur arrête tout. Pas de parallélisme : ordre et octets figés.
+//!
+//! Coût : celui de `terrain.viewshed` (environ 5 s au pire, tout visible au rayon de 500
+//! cellules) multiplié par le nombre d'observateurs, soit environ 2 min 30 s au pire pour 32,
+//! sans annulation. Décision du propriétaire (2026-11-06) : gardé tel quel, et dit.
 
 use std::path::Path;
 
@@ -212,8 +216,8 @@ impl Command for TerrainViewshedCumulative {
     fn spec() -> CommandSpec {
         CommandSpec::new::<TerrainViewshedCumulativeParams, TerrainViewshedCumulativeOutput>(
             "terrain.viewshed_cumulative",
-            "Champ de vision cumulé depuis plusieurs points sur un MNT : compte, pour chaque cellule d'un modèle numérique d'élévation (fichier GeoTIFF désigné par `dem`, chemin de fichier MNT recopié de l'inventaire, pas un id de couche), combien d'observateurs la voient, de 1 à 32 observateurs, au-delà refus. Même calcul que le champ de vision d'un seul point, répété pour chacun avec les mêmes hauteurs de l'œil et des cibles, le même rayon (5 km par défaut, ramenés à la borne ; au plus 500 fois la taille de cellule du MNT, au-delà refus), la courbure terrestre et la réfraction. Les observateurs sont dans le système du MNT. Écrit un nouveau GeoTIFF : nombre d'observateurs qui voient la cellule, sans donnée hors de tous les rayons. Ne modifie pas le MNT.",
-            "Cumulative viewshed from several points on a DEM: counts, for each cell of a digital elevation model (GeoTIFF file given by `dem`, a DEM file path copied from the inventory, not a layer id), how many observers see it, from 1 to 32 observers, beyond that refused. Same computation as the single-point viewshed, repeated for each with the same eye and target heights, the same radius (5 km by default, capped at the bound; at most 500 times the DEM cell size, beyond that refused), Earth curvature and refraction. Observers are in the DEM's coordinate system. Writes a new GeoTIFF: number of observers that see the cell, no data outside every radius. Does not modify the DEM.",
+            "Champ de vision cumulé depuis plusieurs points sur un MNT : compte, pour chaque cellule d'un modèle numérique d'élévation (fichier GeoTIFF désigné par `dem`, chemin de fichier MNT recopié de l'inventaire, pas un id de couche), combien d'observateurs la voient, de 1 à 32 observateurs, au-delà refus. Même calcul que le champ de vision d'un seul point, répété pour chacun avec les mêmes hauteurs de l'œil et des cibles, le même rayon (5 km par défaut, ramenés à la borne ; au plus 500 fois la taille de cellule du MNT, au-delà refus), la courbure terrestre et la réfraction. Les observateurs sont dans le système du MNT. Écrit un nouveau GeoTIFF : nombre d'observateurs qui voient la cellule, sans donnée hors de tous les rayons. Calcul non annulable : jusqu'à environ 5 s par observateur au rayon maximal. Ne modifie pas le MNT.",
+            "Cumulative viewshed from several points on a DEM: counts, for each cell of a digital elevation model (GeoTIFF file given by `dem`, a DEM file path copied from the inventory, not a layer id), how many observers see it, from 1 to 32 observers, beyond that refused. Same computation as the single-point viewshed, repeated for each with the same eye and target heights, the same radius (5 km by default, capped at the bound; at most 500 times the DEM cell size, beyond that refused), Earth curvature and refraction. Observers are in the DEM's coordinate system. Writes a new GeoTIFF: number of observers that see the cell, no data outside every radius. Not cancellable: up to about 5 s per observer at the maximum radius. Does not modify the DEM.",
         )
         .runs_in(RunsIn::Core)
         .cancellable(false)
