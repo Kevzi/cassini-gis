@@ -98,8 +98,9 @@ impl Listener {
     }
 }
 
-/// Débloque un `accept` en cours en se branchant soi-même au canal ; la connexion est aussitôt
-/// refermée par l'appelant de `accept`, qui sait qu'il doit s'arrêter.
+/// Débloque un `accept` en cours en se branchant soi-même au canal ; l'appelant de `accept`, qui
+/// sait qu'il doit s'arrêter, referme la première connexion qu'il reçoit ensuite (la session y
+/// écrit d'abord son adieu, au cas où ce serait un relais).
 pub fn wake(name: &ChannelName) -> io::Result<()> {
     sys::connect(&name.0).map(drop)
 }

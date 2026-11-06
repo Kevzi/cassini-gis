@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::io::{self, BufRead, BufReader, Write};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -140,7 +140,8 @@ impl Shared {
 /// Le canal ouvert : le fil d'acceptation et ce qu'il faut pour l'arrêter.
 struct Open {
     name: ChannelName,
-    stop: Arc<AtomicBool>,
+    /// Posé à la fermeture, avec la raison que reçoit un relais accepté après l'arrêt.
+    stop: Arc<OnceLock<Lost>>,
     accept: JoinHandle<()>,
 }
 
@@ -236,7 +237,7 @@ impl Hub {
             ),
             OpenError::Io(e) => io_error(e),
         })?;
-        let stop = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(OnceLock::new());
         let accept = {
             let stop = stop.clone();
             let shared = self.shared.clone();
@@ -250,11 +251,14 @@ impl Hub {
 
     /// Ferme le canal : plus d'acceptation, la socket est retirée, chaque relais reçoit
     /// `external.session_lost` puis sa connexion est coupée. Sans effet si le canal est éteint.
+    /// Un relais connecté juste avant, pas encore accepté, reçoit lui aussi l'adieu s'il est le
+    /// premier en file ; un deuxième en file, ou un relais arrivé après le réveil, voit seulement
+    /// la connexion se fermer.
     pub(super) fn close(&self, why: Lost) {
         let Some(open) = self.open.borrow_mut().take() else {
             return;
         };
-        open.stop.store(true, Ordering::SeqCst);
+        let _ = open.stop.set(why);
         // Le fil d'acceptation est réveillé par une connexion à soi-même ; s'il est déjà sorti
         // (panne), la connexion échoue et il n'y a rien à attendre.
         // Sans réveil, le fil resterait bloqué : il est laissé à lui-même plutôt qu'attendu.
@@ -436,12 +440,22 @@ pub(super) fn session_external(hub: &Hub, params: Option<&Value>) -> Result<Valu
 }
 
 /// Le fil d'acceptation : chaque relais reçoit un fil lecteur et un fil écrivain.
-fn accept_loop(mut listener: Listener, stop: &AtomicBool, shared: &Arc<Shared>, tx: &Sender<Msg>) {
+fn accept_loop(
+    mut listener: Listener,
+    stop: &OnceLock<Lost>,
+    shared: &Arc<Shared>,
+    tx: &Sender<Msg>,
+) {
     loop {
         let accepted = listener.accept();
-        if stop.load(Ordering::SeqCst) {
-            // La connexion de réveil (ou un relais arrivé trop tard) est refermée.
-            if let Ok(stream) = accepted {
+        if let Some(&why) = stop.get() {
+            // La file d'attente du canal sert dans l'ordre d'arrivée : un relais connecté juste
+            // avant la fermeture passe avant la connexion de réveil (bogue 5.42). Il reçoit
+            // l'adieu en une seule écriture, qu'une connexion neuve, au tampon vide, ne bloque
+            // pas ; la connexion de réveil le reçoit aussi, sans effet. Puis la connexion est
+            // refermée.
+            if let Ok(mut stream) = accepted {
+                let _ = stream.write_all(format!("{}\n", session_lost(why)).as_bytes());
                 stream.shutdown();
             }
             return;
@@ -518,4 +532,40 @@ fn start_conn(stream: Stream, shared: &Arc<Shared>, tx: &Sender<Msg>) {
             writer,
         },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Un relais connecté juste avant la fermeture, encore dans la file d'attente du canal, est
+    /// accepté après l'arrêt : il reçoit l'adieu, puis la fin du flux (bogue 5.42).
+    #[test]
+    fn a_relay_queued_at_the_close_gets_the_farewell() {
+        let name = ChannelName::tagged(&format!("file-{}", std::process::id())).unwrap();
+        let listener = Listener::open(&name).unwrap();
+        // Connecté, pas encore accepté : le fil d'acceptation n'est pas lancé.
+        let client = external::connect(&name).unwrap();
+        let stop = Arc::new(OnceLock::new());
+        assert!(stop.set(Lost::SessionEnded).is_ok());
+        let shared = Arc::new(Shared::default());
+        let (tx, _rx) = mpsc::channel();
+        let accept = {
+            let stop = stop.clone();
+            thread::spawn(move || accept_loop(listener, &stop, &shared, &tx))
+        };
+        let mut input = BufReader::new(client);
+        let mut line = String::new();
+        input.read_line(&mut line).unwrap();
+        let lost: Value = serde_json::from_str(line.trim()).expect("l'adieu était attendu");
+        assert_eq!(lost["method"], "external.session_lost");
+        assert_eq!(lost["params"]["reason"], "session_ended");
+        line.clear();
+        assert_eq!(
+            input.read_line(&mut line).unwrap(),
+            0,
+            "fin de flux attendue"
+        );
+        accept.join().unwrap();
+    }
 }
