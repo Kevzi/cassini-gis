@@ -1088,6 +1088,25 @@ mod tests {
         );
         assert!(!overlay.to_string().contains("RasterPath"), "{overlay}");
         assert!(props.get("out").is_none());
+        // Coût cumulé et chemin de moindre coût (ticket 11.10) : raster de coût en chaîne,
+        // sources bornées, sortie cachée.
+        for id in ["terrain.cost_distance", "terrain.least_cost_path"] {
+            let spec = reg.spec(id).unwrap();
+            let entry = catalog_entry(spec);
+            let cost = &entry["params"]["properties"]["cost"];
+            let described = spec.params_schema["properties"]["cost"]["description"].clone();
+            assert_eq!(
+                cost,
+                &json!({"type": "string", "description": described}),
+                "{id}"
+            );
+            assert!(!entry.to_string().contains("RasterPath"), "{entry}");
+            assert!(entry["params"]["properties"].get("out").is_none(), "{id}");
+        }
+        let cost_distance = catalog_entry(reg.spec("terrain.cost_distance").unwrap());
+        let sources = &cost_distance["params"]["properties"]["sources"];
+        assert_eq!(sources["minItems"], json!(1), "{cost_distance}");
+        assert_eq!(sources["maxItems"], json!(32), "{cost_distance}");
         let isochrone = catalog_entry(reg.spec("analysis.isochrone").unwrap());
         assert!(isochrone["params"]["$defs"]["Point"].is_object());
         assert!(!isochrone.to_string().contains("x-cassini"));

@@ -8,6 +8,7 @@ pub mod angle;
 pub mod basemap;
 pub mod commands;
 pub mod contract;
+pub mod cost;
 pub mod dem;
 pub mod error;
 pub mod exec;

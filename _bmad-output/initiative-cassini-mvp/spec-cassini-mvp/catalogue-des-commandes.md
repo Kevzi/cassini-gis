@@ -269,8 +269,8 @@ constante du noyau. Posé par l'entrée 1 de l'epic 10.
 | `terrain.peaks` | faite | core | epic 11, entrée 15 |
 | `raster.reclassify` | faite | core | epic 11, entrée 9 |
 | `raster.weighted_overlay` | faite | core | epic 11, entrée 9 |
-| `terrain.cost_distance` | planifiée | core | epic 11, entrée 10 |
-| `terrain.least_cost_path` | planifiée | core | epic 11, entrée 10 |
+| `terrain.cost_distance` | faite | core | epic 11, entrée 10 |
+| `terrain.least_cost_path` | faite | core | epic 11, entrée 10 |
 | `analysis.count_points_in_polygon` | planifiée | qgis | epic 10, entrée 2 |
 | `data.reproject` | planifiée | qgis | epic 10, entrée 7 |
 | `analysis.difference` | planifiée | qgis | epic 10, entrée 21 |
@@ -1123,16 +1123,13 @@ jamais (aligner d'abord par `raster.align`). Livrée par l'entrée 9 de l'epic 1
  "result": ["file", "max", "min", "nodata_cells"]}
 ```
 
----
-
-## 6. Commandes planifiées — epic 11, géométrie et terrain étendu
-
 ### `terrain.cost_distance`
 
 Coût cumulé depuis une ou plusieurs sources sur un raster de coût, par le module de coût
 unique (AD-20) : coût par mètre parcouru ; cellule NoData, nulle ou négative
 infranchissable ; 8 voisins, coût moyen des deux cellules × distance (taille de cellule,
-× √2 en diagonale). Le coût cumulé est dans l'unité du raster × mètres.
+× √2 en diagonale) ; un pas en diagonale demande que les deux cellules qu'il frôle soient
+franchissables. Le coût cumulé est dans l'unité du raster × mètres.
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
@@ -1148,10 +1145,16 @@ infranchissable ; 8 voisins, coût moyen des deux cellules × distance (taille d
 | `unreachable_cells` | entier | Cellules franchissables mais inatteignables. |
 
 Erreurs : `terrain.crs_mismatch`, `terrain.outside_dem` (source hors de l'emprise, nommée
-par son rang), `terrain.impassable_source` (source sur une cellule infranchissable).
+par son rang), `terrain.impassable_source` (source sur une cellule infranchissable), la
+source fautive nommée par son rang (« source n° 2 ») ; toutes les sources sont contrôlées
+avant que rien ne soit écrit. Une liste vide ou de plus de 32 sources est refusée
+(`registry.invalid_params`, qui nomme `sources`) ; une source répétée ne change rien. Calcul
+non annulable : au pire 144 octets par cellule en plus du raster (cumul, prédécesseur, grille
+écrite et tas), soit environ 36 Gio au plafond de 1 Gio. Livrée par l'entrée 10
+de l'epic 11 (`core/src/cost.rs`, `core/src/commands/terrain_cost_distance.rs`).
 
 ```json fiche
-{"id": "terrain.cost_distance", "status": "planifiee", "runs_in": "core", "dictated_by_core": false,
+{"id": "terrain.cost_distance", "status": "faite", "runs_in": "core", "dictated_by_core": false,
  "params": {"cost": {"type": "RasterPath", "required": true},
             "sources": {"type": "array", "required": true, "items": "Point"},
             "out": {"type": "string", "required": false}},
@@ -1161,7 +1164,8 @@ par son rang), `terrain.impassable_source` (source sur une cellule infranchissab
 ### `terrain.least_cost_path`
 
 Chemin de moindre coût du départ à l'arrivée, dans cet ordre, sur le module de coût unique
-(mêmes règles que `terrain.cost_distance`). Écrit un GeoJSON d'une ligne (AD-30),
+(mêmes règles que `terrain.cost_distance`, dont le pas en diagonale permis seulement si les
+deux cellules qu'il frôle sont franchissables). Écrit un GeoJSON d'une ligne (AD-30),
 propriétés `total_cost` (nombre, unité du raster × mètres) et `length` (nombre, mètres).
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
@@ -1179,16 +1183,28 @@ propriétés `total_cost` (nombre, unité du raster × mètres) et `length` (nom
 | `length` | `Distance` | Longueur de la ligne, en `m`. |
 
 Erreurs : `terrain.crs_mismatch`, `terrain.outside_dem`, `terrain.impassable_source`
-(départ ou arrivée infranchissable), `terrain.no_path` (arrivée inatteignable).
+(départ ou arrivée infranchissable), `terrain.no_path` (arrivée inatteignable) ; l'extrémité
+fautive est nommée (« départ », « arrivée ») et rien n'est écrit. Sommets aux centres des
+cellules, les sommets intermédiaires alignés retirés ; `total_cost` vaut le coût cumulé à la
+cellule d'arrivée. Départ et arrivée dans une même cellule : deux sommets confondus, coût et
+longueur nuls. Livrée par l'entrée 10 de l'epic 11
+(`core/src/commands/terrain_least_cost_path.rs`).
 
 ```json fiche
-{"id": "terrain.least_cost_path", "status": "planifiee", "runs_in": "core", "dictated_by_core": false,
+{"id": "terrain.least_cost_path", "status": "faite", "runs_in": "core", "dictated_by_core": false,
  "params": {"cost": {"type": "RasterPath", "required": true},
             "start": {"type": "Point", "required": true},
             "end": {"type": "Point", "required": true},
             "out": {"type": "string", "required": false}},
  "result": ["feature_count", "file", "length", "total_cost"]}
 ```
+
+---
+
+## 6. Commandes planifiées — epic 11, géométrie et terrain étendu
+
+Aucune : les deux commandes de l'entrée 10, `terrain.cost_distance` et
+`terrain.least_cost_path`, sont faites (§5).
 
 ---
 

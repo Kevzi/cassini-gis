@@ -2406,3 +2406,75 @@ fn a_path_inside_a_list_of_objects_is_journaled_relative_and_replays_identically
     drop(s);
     let _ = fs::remove_dir_all(dir);
 }
+
+/// Plan pente → reclassement → chemin de moindre coût, sans QGIS, chaque étape citant la sortie
+/// de la précédente par son repère ; le rejeu le rend à l'identique (ticket 11.10).
+#[test]
+fn a_slope_reclassify_least_cost_path_plan_replays_identically() {
+    let (dir, project, token) = temp_project();
+    with_dem(&dir);
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, &project).unwrap();
+    s.call_in_plan("terrain.slope", slope_params(), 1).unwrap();
+    let classes = s
+        .call_in_plan(
+            "raster.reclassify",
+            json!({"raster": "out:1.1", "classes": [
+                {"max": 5.0, "value": 1.0},
+                {"min": 5.0, "value": 4.0}
+            ]}),
+            2,
+        )
+        .unwrap();
+    assert!(classes["nodata_cells"].as_u64().unwrap() > 0);
+    let found = s
+        .call_in_plan(
+            "terrain.least_cost_path",
+            json!({"cost": "out:2.1",
+                "start": {"x": 652015, "y": 6850285, "epsg": 2154},
+                "end": {"x": 652385, "y": 6850015, "epsg": 2154}}),
+            3,
+        )
+        .unwrap();
+    assert_eq!(found["feature_count"], 1);
+    assert_eq!(found["length"]["unit"], "m");
+    assert!(found["total_cost"].as_f64().unwrap() > 0.0);
+    let l = lines(&s);
+    let ids: Vec<&str> = l.iter().map(|l| l["id"].as_str().unwrap()).collect();
+    assert_eq!(
+        ids,
+        [
+            "terrain.slope",
+            "raster.reclassify",
+            "terrain.least_cost_path"
+        ]
+    );
+    assert_eq!(l[1]["params"]["raster"], json!("out:1.1"));
+    assert_eq!(l[2]["params"]["cost"], json!("out:2.1"));
+    assert_eq!(l[2]["inputs"], json!([]));
+    assert!(!fs::read_to_string(s.journal_path())
+        .unwrap()
+        .contains(&token));
+    let path = s.work_dir().join("3-terrain.least_cost_path.geojson");
+    assert!(path.is_file());
+
+    let (report, warnings) = replay_of(&registry, &project).unwrap();
+    assert_eq!(
+        report,
+        ReplayReport {
+            steps: 3,
+            identical: true
+        }
+    );
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(
+        fs::read(&path).unwrap(),
+        fs::read(
+            s.work_dir()
+                .join("replay/3-terrain.least_cost_path.geojson")
+        )
+        .unwrap()
+    );
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
