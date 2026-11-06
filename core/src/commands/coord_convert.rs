@@ -9,12 +9,10 @@
 use schemars::JsonSchema;
 use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
 
-use crate::geodesy::{self, Mgrs, Utm};
+use super::geo_point::{check_grid_latitude, out_of_range, read_point, utm_point, wgs84_point};
+use crate::geodesy::{self, Mgrs};
 use crate::point::{MgrsRef, Point};
 use crate::registry::{Command, CommandFailure, CommandSpec, Registration, RunsIn};
-
-/// Code EPSG du WGS84 géographique.
-const WGS84: u32 = 4326;
 
 // Une forme demandée : WGS84 (degrés décimaux), UTM sur WGS84 (mètres) ou MGRS. Sans
 // commentaire de documentation : il deviendrait une description par valeur dans le schéma du
@@ -101,64 +99,6 @@ pub struct CoordConvertOutput {
     pub mgrs: Option<MgrsRef>,
 }
 
-fn out_of_range(message: String) -> CommandFailure {
-    CommandFailure::new("coord.out_of_range", message)
-}
-
-/// Arrondi à `1 / scale` : le millimètre pour l'UTM (1e3), le milliardième de degré pour le
-/// WGS84 (1e9). L'entier arrondi est divisé, non multiplié par le pas : le flottant rendu est le
-/// plus proche du décimal court, que le JSON écrit et relit à l'identique (le rejeu compare le
-/// résultat relu du journal à celui qu'il recalcule).
-fn rounded(value: f64, scale: f64) -> f64 {
-    libm::round(value * scale) / scale
-}
-
-/// Lit le point d'entrée en WGS84 : (latitude, longitude) en degrés.
-fn read_point(point: &Point) -> Result<(f64, f64), CommandFailure> {
-    if !(point.x.is_finite() && point.y.is_finite()) {
-        return Err(out_of_range("Les coordonnées du point ne sont pas des nombres finis.".into()));
-    }
-    if point.epsg == WGS84 {
-        if !(-90.0..=90.0).contains(&point.y) || !(-180.0..=180.0).contains(&point.x) {
-            return Err(out_of_range(format!(
-                "Le point ({}, {}) n'est pas un point WGS84 : la longitude (x) va de -180 à 180, la latitude (y) de -90 à 90.",
-                point.x, point.y
-            )));
-        }
-        return Ok((point.y, point.x));
-    }
-    let Some((zone, north)) = Utm::zone_of_epsg(point.epsg) else {
-        return Err(CommandFailure::new(
-            "geo.unsupported_crs",
-            format!(
-                "Le système EPSG:{} n'est pas pris en charge par coord.convert, qui ne connaît que le WGS84 (EPSG:4326) et l'UTM sur WGS84 (EPSG:32601 à 32660, 32701 à 32760) : ajoutez d'abord une étape data.transform_point vers EPSG:4326.",
-                point.epsg
-            ),
-        ));
-    };
-    let (lat, lon) = geodesy::from_utm(&Utm {
-        zone,
-        north,
-        easting: point.x,
-        northing: point.y,
-    });
-    // Latitude dans la grille, hémisphère conforme au code EPSG, et longitude à au plus 9° du
-    // méridien central (une zone voisine au plus) : sinon les nombres ne sont pas un point de
-    // cette zone.
-    let inside = lat.is_finite()
-        && lon.is_finite()
-        && (geodesy::MIN_LATITUDE..=geodesy::MAX_LATITUDE).contains(&lat)
-        && north == (lat >= 0.0)
-        && geodesy::wrap_longitude(lon - geodesy::central_meridian(zone)).abs() <= 9.0;
-    if !inside {
-        return Err(out_of_range(format!(
-            "Le point ({}, {}) est hors de la zone UTM EPSG:{}.",
-            point.x, point.y, point.epsg
-        )));
-    }
-    Ok((lat, lon))
-}
-
 /// Lit la référence MGRS d'entrée : coin sud-ouest de sa case, en WGS84.
 fn read_mgrs(reference: &MgrsRef) -> Result<(f64, f64), CommandFailure> {
     let invalid = |e: geodesy::MgrsError| {
@@ -175,16 +115,6 @@ fn read_mgrs(reference: &MgrsRef) -> Result<(f64, f64), CommandFailure> {
     let mgrs = reference.parse().map_err(invalid)?;
     let corner = mgrs.south_west().map_err(invalid)?;
     Ok(geodesy::from_utm(&corner))
-}
-
-/// La latitude doit être couverte par l'UTM et le MGRS.
-fn check_grid_latitude(lat: f64) -> Result<(), CommandFailure> {
-    if (geodesy::MIN_LATITUDE..=geodesy::MAX_LATITUDE).contains(&lat) {
-        return Ok(());
-    }
-    Err(out_of_range(format!(
-        "La latitude {lat} est hors de la grille UTM et MGRS, qui va de 80° S à 84° N : les zones polaires ne sont pas prises en charge."
-    )))
 }
 
 /// `coord.convert` : commande du noyau.
@@ -223,7 +153,7 @@ impl Command for CoordConvert {
 
     fn run(&self, params: CoordConvertParams) -> Result<CoordConvertOutput, CommandFailure> {
         let (lat, lon) = match (&params.point, &params.mgrs) {
-            (Some(point), None) => read_point(point)?,
+            (Some(point), None) => read_point(point, "coord.convert")?,
             (None, Some(reference)) => read_mgrs(reference)?,
             _ => {
                 return Err(CommandFailure::new(
@@ -239,11 +169,7 @@ impl Command for CoordConvert {
             mgrs: None,
         };
         if wants(Form::Wgs84) {
-            output.wgs84 = Some(Point {
-                x: rounded(lon, 1e9),
-                y: rounded(lat, 1e9),
-                epsg: WGS84,
-            });
+            output.wgs84 = Some(wgs84_point(lat, lon));
         }
         if wants(Form::Utm) {
             check_grid_latitude(lat)?;
@@ -254,12 +180,7 @@ impl Command for CoordConvert {
                     "La zone UTM {zone} est à plus d'une zone de celle du point ({normal}) : une zone imposée ne peut être que la sienne ou une voisine."
                 )));
             }
-            let utm = geodesy::to_utm(lat, lon, zone);
-            output.utm = Some(Point {
-                x: rounded(utm.easting, 1e3),
-                y: rounded(utm.northing, 1e3),
-                epsg: utm.epsg(),
-            });
+            output.utm = Some(utm_point(lat, lon, zone));
         }
         if wants(Form::Mgrs) {
             check_grid_latitude(lat)?;

@@ -352,8 +352,96 @@ def _coord_convert(lang, p, r, names):
     )
 
 
+def _angle(lang, value):
+    """`45°`, `141,75°`, `50 gon` : affichage au dix-millième d'unité."""
+    if not isinstance(value, dict) or not _is_number(value.get("value")):
+        raise _Unreadable()
+    unit = value.get("unit", "deg")
+    if unit not in ("deg", "gon"):
+        raise _Unreadable()
+    shown = number(lang, round(float(value["value"]), 4))
+    return shown + ("°" if unit == "deg" else " gon")
+
+
+def _length(lang, value):
+    """`39,528 m`, `660,5 km` : au-delà de 1000 m, en kilomètres au mètre près."""
+    if not isinstance(value, dict) or value.get("unit") not in ("m", "km"):
+        raise _Unreadable()
+    v = value.get("value")
+    if not _is_number(v):
+        raise _Unreadable()
+    metres = float(v) * (1000 if value["unit"] == "km" else 1)
+    if abs(metres) >= 1000:
+        return "%s km" % number(lang, round(metres / 1000, 3))
+    return "%s m" % number(lang, round(metres, 3))
+
+
+def _point(lang, value):
+    """Un point rendu : latitude puis longitude en WGS84, ou zone et mètres en UTM."""
+    if not isinstance(value, dict):
+        raise _Unreadable()
+    if value.get("epsg") == 4326:
+        return "%s, %s" % (
+            _degrees(lang, value.get("y"), "N", "S"),
+            _degrees(lang, value.get("x"), "E", "W"),
+        )
+    return texts.tr(
+        lang,
+        "sum_geo_utm",
+        zone=_utm_zone(value.get("epsg")),
+        x=_metres(value.get("x")),
+        y=_metres(value.get("y")),
+    )
+
+
+def _distance_azimuth(lang, p, r, names):
+    """Distance et azimuts rendus ; affichage seul (AD-5)."""
+    if not r:
+        return texts.tr(lang, "sum_geo_measure")
+    return texts.tr(
+        lang,
+        "sum_geo_measured",
+        distance=_length(lang, r.get("distance")),
+        azimuth=_angle(lang, r.get("azimuth")),
+        back=_angle(lang, r.get("back_azimuth")),
+    )
+
+
+def _destination_point(lang, p, r, names):
+    distance = _length(lang, p.get("distance"))
+    azimuth = _angle(lang, p.get("azimuth"))
+    if not r:
+        return texts.tr(lang, "sum_geo_destination", distance=distance, azimuth=azimuth)
+    return texts.tr(
+        lang,
+        "sum_geo_reached",
+        distance=distance,
+        azimuth=azimuth,
+        point=_point(lang, r.get("point")),
+    )
+
+
+def _bearing_intersection(lang, p, r, names):
+    first = _angle(lang, p.get("first_azimuth"))
+    second = _angle(lang, p.get("second_azimuth"))
+    if not r:
+        return texts.tr(lang, "sum_geo_intersection", first=first, second=second)
+    return texts.tr(
+        lang,
+        "sum_geo_intersected",
+        first=first,
+        second=second,
+        point=_point(lang, r.get("point")),
+        d1=_length(lang, r.get("distance_from_first")),
+        d2=_length(lang, r.get("distance_from_second")),
+    )
+
+
 _SENTENCES = {
     "coord.convert": _coord_convert,
+    "geo.distance_azimuth": _distance_azimuth,
+    "geo.destination_point": _destination_point,
+    "geo.bearing_intersection": _bearing_intersection,
     "analysis.buffer": _buffer,
     "analysis.intersect": _intersect,
     "analysis.select_by_attribute": _select,

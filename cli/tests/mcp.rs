@@ -115,6 +115,47 @@ fn coord_convert_is_listed_and_called_like_cassini_run() {
 }
 
 #[test]
+fn geo_commands_are_listed_and_called_like_cassini_run() {
+    let mut client = McpClient::connect(&[], &models_dir());
+    let listed = client.request("tools/list", json!({}));
+    let tools = listed["result"]["tools"].as_array().unwrap();
+    for (tool, id, params) in [
+        (
+            "geo_distance_azimuth",
+            "geo.distance_azimuth",
+            json!({"from": {"x": 2.3522, "y": 48.8566, "epsg": 4326},
+                "to": {"x": 5.3698, "y": 43.2965, "epsg": 4326}}),
+        ),
+        (
+            "geo_destination_point",
+            "geo.destination_point",
+            json!({"from": {"x": 448251.0, "y": 5411750.0, "epsg": 32631},
+                "azimuth": {"value": 100, "unit": "gon"}, "distance": {"value": 1.5, "unit": "km"}}),
+        ),
+        (
+            "geo_bearing_intersection",
+            "geo.bearing_intersection",
+            json!({"first": {"x": 2.0, "y": 48.0, "epsg": 4326}, "first_azimuth": {"value": 45},
+                "second": {"x": 2.2, "y": 48.0, "epsg": 4326}, "second_azimuth": {"value": 315}}),
+        ),
+    ] {
+        assert!(tools.iter().any(|t| t["name"] == tool), "{tool}");
+        let reply = client.call_tool(tool, params.clone());
+        let result = &reply["result"];
+        assert_eq!(result["isError"], false, "{tool} : {reply}");
+        let run = Command::new(BIN)
+            .args(["run", id, &params.to_string()])
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{id}");
+        let expected: Value = serde_json::from_slice(&run.stdout).unwrap();
+        assert_eq!(result["structuredContent"], expected, "{tool}");
+    }
+    client.assert_no_server_request();
+    assert_eq!(client.close().0.code(), Some(0));
+}
+
+#[test]
 fn system_about_gives_the_same_result_as_cassini_run() {
     let mut client = McpClient::connect(&[], &models_dir());
     let reply = client.call_tool("system_about", json!({}));

@@ -895,6 +895,36 @@ mod tests {
     }
 
     #[test]
+    fn geo_commands_run_without_qgis_and_replay_identically() {
+        let (dir, project) = temp_project();
+        for (id, params) in [
+            (
+                "geo.distance_azimuth",
+                r#"{"from":{"x":448251.0,"y":5411750.0,"epsg":32631},"to":{"x":5.3698,"y":43.2965,"epsg":4326},"unit":"gon"}"#,
+            ),
+            (
+                "geo.destination_point",
+                r#"{"from":{"x":2.3522,"y":48.8566,"epsg":4326},"azimuth":{"value":45},"distance":{"value":10,"unit":"km"}}"#,
+            ),
+            (
+                "geo.bearing_intersection",
+                r#"{"first":{"x":2.0,"y":48.0,"epsg":4326},"first_azimuth":{"value":45},"second":{"x":2.2,"y":48.0,"epsg":4326},"second_azimuth":{"value":315}}"#,
+            ),
+        ] {
+            let (code, out, err) = call(&["run", id, params, "--project", &project]);
+            assert_eq!((code, err.as_str()), (0, ""), "{id}");
+            let result: Value = serde_json::from_str(out.trim()).unwrap();
+            assert!(result.is_object(), "{id} : {out}");
+        }
+        let journal = std::fs::read_to_string(dir.join("p.cassini/journal.jsonl")).unwrap();
+        assert_eq!(journal.lines().count(), 3, "{journal}");
+        let (code, out, err) = call(&["replay", &project]);
+        assert_eq!((code, err.as_str()), (0, ""));
+        assert_eq!(out.trim(), r#"{"steps":3,"identical":true}"#);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn terrain_line_of_sight_runs_without_qgis_and_replays_identically() {
         let (dir, project) = temp_project();
         let fixture =

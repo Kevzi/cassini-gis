@@ -239,6 +239,104 @@ class CoordConvertTest(unittest.TestCase):
             )
 
 
+MEASURE = {
+    "from": {"x": 2.3522, "y": 48.8566, "epsg": 4326},
+    "to": {"x": 5.3698, "y": 43.2965, "epsg": 4326},
+}
+MEASURE_OUT = {
+    "distance": {"value": 660503.512, "unit": "m"},
+    "azimuth": {"value": 157.957382201, "unit": "deg"},
+    "back_azimuth": {"value": 340.1, "unit": "deg"},
+}
+DESTINATION = {
+    "from": {"x": 448251.0, "y": 5411750.0, "epsg": 32631},
+    "azimuth": {"value": 100, "unit": "gon"},
+    "distance": {"value": 1.5, "unit": "km"},
+}
+DESTINATION_OUT = {"point": {"x": 449750.981, "y": 5411751.338, "epsg": 32631}}
+INTERSECTION = {
+    "first": {"x": 2.0, "y": 48.0, "epsg": 4326},
+    "first_azimuth": {"value": 45},
+    "second": {"x": 2.2, "y": 48.0, "epsg": 4326},
+    "second_azimuth": {"value": 315},
+}
+INTERSECTION_OUT = {
+    "point": {"x": 2.1, "y": 48.047609571, "epsg": 4326},
+    "distance_from_first": {"value": 7469.237, "unit": "m"},
+    "distance_from_second": {"value": 7469.237, "unit": "m"},
+}
+
+
+class GeoTest(unittest.TestCase):
+    def test_distance_and_azimuths_are_shown(self):
+        self.assertEqual(
+            say("geo.distance_azimuth", MEASURE, MEASURE_OUT),
+            "Distance géodésique : 660,504 km, azimut 157,9574°, contre-azimut 340,1°.",
+        )
+        self.assertEqual(
+            say("geo.distance_azimuth", MEASURE, MEASURE_OUT, lang="en"),
+            "Geodesic distance: 660.504 km, azimuth 157.9574°, back azimuth 340.1°.",
+        )
+        grads = dict(MEASURE_OUT, distance={"value": 39.528, "unit": "m"},
+                     azimuth={"value": 61.9, "unit": "gon"},
+                     back_azimuth={"value": 261.9, "unit": "gon"})
+        self.assertEqual(
+            say("geo.distance_azimuth", MEASURE, grads),
+            "Distance géodésique : 39,528 m, azimut 61,9 gon, contre-azimut 261,9 gon.",
+        )
+        self.assertEqual(
+            say("geo.distance_azimuth", MEASURE),
+            "Mesure de la distance et de l'azimut entre deux points.",
+        )
+
+    def test_the_reached_point_is_shown(self):
+        self.assertEqual(
+            say("geo.destination_point", DESTINATION, DESTINATION_OUT),
+            "Point atteint à 1,5 km, azimut 100 gon : UTM 31N 449750 E, 5411751 N.",
+        )
+        self.assertEqual(
+            say("geo.destination_point", DESTINATION, {}, lang="en"),
+            "Point at 1.5 km, azimuth 100 gon.",
+        )
+        wgs84 = {"point": {"x": -3.5, "y": 48.25, "epsg": 4326}}
+        self.assertEqual(
+            say("geo.destination_point", DESTINATION, wgs84, lang="en"),
+            "Point reached at 1.5 km, azimuth 100 gon: 48.2500000° N, 3.5000000° W.",
+        )
+
+    def test_the_intersection_is_shown_with_its_distances(self):
+        self.assertEqual(
+            say("geo.bearing_intersection", INTERSECTION, INTERSECTION_OUT),
+            "Recoupement des visées 45° et 315° : 48,0476096° N, 2,1000000° E, "
+            "à 7,469 km de la première station et 7,469 km de la seconde.",
+        )
+        self.assertEqual(
+            say("geo.bearing_intersection", INTERSECTION, None, lang="en"),
+            "Intersection of the bearings 45° and 315°.",
+        )
+
+    def test_unreadable_values_fall_back(self):
+        catalogue = [
+            {"id": "geo.destination_point", "description_fr": "Point atteint."},
+            {"id": "geo.distance_azimuth", "description_fr": "Distance et azimuts."},
+        ]
+        bad_point = {"point": {"x": 1, "y": 2, "epsg": 2154}}
+        self.assertEqual(
+            say("geo.destination_point", DESTINATION, bad_point, catalogue=catalogue),
+            "Point atteint. Terminée.",
+        )
+        self.assertEqual(
+            say("geo.destination_point", dict(DESTINATION, azimuth={"value": 1, "unit": "rad"}),
+                catalogue=catalogue),
+            "Point atteint. Terminée.",
+        )
+        self.assertEqual(
+            say("geo.distance_azimuth", MEASURE, dict(MEASURE_OUT, distance=12),
+                catalogue=catalogue),
+            "Distance et azimuts. Terminée.",
+        )
+
+
 class ReferencesTest(unittest.TestCase):
     def test_step_reference_uses_the_name_rendered_by_the_step(self):
         params = {"layer_id": "parcelles_2", "overlay_layer_id": "step:1.layer_id"}
