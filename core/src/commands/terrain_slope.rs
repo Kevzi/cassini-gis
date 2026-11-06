@@ -1,9 +1,9 @@
 //! Commande `terrain.slope` : pente d'un MNT, en degrés ou en pourcentage, calculée dans le
 //! noyau par la méthode de Horn (1981), sans GDAL ni GRASS (AD-1).
 //!
-//! Provenance : les différences finies pondérées sur la fenêtre 3 × 3 sont celles de
-//! B. K. P. Horn, « Hill shading and the reflectance map », *Proceedings of the IEEE*, 69(1),
-//! 1981, p. 14-47, écrites d'après la publication seule. Aucune ligne de code de GDAL, de
+//! Provenance : les différences finies pondérées sur la fenêtre 3 × 3 (`crate::horn`) sont
+//! celles de B. K. P. Horn, « Hill shading and the reflectance map », *Proceedings of the
+//! IEEE*, 69(1), 1981, p. 14-47, écrites d'après la publication seule. Aucune ligne de code de GDAL, de
 //! GRASS, de QGIS ni de Whitebox n'est reprise. Résultat comparé à `gdaldem slope -alg Horn`
 //! (ticket 4.2) et à `native:slope` de QGIS (`docs/comparaison-terrain-qgis.md`).
 //!
@@ -17,6 +17,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::dem::Dem;
+use crate::horn::{horn_gradient, same_grid_as};
 use crate::raster_path::RasterPath;
 use crate::registry::{Command, CommandFailure, CommandSpec, Registration, RunsIn};
 
@@ -81,27 +82,11 @@ pub fn horn_slope(dem: &Dem, unit: SlopeUnit) -> (Dem, SlopeStats) {
     let mut min: Option<f64> = None;
     let mut max: Option<f64> = None;
     let mut valid = 0u64;
-    let z = |c: u32, r: u32| dem.value(c, r).map(f64::from);
     for row in 1..h.saturating_sub(1) {
         for col in 1..w.saturating_sub(1) {
-            let window = (|| {
-                Some([
-                    z(col - 1, row - 1)?,
-                    z(col, row - 1)?,
-                    z(col + 1, row - 1)?,
-                    z(col - 1, row)?,
-                    z(col + 1, row)?,
-                    z(col - 1, row + 1)?,
-                    z(col, row + 1)?,
-                    z(col + 1, row + 1)?,
-                ])
-            })();
-            // La cellule centrale ne sert pas au calcul, mais une cellule sans donnée le reste.
-            let (Some([a, b, c, d, f, g, hh, i]), Some(_)) = (window, z(col, row)) else {
+            let Some((dx, dy)) = horn_gradient(dem, col, row) else {
                 continue;
             };
-            let dx = ((c + 2.0 * f + i) - (a + 2.0 * d + g)) / (8.0 * dem.cell_size_x);
-            let dy = ((g + 2.0 * hh + i) - (a + 2.0 * b + c)) / (8.0 * dem.cell_size_y);
             let p = (dx * dx + dy * dy).sqrt();
             let slope = match unit {
                 SlopeUnit::Percent => 100.0 * p,
@@ -116,18 +101,7 @@ pub fn horn_slope(dem: &Dem, unit: SlopeUnit) -> (Dem, SlopeStats) {
             valid += 1;
         }
     }
-    // Champs copiés un à un : un `..dem.clone()` dupliquerait toute la grille d'entrée.
-    let out = Dem {
-        width: dem.width,
-        height: dem.height,
-        origin_x: dem.origin_x,
-        origin_y: dem.origin_y,
-        cell_size_x: dem.cell_size_x,
-        cell_size_y: dem.cell_size_y,
-        epsg: dem.epsg,
-        nodata: Some(f64::from(SLOPE_NODATA)),
-        values,
-    };
+    let out = same_grid_as(dem, values, SLOPE_NODATA);
     let stats = SlopeStats {
         min,
         max,
