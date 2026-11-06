@@ -1024,7 +1024,13 @@ mod tests {
         // La marque du `Point` reste au noyau : le modèle ne la voit pas.
         assert!(!text.contains("x-cassini"));
         // Un `RasterPath` reste une chaîne pour le modèle, sa description gardée (ticket 11.5).
-        for id in ["terrain.slope", "terrain.viewshed", "terrain.line_of_sight"] {
+        for id in [
+            "terrain.slope",
+            "terrain.viewshed",
+            "terrain.line_of_sight",
+            "terrain.aspect",
+            "terrain.hillshade",
+        ] {
             let spec = reg.spec(id).unwrap();
             let entry = catalog_entry(spec);
             let dem = &entry["params"]["properties"]["dem"];

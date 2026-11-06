@@ -260,8 +260,8 @@ constante du noyau. Posé par l'entrée 1 de l'epic 10.
 | `geo.destination_point` | faite | core | epic 11, entrée 3 |
 | `geo.bearing_intersection` | faite | core | epic 11, entrée 3 |
 | `data.transform_point` | faite | qgis | epic 11, entrée 4 |
-| `terrain.aspect` | planifiée | core | epic 11, entrée 6 |
-| `terrain.hillshade` | planifiée | core | epic 11, entrée 6 |
+| `terrain.aspect` | faite | core | epic 11, entrée 6 |
+| `terrain.hillshade` | faite | core | epic 11, entrée 6 |
 | `terrain.viewshed_cumulative` | planifiée | core | epic 11, entrée 7 |
 | `layer.open_vector` | planifiée (dictée) | qgis | epic 11, entrée 8 |
 | `terrain.peaks` | planifiée | core | epic 11, entrée 15 |
@@ -880,10 +880,6 @@ code négatif ou non entier, champ en trop).
  "result": ["point"]}
 ```
 
----
-
-## 6. Commandes planifiées — epic 11, géométrie et terrain étendu
-
 ### `terrain.aspect`
 
 Exposition de chaque cellule d'un MNT, en degrés depuis le **nord du quadrillage** du MNT,
@@ -901,8 +897,11 @@ plate (gradient nul) a l'exposition NoData (AD-31).
 | `flat_cells` | entier | Cellules plates, mises en NoData. |
 | `nodata_cells` | entier | Cellules sans donnée en tout (bord, trous et plates compris). |
 
+Livrée par l'entrée 6 de l'epic 11 (`core/src/commands/terrain_aspect.rs`, fenêtre de Horn
+commune dans `core/src/horn.rs`). Erreurs : celles du module raster unique (`dem.*`).
+
 ```json fiche
-{"id": "terrain.aspect", "status": "planifiee", "runs_in": "core", "dictated_by_core": false,
+{"id": "terrain.aspect", "status": "faite", "runs_in": "core", "dictated_by_core": false,
  "params": {"dem": {"type": "RasterPath", "required": true},
             "out": {"type": "string", "required": false}},
  "result": ["file", "flat_cells", "nodata_cells"]}
@@ -927,10 +926,11 @@ rapporté au nord du quadrillage du MNT (AD-31).
 | `nodata_cells` | entier | Cellules sans donnée (bord et trous). |
 
 Erreurs : `terrain.invalid_parameter`, qui nomme le paramètre (`sun_altitude` hors de 0 à
-90°, `z_factor` nul ou négatif) ; erreurs du module raster unique (`dem.*`).
+90°, `z_factor` nul ou négatif) ; erreurs du module raster unique (`dem.*`). Livrée par
+l'entrée 6 de l'epic 11 (`core/src/commands/terrain_hillshade.rs`).
 
 ```json fiche
-{"id": "terrain.hillshade", "status": "planifiee", "runs_in": "core", "dictated_by_core": false,
+{"id": "terrain.hillshade", "status": "faite", "runs_in": "core", "dictated_by_core": false,
  "params": {"dem": {"type": "RasterPath", "required": true},
             "sun_azimuth": {"type": "Angle", "required": false},
             "sun_altitude": {"type": "Angle", "required": false},
@@ -938,6 +938,10 @@ Erreurs : `terrain.invalid_parameter`, qui nomme le paramètre (`sun_altitude` h
             "out": {"type": "string", "required": false}},
  "result": ["file", "nodata_cells"]}
 ```
+
+---
+
+## 6. Commandes planifiées — epic 11, géométrie et terrain étendu
 
 ### `terrain.viewshed_cumulative`
 

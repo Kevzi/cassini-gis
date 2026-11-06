@@ -1,12 +1,13 @@
 ﻿# Comparaison des commandes de terrain du noyau à QGIS et GRASS (ticket 7, epic raster et terrain).
 #
-# Lance, en chronométrant, le noyau (pente, trois champs de vision, trente lignes de vue) puis
-# QGIS (native:slope, trois grass:r.viewshed), plus un appel à vide de chacun ; normalise les
+# Lance, en chronométrant, le noyau (pente, exposition, ombrage, trois champs de vision, trente
+# lignes de vue) puis QGIS (native:slope, native:aspect, native:hillshade, trois
+# grass:r.viewshed), plus un appel à vide de chacun ; normalise les
 # sorties de QGIS en GeoTIFF Float32 non compressé ; écrit temps.json. Tout est écrit dans le
 # dossier de travail, hors du dépôt. Mode d'emploi : LISEZMOI.md, à côté.
 #
 # Paramètres communs aux deux outils : observateur 1,6 m, cible 0 m, courbure et réfraction
-# actives, coefficient 0,13, rayon 10 km. Les points viennent de points.json, écrit avant par
+# actives, coefficient 0,13, rayon 10 km ; facteur Z 1, soleil à 315° et 45° pour l'ombrage. Les points viennent de points.json, écrit avant par
 # `cargo run --release -p cassini-core --example comparer_terrain -- points <mnt>`.
 
 param(
@@ -76,11 +77,15 @@ $oeil = @{ value = 1.6; unit = 'm' }
 $cible = @{ value = 0; unit = 'm' }
 
 # --- Noyau -------------------------------------------------------------------------------
-Write-Host 'Noyau : appel à vide, pente, champs de vision, lignes de vue'
+Write-Host 'Noyau : appel à vide, pente, exposition, ombrage, champs de vision, lignes de vue'
 $temps.noyau['vide'] = Mesurer { & $Cassini run system.about | Out-Null }
 $script:r = $null
 $temps.noyau['pente'] = Mesurer { $script:r = Noyau 'terrain.slope' @{ dem = 'mnt.tif'; unit = 'degrees' } }
 Copier-Sortie $script:r 'noyau-pente.tif'
+$temps.noyau['exposition'] = Mesurer { $script:r = Noyau 'terrain.aspect' @{ dem = 'mnt.tif' } }
+Copier-Sortie $script:r 'noyau-exposition.tif'
+$temps.noyau['ombrage'] = Mesurer { $script:r = Noyau 'terrain.hillshade' @{ dem = 'mnt.tif' } }
+Copier-Sortie $script:r 'noyau-ombrage.tif'
 foreach ($o in $points.observateurs) {
     $params = @{
         dem = 'mnt.tif'; observer = (Point $o); observer_height = $oeil; target_height = $cible
@@ -100,11 +105,19 @@ $temps.noyau['lignes-de-vue-30'] = Mesurer {
 }
 
 # --- QGIS et GRASS -----------------------------------------------------------------------
-Write-Host 'QGIS : appel à vide, native:slope, grass:r.viewshed'
+Write-Host 'QGIS : appel à vide, native:slope, native:aspect, native:hillshade, grass:r.viewshed'
 $temps.qgis['vide'] = Mesurer { Qgis @('help', 'native:slope') }
 $brut = Join-Path $Travail 'brut-qgis-pente.tif'
 $temps.qgis['pente'] = Mesurer { Qgis @('run', 'native:slope', '--', "INPUT=$mntTif", 'Z_FACTOR=1', "OUTPUT=$brut") }
 Normaliser $brut 'qgis-pente.tif'
+$brut = Join-Path $Travail 'brut-qgis-exposition.tif'
+$temps.qgis['exposition'] = Mesurer { Qgis @('run', 'native:aspect', '--', "INPUT=$mntTif", 'Z_FACTOR=1', "OUTPUT=$brut") }
+Normaliser $brut 'qgis-exposition.tif'
+$brut = Join-Path $Travail 'brut-qgis-ombrage.tif'
+$temps.qgis['ombrage'] = Mesurer {
+    Qgis @('run', 'native:hillshade', '--', "INPUT=$mntTif", 'Z_FACTOR=1', 'AZIMUTH=315', 'V_ANGLE=45', "OUTPUT=$brut")
+}
+Normaliser $brut 'qgis-ombrage.tif'
 foreach ($o in $points.observateurs) {
     $brut = Join-Path $Travail "brut-qgis-vue-$($o.nom).tif"
     $arguments = @(

@@ -14,6 +14,7 @@ pub mod exec;
 pub mod external;
 pub mod geodesic;
 pub mod geodesy;
+pub mod horn;
 pub mod journal;
 pub mod plan;
 pub mod point;

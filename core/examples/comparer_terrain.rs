@@ -6,11 +6,13 @@
 //!   1 à 10 km), tous au centre d'une cellule valide du MNT, choisis de façon déterministe ;
 //! - `comparer <dossier>` lit dans le dossier de travail le MNT (`mnt.tif`), les points
 //!   (`points.json`), les sorties du noyau et de QGIS déjà normalisées par le script
-//!   `tests/comparaison-terrain/comparer.ps1`, et les temps (`temps.json`) ; il calcule les
-//!   lignes de vue du noyau par le registre, lit `r.viewshed` à la cellule de chaque cible, et
-//!   imprime les tableaux d'écarts en Markdown.
+//!   `tests/comparaison-terrain/comparer.ps1`, et les temps (`temps.json`) ; il compare cellule
+//!   par cellule la pente, l'exposition (écart sur le cercle) et l'ombrage, classe chaque
+//!   désaccord de masque (bord, trou, cellule plate, ailleurs), calcule les lignes de vue du
+//!   noyau par le registre, lit `r.viewshed` à la cellule de chaque cible, et imprime les
+//!   tableaux d'écarts en Markdown.
 //!
-//! Il n'utilise que la porte raster du noyau (`Dem::open`) et le registre
+//! Il n'utilise que la porte raster du noyau (`Dem::open`), la fenêtre de Horn (`horn`) et le registre
 //! (`Registry::standard().call`) : aucune dépendance de plus, ni GDAL, ni GRASS. Le mode
 //! d'emploi est dans `tests/comparaison-terrain/LISEZMOI.md`.
 
@@ -21,6 +23,7 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use cassini_core::dem::Dem;
+use cassini_core::horn::horn_gradient;
 use cassini_core::registry::Registry;
 use serde_json::{json, Value};
 
@@ -299,44 +302,88 @@ fn points(mnt: &Path) -> Result<String, String> {
 // Pente
 
 #[derive(Debug, Default, PartialEq)]
-struct SlopeComparison {
+struct GridComparison {
     /// Cellules définies des deux côtés.
     both: u64,
-    /// Définies par le seul noyau, par le seul QGIS : [bord de grille, voisine d'un trou, autre].
-    core_only: [u64; 3],
-    qgis_only: [u64; 3],
+    /// Définies par le seul noyau, par le seul QGIS, selon le lieu (`place`) : [bord de grille,
+    /// voisine d'un trou, plate, ailleurs].
+    core_only: [u64; 4],
+    qgis_only: [u64; 4],
     neither: u64,
     sum_abs: f64,
     max_abs: f64,
     max_at: (u32, u32),
-    /// Cellules dont l'écart dépasse 0,001°.
+    /// Cellules dont l'écart dépasse 0,001 unité.
     above_milli: u64,
+    /// Vrai si la commande laisse les cellules plates sans donnée (l'exposition seule) : un
+    /// désaccord de masque sur une cellule plate y est expliqué ; ailleurs, il ne l'est pas.
+    flat_explained: bool,
 }
 
-/// Lieu d'une cellule : 0 bord de grille, 1 voisine (ou cellule) sans donnée du MNT, 2 autre.
+/// Noms des lieux de `place`, dans l'ordre des compteurs.
+const PLACES: [&str; 4] = [
+    "bord de grille",
+    "voisine d'un trou",
+    "cellule plate",
+    "ailleurs",
+];
+
+/// Lieu d'une cellule : 0 bord de grille, 1 voisine (ou cellule) sans donnée du MNT, 2 cellule
+/// plate (gradient de Horn nul), 3 ailleurs.
 fn place(mnt: &Dem, col: u32, row: u32) -> usize {
     if col == 0 || row == 0 || col + 1 == mnt.width || row + 1 == mnt.height {
         return 0;
     }
-    for r in row - 1..=row + 1 {
-        for c in col - 1..=col + 1 {
-            if mnt.value(c, r).is_none() {
-                return 1;
-            }
-        }
+    match horn_gradient(mnt, col, row) {
+        None => 1,
+        Some((dx, dy)) if dx == 0.0 && dy == 0.0 => 2,
+        Some(_) => 3,
     }
-    2
 }
 
-fn compare_slope(mnt: &Dem, core: &Dem, qgis: &Dem) -> Result<SlopeComparison, String> {
-    same_grid(mnt, core, "la pente du noyau")?;
-    same_grid(mnt, qgis, "la pente de QGIS")?;
-    let mut s = SlopeComparison::default();
+/// Écart absolu, pour la pente et l'ombrage.
+fn linear(a: f64, b: f64) -> f64 {
+    (a - b).abs()
+}
+
+/// Écart entre deux azimuts en degrés, sur le cercle : 359° et 1° sont à 2°.
+fn circular(a: f64, b: f64) -> f64 {
+    let d = (a - b).abs().rem_euclid(360.0);
+    d.min(360.0 - d)
+}
+
+/// Une section de grilles du rapport : radical des fichiers (`noyau-<file>.tif`,
+/// `qgis-<file>.tif`), nom dans les messages, titre, unité des écarts, fonction d'écart, et
+/// vrai si les cellules plates sont sans donnée par construction (`flat_explained`).
+type GridSection = (
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    fn(f64, f64) -> f64,
+    bool,
+);
+
+/// Compare cellule par cellule deux grilles sur celle du MNT, avec la fonction d'écart `diff`.
+fn compare_grids(
+    mnt: &Dem,
+    core: &Dem,
+    qgis: &Dem,
+    what: &str,
+    diff: fn(f64, f64) -> f64,
+    flat_explained: bool,
+) -> Result<GridComparison, String> {
+    same_grid(mnt, core, &format!("{what} du noyau"))?;
+    same_grid(mnt, qgis, &format!("{what} de QGIS"))?;
+    let mut s = GridComparison {
+        flat_explained,
+        ..GridComparison::default()
+    };
     for row in 0..mnt.height {
         for col in 0..mnt.width {
             match (core.value(col, row), qgis.value(col, row)) {
                 (Some(a), Some(b)) => {
-                    let d = (f64::from(a) - f64::from(b)).abs();
+                    let d = diff(f64::from(a), f64::from(b));
                     s.both += 1;
                     s.sum_abs += d;
                     if d > 1e-3 {
@@ -356,13 +403,71 @@ fn compare_slope(mnt: &Dem, core: &Dem, qgis: &Dem) -> Result<SlopeComparison, S
     Ok(s)
 }
 
-impl SlopeComparison {
+impl GridComparison {
     fn mean_abs(&self) -> f64 {
         if self.both == 0 {
             0.0
         } else {
             self.sum_abs / self.both as f64
         }
+    }
+
+    /// Désaccords de masque hors des lieux expliqués (bord, trou, et cellule plate pour la seule
+    /// exposition) : ils appellent un ticket de bogue.
+    fn unexplained(&self) -> u64 {
+        let flat = if self.flat_explained {
+            0
+        } else {
+            self.core_only[2] + self.qgis_only[2]
+        };
+        self.core_only[3] + self.qgis_only[3] + flat
+    }
+
+    /// Le tableau Markdown de la comparaison, sous son titre ; `unit` suit chaque écart.
+    fn report(&self, mnt: &Dem, title: &str, unit: &str) -> String {
+        let mut out = String::new();
+        let _ = writeln!(out, "## {title}\n");
+        let _ = writeln!(out, "| Mesure | Valeur |\n|---|---|");
+        let _ = writeln!(
+            out,
+            "| Cellules du MNT | {} |",
+            mnt.width as u64 * mnt.height as u64
+        );
+        let _ = writeln!(out, "| Définies des deux côtés | {} |", self.both);
+        let _ = writeln!(out, "| Écart moyen | {}{unit} |", num(self.mean_abs(), 7));
+        let _ = writeln!(
+            out,
+            "| Écart maximal | {}{unit} (colonne {}, ligne {}) |",
+            num(self.max_abs, 7),
+            self.max_at.0,
+            self.max_at.1
+        );
+        let _ = writeln!(
+            out,
+            "| Cellules à plus de 0,001{unit} | {} |",
+            self.above_milli
+        );
+        for (i, label) in PLACES.iter().enumerate() {
+            let _ = writeln!(
+                out,
+                "| Masque différent, {label} : seul le noyau / seul QGIS | {} / {} |",
+                self.core_only[i], self.qgis_only[i]
+            );
+        }
+        let _ = writeln!(out, "| Sans donnée des deux côtés | {} |\n", self.neither);
+        if self.unexplained() > 0 {
+            let places = if self.flat_explained {
+                "hors du bord, des trous et des cellules plates"
+            } else {
+                "hors du bord et des trous"
+            };
+            let _ = writeln!(
+                out,
+                "**{} désaccords de masque {places} : à expliquer, ou ticket de bogue.**\n",
+                self.unexplained()
+            );
+        }
+        out
     }
 }
 
@@ -569,45 +674,44 @@ fn compare(dir: &Path) -> Result<String, String> {
     let targets = sites(&points, "cibles")?;
     let mut out = String::new();
 
-    // Pente.
-    let slope = compare_slope(
-        &mnt,
-        &open(&dir.join("noyau-pente.tif"))?,
-        &open(&dir.join("qgis-pente.tif"))?,
-    )?;
-    let _ = writeln!(
-        out,
-        "## Pente (degrés, Horn) — noyau contre `native:slope`\n"
-    );
-    let _ = writeln!(out, "| Mesure | Valeur |\n|---|---|");
-    let _ = writeln!(
-        out,
-        "| Cellules du MNT | {} |",
-        mnt.width as u64 * mnt.height as u64
-    );
-    let _ = writeln!(out, "| Définies des deux côtés | {} |", slope.both);
-    let _ = writeln!(out, "| Écart moyen | {} ° |", num(slope.mean_abs(), 7));
-    let _ = writeln!(
-        out,
-        "| Écart maximal | {} ° (colonne {}, ligne {}) |",
-        num(slope.max_abs, 7),
-        slope.max_at.0,
-        slope.max_at.1
-    );
-    let _ = writeln!(
-        out,
-        "| Cellules à plus de 0,001 ° | {} |",
-        slope.above_milli
-    );
-    let labels = ["bord de grille", "voisine d'un trou", "autre"];
-    for (i, label) in labels.iter().enumerate() {
-        let _ = writeln!(
-            out,
-            "| Masque différent, {label} : seul le noyau / seul QGIS | {} / {} |",
-            slope.core_only[i], slope.qgis_only[i]
-        );
+    // Pente, exposition et ombrage : la même comparaison de grilles.
+    let grids: [GridSection; 3] = [
+        (
+            "pente",
+            "la pente",
+            "Pente (degrés, Horn) — noyau contre `native:slope`",
+            " °",
+            linear,
+            false,
+        ),
+        (
+            "exposition",
+            "l'exposition",
+            "Exposition (degrés depuis le nord du quadrillage, écart sur le cercle) — `terrain.aspect` contre `native:aspect`",
+            " °",
+            circular,
+            true,
+        ),
+        (
+            "ombrage",
+            "l'ombrage",
+            "Ombrage (0 à 255, soleil 315°, 45°, facteur Z 1) — `terrain.hillshade` contre `native:hillshade`",
+            "",
+            linear,
+            false,
+        ),
+    ];
+    for (file, what, title, unit, diff, flat_explained) in grids {
+        let comparison = compare_grids(
+            &mnt,
+            &open(&dir.join(format!("noyau-{file}.tif")))?,
+            &open(&dir.join(format!("qgis-{file}.tif")))?,
+            what,
+            diff,
+            flat_explained,
+        )?;
+        out.push_str(&comparison.report(&mnt, title, unit));
     }
-    let _ = writeln!(out, "| Sans donnée des deux côtés | {} |\n", slope.neither);
 
     // Champs de vision.
     let _ = writeln!(
@@ -819,16 +923,97 @@ mod tests {
         q[9] = 3.0;
         q[15] = nd;
         let qgis = grid(4, 4, q);
-        let s = compare_slope(&mnt, &core, &qgis).unwrap();
+        let s = compare_grids(&mnt, &core, &qgis, "la pente", linear, false).unwrap();
         assert_eq!(s.both, 3);
-        assert_eq!(s.core_only, [0, 0, 0]);
+        assert_eq!(s.core_only, [0, 0, 0, 0]);
         // 12 cellules de bord moins le trou, définies par QGIS seul ; la voisine du trou.
-        assert_eq!(s.qgis_only, [11, 1, 0]);
+        assert_eq!(s.qgis_only, [11, 1, 0, 0]);
         assert_eq!(s.neither, 1);
         assert_eq!(s.above_milli, 1);
         assert_eq!(s.max_at, (2, 1));
         assert!((s.max_abs - 0.5).abs() < 1e-9);
         assert!((s.mean_abs() - 0.5 / 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_circular_gap_wraps_around_north() {
+        assert_eq!(circular(359.0, 1.0), 2.0);
+        assert_eq!(circular(1.0, 359.0), 2.0);
+        assert_eq!(circular(90.0, 270.0), 180.0);
+        assert_eq!(circular(10.0, 10.0), 0.0);
+        assert!((circular(0.25, 359.75) - 0.5).abs() < 1e-12);
+        assert_eq!(linear(359.0, 1.0), 358.0);
+    }
+
+    #[test]
+    fn aspect_masks_on_flat_cells_are_classed_apart_and_others_are_flagged() {
+        // MNT 5 × 4 : plat à gauche (10 m), plan qui monte vers l'est à droite.
+        let mnt = grid(
+            5,
+            4,
+            vec![
+                10.0, 10.0, 10.0, 11.0, 12.0, //
+                10.0, 10.0, 10.0, 11.0, 12.0, //
+                10.0, 10.0, 10.0, 11.0, 12.0, //
+                10.0, 10.0, 10.0, 11.0, 12.0,
+            ],
+        );
+        let nd = -9999.0;
+        // Noyau : (1, 1) et (1, 2) plates, donc sans donnée ; 359,5° en (2, 1).
+        let core = grid(
+            5,
+            4,
+            vec![
+                nd, nd, nd, nd, nd, //
+                nd, nd, 359.5, 270.0, nd, //
+                nd, nd, 270.0, nd, nd, //
+                nd, nd, nd, nd, nd,
+            ],
+        );
+        // QGIS : une valeur sur les plates, 0,5° en (2, 1), et (3, 2) que le noyau n'a pas.
+        let qgis = grid(
+            5,
+            4,
+            vec![
+                nd, nd, nd, nd, nd, //
+                nd, 0.0, 0.5, 270.0, nd, //
+                nd, 0.0, 270.0, 270.0, nd, //
+                nd, nd, nd, nd, nd,
+            ],
+        );
+        let s = compare_grids(&mnt, &core, &qgis, "l'exposition", circular, true).unwrap();
+        assert_eq!(s.both, 3);
+        assert!((s.max_abs - 1.0).abs() < 1e-9 && s.max_at == (2, 1));
+        assert_eq!(s.qgis_only, [0, 0, 2, 1]);
+        assert_eq!(s.unexplained(), 1);
+        let report = s.report(&mnt, "Exposition", " °");
+        assert!(report.starts_with("## Exposition\n"));
+        assert!(report
+            .contains("| Masque différent, cellule plate : seul le noyau / seul QGIS | 0 / 2 |"));
+        assert!(report
+            .contains("1 désaccords de masque hors du bord, des trous et des cellules plates"));
+    }
+
+    #[test]
+    fn a_flat_cell_mask_disagreement_is_unexplained_for_slope_and_hillshade() {
+        // MNT plat 3 × 3 : la cellule centrale est plate ; le noyau la laisse sans donnée.
+        let mnt = grid(3, 3, vec![10.0; 9]);
+        let nd = -9999.0;
+        let core = grid(3, 3, vec![nd; 9]);
+        let mut q = vec![nd; 9];
+        q[4] = 0.0;
+        let qgis = grid(3, 3, q);
+        for (what, unit) in [("la pente", " °"), ("l'ombrage", "")] {
+            let s = compare_grids(&mnt, &core, &qgis, what, linear, false).unwrap();
+            assert_eq!(s.qgis_only, [0, 0, 1, 0]);
+            assert_eq!(s.unexplained(), 1, "{what}");
+            let report = s.report(&mnt, "Grille", unit);
+            assert!(report.contains("**1 désaccords de masque hors du bord et des trous :"));
+        }
+        // Pour l'exposition, la même cellule plate est expliquée.
+        let s = compare_grids(&mnt, &core, &qgis, "l'exposition", circular, true).unwrap();
+        assert_eq!(s.unexplained(), 0);
+        assert!(!s.report(&mnt, "Grille", " °").contains("**"));
     }
 
     #[test]

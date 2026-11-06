@@ -1,13 +1,20 @@
 # Comparaison à QGIS des commandes de terrain
 
-Les trois commandes de terrain du noyau — `terrain.slope`, `terrain.line_of_sight` et
-`terrain.viewshed` — comparées à l'outil de référence des utilisateurs, QGIS, et à GRASS pour
-la visibilité, sur un vrai modèle numérique d'élévation. Ticket 7 de l'epic « raster et
-terrain », mesuré le 2026-11-05 sur la révision `d45d5a5`.
+Les commandes de terrain du noyau — `terrain.slope`, `terrain.aspect`, `terrain.hillshade`,
+`terrain.line_of_sight` et `terrain.viewshed` — comparées à l'outil de référence des
+utilisateurs, QGIS, et à GRASS pour la visibilité, sur un vrai modèle numérique d'élévation.
+Ticket 7 de l'epic « raster et terrain », mesuré le 2026-11-05 sur la révision `d45d5a5` ;
+exposition et ombrage ajoutés par l'entrée 6 de l'epic 11, mesurés le 2026-11-06 sur la
+révision `153b179` augmentée des changements de cette entrée (branche `story/11-6`), le
+protocole complet rejoué (pente, visibilité et lignes de vue retrouvent les mêmes écarts).
 
 **En bref.** La pente du noyau est celle de QGIS à 4 millionièmes de degré près ; seuls les
 bords et les abords des trous diffèrent, parce que QGIS les calcule et que le noyau, comme
-`gdaldem`, les laisse sans donnée. Les 30 lignes de vue ont le verdict de GRASS. Les champs de
+`gdaldem`, les laisse sans donnée. L'exposition et l'ombrage sont ceux de QGIS à quelques pas
+de Float32 près (3 cent-millièmes de degré, 5 cent-millièmes de niveau de gris). L'ombrage a
+exactement le masque de la pente ; celui de l'exposition en diffère un peu, parce que les
+cellules plates, que QGIS laisse lui aussi sans donnée, absorbent une partie des cellules de
+bord et des abords des trous. Les 30 lignes de vue ont le verdict de GRASS. Les champs de
 vision concordent sur 98,7 à 100 % des cellules, et presque tous les désaccords sont sur une
 lisière entre zone vue et zone cachée, ce qu'explique la façon différente dont les deux outils
 lisent le relief entre deux centres de cellule. Aucun écart ne relève d'une erreur du noyau :
@@ -32,12 +39,16 @@ parce que QGIS paie 2,4 à 2,5 s de démarrage à chaque appel.
   rayon), soit 30 couples.
 - **Paramètres, les mêmes des deux côtés** : observateur 1,6 m, cible 0 m, courbure et
   réfraction actives, coefficient de réfraction 0,13 (GRASS prend 1/7 par défaut : il lui est
-  passé par `refraction_coeff=0.13`), rayon 10 km ; pente en degrés, facteur Z 1.
+  passé par `refraction_coeff=0.13`), rayon 10 km ; pente en degrés, facteur Z 1 ;
+  exposition avec un facteur Z 1 ; ombrage par les défauts du noyau (soleil à 315° et 45°,
+  facteur Z 1), passés tels quels à QGIS.
 - **Outils** :
 
   | Commande du noyau | Équivalent QGIS |
   |---|---|
   | `terrain.slope`, `unit: degrees` | `native:slope`, `Z_FACTOR=1` |
+  | `terrain.aspect` | `native:aspect`, `Z_FACTOR=1` |
+  | `terrain.hillshade`, paramètres par défaut | `native:hillshade`, `Z_FACTOR=1 AZIMUTH=315 V_ANGLE=45` |
   | `terrain.viewshed`, rayon 10 km | `grass:r.viewshed -c -r -b`, `max_distance=10000` |
   | `terrain.line_of_sight` | `r.viewshed` ci-dessus, lu à la cellule de la cible |
 
@@ -72,6 +83,68 @@ celles qui touchent une cellule sans donnée, en remplaçant la voisine manquant
 valeur. Le noyau les laisse sans donnée, comme `gdaldem` et GRASS par défaut : une pente
 calculée avec une altitude inventée n'est pas une mesure. Les 3 008 cellules concernées sont
 toutes au bord ou au contact d'un trou ; aucune ailleurs.
+
+## Exposition
+
+Écart mesuré sur le cercle : 359° et 1° sont à 2°, pas à 358°.
+
+| Mesure | Valeur |
+|---|---|
+| Cellules du MNT | 557 496 |
+| Définies des deux côtés | 532 193 |
+| Écart moyen | 0,0000020° |
+| Écart maximal | 0,0000305° |
+| Cellules à plus de 0,001° d'écart | 0 |
+| Définies par QGIS seul : bord de grille | 320 |
+| Définies par QGIS seul : voisines d'un trou | 2 476 |
+| Définies par QGIS seul : cellules plates | 0 |
+| Définies par QGIS seul : ailleurs | 0 |
+| Définies par le noyau seul | 0 |
+| Sans donnée des deux côtés | 22 507 |
+
+**Intérieur : même résultat.** Les deux outils prennent la direction de la descente sur le
+gradient de Horn, rapportée au nord du quadrillage. L'écart maximal, 3 cent-millièmes de
+degré, est l'arrondi Float32 d'un angle proche de 360° (le pas d'un Float32 y vaut 3 × 10⁻⁵).
+
+**Cellules plates : même choix.** Le MNT est en mètres entiers : 14 533 cellules intérieures
+ont un gradient nul, et `terrain.aspect` les met sans donnée (`flat_cells` = 14 533). QGIS les
+met aussi sans donnée : aucune cellule plate n'est définie d'un seul côté, elles comptent
+parmi les 22 507 cellules sans donnée des deux côtés.
+
+**Masque : écart attendu, celui de la pente.** Comme pour la pente, QGIS calcule les bords et
+les voisines des trous avec une altitude remplacée, le noyau non. Il y en a moins que pour la
+pente (2 796 contre 3 008) parce que 212 de ces cellules, plates pour QGIS, sont sans donnée
+des deux côtés. Aucun désaccord ailleurs : aucun ticket de bogue.
+
+## Ombrage
+
+Valeurs de 0 (ombre) à 255 (pleine lumière), sans arrondi entier des deux côtés.
+
+| Mesure | Valeur |
+|---|---|
+| Cellules du MNT | 557 496 |
+| Définies des deux côtés | 546 726 |
+| Écart moyen | 0,0000058 |
+| Écart maximal | 0,0000458 |
+| Cellules à plus de 0,001 d'écart | 0 |
+| Définies par QGIS seul : bord de grille | 346 |
+| Définies par QGIS seul : voisines d'un trou | 2 662 |
+| Définies par QGIS seul : cellules plates | 0 |
+| Définies par QGIS seul : ailleurs | 0 |
+| Définies par le noyau seul | 0 |
+| Sans donnée des deux côtés | 7 762 |
+
+**Intérieur : même résultat.** Les deux outils prennent le cosinus de l'angle entre la normale
+au sol de Horn et la direction du soleil, multiplié par 255. L'écart maximal, 5 cent-millièmes
+de niveau, vaut environ trois pas de Float32 (le pas vaut 1,5 × 10⁻⁵ entre 128 et 256) : plus
+que le seul arrondi de la sortie, il s'explique probablement par un calcul de QGIS en simple
+précision, quand le noyau calcule en double et n'arrondit qu'à l'écriture. L'écart reste
+sans portée : 0 cellule à plus de 0,001.
+
+**Masque : exactement celui de la pente**, pour la même raison : QGIS invente l'altitude
+manquante au bord et autour des trous, le noyau laisse ces 3 008 cellules sans donnée. Une
+cellule plate a un ombrage défini (255 × sin 45°) des deux côtés. Aucun désaccord ailleurs :
+aucun ticket de bogue.
 
 ## Ligne de vue
 
@@ -146,7 +219,9 @@ façon à cette précision.
 
 Durée murale de chaque appel, en secondes, sur la même machine, par le script de comparaison,
 lors de deux passages complets du protocole (les écarts mesurés y sont identiques) ; à titre
-d'information, sans seuil.
+d'information, sans seuil. L'exposition et l'ombrage ont été mesurés lors d'un troisième
+passage, le 2026-11-06 : noyau 0,14 s et 0,13 s, QGIS 2,49 s et 2,28 s (rapport d'environ 18 pour chacune),
+le démarrage de `qgis_process` en faisant l'essentiel.
 
 | Appel | Noyau (`cassini.exe run`), passage 1 / 2 | QGIS (`qgis_process`), passage 1 / 2 |
 |---|---|---|
@@ -177,14 +252,17 @@ Lecture :
 ## Provenance du code
 
 Aucune ligne de code de GRASS, de Whitebox, de GDAL ni de QGIS n'a été reprise dans le
-noyau. Les trois commandes ont été écrites d'après les publications et les formules
+noyau. Les cinq commandes ont été écrites d'après les publications et les formules
 classiques ci-dessous, sans aucun fichier porté ; les en-têtes des modules le disent
-(`core/src/commands/terrain_slope.rs`, `terrain_line_of_sight.rs`, `terrain_viewshed.rs`).
+(`core/src/horn.rs`, `core/src/commands/terrain_slope.rs`, `terrain_aspect.rs`,
+`terrain_hillshade.rs`, `terrain_line_of_sight.rs`, `terrain_viewshed.rs`).
 Les GeoTIFF sont lus et écrits par `core/src/dem.rs` avec la crate `tiff` (MIT), sans GDAL.
 
 | Commande | Ce qui est repris | Source |
 |---|---|---|
 | `terrain.slope` | Différences finies pondérées de Horn sur la fenêtre 3 × 3 | B. K. P. Horn, « Hill shading and the reflectance map », *Proceedings of the IEEE*, 69(1), 1981, p. 14-47 |
+| `terrain.aspect` | Direction de la plus grande descente, opposée au gradient de Horn, depuis le nord du quadrillage, sens horaire ; cellule plate sans donnée | Horn 1981, ci-dessus |
+| `terrain.hillshade` | Réflectance lambertienne : cosinus de l'angle entre la normale au sol (gradient de Horn) et la direction du soleil, × 255 | Horn 1981, ci-dessus |
 | `terrain.line_of_sight` | Test direct de la ligne de visée, échantillonnée à pas constant, altitude interpolée en bilinéaire | Méthode générale, sans source propre |
 | | Chute due à la courbure, flèche d²/2R d'une sphère (approximation pour d ≪ R) | Géodésie classique |
 | | Rayon R = 6 371 km : rayon moyen R1 de l'ellipsoïde GRS80, arrondi | H. Moritz, « Geodetic Reference System 1980 », *Journal of Geodesy*, 74, 2000, p. 128-133 |
