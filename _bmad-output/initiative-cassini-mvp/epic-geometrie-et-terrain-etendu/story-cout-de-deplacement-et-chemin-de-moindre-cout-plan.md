@@ -62,7 +62,7 @@ context:
 - [x] `core/src/journal/tests.rs` -- plan pente → `raster.reclassify` → `terrain.least_cost_path`, rejoué à l'identique.
 - [x] `ai/src/plan.rs` -- assertions du prompt pour les deux commandes.
 - [x] `catalogue-des-commandes.md` -- fiches en `faite`, même commit.
-- [ ] Poste du propriétaire -- installer noyau et extension (mémoire « Mettre à jour QGIS et le noyau »), dans QGIS 3.44 sur le MNT test en 2154 : pente, reclassement, coût cumulé, chemin de moindre coût, puis `journal.replay`.
+- [x] Poste du propriétaire -- installer noyau et extension (mémoire « Mettre à jour QGIS et le noyau »), dans QGIS 3.44 sur le MNT test en 2154 : pente, reclassement, coût cumulé, chemin de moindre coût, puis `journal.replay`.
 
 **Acceptance Criteria:**
 - Given le noyau sans QGIS, when `cargo test --workspace`, then tout passe, dont `catalogue` avec les deux fiches `faite`.
@@ -76,6 +76,12 @@ context:
 - `max` est `Option<f64>` pour coller à la fiche (« nombre ou null ») ; il vaut toujours au moins 0, une source étant atteinte.
 - Vérification : `cargo fmt --check` propre ; `cargo clippy -p cassini-core -p cassini-ai -p cassini -p cassini-training --all-targets -- -D warnings` propre et `cargo test` des mêmes paquets tout vert (catalogue et parité compris), lancés par `cargo` Windows (LIBCLANG_PATH, `CARGO_TARGET_DIR=C:\ct`) : sous WSL, `llama-cpp-sys-2` et la coquille Tauri (`app/src-tauri`) ne se compilent pas faute de libclang et de GTK. `app/src-tauri` non relu par clippy, non touché.
 - Sonde QGIS 3.44 (dernière tâche) : non jouée.
+
+- Installé (2026-11-06) : noyau `--features gpu` dans `%LOCALAPPDATA%\Cassini\bin` (l'ancien gardé en `cassini.exe.avant-11-10`) et extension dans le profil.
+- Sonde QGIS 3.44.15 jouée : mode offscreen, noyau installé, sur une copie `projet-sonde-11-10.qgz`, script `donnees-test-cassini/sonde_cout_chemin_11_10.py`, MNT de Villeneuve-le-Roi (783 × 712).
+  - Enchaînement : pente en degrés → reclassement en coût (pente < 5° : 1 ; de 5 à 15° : 3 ; ≥ 15° : 0, infranchissable ; 488 594 / 57 594 / 538 cellules) → coût cumulé depuis (653982, 6844000) : 546 186 cellules atteintes, 2 inatteignables, max 18 394 → chemin jusqu'à (661391, 6850737).
+  - Le chemin est une ligne de 21 sommets, longue de 10 276 m, pour un coût total de 10 631. Elle part du départ et finit à l'arrivée, à moins d'une cellule près.
+  - Les quatre couches sont valides en EPSG:2154. Le rejeu rend `identical: true` (8 étapes), avec les mêmes couches.
 
 ## Plan Change Log
 
