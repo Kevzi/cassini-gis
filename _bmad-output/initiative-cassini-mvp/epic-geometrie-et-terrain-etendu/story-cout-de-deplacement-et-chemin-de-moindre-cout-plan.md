@@ -75,7 +75,7 @@ context:
 - Départ et arrivée dans la même cellule : ligne de deux sommets confondus, `total_cost` et `length` nuls (une ligne GeoJSON demande deux positions).
 - `max` est `Option<f64>` pour coller à la fiche (« nombre ou null ») ; il vaut toujours au moins 0, une source étant atteinte.
 - Vérification : `cargo fmt --check` propre ; `cargo clippy -p cassini-core -p cassini-ai -p cassini -p cassini-training --all-targets -- -D warnings` propre et `cargo test` des mêmes paquets tout vert (catalogue et parité compris), lancés par `cargo` Windows (LIBCLANG_PATH, `CARGO_TARGET_DIR=C:\ct`) : sous WSL, `llama-cpp-sys-2` et la coquille Tauri (`app/src-tauri`) ne se compilent pas faute de libclang et de GTK. `app/src-tauri` non relu par clippy, non touché.
-- Sonde QGIS 3.44 (dernière tâche) : non jouée.
+- Sonde QGIS 3.44 (dernière tâche) : non jouée par l'implémenteur ; jouée ensuite par Claude, résultat plus bas.
 
 - Installé (2026-11-06) : noyau `--features gpu` dans `%LOCALAPPDATA%\Cassini\bin` (l'ancien gardé en `cassini.exe.avant-11-10`) et extension dans le profil.
 - Sonde QGIS 3.44.15 jouée : mode offscreen, noyau installé, sur une copie `projet-sonde-11-10.qgz`, script `donnees-test-cassini/sonde_cout_chemin_11_10.py`, MNT de Villeneuve-le-Roi (783 × 712).
