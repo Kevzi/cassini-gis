@@ -49,7 +49,7 @@ const DEFAULT_RADIUS: Distance = Distance {
 };
 
 /// Un rayon donné est toujours `Some` : `None` veut dire « absent », jamais `null`.
-fn given_radius<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Distance>, D::Error> {
+pub(crate) fn given_radius<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Distance>, D::Error> {
     Distance::deserialize(d).map(Some)
 }
 
@@ -141,11 +141,27 @@ pub fn viewshed(
     dem: &Dem,
     params: &TerrainViewshedParams,
 ) -> Result<(Dem, ViewshedStats), CommandFailure> {
-    let o = &params.observer;
-    // Mêmes contrôles et même ordre que `terrain.line_of_sight`.
-    check_crs(dem, o, "observateur")?;
-    check_extent(dem, o, "observateur")?;
-    let z_obs = endpoint_elevation(dem, o, "observateur")?;
+    viewshed_of(dem, params, &params.observer, "observateur")
+}
+
+/// Contrôles de l'observateur `o`, nommé `name` dans les messages, dans l'ordre de
+/// `terrain.line_of_sight` : système, emprise, puis altitude, rendue.
+pub(crate) fn check_observer(dem: &Dem, o: &Point, name: &str) -> Result<f64, CommandFailure> {
+    check_crs(dem, o, name)?;
+    check_extent(dem, o, name)?;
+    endpoint_elevation(dem, o, name)
+}
+
+/// Champ de vision de l'observateur `observer`, qui remplace celui de `params` ; `name` le
+/// désigne dans les messages d'erreur (« observateur », « observateur n° 2 »).
+pub(crate) fn viewshed_of(
+    dem: &Dem,
+    params: &TerrainViewshedParams,
+    observer: &Point,
+    name: &str,
+) -> Result<(Dem, ViewshedStats), CommandFailure> {
+    let o = observer;
+    let z_obs = check_observer(dem, o, name)?;
     let cell = dem.cell_size_x.min(dem.cell_size_y);
     let bound = MAX_RADIUS_CELLS * cell;
     let radius = match params.radius {

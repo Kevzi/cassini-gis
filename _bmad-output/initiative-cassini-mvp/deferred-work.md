@@ -699,3 +699,6 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-un-seul-type-de-raster-rasterpath-partout-plan.md`
   summary: Cacher à l'inventaire du modèle un raster intermédiaire consommé par `out:k.n` dans un plan.
   evidence: `intermediate_files` (`core/src/journal/mod.rs`) ne reconnaît que les sorties consommées par `layer_id` ; une pente lue par `terrain.viewshed` via `out:3.1` reste montrée au modèle (comportement antérieur inchangé).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-champ-de-vision-cumule-depuis-plusieurs-points-plan.md`
+  summary: terrain.viewshed_cumulative peut durer environ 32 × 5 s au pire (32 observateurs au rayon maximal), sans annulation ; décider s'il faut documenter ce coût, plafonner le travail total ou rendre la commande annulable.
+  evidence: terrain_viewshed.rs l. 21-23 (5 s au pire pour un observateur, non annulable) ; la fiche du catalogue fige 32 observateurs et 500 cellules ; relecture quick de 11.7, boucle 0.
