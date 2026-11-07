@@ -12,8 +12,9 @@
 //! la `source` du MNT ; S21 écrit le système une seule fois pour deux points, ce que le garde-fou
 //! des coordonnées accepte depuis le ticket 4.10 (décision du propriétaire, 2026-11-05) ; S23 et
 //! S24, terrain puis moyenne par commune, restent des refus (statistiques sur un raster).
-//! S25, un point écrit en WGS84 sur un MNT en Lambert-93, est un refus : le noyau ne reprojette
-//! pas un point de terrain (`terrain.crs_mismatch`).
+//! S25, un point écrit en WGS84 sur un MNT en Lambert-93, attend depuis 11.16 le plan que le
+//! générateur enseigne depuis 11.12 (lot 1) : `data.transform_point` vers le système du MNT,
+//! puis `terrain.viewshed` sur `step:1.point`. Un refus ou un champ de vision en 4326 est un échec.
 //!
 //! Une question rendue sur une phrase claire est un échec, et il en faut au plus deux sur les 25 :
 //! concession du propriétaire (2026-10-17) pour un GGUF seul au long prompt. Un modèle au prompt
@@ -107,7 +108,16 @@ fn expected(id: &str) -> Want {
             "target": {"x": 657100, "y": 6848200, "epsg": 2154},
             "observer_height": {"value": 2, "unit": "m"},
             "target_height": {"value": 2, "unit": "m"}}}]),
-        // S04 S05 S09 S10 S15 S18 S23 S24 S25 : refus.
+        // Un point WGS84 sur un MNT en Lambert-93 : la reprojection est une étape visible (11.12).
+        "S25" => json!([
+            {"command": "data.transform_point", "params": {
+                "point": {"x": 2.415, "y": 48.735, "epsg": 4326}, "target_epsg": 2154}},
+            {"command": "terrain.viewshed", "params": {
+                "dem": MNT, "observer": "step:1.point",
+                "observer_height": {"value": 10, "unit": "m"},
+                "radius": {"value": 1, "unit": "km"}}}
+        ]),
+        // S04 S05 S09 S10 S15 S18 S23 S24 : refus.
         _ => return Want::Refusal,
     };
     Want::Plan(plan)
@@ -232,6 +242,7 @@ fn the_terrain_sentences_expect_plans_except_the_raster_statistics() {
     assert!(matches!(expected("S20"), Want::Plan(_)));
     assert!(matches!(expected("S21"), Want::Plan(_)));
     assert!(matches!(expected("S22"), Want::Plan(_)));
+    assert!(matches!(expected("S25"), Want::Plan(_)));
     assert_eq!(expected("S23"), Want::Refusal);
     assert_eq!(expected("S24"), Want::Refusal);
 }
@@ -250,4 +261,24 @@ fn the_right_line_of_sight_for_s21_passes_the_guard() {
         guard_coordinates(&registry, plan.clone(), &sentence("S21")),
         plan
     );
+}
+
+#[test]
+fn s25_reprojects_the_wgs84_point_into_the_dem_system_first() {
+    // Le point écrit en WGS84 passe par `data.transform_point` vers le Lambert-93 du MNT ; le
+    // champ de vision prend le point reprojeté, jamais un point en 4326.
+    let Want::Plan(calls) = expected("S25") else {
+        panic!("S25 attend un plan");
+    };
+    let inventory: Value = serde_json::from_str(INVENTORY).unwrap();
+    let dem = inventory["layers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["source"] == MNT)
+        .unwrap();
+    assert_eq!(calls[0]["command"], "data.transform_point");
+    assert_eq!(calls[0]["params"]["target_epsg"], dem["epsg"]);
+    assert_eq!(calls[1]["command"], "terrain.viewshed");
+    assert_eq!(calls[1]["params"]["observer"], "step:1.point");
 }

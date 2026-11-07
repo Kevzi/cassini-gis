@@ -753,6 +753,8 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-familles-du-generateur-pour-les-nouvelles-commandes-plan.md`
   summary: Avant de mesurer le modèle ré-entraîné (entrée 16), mettre à jour l'attendu de S25 dans `ai/tests/plan_reel.rs` (point WGS84 sur un MNT en Lambert-93) : refus aujourd'hui, plan `data.transform_point` puis `terrain.viewshed` sur `step:1.point` depuis le lot 1 de 11.12. Le renfort du refus `NO_TERRAIN_CRS` demandé après 5.41 est caduc ; `foreign_point` tire désormais aussi l'UTM 32N sur un MNT en 31N et inversement.
   evidence: Lot 1 de 11.12 : le générateur n'engendre plus ce refus et apprend la reprojection visible ; le plan du lot interdit de toucher `cassini-ai`. Un modèle ré-entraîné « échouerait » S25 là où il a raison.
+  status: close, 2026-11-07, entrée 16 (`epic-geometrie-et-terrain-etendu/story-re-entrainement-groupe-et-recette-du-modele-plan.md`)
+  resolution: S25 attend dans `ai/tests/plan_reel.rs` le plan `data.transform_point` (`point` 4326, `target_epsg` 2154) puis `terrain.viewshed` (`observer: step:1.point`, 10 m, 1 km) ; en-tête mis à jour ; tests sans modèle `the_terrain_sentences_expect_plans_except_the_raster_statistics` et `s25_reprojects_the_wgs84_point_into_the_dem_system_first`.
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-familles-du-generateur-pour-les-nouvelles-commandes-plan.md`
   summary: `cargo clippy --workspace --all-targets -- -D warnings` ne se construit pas sous WSL (GTK pour `cassini-app`, script de `llama-cpp-sys-2`) : le critère « clippy sur tout l'espace » des tickets n'y est vérifiable que par crate.

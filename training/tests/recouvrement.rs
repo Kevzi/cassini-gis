@@ -1,8 +1,8 @@
 //! Garde-fou du jeu tenu à l'écart (ticket 5.10) : aucune de ses phrases ne doit figurer
 //! dans le jeu engendré avec la graine par défaut. Depuis 5.15, il couvre aussi les phrases
 //! des essais réels de `ai/tests/` : `plan_reel` (les phrases de l'épreuve), `question_reel`,
-//! `duree_reel` (le scénario de démo et son amorce), depuis 5.39 `echelle_utm_reel` et, depuis 5.41,
-//! `terrain_reel`. Les familles visent leur sorte de demande
+//! `duree_reel` (le scénario de démo et son amorce), depuis 5.39 `echelle_utm_reel`, depuis 5.41
+//! `terrain_reel` et, depuis 11.16, `epic11_reel`. Les familles visent leur sorte de demande
 //! avec d'autres tournures ; elles ne les recopient jamais. Deux comparaisons, sur le texte normalisé
 //! (minuscules, sans accents ni ponctuation) : à l'identique, puis à un nombre ou une commune
 //! près (chiffres masqués, noms de communes remplacés par un même repère, des deux côtés).
@@ -25,6 +25,7 @@ const QUESTION_REEL: &str = include_str!("../../ai/tests/question_reel.rs");
 const DUREE_REEL: &str = include_str!("../../ai/tests/duree_reel.rs");
 const ECHELLE_UTM_REEL: &str = include_str!("../../ai/tests/echelle_utm_reel.rs");
 const TERRAIN_REEL: &str = include_str!("../../ai/tests/terrain_reel.rs");
+const EPIC11_REEL: &str = include_str!("../../ai/tests/epic11_reel.rs");
 
 /// Texte normalisé, chiffres masqués et communes remplacées par un même repère.
 fn masked(text: &str) -> String {
@@ -121,7 +122,7 @@ fn pairs(source: &str, start: &str) -> Vec<(String, String)> {
 }
 
 /// Les phrases des essais réels de `ai/tests/` : `plan_reel`, `question_reel`, `duree_reel`,
-/// `echelle_utm_reel`, `terrain_reel`.
+/// `echelle_utm_reel`, `terrain_reel`, `epic11_reel`.
 fn real_trials() -> Vec<(String, String)> {
     let mut all = from_json(PLAN_REEL);
     let questions = pairs(QUESTION_REEL, "const AMBIGUOUS");
@@ -137,6 +138,10 @@ fn real_trials() -> Vec<(String, String)> {
     let terrain = pairs(TERRAIN_REEL, "const SENTENCES");
     assert_eq!(terrain.len(), 8, "{terrain:?}");
     all.extend(terrain);
+    let epic11 = pairs(EPIC11_REEL, "const SENTENCES");
+    assert_eq!(epic11.len(), 28, "{epic11:?}");
+    all.extend(epic11);
+    all.extend(pairs(EPIC11_REEL, "const GRID_QUESTION"));
     all
 }
 
@@ -185,7 +190,7 @@ fn no_sentence_of_the_real_trials_appears_in_the_generated_set() {
 #[test]
 fn the_real_trials_are_read_whole() {
     let all = real_trials();
-    assert_eq!(all.len(), 25 + 12 + 8 + 1 + 8 + 8);
+    assert_eq!(all.len(), 25 + 12 + 8 + 1 + 8 + 8 + 28 + 1);
     let find = |id: &str| all.iter().find(|(i, _)| i == id).unwrap().1.clone();
     assert_eq!(
         find("Q11"),
@@ -197,6 +202,14 @@ fn the_real_trials_are_read_whole() {
     assert_eq!(
         find("X02"),
         "Je voudrais une impression de la carte au 10 000e."
+    );
+    assert_eq!(
+        find("F02"),
+        "Sors la carte en PDF au format A2 avec un carroyage Lambert-93 tous les 1 km."
+    );
+    assert_eq!(
+        find("F03"),
+        "Fais un PDF de la carte avec un carroyage UTM au kilomètre."
     );
 }
 
