@@ -203,13 +203,46 @@ pub static FAMILIES: &[Family] = &[
         weight: 5,
         make: etape_unique,
     },
+    // Géométrie de l'epic 11 (11.12, lot 1) : une famille par commande, et le point de terrain
+    // d'un autre système reprojeté avant la commande de terrain.
+    Family {
+        name: "conversion_coordonnees",
+        weight: 5,
+        make: conversion_coordonnees,
+    },
+    Family {
+        name: "reprojection_point",
+        weight: 4,
+        make: reprojection_point,
+    },
+    Family {
+        name: "distance_azimut",
+        weight: 4,
+        make: distance_azimut,
+    },
+    Family {
+        name: "point_projete",
+        weight: 4,
+        make: point_projete,
+    },
+    Family {
+        name: "recoupement",
+        weight: 3,
+        make: recoupement,
+    },
+    Family {
+        name: "terrain_autre_systeme",
+        weight: 4,
+        make: terrain_autre_systeme,
+    },
     // Environ 5 % du jeu : un exemple d'une autre famille, vu au tour de redemande. Le poids
     // compte les tirages laissés (corruption acceptée par `check_plan`, premier essai qui
     // n'est pas un plan d'appels) : un sur deux environ. Relevé de 20 à 24 en 4.6 : les plans
-    // de terrain, sans couche ni référence d'étape, ne se corrompent pas.
+    // de terrain, sans couche ni référence d'étape, ne se corrompent pas. Relevé de 24 à 36 en
+    // 11.12 : les plans de géométrie à une étape ne se corrompent pas non plus.
     Family {
         name: "redemande",
-        weight: 24,
+        weight: 36,
         make: redemande,
     },
 ];
@@ -2378,9 +2411,6 @@ const NO_RASTER_STATS: &str = "Aucune commande du catalogue ne calcule de statis
 /// une pente calculée à la place de la sélection demandée.
 const NO_RASTER_THRESHOLD: &str =
     "Aucune commande du catalogue ne sélectionne les cellules d'un raster par leur valeur.";
-/// 5.41 : un point de terrain écrit dans un autre système que le MNT est un refus ; le noyau ne
-/// reprojette pas un point (`terrain.crs_mismatch`).
-const NO_TERRAIN_CRS: &str = "Les commandes de terrain du catalogue prennent un point écrit dans le système du MNT : aucune ne reprojette un point.";
 /// Décision du propriétaire (2026-10-23, option a) : « de chaque gare », « de toutes les
 /// gares », « des gares » ; l'isochrone du catalogue part d'un seul point en coordonnées.
 pub const NO_MULTI_ORIGIN: &str = "L'isochrone du catalogue part d'un seul point donné en coordonnées : elle ne se calcule pas depuis plusieurs lieux à la fois.";
@@ -2389,11 +2419,12 @@ pub const NO_MULTI_ORIGIN: &str = "L'isochrone du catalogue part d'un seul point
 /// les statistiques et le seuil sur un raster) : un refus affirmatif, jamais un plan de
 /// substitution (un décompte à la place d'une moyenne d'altitude, une pente à la place d'une
 /// sélection des cellules). Depuis 5.41 : un calcul de terrain suivi d'une statistique par zone
-/// (refus entier, jamais le seul calcul de terrain) et un point de terrain écrit dans un autre
-/// système que le MNT (le bras ajoute lui-même son MNT par `add_dem`).
+/// (refus entier, jamais le seul calcul de terrain). Le point de terrain écrit dans un autre
+/// système que le MNT n'y est plus depuis 11.12 : `data.transform_point` le reprojette
+/// (`terrain_autre_systeme`).
 fn refus_hors_registre(rng: &mut Rng) -> Option<Example> {
     let mut b = Builder::new();
-    let roll = rng.below(6);
+    let roll = rng.below(5);
     // Les statistiques et le seuil portent sur un MNT : il est là, ce n'est pas lui qui manque.
     if matches!(roll, 2 | 4) {
         b.add(rng, "mnt", &[], &[], &[]);
@@ -2464,25 +2495,6 @@ fn refus_hors_registre(rng: &mut Rng) -> Option<Example> {
                 }
             };
             (body, q, NO_MULTI_ORIGIN)
-        }
-        // 5.41 : un point écrit dans un autre système que celui du MNT.
-        5 => {
-            let epsg = terrain_epsg(rng);
-            b.add_dem(rng, epsg);
-            let p = foreign_point(rng, epsg)?;
-            let (mut body, q) = match rng.below(4) {
-                0 => (format!("Calcule le champ de vision depuis {p}"), false),
-                1 => (format!("Quelles zones sont visibles depuis {p}"), true),
-                2 => (format!("Montre la zone vue depuis {p}"), false),
-                _ => {
-                    let c = foreign_point(rng, epsg)?;
-                    (format!("Vérifie si {c} est visible depuis {p}"), false)
-                }
-            };
-            if rng.chance(1, 2) {
-                body.push_str(&eye_clause(rng).1);
-            }
-            (body, q, NO_TERRAIN_CRS)
         }
         // Un seuil sur la pente : aucune commande ne sélectionne des cellules par leur valeur.
         4 => {
@@ -2560,13 +2572,13 @@ fn refus_hors_registre(rng: &mut Rng) -> Option<Example> {
         }
     };
     let request = finish(rng, &body, q, false);
-    let e = example("refus_hors_registre", b, rng, request, refusal(reason));
-    // Le refus d'un point d'un autre système se lit dans l'inventaire : sans le système du MNT
-    // (forme QGIS qui l'a perdu), l'exemple n'est pas gardé.
-    if reason == NO_TERRAIN_CRS && !dem_has_epsg(&e.inventory) {
-        return None;
-    }
-    Some(e)
+    Some(example(
+        "refus_hors_registre",
+        b,
+        rng,
+        request,
+        refusal(reason),
+    ))
 }
 
 /// Le MNT de l'inventaire (raster `mnt…` qui garde sa `source`) donne son système.
@@ -2608,8 +2620,9 @@ fn lambert_origin(rng: &mut Rng) -> Origin {
     }
 }
 
-/// Le système d'une demande de terrain, qui est aussi celui du MNT de l'inventaire : un point
-/// et un MNT de systèmes différents ne sont pas engendrés (le noyau rend son erreur typée).
+/// Le système du MNT de l'inventaire d'une demande de terrain. Les familles de terrain y écrivent
+/// leurs points ; `terrain_autre_systeme` écrit le sien dans un autre système et le reprojette
+/// d'abord par `data.transform_point` (11.12).
 fn terrain_epsg(rng: &mut Rng) -> u32 {
     match rng.below(4) {
         0 | 1 => 2154,
@@ -2628,27 +2641,23 @@ fn terrain_point(rng: &mut Rng, epsg: u32) -> Option<Origin> {
     }
 }
 
-/// 5.41 : un point écrit dans un autre système que `epsg`, celui du MNT : en WGS84 (longitude,
-/// latitude), ou en UTM 31N sur un MNT en Lambert-93, en Lambert-93 sur un MNT en UTM.
-fn foreign_point(rng: &mut Rng, epsg: u32) -> Option<String> {
-    if rng.chance(1, 2) {
-        let lon = rng.range(22_000, 26_000);
-        let lat = rng.range(486_000, 489_000);
-        let (xs, ys) = (
-            format!("{},{:04}", lon / 10_000, lon % 10_000),
-            format!("{},{:04}", lat / 10_000, lat % 10_000),
-        );
-        let crs = *rng.pick(&["WGS84", "EPSG:4326", "WGS 84"]);
-        return Some(match rng.below(2) {
-            0 => format!("le point de longitude {xs} et de latitude {ys} ({crs})"),
-            _ => format!("le point GPS {ys} N, {xs} E ({crs})"),
-        });
+/// Un point écrit dans un autre système que `epsg`, celui du MNT (5.41, élargi en 11.12) : en
+/// WGS84 (latitude, longitude), en UTM d'une autre zone (31N ou 32N sur un MNT en Lambert-93,
+/// 32N sur un MNT en 31N et inversement), ou en Lambert-93 sur un MNT en UTM.
+fn foreign_point(rng: &mut Rng, epsg: u32) -> Option<Origin> {
+    let choices = if epsg == 2154 { 2 } else { 3 };
+    match rng.below(choices) {
+        0 => Some(wgs84_coord(rng, epsg == 32632).origin()),
+        1 => {
+            let zone = match epsg {
+                2154 => *rng.pick(&[31, 32]),
+                32631 => 32,
+                _ => 31,
+            };
+            utm_origin_in(rng, zone)
+        }
+        _ => Some(lambert_origin(rng)),
     }
-    Some(if epsg == 2154 {
-        utm_origin_in(rng, 31)?.place
-    } else {
-        lambert_origin(rng).place
-    })
 }
 
 /// « du MNT », « du modèle numérique de terrain », « de la couche « MNT 1 m » », ou rien
@@ -2895,6 +2904,764 @@ fn champ_de_vision(rng: &mut Rng) -> Option<Example> {
         json!({"command": "terrain.viewshed", "params": params}),
     ]);
     Some(example("champ_de_vision", b, rng, request, expected))
+}
+
+// -- géométrie (11.12, lot 1) ------------------------------------------------
+//
+// Règle du catalogue : entre WGS84, UTM et MGRS, `coord.convert` ; dès qu'un autre système
+// est en jeu (Lambert-93, ou le système d'un MNT), `data.transform_point`. Une conversion ou
+// une reprojection est toujours une étape visible du plan, jamais insérée en silence.
+
+/// Un point écrit pour une demande de géométrie : le point attendu, la phrase « le point … »
+/// qui le porte avec son système, ses coordonnées nues et son système écrit (pour plusieurs
+/// points écrits dans un seul système, nommé une fois).
+struct Coord {
+    point: Value,
+    place: String,
+    bare: String,
+    crs: String,
+}
+
+impl Coord {
+    fn origin(self) -> Origin {
+        Origin {
+            coords: format!(" ({}, {})", self.bare, self.crs),
+            point: self.point,
+            place: self.place,
+        }
+    }
+}
+
+/// Un point en WGS84, quatre décimales écrites à la virgule : près de Paris (zone UTM 31), ou
+/// dans l'Est (`east`, zone 32).
+fn wgs84_coord(rng: &mut Rng, east: bool) -> Coord {
+    let (lon, lat) = if east {
+        (rng.range(62_000, 78_000), rng.range(478_000, 490_000))
+    } else {
+        (rng.range(22_000, 26_000), rng.range(486_000, 490_000))
+    };
+    let text = |n: u64| format!("{},{:04}", n / 10_000, n % 10_000);
+    let (xs, ys) = (text(lon), text(lat));
+    let crs = (*rng.pick(&["WGS84", "EPSG:4326", "WGS 84"])).to_string();
+    let bare = format!("{ys} N, {xs} E");
+    let place = match rng.below(3) {
+        0 => format!("le point de longitude {xs} et de latitude {ys} ({crs})"),
+        1 => format!("le point GPS {bare} ({crs})"),
+        _ => format!("le point {bare} ({crs})"),
+    };
+    Coord {
+        point: json!({"x": lon as f64 / 10_000.0, "y": lat as f64 / 10_000.0, "epsg": 4326}),
+        place,
+        bare,
+        crs,
+    }
+}
+
+/// Coordonnées projetées écrites « x / y », « X = x, Y = y » ou « (x ; y) ».
+fn projected_coord(rng: &mut Rng, x: u64, y: u64, epsg: u32, crs: String) -> Coord {
+    let (xs, ys) = if rng.chance(1, 2) {
+        (thousands(x), thousands(y))
+    } else {
+        (x.to_string(), y.to_string())
+    };
+    let (bare, place) = match rng.below(3) {
+        0 => {
+            let bare = format!("{xs} / {ys}");
+            let place = format!("le point {bare} ({crs})");
+            (bare, place)
+        }
+        1 => {
+            let bare = format!("X = {xs}, Y = {ys}");
+            let place = format!("le point {bare} en {crs}");
+            (bare, place)
+        }
+        _ => {
+            let bare = format!("({xs} ; {ys})");
+            let place = format!("le point {bare} en {crs}");
+            (bare, place)
+        }
+    };
+    Coord {
+        point: json!({"x": x, "y": y, "epsg": epsg}),
+        place,
+        bare,
+        crs,
+    }
+}
+
+/// Un point en UTM du WGS84, zone nord 31 ou 32, sa zone écrite avec l'hémisphère.
+fn utm_coord(rng: &mut Rng, zone: u32) -> Coord {
+    let x = if zone == 31 {
+        rng.range(40_000, 70_000) * 10
+    } else {
+        rng.range(28_000, 45_000) * 10
+    };
+    let y = rng.range(530_000, 550_000) * 10;
+    let crs = match rng.below(4) {
+        0 => format!("UTM {zone}N"),
+        1 => format!("UTM {zone} N"),
+        2 => format!("UTM zone {zone} Nord"),
+        _ => format!("UTM{zone}N"),
+    };
+    projected_coord(rng, x, y, 32600 + zone, crs)
+}
+
+/// Un point en Lambert-93, près de Paris.
+fn lambert_coord(rng: &mut Rng) -> Coord {
+    let x = rng.range(60_000, 70_000) * 10;
+    let y = rng.range(678_000, 690_000) * 10;
+    let crs = (*rng.pick(&["Lambert-93", "Lambert 93", "EPSG:2154"])).to_string();
+    projected_coord(rng, x, y, 2154, crs)
+}
+
+/// Les systèmes d'un point de géométrie : WGS84, ou UTM de la zone normale de la région.
+fn wgs84_or_utm(rng: &mut Rng, east: bool) -> Coord {
+    if rng.chance(1, 2) {
+        wgs84_coord(rng, east)
+    } else {
+        utm_coord(rng, if east { 32 } else { 31 })
+    }
+}
+
+/// Une référence MGRS valide, tirée par `Mgrs::from_lat_lon` d'un point WGS84 de la région :
+/// sa forme canonique (celle du plan) et sa forme écrite (espacée, compacte ou mixte).
+struct MgrsText {
+    canonical: String,
+    written: String,
+}
+
+fn mgrs_ref(rng: &mut Rng, east: bool) -> Option<MgrsText> {
+    let c = wgs84_coord(rng, east);
+    let (lon, lat) = (c.point["x"].as_f64()?, c.point["y"].as_f64()?);
+    let precision = *rng.pick(&[5u8, 5, 4, 3]);
+    let m = cassini_core::geodesy::Mgrs::from_lat_lon(lat, lon, precision)?;
+    let p = usize::from(precision);
+    let (e, n) = (format!("{:0p$}", m.easting), format!("{:0p$}", m.northing));
+    let written = match rng.below(3) {
+        0 => format!("{}{} {}{} {e} {n}", m.zone, m.band, m.column, m.row),
+        1 => m.canonical(),
+        _ => format!("{}{}{}{} {e} {n}", m.zone, m.band, m.column, m.row),
+    };
+    Some(MgrsText {
+        canonical: m.canonical(),
+        written,
+    })
+}
+
+/// « le point … » → « du point … », « la référence … » → « de la référence … ».
+fn de_np(np: &str) -> String {
+    if let Some(rest) = np.strip_prefix("le ") {
+        format!("du {rest}")
+    } else if let Some(rest) = np.strip_prefix("les ") {
+        format!("des {rest}")
+    } else {
+        de_word(np)
+    }
+}
+
+/// « le point … » → « au point … ».
+fn a_np(np: &str) -> String {
+    match np.strip_prefix("le ") {
+        Some(rest) => format!("au {rest}"),
+        None => format!("à {np}"),
+    }
+}
+
+fn transform_call(point: Value, target: u32) -> Value {
+    json!({"command": "data.transform_point",
+        "params": {"point": point, "target_epsg": target}})
+}
+
+/// Un azimut écrit, toujours avec son unité : degrés (« 45° », « 45 degrés ») ou grades
+/// (« 50 gr », « 50 grades ») ; `lo` et `hi` bornent la valeur en degrés.
+fn azimuth_words(rng: &mut Rng, gon: bool, lo: u64, hi: u64) -> (Value, String) {
+    if gon {
+        let n = rng.range(lo * 10 / 9 + 1, hi * 10 / 9);
+        let unit = *rng.pick(&["gr", "grades"]);
+        (json!({"value": n, "unit": "gon"}), format!("{n} {unit}"))
+    } else {
+        let n = rng.range(lo, hi);
+        let text = if rng.chance(1, 2) {
+            format!("{n}°")
+        } else {
+            format!("{n} degrés")
+        };
+        (json!({"value": n, "unit": "deg"}), text)
+    }
+}
+
+/// L'azimut `degrees` (dans [0, 360)) écrit arrondi à l'unité, en degrés ou en grades, avec son
+/// unité, comme `azimuth_words`.
+fn angle_words(rng: &mut Rng, gon: bool, degrees: f64) -> (Value, String) {
+    if gon {
+        let n = ((degrees * 400.0 / 360.0).round() as u64) % 400;
+        let unit = *rng.pick(&["gr", "grades"]);
+        (json!({"value": n, "unit": "gon"}), format!("{n} {unit}"))
+    } else {
+        let n = (degrees.round() as u64) % 360;
+        let text = if rng.chance(1, 2) {
+            format!("{n}°")
+        } else {
+            format!("{n} degrés")
+        };
+        (json!({"value": n, "unit": "deg"}), text)
+    }
+}
+
+/// Latitude et longitude d'un point de géométrie, en WGS84 ou en UTM nord.
+fn lat_lon(c: &Coord) -> Option<(f64, f64)> {
+    let (x, y) = (c.point["x"].as_f64()?, c.point["y"].as_f64()?);
+    let epsg = u32::try_from(c.point["epsg"].as_u64()?).ok()?;
+    if epsg == 4326 {
+        return Some((y, x));
+    }
+    let (zone, north) = cassini_core::geodesy::Utm::zone_of_epsg(epsg)?;
+    Some(cassini_core::geodesy::from_utm(
+        &cassini_core::geodesy::Utm {
+            zone,
+            north,
+            easting: x,
+            northing: y,
+        },
+    ))
+}
+
+/// Une distance géodésique écrite en chiffres : la `Distance` attendue et sa forme écrite.
+fn geo_distance(rng: &mut Rng) -> (Value, String) {
+    match rng.below(4) {
+        0 => {
+            let n = rng.range(4, 60) * 50;
+            let unit = *rng.pick(&["m", "mètres"]);
+            (
+                json!({"value": n, "unit": "m"}),
+                format!("{} {unit}", thousands(n)),
+            )
+        }
+        1 => {
+            let (v, text) = *rng.pick(&[(1.5, "1,5"), (2.5, "2,5"), (3.2, "3,2"), (7.5, "7,5")]);
+            (json!({"value": v, "unit": "km"}), format!("{text} km"))
+        }
+        _ => {
+            let n = rng.range(2, 25);
+            let unit = *rng.pick(&["km", "kilomètres"]);
+            (json!({"value": n, "unit": "km"}), format!("{n} {unit}"))
+        }
+    }
+}
+
+/// Le résultat demandé en MGRS : la phrase et l'étape `coord.convert` sur le point de l'étape
+/// `k`, la précision seulement si elle est écrite.
+fn mgrs_result(rng: &mut Rng, k: usize) -> (String, Value) {
+    let mut params = json!({"point": format!("step:{k}.point"), "to": ["mgrs"]});
+    let text = if rng.chance(1, 3) {
+        let p = rng.range(1, 5);
+        params["mgrs_precision"] = json!(p);
+        format!(", résultat en MGRS à {p} chiffres")
+    } else {
+        (*rng.pick(&[
+            ", et donne le résultat en MGRS",
+            ", résultat en référence MGRS",
+            ", puis rends-le en MGRS",
+        ]))
+        .to_string()
+    };
+    (text, json!({"command": "coord.convert", "params": params}))
+}
+
+/// Ce qu'une conversion demande, écrit : (« en UTM », « les coordonnées UTM »).
+fn convert_words(
+    rng: &mut Rng,
+    target: &str,
+    precision: Option<u64>,
+    zone: Option<u64>,
+) -> (String, String) {
+    match target {
+        "wgs84" => match rng.below(3) {
+            0 => (
+                "en latitude et longitude".into(),
+                "la latitude et la longitude".into(),
+            ),
+            1 => ("en WGS84".into(), "les coordonnées WGS84".into()),
+            _ => (
+                "en coordonnées géographiques".into(),
+                "les coordonnées géographiques".into(),
+            ),
+        },
+        "utm" => {
+            let (en, noun) = if rng.chance(1, 2) {
+                ("en UTM", "les coordonnées UTM")
+            } else {
+                ("en coordonnées UTM", "les coordonnées UTM")
+            };
+            match zone {
+                Some(z) => (
+                    format!("{en} dans le fuseau {z}"),
+                    format!("{noun} dans le fuseau {z}"),
+                ),
+                None => (en.into(), noun.into()),
+            }
+        }
+        _ => {
+            let (en, noun) = if rng.chance(1, 2) {
+                ("en MGRS", "la référence MGRS")
+            } else {
+                ("en référence MGRS", "la référence MGRS")
+            };
+            match precision {
+                Some(p) => (
+                    format!("{en} à {p} chiffres"),
+                    format!("{noun} à {p} chiffres"),
+                ),
+                None => (en.into(), noun.into()),
+            }
+        }
+    }
+}
+
+/// « Donne la référence MGRS du point 48,8566 N, 2,3522 E (WGS84) », « Convertis
+/// 31U DQ 52000 12000 en latitude et longitude » : `coord.convert` entre WGS84, UTM et MGRS,
+/// `mgrs_precision` et `utm_zone` seulement s'ils sont écrits. Un point en Lambert-93 passe
+/// d'abord par `data.transform_point` vers le WGS84 (deux étapes).
+fn conversion_coordonnees(rng: &mut Rng) -> Option<Example> {
+    let b = Builder::new();
+    let east = rng.chance(1, 3);
+    let normal_zone: u64 = if east { 32 } else { 31 };
+    let roll = rng.below(4);
+    // Le point à convertir, ou l'étape de reprojection d'un point en Lambert-93.
+    let (np, mut params, offered, first): (String, Value, [&str; 2], Option<Value>) = match roll {
+        0 => {
+            let c = wgs84_coord(rng, east);
+            (c.place, json!({"point": c.point}), ["utm", "mgrs"], None)
+        }
+        1 => {
+            let c = utm_coord(rng, normal_zone as u32);
+            (c.place, json!({"point": c.point}), ["wgs84", "mgrs"], None)
+        }
+        2 => {
+            let m = mgrs_ref(rng, east)?;
+            let np = match rng.below(3) {
+                0 => m.written.clone(),
+                1 => format!("la référence MGRS {}", m.written),
+                _ => format!("le point MGRS {}", m.written),
+            };
+            (np, json!({"mgrs": m.canonical}), ["wgs84", "utm"], None)
+        }
+        _ => {
+            let c = lambert_coord(rng);
+            let first = transform_call(c.point, 4326);
+            (
+                c.place,
+                json!({"point": "step:1.point"}),
+                ["utm", "mgrs"],
+                Some(first),
+            )
+        }
+    };
+    let mut targets: Vec<&str> = if rng.chance(1, 3) {
+        offered.to_vec()
+    } else {
+        vec![*rng.pick(&offered)]
+    };
+    if targets.len() == 2 && rng.chance(1, 2) {
+        targets.reverse();
+    }
+    let precision = (targets.contains(&"mgrs") && rng.chance(1, 3)).then(|| rng.range(1, 5));
+    // Le fuseau imposé reste à une zone de celle du point (`coord.out_of_range` au-delà).
+    let zone = (targets.contains(&"utm") && roll != 3 && rng.chance(1, 4)).then(|| {
+        if rng.chance(1, 2) {
+            normal_zone + 1
+        } else {
+            normal_zone - 1
+        }
+    });
+    let (mut en, mut noun) = (Vec::new(), Vec::new());
+    for t in &targets {
+        let (e, n) = convert_words(rng, t, precision, zone);
+        en.push(e);
+        noun.push(n);
+    }
+    let (en, noun) = (en.join(" et "), noun.join(" et "));
+    let (body, q) = match rng.below(5) {
+        0 => (format!("Convertis {np} {en}"), false),
+        1 => (format!("Donne {noun} {}", de_np(&np)), false),
+        2 => (format!("Exprime {np} {en}"), false),
+        3 => (format!("Peux-tu convertir {np} {en}"), true),
+        _ => (format!("Traduis {np} {en}"), false),
+    };
+    params["to"] = json!(targets);
+    if let Some(p) = precision {
+        params["mgrs_precision"] = json!(p);
+    }
+    if let Some(z) = zone {
+        params["utm_zone"] = json!(z);
+    }
+    let convert = json!({"command": "coord.convert", "params": params});
+    let list = match first {
+        Some(call) => vec![call, convert],
+        None => vec![convert],
+    };
+    let request = finish(rng, &body, q, false);
+    Some(example(
+        "conversion_coordonnees",
+        b,
+        rng,
+        request,
+        calls(list),
+    ))
+}
+
+/// « Reprojette le point … (Lambert-93) en WGS84 », « Donne les coordonnées du point … (UTM 31N)
+/// en Lambert-93 » : dès qu'un système hors WGS84, UTM et MGRS est en jeu, une seule étape
+/// `data.transform_point`, le système d'arrivée écrit.
+fn reprojection_point(rng: &mut Rng) -> Option<Example> {
+    let b = Builder::new();
+    let east = rng.chance(1, 3);
+    const TO_LAMBERT: &[&str] = &["en Lambert-93", "en Lambert 93", "vers l'EPSG:2154"];
+    let (np, point, target, words): (String, Value, u32, String) = match rng.below(4) {
+        0 => {
+            let c = lambert_coord(rng);
+            let w = *rng.pick(&[
+                "en WGS84",
+                "en latitude et longitude WGS84",
+                "vers l'EPSG:4326",
+                "en coordonnées GPS (WGS84)",
+            ]);
+            (c.place, c.point, 4326, w.to_string())
+        }
+        1 => {
+            let c = wgs84_coord(rng, east);
+            (c.place, c.point, 2154, rng.pick(TO_LAMBERT).to_string())
+        }
+        2 => {
+            let c = utm_coord(rng, if east { 32 } else { 31 });
+            (c.place, c.point, 2154, rng.pick(TO_LAMBERT).to_string())
+        }
+        _ => {
+            let c = wgs84_or_utm(rng, east);
+            let (target, w) = *rng.pick(&[
+                (27572, "en Lambert II étendu (EPSG:27572)"),
+                (3857, "en Web Mercator (EPSG:3857)"),
+                (27572, "vers l'EPSG:27572"),
+                (3857, "vers l'EPSG:3857"),
+            ]);
+            (c.place, c.point, target, w.to_string())
+        }
+    };
+    let (body, q) = match rng.below(5) {
+        0 => (format!("Reprojette {np} {words}"), false),
+        1 => (format!("Convertis {np} {words}"), false),
+        2 => (
+            format!("Donne les coordonnées {} {words}", de_np(&np)),
+            false,
+        ),
+        3 => (format!("Transforme {np} {words}"), false),
+        _ => (
+            format!("Quelles sont les coordonnées {} {words}", de_np(&np)),
+            true,
+        ),
+    };
+    let request = finish(rng, &body, q, false);
+    Some(example(
+        "reprojection_point",
+        b,
+        rng,
+        request,
+        calls(vec![transform_call(point, target)]),
+    ))
+}
+
+/// « Quelle distance sépare le point … du point … », « distance et azimut entre les points …
+/// et … (UTM 31N), azimut en grades » : `geo.distance_azimuth`, `unit` seulement si elle est
+/// écrite (`gon` pour les grades). Des points en Lambert-93 sont d'abord reprojetés en WGS84,
+/// chacun par son étape.
+fn distance_azimut(rng: &mut Rng) -> Option<Example> {
+    let b = Builder::new();
+    let east = rng.chance(1, 3);
+    let roll = rng.below(3);
+    let make = |rng: &mut Rng| match roll {
+        0 => wgs84_coord(rng, east),
+        1 => utm_coord(rng, if east { 32 } else { 31 }),
+        _ => lambert_coord(rng),
+    };
+    let a = make(rng);
+    let c = make(rng);
+    if a.point == c.point {
+        return None;
+    }
+    let (mut body, q) = if rng.chance(1, 3) {
+        // Le système écrit une fois pour les deux points.
+        let suffix = if a.bare.starts_with('X') || a.bare.starts_with('(') {
+            format!("en {}", a.crs)
+        } else {
+            format!("({})", a.crs)
+        };
+        let between = format!("les points {} et {} {suffix}", a.bare, c.bare);
+        match rng.below(3) {
+            0 => (
+                format!("Donne la distance et l'azimut entre {between}"),
+                false,
+            ),
+            1 => (format!("Quelle est la distance entre {between}"), true),
+            _ => (format!("Calcule distance et azimut entre {between}"), false),
+        }
+    } else {
+        let (pa, pc) = (&a.place, &c.place);
+        match rng.below(5) {
+            0 => (format!("Quelle distance sépare {pa} {}", de_np(pc)), true),
+            1 => (
+                format!("Calcule la distance et l'azimut {} {}", de_np(pa), a_np(pc)),
+                false,
+            ),
+            2 => (
+                format!("Donne la distance et l'azimut entre {pa} et {pc}"),
+                false,
+            ),
+            3 => (format!("Quel est l'azimut {} vers {pc}", de_np(pa)), true),
+            _ => (
+                format!("Mesure la distance géodésique entre {pa} et {pc}"),
+                false,
+            ),
+        }
+    };
+    let unit = match rng.below(4) {
+        0 => {
+            body.push_str(pick_str(
+                rng,
+                &[", azimut en grades", " (angles en grades)"],
+            ));
+            Some("gon")
+        }
+        1 => {
+            body.push_str(pick_str(
+                rng,
+                &[", azimut en degrés", " (angles en degrés)"],
+            ));
+            Some("deg")
+        }
+        _ => None,
+    };
+    let mut list = Vec::new();
+    let (from, to) = if roll == 2 {
+        list.push(transform_call(a.point, 4326));
+        list.push(transform_call(c.point, 4326));
+        (json!("step:1.point"), json!("step:2.point"))
+    } else {
+        (a.point, c.point)
+    };
+    let mut params = json!({"from": from, "to": to});
+    if let Some(u) = unit {
+        params["unit"] = json!(u);
+    }
+    list.push(json!({"command": "geo.distance_azimuth", "params": params}));
+    let request = finish(rng, &body, q, false);
+    Some(example("distance_azimut", b, rng, request, calls(list)))
+}
+
+/// « Quel point atteint-on à 3 km du point …, azimut 45° » : `geo.destination_point`, l'azimut
+/// avec son unité et la distance tels qu'écrits ; résultat demandé en MGRS → `coord.convert`
+/// sur `step:1.point`.
+fn point_projete(rng: &mut Rng) -> Option<Example> {
+    let b = Builder::new();
+    let east = rng.chance(1, 3);
+    let from = wgs84_or_utm(rng, east);
+    let gon = rng.chance(1, 4);
+    let (az, az_text) = azimuth_words(rng, gon, 10, 350);
+    let (d, d_text) = geo_distance(rng);
+    let p = &from.place;
+    let de_p = de_np(p);
+    let (mut body, q) = match rng.below(5) {
+        0 => (
+            format!("Quel point atteint-on à {d_text} {de_p}, azimut {az_text}"),
+            true,
+        ),
+        1 => (
+            format!("Calcule le point situé à {d_text} {de_p} dans l'azimut {az_text}"),
+            false,
+        ),
+        2 => (
+            format!("Depuis {p}, avance de {d_text} à l'azimut {az_text}"),
+            false,
+        ),
+        3 => (
+            format!("Donne les coordonnées du point à {d_text} {de_p}, à l'azimut {az_text}"),
+            false,
+        ),
+        _ => (
+            format!("Projette un point à {d_text} {de_p}, azimut {az_text}"),
+            false,
+        ),
+    };
+    let mut list = vec![json!({"command": "geo.destination_point",
+        "params": {"from": from.point, "azimuth": az, "distance": d}})];
+    if rng.chance(1, 3) {
+        let (text, call) = mgrs_result(rng, 1);
+        body.push_str(&text);
+        list.push(call);
+    }
+    let request = finish(rng, &body, q, false);
+    Some(example("point_projete", b, rng, request, calls(list)))
+}
+
+/// « Recoupe la visée du point … à l'azimut 40° avec celle du point … à l'azimut 310° » :
+/// `geo.bearing_intersection`, chaque station avec son azimut écrit (unité comprise) ;
+/// résultat demandé en MGRS → `coord.convert` sur `step:1.point`.
+fn recoupement(rng: &mut Rng) -> Option<Example> {
+    let b = Builder::new();
+    let east = rng.chance(1, 3);
+    let utm = rng.chance(1, 2);
+    let make = |rng: &mut Rng| {
+        if utm {
+            utm_coord(rng, if east { 32 } else { 31 })
+        } else {
+            wgs84_coord(rng, east)
+        }
+    };
+    let (mut a, mut c) = (make(rng), make(rng));
+    // La première station à l'ouest, visée vers le nord-est ; la seconde à l'est, vers le
+    // nord-ouest : les deux visées se coupent en avant des stations.
+    let x = |p: &Coord| p.point["x"].as_f64().unwrap_or(0.0);
+    if x(&a) == x(&c) {
+        return None;
+    }
+    if x(&a) > x(&c) {
+        std::mem::swap(&mut a, &mut c);
+    }
+    // Les azimuts visent un vrai point au nord des deux stations, à une distance du même ordre
+    // que leur écart : tirés au hasard, les deux visées ne se coupaient pas toujours en avant
+    // des stations (`geo.no_intersection`).
+    let (lat_a, lon_a) = lat_lon(&a)?;
+    let (lat_c, lon_c) = lat_lon(&c)?;
+    let k = rng.range(40, 120) as f64 / 100.0;
+    let lat_t = lat_a.max(lat_c) + (lon_c - lon_a) * k;
+    let lon_t = (lon_a + lon_c) / 2.0 + (rng.range(0, 20) as f64 - 10.0) / 100.0 * (lon_c - lon_a);
+    let bearing = |lat: f64, lon: f64| {
+        cassini_core::geodesic::inverse(lat, lon, lat_t, lon_t)
+            .azi1
+            .rem_euclid(360.0)
+    };
+    let (b1, b2) = (bearing(lat_a, lon_a), bearing(lat_c, lon_c));
+    // Les visées se coupent sous un angle franc (bien plus que le degré du seuil de parallélisme).
+    if !(30.0..=150.0).contains(&(b1 - b2).rem_euclid(360.0)) {
+        return None;
+    }
+    let gon = rng.chance(1, 4);
+    let (az1, t1) = angle_words(rng, gon, b1);
+    let (az2, t2) = angle_words(rng, gon, b2);
+    let (pa, pc) = (&a.place, &c.place);
+    let (mut body, q) = match rng.below(5) {
+        0 => (
+            format!(
+                "Recoupe la visée {} à l'azimut {t1} avec celle {} à l'azimut {t2}",
+                de_np(pa),
+                de_np(pc)
+            ),
+            false,
+        ),
+        1 => (
+            format!(
+                "Où se croisent l'azimut {t1} relevé depuis {pa} et l'azimut {t2} relevé depuis {pc}"
+            ),
+            true,
+        ),
+        2 => (
+            format!("Calcule l'intersection des visées : {t1} depuis {pa}, {t2} depuis {pc}"),
+            false,
+        ),
+        3 => (
+            format!("Depuis {pa} je relève {t1}, depuis {pc} je relève {t2} : trouve le point visé"),
+            false,
+        ),
+        _ => (
+            format!("Fais un recoupement entre {pa} (azimut {t1}) et {pc} (azimut {t2})"),
+            false,
+        ),
+    };
+    let mut list = vec![json!({"command": "geo.bearing_intersection", "params": {
+        "first": a.point, "first_azimuth": az1, "second": c.point, "second_azimuth": az2}})];
+    if rng.chance(1, 3) {
+        let (text, call) = mgrs_result(rng, 1);
+        body.push_str(&text);
+        list.push(call);
+    }
+    let request = finish(rng, &body, q, false);
+    Some(example("recoupement", b, rng, request, calls(list)))
+}
+
+/// Les étapes qui portent un point d'un autre système dans celui du MNT, ajoutées à `steps` :
+/// `data.transform_point` vers `epsg` ; une référence MGRS passe d'abord par `coord.convert`
+/// vers le WGS84. Rend la phrase du point et la référence `step:k.point` du point reprojeté.
+fn into_dem_system(rng: &mut Rng, epsg: u32, steps: &mut Vec<Value>) -> Option<(String, String)> {
+    let place = if rng.chance(1, 4) {
+        let m = mgrs_ref(rng, epsg == 32632)?;
+        steps.push(json!({"command": "coord.convert",
+            "params": {"mgrs": m.canonical, "to": ["wgs84"]}}));
+        let k = steps.len();
+        steps.push(transform_call(json!(format!("step:{k}.wgs84")), epsg));
+        match rng.below(2) {
+            0 => format!("le point MGRS {}", m.written),
+            _ => format!("la référence MGRS {}", m.written),
+        }
+    } else {
+        let o = foreign_point(rng, epsg)?;
+        steps.push(transform_call(o.point, epsg));
+        o.place
+    };
+    Some((place, format!("step:{}.point", steps.len())))
+}
+
+/// Un champ de vision ou une ligne de vue depuis un point écrit dans un autre système que le
+/// MNT (WGS84, UTM d'une autre zone, Lambert-93 sur un MNT en UTM, MGRS) : la reprojection vers
+/// le système du MNT est une étape visible, puis la commande de terrain prend `step:k.point`.
+/// Remplace le refus `NO_TERRAIN_CRS` de 5.41, devenu faux avec `data.transform_point`. Sans le
+/// système du MNT à l'inventaire, l'exemple n'est pas gardé.
+fn terrain_autre_systeme(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let epsg = terrain_epsg(rng);
+    let dem = b.add_dem(rng, epsg);
+    let mut steps = Vec::new();
+    let (pa, observer) = into_dem_system(rng, epsg, &mut steps)?;
+    let line = rng.chance(1, 3);
+    let (mut body, q, mut params, command) = if line {
+        let (pc, target) = into_dem_system(rng, epsg, &mut steps)?;
+        let (body, q) = match rng.below(3) {
+            0 => (
+                format!("Y a-t-il une ligne de vue entre {pa} et {pc}"),
+                true,
+            ),
+            1 => (format!("Vérifie si {pc} est visible depuis {pa}"), false),
+            _ => (
+                format!("Calcule la ligne de vue {} vers {pc}", de_np(&pa)),
+                false,
+            ),
+        };
+        let params = json!({"dem": dem.source, "observer": observer, "target": target});
+        (body, q, params, "terrain.line_of_sight")
+    } else {
+        let (body, q) = match rng.below(4) {
+            0 => (format!("Calcule le champ de vision depuis {pa}"), false),
+            1 => (format!("Quelles zones sont visibles depuis {pa}"), true),
+            2 => (format!("Montre la zone vue depuis {pa}"), false),
+            _ => (format!("Détermine ce qu'on voit depuis {pa}"), false),
+        };
+        let params = json!({"dem": dem.source, "observer": observer});
+        (body, q, params, "terrain.viewshed")
+    };
+    if rng.chance(1, 2) {
+        let (h, text) = eye_clause(rng);
+        body.push_str(&text);
+        params["observer_height"] = h;
+    }
+    if !line && rng.chance(1, 3) {
+        let (r, text) = radius_clause(rng);
+        body.push_str(&text);
+        params["radius"] = r;
+    }
+    steps.push(json!({"command": command, "params": params}));
+    let request = finish(rng, &body, q, false);
+    let e = example("terrain_autre_systeme", b, rng, request, calls(steps));
+    // Le système d'arrivée se lit dans l'inventaire : sans le système du MNT (forme QGIS qui
+    // l'a perdu), l'exemple n'est pas gardé.
+    dem_has_epsg(&e.inventory).then_some(e)
 }
 
 /// Lieux nommés sans coordonnées, d'où partirait une vue : aucune commande ne trouve un point
@@ -3365,6 +4132,21 @@ fn layer_param(
     }
 }
 
+/// Un refus qui dit qu'aucune commande ne reprojette un point : faux depuis
+/// `data.transform_point` (11.12). Sert de garde-fou aux tests.
+#[cfg(test)]
+pub(crate) fn reprojects_no_point(expected: &Value) -> bool {
+    expected["kind"] == "refusal"
+        && expected["reason"]
+            .as_str()
+            // Toute tournure qui parle de reprojection et de point (« ne reprojette pas de point »,
+            // « aucune reprojection d'un point ») ; le refus de reprojeter une couche n'en parle pas.
+            .is_some_and(|r| {
+                let r = r.to_lowercase();
+                r.contains("reproj") && r.contains("point")
+            })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3437,42 +4219,315 @@ mod tests {
         })
     }
 
-    /// Le système du MNT de l'inventaire d'un exemple (une couche de `sourced` garde sa
-    /// `source` et son système ; un raster de distraction peut s'y ajouter).
-    fn dem_epsg(e: &Example) -> u64 {
-        let rasters: Vec<&Value> = e.inventory["layers"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|l| l["kind"] == "raster" && l.get("source").is_some())
-            .filter(|l| l["layer_id"].as_str().unwrap().starts_with("mnt"))
-            .collect();
-        assert_eq!(rasters.len(), 1, "{}", e.request);
-        rasters[0]["epsg"].as_u64().unwrap()
+    // -- géométrie (11.12, lot 1) ---------------------------------------------
+
+    /// Les exemples d'une famille de géométrie : valides, et leur plan laissé tel quel par le
+    /// garde-fou des coordonnées avec leur demande.
+    fn geometry_examples(make: fn(&mut Rng) -> Option<Example>) -> Vec<Example> {
+        let registry = cassini_core::registry::Registry::standard();
+        let examples = valid(make, 600);
+        for e in &examples {
+            let plan: cassini_core::plan::Plan =
+                serde_json::from_value(e.expected.clone()).unwrap();
+            let guarded =
+                cassini_core::point::guard_coordinates(&registry, plan.clone(), &e.request);
+            assert_eq!(guarded, plan, "{}", e.request);
+        }
+        examples
+    }
+
+    /// Le nombre `value` est écrit dans la demande, lu comme le lit le garde-fou.
+    fn written(e: &Example, value: &Value) {
+        let v = value
+            .as_f64()
+            .unwrap_or_else(|| panic!("{value} : {}", e.request));
+        let numbers = cassini_core::point::request_numbers(&e.request);
+        assert!(
+            numbers.iter().any(|n| (n - v).abs() < 1e-9),
+            "{v} absent : {}",
+            e.request
+        );
+    }
+
+    fn call(e: &Example, k: usize) -> &Value {
+        &e.expected["calls"][k]
+    }
+
+    /// Un angle du plan porte toujours son unité, et sa valeur est écrite dans la demande.
+    fn written_angle(e: &Example, angle: &Value) {
+        let unit = angle["unit"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{}", e.request));
+        let r = e.request.as_str();
+        match unit {
+            "gon" => assert!(r.contains(" gr"), "{r}"),
+            _ => assert!(r.contains('°') || r.contains("degrés"), "{r}"),
+        }
+        written(e, &angle["value"]);
+    }
+
+    /// Un résultat demandé en MGRS : `coord.convert` sur le point de l'étape 1, la précision
+    /// seulement si elle est écrite.
+    fn mgrs_tail(examples: &[Example], command: &str) {
+        let (mut with, mut without) = (0, 0);
+        for e in examples {
+            assert_eq!(commands(e)[0], command, "{}", e.request);
+            let asks = e.request.contains("MGRS");
+            assert_eq!(commands(e).len(), if asks { 2 } else { 1 }, "{}", e.request);
+            if asks {
+                with += 1;
+                let p = &call(e, 1)["params"];
+                assert_eq!(p["point"], "step:1.point", "{}", e.request);
+                assert_eq!(p["to"], json!(["mgrs"]), "{}", e.request);
+                assert_eq!(
+                    p.get("mgrs_precision").is_some(),
+                    e.request.contains("chiffres"),
+                    "{}",
+                    e.request
+                );
+                if let Some(n) = p.get("mgrs_precision") {
+                    written(e, n);
+                }
+            } else {
+                without += 1;
+            }
+        }
+        assert!(with > 0 && without > 0);
     }
 
     #[test]
-    fn a_terrain_point_in_another_system_than_the_dem_is_refused() {
-        // 5.41 : WGS84 sur tout MNT, UTM sur un MNT en Lambert-93, Lambert-93 sur un MNT en UTM.
-        let examples: Vec<Example> = valid(refus_hors_registre, 600)
-            .into_iter()
-            .filter(|e| e.expected["reason"] == NO_TERRAIN_CRS)
-            .collect();
-        assert!(examples.len() > 20);
-        let mut wgs84 = 0;
+    fn a_conversion_between_wgs84_utm_and_mgrs_is_one_coord_convert() {
+        let examples = geometry_examples(conversion_coordonnees);
+        let mut inputs = std::collections::BTreeSet::new();
         for e in &examples {
-            assert_eq!(e.expected["kind"], "refusal");
             let r = &e.request;
-            let lambert = ["Lambert", "2154"].iter().any(|w| r.contains(w));
-            let utm = r.contains("UTM");
-            let geographic = ["WGS", "4326"].iter().any(|w| r.contains(w));
-            wgs84 += usize::from(geographic);
-            match dem_epsg(e) {
-                2154 => assert!(!lambert && (utm || geographic), "{r}"),
-                _ => assert!(!utm && (lambert || geographic), "{r}"),
+            let last = call(e, commands(e).len() - 1);
+            assert_eq!(last["command"], "coord.convert", "{r}");
+            let p = &last["params"];
+            let to = p["to"].as_array().unwrap();
+            assert!((1..=2).contains(&to.len()), "{r}");
+            // Un point en Lambert-93 passe d'abord par `data.transform_point` vers le WGS84.
+            if commands(e).len() == 2 {
+                assert_eq!(commands(e)[0], "data.transform_point", "{r}");
+                assert_eq!(call(e, 0)["params"]["point"]["epsg"], 2154, "{r}");
+                assert_eq!(call(e, 0)["params"]["target_epsg"], 4326, "{r}");
+                assert_eq!(p["point"], "step:1.point", "{r}");
+                assert!(!to.contains(&json!("wgs84")), "{r}");
+                inputs.insert("lambert");
+            } else if let Some(m) = p["mgrs"].as_str() {
+                // MGRS valide et canonique, recopié de la demande.
+                let parsed = cassini_core::geodesy::Mgrs::parse(m).unwrap();
+                assert_eq!(parsed.canonical(), m, "{r}");
+                assert!(!to.contains(&json!("mgrs")), "{r}");
+                inputs.insert("mgrs");
+            } else {
+                let epsg = p["point"]["epsg"].as_u64().unwrap();
+                let utm = (32601..=32660).contains(&epsg);
+                assert!(epsg == 4326 || utm, "{r}");
+                assert!(
+                    !to.contains(&json!(if utm { "utm" } else { "wgs84" })),
+                    "{r}"
+                );
+                inputs.insert(if utm { "utm" } else { "wgs84" });
+            }
+            assert_eq!(
+                p.get("mgrs_precision").is_some(),
+                r.contains("chiffres"),
+                "{r}"
+            );
+            assert_eq!(p.get("utm_zone").is_some(), r.contains("fuseau"), "{r}");
+            for key in ["mgrs_precision", "utm_zone"] {
+                if let Some(n) = p.get(key) {
+                    written(e, n);
+                }
             }
         }
-        assert!(wgs84 > 0 && wgs84 < examples.len());
+        assert_eq!(inputs.len(), 4, "{inputs:?}");
+        assert!(examples.iter().any(|e| call(e, 0)["params"]["to"]
+            .as_array()
+            .is_some_and(|t| t.len() == 2)));
+    }
+
+    #[test]
+    fn a_point_in_another_system_is_one_transform_point() {
+        let examples = geometry_examples(reprojection_point);
+        let mut targets = std::collections::BTreeSet::new();
+        for e in &examples {
+            let r = &e.request;
+            assert_eq!(commands(e), ["data.transform_point"], "{r}");
+            let p = &call(e, 0)["params"];
+            let (from, to) = (
+                p["point"]["epsg"].as_u64().unwrap(),
+                p["target_epsg"].clone(),
+            );
+            assert_ne!(json!(from), to, "{r}");
+            // Un système hors WGS84, UTM et MGRS est toujours en jeu.
+            assert!(from == 2154 || ![json!(4326)].contains(&to), "{r}");
+            assert!(
+                from == 2154 || !(32601..=32660).contains(&to.as_u64().unwrap()),
+                "{r}"
+            );
+            written(e, &to);
+            targets.insert(to.as_u64().unwrap());
+        }
+        assert_eq!(
+            targets.into_iter().collect::<Vec<_>>(),
+            [2154, 3857, 4326, 27572]
+        );
+    }
+
+    #[test]
+    fn a_distance_and_azimuth_takes_the_written_unit_and_reprojects_lambert_first() {
+        let examples = geometry_examples(distance_azimut);
+        let (mut lambert, mut once) = (0, 0);
+        for e in &examples {
+            let r = &e.request;
+            let last = call(e, commands(e).len() - 1);
+            assert_eq!(last["command"], "geo.distance_azimuth", "{r}");
+            let p = &last["params"];
+            let unit = p.get("unit").and_then(Value::as_str);
+            assert_eq!(unit == Some("gon"), r.contains("grades"), "{r}");
+            assert_eq!(unit == Some("deg"), r.contains("degrés"), "{r}");
+            if commands(e).len() == 3 {
+                lambert += 1;
+                for k in 0..2 {
+                    assert_eq!(call(e, k)["command"], "data.transform_point", "{r}");
+                    assert_eq!(call(e, k)["params"]["point"]["epsg"], 2154, "{r}");
+                    assert_eq!(call(e, k)["params"]["target_epsg"], 4326, "{r}");
+                }
+                assert_eq!(p["from"], "step:1.point", "{r}");
+                assert_eq!(p["to"], "step:2.point", "{r}");
+            } else {
+                assert_eq!(commands(e).len(), 1, "{r}");
+                assert_ne!(p["from"]["epsg"], 2154, "{r}");
+            }
+            once += usize::from(r.contains("les points"));
+        }
+        assert!(lambert > 0 && once > 0);
+    }
+
+    #[test]
+    fn a_destination_point_takes_the_written_azimuth_and_distance() {
+        let examples = geometry_examples(point_projete);
+        for e in &examples {
+            let p = &call(e, 0)["params"];
+            written_angle(e, &p["azimuth"]);
+            written(e, &p["distance"]["value"]);
+            assert!(["m", "km"].contains(&p["distance"]["unit"].as_str().unwrap()));
+        }
+        assert!(examples
+            .iter()
+            .any(|e| call(e, 0)["params"]["azimuth"]["unit"] == "gon"));
+        mgrs_tail(&examples, "geo.destination_point");
+    }
+
+    #[test]
+    fn the_geometry_steps_of_the_core_run_without_error() {
+        // Les commandes de géométrie du noyau, exécutées sur chaque exemple : un recoupement
+        // dont les visées ne se coupent pas en avant, ou un point projeté hors de la grille UTM,
+        // apprendrait un plan qui échoue.
+        let registry = cassini_core::registry::Registry::standard();
+        for make in [
+            point_projete as fn(&mut Rng) -> Option<Example>,
+            recoupement,
+            distance_azimut,
+            conversion_coordonnees,
+        ] {
+            for e in valid(make, 600) {
+                let step = call(&e, 0);
+                let params = &step["params"];
+                if step["command"] == "data.transform_point" {
+                    continue;
+                }
+                let out = registry.call(step["command"].as_str().unwrap(), params.clone());
+                assert!(out.is_ok(), "{out:?} : {}", e.request);
+            }
+        }
+    }
+
+    #[test]
+    fn a_bearing_intersection_takes_both_written_azimuths() {
+        let examples = geometry_examples(recoupement);
+        for e in &examples {
+            let p = &call(e, 0)["params"];
+            written_angle(e, &p["first_azimuth"]);
+            written_angle(e, &p["second_azimuth"]);
+            assert_eq!(p["first_azimuth"]["unit"], p["second_azimuth"]["unit"]);
+        }
+        mgrs_tail(&examples, "geo.bearing_intersection");
+    }
+
+    #[test]
+    fn a_terrain_point_in_another_system_is_reprojected_into_the_dem_system_first() {
+        // 11.12 remplace le refus de 5.41 : WGS84, UTM d'une autre zone, Lambert-93 sur un MNT
+        // en UTM, ou MGRS, puis la commande de terrain sur `step:k.point`.
+        let examples = geometry_examples(terrain_autre_systeme);
+        let mut seen = std::collections::BTreeSet::new();
+        for e in &examples {
+            let r = &e.request;
+            let names = commands(e);
+            let last = call(e, names.len() - 1);
+            assert!(
+                ["terrain.viewshed", "terrain.line_of_sight"].contains(&names[names.len() - 1]),
+                "{r}"
+            );
+            let dem = cited_dem_of(e, last);
+            let epsg = dem["epsg"].as_u64().unwrap_or_else(|| panic!("{r}"));
+            for (k, step) in e.expected["calls"].as_array().unwrap().iter().enumerate() {
+                let p = &step["params"];
+                match step["command"].as_str().unwrap() {
+                    "data.transform_point" => {
+                        assert_eq!(p["target_epsg"], epsg, "{r}");
+                        match p["point"]["epsg"].as_u64() {
+                            Some(from) => {
+                                assert_ne!(from, epsg, "{r}");
+                                seen.insert((epsg, from));
+                            }
+                            None => {
+                                // Une référence MGRS : convertie en WGS84 à l'étape d'avant.
+                                assert_eq!(p["point"], format!("step:{k}.wgs84"), "{r}");
+                                assert_eq!(call(e, k - 1)["command"], "coord.convert", "{r}");
+                                assert_eq!(call(e, k - 1)["params"]["to"], json!(["wgs84"]));
+                                seen.insert((epsg, 0));
+                            }
+                        }
+                    }
+                    "coord.convert" => assert!(p["mgrs"].is_string(), "{r}"),
+                    _ => {
+                        for key in ["observer", "target"] {
+                            if let Some(point) = p.get(key) {
+                                assert!(point.as_str().is_some_and(|s| s.starts_with("step:")));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for pair in [
+            (2154, 4326),
+            (2154, 32631),
+            (2154, 32632),
+            (2154, 0),
+            (32631, 32632),
+            (32632, 32631),
+            (32631, 2154),
+            (32632, 2154),
+            (32632, 4326),
+            (32631, 0),
+        ] {
+            assert!(seen.contains(&pair), "{pair:?} : {seen:?}");
+        }
+    }
+
+    /// Le MNT cité par l'étape de terrain `last`.
+    fn cited_dem_of<'a>(e: &'a Example, last: &Value) -> &'a Value {
+        let dem = last["params"]["dem"].as_str().unwrap();
+        e.inventory["layers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|l| l["kind"] == "raster" && l["source"] == dem)
+            .unwrap_or_else(|| panic!("MNT « {dem} » absent : {}", e.request))
     }
 
     #[test]
@@ -3936,6 +4991,25 @@ mod tests {
         // Format et orientation de page sont arrivés à l'entrée 11.11 (`page_size`,
         // `orientation`) : le refus `ONLY_A4` est à remplacer par un plan au ré-entraînement
         // (entrée 16), noté dans `deferred-work.md`.
+        //
+        // Point reprojeté (11.12) : `data.transform_point` est au registre, donc aucun refus
+        // ne dit plus qu'aucune commande ne reprojette un point. Ce volet échoue si le refus
+        // de 5.41 revient dans une famille de refus.
+        assert!(registry.spec("data.transform_point").is_some());
+        for make in [
+            refus as fn(&mut Rng) -> Option<Example>,
+            refus_hors_registre,
+        ] {
+            let mut rng = Rng::new(3);
+            for _ in 0..2000 {
+                let Some(e) = make(&mut rng) else {
+                    continue;
+                };
+                assert!(!reprojects_no_point(&e.expected), "{}", e.request);
+            }
+        }
+        assert!(reprojects_no_point(&json!({"kind": "refusal", "reason":
+            "Les commandes de terrain du catalogue prennent un point écrit dans le système du MNT : aucune ne reprojette un point."})));
     }
 
     #[test]

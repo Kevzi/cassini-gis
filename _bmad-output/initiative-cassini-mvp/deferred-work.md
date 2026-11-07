@@ -733,3 +733,19 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-format-orientation-et-carroyage-de-la-mise-en-page-plan.md`
   summary: Plus rien n'échoue si le remplacement de la famille de refus `ONLY_A4` est oublié : le garde-fou `what_is_refused_out_of_registry_is_still_missing_from_the_registry` n'a plus de volet « papier », et `docs/entrainement-du-modele.md:1119` décrit encore ce refus comme juste.
   evidence: Relecture rapide de 11.11 ; à l'entrée 16, remettre un garde-fou qui échoue tant qu'un exemple refuse un format ou une orientation désormais permis, et corriger la doc.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-familles-du-generateur-pour-les-nouvelles-commandes-plan.md`
+  summary: Familles du générateur pour les commandes raster et de terrain de l'epic 11 (`terrain.aspect`, `terrain.hillshade`, `terrain.viewshed_cumulative`, `terrain.peaks`, `raster.reclassify`, `raster.weighted_overlay`, `terrain.cost_distance`, `terrain.least_cost_path`), thèmes raster de l'inventaire (coût, critères, masque), validateur étendu aux paramètres raster et à `step:k`, et remplacement du refus `NO_RASTER_THRESHOLD` par pente puis reclassement.
+  evidence: Plan de 11.12 à environ 2 800 jetons ; découpé en trois par le propriétaire le 2026-11-07, deuxième lot. À faire avant l'entrée 16 (ré-entraînement groupé).
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-familles-du-generateur-pour-les-nouvelles-commandes-plan.md`
+  summary: Famille du générateur pour l'export au format (`layout.export_pdf` avec `page_size`, `orientation`, `grid`), remplacement du refus `ONLY_A4`, inversion du test `paper_and_orientation_refusals_stay_refusals` et correction de `docs/entrainement-du-modele.md` (refus A4 décrit comme juste).
+  evidence: Plan de 11.12 à environ 2 800 jetons ; découpé en trois par le propriétaire le 2026-11-07, troisième lot. À faire avant l'entrée 16 (ré-entraînement groupé).
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-familles-du-generateur-pour-les-nouvelles-commandes-plan.md`
+  summary: Avant de mesurer le modèle ré-entraîné (entrée 16), mettre à jour l'attendu de S25 dans `ai/tests/plan_reel.rs` (point WGS84 sur un MNT en Lambert-93) : refus aujourd'hui, plan `data.transform_point` puis `terrain.viewshed` sur `step:1.point` depuis le lot 1 de 11.12. Le renfort du refus `NO_TERRAIN_CRS` demandé après 5.41 est caduc ; `foreign_point` tire désormais aussi l'UTM 32N sur un MNT en 31N et inversement.
+  evidence: Lot 1 de 11.12 : le générateur n'engendre plus ce refus et apprend la reprojection visible ; le plan du lot interdit de toucher `cassini-ai`. Un modèle ré-entraîné « échouerait » S25 là où il a raison.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-familles-du-generateur-pour-les-nouvelles-commandes-plan.md`
+  summary: `cargo clippy --workspace --all-targets -- -D warnings` ne se construit pas sous WSL (GTK pour `cassini-app`, script de `llama-cpp-sys-2`) : le critère « clippy sur tout l'espace » des tickets n'y est vérifiable que par crate.
+  evidence: Relecture de 11.12 lot 1 ; clippy vert sur `cassini-training` et `cassini-core`. À confirmer par la recette GitHub après le push, ou en installant les bibliothèques système sous WSL.

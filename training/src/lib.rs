@@ -418,6 +418,50 @@ mod tests {
     }
 
     #[test]
+    fn the_geometry_families_of_the_default_set_cover_every_command_and_pass_the_guard() {
+        // 11.12, lot 1 : au jeu par défaut, chacune des six familles est là, chacune des cinq
+        // commandes de géométrie figure dans un plan, chaque plan passe `check_plan` puis le
+        // garde-fou inchangé, et aucun refus ne dit qu'aucune commande ne reprojette un point.
+        const GEOMETRY: [&str; 6] = [
+            "conversion_coordonnees",
+            "reprojection_point",
+            "distance_azimut",
+            "point_projete",
+            "recoupement",
+            "terrain_autre_systeme",
+        ];
+        let registry = Registry::standard();
+        let (examples, _) = generate(DEFAULT_SEED, DEFAULT_COUNT);
+        let mut planned = HashSet::new();
+        for name in GEOMETRY {
+            let family: Vec<_> = examples.iter().filter(|e| e.family == name).collect();
+            assert!(!family.is_empty(), "famille absente : {name}");
+            for e in family {
+                let plan: Plan = serde_json::from_value(e.expected.clone()).unwrap();
+                assert_eq!(registry.check_plan(&plan), Ok(()), "{}", e.request);
+                let guarded =
+                    cassini_core::point::guard_coordinates(&registry, plan.clone(), &e.request);
+                assert_eq!(guarded, plan, "{}", e.request);
+            }
+        }
+        for e in &examples {
+            assert!(!families::reprojects_no_point(&e.expected), "{}", e.request);
+            for c in e.expected["calls"].as_array().into_iter().flatten() {
+                planned.insert(c["command"].as_str().unwrap_or_default().to_string());
+            }
+        }
+        for command in [
+            "coord.convert",
+            "data.transform_point",
+            "geo.distance_azimuth",
+            "geo.destination_point",
+            "geo.bearing_intersection",
+        ] {
+            assert!(planned.contains(command), "{command}");
+        }
+    }
+
+    #[test]
     fn the_exports_at_a_scale_of_the_default_set_pass_the_guard() {
         // 5.38 : au jeu par défaut, la famille est là, ses plans passent `check_plan` et le
         // garde-fou les laisse.
