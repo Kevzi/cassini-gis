@@ -831,3 +831,5 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-second-jeu-de-test-reel-annecy-pret-pour-la-demonstration-plan.md`
   summary: Le carroyage UTM de 1 km en A3 est refusé (plus de 200 lignes par axe) sur le projet d'Annecy ; il faut vérifier quelle emprise la mise en page prend.
   evidence: Sonde 11.18, refus aux deux passages, y compris après que les communes ont été ramenées à un fichier du 74 seul (279 entités). L'emprise des couches est d'environ 125 × 100 km (MNT 25 m), soit environ 130 lignes à 1 km, marge de 5 % comprise : moins de 200.
+  status: résolu, 2026-11-07
+  resolution: Pas un bogue de Cassini. La couche `cours_d_eau` de la BD TOPO garde les rivières entières, jusqu'à Y = 6 249 877 : l'emprise réelle était de 196 × 352 km, et le refus était juste. Les cours d'eau du jeu de test sont découpés sur le 74 (`annecy/cours-d-eau-74.gpkg`), ce qui ramène l'emprise à 125 × 100 km. Même phrase, vrai modèle : PDF A3 carroyé en UTM 32N, rejeu identique.
