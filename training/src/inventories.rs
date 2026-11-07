@@ -1161,7 +1161,192 @@ pub static THEMES: &[Theme] = &[
         geom: Geom::Raster,
         fields: &[],
     },
+    // Critères notés, masques et rasters bruts (11.12, lot 2b-2) : les `criteria` et les
+    // `exclusions` de `raster.weighted_overlay`, le `raster` de `raster.reclassify`. Des rasters
+    // apportés par l'utilisateur, jamais des dérivés du MNT : ni leur nom ni leur fichier ne
+    // parlent de pente, d'altitude, de relief ou de coût. Un masque partage le groupe de la
+    // couche vecteur de même sujet : les deux ne se rencontrent jamais dans un inventaire.
+    Theme {
+        key: "accessibilite",
+        group: "accessibilite",
+        domain: "urbanisme",
+        noun: Noun {
+            sg: "note d'accessibilité",
+            pl: "notes d'accessibilité",
+            fem: true,
+        },
+        of_none: "d'accessibilité",
+        the_layer: "la couche d'accessibilité",
+        names: &[
+            "Accessibilité",
+            "Note d'accessibilité",
+            "Indice d'accessibilité",
+        ],
+        slugs: &[
+            "accessibilite",
+            "note_accessibilite",
+            "indice_accessibilite",
+        ],
+        files: &[
+            "accessibilite",
+            "note_accessibilite",
+            "indice_accessibilite",
+        ],
+        geom: Geom::Raster,
+        fields: &[],
+    },
+    Theme {
+        key: "ensoleillement",
+        group: "ensoleillement",
+        domain: "environnement",
+        noun: Noun {
+            sg: "note d'ensoleillement",
+            pl: "notes d'ensoleillement",
+            fem: true,
+        },
+        of_none: "d'ensoleillement",
+        the_layer: "la couche d'ensoleillement",
+        names: &[
+            "Ensoleillement",
+            "Note d'ensoleillement",
+            "Potentiel solaire",
+        ],
+        slugs: &["ensoleillement", "note_ensoleillement", "potentiel_solaire"],
+        files: &["ensoleillement", "note_ensoleillement", "potentiel_solaire"],
+        geom: Geom::Raster,
+        fields: &[],
+    },
+    Theme {
+        key: "proximite_services",
+        group: "proximite_services",
+        domain: "urbanisme",
+        noun: Noun {
+            sg: "note de proximité des services",
+            pl: "notes de proximité des services",
+            fem: true,
+        },
+        of_none: "de proximité des services",
+        the_layer: "la couche de proximité des services",
+        names: &[
+            "Proximité des services",
+            "Accès aux services",
+            "Note de proximité des services",
+        ],
+        slugs: &["proximite_services", "acces_services", "note_services"],
+        files: &["proximite_services", "acces_services", "note_services"],
+        geom: Geom::Raster,
+        fields: &[],
+    },
+    Theme {
+        key: "calme",
+        group: "calme",
+        domain: "environnement",
+        noun: Noun {
+            sg: "note de calme",
+            pl: "notes de calme",
+            fem: true,
+        },
+        of_none: "de calme",
+        the_layer: "la couche de calme",
+        names: &["Calme", "Note de calme", "Tranquillité"],
+        slugs: &["calme", "note_calme", "tranquillite"],
+        files: &["calme", "note_calme", "tranquillite"],
+        geom: Geom::Raster,
+        fields: &[],
+    },
+    Theme {
+        key: "masque_inondable",
+        group: "inondables",
+        domain: "environnement",
+        noun: Noun {
+            sg: "masque des zones inondables",
+            pl: "masques des zones inondables",
+            fem: false,
+        },
+        of_none: "de masque des zones inondables",
+        the_layer: "la couche du masque des zones inondables",
+        names: &[
+            "Masque des zones inondables",
+            "Zones inondables (masque)",
+            "Exclusion inondation",
+        ],
+        slugs: &["masque_inondable", "zi_masque", "exclusion_inondation"],
+        files: &["masque_inondable", "zi_masque", "exclusion_inondation"],
+        geom: Geom::Raster,
+        fields: &[],
+    },
+    Theme {
+        key: "masque_protege",
+        group: "znieff",
+        domain: "environnement",
+        noun: Noun {
+            sg: "masque des espaces protégés",
+            pl: "masques des espaces protégés",
+            fem: false,
+        },
+        of_none: "de masque des espaces protégés",
+        the_layer: "la couche du masque des espaces protégés",
+        names: &[
+            "Masque des espaces protégés",
+            "Espaces protégés (masque)",
+            "Exclusion espaces naturels",
+        ],
+        slugs: &["masque_protege", "espaces_proteges", "exclusion_naturel"],
+        files: &["masque_protege", "espaces_proteges", "exclusion_naturel"],
+        geom: Geom::Raster,
+        fields: &[],
+    },
+    Theme {
+        key: "distance_routes",
+        group: "voirie",
+        domain: "réseaux",
+        noun: Noun {
+            sg: "raster de distance aux routes",
+            pl: "rasters de distance aux routes",
+            fem: false,
+        },
+        of_none: "de distance aux routes",
+        the_layer: "la couche de distance aux routes",
+        names: &[
+            "Distance aux routes",
+            "Éloignement des routes",
+            "Distance à la voirie",
+        ],
+        slugs: &["distance_routes", "dist_routes", "distance_voirie"],
+        files: &["distance_routes", "dist_routes", "distance_voirie"],
+        geom: Geom::Raster,
+        fields: &[],
+    },
+    Theme {
+        key: "bruit",
+        group: "bruit",
+        domain: "environnement",
+        noun: Noun {
+            sg: "carte de bruit",
+            pl: "cartes de bruit",
+            fem: true,
+        },
+        of_none: "de bruit",
+        the_layer: "la couche de bruit",
+        names: &["Bruit routier", "Carte de bruit", "Niveau sonore Lden"],
+        slugs: &["bruit_routier", "carte_bruit", "bruit_lden"],
+        files: &["bruit_routier", "carte_bruit", "bruit_lden"],
+        geom: Geom::Raster,
+        fields: &[],
+    },
 ];
+
+/// Critères notés de `raster.weighted_overlay` (11.12, lot 2b-2).
+pub const CRITERIA: [&str; 4] = [
+    "accessibilite",
+    "ensoleillement",
+    "proximite_services",
+    "calme",
+];
+/// Masques d'exclusion de `raster.weighted_overlay` : chacun dans le groupe de son vecteur.
+pub const MASKS: [&str; 2] = ["masque_inondable", "masque_protege"];
+/// Rasters bruts que `raster.reclassify` classe directement, sans étape de terrain.
+pub const RAW_RASTERS: [&str; 2] = ["distance_routes", "bruit"];
 
 /// Le thème de clé `key` (panique si inconnu : c'est une erreur de programmation).
 pub fn theme(key: &str) -> &'static Theme {
@@ -1735,6 +1920,62 @@ mod tests {
         assert!(no_epsg > 0);
         let dirs: Vec<&str> = dirs.iter().map(String::as_str).collect();
         assert_eq!(dirs, ["", "../donnees", "donnees", "rasters"]);
+    }
+
+    #[test]
+    fn criteria_masks_and_raw_rasters_are_plain_rasters_cited_by_their_source() {
+        // 11.12, lot 2b-2 : aucun nom ni fichier ne parle du relief ou du coût ; un masque est
+        // dans le groupe de son vecteur ; la `source` citée reste après les formes de QGIS.
+        let all: Vec<&str> = CRITERIA
+            .iter()
+            .chain(&MASKS)
+            .chain(&RAW_RASTERS)
+            .copied()
+            .collect();
+        for key in &all {
+            let t = theme(key);
+            assert_eq!(t.geom, Geom::Raster, "{key}");
+            assert!(t.fields.is_empty(), "{key}");
+            for text in t.names.iter().chain(t.files).chain(t.slugs) {
+                let text = text.to_lowercase();
+                for word in ["pente", "mnt", "altitude", "relief", "coût", "cout"] {
+                    assert!(!text.contains(word), "{key} : {text}");
+                }
+            }
+        }
+        assert_eq!(theme("masque_inondable").group, theme("inondables").group);
+        assert_eq!(theme("masque_protege").group, theme("znieff").group);
+        assert_eq!(theme("distance_routes").group, theme("routes").group);
+        let mut rng = Rng::new(10);
+        for i in 0..400 {
+            let key = all[i % all.len()];
+            let mut b = Builder::new();
+            let r = b.add_raster(&mut rng, key, 2154);
+            let inv = b.finish(&mut rng);
+            let layers = inv["layers"].as_array().unwrap();
+            let layer = layers
+                .iter()
+                .find(|l| l["layer_id"] == r.id.as_str())
+                .unwrap();
+            assert_eq!(layer["source"], r.source.as_str());
+            // Ni le vecteur de même sujet, ni un autre thème du groupe.
+            let group = theme(key).group;
+            for t in THEMES.iter().filter(|t| t.group == group && t.key != key) {
+                assert!(
+                    !layers.iter().any(|l| {
+                        let id = l["layer_id"].as_str().unwrap();
+                        // Le slug, puis un suffixe aléatoire (`reseau_elec_…` n'est pas `reseau`).
+                        t.slugs.iter().any(|s| {
+                            id.strip_prefix(&format!("{s}_")).is_some_and(|rest| {
+                                rest.chars().all(|c| c == '_' || c.is_ascii_hexdigit())
+                            })
+                        })
+                    }),
+                    "{key} et {}",
+                    t.key
+                );
+            }
+        }
     }
 
     #[test]

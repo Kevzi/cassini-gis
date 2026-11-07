@@ -122,6 +122,8 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `pente_seuil` | « où la pente dépasse-t-elle 15 % », « classe les pentes en moins de 5 %, de 5 % à 15 % et plus de 15 % » → `terrain.slope` dans l'unité du seuil, puis `raster.reclassify` sur `step:1` ; « dépasse, plus de n » → `{min: n, value: 1}`, « sous, moins de n » → `{max: n, value: 1}`, deux ou trois classes de valeurs 1, 2, 3 à bornes contiguës (11.12, lot 2a) |
 | `cout_cumule` | « calcule le coût de déplacement cumulé depuis le point … (Lambert-93) sur le raster de coût » → `terrain.cost_distance`, `cost` recopié de la `source` du raster de coût de l'inventaire, une à trois `sources` écrites dans son système, dans l'ordre écrit, chacune avec son système ; une fois sur six, un lieu nommé sans coordonnées (« depuis la mairie de X ») → question qui demande le point en X, Y et système (11.12, lot 2b-1) |
 | `chemin_moindre_cout` | « trace le chemin de moindre coût du point … au point … sur la couche « Friction » » → `terrain.least_cost_path`, `start` puis `end` dans l'ordre écrit, dans le système du raster de coût ; un seul point écrit, l'autre nommé → question du point ; aucun raster de coût dans l'inventaire (le MNT seul, ou rien) → question qui demande d'ouvrir ou de nommer le raster de coût, jamais le MNT pris comme coût (11.12, lot 2b-1) |
+| `superposition_ponderee` | « combine l'accessibilité (poids 2) et le calme (poids 1), en excluant les zones inondables » → `raster.weighted_overlay`, deux à quatre `criteria` `{raster, weight}` dans l'ordre écrit, chaque `raster` recopié de la `source` d'un critère noté de l'inventaire ; poids écrits recopiés (« poids 2 », « avec un poids de 2 pour… », « … comptant double »), sinon tous à 1 ; zéro à deux `exclusions`, masques écrits dans l'ordre écrit ; une fois sur huit, un critère nommé absent de l'inventaire → question qui demande d'ouvrir ou de nommer ce raster (11.12, lot 2b-2) |
+| `reclassement_raster` | « classe la distance aux routes en moins de 100 m, de 100 à 500 m et plus de 500 m », « où le bruit dépasse 65 dB » → `raster.reclassify` directement sur la `source` du raster brut, sans `terrain.slope` ; seuil unique (`{min}` ou `{max}`, valeur 1) ou deux à trois classes à bornes contiguës, valeurs 1, 2, 3 sauf si elles sont écrites (« notées 3, 2 et 1 », une fois sur trois) ; une fois sur huit, raster absent → question du raster (11.12, lot 2b-2) |
 | `redemande` | environ 5 % du jeu : un exemple d'une autre famille vu au tour de redemande (voir plus bas) |
 
 Depuis 5.15, `conditions_multiples` porte aussi les plans à **trois conditions** (cible
@@ -213,7 +215,7 @@ hors classe devient NoData, ce qui est la sélection voulue. Le garde-fou `selec
 **Validateur.** Un paramètre raster de premier niveau (`dem`, `raster`) est la `source` d'un
 raster de l'inventaire ou le résultat d'une étape précédente (`step:k`) ; `check_plan` vérifie
 la référence et son type raster. Les éléments de liste (`criteria[i].raster`, `exclusions[i]`)
-ne sont pas concernés.
+sont contrôlés depuis 11.12, lot 2b-2 (voir plus bas).
 
 **Redemande.** Ces plans, sans couche, ne se corrompent guère (seule `pente_seuil`, à deux
 étapes, perd une étape) : le poids de `redemande` reste à 36, pour 348 redemandes sur 8 000 à
@@ -250,9 +252,34 @@ l'inventaire, jamais un chemin inventé ni l'id d'une couche.
 redemandes tombaient à 3,9 %. Le poids de `redemande` passe de 36 à 44, pour 383 redemandes
 sur 8 000 à la graine 1 (4,8 %).
 
-Restent le lot 2b-2 (rasters de critères et de masque, `raster.weighted_overlay`, reclassement
-d'un raster brut, `deferred-work.md`) et l'export au format (lot 3), avant le ré-entraînement
-groupé (entrée 16).
+### Familles des critères, des masques et de la superposition (11.12, lot 2b-2)
+
+L'inventaire synthétique gagne huit thèmes raster civils, sans champ, apportés par
+l'utilisateur et cités par leur `source` protégée (`Builder::add_raster`) : quatre critères
+notés (accessibilité, ensoleillement, proximité des services, calme ; un groupe chacun), deux
+masques (zones inondables dans le groupe `inondables`, espaces protégés dans le groupe
+`znieff`) et deux rasters bruts (distance aux routes dans le groupe `voirie`, bruit dans son
+groupe). Aucun nom, fichier ni identifiant ne parle de pente, de MNT, d'altitude, de relief ou
+de coût. Un masque partage le groupe de la couche vecteur de même sujet : les deux ne se
+rencontrent jamais dans un inventaire. Tous entrent parmi les rasters de distraction, si bien
+qu'un critère ou un masque non écrit peut être là sans être cité.
+
+Deux familles, de poids 4 : `superposition_ponderee` et `reclassement_raster` (table plus
+haut). Le MNT (une fois sur quatre) et le raster de coût (une fois sur six) y sont posés en
+distraction : ni l'un ni l'autre n'est jamais un critère, un masque ni le raster reclassé.
+Chaque critère, masque, poids, seuil et valeur cité est écrit dans la demande. Un critère se
+désigne par son sujet (« l'accessibilité », « la note de calme ») ou par le nom de sa couche
+(« la couche « Tranquillité » ») ; un masque par « en excluant les zones inondables », « hors
+espaces protégés », « en écartant… », « sans… ». Les unités des rasters bruts sont les mètres
+(distance) et les décibels (bruit).
+
+**Validateur.** Chaque `criteria[i].raster` et chaque `exclusions[i]` est la `source` d'un
+raster de l'inventaire : ni un chemin inventé, ni l'id d'une couche, ni une étape (`step:k`).
+
+**Redemande.** Ces plans à une étape, sans couche, ne se corrompent pas : à poids inchangé (44),
+363 redemandes sur 8 000 à la graine 1 (4,5 %), dans la fourchette de 4 à 7 %.
+
+Reste l'export au format (lot 3), avant le ré-entraînement groupé (entrée 16).
 
 ### Les inventaires de QGIS (5.15)
 

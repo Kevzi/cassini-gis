@@ -9,7 +9,10 @@
 
 use serde_json::{json, Value};
 
-use crate::inventories::{theme, Builder, FieldDef, Geom, Kind, Layer, Noun, Theme, Val, THEMES};
+use crate::inventories::{
+    theme, Builder, FieldDef, Geom, Kind, Layer, Noun, Theme, Val, CRITERIA, MASKS, RAW_RASTERS,
+    THEMES,
+};
 use crate::rng::Rng;
 
 /// Un exemple engendré, avant validation.
@@ -273,6 +276,18 @@ pub static FAMILIES: &[Family] = &[
         name: "chemin_moindre_cout",
         weight: 4,
         make: chemin_moindre_cout,
+    },
+    // Critères, masques et superposition (11.12, lot 2b-2) : des rasters apportés par
+    // l'utilisateur, cités par leur `source`, jamais une étape en liste.
+    Family {
+        name: "superposition_ponderee",
+        weight: 4,
+        make: superposition_ponderee,
+    },
+    Family {
+        name: "reclassement_raster",
+        weight: 4,
+        make: reclassement_raster,
     },
     // Environ 5 % du jeu : un exemple d'une autre famille, vu au tour de redemande. Le poids
     // compte les tirages laissés (corruption acceptée par `check_plan`, premier essai qui
@@ -3464,6 +3479,363 @@ fn cout_absent(rng: &mut Rng, mut b: Builder, epsg: u32) -> Option<Example> {
     ))
 }
 
+// -- critères, masques et superposition (11.12, lot 2b-2) -------------------
+//
+// Les critères notés, les masques et les rasters bruts sont apportés par l'utilisateur : des
+// rasters de l'inventaire, cités par leur `source` comme le MNT. Jamais le MNT, le raster de
+// coût ni un dérivé du MNT comme critère ou masque, jamais une étape (`step:k`) en liste.
+
+/// Les sujets d'un raster noté ou brut, article compris : « l'accessibilité », « le bruit ».
+fn raster_subjects(key: &str) -> &'static [&'static str] {
+    match key {
+        "accessibilite" => &["l'accessibilité", "la note d'accessibilité"],
+        "ensoleillement" => &["l'ensoleillement", "la note d'ensoleillement"],
+        "proximite_services" => &["la proximité des services", "l'accès aux services"],
+        "calme" => &["le calme", "la note de calme"],
+        "distance_routes" => &["la distance aux routes", "l'éloignement des routes"],
+        "bruit" => &["le bruit", "le niveau de bruit", "le niveau sonore"],
+        _ => panic!("raster sans sujet : {key}"),
+    }
+}
+
+/// Un raster désigné par son sujet, ou une fois sur quatre par le nom de sa couche (quand elle
+/// est dans l'inventaire).
+fn raster_words(rng: &mut Rng, key: &str, layer: Option<&Layer>) -> String {
+    match layer {
+        Some(l) if rng.chance(1, 4) => format!("la couche « {} »", l.name),
+        _ => pick_str(rng, raster_subjects(key)).to_string(),
+    }
+}
+
+/// Les mots d'un masque d'exclusion, article compris.
+fn mask_words(rng: &mut Rng, key: &str) -> &'static str {
+    match key {
+        "masque_inondable" => pick_str(
+            rng,
+            &[
+                "les zones inondables",
+                "les secteurs inondables",
+                "les zones à risque d'inondation",
+            ],
+        ),
+        "masque_protege" => pick_str(
+            rng,
+            &[
+                "les espaces protégés",
+                "les espaces naturels protégés",
+                "les secteurs protégés",
+            ],
+        ),
+        _ => panic!("masque sans mots : {key}"),
+    }
+}
+
+/// La question d'un raster nommé par la demande et absent de l'inventaire : l'ouvrir ou le
+/// nommer, jamais un plan.
+fn missing_raster_question(rng: &mut Rng, key: &str) -> String {
+    let of_none = theme(key).of_none;
+    match rng.below(3) {
+        0 => format!(
+            "Aucun raster {of_none} n'est ouvert dans le projet : quel fichier faut-il ouvrir ?"
+        ),
+        1 => format!(
+            "Le projet ne contient pas de raster {of_none}. Peux-tu l'ouvrir ou me dire lequel prendre ?"
+        ),
+        _ => missing_layer_question(rng, of_none),
+    }
+}
+
+/// Le MNT ou le raster de coût, parfois, en distraction : ni l'un ni l'autre n'est un critère.
+fn raster_distractors(rng: &mut Rng, b: &mut Builder) {
+    if rng.chance(1, 4) {
+        b.add(rng, "mnt", &[], &[], &[]);
+    }
+    if rng.chance(1, 6) {
+        b.add(rng, "cout", &[], &[], &[]);
+    }
+}
+
+/// « Combine l'accessibilité (poids 2) et le calme (poids 1), en excluant les zones
+/// inondables » : `raster.weighted_overlay`, deux à quatre critères notés dans l'ordre écrit,
+/// leurs poids recopiés quand ils sont écrits (une fois sur deux), sinon tous à 1 ; zéro à
+/// deux masques écrits, dans l'ordre écrit. Un critère nommé absent de l'inventaire : la
+/// question du raster.
+fn superposition_ponderee(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    raster_distractors(rng, &mut b);
+    let n = rng.range(2, 4) as usize;
+    let mut keys = CRITERIA.to_vec();
+    rng.shuffle(&mut keys);
+    keys.truncate(n);
+    let absent = rng.chance(1, 8).then(|| rng.below(n));
+    let mut subjects = Vec::with_capacity(n);
+    let mut sources = Vec::with_capacity(n);
+    for (i, key) in keys.iter().enumerate() {
+        if absent == Some(i) {
+            b.exclude(key);
+            subjects.push(raster_words(rng, key, None));
+            sources.push(String::new());
+        } else {
+            let layer = b.add_raster(rng, key, 2154);
+            subjects.push(raster_words(rng, key, Some(&layer)));
+            sources.push(layer.source);
+        }
+    }
+    let mut masks = MASKS.to_vec();
+    rng.shuffle(&mut masks);
+    masks.truncate(rng.below(3));
+    let mut mask_sources = Vec::with_capacity(masks.len());
+    let mut mask_texts = Vec::with_capacity(masks.len());
+    for key in &masks {
+        mask_sources.push(b.add_raster(rng, key, 2154).source);
+        mask_texts.push(mask_words(rng, key).to_string());
+    }
+    // Poids écrits une fois sur deux : dans la liste, après elle, ou « compte double ».
+    let mut weights = vec![1u64; n];
+    let (list, tail) = if rng.chance(1, 2) {
+        match rng.below(4) {
+            0 | 1 => {
+                let inline = rng.chance(1, 2);
+                let items: Vec<String> = subjects
+                    .iter()
+                    .zip(weights.iter_mut())
+                    .map(|(s, w)| {
+                        *w = rng.range(1, 5);
+                        if inline {
+                            format!("{s} (poids {w})")
+                        } else {
+                            format!("{s} avec un poids de {w}")
+                        }
+                    })
+                    .collect();
+                (enumerate(&items), String::new())
+            }
+            2 => {
+                let parts: Vec<String> = subjects
+                    .iter()
+                    .zip(weights.iter_mut())
+                    .enumerate()
+                    .map(|(i, (s, w))| {
+                        *w = rng.range(1, 5);
+                        if i == 0 {
+                            format!("avec un poids de {w} pour {s}")
+                        } else {
+                            format!("de {w} pour {s}")
+                        }
+                    })
+                    .collect();
+                (enumerate(&subjects), format!(", {}", enumerate(&parts)))
+            }
+            _ => {
+                let d = rng.below(n);
+                weights[d] = 2;
+                let tail = if rng.chance(1, 2) {
+                    format!(", {} comptant double", subjects[d])
+                } else {
+                    format!(", en comptant double {}", subjects[d])
+                };
+                (enumerate(&subjects), tail)
+            }
+        }
+    } else {
+        let tail = pick_str(
+            rng,
+            &[
+                "",
+                "",
+                " à poids égaux",
+                " avec le même poids pour chacun",
+                ", tous au même poids",
+            ],
+        );
+        (enumerate(&subjects), tail.to_string())
+    };
+    let excl = if mask_texts.is_empty() {
+        String::new()
+    } else {
+        let m = enumerate(&mask_texts);
+        match rng.below(4) {
+            0 => format!(", en excluant {m}"),
+            1 => {
+                let bare: Vec<String> = mask_texts
+                    .iter()
+                    .map(|t| t.strip_prefix("les ").unwrap_or(t).to_string())
+                    .collect();
+                format!(", hors {}", enumerate(&bare))
+            }
+            2 => format!(" en écartant {m}"),
+            _ => format!(", sans {m}"),
+        }
+    };
+    let (body, q) = match rng.below(6) {
+        0 => (format!("Combine {list}{tail}{excl}"), false),
+        1 => (format!("Superpose {list}{tail}{excl}"), false),
+        2 => (
+            format!("Fais une superposition pondérée des critères suivants : {list}{tail}{excl}"),
+            false,
+        ),
+        3 => (
+            format!("Calcule un score d'aptitude en combinant {list}{tail}{excl}"),
+            false,
+        ),
+        4 => (
+            format!("Croise {list} dans une analyse multicritère{tail}{excl}"),
+            false,
+        ),
+        _ => (
+            format!("Quelles zones ressortent quand on combine {list}{tail}{excl}"),
+            true,
+        ),
+    };
+    let request = finish(rng, &body, q, false);
+    let expected = match absent {
+        Some(i) => question(missing_raster_question(rng, keys[i])),
+        None => {
+            let criteria: Vec<Value> = sources
+                .iter()
+                .zip(&weights)
+                .map(|(s, w)| json!({"raster": s, "weight": w}))
+                .collect();
+            let mut params = json!({"criteria": criteria});
+            if !mask_sources.is_empty() {
+                params["exclusions"] = json!(mask_sources);
+            }
+            calls(vec![
+                json!({"command": "raster.weighted_overlay", "params": params}),
+            ])
+        }
+    };
+    Some(example("superposition_ponderee", b, rng, request, expected))
+}
+
+/// « Classe la distance aux routes en moins de 100 m, de 100 à 500 m et plus de 500 m » :
+/// `raster.reclassify` sur la `source` d'un raster brut (distance aux routes, bruit), sans
+/// étape de terrain. Seuil unique (`{min}` ou `{max}`, valeur 1) ou deux à trois classes à
+/// bornes contiguës, valeurs 1, 2, 3 dans l'ordre sauf si elles sont écrites (une fois sur
+/// trois). Un raster nommé absent de l'inventaire : la question du raster.
+fn reclassement_raster(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    raster_distractors(rng, &mut b);
+    let key = *rng.pick(&RAW_RASTERS);
+    let raster = if rng.chance(1, 8) {
+        b.exclude(key);
+        None
+    } else {
+        Some(b.add_raster(rng, key, 2154))
+    };
+    let s = raster_words(rng, key, raster.as_ref());
+    let noise = key == "bruit";
+    let values: &[u64] = if noise {
+        &[45, 50, 55, 60, 65, 70, 75]
+    } else {
+        &[50, 100, 150, 200, 300, 500, 1000]
+    };
+    let u = |n: u64| {
+        if noise {
+            format!("{n} dB")
+        } else {
+            format!("{} m", thousands(n))
+        }
+    };
+    let (body, q, classes) = match rng.below(3) {
+        0 => {
+            let n = *rng.pick(values);
+            let t = u(n);
+            let (body, q) = match rng.below(4) {
+                0 => (format!("Montre les zones où {s} dépasse {t}"), false),
+                1 => (
+                    format!("Garde seulement les cellules où {s} est au-dessus de {t}"),
+                    false,
+                ),
+                2 => (
+                    format!("Repère les secteurs où {s} fait plus de {t}"),
+                    false,
+                ),
+                _ => (format!("Où est-ce que {s} dépasse {t}"), true),
+            };
+            (body, q, json!([{"min": n, "value": 1}]))
+        }
+        1 => {
+            let n = *rng.pick(values);
+            let t = u(n);
+            let (body, q) = match rng.below(4) {
+                0 => (format!("Montre les zones où {s} reste sous {t}"), false),
+                1 => (
+                    format!("Garde seulement les cellules où {s} est en dessous de {t}"),
+                    false,
+                ),
+                2 => (
+                    format!("Sélectionne les secteurs où {s} fait moins de {t}"),
+                    false,
+                ),
+                _ => (format!("Où est-ce que {s} reste sous {t}"), true),
+            };
+            (body, q, json!([{"max": n, "value": 1}]))
+        }
+        _ => {
+            let i = rng.below(values.len() - 1);
+            let a = values[i];
+            let three = rng.chance(1, 2);
+            let k = if three { 3 } else { 2 };
+            // Valeurs écrites une fois sur trois ; sinon 1, 2, 3 dans l'ordre des classes.
+            let written: Option<Vec<u64>> = rng.chance(1, 3).then(|| match rng.below(3) {
+                0 => (1..=k).rev().collect(),
+                1 => (1..=k).map(|v| v * 10).collect(),
+                _ => (1..=k).rev().map(|v| v * 10).collect(),
+            });
+            let vals = written.clone().unwrap_or_else(|| (1..=k).collect());
+            let (body, classes) = if three {
+                let c = values[rng.range((i + 1) as u64, (values.len() - 1) as u64) as usize];
+                let (ta, tc) = (u(a), u(c));
+                let body = match rng.below(3) {
+                    0 => format!("Classe {s} en moins de {ta}, de {a} à {tc} et plus de {tc}"),
+                    1 => format!(
+                        "Reclasse {s} en trois classes : sous {ta}, entre {ta} et {tc}, au-delà de {tc}"
+                    ),
+                    _ => format!(
+                        "Découpe {s} en trois catégories : moins de {ta}, {ta} à {tc}, plus de {tc}"
+                    ),
+                };
+                (
+                    body,
+                    json!([{"max": a, "value": vals[0]}, {"min": a, "max": c, "value": vals[1]},
+                        {"min": c, "value": vals[2]}]),
+                )
+            } else {
+                let ta = u(a);
+                let body = match rng.below(3) {
+                    0 => format!("Classe {s} en deux catégories : moins de {ta} et plus de {ta}"),
+                    1 => format!("Reclasse {s} en deux classes, sous {ta} et au-dessus de {ta}"),
+                    _ => format!("Découpe {s} en deux classes : moins de {ta}, plus de {ta}"),
+                };
+                (
+                    body,
+                    json!([{"max": a, "value": vals[0]}, {"min": a, "value": vals[1]}]),
+                )
+            };
+            let body = match written {
+                Some(w) => {
+                    let w: Vec<String> = w.iter().map(u64::to_string).collect();
+                    let w = enumerate(&w);
+                    match rng.below(2) {
+                        0 => format!("{body}, notées {w}"),
+                        _ => format!("{body}, avec les valeurs {w}"),
+                    }
+                }
+                None => body,
+            };
+            (body, false, classes)
+        }
+    };
+    let request = finish(rng, &body, q, false);
+    let expected = match &raster {
+        Some(r) => calls(vec![json!({"command": "raster.reclassify",
+            "params": {"raster": r.source, "classes": classes}})]),
+        None => question(missing_raster_question(rng, key)),
+    };
+    Some(example("reclassement_raster", b, rng, request, expected))
+}
+
 // -- géométrie (11.12, lot 1) ------------------------------------------------
 //
 // Règle du catalogue : entre WGS84, UTM et MGRS, `coord.convert` ; dès qu'un autre système
@@ -4721,6 +5093,7 @@ pub(crate) fn selects_no_cell(expected: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
     #[test]
     fn thousands_are_separated_by_spaces() {
@@ -6179,6 +6552,239 @@ mod tests {
             }
         }
         assert!(no_cost > 0 && no_cost_with_dem > 0 && no_point > 0);
+    }
+
+    // -- critères, masques et superposition (11.12, lot 2b-2) ------------------
+
+    /// Le thème et la couche du raster de source `path` : présent dans l'inventaire, sinon échec.
+    fn listed_raster<'a>(e: &'a Example, path: &Value) -> (&'static str, &'a Value) {
+        assert!(
+            !path.to_string().contains("step:"),
+            "étape en liste : {}",
+            e.request
+        );
+        let layer = e.inventory["layers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|l| l["kind"] == "raster" && l.get("source") == Some(path))
+            .unwrap_or_else(|| panic!("raster {path} absent : {}", e.request));
+        let id = layer["layer_id"].as_str().unwrap();
+        let t = THEMES
+            .iter()
+            .find(|t| t.slugs.iter().any(|s| id.starts_with(&format!("{s}_"))))
+            .unwrap_or_else(|| panic!("{id} sans thème"));
+        (t.key, layer)
+    }
+
+    /// Les plans d'appels d'une famille de rasters en liste : une étape `command`, ses clés
+    /// parmi `keys` (les `required` toujours là) ; et ses questions, sans plan, qui nomment un
+    /// raster de `named` absent de l'inventaire.
+    fn listed_examples(
+        make: fn(&mut Rng) -> Option<Example>,
+        command: &str,
+        required: &[&str],
+        keys: &[&str],
+        named: &[&str],
+    ) -> (Vec<Example>, Vec<Example>) {
+        let (planned, asked): (Vec<Example>, Vec<Example>) = valid(make, 800)
+            .into_iter()
+            .partition(|e| e.expected["kind"] == "calls");
+        for e in &planned {
+            assert_eq!(commands(e), [command], "{}", e.request);
+            let params = params0(e).as_object().unwrap();
+            for k in params.keys() {
+                assert!(keys.contains(&k.as_str()), "{k} : {}", e.request);
+            }
+            for k in required {
+                assert!(params.contains_key(*k), "{k} : {}", e.request);
+            }
+        }
+        for e in &asked {
+            assert_eq!(e.expected["kind"], "question", "{}", e.request);
+            assert!(e.expected.get("calls").is_none());
+            let q = e.expected["question"].as_str().unwrap();
+            assert!(
+                named
+                    .iter()
+                    .any(|k| q.contains(theme(k).of_none) && !has_theme(e, k)),
+                "{q} : {}",
+                e.request
+            );
+        }
+        assert!(!planned.is_empty() && !asked.is_empty());
+        (planned, asked)
+    }
+
+    /// Rang de la première mention d'un raster dans la demande : un de ses sujets, ou le nom de
+    /// sa couche entre guillemets.
+    fn mention(e: &Example, key: &str, layer: &Value) -> usize {
+        let name = format!("« {} »", layer["name"].as_str().unwrap());
+        let words: Vec<&str> = match key {
+            "masque_inondable" => vec!["inondables", "inondation"],
+            "masque_protege" => vec!["protégés"],
+            _ => raster_subjects(key).to_vec(),
+        };
+        words
+            .iter()
+            .copied()
+            .chain([name.as_str()])
+            .filter_map(|w| e.request.find(w))
+            .min()
+            .unwrap_or_else(|| panic!("{key} non écrit : {}", e.request))
+    }
+
+    #[test]
+    fn a_weighted_overlay_takes_the_written_criteria_weights_and_masks_in_order() {
+        let (planned, _) = listed_examples(
+            superposition_ponderee,
+            "raster.weighted_overlay",
+            &["criteria"],
+            &["criteria", "exclusions"],
+            &CRITERIA,
+        );
+        let (mut counts, mut masks) = (BTreeSet::new(), BTreeSet::new());
+        let (mut weighted, mut equal, mut double) = (0, 0, 0);
+        for e in &planned {
+            let p = params0(e);
+            let criteria = p["criteria"].as_array().unwrap();
+            counts.insert(criteria.len());
+            let mut ranks = Vec::new();
+            for c in criteria {
+                let mut keys: Vec<&str> =
+                    c.as_object().unwrap().keys().map(String::as_str).collect();
+                keys.sort_unstable();
+                assert_eq!(keys, ["raster", "weight"], "{}", e.request);
+                let (key, layer) = listed_raster(e, &c["raster"]);
+                assert!(CRITERIA.contains(&key), "critère {key} : {}", e.request);
+                ranks.push(mention(e, key, layer));
+            }
+            assert!(ranks.is_sorted(), "ordre des critères : {}", e.request);
+            let weights: Vec<u64> = criteria
+                .iter()
+                .map(|c| c["weight"].as_u64().unwrap())
+                .collect();
+            if e.request.contains("double") {
+                double += 1;
+                let mut w = weights.clone();
+                w.sort_unstable();
+                let mut want = vec![1; w.len() - 1];
+                want.push(2);
+                assert_eq!(w, want, "{}", e.request);
+            } else if cassini_core::point::request_numbers(&e.request).is_empty() {
+                equal += 1;
+                assert!(weights.iter().all(|w| *w == 1), "{}", e.request);
+            } else {
+                weighted += 1;
+                for c in criteria {
+                    written(e, &c["weight"]);
+                }
+            }
+            let exclusions = p["exclusions"].as_array().cloned().unwrap_or_default();
+            masks.insert(exclusions.len());
+            let mut ranks = Vec::new();
+            for m in &exclusions {
+                let (key, layer) = listed_raster(e, m);
+                assert!(MASKS.contains(&key), "masque {key} : {}", e.request);
+                ranks.push(mention(e, key, layer));
+            }
+            assert!(ranks.is_sorted(), "ordre des masques : {}", e.request);
+            if exclusions.is_empty() {
+                assert!(
+                    !e.request.contains("inond") && !e.request.contains("protégé"),
+                    "masque non écrit : {}",
+                    e.request
+                );
+            }
+        }
+        assert_eq!(counts.into_iter().collect::<Vec<_>>(), [2, 3, 4]);
+        assert_eq!(masks.into_iter().collect::<Vec<_>>(), [0, 1, 2]);
+        assert!(weighted > 0 && equal > 0 && double > 0);
+        // Le MNT ou le raster de coût en distraction ne deviennent jamais un critère.
+        assert!(planned.iter().any(|e| has_theme(e, "mnt")));
+        assert!(planned.iter().any(|e| has_theme(e, "cout")));
+    }
+
+    #[test]
+    fn a_raw_raster_is_reclassified_directly_into_contiguous_classes() {
+        let (planned, _) = listed_examples(
+            reclassement_raster,
+            "raster.reclassify",
+            &["raster", "classes"],
+            &["raster", "classes"],
+            &RAW_RASTERS,
+        );
+        let (mut lengths, mut rasters) = (BTreeSet::new(), BTreeSet::new());
+        let mut written_values = 0;
+        for e in &planned {
+            let p = params0(e);
+            let (key, _) = listed_raster(e, &p["raster"]);
+            assert!(RAW_RASTERS.contains(&key), "{key} : {}", e.request);
+            rasters.insert(key);
+            let noise = key == "bruit";
+            if !noise {
+                assert!(!e.request.contains("dB"), "{}", e.request);
+            }
+            let classes = p["classes"].as_array().unwrap();
+            lengths.insert(classes.len());
+            for c in classes {
+                for bound in ["min", "max"] {
+                    if let Some(b) = c.get(bound) {
+                        written(e, b);
+                        // La borne est écrite avec son unité : « 65 dB », « 1 000 m ».
+                        let n = b.as_u64().unwrap();
+                        let with_unit = if noise {
+                            format!("{n} dB")
+                        } else {
+                            format!("{} m", thousands(n))
+                        };
+                        assert!(
+                            e.request.contains(&with_unit),
+                            "{with_unit} : {}",
+                            e.request
+                        );
+                    }
+                }
+            }
+            if let [only] = classes.as_slice() {
+                assert_eq!(only["value"], 1, "{}", e.request);
+                let above = ["dépasse", "au-dessus", "plus de"];
+                let below = ["sous", "en dessous", "moins de"];
+                let words = if only.get("min").is_some() {
+                    assert!(only.get("max").is_none());
+                    above
+                } else {
+                    assert!(only.get("max").is_some());
+                    below
+                };
+                assert!(words.iter().any(|w| e.request.contains(w)), "{}", e.request);
+                continue;
+            }
+            // Bornes contiguës : ouverte en bas, ouverte en haut, chaque min la max d'avant.
+            assert!(classes[0].get("min").is_none(), "{}", e.request);
+            assert!(classes[classes.len() - 1].get("max").is_none());
+            for pair in classes.windows(2) {
+                assert_eq!(pair[1]["min"], pair[0]["max"], "{}", e.request);
+            }
+            let values: Vec<u64> = classes
+                .iter()
+                .map(|c| c["value"].as_u64().unwrap())
+                .collect();
+            let default: Vec<u64> = (1..=values.len() as u64).collect();
+            if values != default {
+                written_values += 1;
+                for c in classes {
+                    written(e, &c["value"]);
+                }
+            }
+        }
+        assert_eq!(lengths.into_iter().collect::<Vec<_>>(), [1, 2, 3]);
+        assert_eq!(
+            rasters.into_iter().collect::<Vec<_>>(),
+            ["bruit", "distance_routes"]
+        );
+        assert!(written_values > 0);
+        assert!(planned.iter().any(|e| has_theme(e, "mnt")));
     }
 
     #[test]
