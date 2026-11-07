@@ -64,6 +64,9 @@ class FakeBackend:
     def extent_of(self, layer, to_authid=None):
         return layer.box
 
+    def is_vector(self, layer):
+        return not layer.source.lower().endswith((".tif", ".tiff", ".asc", ".vrt"))
+
     def export_pdf(self, layers, title, sources_text, out, authid, box, **kwargs):
         self.exported = (layers, title, sources_text, out, authid, box)
         self.kwargs = kwargs
@@ -168,6 +171,26 @@ class LayoutExportTest(unittest.TestCase):
         self.assertEqual(result["sources"], [])
         box = backend.exported[5]
         self.assertLess(box[0], box[2])  # un point seul reçoit une marge
+
+    def test_the_map_is_framed_on_vector_layers_the_dem_staying_behind(self):
+        # Un MNT de 0 à 100 autour de vecteurs de 40 à 60 : le cadre suit les vecteurs, marge de 5 %.
+        layers = [
+            FakeLayer("g", "/d/gares.gpkg|layername=g", (40.0, 40.0, 60.0, 50.0)),
+            FakeLayer("z", "/d/zones.shp", (45.0, 42.0, 55.0, 60.0)),
+            FakeLayer("mnt", "/d/mnt.tif", (0.0, 0.0, 100.0, 100.0)),
+        ]
+        backend = FakeBackend(layers)
+        (result, error), _ = run(backend, {"title": "Carte", "out": self.out})
+        self.assertIsNone(error)
+        self.assertEqual(backend.exported[5], (39.0, 39.0, 61.0, 61.0))
+        self.assertEqual(result["layer_count"], 3)  # le MNT reste sur la carte, en fond
+
+    def test_without_vector_layers_the_map_is_framed_on_the_rasters(self):
+        layers = [FakeLayer("mnt", "/d/mnt.tif", (0.0, 0.0, 100.0, 100.0))]
+        backend = FakeBackend(layers)
+        (_, error), _ = run(backend, {"title": "Carte", "out": self.out})
+        self.assertIsNone(error)
+        self.assertEqual(backend.exported[5], (-5.0, -5.0, 105.0, 105.0))
 
     def test_sources_are_bounded_and_deduplicated(self):
         layers = [FakeLayer(str(i), "/d/f%d.shp" % i, (0.0, 0.0, 1.0, 1.0)) for i in range(60)]

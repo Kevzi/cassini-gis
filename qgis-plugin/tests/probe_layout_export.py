@@ -91,6 +91,18 @@ def _spy_export(self, *args, **kwargs):
 
 QgsLayoutExporter.exportToPdf = _spy_export
 
+# Cadres passés au fond : sans échelle, ils suivent les vecteurs, pas le MNT (18,5 × 16,8 km).
+framings = []
+_backend_export = layout_export.LayoutBackend.export_pdf
+
+
+def _spy_framing(self, layers, title, sources_text, out, authid, box, **kwargs):
+    framings.append((box, kwargs.get("scale")))
+    return _backend_export(self, layers, title, sources_text, out, authid, box, **kwargs)
+
+
+layout_export.LayoutBackend.export_pdf = _spy_framing
+
 
 def step_empty():
     root = project.layerTreeRoot()
@@ -196,7 +208,10 @@ def done_ok(result=None, error=None):
         ok = ok and "scale" not in result and "center" not in result
         # Sans les nouveaux paramètres : A4 paysage, aucune grille.
         ok = ok and close_to(media_box(out_ok), (841.89, 595.28)) and grids == []
-    results.append(("export", result if error is None else error.code, ok))
+        # Cadré sur les vecteurs (≈ 9 km de côté, marge comprise), pas sur le MNT de 18,5 km.
+        box, scale = framings[0]
+        ok = ok and scale is None and box[2] - box[0] < 12000 and box[3] - box[1] < 12000
+    results.append(("export", (result, framings[:1]) if error is None else error.code, ok))
     QTimer.singleShot(0, step_scale)
 
 

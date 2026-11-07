@@ -575,6 +575,14 @@ class LayoutExportGesture(_ReadGesture):
         if box is None:
             raise GestureError(EMPTY, "Les couches visibles sont vides : la carte n'a pas d'emprise.")
 
+        # Sans échelle : cadré sur les couches vectorielles, les rasters (un MNT déborde souvent de
+        # la zone d'étude) restant en fond ; sans vecteur, sur toutes les couches. Les couches
+        # « autres » (tuiles vectorielles, maillages) n'y entrent pas : un fond de tuiles couvre
+        # souvent le monde.
+        frame_box = box
+        if scale is None:
+            frame_box = _union([e for layer, e in zip(layers, extents) if backend.is_vector(layer)]) or box
+
         names = []
         for layer in layers:
             name = source_name(backend.source_of(layer))
@@ -617,7 +625,7 @@ class LayoutExportGesture(_ReadGesture):
         if grid is not None:
             extra["grid"] = {"authid": grid["authid"], "interval": grid["interval"], "projected": grid["projected"]}
         try:
-            framing = _padded(box) if scale is None else _centered(center)
+            framing = _padded(frame_box) if scale is None else _centered(center)
             done = backend.export_pdf(layers, title.strip(), sources_text, out, crs, framing, **extra)
             if scale is not None and round(done["scale"]) != scale:
                 raise RuntimeError("échelle non tenue : 1:%s au lieu de 1:%s" % (done["scale"], scale))
