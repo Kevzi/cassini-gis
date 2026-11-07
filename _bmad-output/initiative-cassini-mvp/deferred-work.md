@@ -833,3 +833,23 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
   evidence: Sonde 11.18, refus aux deux passages, y compris après que les communes ont été ramenées à un fichier du 74 seul (279 entités). L'emprise des couches est d'environ 125 × 100 km (MNT 25 m), soit environ 130 lignes à 1 km, marge de 5 % comprise : moins de 200.
   status: résolu, 2026-11-07
   resolution: Pas un bogue de Cassini. La couche `cours_d_eau` de la BD TOPO garde les rivières entières, jusqu'à Y = 6 249 877 : l'emprise réelle était de 196 × 352 km, et le refus était juste. Les cours d'eau du jeu de test sont découpés sur le 74 (`annecy/cours-d-eau-74.gpkg`), ce qui ramène l'emprise à 125 × 100 km. Même phrase, vrai modèle : PDF A3 carroyé en UTM 32N, rejeu identique.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-second-jeu-de-test-reel-annecy-pret-pour-la-demonstration-plan.md`
+  summary: Dans l'export PDF, la légende déborde sur la flèche du nord dès que le projet a beaucoup de couches ou de catégories ; elle n'est ni bornée en hauteur ni répartie en colonnes.
+  evidence: Export A3 du projet d'Annecy (12 couches, 9 catégories), 2026-11-07, rendu par pypdfium2. `qgis-plugin/cassini_qgis/layout_export.py` place la légende en (215, 22, 72, 100) et la flèche en (215, 130) sans tenir compte de la hauteur réelle de la légende.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-second-jeu-de-test-reel-annecy-pret-pour-la-demonstration-plan.md`
+  summary: Le quadrillage de l'export PDF ne montre aucune coordonnée sur les bords quand QGIS a ses polices (plateforme Windows), alors que l'export demande des étiquettes à gauche et en bas.
+  evidence: Même export d'Annecy, en UTM 32N à 10 km et à 1 km, avec QT_QPA_PLATFORM=windows : lignes tracées, aucune étiquette. Sous offscreen, des pavés apparaissaient dans la marge gauche (les polices y manquent). À vérifier aussi dans QGIS avec son interface.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-second-jeu-de-test-reel-annecy-pret-pour-la-demonstration-plan.md`
+  summary: Le modèle choisit parfois un fuseau UTM sans rapport avec le lieu de la carte pour « un carroyage UTM » (EPSG:32621 au lieu de 32632 à Annecy, 1 essai sur 3) ; il faut des exemples d'entraînement où le fuseau se déduit de l'emprise du projet.
+  evidence: Sonde 11.18, phrase « Exporte la carte en A3 paysage avec un carroyage UTM tous les 1 km » : 32632 à deux essais, 32621 au troisième, puis refus « plus de 200 lignes » parce que le cadre est à 5 000 km. À traiter avec le prochain ré-entraînement groupé.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-second-jeu-de-test-reel-annecy-pret-pour-la-demonstration-plan.md`
+  summary: À la réouverture d'un projet, le panneau n'affiche que l'historique de la session en cours, alors que le journal garde toutes les étapes passées (`journal.jsonl` complété, numérotation reprise) ; l'utilisateur ne retrouve pas ce qu'il a fait.
+  evidence: Remarque du propriétaire (2026-11-07). `core/src/journal/mod.rs` rouvre le journal en ajout (`count_lines + 1`) ; `qgis-plugin/cassini_qgis/panel.py` ne montre que le « journal de la session ». Il faut un moyen pour le panneau de relire le journal du projet (message du canal ou commande), à décider au regard d'AD-12 et du catalogue figé.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-second-jeu-de-test-reel-annecy-pret-pour-la-demonstration-plan.md`
+  summary: Idée du propriétaire : une commande qui applique aux couches du projet une mise en forme conforme aux conventions des cartes topographiques (eau en bleu, routes selon leur importance, limites, PLU aux couleurs CNIG, relief), pour que l'IA puisse la demander.
+  evidence: Le jeu d'Annecy a dû être mis en forme à la main (script `%TEMP%\\sonde-11-18\\style.py`) pour donner une carte lisible : les couches ouvertes brutes, MNT par-dessus, ne montraient rien. Commande nouvelle, donc changement du catalogue figé.
