@@ -3,7 +3,7 @@ title: 'La table fermée ne contient que les commandes déléguées'
 type: 'chore'
 ticket: '17'
 created: '2026-11-06'
-status: 'built'
+status: done
 baseline_revision: 'd6373fd9ed9138334190cfecc5f4939dde27cc23'
 route: 'oneshot'
 route_source: 'auto'

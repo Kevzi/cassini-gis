@@ -3,7 +3,7 @@ title: 'Familles du générateur pour les nouvelles commandes — lot 3, export 
 type: 'feature'
 ticket: '12'
 created: '2026-11-07'
-status: 'built'
+status: done
 baseline_revision: '28725d2ea0de50dae286eb4ae6f17417034bcefd'
 route: 'full'
 route_source: 'auto'

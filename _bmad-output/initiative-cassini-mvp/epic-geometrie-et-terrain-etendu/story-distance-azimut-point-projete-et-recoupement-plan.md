@@ -3,7 +3,7 @@ title: 'Distance, azimut, point projeté et recoupement'
 type: 'feature'
 ticket: '3'
 created: '2026-11-05'
-status: 'built'
+status: done
 baseline_revision: 'd9e79039044ae5024bb4159b15263992c5b858ea'
 route: 'full'
 route_source: 'auto'

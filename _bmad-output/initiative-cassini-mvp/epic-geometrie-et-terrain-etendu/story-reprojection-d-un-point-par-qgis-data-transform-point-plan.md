@@ -3,7 +3,7 @@ title: 'Reprojection d''un point par QGIS (data.transform_point)'
 type: 'feature'
 ticket: '4'
 created: '2026-11-06'
-status: 'built'
+status: done
 baseline_revision: 'cc5926d3a5388a367bdf8b4cb4f8cba86b142d7d'
 route: 'full'
 route_source: 'auto'

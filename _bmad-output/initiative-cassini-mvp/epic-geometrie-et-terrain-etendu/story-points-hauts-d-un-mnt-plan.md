@@ -3,7 +3,7 @@ title: 'Points hauts d''un MNT'
 type: 'feature'
 ticket: '15'
 created: '2026-11-06'
-status: 'built'
+status: done
 baseline_revision: '5f85209c64cb0cc3f87bf3d070bb9a03177dd449'
 route: 'full'
 route_source: 'auto'

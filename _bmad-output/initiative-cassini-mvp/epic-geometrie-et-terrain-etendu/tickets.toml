@@ -43,7 +43,7 @@ title = "Reprojection d'un point par QGIS (data.transform_point)"
 description = "Ajoute la commande deleguee data.transform_point : une ligne de la table fermee de l'extension reprojette un Point vers un code EPSG quelconque ; elle relie un point WGS84 ou UTM au systeme d'un MNT (AD-19, AD-31)."
 verify = "Test de l'extension : un point WGS84 reprojete en Lambert-93 rend les coordonnees attendues a 1 cm pres ; un code EPSG inconnu rend une erreur nommee."
 covers = ["G4"]
-after = [3]
+after = [3, "epic-facade-qgis"]
 hitl = false
 risk = "low"
 
@@ -140,7 +140,7 @@ title = "Format, orientation et carroyage de la mise en page"
 description = "Ajoute a layout.export_pdf les parametres page_size (A4 a A0), orientation et grid (aucun, degres, projete avec systeme et intervalle), executes par la mise en page de QGIS."
 verify = "Test de l'extension : un export A3 paysage avec carroyage UTM au kilometre produit un PDF de la bonne taille de page dont la grille est presente ; sans ces parametres, l'export est inchange."
 covers = ["G11"]
-after = [10]
+after = [10, "epic-facade-qgis"]
 hitl = false
 risk = "medium"
 

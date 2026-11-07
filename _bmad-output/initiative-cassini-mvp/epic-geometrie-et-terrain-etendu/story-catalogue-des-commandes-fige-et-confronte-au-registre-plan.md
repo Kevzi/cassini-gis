@@ -3,7 +3,7 @@ title: 'Catalogue des commandes figé et confronté au registre'
 type: 'feature'
 ticket: '1'
 created: '2026-11-05'
-status: 'built'
+status: done
 baseline_revision: 'c57edf3e23e2de9e2f4b5b1b2fc898835b17cc15'
 route: 'full'
 route_source: 'auto'

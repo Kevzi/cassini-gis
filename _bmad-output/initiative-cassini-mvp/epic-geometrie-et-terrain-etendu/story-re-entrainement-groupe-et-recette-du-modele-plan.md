@@ -3,7 +3,7 @@ title: 'Ré-entraînement groupé et recette du modèle'
 type: 'feature'
 ticket: '16'
 created: '2026-11-07'
-status: 'built'
+status: done
 baseline_revision: '01ed24f4c2e7c3841df6f02174d7fe707d1049d5'
 route: 'full'
 route_source: 'auto'

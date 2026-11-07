@@ -3,7 +3,7 @@ title: "Exposition et ombrage d'un MNT"
 type: 'feature'
 ticket: '6'
 created: '2026-11-06'
-status: 'built'
+status: done
 baseline_revision: '153b17908bd349a0650ff106496dc22a90914306'
 route: 'full'
 route_source: 'auto'

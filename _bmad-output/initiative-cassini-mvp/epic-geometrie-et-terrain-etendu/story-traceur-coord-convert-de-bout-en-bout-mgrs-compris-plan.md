@@ -3,7 +3,7 @@ title: 'Traceur : coord.convert de bout en bout, MGRS compris'
 type: 'feature'
 ticket: '2'
 created: '2026-11-05'
-status: 'built'
+status: done
 baseline_revision: 'bee726ba670314b6f5de0aaccb850bc89130bee7'
 route: 'full'
 route_source: 'auto'

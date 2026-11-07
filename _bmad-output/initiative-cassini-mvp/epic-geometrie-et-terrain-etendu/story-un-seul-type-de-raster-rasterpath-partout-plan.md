@@ -3,7 +3,7 @@ title: 'Un seul type de raster : RasterPath partout'
 type: 'refactor'
 ticket: '5'
 created: '2026-11-06'
-status: 'built'
+status: done
 baseline_revision: 'cc60a2a262bebdd792f228d5773b992a9ba90c27'
 route: 'full'
 route_source: 'auto'

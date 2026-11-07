@@ -3,7 +3,7 @@ title: "Coût de déplacement et chemin de moindre coût"
 type: 'feature'
 ticket: '10'
 created: '2026-11-06'
-status: 'built'
+status: done
 baseline_revision: 'c25d12718aab3b190165b0be6b414cf0be560878'
 route: 'full'
 route_source: 'auto'

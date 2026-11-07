@@ -3,7 +3,7 @@ title: 'Écriture GeoJSON du noyau et ouverture dictée'
 type: 'feature'
 ticket: '8'
 created: '2026-11-06'
-status: 'built'
+status: done
 baseline_revision: '82e7a27809ca88286acadb8428ae29cb93f13bd6'
 route: 'full'
 route_source: 'auto'

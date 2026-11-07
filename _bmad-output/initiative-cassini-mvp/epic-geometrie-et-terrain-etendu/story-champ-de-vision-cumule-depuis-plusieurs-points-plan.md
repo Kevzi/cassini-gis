@@ -3,7 +3,7 @@ title: 'Champ de vision cumulé depuis plusieurs points'
 type: 'feature'
 ticket: '7'
 created: '2026-11-06'
-status: 'built'
+status: done
 baseline_revision: 'ae1eeaf565b97daa4e523e9fa96ad4a5320d503d'
 route: 'full'
 route_source: 'auto'

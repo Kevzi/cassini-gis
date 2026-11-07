@@ -3,7 +3,7 @@ title: 'Reclassement et superposition pondérée de rasters'
 type: 'feature'
 ticket: '9'
 created: '2026-11-06'
-status: 'built'
+status: done
 baseline_revision: '2d7e9e40021ab9ccc0463cabb7722ff90120a1db'
 route: 'full'
 route_source: 'auto'
