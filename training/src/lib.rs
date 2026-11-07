@@ -491,10 +491,16 @@ mod tests {
             Ok(())
         );
         for bad in ["donnees/ensoleillement.tif", "accessibilite_1", "step:1"] {
+            // `step:k` dans une liste est refusé dès la vérification du plan (entrée 11.13).
+            let expected = if bad.starts_with("step:") {
+                "plan.bad_reference"
+            } else {
+                "raster absent"
+            };
             let err = validate(&registry, &overlay(json!(bad), good.1.clone())).unwrap_err();
-            assert!(err.contains("raster absent"), "critère {bad} : {err}");
+            assert!(err.contains(expected), "critère {bad} : {err}");
             let err = validate(&registry, &overlay(good.0.clone(), json!(bad))).unwrap_err();
-            assert!(err.contains("raster absent"), "masque {bad} : {err}");
+            assert!(err.contains(expected), "masque {bad} : {err}");
         }
     }
 

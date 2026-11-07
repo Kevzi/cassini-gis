@@ -39,6 +39,10 @@ const LINEAR_METER: u16 = 9001;
 /// grille seule : la mémoire de pointe est plus haute (grille décodée puis sa copie en f32).
 pub const MAX_DECODED_BYTES: usize = 1 << 30;
 
+/// Valeur sans-donnée de tout raster écrit par le noyau (pente, exposition, ombrage, champ de
+/// vision, coût cumulé, reclassement, superposition).
+pub const NODATA: f32 = -9999.0;
+
 /// Message commun des refus pour taille, avant décodage ou par la limite de `tiff`.
 const TOO_LARGE: &str = "dépasse le plafond de 1 Gio pour la grille ; découpez-le dans QGIS (Raster > Extraction > Découper un raster selon une emprise).";
 

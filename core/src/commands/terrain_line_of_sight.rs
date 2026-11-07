@@ -505,15 +505,9 @@ inventory::submit! { Registration(|r| r.register(TerrainLineOfSight)) }
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::test_support::fixture;
     use crate::registry::Registry;
     use serde_json::{json, Value};
-    use std::path::PathBuf;
-
-    fn fixture(name: &str) -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../fixtures")
-            .join(name)
-    }
 
     fn m(value: f64) -> Height {
         Height {

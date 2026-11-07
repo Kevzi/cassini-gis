@@ -32,13 +32,11 @@ use crate::commands::terrain_line_of_sight::{
     check_crs, check_extent, default_curvature, default_observer_height, default_refraction,
     default_target_height, endpoint_elevation, refraction, sight, Height, Line,
 };
-use crate::dem::Dem;
+use crate::dem::{Dem, NODATA};
 use crate::point::Point;
 use crate::raster_path::RasterPath;
 use crate::registry::{Command, CommandFailure, CommandSpec, Registration, RunsIn};
 
-/// Valeur sans-donnée du champ de vision écrit.
-pub const VIEWSHED_NODATA: f32 = -9999.0;
 /// Rayon maximal, en nombre de plus petites cellules (AD-8).
 pub const MAX_RADIUS_CELLS: f64 = 500.0;
 
@@ -195,7 +193,7 @@ pub(crate) fn viewshed_of(
     );
 
     let (w, h) = (c1 - c0 + 1, r1 - r0 + 1);
-    let mut values = vec![VIEWSHED_NODATA; w as usize * h as usize];
+    let mut values = vec![NODATA; w as usize * h as usize];
     let (mut visible, mut hidden) = (0u64, 0u64);
     for row in r0..=r1 {
         for col in c0..=c1 {
@@ -244,7 +242,7 @@ pub(crate) fn viewshed_of(
         cell_size_x: dem.cell_size_x,
         cell_size_y: dem.cell_size_y,
         epsg: dem.epsg,
-        nodata: Some(f64::from(VIEWSHED_NODATA)),
+        nodata: Some(f64::from(NODATA)),
         values,
     };
     let stats = ViewshedStats {
@@ -320,38 +318,10 @@ inventory::submit! { Registration(|r| r.register(TerrainViewshed)) }
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::test_support::{fixture, Scratch};
     use crate::commands::terrain_line_of_sight::{line_of_sight, TerrainLineOfSightParams};
     use crate::registry::Registry;
     use serde_json::{json, Value};
-    use std::path::PathBuf;
-
-    fn fixture(name: &str) -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../fixtures")
-            .join(name)
-    }
-
-    /// Dossier temporaire propre à un test, effacé à la fin, y compris s'il échoue.
-    struct Scratch(PathBuf);
-
-    impl Scratch {
-        fn new(name: &str) -> Self {
-            let dir = std::env::temp_dir()
-                .join(format!("cassini-viewshed-{}-{name}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&dir);
-            std::fs::create_dir_all(&dir).unwrap();
-            Scratch(dir)
-        }
-        fn join(&self, name: &str) -> PathBuf {
-            self.0.join(name)
-        }
-    }
-
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
 
     fn m(value: f64) -> Height {
         Height {

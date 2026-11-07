@@ -15,13 +15,10 @@ use schemars::JsonSchema;
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::dem::Dem;
+use crate::dem::{Dem, NODATA};
 use crate::horn::same_grid_as;
 use crate::raster_path::RasterPath;
 use crate::registry::{Command, CommandFailure, CommandSpec, Registration, RunsIn};
-
-/// Valeur sans-donnée du raster reclassé.
-pub const RECLASSIFY_NODATA: f32 = -9999.0;
 
 /// Nombre maximal de classes (AD-8).
 pub const MAX_CLASSES: usize = 32;
@@ -111,7 +108,7 @@ pub fn check_classes(classes: &[RasterClass]) -> Result<(), CommandFailure> {
                 ));
             }
         }
-        if class.value as f32 == RECLASSIFY_NODATA {
+        if class.value as f32 == NODATA {
             return Err(CommandFailure::new(
                 "raster.invalid_class",
                 format!(
@@ -146,7 +143,7 @@ pub fn reclassify(raster: &Dem, classes: &[RasterClass]) -> (Dem, Vec<ClassCount
         slot.push(at);
     }
     let (w, h) = (raster.width, raster.height);
-    let mut values = vec![RECLASSIFY_NODATA; w as usize * h as usize];
+    let mut values = vec![NODATA; w as usize * h as usize];
     let mut nodata = 0u64;
     for row in 0..h {
         for col in 0..w {
@@ -163,7 +160,7 @@ pub fn reclassify(raster: &Dem, classes: &[RasterClass]) -> (Dem, Vec<ClassCount
             }
         }
     }
-    (same_grid_as(raster, values, RECLASSIFY_NODATA), counts, nodata)
+    (same_grid_as(raster, values, NODATA), counts, nodata)
 }
 
 /// `raster.reclassify` : commande du noyau.
@@ -221,40 +218,11 @@ inventory::submit! { Registration(|r| r.register(RasterReclassify)) }
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::test_support::{fixture, Scratch};
     use crate::commands::terrain_slope::{horn_slope, SlopeUnit};
     use crate::registry::Registry;
     use serde_json::{json, Value};
     use std::path::PathBuf;
-
-    fn fixture(name: &str) -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../fixtures")
-            .join(name)
-    }
-
-    /// Dossier temporaire propre à un test, effacé à la fin, y compris s'il échoue.
-    struct Scratch(PathBuf);
-
-    impl Scratch {
-        fn new(name: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!(
-                "cassini-reclassify-{}-{name}",
-                std::process::id()
-            ));
-            let _ = std::fs::remove_dir_all(&dir);
-            std::fs::create_dir_all(&dir).unwrap();
-            Scratch(dir)
-        }
-        fn join(&self, name: &str) -> PathBuf {
-            self.0.join(name)
-        }
-    }
-
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
 
     fn call(raster: &Path, classes: Value, out: &Path) -> Result<Value, crate::registry::RegistryError> {
         Registry::standard().call(

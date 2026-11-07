@@ -28,9 +28,9 @@ use crate::commands::terrain_line_of_sight::{
     refraction, Height,
 };
 use crate::commands::terrain_viewshed::{
-    check_observer, given_radius, viewshed_of, TerrainViewshedParams, VIEWSHED_NODATA,
+    check_observer, given_radius, viewshed_of, TerrainViewshedParams,
 };
-use crate::dem::Dem;
+use crate::dem::{Dem, NODATA};
 use crate::point::Point;
 use crate::raster_path::RasterPath;
 use crate::registry::{Command, CommandFailure, CommandSpec, Registration, RunsIn};
@@ -146,7 +146,7 @@ pub fn viewshed_cumulative(
     // puis oubliée : une seule fenêtre en mémoire à la fois. L'enveloppe, en colonnes et
     // lignes du MNT, est suivie au passage, et le compteur rogné à la fin.
     let full_w = dem.width as usize;
-    let mut counts = vec![VIEWSHED_NODATA; full_w * dem.height as usize];
+    let mut counts = vec![NODATA; full_w * dem.height as usize];
     let (mut c0, mut r0, mut c1, mut r1) = (u32::MAX, u32::MAX, 0u32, 0u32);
     for (i, o) in params.observers.iter().enumerate() {
         let (g, _) = viewshed_of(dem, &single, o, &rank_name(i))?;
@@ -160,12 +160,12 @@ pub fn viewshed_cumulative(
                 let v = g.values[row * g.width as usize + col];
                 let cell = &mut counts[(row + r as usize) * full_w + col + c as usize];
                 if v == 1.0 {
-                    *cell = if *cell == VIEWSHED_NODATA {
+                    *cell = if *cell == NODATA {
                         1.0
                     } else {
                         *cell + 1.0
                     };
-                } else if v == 0.0 && *cell == VIEWSHED_NODATA {
+                } else if v == 0.0 && *cell == NODATA {
                     *cell = 0.0;
                 }
             }
@@ -179,7 +179,7 @@ pub fn viewshed_cumulative(
     drop(counts);
     let (mut max_count, mut visible, mut nodata) = (0u64, 0u64, 0u64);
     for &v in &values {
-        if v == VIEWSHED_NODATA {
+        if v == NODATA {
             nodata += 1;
         } else if v >= 1.0 {
             visible += 1;
@@ -194,7 +194,7 @@ pub fn viewshed_cumulative(
         cell_size_x: dem.cell_size_x,
         cell_size_y: dem.cell_size_y,
         epsg: dem.epsg,
-        nodata: Some(f64::from(VIEWSHED_NODATA)),
+        nodata: Some(f64::from(NODATA)),
         values,
     };
     let stats = CumulativeStats {
@@ -279,41 +279,11 @@ inventory::submit! { Registration(|r| r.register(TerrainViewshedCumulative)) }
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::test_support::{fixture, Scratch};
     use crate::commands::analysis_buffer::DistanceUnit;
     use crate::commands::terrain_viewshed::viewshed;
     use crate::registry::Registry;
     use serde_json::{json, Value};
-    use std::path::PathBuf;
-
-    fn fixture(name: &str) -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../fixtures")
-            .join(name)
-    }
-
-    /// Dossier temporaire propre à un test, effacé à la fin, y compris s'il échoue.
-    struct Scratch(PathBuf);
-
-    impl Scratch {
-        fn new(name: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!(
-                "cassini-viewshed-cumulative-{}-{name}",
-                std::process::id()
-            ));
-            let _ = std::fs::remove_dir_all(&dir);
-            std::fs::create_dir_all(&dir).unwrap();
-            Scratch(dir)
-        }
-        fn join(&self, name: &str) -> PathBuf {
-            self.0.join(name)
-        }
-    }
-
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
 
     fn m(value: f64) -> Height {
         Height {
@@ -404,7 +374,7 @@ mod tests {
             }
         }
         for v in &grid.values {
-            if *v == VIEWSHED_NODATA {
+            if *v == NODATA {
                 nodata += 1;
             }
         }
@@ -533,7 +503,7 @@ mod tests {
         let (grid, stats) = viewshed_cumulative(&dem, &params(vec![o, o], 1000.0)).unwrap();
         let (simple, _) = viewshed(&dem, &single(&params(vec![o], 1000.0), o)).unwrap();
         for (a, b) in grid.values.iter().zip(&simple.values) {
-            let doubled = if *b == VIEWSHED_NODATA { *b } else { *b * 2.0 };
+            let doubled = if *b == NODATA { *b } else { *b * 2.0 };
             assert_eq!(*a, doubled);
         }
         assert_eq!(stats.max_count, 2);

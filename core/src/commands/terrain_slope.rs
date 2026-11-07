@@ -16,13 +16,10 @@ use std::path::Path;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::dem::Dem;
+use crate::dem::{Dem, NODATA};
 use crate::horn::{horn_gradient, same_grid_as};
 use crate::raster_path::RasterPath;
 use crate::registry::{Command, CommandFailure, CommandSpec, Registration, RunsIn};
-
-/// Valeur sans-donnée de la pente écrite.
-pub const SLOPE_NODATA: f32 = -9999.0;
 
 /// Unité de la pente.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
@@ -78,7 +75,7 @@ pub struct SlopeStats {
 /// en f32 ; la grille rendue garde l'emprise, la cellule et l'EPSG du MNT.
 pub fn horn_slope(dem: &Dem, unit: SlopeUnit) -> (Dem, SlopeStats) {
     let (w, h) = (dem.width, dem.height);
-    let mut values = vec![SLOPE_NODATA; w as usize * h as usize];
+    let mut values = vec![NODATA; w as usize * h as usize];
     let mut min: Option<f64> = None;
     let mut max: Option<f64> = None;
     let mut valid = 0u64;
@@ -101,7 +98,7 @@ pub fn horn_slope(dem: &Dem, unit: SlopeUnit) -> (Dem, SlopeStats) {
             valid += 1;
         }
     }
-    let out = same_grid_as(dem, values, SLOPE_NODATA);
+    let out = same_grid_as(dem, values, NODATA);
     let stats = SlopeStats {
         min,
         max,
@@ -164,37 +161,9 @@ inventory::submit! { Registration(|r| r.register(TerrainSlope)) }
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::test_support::{fixture, Scratch};
     use crate::registry::Registry;
     use serde_json::{json, Value};
-    use std::path::PathBuf;
-
-    fn fixture(name: &str) -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../fixtures")
-            .join(name)
-    }
-
-    /// Dossier temporaire propre à un test, effacé à la fin, y compris s'il échoue.
-    struct Scratch(PathBuf);
-
-    impl Scratch {
-        fn new(name: &str) -> Self {
-            let dir =
-                std::env::temp_dir().join(format!("cassini-slope-{}-{name}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&dir);
-            std::fs::create_dir_all(&dir).unwrap();
-            Scratch(dir)
-        }
-        fn join(&self, name: &str) -> PathBuf {
-            self.0.join(name)
-        }
-    }
-
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
 
     fn slope(dem: &Path, unit: &str, out: &Path) -> Result<Value, crate::registry::RegistryError> {
         Registry::standard().call(

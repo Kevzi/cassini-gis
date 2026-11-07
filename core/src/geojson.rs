@@ -87,7 +87,7 @@ fn to_bytes(epsg: u32, features: &[Feature]) -> Result<Vec<u8>, GeojsonError> {
         ));
     }
     for (i, feature) in features.iter().enumerate() {
-        check_finite(i + 1, feature)?;
+        check_feature(i + 1, feature)?;
     }
     let mut bytes = serde_json::to_vec(&Collection { epsg, features })
         .map_err(|e| GeojsonError::unwritable(format!("Écriture du GeoJSON : {e}.")))?;
@@ -95,7 +95,16 @@ fn to_bytes(epsg: u32, features: &[Feature]) -> Result<Vec<u8>, GeojsonError> {
     Ok(bytes)
 }
 
-fn check_finite(rank: usize, feature: &Feature) -> Result<(), GeojsonError> {
+fn check_feature(rank: usize, feature: &Feature) -> Result<(), GeojsonError> {
+    // Une ligne GeoJSON a au moins deux positions (RFC 7946, §3.1.4) ; deux sommets confondus
+    // restent permis (chemin de moindre coût dans une seule cellule).
+    if let Geometry::LineString(points) = &feature.geometry {
+        if points.len() < 2 {
+            return Err(GeojsonError::unwritable(format!(
+                "L'entité {rank} est une ligne de moins de deux sommets : rien n'est écrit."
+            )));
+        }
+    }
     let coordinates_finite = match &feature.geometry {
         Geometry::Point(x, y) => x.is_finite() && y.is_finite(),
         Geometry::LineString(points) => points.iter().all(|(x, y)| x.is_finite() && y.is_finite()),
@@ -361,6 +370,31 @@ mod tests {
             assert!(e.message.contains("rien n'est écrit"), "{}", e.message);
             assert!(!path.exists(), "{i} écrit");
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_line_of_fewer_than_two_vertices_writes_nothing() {
+        let dir = scratch("ligne-courte");
+        for (i, vertices) in [vec![], vec![(652000.0, 6850000.0)]]
+            .into_iter()
+            .enumerate()
+        {
+            let mut features = fixture_points();
+            features[2].geometry = Geometry::LineString(vertices);
+            let path = dir.join(format!("{i}.geojson"));
+            let e = write(&path, 2154, &features).unwrap_err();
+            assert_eq!(e.code, "geojson.unwritable");
+            assert!(e.message.contains("L'entité 3"), "{}", e.message);
+            assert!(e.message.contains("rien n'est écrit"), "{}", e.message);
+            assert!(!path.exists(), "{i} écrit");
+        }
+        // Deux sommets confondus restent une ligne.
+        let same = Feature {
+            geometry: Geometry::LineString(vec![(15.0, 25.0), (15.0, 25.0)]),
+            properties: vec![],
+        };
+        assert!(to_bytes(2154, &[same]).is_ok());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
