@@ -3,7 +3,7 @@ title: 'Inventaire du projet gardé entre les phrases, recalculé seulement pour
 type: 'feature'
 ticket: ''
 created: '2026-11-08'
-status: 'built'
+status: 'done'
 baseline_revision: '6ad13abbf642b139f818dd479666769de5e7c083'
 route: 'oneshot'
 route_source: 'auto'
