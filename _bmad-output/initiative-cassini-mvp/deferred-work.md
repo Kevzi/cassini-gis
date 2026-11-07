@@ -731,10 +731,14 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-format-orientation-et-carroyage-de-la-mise-en-page-plan.md`
   summary: La famille de refus « papier » du générateur (`refus_hors_registre`, cas 1, `ONLY_A4`, `training/src/families.rs`) apprend au modèle à refuser « exporte en A3 », « en portrait », « en A0 », que `layout.export_pdf` sait désormais faire (`page_size`, `orientation`, `grid`) ; à remplacer par des plans au ré-entraînement (entrée 16), avec une famille pour le carroyage.
   evidence: Le garde-fou `what_is_refused_out_of_registry_is_still_missing_from_the_registry` a échoué à l'arrivée de `page_size` et `orientation` ; l'entrée 11.11 n'a ôté que la vérification des noms de paramètres de l'export, sans toucher au générateur ni aux exemples (frontière du plan : ni exemple ni ré-entraînement).
+  status: close, 2026-11-07, entrée 11.12, lot 3 (`epic-geometrie-et-terrain-etendu/story-familles-du-generateur-lot-3-export-au-format-plan.md`)
+  resolution: `ONLY_A4` retiré ; le cas papier de `refus_hors_registre` refuse désormais un format hors série (A5, lettre US) et l'impression ou le nombre d'exemplaires ; la famille `export_pdf_format` apprend `page_size`, `orientation` et `grid` (carroyage sans système → question).
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-format-orientation-et-carroyage-de-la-mise-en-page-plan.md`
   summary: Plus rien n'échoue si le remplacement de la famille de refus `ONLY_A4` est oublié : le garde-fou `what_is_refused_out_of_registry_is_still_missing_from_the_registry` n'a plus de volet « papier », et `docs/entrainement-du-modele.md:1119` décrit encore ce refus comme juste.
   evidence: Relecture rapide de 11.11 ; à l'entrée 16, remettre un garde-fou qui échoue tant qu'un exemple refuse un format ou une orientation désormais permis, et corriger la doc.
+  status: close, 2026-11-07, entrée 11.12, lot 3 (`epic-geometrie-et-terrain-etendu/story-familles-du-generateur-lot-3-export-au-format-plan.md`)
+  resolution: `refuses_a_known_page` rétabli dans `what_is_refused_out_of_registry_is_still_missing_from_the_registry` (échoue si un refus de `refus` ou `refus_hors_registre` cite A4…A0, portrait, paysage ou orientation) ; `paper_and_orientation_are_plans_never_refusals` au jeu par défaut ; `docs/entrainement-du-modele.md` corrigé.
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-familles-du-generateur-pour-les-nouvelles-commandes-plan.md`
   summary: Familles du générateur pour les commandes raster et de terrain de l'epic 11 (`terrain.aspect`, `terrain.hillshade`, `terrain.viewshed_cumulative`, `terrain.peaks`, `raster.reclassify`, `raster.weighted_overlay`, `terrain.cost_distance`, `terrain.least_cost_path`), thèmes raster de l'inventaire (coût, critères, masque), validateur étendu aux paramètres raster et à `step:k`, et remplacement du refus `NO_RASTER_THRESHOLD` par pente puis reclassement.
@@ -743,6 +747,8 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-familles-du-generateur-pour-les-nouvelles-commandes-plan.md`
   summary: Famille du générateur pour l'export au format (`layout.export_pdf` avec `page_size`, `orientation`, `grid`), remplacement du refus `ONLY_A4`, inversion du test `paper_and_orientation_refusals_stay_refusals` et correction de `docs/entrainement-du-modele.md` (refus A4 décrit comme juste).
   evidence: Plan de 11.12 à environ 2 800 jetons ; découpé en trois par le propriétaire le 2026-11-07, troisième lot. À faire avant l'entrée 16 (ré-entraînement groupé).
+  status: close, 2026-11-07, entrée 11.12, lot 3 (`epic-geometrie-et-terrain-etendu/story-familles-du-generateur-lot-3-export-au-format-plan.md`)
+  resolution: Famille `export_pdf_format` (poids 4), refus `ONLY_A4` remplacé, test inversé, doc corrigée ; 140 exemples au jeu par défaut, 4,6 % de redemandes.
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-familles-du-generateur-pour-les-nouvelles-commandes-plan.md`
   summary: Avant de mesurer le modèle ré-entraîné (entrée 16), mettre à jour l'attendu de S25 dans `ai/tests/plan_reel.rs` (point WGS84 sur un MNT en Lambert-93) : refus aujourd'hui, plan `data.transform_point` puis `terrain.viewshed` sur `step:1.point` depuis le lot 1 de 11.12. Le renfort du refus `NO_TERRAIN_CRS` demandé après 5.41 est caduc ; `foreign_point` tire désormais aussi l'UTM 32N sur un MNT en 31N et inversement.
