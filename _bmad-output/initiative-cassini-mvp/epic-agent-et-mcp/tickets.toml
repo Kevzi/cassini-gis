@@ -753,3 +753,14 @@ notes = [
   "Assumption: la cause est la charge de la machine, pas le noyau ; a confirmer par la mesure.",
   "Risque high : canal d'IA externe (CLAUDE.md, relecture thorough) ; controle hors du ticket : la recette GitHub Windows verte sur plusieurs executions.",
 ]
+
+[[entry]]
+id = 44
+type = "bug"
+title = "Chaque poignee de main du canal coute 3,4 s de processeur dans les tests, et la recette GitHub depasse ses delais"
+description = "Les tests du canal local attendent une reponse du noyau 10 s au plus. Sur la recette GitHub, plusieurs depassent ce delai et la recette passe au rouge. La cause est mesuree : la reponse a session.hello porte le catalogue (environ 107 Ko), le noyau l'ecrit en milliers de petits morceaux, et l'ecrivain de test relit tout son tampon a chaque morceau. Chaque poignee de main coute 3,4 s de processeur ; 225 s des 229 s des tests du noyau viennent de la."
+verify = "La poignee de main des tests du canal coute quelques millisecondes ; la somme des tests du noyau baisse d'un ordre de grandeur ; la recette GitHub passe plusieurs fois de suite sans depasser un delai."
+covers = []
+after = []
+hitl = false
+risk = "high"
