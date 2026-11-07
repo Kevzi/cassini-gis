@@ -15,6 +15,8 @@
 //! S25, un point écrit en WGS84 sur un MNT en Lambert-93, attend depuis 11.16 le plan que le
 //! générateur enseigne depuis 11.12 (lot 1) : `data.transform_point` vers le système du MNT,
 //! puis `terrain.viewshed` sur `step:1.point`. Un refus ou un champ de vision en 4326 est un échec.
+//! `tests/epreuve-modele-local/` reste gelé : son `sentences.json` et son banc Python (étape 2)
+//! gardent S25 en refus ; seul cet essai porte l'attendu du registre réel.
 //!
 //! Une question rendue sur une phrase claire est un échec, et il en faut au plus deux sur les 25 :
 //! concession du propriétaire (2026-10-17) pour un GGUF seul au long prompt. Un modèle au prompt
@@ -278,7 +280,9 @@ fn s25_reprojects_the_wgs84_point_into_the_dem_system_first() {
         .find(|l| l["source"] == MNT)
         .unwrap();
     assert_eq!(calls[0]["command"], "data.transform_point");
+    assert_eq!(calls[0]["params"]["point"]["epsg"], 4326);
     assert_eq!(calls[0]["params"]["target_epsg"], dem["epsg"]);
+    assert_eq!(calls[1]["params"]["dem"], MNT);
     assert_eq!(calls[1]["command"], "terrain.viewshed");
     assert_eq!(calls[1]["params"]["observer"], "step:1.point");
 }

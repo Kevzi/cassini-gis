@@ -3,14 +3,14 @@ title: 'Ré-entraînement groupé et recette du modèle'
 type: 'feature'
 ticket: '16'
 created: '2026-11-07'
-status: 'in-progress'
+status: 'built'
 baseline_revision: '01ed24f4c2e7c3841df6f02174d7fe707d1049d5'
 route: 'full'
 route_source: 'auto'
 risk: 'high'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'thorough'
+review_source: 'pinned'
+lenses_ran: ['blind-hunter', 'edge-case-hunter', 'verification-gap', 'intent-alignment']
 review_loop_iteration: 0
 context: []
 ---
@@ -59,17 +59,56 @@ context: []
 - [x] `ai/tests/plan_reel.rs` -- attendu S25, en-tête, tests sans modèle -- l'attendu ne périme plus
 - [x] `ai/tests/epic11_reel.rs` (nouveau) -- 2 phrases par commande (28), inventaire étendu en mémoire ; test sans modèle : chaque attendu passe `check_plan` et le garde-fou ; essai ignoré : score par commande -- mesure ce que 11.12 a enseigné
 - [x] `training/tests/recouvrement.rs` -- inclure l'essai neuf -- aucune de ses phrases dans le jeu engendré
-- [ ] (hitl, feu vert) entraînement vers `~/cassini-entrainement/11-16`, fusion GGUF, parité des découpeurs ; copie dans `C:\Users\kevin\cassini-modeles\ajuste-11-16\`
-- [ ] mesures GPU avant installation : `plan_reel`, `question_reel`, `ecart_reel`, `echelle_utm_reel`, `terrain_reel`, essai neuf, sur le modèle neuf et sur 5.41 (essai neuf seulement, pour la colonne de comparaison) -- les barres
-- [ ] installation (5.41 renommé `-5-41` + déclaration) ; noyau `--features gpu` et extension à jour ; `model.list`
-- [ ] `../donnees-test-cassini/` (hors dépôt) -- raster de coût, deux critères notés, un masque, dérivés du MNT 2154 par QGIS, ajoutés à `projet-sonde-11-16.qgz` ; source notée dans `LISEZMOI.txt` -- décision 3
-- [ ] recette QGIS : une dizaine de phrases enchaînées dans une seule session (conversion MGRS, distance et azimut, reprojection puis champ de vision, champ de vision cumulé, exposition, points hauts, pente au-delà d'un seuil, chemin de moindre coût, export A3 carroyé, phrase de démo), puis rejeu -- le produit
-- [ ] `docs/entrainement-du-modele.md` -- section « Ré-entraînement de 11.16 » ; `deferred-work.md` -- report S25 clos
+- [x] (hitl, feu vert) entraînement vers `~/cassini-entrainement/11-16`, fusion GGUF, parité des découpeurs ; copie dans `C:\Users\kevin\cassini-modeles\ajuste-11-16\`
+- [x] mesures GPU avant installation : `plan_reel`, `question_reel`, `ecart_reel`, `echelle_utm_reel`, `terrain_reel`, essai neuf, sur le modèle neuf et sur 5.41 (essai neuf seulement, pour la colonne de comparaison) -- les barres
+- [x] installation (5.41 renommé `-5-41` + déclaration) ; noyau `--features gpu` et extension à jour ; `model.list`
+- [x] `../donnees-test-cassini/` (hors dépôt) -- raster de coût, deux critères notés, un masque, dérivés du MNT 2154 par QGIS, ajoutés à `projet-sonde-11-16.qgz` ; source notée dans `LISEZMOI.txt` -- décision 3
+- [x] recette QGIS : une dizaine de phrases enchaînées dans une seule session (conversion MGRS, distance et azimut, reprojection puis champ de vision, champ de vision cumulé, exposition, points hauts, pente au-delà d'un seuil, chemin de moindre coût, export A3 carroyé, phrase de démo), puis rejeu -- le produit
+- [x] `docs/entrainement-du-modele.md` -- section « Ré-entraînement de 11.16 » ; `deferred-work.md` -- report S25 clos
 
 **Acceptance Criteria:**
 - Given le modèle neuf, when les essais tournent sur GPU, then aucun ne descend sous sa barre (décision 2) et chaque score est consigné.
 - Given l'essai neuf, when il tourne, then chacune des quatorze commandes a au moins une phrase composée en plan conforme.
 - Given QGIS, le projet de test et le modèle installé, when les phrases s'enchaînent puis le journal est rejoué, then chaque plan est juste et s'exécute, et le rejeu rend `identical: true`.
+
+## Implementation Notes
+
+- Étape sans modèle (commit `ce7fe05`) : S25 attend `data.transform_point` (`target_epsg`, nom réel du catalogue) puis `terrain.viewshed` ; `ai/tests/epic11_reel.rs`, 28 phrases + F03 (carroyage sans système → question) ; recouvrement 91 phrases, vert.
+- 2026-11-07, entraînement : commit `ce7fe05` (arbre propre), `~/cassini-entrainement/11-16`, 323 min (dont 49 min de validation), perte finale 0,00697, 0 exemple écarté pour longueur (jetons : médiane 738, max 1 644), validation 293/300 (plans 236/241, questions 34/36, refus 23/23), parité 300/300 (202 154 jetons), essais `llama-completion` base + adaptateur et fusionné : plan attendu. Fusionné SHA-256 `9dbed14d801eda2705e4f743b2a0057ccb101db414ef2995b3c0e17296c3ea6e`, copié dans `ajuste-11-16`.
+- Ratés de validation : 2 reprojections UTM d'un fuseau à l'autre oubliées, 1 carroyage sans système planifié, 2 noms de raster, 1 refus à tort, 1 plan tronqué.
+- Essais GPU (`~/cassini-entrainement/11-16-mesures/`) : `plan_reel` 23/25 (S18, S20 ; 1 fausse question), `question_reel` 12/12, `ecart_reel` 34/40 (plans 20/26, questions 8/8, refus 6/6, 180 s), `echelle_utm_reel` 8/8, `terrain_reel` 8/8, `epic11_reel` 27/28, 14/14 commandes (A01 rendu en pente + reclassement), F03 refusé (« aucune commande n'exporte de carte ») au lieu de la question. 5.41 sur `epic11_reel` : 0/28.
+- S25 juste. S18 (« carte PDF A3 en portrait **des routes et des gares** ») : le modèle exporte toutes les couches visibles ; le refus reste attendu (couches nommées du PDF non portées par l'export), donc un vrai échec.
+- 2026-11-07, installation : `ajuste-11-16` en lien dur sous `cassini-composition-4b-Q4_K_M.gguf` (SHA-256 vérifié), 5.41 renommé `cassini-composition-4b-5-41-Q4_K_M.gguf` + déclaration ; `model.list` voit les six. Noyau installé identique au build `--features gpu` (aucun changement du noyau depuis), extension identique au dépôt.
+- Rasters de recette (décision 3) : `donnees-test-cassini/derives-11-16/` (coût, accessibilité, calme, masque < 40 m), grille du MNT 2154, ajoutés à `projet-sonde-11-16.qgz` ; source notée dans `LISEZMOI.txt`.
+- Recette QGIS (sonde jetable `%TEMP%\sonde-11-16\sonde.py`) : 12/12 plans justes et exécutés, rejeu `identical: true` (29 étapes). La distance entre deux points Lambert-93 passe par deux `data.transform_point` vers 4326 : juste, `geo.distance_azimuth` n'accepte que 4326 et UTM.
+
+## Plan Change Log
+
+- 2026-11-07, décision du propriétaire après les mesures : le modèle `ajuste-11-16` est accepté malgré F03 (refus au lieu de la question ; ligne « Carroyage sans système » de la matrice non tenue). F03, A01, S18 et S20 vont au report `deferred-work.md` comme familles à renforcer au prochain ré-entraînement groupé ; pas de second entraînement dans ce ticket.
+
+## Review Triage Log
+
+Relecture `thorough` du 2026-11-07 (quatre lentilles), diff depuis `01ed24f` : high 0, medium 3, low 9, false 4, maybe-false 0 ; plusieurs lentilles ont rendu les mêmes constats, regroupés ci-dessous.
+
+| # | Constat | Verdict | Route | Preuve / action |
+|---|---|---|---|---|
+| 1 | `epic11_reel` rouge sur le modèle accepté (F03 compté dans l'assertion), alors que la doc annonce la barre tenue (4 lentilles) | medium | patch | Doc : l'essai reste rouge par décision, il garde l'exigence de F03 (ligne figée de la matrice) pour le prochain ré-entraînement ; l'assertion n'est pas affaiblie. |
+| 2 | La recette QGIS n'exerce pas `terrain.cost_distance` (décision 3) ; `geo.destination_point`, `geo.bearing_intersection`, MGRS → WGS84 non plus (3 lentilles) | medium | patch | Seconde sonde (`projet-sonde-11-16b.qgz`) : 4/4 plans exécutés, rejeu identique ; section ajoutée à la doc. |
+| 3 | Six écarts de `ecart_reel` non nommés | medium | patch | H08, H11, H13, H17, H18, H19 nommés dans la doc, comparés à 5.41. |
+| 4 | Ratés de validation absents du report ; « plan tronqué » | low | patch | Rang 239 vérifié : pas tronqué, mauvaise référence `step:0` ; doc précisée (noms de raster, refus, référence d'étape). |
+| 5 | Durée sur processeur non mesurée alors que le registre a grossi | low | defer | La croissance du prompt vient de 11.2 à 11.11, pas de ce ticket ; entrée au report (`duree_reel` sur CPU). |
+| 6 | Doc d'installation : « déclaration … lien dur » ; SHA-256 sans dire quel fichier | low | patch | Formulation corrigée ; empreinte de la sortie, de la copie et de l'installé. |
+| 7 | Aucune phrase de l'essai neuf avec un point d'un autre système ni reprojection UTM 31N → 32N | low | defer | Entrée au report, avec le prochain ré-entraînement. |
+| 8 | `the_grid_question_names_no_system` : liste de mots trop courte (2 lentilles) | low | patch | `2154`, `utm 3`, `fuseau`, `wgs`, `4326`, `epsg`, `mgrs`, `°` ajoutés. |
+| 9 | `s25_reprojects_…` ne vérifie ni le point en 4326 ni le MNT | low | patch | Deux assertions ajoutées. |
+| 10 | Banc Python gelé (`sentences.json`, `harness.py`) garde S25 en refus | low | patch | Une phrase dans l'en-tête de `plan_reel.rs` ; le dossier gelé n'est pas touché. |
+| 11 | Méthode des rasters de critères non décrite ; 3 606 m non recoupés | low | patch | Formules dans la doc ; distance et azimut recoupés à la main (≈ 3,60 km, 55,9°). |
+| 12 | Code Map : `to_epsg` au lieu de `target_epsg` | low | rejet | La correction éditerait le plan ; le nom réel est dans les Implementation Notes. |
+| 13 | Ordre de la voie de l'epic sans l'entrée 18 ; `verify` de 18 sans mesure du gros MNT | low | rejet | Décision du 2026-11-07 dans les Notes de l'epic (14 attend 18) ; le `verify` d'une entrée se précise à son build. |
+| 14 | Z01 : `min: 15` inclusif pour « dépasse 15 % » | false | rejet | Forme enseignée par le générateur (`pente_seuil`, 11.12 lot 2a) ; la borne exacte ne change rien d'observable. |
+| 15 | Un paramètre d'export en trop ferait échouer F01/F02 | false | rejet | Comparaison exacte voulue, comme `terrain_reel` ; un paramètre non demandé est une erreur. |
+| 16 | Champs de relecture contradictoires (lentilles listées, journal vide) | false | rejet | La relecture était en cours ; ce journal la consigne. |
+| 17 | Le lecteur des critères manquerait F03 | false | rejet | Plan Change Log et doc le disent. |
 
 ## Design Notes
 

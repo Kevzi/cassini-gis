@@ -495,7 +495,10 @@ fn the_grid_question_names_no_system() {
     for (_, text) in GRID_QUESTION {
         let text = text.to_lowercase();
         assert!(text.contains("carroyage"));
-        for system in ["lambert", "31n", "30n", "32n", "zone", "degré", "grade"] {
+        for system in [
+            "lambert", "2154", "utm 3", "30n", "31n", "32n", "zone", "fuseau", "wgs", "4326",
+            "epsg", "mgrs", "degré", "grade", "°",
+        ] {
             assert!(!text.contains(system), "{system}");
         }
     }
