@@ -121,6 +121,11 @@ pub static FAMILIES: &[Family] = &[
         make: export_pdf_scale,
     },
     Family {
+        name: "export_pdf_format",
+        weight: 4,
+        make: export_pdf_format,
+    },
+    Family {
         name: "isochrone",
         weight: 4,
         make: isochrone,
@@ -1715,6 +1720,279 @@ fn export_pdf_scale(rng: &mut Rng) -> Option<Example> {
     ))
 }
 
+/// Formats de page du catalogue : valeur du plan et forme écrite (11.12, lot 3).
+const PAGE_SIZES: [(&str, &str); 5] = [
+    ("a4", "A4"),
+    ("a3", "A3"),
+    ("a2", "A2"),
+    ("a1", "A1"),
+    ("a0", "A0"),
+];
+
+/// Intervalles d'un graticule en degrés, tels qu'écrits à la française (« 0,01 »).
+const DEG_STEPS: [f64; 8] = [0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0];
+/// Intervalles d'un graticule en grades.
+const GON_STEPS: [f64; 5] = [0.5, 1.0, 5.0, 10.0, 20.0];
+/// Intervalles d'un quadrillage projeté : valeur et unité du registre.
+const GRID_STEPS: [(u64, &str); 9] = [
+    (100, "m"),
+    (200, "m"),
+    (250, "m"),
+    (500, "m"),
+    (1000, "m"),
+    (1, "km"),
+    (2, "km"),
+    (5, "km"),
+    (10, "km"),
+];
+
+/// Un nombre décimal écrit à la française : « 0,01 », « 5 ».
+fn decimal_fr(v: f64) -> String {
+    format!("{v}").replace('.', ",")
+}
+
+/// Valeur JSON d'un intervalle : entière si elle l'est (`1`, pas `1.0`).
+fn number_json(v: f64) -> Value {
+    if v.fract() == 0.0 {
+        json!(v as u64)
+    } else {
+        json!(v)
+    }
+}
+
+/// Un carroyage demandé : la proposition écrite (espace en tête) et le `grid` du plan, ou
+/// `None` quand la demande ne nomme pas son système (décision 1 du propriétaire, 2026-11-07 :
+/// la réponse est alors une question).
+fn grid_words(rng: &mut Rng, with_system: bool) -> (String, Option<Value>) {
+    if !with_system {
+        let text = match rng.below(5) {
+            0 => " avec un carroyage UTM au kilomètre".to_string(),
+            1 => format!(
+                " avec un quadrillage tous les {}",
+                distance_step_text(rng, 500, "m")
+            ),
+            2 => format!(
+                " avec un carroyage UTM tous les {}",
+                distance_step_text(rng, 1, "km")
+            ),
+            3 => format!(" avec une grille de {}", distance_step_text(rng, 1, "km")),
+            _ => " avec un carroyage kilométrique".to_string(),
+        };
+        return (text, None);
+    }
+    if rng.chance(1, 3) {
+        // Graticule, en degrés ou en grades.
+        let gon = rng.chance(1, 3);
+        let v = if gon {
+            *rng.pick(&GON_STEPS)
+        } else {
+            *rng.pick(&DEG_STEPS)
+        };
+        let n = decimal_fr(v);
+        let iv = if gon {
+            match rng.below(2) {
+                0 => format!("{n} gr"),
+                _ if v >= 2.0 => format!("{n} grades"),
+                _ => format!("{n} grade"),
+            }
+        } else {
+            match rng.below(3) {
+                0 | 1 => format!("{n}°"),
+                _ if v >= 2.0 => format!("{n} degrés"),
+                _ => format!("{n} degré"),
+            }
+        };
+        let text = match rng.below(4) {
+            0 => format!(" avec un graticule tous les {iv}"),
+            1 => format!(" avec un graticule de {iv}"),
+            2 => format!(" avec un carroyage géographique tous les {iv}"),
+            _ => format!(" avec un quadrillage géographique de {iv}"),
+        };
+        let unit = if gon { "gon" } else { "deg" };
+        let grid = json!({"kind": "degrees",
+            "interval": {"value": number_json(v), "unit": unit}});
+        return (text, Some(grid));
+    }
+    let (epsg, sys) = if rng.chance(1, 2) {
+        (2154, (*rng.pick(&["Lambert-93", "Lambert 93"])).to_string())
+    } else {
+        let zone = rng.range(30, 32);
+        let sys = match rng.below(4) {
+            0 => format!("UTM {zone}N"),
+            1 => format!("UTM {zone} N"),
+            2 => format!("UTM zone {zone} nord"),
+            _ => format!("UTM {zone} Nord"),
+        };
+        (32600 + zone as u32, sys)
+    };
+    let (value, unit) = *rng.pick(&GRID_STEPS);
+    let iv = distance_step_text(rng, value, unit);
+    let text = match rng.below(4) {
+        0 => format!(" avec un carroyage {sys} tous les {iv}"),
+        1 => format!(" avec un quadrillage {sys} de {iv}"),
+        2 => format!(" avec une grille {sys} tous les {iv}"),
+        _ => format!(" avec un carroyage {sys} de {iv}"),
+    };
+    let grid = json!({"kind": "projected", "epsg": epsg,
+        "interval": {"value": value, "unit": unit}});
+    (text, Some(grid))
+}
+
+/// Un intervalle de quadrillage écrit avec son unité : « 1 000 m », « 500 mètres », « 2 km ».
+fn distance_step_text(rng: &mut Rng, value: u64, unit: &str) -> String {
+    let n = thousands(value);
+    match (unit, rng.below(2)) {
+        ("m", 0) => format!("{n} m"),
+        ("m", _) => format!("{n} mètres"),
+        (_, 0) => format!("{n} km"),
+        _ if value >= 2 => format!("{n} kilomètres"),
+        _ => format!("{n} kilomètre"),
+    }
+}
+
+/// Format et orientation écrits (espace en tête) ; `portrait` : `Some(true)` portrait,
+/// `Some(false)` paysage.
+fn page_words(rng: &mut Rng, size: Option<&str>, portrait: Option<bool>) -> String {
+    let o = |p: bool| if p { "portrait" } else { "paysage" };
+    match (size, portrait) {
+        (Some(f), None) => match rng.below(4) {
+            0 => format!(" au format {f}"),
+            1 => format!(" en {f}"),
+            2 => format!(" sur une feuille {f}"),
+            _ => format!(" en format {f}"),
+        },
+        (None, Some(p)) => match rng.below(4) {
+            0 => format!(" en {}", o(p)),
+            1 => (if p {
+                " à la française"
+            } else {
+                " à l'italienne"
+            })
+            .to_string(),
+            2 => format!(" en format {}", o(p)),
+            _ => format!(" en mode {}", o(p)),
+        },
+        (Some(f), Some(p)) => match rng.below(4) {
+            0 => format!(" au format {f} {}", o(p)),
+            1 => format!(" en {f} {}", o(p)),
+            2 => format!(" sur une feuille {f} {}", o(p)),
+            _ => format!(
+                " en {f}{}",
+                if p {
+                    " à la française"
+                } else {
+                    " à l'italienne"
+                }
+            ),
+        },
+        (None, None) => String::new(),
+    }
+}
+
+/// Question quand le carroyage demandé ne nomme pas son système.
+const GRID_SYSTEM_QUESTION: &str = "Dans quel système veux-tu le carroyage : Lambert-93, UTM avec sa zone (30N, 31N ou 32N), ou un graticule en degrés ou en grades ?";
+
+/// Export PDF au format, à l'orientation et/ou avec le carroyage écrits dans la demande
+/// (11.12, lot 3) : la carte seule, ou au bout d'une recherche une fois sur trois. Un
+/// paramètre n'est au plan que si la demande le nomme ; jamais `scale` (`export_pdf_scale`).
+/// Un carroyage sans système (une fois sur huit) mène à une question.
+fn export_pdf_format(rng: &mut Rng) -> Option<Example> {
+    let asks = rng.chance(1, 8);
+    // Au moins un des trois ; le carroyage toujours quand il manque son système.
+    let mask = if asks {
+        4 | rng.below(4)
+    } else {
+        1 + rng.below(7)
+    };
+    let size = (mask & 1 != 0).then(|| *rng.pick(&PAGE_SIZES));
+    let portrait = (mask & 2 != 0).then(|| rng.chance(1, 2));
+    let pw = page_words(rng, size.map(|s| s.1), portrait);
+    let (gw, grid) = if mask & 4 != 0 {
+        grid_words(rng, !asks)
+    } else {
+        (String::new(), None)
+    };
+    let params = |title: &str| {
+        let mut p = json!({"title": title});
+        if let Some((v, _)) = size {
+            p["page_size"] = json!(v);
+        }
+        if let Some(port) = portrait {
+            p["orientation"] = json!(if port { "portrait" } else { "landscape" });
+        }
+        if let Some(g) = &grid {
+            p["grid"] = g.clone();
+        }
+        json!({"command": "layout.export_pdf", "params": p})
+    };
+    if rng.chance(2, 3) {
+        // La carte seule.
+        let mut b = Builder::new();
+        b.distract(rng, 2, vector);
+        let titled = rng.chance(1, 2);
+        let title = if titled {
+            (*rng.pick(USER_TITLES)).to_string()
+        } else {
+            "Carte du projet".to_string()
+        };
+        let head = *rng.pick(&[
+            "Exporte la carte en PDF",
+            "Sors la carte",
+            "Fais un PDF de la carte",
+            "Produis la carte en PDF",
+            "Génère un PDF de la carte",
+            "Sors-moi la carte en PDF",
+            "Exporte la carte",
+        ]);
+        let mut body = format!("{head}{pw}{gw}");
+        if titled {
+            match rng.below(2) {
+                0 => body.push_str(&format!(", avec le titre « {title} »")),
+                _ => body.push_str(&format!(", intitulée « {title} »")),
+            }
+        }
+        let request = finish(rng, &body, false, false);
+        let expected = if asks {
+            question(GRID_SYSTEM_QUESTION.to_string())
+        } else {
+            calls(vec![params(&title)])
+        };
+        return Some(example("export_pdf_format", b, rng, request, expected));
+    }
+    let mut d = match rng.below(3) {
+        0 => draft_filter_eq(rng)?,
+        1 => draft_distance(rng)?,
+        _ => draft_zone(rng)?,
+    };
+    if d.calls.len() >= MAX_DRAFT_STEPS {
+        return None;
+    }
+    let (mut body, _) = open_find(rng, d.noun, &d.np, false);
+    let (clause, title) = if rng.chance(1, 3) {
+        let title = (*rng.pick(USER_TITLES)).to_string();
+        (
+            format!(", puis sors un PDF{pw}{gw} intitulé « {title} »"),
+            title,
+        )
+    } else {
+        let clause = match rng.below(3) {
+            0 => format!(" et sors-moi la carte en PDF{pw}{gw}"),
+            1 => format!(", puis exporte la carte{pw}{gw}"),
+            _ => format!(" et fais-en une carte en PDF{pw}{gw}"),
+        };
+        (clause, d.title())
+    };
+    body.push_str(&clause);
+    let request = finish(rng, &body, false, false);
+    let expected = if asks {
+        question(GRID_SYSTEM_QUESTION.to_string())
+    } else {
+        d.calls.push(params(&title));
+        calls(d.calls)
+    };
+    Some(example("export_pdf_format", d.b, rng, request, expected))
+}
+
 fn export_pdf(rng: &mut Rng) -> Option<Example> {
     if rng.chance(1, 3) {
         // La carte seule.
@@ -2448,7 +2726,9 @@ fn refus(rng: &mut Rng) -> Option<Example> {
         10 => (format!("Mets les {pl} en rouge sur la carte"), "Aucune commande du catalogue ne change le style d'une couche."),
         11 => (format!("Calcule l'itinéraire le plus court entre deux {pl}"), "Aucune commande du catalogue ne calcule d'itinéraire sur un réseau routier entre deux objets d'une couche : le chemin de moindre coût demande un raster de coût et deux points en coordonnées."),
         12 => (format!("Télécharge le cadastre {}", de_place(commune)), "Aucune commande du catalogue ne télécharge de données : le projet utilise les fichiers de l'utilisateur."),
-        // Le papier A3 vit dans `refus_hors_registre`, avec ses variantes.
+        // Ce que l'export PDF ne fait pas (format hors liste, impression) vit dans
+        // `refus_hors_registre` ; format, orientation et carroyage sont des plans
+        // (`export_pdf_format`, 11.12, lot 3).
         13 => ("Publie la carte sur internet".to_string(), "Aucune commande du catalogue ne publie de carte en ligne."),
         14 => (format!("Modifie la valeur d'un champ pour toutes les {pl}"), "Aucune commande du catalogue ne modifie les attributs d'une couche."),
         _ => ("Affiche la carte en 3D".to_string(), "Aucune commande du catalogue n'affiche de vue en 3D."),
@@ -2460,7 +2740,11 @@ fn refus(rng: &mut Rng) -> Option<Example> {
 // -- hors registre ---------------------------------------------------------
 
 const NO_FRAMING: &str = "Aucune commande du catalogue ne cadre ni ne zoome la carte.";
-const ONLY_A4: &str = "L'export PDF du catalogue produit seulement une page A4 paysage.";
+/// Décision 2 du propriétaire (2026-11-07) : ce que l'export PDF ne fait pas. Le format, hors
+/// de la série du catalogue ; jamais un format ni une orientation qu'il connaît.
+const NO_PAGE_SIZE: &str = "L'export PDF du catalogue ne propose pas ce format de page : ni l'A5, ni les formats américains comme la lettre US.";
+/// L'impression et le nombre d'exemplaires restent hors du produit.
+const NO_PRINTING: &str = "L'export PDF du catalogue écrit un fichier PDF : il n'envoie rien à une imprimante et ne fixe aucun nombre d'exemplaires.";
 const NO_RASTER_STATS: &str = "Aucune commande du catalogue ne calcule de statistiques sur un raster : le décompte par zone ne compte que des points.";
 /// Décision du propriétaire (2026-10-23, option a) : « de chaque gare », « de toutes les
 /// gares », « des gares » ; l'isochrone du catalogue part d'un seul point en coordonnées.
@@ -2472,7 +2756,9 @@ pub const NO_MULTI_ORIGIN: &str = "L'isochrone du catalogue part d'un seul point
 /// d'une statistique par zone (refus entier, jamais le seul calcul de terrain). Le point de
 /// terrain écrit dans un autre système que le MNT n'y est plus depuis 11.12 :
 /// `data.transform_point` le reprojette (`terrain_autre_systeme`). Le seuil sur la pente non
-/// plus depuis 11.12, lot 2a : `raster.reclassify` le fait (`pente_seuil`).
+/// plus depuis 11.12, lot 2a : `raster.reclassify` le fait (`pente_seuil`). Ni le format A3, A0
+/// ou portrait depuis 11.12, lot 3 (`export_pdf_format`) : seuls un format hors de la série du
+/// catalogue et l'impression restent refusés.
 fn refus_hors_registre(rng: &mut Rng) -> Option<Example> {
     let mut b = Builder::new();
     let roll = rng.below(4);
@@ -2499,18 +2785,35 @@ fn refus_hors_registre(rng: &mut Rng) -> Option<Example> {
         }
         1 => {
             b.distract(rng, 1, vector);
-            let body = match rng.below(6) {
-                0 => "Exporte la carte en PDF au format A3".to_string(),
-                1 => "Sors la carte en A3".to_string(),
-                2 => "Fais un PDF de la carte sur une feuille A3".to_string(),
-                3 => "Exporte la carte en PDF, en portrait".to_string(),
-                4 => format!(
-                    "Produis la carte en PDF A0, titre « {} »",
-                    rng.pick(USER_TITLES)
+            let copies = rng.range(2, 10);
+            let (body, reason) = match rng.below(7) {
+                0 => (
+                    "Exporte la carte en PDF au format A5".to_string(),
+                    NO_PAGE_SIZE,
                 ),
-                _ => "Génère un PDF de la carte au format A3 paysage".to_string(),
+                1 => ("Sors la carte en A5".to_string(), NO_PAGE_SIZE),
+                2 => (
+                    "Fais un PDF de la carte au format lettre US".to_string(),
+                    NO_PAGE_SIZE,
+                ),
+                3 => (
+                    format!(
+                        "Produis la carte en PDF A5, titre « {} »",
+                        rng.pick(USER_TITLES)
+                    ),
+                    NO_PAGE_SIZE,
+                ),
+                4 => (
+                    format!("Imprime la carte en {copies} exemplaires"),
+                    NO_PRINTING,
+                ),
+                5 => ("Envoie la carte à l'imprimante".to_string(), NO_PRINTING),
+                _ => (
+                    format!("Exporte la carte en PDF et imprime-la en {copies} exemplaires"),
+                    NO_PRINTING,
+                ),
             };
-            (body, false, ONLY_A4)
+            (body, false, reason)
         }
         // Un trajet depuis plusieurs lieux : refus, jamais un plan ni une question.
         3 => {
@@ -5090,6 +5393,33 @@ pub(crate) fn selects_no_cell(expected: &Value) -> bool {
         })
 }
 
+/// Un refus qui cite un format, une orientation ou un carroyage que l'export connaît
+/// (« seulement une page A4 paysage », A3, portrait, quadrillage) : faux depuis `page_size`,
+/// `orientation` et `grid` (11.11, famille
+/// `export_pdf_format` en 11.12, lot 3). Sert de garde-fou aux tests.
+#[cfg(test)]
+pub(crate) fn refuses_a_known_page(expected: &Value) -> bool {
+    expected["kind"] == "refusal"
+        && expected["reason"].as_str().is_some_and(|r| {
+            let r = r.to_lowercase();
+            [
+                "a4",
+                "a3",
+                "a2",
+                "a1",
+                "a0",
+                "portrait",
+                "paysage",
+                "orientation",
+                "carroyage",
+                "quadrillage",
+                "graticule",
+            ]
+            .iter()
+            .any(|w| r.contains(w))
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5932,10 +6262,6 @@ mod tests {
                 assert!(!id.contains(word), "{id}");
             }
         }
-        // Format et orientation de page sont arrivés à l'entrée 11.11 (`page_size`,
-        // `orientation`) : le refus `ONLY_A4` est à remplacer par un plan au ré-entraînement
-        // (entrée 16), noté dans `deferred-work.md`.
-        //
         // Point reprojeté (11.12) : `data.transform_point` est au registre, donc aucun refus
         // ne dit plus qu'aucune commande ne reprojette un point. Ce volet échoue si le refus
         // de 5.41 revient dans une famille de refus.
@@ -5951,10 +6277,245 @@ mod tests {
                 };
                 assert!(!reprojects_no_point(&e.expected), "{}", e.request);
                 assert!(!selects_no_cell(&e.expected), "{}", e.request);
+                // Format, orientation et carroyage (11.11) : plus aucun refus « A4 paysage »
+                // ni d'un format ou d'une orientation du catalogue (11.12, lot 3).
+                assert!(!refuses_a_known_page(&e.expected), "{}", e.request);
             }
         }
+        assert!(registry.spec("layout.export_pdf").is_some_and(|s| {
+            let params = &s.params_schema["properties"];
+            ["page_size", "orientation", "grid"]
+                .iter()
+                .all(|p| params.get(p).is_some())
+        }));
+        assert!(refuses_a_known_page(&json!({"kind": "refusal", "reason":
+            "L'export PDF du catalogue produit seulement une page A4 paysage."})));
+        assert!(!refuses_a_known_page(&refusal(NO_PAGE_SIZE)));
+        assert!(!refuses_a_known_page(&refusal(NO_PRINTING)));
         assert!(reprojects_no_point(&json!({"kind": "refusal", "reason":
             "Les commandes de terrain du catalogue prennent un point écrit dans le système du MNT : aucune ne reprojette un point."})));
+    }
+
+    #[test]
+    fn a_page_out_of_the_series_and_printing_stay_refusals() {
+        // 11.12, lot 3 (décision 2) : A5, lettre US, impression et exemplaires restent des
+        // refus, chacun avec sa raison.
+        let mut rng = Rng::new(5);
+        let (mut pages, mut prints) = (0, 0);
+        for _ in 0..2000 {
+            let Some(e) = refus_hors_registre(&mut rng) else {
+                continue;
+            };
+            let r = e.request.to_lowercase();
+            if r.contains("a5") || r.contains("lettre us") {
+                pages += 1;
+                assert_eq!(e.expected, refusal(NO_PAGE_SIZE), "{}", e.request);
+            } else if r.contains("exemplaires") || r.contains("imprimante") {
+                prints += 1;
+                assert_eq!(e.expected, refusal(NO_PRINTING), "{}", e.request);
+            }
+        }
+        assert!(pages > 0 && prints > 0);
+    }
+
+    #[test]
+    fn an_export_at_a_format_carries_only_the_written_parameters() {
+        // 11.12, lot 3 : clés attendues seules, valeurs du catalogue, chaque valeur retrouvée
+        // écrite dans la demande, intervalle et unité recopiés, un seul export par plan.
+        let registry = cassini_core::registry::Registry::standard();
+        let examples = valid(export_pdf_format, 800);
+        let (mut questions, mut searches, mut alone) = (0, 0, 0);
+        let mut seen = BTreeSet::new();
+        for e in &examples {
+            assert_eq!(e.family, "export_pdf_format");
+            let r = e.request.to_lowercase();
+            assert!(
+                !r.contains("mgrs") && !r.contains("exemplaire"),
+                "{}",
+                e.request
+            );
+            if e.expected["kind"] == "question" {
+                questions += 1;
+                assert_eq!(e.expected["question"], GRID_SYSTEM_QUESTION);
+                // Un carroyage écrit sans son système : ni Lambert, ni zone UTM, ni degrés.
+                let named = ["lambert", "utm 3", "utm zone", "°", "degré", "grade", "gr "]
+                    .iter()
+                    .any(|w| r.contains(w));
+                assert!(!named, "{}", e.request);
+                assert!(
+                    ["carroyage", "quadrillage", "grille"]
+                        .iter()
+                        .any(|w| r.contains(w)),
+                    "{}",
+                    e.request
+                );
+                continue;
+            }
+            let calls = e.expected["calls"].as_array().unwrap();
+            let exports: Vec<&Value> = calls
+                .iter()
+                .filter(|c| c["command"] == "layout.export_pdf")
+                .collect();
+            assert_eq!(exports.len(), 1, "{}", e.request);
+            assert_eq!(
+                calls.last().unwrap()["command"],
+                "layout.export_pdf",
+                "{}",
+                e.request
+            );
+            if calls.len() > 1 {
+                searches += 1;
+            } else {
+                alone += 1;
+            }
+            let params = exports[0]["params"].as_object().unwrap();
+            assert!(params["title"].as_str().is_some_and(|t| !t.is_empty()));
+            let keys: BTreeSet<&str> = params.keys().map(String::as_str).collect();
+            assert!(keys.len() >= 2, "{}", e.request);
+            for k in &keys {
+                assert!(
+                    ["title", "page_size", "orientation", "grid"].contains(k),
+                    "{k} : {}",
+                    e.request
+                );
+            }
+            if let Some(size) = params.get("page_size") {
+                let size = size.as_str().unwrap();
+                let (_, written) = PAGE_SIZES.iter().find(|(v, _)| *v == size).unwrap();
+                assert!(e.request.contains(written), "{size} : {}", e.request);
+                seen.insert(size.to_string());
+            } else {
+                for (_, written) in PAGE_SIZES {
+                    assert!(!e.request.contains(written), "{}", e.request);
+                }
+            }
+            match params.get("orientation").and_then(Value::as_str) {
+                Some("portrait") => {
+                    assert!(r.contains("portrait") || r.contains("à la française"));
+                    seen.insert("portrait".into());
+                }
+                Some("landscape") => {
+                    assert!(r.contains("paysage") || r.contains("à l'italienne"));
+                    seen.insert("landscape".into());
+                }
+                Some(o) => panic!("orientation {o}"),
+                None => {
+                    for w in ["portrait", "paysage", "française", "italienne"] {
+                        assert!(!r.contains(w), "{}", e.request);
+                    }
+                }
+            }
+            match params.get("grid") {
+                Some(grid) => {
+                    let interval = &grid["interval"];
+                    let unit = interval["unit"].as_str().unwrap();
+                    let value = interval["value"].as_f64().unwrap();
+                    assert!(value > 0.0);
+                    let words: &[&str] = match grid["kind"].as_str().unwrap() {
+                        "degrees" => {
+                            assert_eq!(grid.as_object().unwrap().len(), 2);
+                            seen.insert("degrees".into());
+                            match unit {
+                                "deg" => &["°", "degré"],
+                                "gon" => &[" gr", "grade"],
+                                u => panic!("unité {u}"),
+                            }
+                        }
+                        "projected" => {
+                            seen.insert("projected".into());
+                            let epsg = grid["epsg"].as_u64().unwrap();
+                            if epsg == 2154 {
+                                assert!(r.contains("lambert"), "{}", e.request);
+                            } else {
+                                assert!((32630..=32632).contains(&epsg), "{epsg}");
+                                assert!(
+                                    {
+                                        let z = epsg - 32600;
+                                        r.contains(&format!("utm {z}"))
+                                            || r.contains(&format!("utm zone {z}"))
+                                    },
+                                    "{}",
+                                    e.request
+                                );
+                            }
+                            match unit {
+                                "m" => &[" m", "mètre"],
+                                "km" => &["km", "kilomètre"],
+                                u => panic!("unité {u}"),
+                            }
+                        }
+                        k => panic!("grille {k}"),
+                    };
+                    let number = if grid["kind"] == "degrees" {
+                        decimal_fr(value)
+                    } else {
+                        thousands(value as u64)
+                    };
+                    assert!(
+                        words
+                            .iter()
+                            .any(|w| e.request.contains(&format!("{number}{w}"))
+                                || e.request.contains(&format!("{number} {}", w.trim()))),
+                        "{number} {unit} : {}",
+                        e.request
+                    );
+                }
+                None => {
+                    for w in ["carroyage", "quadrillage", "graticule", "grille"] {
+                        assert!(!r.contains(w), "{}", e.request);
+                    }
+                }
+            }
+            let plan: cassini_core::plan::Plan =
+                serde_json::from_value(e.expected.clone()).unwrap();
+            let guarded =
+                cassini_core::point::guard_coordinates(&registry, plan.clone(), &e.request);
+            assert_eq!(guarded, plan, "{}", e.request);
+        }
+        assert!(questions > 0 && searches > 0 && alone > 0);
+        for v in [
+            "a4",
+            "a3",
+            "a2",
+            "a1",
+            "a0",
+            "portrait",
+            "landscape",
+            "degrees",
+            "projected",
+        ] {
+            assert!(seen.contains(v), "{v} absent");
+        }
+    }
+
+    #[test]
+    fn page_words_and_grid_steps_are_written_with_their_unit() {
+        assert_eq!(decimal_fr(0.01), "0,01");
+        assert_eq!(decimal_fr(5.0), "5");
+        assert_eq!(number_json(1.0), json!(1));
+        assert_eq!(number_json(0.5), json!(0.5));
+        let mut rng = Rng::new(5);
+        for _ in 0..50 {
+            let t = distance_step_text(&mut rng, 1000, "m");
+            assert!(t == "1 000 m" || t == "1 000 mètres", "{t}");
+            let t = distance_step_text(&mut rng, 1, "km");
+            assert!(t == "1 km" || t == "1 kilomètre", "{t}");
+            let t = page_words(&mut rng, Some("A3"), None);
+            assert!(t.starts_with(' ') && t.contains("A3"), "{t}");
+            for p in [true, false] {
+                let t = page_words(&mut rng, None, Some(p));
+                let words: &[&str] = if p {
+                    &["portrait", "à la française"]
+                } else {
+                    &["paysage", "à l'italienne"]
+                };
+                assert!(words.iter().any(|w| t.contains(w)), "{t}");
+                let t = page_words(&mut rng, Some("A0"), Some(p));
+                assert!(t.contains("A0"), "{t}");
+                assert!(words.iter().any(|w| t.contains(w)), "{t}");
+            }
+            assert_eq!(page_words(&mut rng, None, None), "");
+        }
     }
 
     #[test]

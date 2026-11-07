@@ -92,6 +92,7 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `constructible` | vocabulaire d'urbanisme : « parcelles constructibles », avec ou sans distance et PDF |
 | `export_pdf` | « sors-moi la carte en PDF », titre donné par l'utilisateur ou déduit de la demande |
 | `export_pdf_scale` | « exporte la carte en PDF au 1:25 000 » → `scale: 25000`, l'entier écrit ; échelles courantes de 1:1 000 à 1:250 000, écrites « au 1:25 000 », « au 1/25000 », « au 25 000e », « au 1:25k » (multiple de 1 000 seulement) ou « à l'échelle 1/25 000 » ; la carte seule ou au bout d'une recherche (5.38) ; depuis 5.40, aussi sans le mot « PDF » (« imprime la carte au 1/50000 », « sors-moi la carte au 25 000e »), un export et jamais un refus de format |
+| `export_pdf_format` | « exporte la carte en PDF au format A3 » → `page_size: "a3"`, « en portrait » ou « à la française » → `orientation: "portrait"` (« paysage », « à l'italienne » → `landscape`), « avec un carroyage Lambert-93 tous les 1 km » → `grid: {kind: projected, epsg: 2154, interval: {value: 1, unit: km}}`, « avec un graticule tous les 0,01° » → `grid: {kind: degrees, interval: {value: 0.01, unit: deg}}` (grades → `gon`) ; seuls les paramètres écrits, jamais `scale` ; la carte seule ou au bout d'une recherche ; un carroyage sans système (« carroyage UTM au kilomètre », « quadrillage tous les 500 m ») → question qui demande le système (11.12, lot 3) |
 | `isochrone` | « zone atteinte en 10 minutes à pied depuis le point ... (Lambert-93) » |
 | `isochrone_utm` | « zone atteinte en 10 minutes à pied depuis le point 412 300 / 5 412 000 (UTM 31N) » → même isochrone, code 32631 ou 32632 ; zone 31N ou 32N, écrite « UTM 31N », « UTM 31 N », « UTM zone 31 Nord » ou « UTM31N » (5.37) |
 | `isochrone_vers_cible` | « les écoles à 10 min à pied du point ... (Lambert-93) » → isochrone, puis intersection de la cible avec l'étape 1 ; la couche du lieu (gares, écoles...) est souvent dans l'inventaire, seules les coordonnées donnent l'origine ; une fois sur trois, le lieu est nommé avec ses coordonnées (« de la gare de X (652 000 / 6 862 000, Lambert-93) ») et reste un plan |
@@ -101,7 +102,7 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `question_couche_absente` | une couche dont rien ne parle dans l'inventaire → question |
 | `question_champ_absent` | un critère qu'aucun champ ne porte → question, jamais un champ voisin deviné |
 | `refus` | courriel, suppression, reprojection d'une couche, export de couche, style, itinéraire sur le réseau routier entre deux objets d'une couche (depuis 11.12, lot 2b-1, le refus dit que le chemin de moindre coût demande un raster de coût et deux points en coordonnées), téléchargement, 3D → refus affirmatif |
-| `refus_hors_registre` | cadrage ou zoom de la carte, PDF en A3, A0 ou portrait, altitude moyenne par zone (statistiques sur un raster ; depuis 5.41 aussi après une pente ou un champ de vision : « la pente puis sa moyenne par commune » est un refus entier), MNT présent pour l'altitude par zone, trajet depuis plusieurs lieux (« de chaque gare », « de toutes les gares », « des gares ») → refus affirmatif, jamais un plan de substitution. Le point de terrain écrit dans un autre système que le MNT, refusé en 5.41, est un plan depuis 11.12 (`terrain_autre_systeme`). Le champ de vision, la ligne de vue et la pente n'y sont plus depuis 4.6 : le registre les a. Le seuil sur la pente (« où la pente dépasse 15 % »), refusé de 4.6 à 11.12, est un plan depuis 11.12, lot 2a (`pente_seuil`) |
+| `refus_hors_registre` | cadrage ou zoom de la carte, PDF dans un format hors de la série du catalogue (A5, lettre US), ou envoyé à une imprimante ou avec un nombre d'exemplaires (« envoie la carte à l'imprimante », « en 3 exemplaires ») ; « imprime la carte » seul reste un export, altitude moyenne par zone (statistiques sur un raster ; depuis 5.41 aussi après une pente ou un champ de vision : « la pente puis sa moyenne par commune » est un refus entier), MNT présent pour l'altitude par zone, trajet depuis plusieurs lieux (« de chaque gare », « de toutes les gares », « des gares ») → refus affirmatif, jamais un plan de substitution. Le point de terrain écrit dans un autre système que le MNT, refusé en 5.41, est un plan depuis 11.12 (`terrain_autre_systeme`). Le champ de vision, la ligne de vue et la pente n'y sont plus depuis 4.6 : le registre les a. Le seuil sur la pente (« où la pente dépasse 15 % »), refusé de 4.6 à 11.12, est un plan depuis 11.12, lot 2a (`pente_seuil`). Le PDF en A3, A0 ou portrait, refusé jusqu'au lot 3 de 11.12 (« seulement une page A4 paysage »), est un plan depuis (`export_pdf_format`) |
 | `pente` | « fais la carte des pentes du MNT en pourcentage » → `terrain.slope`, `dem` recopié de la `source` du raster de l'inventaire, `unit` telle qu'écrite (`degrees` : « en degrés », « en ° » ; `percent` : « en pourcentage », « en % », « en pour cent ») (4.6) |
 | `ligne_de_vue` | « y a-t-il une ligne de vue entre le point (... ; ...) en Lambert-93 et le point (... ; ...) en Lambert-93, œil à 2 m » → `terrain.line_of_sight`, deux points écrits en Lambert-93 ou en UTM 31N/32N, le système écrit à chaque point (le garde-fou en demande une occurrence par point), le MNT dans ce même système ; `observer_height` et `target_height` seulement s'ils sont écrits, jamais courbure ni réfraction (4.6) |
 | `champ_de_vision` | « calcule le champ de vision depuis le point ... (UTM 31N) sur 2 km » → `terrain.viewshed`, même règle de points et de MNT ; hauteurs et `radius` seulement s'ils sont écrits (4.6) ; depuis 5.41, le rayon aussi avant le point (« dans un rayon de 800 m autour du point … ») |
@@ -279,7 +280,39 @@ raster de l'inventaire : ni un chemin inventé, ni l'id d'une couche, ni une ét
 **Redemande.** Ces plans à une étape, sans couche, ne se corrompent pas : à poids inchangé (44),
 363 redemandes sur 8 000 à la graine 1 (4,5 %), dans la fourchette de 4 à 7 %.
 
-Reste l'export au format (lot 3), avant le ré-entraînement groupé (entrée 16).
+### Famille de l'export au format (11.12, lot 3)
+
+`layout.export_pdf` porte depuis 11.11 `page_size` (`a4` à `a0`), `orientation` (`landscape`,
+`portrait`) et `grid`. La famille `export_pdf_format` (poids 4) les apprend : format seul,
+orientation seule, carroyage seul ou combinés, la carte seule deux fois sur trois, sinon au
+bout d'une sélection, d'une distance ou d'une zone, avec un seul export en dernière étape. Un
+paramètre n'est au plan que si la demande le nomme : ni `a4` ni `landscape` écrits par défaut,
+jamais `scale` (qui reste à `export_pdf_scale`). Formats écrits « au format A3 », « en A3 »,
+« sur une feuille A0 », « en format A2 », « A2 paysage ».
+
+**Carroyage** (décision du propriétaire, 2026-11-07). Toute demande de carroyage nomme son
+système : Lambert-93 → `epsg: 2154`, UTM 30N, 31N ou 32N → 32630, 32631, 32632, tous les
+100 m à 10 km ; degrés (de 0,01° à 5°) ou grades (de 0,5 à 20 gr) → graticule. L'intervalle
+est écrit avec son unité, à la française (« 0,01° » → `0.01`), et recopié. Une fois sur huit,
+le carroyage ne nomme pas son système (« carroyage UTM au kilomètre », « quadrillage tous les
+500 m ») : la réponse est la question « Dans quel système veux-tu le carroyage : Lambert-93,
+UTM avec sa zone (30N, 31N ou 32N), ou un graticule en degrés ou en grades ? », jamais un plan. Aucune
+étiquette MGRS n'est promise.
+
+**Refus.** Le cas « papier » de `refus_hors_registre`, qui refusait A3, A0 et portrait (« seulement
+une page A4 paysage »), est remplacé par ce que l'export ne fait pas : un format hors de la
+série (A5, lettre US), l'envoi à une imprimante et le nombre d'exemplaires ; « imprime la
+carte » seul reste un export (5.40). Le garde-fou
+`what_is_refused_out_of_registry_is_still_missing_from_the_registry` échoue si un refus de
+`refus` ou de `refus_hors_registre` cite un format, une orientation ou un carroyage du catalogue, et
+`paper_and_orientation_are_plans_never_refusals` (qui inverse le test de 5.40) vérifie au jeu
+par défaut qu'aucun refus ne cite « A4 » et que la famille a des plans en A3, A0, portrait et
+pour les deux formes de grille.
+
+**Redemande.** À poids inchangé (44), 369 redemandes sur 8 000 à la graine 1 (4,6 %), dans la
+fourchette de 4 à 7 % ; 140 exemples `export_pdf_format`, aucune famille écartée.
+
+Les trois lots de 11.12 sont faits ; reste le ré-entraînement groupé (entrée 16).
 
 ### Les inventaires de QGIS (5.15)
 

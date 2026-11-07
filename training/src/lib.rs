@@ -770,25 +770,36 @@ mod tests {
     }
 
     #[test]
-    fn paper_and_orientation_refusals_stay_refusals() {
-        // 5.40 : les refus de format (A3, A0, portrait) gardent leur refus, et aucun export à
-        // l'échelle ne nomme un papier ni une orientation.
+    fn paper_and_orientation_are_plans_never_refusals() {
+        // 11.12, lot 3 (inverse le test de 5.40) : au jeu par défaut, aucun refus ne cite
+        // « A4 », `export_pdf_format` a des plans pour A3, A0, portrait et chacune des deux
+        // formes de grille, et aucun export à l'échelle ne nomme un papier ni une orientation.
+        let registry = Registry::standard();
         let (examples, _) = generate(DEFAULT_SEED, DEFAULT_COUNT);
-        let formats: Vec<_> = examples
-            .iter()
-            .filter(|e| {
-                e.family == "refus_hors_registre"
-                    && e.expected["reason"]
-                        .as_str()
-                        .is_some_and(|r| r.contains("seulement une page A4 paysage"))
-            })
-            .collect();
-        for paper in ["A3", "A0", "portrait"] {
-            assert!(
-                formats.iter().any(|e| e.request.contains(paper)),
-                "refus {paper} absent"
-            );
+        for e in &examples {
+            if let Some(reason) = e.expected["reason"].as_str() {
+                assert!(!reason.contains("A4"), "{} → {reason}", e.request);
+            }
         }
+        let exports: Vec<&Value> = examples
+            .iter()
+            .filter(|e| e.family == "export_pdf_format" && e.expected["kind"] == "calls")
+            .inspect(|e| {
+                let plan: cassini_core::plan::Plan =
+                    serde_json::from_value(e.expected.clone()).unwrap();
+                assert_eq!(registry.check_plan(&plan), Ok(()), "{}", e.request);
+            })
+            .filter_map(|e| e.expected["calls"].as_array()?.last())
+            .map(|c| &c["params"])
+            .collect();
+        for size in ["a3", "a0"] {
+            assert!(exports.iter().any(|p| p["page_size"] == size), "{size}");
+        }
+        assert!(exports.iter().any(|p| p["orientation"] == "portrait"));
+        for kind in ["degrees", "projected"] {
+            assert!(exports.iter().any(|p| p["grid"]["kind"] == kind), "{kind}");
+        }
+        assert!(exports.iter().all(|p| p.get("scale").is_none()));
         for e in examples.iter().filter(|e| e.family == "export_pdf_scale") {
             for paper in ["A3", "A0", "portrait"] {
                 assert!(!e.request.contains(paper), "{}", e.request);
