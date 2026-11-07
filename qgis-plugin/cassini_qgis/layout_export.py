@@ -37,7 +37,8 @@ Lisibilité (2026-11-07). La grille est portée par une seconde carte, sans fond
 sur la première : une couche en mode de fusion fait rastériser la carte, et QGIS couperait les
 étiquettes qui dépassent du cadre. Étiquettes à gauche (Y seuls) et en bas (X seuls). La flèche du
 nord est dans le coin haut droit de la carte ; la légende tient la colonne de droite, en une, deux
-ou trois colonnes, puis en plus petit (`fit_legend`).
+ou trois colonnes, puis en plus petit (`fit_legend`). Textes en `MAP_FONT` (Helvetica) quand elle
+est installée, sinon dans la police par défaut de QGIS.
 
 La mise en page de QGIS ne tourne pas hors du fil principal : l'export est synchrone
 (commande non annulable). Accès à QGIS par un « fond » injectable ; `LayoutBackend` est
@@ -100,7 +101,28 @@ def check_grid_density(frame, interval):
             )
 
 
-def fit_legend(legend, max_width, max_height):
+# Police des textes de la carte, si elle est installée ; sinon celle de QGIS par défaut. Aucune
+# police n'est livrée avec Cassini.
+MAP_FONT = "Helvetica"
+
+
+def map_font_family():
+    """`MAP_FONT` si QGIS la connaît, sinon None (police par défaut)."""
+    from qgis.PyQt.QtGui import QFontDatabase
+
+    return MAP_FONT if MAP_FONT in QFontDatabase().families() else None
+
+
+def with_family(text_format, family):
+    """`text_format` (QgsTextFormat) dans la famille `family` ; inchangé si `family` est None."""
+    if family is not None:
+        font = text_format.font()
+        font.setFamily(family)
+        text_format.setFont(font)
+    return text_format
+
+
+def fit_legend(legend, max_width, max_height, family=None):
     """Fait tenir la légende dans `max_width` × `max_height` mm : une, deux puis trois colonnes,
     puis des textes et symboles plus petits. Si rien ne tient, une seule colonne au plus petit :
     la légende déborde alors vers le bas, jamais hors de la page à droite."""
@@ -113,7 +135,7 @@ def fit_legend(legend, max_width, max_height):
     for shrink in (1.0, 0.85, 0.7):
         for s in styles:
             style = legend.style(s)
-            text = style.textFormat()
+            text = with_family(style.textFormat(), family)
             text.setSize(sizes[s] * shrink)
             style.setTextFormat(text)
             legend.setStyle(s, style)
@@ -241,6 +263,7 @@ class LayoutBackend(QgisBackend):
         width, height = page_dimensions(page)
         fx, fy = width / BASE_PAGE[0], height / BASE_PAGE[1]
         ff = min(fx, fy)
+        family = map_font_family()
 
         def place(item, x, y, w, h):
             item.attemptMove(QgsLayoutPoint(x * fx, y * fy))
@@ -256,6 +279,8 @@ class LayoutBackend(QgisBackend):
             item = QgsLayoutItemLabel(layout)
             item.setText(text)
             font = QFont()
+            if family is not None:
+                font.setFamily(family)
             font.setPointSize(points(size))
             font.setBold(bold)
             item.setFont(font)
@@ -318,7 +343,7 @@ class LayoutBackend(QgisBackend):
             map_grid.setAnnotationDisplay(
                 QgsLayoutItemMapGrid.DisplayMode.LongitudeOnly, QgsLayoutItemMapGrid.BorderSide.Bottom
             )
-            grid_format = map_grid.annotationTextFormat()
+            grid_format = with_family(map_grid.annotationTextFormat(), family)
             grid_format.setSize(points(6))
             map_grid.setAnnotationTextFormat(grid_format)
             grid_map.grids().addGrid(map_grid)
@@ -334,7 +359,7 @@ class LayoutBackend(QgisBackend):
         for layer in layers:
             root.addLayer(layer)
         place(legend, 215, 22, 72, 100)
-        fit_legend(legend, 72 * fx, (195 - 22) * fy)
+        fit_legend(legend, 72 * fx, (195 - 22) * fy, family)
 
         scalebar = QgsLayoutItemScaleBar(layout)
         scalebar.setLinkedMap(carte)
@@ -345,6 +370,8 @@ class LayoutBackend(QgisBackend):
             scalebar.setUnits(Qgis.DistanceUnit.Kilometers)
             scalebar.setUnitLabel("km")
         scale_font = QFont()
+        if family is not None:
+            scale_font.setFamily(family)
         scale_font.setPointSize(points(8))
         scalebar.setFont(scale_font)
         place(scalebar, 10, 185, 80, 12)

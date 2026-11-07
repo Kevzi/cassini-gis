@@ -50,6 +50,8 @@ Vérifié : 436 tests de l'extension verts ; sonde QGIS 3.44 OK, 6 cas sur 6 ; r
 **Manual checks:**
 - Le PDF A3 d'Annecy en UTM 32N à 10 km, rendu en PNG, montre les coordonnées à gauche et en bas, et une légende qui ne touche pas la flèche du nord.
 
+Ajout à la demande du propriétaire (2026-11-07), après la relecture : les textes de la carte (titre, légende, coordonnées, échelle, sources) sont en Helvetica (`MAP_FONT`) quand elle est installée, sinon dans la police par défaut. Aucune police n'est livrée avec Cassini (Helvetica est commerciale, achetée par le propriétaire et installée pour son compte Windows). Rendu vérifié ; sonde OK.
+
 ## Review Triage Log
 
 - medium, patch : `fit_legend` retombait sur 3 colonnes, la mise en page la plus large, et pouvait sortir de la page à droite. Elle retombe maintenant sur 1 colonne au plus petit.
