@@ -3,7 +3,7 @@ title: 'Export PDF : coordonnées du carroyage visibles et légende qui ne débo
 type: 'bugfix'
 ticket: ''
 created: '2026-11-07'
-status: 'built'
+status: 'done'
 baseline_revision: '91ad2e818b9d0b1d61b137e1a48e8c3a46af6eed'
 route: 'oneshot'
 route_source: 'auto'
