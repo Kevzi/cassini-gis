@@ -48,8 +48,8 @@ pub struct Summary {
 
 /// Paramètres de couche qui désignent une couche existante (ou une étape précédente).
 const LAYER_PARAMS: [&str; 3] = ["layer_id", "overlay_layer_id", "points_layer_id"];
-/// Paramètres raster de premier niveau : un MNT ou un raster d'entrée.
-const RASTER_PARAMS: [&str; 2] = ["dem", "raster"];
+/// Paramètres raster de premier niveau : un MNT, un raster d'entrée ou un raster de coût.
+const RASTER_PARAMS: [&str; 3] = ["dem", "raster", "cost"];
 
 /// Vérifie un exemple : plan lisible, `check_plan` du registre réel, couches et fichiers cités
 /// présents dans l'inventaire, plafond d'étapes, question et refus non vides. Rend le motif
@@ -419,6 +419,37 @@ mod tests {
     }
 
     #[test]
+    fn a_cost_raster_is_the_source_of_a_raster_of_the_inventory() {
+        // 11.12, lot 2b-1 : `cost` se contrôle comme `dem` ; un chemin inventé, l'id de la
+        // couche ou la source d'un vecteur sont écartés.
+        let registry = Registry::standard();
+        let inventory = json!({"layers": [
+            {"layer_id": "friction_1", "kind": "raster", "source": "donnees/friction.tif"},
+            {"layer_id": "routes_1", "kind": "vector", "source": "donnees/routes.gpkg"}
+        ], "unloaded_files": []});
+        let path = |cost: Value| Example {
+            family: "essai",
+            inventory: inventory.clone(),
+            request: "Trace le chemin de moindre coût du point (652 300 ; 6 862 100) en \
+                Lambert-93 au point (653 100 ; 6 861 500) en Lambert-93."
+                .into(),
+            expected: json!({"kind": "calls", "calls": [
+                {"command": "terrain.least_cost_path", "params": {"cost": cost,
+                    "start": {"x": 652300, "y": 6862100, "epsg": 2154},
+                    "end": {"x": 653100, "y": 6861500, "epsg": 2154}}}]}),
+            retry: None,
+        };
+        assert_eq!(
+            validate(&registry, &path(json!("donnees/friction.tif"))),
+            Ok(())
+        );
+        for bad in ["donnees/cout.tif", "friction_1", "donnees/routes.gpkg"] {
+            let err = validate(&registry, &path(json!(bad))).unwrap_err();
+            assert!(err.contains("raster absent"), "{bad} : {err}");
+        }
+    }
+
+    #[test]
     fn every_family_gives_at_least_one_valid_example() {
         let registry = Registry::standard();
         for family in FAMILIES {
@@ -540,6 +571,46 @@ mod tests {
             "terrain.peaks",
             "raster.reclassify",
         ] {
+            assert!(planned.contains(command), "{command}");
+        }
+    }
+
+    #[test]
+    fn the_cost_families_of_the_default_set_cite_a_cost_raster_never_the_dem() {
+        // 11.12, lot 2b-1 : au jeu par défaut, les deux familles sont là, sans rejet, chaque
+        // commande de coût figure dans un plan, et tout `cost` est la `source` d'un raster de
+        // coût de l'inventaire, jamais celle d'un MNT ; aucune source n'est une étape.
+        let cost_slugs = inventories::theme("cout").slugs;
+        let (examples, summary) = generate(DEFAULT_SEED, DEFAULT_COUNT);
+        for name in ["cout_cumule", "chemin_moindre_cout"] {
+            let tally = &summary.families[name];
+            assert!(tally.kept > 0 && tally.rejected == 0, "{name} : {tally:?}");
+        }
+        let mut planned = HashSet::new();
+        for e in &examples {
+            for c in e.expected["calls"].as_array().into_iter().flatten() {
+                let Some(cost) = c["params"].get("cost") else {
+                    continue;
+                };
+                planned.insert(c["command"].as_str().unwrap_or_default().to_string());
+                let layer = e.inventory["layers"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|l| l["kind"] == "raster" && l.get("source") == Some(cost))
+                    .unwrap_or_else(|| panic!("coût absent : {}", e.request));
+                let id = layer["layer_id"].as_str().unwrap();
+                assert!(
+                    cost_slugs.iter().any(|s| id.starts_with(&format!("{s}_"))),
+                    "{id} : {}",
+                    e.request
+                );
+                for s in c["params"]["sources"].as_array().into_iter().flatten() {
+                    assert!(!s.to_string().contains("step:"), "{}", e.request);
+                }
+            }
+        }
+        for command in ["terrain.cost_distance", "terrain.least_cost_path"] {
             assert!(planned.contains(command), "{command}");
         }
     }
@@ -768,9 +839,13 @@ mod tests {
             let asks_point = e.expected["question"]
                 .as_str()
                 .is_some_and(|q| q.contains("coordonnées"));
-            // Depuis 4.6, une vue depuis un lieu nommé demande aussi son point (`question_terrain`).
+            // Depuis 4.6, une vue depuis un lieu nommé demande aussi son point (`question_terrain`),
+            // et depuis 11.12, lot 2b-1, un coût de déplacement depuis un lieu nommé.
             if asks_point {
-                let terrain = e.family == "question_terrain";
+                let terrain = matches!(
+                    e.family,
+                    "question_terrain" | "cout_cumule" | "chemin_moindre_cout"
+                );
                 assert!(
                     (travel || terrain) && !has_distance(&e.request),
                     "{}",

@@ -262,14 +262,27 @@ pub static FAMILIES: &[Family] = &[
         weight: 4,
         make: pente_seuil,
     },
+    // Coût de déplacement (11.12, lot 2b-1) : un raster de coût apporté par l'utilisateur,
+    // jamais le MNT.
+    Family {
+        name: "cout_cumule",
+        weight: 4,
+        make: cout_cumule,
+    },
+    Family {
+        name: "chemin_moindre_cout",
+        weight: 4,
+        make: chemin_moindre_cout,
+    },
     // Environ 5 % du jeu : un exemple d'une autre famille, vu au tour de redemande. Le poids
     // compte les tirages laissés (corruption acceptée par `check_plan`, premier essai qui
     // n'est pas un plan d'appels) : un sur deux environ. Relevé de 20 à 24 en 4.6 : les plans
     // de terrain, sans couche ni référence d'étape, ne se corrompent pas. Relevé de 24 à 36 en
-    // 11.12 : les plans de géométrie à une étape ne se corrompent pas non plus.
+    // 11.12 : les plans de géométrie à une étape ne se corrompent pas non plus. Relevé de 36 à
+    // 44 en 11.12, lot 2b-1 : les plans de coût, à une étape, pas davantage (3,9 % sinon).
     Family {
         name: "redemande",
-        weight: 36,
+        weight: 44,
         make: redemande,
     },
 ];
@@ -2418,7 +2431,7 @@ fn refus(rng: &mut Rng) -> Option<Example> {
         8 => (format!("Enregistre les {pl} dans un fichier Excel"), "Aucune commande du catalogue n'exporte une couche vers un fichier."),
         9 => (format!("Renomme la couche « {name} » en « {} »", rng.pick(USER_TITLES)), "Aucune commande du catalogue ne renomme une couche."),
         10 => (format!("Mets les {pl} en rouge sur la carte"), "Aucune commande du catalogue ne change le style d'une couche."),
-        11 => (format!("Calcule l'itinéraire le plus court entre deux {pl}"), "Aucune commande du catalogue ne calcule d'itinéraire."),
+        11 => (format!("Calcule l'itinéraire le plus court entre deux {pl}"), "Aucune commande du catalogue ne calcule d'itinéraire sur un réseau routier entre deux objets d'une couche : le chemin de moindre coût demande un raster de coût et deux points en coordonnées."),
         12 => (format!("Télécharge le cadastre {}", de_place(commune)), "Aucune commande du catalogue ne télécharge de données : le projet utilise les fichiers de l'utilisateur."),
         // Le papier A3 vit dans `refus_hors_registre`, avec ses variantes.
         13 => ("Publie la carte sur internet".to_string(), "Aucune commande du catalogue ne publie de carte en ligne."),
@@ -2660,7 +2673,7 @@ fn foreign_point(rng: &mut Rng, epsg: u32) -> Option<Origin> {
 }
 
 /// « du MNT », « du modèle numérique de terrain », « de la couche « MNT 1 m » », ou rien
-/// (« du terrain ») : le MNT est le seul raster de l'inventaire.
+/// (« du terrain ») : « du terrain » désigne le MNT, seul raster d'altitude de l'inventaire.
 fn dem_words(rng: &mut Rng, dem: &Layer) -> String {
     match rng.below(4) {
         0 => "du MNT".to_string(),
@@ -3257,6 +3270,198 @@ fn pente_seuil(rng: &mut Rng) -> Option<Example> {
             "params": {"raster": "step:1", "classes": classes}}),
     ]);
     Some(example("pente_seuil", b, rng, request, expected))
+}
+
+// -- coût de déplacement (11.12, lot 2b-1) ----------------------------------
+//
+// Le raster de coût est apporté par l'utilisateur : un raster `cout` de l'inventaire, cité par
+// sa `source` comme le MNT. Jamais le MNT ni un de ses dérivés pris comme coût : sans raster de
+// coût, on le demande. Les points sont écrits dans le système du raster, chacun avec le sien.
+
+/// « sur le raster de coût », « sur la couche « Friction » » : le raster de coût est désigné,
+/// jamais « le terrain » (le MNT peut être là en distraction).
+fn cost_words(rng: &mut Rng, cost: &Layer) -> String {
+    match rng.below(4) {
+        0 => "sur le raster de coût".to_string(),
+        1 => format!("sur la couche « {} »", cost.name),
+        2 => "avec le raster de coût".to_string(),
+        _ => "sur le raster de coût de déplacement".to_string(),
+    }
+}
+
+/// Le raster de coût cité, dans le système `epsg`, et parfois le MNT en distraction.
+fn cost_inventory(rng: &mut Rng, b: &mut Builder, epsg: u32) -> Layer {
+    if rng.chance(1, 3) {
+        b.add(rng, "mnt", &[], &[], &[]);
+    }
+    b.add_raster(rng, "cout", epsg)
+}
+
+/// « Calcule le coût de déplacement cumulé depuis A, B et C sur le raster de coût » :
+/// `terrain.cost_distance`, une à trois sources écrites dans le système du raster de coût,
+/// dans l'ordre écrit. Un lieu nommé sans coordonnées devient la question du point.
+fn cout_cumule(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let epsg = terrain_epsg(rng);
+    let cost = cost_inventory(rng, &mut b, epsg);
+    let on = cost_words(rng, &cost);
+    let named = rng.chance(1, 6);
+    let n = rng.range(1, 3) as usize;
+    let mut points = Vec::with_capacity(n);
+    let mut places = Vec::with_capacity(n + 1);
+    for _ in 0..n {
+        let o = terrain_point(rng, epsg)?;
+        points.push(o.point);
+        places.push(o.place);
+    }
+    let place = named.then(|| named_viewpoint(rng));
+    if let Some(p) = &place {
+        // Le lieu nommé seul, ou parmi des points écrits : aucun plan ne le devine.
+        if rng.chance(1, 2) {
+            places.clear();
+        }
+        let at = rng.below(places.len() + 1);
+        places.insert(at, p.clone());
+    }
+    let pts = enumerate(&places);
+    let (body, q) = match rng.below(6) {
+        0 => (
+            format!("Calcule le coût de déplacement cumulé depuis {pts} {on}"),
+            false,
+        ),
+        1 => (
+            format!("Fais la carte du coût cumulé depuis {pts}, {on}"),
+            false,
+        ),
+        2 => (
+            format!("Quel est l'effort cumulé pour rejoindre chaque endroit depuis {pts}, {on}"),
+            true,
+        ),
+        3 => (
+            format!("Calcule la distance de coût depuis {pts} {on}"),
+            false,
+        ),
+        4 => (
+            format!("Produis le raster de coût cumulé {on}, avec pour départ {pts}"),
+            false,
+        ),
+        _ => (
+            format!(
+                "Combien coûte, en friction cumulée, l'accès à chaque cellule depuis {pts} {on}"
+            ),
+            true,
+        ),
+    };
+    let request = finish(rng, &body, q, false);
+    let expected = match &place {
+        Some(p) => question(point_question(rng, p)),
+        None => calls(vec![json!({"command": "terrain.cost_distance",
+            "params": {"cost": cost.source, "sources": points}})]),
+    };
+    Some(example("cout_cumule", b, rng, request, expected))
+}
+
+/// « Trace le chemin de moindre coût du point A au point B sur le raster de coût » :
+/// `terrain.least_cost_path`, départ et arrivée écrits dans le système du raster de coût, dans
+/// l'ordre écrit. Un seul point écrit, l'autre nommé : la question du point. Aucun raster de
+/// coût dans l'inventaire (le MNT seul, ou rien) : la question du raster, jamais le MNT.
+fn chemin_moindre_cout(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let epsg = terrain_epsg(rng);
+    let roll = rng.below(6);
+    if roll == 0 {
+        return cout_absent(rng, b, epsg);
+    }
+    let cost = cost_inventory(rng, &mut b, epsg);
+    let on = cost_words(rng, &cost);
+    let a = terrain_point(rng, epsg)?;
+    let c = terrain_point(rng, epsg)?;
+    let place = (roll == 1).then(|| named_viewpoint(rng));
+    let (pa, pc) = match &place {
+        // Le lieu nommé au départ ou à l'arrivée.
+        Some(p) if rng.chance(1, 2) => (p.clone(), c.place.clone()),
+        Some(p) => (a.place.clone(), p.clone()),
+        None => (a.place.clone(), c.place.clone()),
+    };
+    let from = de_np(&pa);
+    let to = a_np(&pc);
+    let (body, q) = match rng.below(6) {
+        0 => (
+            format!("Trace le chemin de moindre coût {from} {to}, {on}"),
+            false,
+        ),
+        1 => (
+            format!("Quel est le chemin le moins coûteux pour aller {from} {to}, {on}"),
+            true,
+        ),
+        2 => (
+            format!("Depuis {pa}, trouve le trajet de moindre effort jusqu'{to} {on}"),
+            false,
+        ),
+        3 => (
+            format!("Cherche le passage le moins coûteux {from} {to} {on}"),
+            false,
+        ),
+        4 => (
+            format!("Relie {pa} {to} par le chemin de moindre coût, {on}"),
+            false,
+        ),
+        _ => (
+            format!(
+                "Calcule le chemin de moindre friction en partant {from} pour arriver {to} {on}"
+            ),
+            false,
+        ),
+    };
+    let request = finish(rng, &body, q, false);
+    let expected = match &place {
+        Some(p) => question(point_question(rng, p)),
+        None => calls(vec![json!({"command": "terrain.least_cost_path",
+            "params": {"cost": cost.source, "start": a.point, "end": c.point}})]),
+    };
+    Some(example("chemin_moindre_cout", b, rng, request, expected))
+}
+
+/// Une demande de coût sans raster de coût dans l'inventaire : le MNT seul, ou aucun raster.
+/// On demande d'ouvrir ou de nommer le raster de coût ; le MNT n'en tient jamais lieu.
+fn cout_absent(rng: &mut Rng, mut b: Builder, epsg: u32) -> Option<Example> {
+    b.exclude("cout");
+    if rng.chance(1, 2) {
+        b.add_dem(rng, epsg);
+    }
+    let a = terrain_point(rng, epsg)?;
+    let body = if rng.chance(1, 2) {
+        let c = terrain_point(rng, epsg)?;
+        match rng.below(2) {
+            0 => format!(
+                "Trace le chemin de moindre coût {} {}",
+                de_np(&a.place),
+                a_np(&c.place)
+            ),
+            _ => format!(
+                "Cherche le passage le moins coûteux entre {} et {}",
+                a.place, c.place
+            ),
+        }
+    } else {
+        match rng.below(2) {
+            0 => format!("Calcule le coût de déplacement cumulé depuis {}", a.place),
+            _ => format!("Fais la carte du coût cumulé depuis {}", a.place),
+        }
+    };
+    let text = match rng.below(3) {
+        0 => "Aucun raster de coût de déplacement n'est ouvert dans le projet : quel fichier de coût faut-il ouvrir ?".to_string(),
+        1 => "Le projet ne contient pas de raster de coût. Peux-tu ouvrir le raster de coût de déplacement à utiliser, ou me dire lequel prendre ?".to_string(),
+        _ => missing_layer_question(rng, theme("cout").of_none),
+    };
+    let request = finish(rng, &body, false, false);
+    Some(example(
+        "chemin_moindre_cout",
+        b,
+        rng,
+        request,
+        question(text),
+    ))
 }
 
 // -- géométrie (11.12, lot 1) ------------------------------------------------
@@ -4055,7 +4260,8 @@ fn question_terrain(rng: &mut Rng) -> Option<Example> {
     let mut b = Builder::new();
     let roll = rng.below(4);
     let (body, q, text) = if roll == 0 {
-        // Aucun raster : on demande d'ouvrir ou de nommer le MNT.
+        // Aucun MNT (un raster de coût peut venir en distraction) : on demande d'ouvrir ou de
+        // nommer le MNT.
         b.exclude("mnt");
         let epsg = terrain_epsg(rng);
         let (body, q) = match rng.below(3) {
@@ -5444,13 +5650,18 @@ mod tests {
 
     /// Le MNT d'un plan de terrain : la couche raster dont `dem` est la `source`.
     fn cited_dem(e: &Example) -> &Value {
-        let dem = e.expected["calls"][0]["params"]["dem"].as_str().unwrap();
+        cited_raster(e, "dem")
+    }
+
+    /// La couche raster dont le paramètre `key` de la première étape est la `source`.
+    fn cited_raster<'a>(e: &'a Example, key: &str) -> &'a Value {
+        let path = e.expected["calls"][0]["params"][key].as_str().unwrap();
         e.inventory["layers"]
             .as_array()
             .unwrap()
             .iter()
-            .find(|l| l["kind"] == "raster" && l["source"] == dem)
-            .unwrap_or_else(|| panic!("MNT « {dem} » absent : {}", e.request))
+            .find(|l| l["kind"] == "raster" && l["source"] == path)
+            .unwrap_or_else(|| panic!("raster « {path} » absent : {}", e.request))
     }
 
     /// Les exemples d'une famille de terrain : une étape, la commande attendue, le `dem` source
@@ -5592,13 +5803,9 @@ mod tests {
             assert_eq!(e.expected["kind"], "question", "{}", e.request);
             let q = e.expected["question"].as_str().unwrap();
             assert!(!q.contains(" de le "), "{q}");
-            let rasters = e.inventory["layers"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .filter(|l| l["kind"] == "raster")
-                .count();
-            if rasters == 0 {
+            // Le raster de coût peut venir en distraction (11.12, lot 2b-1) : c'est le MNT
+            // qui manque, pas tout raster.
+            if !has_theme(e, "mnt") {
                 no_dem += 1;
                 assert!(q.contains("MNT") || q.contains("modèle numérique"), "{q}");
             } else if q.contains("degrés") {
@@ -5820,6 +6027,158 @@ mod tests {
             "Aucune commande du catalogue ne sélectionne les cellules d'un raster par leur valeur."
         )));
         assert!(!selects_no_cell(&refusal(NO_RASTER_STATS)));
+    }
+
+    // -- coût de déplacement (11.12, lot 2b-1) ---------------------------------
+
+    /// Le raster de coût d'un plan : la couche `cout` dont `cost` est la `source`, jamais le MNT.
+    fn cited_cost(e: &Example) -> &Value {
+        let layer = cited_raster(e, "cost");
+        let id = layer["layer_id"].as_str().unwrap();
+        assert!(
+            theme("cout")
+                .slugs
+                .iter()
+                .any(|s| id.starts_with(&format!("{s}_"))),
+            "{id} : {}",
+            e.request
+        );
+        layer
+    }
+
+    /// Les plans d'appels d'une famille de coût : une étape `command`, ses clés exactement
+    /// `keys`, `cost` source du raster de coût, le plan laissé par le garde-fou ; et ses
+    /// questions, sans plan. Rend les deux parts.
+    fn cost_examples(
+        make: fn(&mut Rng) -> Option<Example>,
+        command: &str,
+        keys: &[&str],
+    ) -> (Vec<Example>, Vec<Example>) {
+        let registry = cassini_core::registry::Registry::standard();
+        let (planned, asked): (Vec<Example>, Vec<Example>) = valid(make, 600)
+            .into_iter()
+            .partition(|e| e.expected["kind"] == "calls");
+        for e in &planned {
+            assert_eq!(commands(e), [command], "{}", e.request);
+            let params = params0(e).as_object().unwrap();
+            let mut got: Vec<&str> = params.keys().map(String::as_str).collect();
+            got.sort_unstable();
+            let mut want = keys.to_vec();
+            want.sort_unstable();
+            assert_eq!(got, want, "{}", e.request);
+            cited_cost(e);
+            let plan: cassini_core::plan::Plan =
+                serde_json::from_value(e.expected.clone()).unwrap();
+            let guarded =
+                cassini_core::point::guard_coordinates(&registry, plan.clone(), &e.request);
+            assert_eq!(guarded, plan, "{}", e.request);
+        }
+        for e in &asked {
+            assert_eq!(e.expected["kind"], "question", "{}", e.request);
+            assert!(e.expected.get("calls").is_none());
+        }
+        assert!(!planned.is_empty() && !asked.is_empty());
+        (planned, asked)
+    }
+
+    /// Un point du plan : écrit dans la demande, dans le système du raster de coût. Rend le
+    /// rang de son X parmi les nombres de la demande, pour l'ordre.
+    fn cost_point(
+        e: &Example,
+        point: &Value,
+        systems: &mut std::collections::BTreeSet<u64>,
+    ) -> usize {
+        if let Some(epsg) = cited_cost(e).get("epsg") {
+            assert_eq!(epsg, &point["epsg"], "{}", e.request);
+        }
+        systems.insert(point["epsg"].as_u64().unwrap());
+        written(e, &point["x"]);
+        written(e, &point["y"]);
+        let x = point["x"].as_f64().unwrap();
+        cassini_core::point::request_numbers(&e.request)
+            .iter()
+            .position(|n| (n - x).abs() < 1e-9)
+            .unwrap()
+    }
+
+    /// Une question de point manquant : X, Y et système.
+    fn asks_for_the_point(q: &str) -> bool {
+        let q = q.to_lowercase();
+        q.contains('x') && q.contains('y') && q.contains("système")
+    }
+
+    #[test]
+    fn a_cost_distance_takes_one_to_three_written_sources_of_the_cost_system() {
+        let (planned, asked) =
+            cost_examples(cout_cumule, "terrain.cost_distance", &["cost", "sources"]);
+        let mut counts = std::collections::BTreeSet::new();
+        let mut systems = std::collections::BTreeSet::new();
+        for e in &planned {
+            let sources = params0(e)["sources"].as_array().unwrap();
+            counts.insert(sources.len());
+            let ranks: Vec<usize> = sources
+                .iter()
+                .map(|s| cost_point(e, s, &mut systems))
+                .collect();
+            let distinct: std::collections::BTreeSet<String> =
+                sources.iter().map(|s| s["x"].to_string()).collect();
+            if distinct.len() == sources.len() {
+                assert!(ranks.is_sorted(), "ordre : {}", e.request);
+            }
+            for s in sources {
+                assert!(!s.to_string().contains("step:"), "{}", e.request);
+            }
+        }
+        assert_eq!(counts.into_iter().collect::<Vec<_>>(), [1, 2, 3]);
+        assert_eq!(
+            systems.into_iter().collect::<Vec<_>>(),
+            [2154, 32631, 32632]
+        );
+        // Le MNT en distraction ne change pas le raster cité.
+        assert!(planned.iter().any(|e| has_theme(e, "mnt")));
+        for e in &asked {
+            assert!(has_theme(e, "cout"), "{}", e.request);
+            assert!(asks_for_the_point(e.expected["question"].as_str().unwrap()));
+        }
+        assert!(planned.iter().any(|e| e.request.contains("« ")));
+    }
+
+    #[test]
+    fn a_least_cost_path_goes_from_the_written_start_to_the_written_end() {
+        let (planned, asked) = cost_examples(
+            chemin_moindre_cout,
+            "terrain.least_cost_path",
+            &["cost", "start", "end"],
+        );
+        let mut systems = std::collections::BTreeSet::new();
+        for e in &planned {
+            let p = params0(e);
+            let start = cost_point(e, &p["start"], &mut systems);
+            let end = cost_point(e, &p["end"], &mut systems);
+            if p["start"]["x"] != p["end"]["x"] {
+                assert!(start < end, "départ puis arrivée : {}", e.request);
+            }
+        }
+        assert_eq!(
+            systems.into_iter().collect::<Vec<_>>(),
+            [2154, 32631, 32632]
+        );
+        assert!(planned.iter().any(|e| has_theme(e, "mnt")));
+        let (mut no_cost, mut no_cost_with_dem, mut no_point) = (0, 0, 0);
+        for e in &asked {
+            let q = e.expected["question"].as_str().unwrap();
+            if has_theme(e, "cout") {
+                no_point += 1;
+                assert!(asks_for_the_point(q), "{q}");
+            } else {
+                // Sans raster de coût, on le demande ; le MNT n'en tient jamais lieu.
+                no_cost += 1;
+                no_cost_with_dem += usize::from(has_theme(e, "mnt"));
+                assert!(q.contains("raster de coût"), "{q}");
+                assert!(!q.contains("MNT"), "{q}");
+            }
+        }
+        assert!(no_cost > 0 && no_cost_with_dem > 0 && no_point > 0);
     }
 
     #[test]
