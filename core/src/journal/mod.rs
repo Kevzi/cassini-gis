@@ -1010,6 +1010,11 @@ impl<'a> Replay<'a> {
                     bound.insert(old.to_string(), new.to_string());
                 }
             }
+            // Une étape QGIS qui redonne la même erreur n'a pas de sortie à exiger : seul son
+            // code d'erreur compte. Une commande du noyau garde la comparaison des octets.
+            if outcome.is_err() && spec.runs_in == Some(crate::registry::RunsIn::Qgis) {
+                continue;
+            }
             for name in &spec.output_params {
                 let file = output_file(step, id, &spec.output_params, name, &spec.output_ext);
                 let again = fs::read(out_dir.join(&file)).ok();

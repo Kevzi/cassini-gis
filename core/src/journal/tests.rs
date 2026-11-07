@@ -535,6 +535,8 @@ struct SessionQgis {
     short_inventory: bool,
     /// Une couche ouverte à la main après le tampon, sans équivalent à l'origine.
     stranger: bool,
+    /// Le tampon est refusé, comme pour une couche en degrés : erreur, aucun fichier écrit.
+    refuse_buffer: bool,
 }
 
 impl SessionQgis {
@@ -548,6 +550,7 @@ impl SessionQgis {
             inventory_feature_count: 4,
             short_inventory: false,
             stranger: false,
+            refuse_buffer: false,
         }
     }
 
@@ -606,6 +609,12 @@ impl Executor for SessionQgis {
                     self.created.borrow().iter().any(|(l, _)| l == source),
                     "couche d'une autre session : {source}"
                 );
+                if self.refuse_buffer {
+                    return Err(RegistryError::Delegated {
+                        code: "analysis.crs_not_metric".into(),
+                        message: "couche en degrés".into(),
+                    });
+                }
                 let bytes = if self.empty_output {
                     String::new()
                 } else {
@@ -765,6 +774,67 @@ fn a_qgis_step_with_another_result_stops_the_replay_naming_the_step() {
         .unwrap()
         .run(
             &Router::new(&registry).with_qgis(other),
+            &mut HashSet::new(),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "replay.diverged");
+    assert_eq!(err.step, Some(2));
+    assert!(err.message.contains("analysis.buffer"));
+    let _ = fs::remove_dir_all(dir);
+}
+
+/// Journal de 11.18 en petit : une couche, un tampon refusé par QGIS, puis une autre couche.
+fn refused_buffer_journal(project: &Path) {
+    let registry = Registry::standard();
+    let mut qgis = SessionQgis::new(1);
+    qgis.refuse_buffer = true;
+    let mut s = Session::open(&registry, project).unwrap().with_qgis(qgis);
+    let added = s
+        .call("layer.add", json!({"path": "pts.csv", "crs": "EPSG:4326"}))
+        .unwrap();
+    let first = added["layer_id"].as_str().unwrap().to_string();
+    let err = s
+        .call(
+            "analysis.buffer",
+            json!({"layer_id": first, "distance": {"value": 500, "unit": "m"}}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "analysis.crs_not_metric");
+    s.call("layer.add", json!({"path": "pts.csv", "crs": "EPSG:2154"}))
+        .unwrap();
+    assert_eq!(lines(&s)[1]["error"], "analysis.crs_not_metric");
+}
+
+#[test]
+fn a_qgis_step_refused_again_replays_identically_and_the_replay_goes_on() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    refused_buffer_journal(&project);
+    let mut qgis = SessionQgis::new(2);
+    qgis.refuse_buffer = true;
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(&Router::new(&registry).with_qgis(qgis), &mut HashSet::new())
+        .unwrap();
+    assert_eq!(
+        report,
+        ReplayReport {
+            steps: 3,
+            identical: true
+        }
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_qgis_step_refused_at_first_but_done_on_replay_diverges() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    refused_buffer_journal(&project);
+    let err = Replay::load(&registry, &project)
+        .unwrap()
+        .run(
+            &Router::new(&registry).with_qgis(SessionQgis::new(2)),
             &mut HashSet::new(),
         )
         .unwrap_err();
