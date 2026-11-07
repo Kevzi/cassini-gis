@@ -100,12 +100,12 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `description` | décrire une couche, inventaire du projet, version, modèles installés |
 | `question_couche_absente` | une couche dont rien ne parle dans l'inventaire → question |
 | `question_champ_absent` | un critère qu'aucun champ ne porte → question, jamais un champ voisin deviné |
-| `refus` | courriel, suppression, reprojection d'une couche, export de couche, style, itinéraire, téléchargement, 3D → refus affirmatif |
+| `refus` | courriel, suppression, reprojection d'une couche, export de couche, style, itinéraire sur le réseau routier entre deux objets d'une couche (depuis 11.12, lot 2b-1, le refus dit que le chemin de moindre coût demande un raster de coût et deux points en coordonnées), téléchargement, 3D → refus affirmatif |
 | `refus_hors_registre` | cadrage ou zoom de la carte, PDF en A3, A0 ou portrait, altitude moyenne par zone (statistiques sur un raster ; depuis 5.41 aussi après une pente ou un champ de vision : « la pente puis sa moyenne par commune » est un refus entier), MNT présent pour l'altitude par zone, trajet depuis plusieurs lieux (« de chaque gare », « de toutes les gares », « des gares ») → refus affirmatif, jamais un plan de substitution. Le point de terrain écrit dans un autre système que le MNT, refusé en 5.41, est un plan depuis 11.12 (`terrain_autre_systeme`). Le champ de vision, la ligne de vue et la pente n'y sont plus depuis 4.6 : le registre les a. Le seuil sur la pente (« où la pente dépasse 15 % »), refusé de 4.6 à 11.12, est un plan depuis 11.12, lot 2a (`pente_seuil`) |
 | `pente` | « fais la carte des pentes du MNT en pourcentage » → `terrain.slope`, `dem` recopié de la `source` du raster de l'inventaire, `unit` telle qu'écrite (`degrees` : « en degrés », « en ° » ; `percent` : « en pourcentage », « en % », « en pour cent ») (4.6) |
 | `ligne_de_vue` | « y a-t-il une ligne de vue entre le point (... ; ...) en Lambert-93 et le point (... ; ...) en Lambert-93, œil à 2 m » → `terrain.line_of_sight`, deux points écrits en Lambert-93 ou en UTM 31N/32N, le système écrit à chaque point (le garde-fou en demande une occurrence par point), le MNT dans ce même système ; `observer_height` et `target_height` seulement s'ils sont écrits, jamais courbure ni réfraction (4.6) |
 | `champ_de_vision` | « calcule le champ de vision depuis le point ... (UTM 31N) sur 2 km » → `terrain.viewshed`, même règle de points et de MNT ; hauteurs et `radius` seulement s'ils sont écrits (4.6) ; depuis 5.41, le rayon aussi avant le point (« dans un rayon de 800 m autour du point … ») |
-| `question_terrain` | demande de terrain sans raster dans l'inventaire → question qui demande d'ouvrir ou de nommer le MNT ; vue depuis un lieu nommé sans coordonnées (« depuis le clocher de Thiais ») ou ligne de vue avec un seul point écrit → question qui demande le point en X, Y et système ; pente sans unité → question « degrés ou pourcentage » (4.6) |
+| `question_terrain` | demande de terrain sans MNT dans l'inventaire (un raster de coût peut y être depuis 11.12, lot 2b-1) → question qui demande d'ouvrir ou de nommer le MNT ; vue depuis un lieu nommé sans coordonnées (« depuis le clocher de Thiais ») ou ligne de vue avec un seul point écrit → question qui demande le point en X, Y et système ; pente sans unité → question « degrés ou pourcentage » (4.6) |
 | `appartenance_commune` | « qui appartiennent à la commune de X », « sur le territoire de X » → sélection de la commune par son nom, puis intersection ; sans couche de communes, ou sans nom de commune, une question. Une commune citée seule (« à Orly ») reste un contexte sans effet |
 | `question_isochrone` | isochrone ou cible à une durée de trajet d'un lieu nommé (« depuis la mairie de X », « les parcelles à 10 min à pied de la gare de X »), sans coordonnées → question qui demande le point en X et Y avec son système ; « d'une gare » → question qui demande laquelle |
 | `etape_unique` | une seule opération demandée, une autre couche citée pour le contexte (« je m'occuperai des écoles plus tard ») → une étape |
@@ -120,6 +120,8 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `champ_de_vision_cumule` | « combien de ces points voient chaque endroit : le point …, le point … et le point … » → `terrain.viewshed_cumulative`, deux à quatre points dans le système du MNT, chacun avec son système ; hauteurs et `radius` comme `champ_de_vision` (11.12, lot 2a) |
 | `points_hauts` | « les 10 sommets les plus hauts du MNT, proéminence d'au moins 20 m » → `terrain.peaks` ; `max_count` (2 à 100, écrit en chiffres), `min_prominence` et `min_distance` seulement s'ils sont écrits (11.12, lot 2a) |
 | `pente_seuil` | « où la pente dépasse-t-elle 15 % », « classe les pentes en moins de 5 %, de 5 % à 15 % et plus de 15 % » → `terrain.slope` dans l'unité du seuil, puis `raster.reclassify` sur `step:1` ; « dépasse, plus de n » → `{min: n, value: 1}`, « sous, moins de n » → `{max: n, value: 1}`, deux ou trois classes de valeurs 1, 2, 3 à bornes contiguës (11.12, lot 2a) |
+| `cout_cumule` | « calcule le coût de déplacement cumulé depuis le point … (Lambert-93) sur le raster de coût » → `terrain.cost_distance`, `cost` recopié de la `source` du raster de coût de l'inventaire, une à trois `sources` écrites dans son système, dans l'ordre écrit, chacune avec son système ; une fois sur six, un lieu nommé sans coordonnées (« depuis la mairie de X ») → question qui demande le point en X, Y et système (11.12, lot 2b-1) |
+| `chemin_moindre_cout` | « trace le chemin de moindre coût du point … au point … sur la couche « Friction » » → `terrain.least_cost_path`, `start` puis `end` dans l'ordre écrit, dans le système du raster de coût ; un seul point écrit, l'autre nommé → question du point ; aucun raster de coût dans l'inventaire (le MNT seul, ou rien) → question qui demande d'ouvrir ou de nommer le raster de coût, jamais le MNT pris comme coût (11.12, lot 2b-1) |
 | `redemande` | environ 5 % du jeu : un exemple d'une autre famille vu au tour de redemande (voir plus bas) |
 
 Depuis 5.15, `conditions_multiples` porte aussi les plans à **trois conditions** (cible
@@ -218,8 +220,39 @@ ne sont pas concernés.
 la graine 1 (4,35 %).
 
 Les rasters de coût, de critères et de masque, avec `raster.weighted_overlay`,
-`terrain.cost_distance` et `terrain.least_cost_path`, forment le lot 2b, reporté
-(`deferred-work.md`).
+`terrain.cost_distance` et `terrain.least_cost_path`, forment le lot 2b, découpé en deux
+(section suivante).
+
+### Familles du raster de coût (11.12, lot 2b-1)
+
+L'inventaire synthétique gagne un second thème raster, `cout` (« Coût de déplacement »,
+« Friction », « Coût de traversée ») : un raster apporté par l'utilisateur, dont ni le nom ni
+le fichier ne parlent de pente, d'altitude ou de relief. Il est cité par sa `source`, protégée
+des formes de QGIS comme celle du MNT (`Builder::add_raster`), dans le système des points de
+la demande (Lambert-93, UTM 31N ou 32N). Il entre aussi parmi les rasters de distraction :
+une demande de terrain sans MNT reste une question sur le MNT, même si un raster de coût est
+là.
+
+Deux familles : `cout_cumule` (`terrain.cost_distance`, une à trois sources) et
+`chemin_moindre_cout` (`terrain.least_cost_path`, départ puis arrivée), les points dans le
+système du raster de coût, chacun avec son système, dans l'ordre écrit. La demande désigne le
+raster (« sur le raster de coût », « sur la couche « Friction » »), jamais « le terrain » : le
+MNT est en distraction environ une fois sur deux (posé une fois sur trois, sinon parfois tiré
+parmi les rasters de distraction). Sans raster de coût, le MNT est là environ cinq fois sur
+huit, aucun raster environ trois fois sur huit. Aucune pente ni aucun autre dérivé du MNT n'est pris
+comme coût ; sans raster de coût dans l'inventaire, on le demande. Le refus d'itinéraire entre
+deux couches (`refus`) reste : un réseau routier n'est pas un raster de coût.
+
+**Validateur.** `cost` rejoint `dem` et `raster` : c'est la `source` d'un raster de
+l'inventaire, jamais un chemin inventé ni l'id d'une couche.
+
+**Redemande.** Ces plans à une étape, sans couche, ne se corrompent pas : à poids inchangé, les
+redemandes tombaient à 3,9 %. Le poids de `redemande` passe de 36 à 44, pour 383 redemandes
+sur 8 000 à la graine 1 (4,8 %).
+
+Restent le lot 2b-2 (rasters de critères et de masque, `raster.weighted_overlay`, reclassement
+d'un raster brut, `deferred-work.md`) et l'export au format (lot 3), avant le ré-entraînement
+groupé (entrée 16).
 
 ### Les inventaires de QGIS (5.15)
 

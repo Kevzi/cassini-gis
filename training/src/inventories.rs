@@ -1141,6 +1141,26 @@ pub static THEMES: &[Theme] = &[
         geom: Geom::Raster,
         fields: &[],
     },
+    // Raster de coût de déplacement (11.12, lot 2b-1) : la `cost` de `terrain.cost_distance`
+    // et de `terrain.least_cost_path`. Un raster apporté par l'utilisateur, jamais un dérivé du
+    // MNT : ni son nom ni son fichier ne parlent de pente, d'altitude ou de relief.
+    Theme {
+        key: "cout",
+        group: "cout",
+        domain: "environnement",
+        noun: Noun {
+            sg: "raster de coût",
+            pl: "rasters de coût",
+            fem: false,
+        },
+        of_none: "de raster de coût",
+        the_layer: "la couche du raster de coût",
+        names: &["Coût de déplacement", "Friction", "Coût de traversée"],
+        slugs: &["cout_deplacement", "friction", "cout_traversee"],
+        files: &["cout_deplacement", "friction", "cout_traversee"],
+        geom: Geom::Raster,
+        fields: &[],
+    },
 ];
 
 /// Le thème de clé `key` (panique si inconnu : c'est une erreur de programmation).
@@ -1379,14 +1399,41 @@ impl Builder {
     /// `donnees/x.tif`, `dem/x.tif`, `../donnees/x.tif` ou le nom seul. Le RGE ALTI n'existant
     /// qu'en Lambert-93, un MNT en UTM porte un nom de fichier neutre.
     pub fn add_dem(&mut self, rng: &mut Rng, epsg: u32) -> Layer {
-        self.sourced.push(self.layers.len());
-        let mut layer = self.add(rng, "mnt", &[], &[], &[]);
-        let file = if epsg == 2154 {
-            (*rng.pick(theme("mnt").files)).to_string()
+        let files: &[&str] = if epsg == 2154 {
+            theme("mnt").files
         } else {
-            (*rng.pick(&["mnt", "mnt_5m", "mnt_25m"])).to_string()
+            &["mnt", "mnt_5m", "mnt_25m"]
         };
-        let dir = *rng.pick(&["donnees/", "donnees/", "dem/", "../donnees/", ""]);
+        self.add_sourced(rng, "mnt", epsg, files, &["dem/"])
+    }
+
+    /// Ajoute le raster du thème `key` qu'un plan cite par son `source` (le raster de coût de
+    /// 11.12, lot 2b-1), dans le système `epsg`, sa `source` protégée comme celle du MNT.
+    pub fn add_raster(&mut self, rng: &mut Rng, key: &str, epsg: u32) -> Layer {
+        assert_eq!(theme(key).geom, Geom::Raster, "thème non raster : {key}");
+        self.add_sourced(rng, key, epsg, theme(key).files, &["rasters/"])
+    }
+
+    /// Couche raster citée par sa `source` : fichier tiré de `files`, dossier relatif au projet
+    /// (`donnees/`, `../donnees/`, le dossier propre `own` ou le nom seul).
+    fn add_sourced(
+        &mut self,
+        rng: &mut Rng,
+        key: &str,
+        epsg: u32,
+        files: &[&str],
+        own: &[&'static str],
+    ) -> Layer {
+        self.sourced.push(self.layers.len());
+        let mut layer = self.add(rng, key, &[], &[], &[]);
+        let file = (*rng.pick(files)).to_string();
+        let dirs = [
+            ["donnees/", "donnees/"].as_slice(),
+            own,
+            &["../donnees/", ""],
+        ]
+        .concat();
+        let dir = *rng.pick(&dirs);
         layer.epsg = epsg;
         layer.source = format!("{dir}{file}.tif");
         if let Some(last) = self.layers.last_mut() {
@@ -1642,6 +1689,52 @@ mod tests {
         // Les formes de chemin relatif que rend l'extension depuis 4.3, nom seul compris.
         let dirs: Vec<&str> = sources.iter().map(String::as_str).collect();
         assert_eq!(dirs, ["", "../donnees", "dem", "donnees"]);
+    }
+
+    #[test]
+    fn the_cited_cost_raster_keeps_its_source_and_takes_the_chosen_system() {
+        // 11.12, lot 2b-1 : le raster de coût est cité comme le MNT, par sa `source`, que les
+        // formes de QGIS ne retirent jamais ; son nom ne dit rien du relief.
+        let mut rng = Rng::new(8);
+        let mut no_epsg = 0;
+        let mut dirs = std::collections::BTreeSet::new();
+        for i in 0..600 {
+            let epsg = [2154, 32631, 32632][i % 3];
+            let mut b = Builder::new();
+            let cost = b.add_raster(&mut rng, "cout", epsg);
+            assert_eq!(cost.epsg, epsg);
+            assert!(cost.source.ends_with(".tif"), "{}", cost.source);
+            for word in ["pente", "mnt", "altitude", "relief"] {
+                assert!(
+                    !cost.source.to_lowercase().contains(word),
+                    "{}",
+                    cost.source
+                );
+                assert!(!cost.name.to_lowercase().contains(word), "{}", cost.name);
+            }
+            dirs.insert(
+                cost.source
+                    .rsplit_once('/')
+                    .map_or("", |(d, _)| d)
+                    .to_string(),
+            );
+            let inv = b.finish(&mut rng);
+            let layer = inv["layers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|l| l["layer_id"] == cost.id.as_str())
+                .unwrap();
+            assert_eq!(layer["kind"], "raster");
+            assert_eq!(layer["source"], cost.source.as_str());
+            match layer.get("epsg") {
+                Some(e) => assert_eq!(e, epsg),
+                None => no_epsg += 1,
+            }
+        }
+        assert!(no_epsg > 0);
+        let dirs: Vec<&str> = dirs.iter().map(String::as_str).collect();
+        assert_eq!(dirs, ["", "../donnees", "donnees", "rasters"]);
     }
 
     #[test]
