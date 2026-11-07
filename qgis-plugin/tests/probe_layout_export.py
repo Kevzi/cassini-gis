@@ -70,6 +70,7 @@ def close_to(box, want):
 from qgis.core import QgsLayoutExporter, QgsLayoutItemMap  # noqa: E402
 
 _export_to_pdf = QgsLayoutExporter.exportToPdf
+grid_maps = []  # (fond, entités des couches, Y à gauche, X en bas) des cartes qui portent une grille
 
 
 def _spy_export(self, *args, **kwargs):
@@ -77,10 +78,30 @@ def _spy_export(self, *args, **kwargs):
         if isinstance(item, QgsLayoutItemMap):
             for g in item.grids().asList():
                 grids.append((g.crs().authid(), g.intervalX(), g.intervalY(), g.enabled()))
+                # Carte du carroyage : sans fond, une seule couche (vide), Y à gauche, X en bas.
+                Side, Mode = g.BorderSide, g.DisplayMode
+                grid_maps.append((
+                    item.hasBackground(),
+                    [l.featureCount() for l in item.layers()],
+                    g.annotationDisplay(Side.Left) == Mode.LatitudeOnly,
+                    g.annotationDisplay(Side.Bottom) == Mode.LongitudeOnly,
+                ))
     return _export_to_pdf(self, *args, **kwargs)
 
 
 QgsLayoutExporter.exportToPdf = _spy_export
+
+# Cadres passés au fond : sans échelle, ils suivent les vecteurs, pas le MNT (18,5 × 16,8 km).
+framings = []
+_backend_export = layout_export.LayoutBackend.export_pdf
+
+
+def _spy_framing(self, layers, title, sources_text, out, authid, box, **kwargs):
+    framings.append((box, kwargs.get("scale")))
+    return _backend_export(self, layers, title, sources_text, out, authid, box, **kwargs)
+
+
+layout_export.LayoutBackend.export_pdf = _spy_framing
 
 
 def step_empty():
@@ -101,12 +122,14 @@ def step_empty():
 
 def step_a3():
     grids.clear()
+    grid_maps.clear()
     grid = {"kind": "projected", "epsg": 32631, "interval": {"value": 1, "unit": "km"}}
 
     def done(result=None, error=None):
         box = media_box(out_a3) if error is None and os.path.isfile(out_a3) else None
         ok = error is None and close_to(box, (1190.55, 841.89))
         ok = ok and grids == [("EPSG:32631", 1000.0, 1000.0, True)]
+        ok = ok and grid_maps == [(False, [0], True, True)]
         ok = ok and "grid" not in result and "page_size" not in result
         results.append(("A3 paysage, carroyage UTM 1 km", (box, grids[:]) if error is None else error.code, ok))
         QTimer.singleShot(0, step_empty)
@@ -185,7 +208,10 @@ def done_ok(result=None, error=None):
         ok = ok and "scale" not in result and "center" not in result
         # Sans les nouveaux paramètres : A4 paysage, aucune grille.
         ok = ok and close_to(media_box(out_ok), (841.89, 595.28)) and grids == []
-    results.append(("export", result if error is None else error.code, ok))
+        # Cadré sur les vecteurs (≈ 9 km de côté, marge comprise), pas sur le MNT de 18,5 km.
+        box, scale = framings[0]
+        ok = ok and scale is None and box[2] - box[0] < 12000 and box[3] - box[1] < 12000
+    results.append(("export", (result, framings[:1]) if error is None else error.code, ok))
     QTimer.singleShot(0, step_scale)
 
 

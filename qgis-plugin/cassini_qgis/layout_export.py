@@ -31,7 +31,14 @@ jamais en MGRS. Un `epsg` inconnu de QGIS rend `data.unknown_crs` ; une grille d
 lignes par axe sur le cadre de la carte (AD-8), un système géographique pour `projected` ou un
 cadre qu'on ne sait pas ramener dans le système de la grille rendent `layout.bad_params` :
 tous avant l'export, sans fichier. Sans ces trois paramètres, le fond est appelé avec les
-arguments d'avant et le PDF est le même ; le résultat ne change jamais.
+arguments d'avant ; le résultat ne change jamais.
+
+Lisibilité (2026-11-07). La grille est portée par une seconde carte, sans fond ni couche, posée
+sur la première : une couche en mode de fusion fait rastériser la carte, et QGIS couperait les
+étiquettes qui dépassent du cadre. Étiquettes à gauche (Y seuls) et en bas (X seuls). La flèche du
+nord est dans le coin haut droit de la carte ; la légende tient la colonne de droite, en une, deux
+ou trois colonnes, puis en plus petit (`fit_legend`). Textes en `MAP_FONT` (Helvetica) quand elle
+est installée, sinon dans la police par défaut de QGIS.
 
 La mise en page de QGIS ne tourne pas hors du fil principal : l'export est synchrone
 (commande non annulable). Accès à QGIS par un « fond » injectable ; `LayoutBackend` est
@@ -92,6 +99,58 @@ def check_grid_density(frame, interval):
                 "Carroyage trop serré : plus de %d lignes par axe sur la carte ; choisissez un intervalle plus grand."
                 % MAX_GRID_LINES
             )
+
+
+# Police des textes de la carte, si elle est installée ; sinon celle de QGIS par défaut. Aucune
+# police n'est livrée avec Cassini.
+MAP_FONT = "Helvetica"
+
+
+def map_font_family():
+    """`MAP_FONT` si QGIS la connaît, sinon None (police par défaut)."""
+    from qgis.PyQt.QtGui import QFontDatabase
+
+    return MAP_FONT if MAP_FONT in QFontDatabase().families() else None
+
+
+def with_family(text_format, family):
+    """`text_format` (QgsTextFormat) dans la famille `family` ; inchangé si `family` est None."""
+    if family is not None:
+        font = text_format.font()
+        font.setFamily(family)
+        text_format.setFont(font)
+    return text_format
+
+
+def fit_legend(legend, max_width, max_height, family=None):
+    """Fait tenir la légende dans `max_width` × `max_height` mm : une, deux puis trois colonnes,
+    puis des textes et symboles plus petits. Si rien ne tient, une seule colonne au plus petit :
+    la légende déborde alors vers le bas, jamais hors de la page à droite."""
+    from qgis.core import QgsLegendStyle
+
+    styles = (QgsLegendStyle.Style.Title, QgsLegendStyle.Style.Group, QgsLegendStyle.Style.Subgroup,
+              QgsLegendStyle.Style.SymbolLabel)
+    sizes = {s: legend.style(s).textFormat().size() for s in styles}
+    symbol = (legend.symbolWidth(), legend.symbolHeight())
+    for shrink in (1.0, 0.85, 0.7):
+        for s in styles:
+            style = legend.style(s)
+            text = with_family(style.textFormat(), family)
+            text.setSize(sizes[s] * shrink)
+            style.setTextFormat(text)
+            legend.setStyle(s, style)
+        legend.setSymbolWidth(symbol[0] * shrink)
+        legend.setSymbolHeight(symbol[1] * shrink)
+        for columns in (1, 2, 3):
+            legend.setColumnCount(columns)
+            legend.setSplitLayer(columns > 1)
+            legend.adjustBoxSize()
+            size = legend.sizeWithUnits()
+            if size.width() <= max_width and size.height() <= max_height:
+                return
+    legend.setColumnCount(1)
+    legend.setSplitLayer(False)
+    legend.adjustBoxSize()
 
 
 def _decimals(interval):
@@ -187,8 +246,9 @@ class LayoutBackend(QgisBackend):
             QgsLayoutSize,
             QgsProject,
             QgsRectangle,
+            QgsVectorLayer,
         )
-        from qgis.PyQt.QtGui import QFont
+        from qgis.PyQt.QtGui import QColor, QFont
 
         layout = QgsLayout(QgsProject.instance())  # jamais ajoutée au gestionnaire du projet
         layout.initializeDefaults()
@@ -203,6 +263,7 @@ class LayoutBackend(QgisBackend):
         width, height = page_dimensions(page)
         fx, fy = width / BASE_PAGE[0], height / BASE_PAGE[1]
         ff = min(fx, fy)
+        family = map_font_family()
 
         def place(item, x, y, w, h):
             item.attemptMove(QgsLayoutPoint(x * fx, y * fy))
@@ -218,6 +279,8 @@ class LayoutBackend(QgisBackend):
             item = QgsLayoutItemLabel(layout)
             item.setText(text)
             font = QFont()
+            if family is not None:
+                font.setFamily(family)
             font.setPointSize(points(size))
             font.setBold(bold)
             item.setFont(font)
@@ -247,7 +310,21 @@ class LayoutBackend(QgisBackend):
             except Exception:  # QgsCsException : cadre hors du domaine du système
                 in_grid = None
             check_grid_density(in_grid, grid["interval"])
-            map_grid = QgsLayoutItemMapGrid("Carroyage", carte)
+            # Carroyage porté par une seconde carte, sans fond, posée sur la première : une couche
+            # en mode de fusion fait rastériser la carte, et QGIS coupe alors ce qui dépasse du
+            # cadre, donc les étiquettes de la grille. La seconde carte reste vectorielle. Une
+            # liste de couches vide voudrait dire « toutes » : elle reçoit une couche vide.
+            empty_layer = QgsVectorLayer("Point", "vide", "memory")
+            grid_map = QgsLayoutItemMap(layout)
+            grid_map.setCrs(carte.crs())
+            grid_map.setKeepLayerSet(True)
+            grid_map.setLayers([empty_layer])
+            grid_map.setBackgroundEnabled(False)
+            grid_map.setFrameEnabled(False)
+            place(grid_map, 10, 22, 200, 160)
+            grid_map.setExtent(carte.extent())
+            grid_map.empty_layer = empty_layer  # tenue en vie jusqu'à l'export
+            map_grid = QgsLayoutItemMapGrid("Carroyage", grid_map)
             map_grid.setCrs(grid_crs)
             map_grid.setIntervalX(grid["interval"])
             map_grid.setIntervalY(grid["interval"])
@@ -256,13 +333,20 @@ class LayoutBackend(QgisBackend):
             map_grid.setAnnotationFormat(QgsLayoutItemMapGrid.AnnotationFormat.Decimal)
             map_grid.setAnnotationPrecision(_decimals(grid["interval"]))
             # Étiquettes à gauche et en bas seulement : à droite, elles mordraient sur la légende,
-            # en haut sur le titre.
+            # en haut sur le titre. Un seul axe par bord (Y à gauche, X en bas) : sur une grille
+            # inclinée, les deux se superposeraient dans les coins.
             for side in (QgsLayoutItemMapGrid.BorderSide.Right, QgsLayoutItemMapGrid.BorderSide.Top):
                 map_grid.setAnnotationDisplay(QgsLayoutItemMapGrid.DisplayMode.HideAll, side)
-            grid_format = map_grid.annotationTextFormat()
+            map_grid.setAnnotationDisplay(
+                QgsLayoutItemMapGrid.DisplayMode.LatitudeOnly, QgsLayoutItemMapGrid.BorderSide.Left
+            )
+            map_grid.setAnnotationDisplay(
+                QgsLayoutItemMapGrid.DisplayMode.LongitudeOnly, QgsLayoutItemMapGrid.BorderSide.Bottom
+            )
+            grid_format = with_family(map_grid.annotationTextFormat(), family)
             grid_format.setSize(points(6))
             map_grid.setAnnotationTextFormat(grid_format)
-            carte.grids().addGrid(map_grid)
+            grid_map.grids().addGrid(map_grid)
             map_grid.setEnabled(True)
 
         title_label = label(title, 10, 6, 277, 14, 18, bold=True)
@@ -275,6 +359,7 @@ class LayoutBackend(QgisBackend):
         for layer in layers:
             root.addLayer(layer)
         place(legend, 215, 22, 72, 100)
+        fit_legend(legend, 72 * fx, (195 - 22) * fy, family)
 
         scalebar = QgsLayoutItemScaleBar(layout)
         scalebar.setLinkedMap(carte)
@@ -285,6 +370,8 @@ class LayoutBackend(QgisBackend):
             scalebar.setUnits(Qgis.DistanceUnit.Kilometers)
             scalebar.setUnitLabel("km")
         scale_font = QFont()
+        if family is not None:
+            scale_font.setFamily(family)
         scale_font.setPointSize(points(8))
         scalebar.setFont(scale_font)
         place(scalebar, 10, 185, 80, 12)
@@ -293,7 +380,11 @@ class LayoutBackend(QgisBackend):
         arrow.setPicturePath(":/images/north_arrows/layout_default_north_arrow.svg")
         arrow.setLinkedMap(carte)
         arrow.setNorthMode(QgsLayoutItemPicture.NorthMode.GridNorth)
-        place(arrow, 215, 130, 20, 20)
+        # Dans le coin haut droit de la carte, sur un fond blanc : la colonne de droite reste
+        # à la légende, qu'aucune hauteur ne fait plus mordre sur la flèche.
+        arrow.setBackgroundEnabled(True)
+        arrow.setBackgroundColor(QColor(255, 255, 255, 210))
+        place(arrow, 193, 24, 15, 15)
 
         sources_label = label(sources_text, 10, 198, 277, 10, 8)
 
@@ -484,6 +575,14 @@ class LayoutExportGesture(_ReadGesture):
         if box is None:
             raise GestureError(EMPTY, "Les couches visibles sont vides : la carte n'a pas d'emprise.")
 
+        # Sans échelle : cadré sur les couches vectorielles, les rasters (un MNT déborde souvent de
+        # la zone d'étude) restant en fond ; sans vecteur, sur toutes les couches. Les couches
+        # « autres » (tuiles vectorielles, maillages) n'y entrent pas : un fond de tuiles couvre
+        # souvent le monde.
+        frame_box = box
+        if scale is None:
+            frame_box = _union([e for layer, e in zip(layers, extents) if backend.is_vector(layer)]) or box
+
         names = []
         for layer in layers:
             name = source_name(backend.source_of(layer))
@@ -526,7 +625,7 @@ class LayoutExportGesture(_ReadGesture):
         if grid is not None:
             extra["grid"] = {"authid": grid["authid"], "interval": grid["interval"], "projected": grid["projected"]}
         try:
-            framing = _padded(box) if scale is None else _centered(center)
+            framing = _padded(frame_box) if scale is None else _centered(center)
             done = backend.export_pdf(layers, title.strip(), sources_text, out, crs, framing, **extra)
             if scale is not None and round(done["scale"]) != scale:
                 raise RuntimeError("échelle non tenue : 1:%s au lieu de 1:%s" % (done["scale"], scale))
