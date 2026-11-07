@@ -121,6 +121,18 @@ pub fn validate(registry: &Registry, example: &Example) -> Result<(), String> {
                         }
                     }
                 }
+                // Les rasters en liste de `raster.weighted_overlay` (11.12, lot 2b-2) : chaque
+                // critère et chaque masque est une `source` raster de l'inventaire, jamais une
+                // étape (`step:k`) ni un chemin inventé.
+                let criteria = call.params["criteria"].as_array().into_iter().flatten();
+                let listed = criteria
+                    .map(|c| &c["raster"])
+                    .chain(call.params["exclusions"].as_array().into_iter().flatten());
+                for raster in listed {
+                    if !raster.as_str().is_some_and(|r| dems.contains(r)) {
+                        return Err(format!("étape {} : raster absent « {raster} »", index + 1));
+                    }
+                }
                 if let Some(path) = call.params["path"].as_str() {
                     if !files.contains(path) {
                         return Err(format!("étape {} : fichier absent « {path} »", index + 1));
@@ -450,6 +462,43 @@ mod tests {
     }
 
     #[test]
+    fn listed_rasters_of_an_overlay_are_sources_of_rasters_of_the_inventory() {
+        // 11.12, lot 2b-2 : `criteria[i].raster` et `exclusions[i]` se contrôlent comme `dem` ;
+        // un chemin inventé, l'id d'une couche ou une étape en liste sont écartés.
+        let registry = Registry::standard();
+        let inventory = json!({"layers": [
+            {"layer_id": "calme_1", "kind": "raster", "source": "donnees/calme.tif"},
+            {"layer_id": "accessibilite_1", "kind": "raster", "source": "rasters/accessibilite.tif"},
+            {"layer_id": "zi_masque_1", "kind": "raster", "source": "zi_masque.tif"}
+        ], "unloaded_files": []});
+        let overlay = |second: Value, mask: Value| Example {
+            family: "essai",
+            inventory: inventory.clone(),
+            request: "Combine le calme et l'accessibilité, en excluant les zones inondables."
+                .into(),
+            expected: json!({"kind": "calls", "calls": [
+                {"command": "raster.reclassify", "params": {"raster": "donnees/calme.tif",
+                    "classes": [{"min": 2, "value": 1}]}},
+                {"command": "raster.weighted_overlay", "params": {
+                    "criteria": [{"raster": "donnees/calme.tif", "weight": 1},
+                        {"raster": second, "weight": 1}],
+                    "exclusions": [mask]}}]}),
+            retry: None,
+        };
+        let good = (json!("rasters/accessibilite.tif"), json!("zi_masque.tif"));
+        assert_eq!(
+            validate(&registry, &overlay(good.0.clone(), good.1.clone())),
+            Ok(())
+        );
+        for bad in ["donnees/ensoleillement.tif", "accessibilite_1", "step:1"] {
+            let err = validate(&registry, &overlay(json!(bad), good.1.clone())).unwrap_err();
+            assert!(err.contains("raster absent"), "critère {bad} : {err}");
+            let err = validate(&registry, &overlay(good.0.clone(), json!(bad))).unwrap_err();
+            assert!(err.contains("raster absent"), "masque {bad} : {err}");
+        }
+    }
+
+    #[test]
     fn every_family_gives_at_least_one_valid_example() {
         let registry = Registry::standard();
         for family in FAMILIES {
@@ -613,6 +662,56 @@ mod tests {
         for command in ["terrain.cost_distance", "terrain.least_cost_path"] {
             assert!(planned.contains(command), "{command}");
         }
+    }
+
+    #[test]
+    fn the_overlay_families_of_the_default_set_cite_criteria_and_masks_never_the_dem() {
+        // 11.12, lot 2b-2 : au jeu par défaut, les deux familles sont là, sans rejet ;
+        // `raster.weighted_overlay` figure dans un plan, `raster.reclassify` dans un plan sans
+        // `terrain.slope` ; aucun critère ni masque n'est le MNT, un raster de coût, ni absent.
+        let (examples, summary) = generate(DEFAULT_SEED, DEFAULT_COUNT);
+        for name in ["superposition_ponderee", "reclassement_raster"] {
+            let tally = &summary.families[name];
+            assert!(tally.kept > 0 && tally.rejected == 0, "{name} : {tally:?}");
+        }
+        let forbidden: Vec<&str> = ["mnt", "cout"]
+            .iter()
+            .flat_map(|k| inventories::theme(k).slugs.iter().copied())
+            .collect();
+        let (mut overlay, mut direct) = (false, false);
+        for e in &examples {
+            let calls = e.expected["calls"].as_array().into_iter().flatten();
+            let commands: Vec<&str> = calls
+                .clone()
+                .filter_map(|c| c["command"].as_str())
+                .collect();
+            direct |=
+                commands.contains(&"raster.reclassify") && !commands.contains(&"terrain.slope");
+            for c in calls.filter(|c| c["command"] == "raster.weighted_overlay") {
+                overlay = true;
+                let p = &c["params"];
+                let criteria = p["criteria"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|c| &c["raster"]);
+                for raster in criteria.chain(p["exclusions"].as_array().into_iter().flatten()) {
+                    let layer = e.inventory["layers"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|l| l["kind"] == "raster" && l.get("source") == Some(raster))
+                        .unwrap_or_else(|| panic!("raster absent : {}", e.request));
+                    let id = layer["layer_id"].as_str().unwrap();
+                    assert!(
+                        !forbidden.iter().any(|s| id.starts_with(&format!("{s}_"))),
+                        "{id} : {}",
+                        e.request
+                    );
+                }
+            }
+        }
+        assert!(overlay && direct);
     }
 
     #[test]
