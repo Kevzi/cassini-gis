@@ -134,6 +134,7 @@ class LayerOpenVectorTest(unittest.TestCase):
         result, error = run(self.gesture(Exploding()), {"path": self.points})
         self.assertIsNone(result)
         self.assertEqual(error.code, "qgis.gesture_failed")
+        self.assertEqual(error.message, "Échec inattendu de l'ouverture du GeoJSON.")
 
     def test_cancel_answers_once(self):
         calls = []

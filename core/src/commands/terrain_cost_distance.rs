@@ -29,7 +29,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::commands::terrain_line_of_sight::{check_crs, check_extent};
 use crate::cost::{accumulate, passable};
-use crate::dem::Dem;
+use crate::dem::{Dem, NODATA};
 use crate::horn::same_grid_as;
 use crate::point::Point;
 use crate::raster_path::RasterPath;
@@ -37,9 +37,6 @@ use crate::registry::{Command, CommandFailure, CommandSpec, Registration, RunsIn
 
 /// Nombre maximal de sources (AD-8).
 pub const MAX_SOURCES: usize = 32;
-
-/// Valeur sans-donnée du coût cumulé écrit.
-pub const COST_NODATA: f32 = -9999.0;
 
 fn sources<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<Point>, D::Error> {
     let sources = Vec::<Point>::deserialize(d)?;
@@ -153,7 +150,7 @@ pub fn cost_distance(cost: &Dem, sources: &[Point]) -> Result<(Dem, CostStats), 
                     if passable(cost, col, row).is_some() {
                         unreachable += 1;
                     }
-                    values.push(COST_NODATA);
+                    values.push(NODATA);
                 }
             }
         }
@@ -164,7 +161,7 @@ pub fn cost_distance(cost: &Dem, sources: &[Point]) -> Result<(Dem, CostStats), 
         reachable_cells: reachable,
         unreachable_cells: unreachable,
     };
-    Ok((same_grid_as(cost, values, COST_NODATA), stats))
+    Ok((same_grid_as(cost, values, NODATA), stats))
 }
 
 /// `terrain.cost_distance` : commande du noyau.
@@ -230,40 +227,10 @@ inventory::submit! { Registration(|r| r.register(TerrainCostDistance)) }
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::test_support::{fixture, Scratch};
     use crate::cost;
     use crate::registry::Registry;
     use serde_json::{json, Value};
-    use std::path::PathBuf;
-
-    fn fixture(name: &str) -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../fixtures")
-            .join(name)
-    }
-
-    /// Dossier temporaire propre à un test, effacé à la fin, y compris s'il échoue.
-    struct Scratch(PathBuf);
-
-    impl Scratch {
-        fn new(name: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!(
-                "cassini-cost-distance-{}-{name}",
-                std::process::id()
-            ));
-            let _ = std::fs::remove_dir_all(&dir);
-            std::fs::create_dir_all(&dir).unwrap();
-            Scratch(dir)
-        }
-        fn join(&self, name: &str) -> PathBuf {
-            self.0.join(name)
-        }
-    }
-
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
 
     fn pt(x: f64, y: f64) -> Point {
         Point { x, y, epsg: 2154 }
@@ -358,7 +325,7 @@ mod tests {
         // 60 cellules : 16 du mur, 1 trou, 9 enfermées.
         assert_eq!(stats.unreachable_cells, 9);
         assert_eq!(stats.reachable_cells, 60 - 16 - 1 - 9);
-        let nodata = out.values.iter().filter(|v| **v == COST_NODATA).count();
+        let nodata = out.values.iter().filter(|v| **v == NODATA).count();
         assert_eq!(nodata, 16 + 1 + 9);
     }
 

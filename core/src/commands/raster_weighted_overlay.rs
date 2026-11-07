@@ -17,13 +17,10 @@ use schemars::JsonSchema;
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::dem::Dem;
+use crate::dem::{Dem, NODATA};
 use crate::horn::same_grid_as;
 use crate::raster_path::RasterPath;
 use crate::registry::{Command, CommandFailure, CommandSpec, Registration, RunsIn};
-
-/// Valeur sans-donnée du score écrit.
-pub const OVERLAY_NODATA: f32 = -9999.0;
 
 /// Nombres de critères permis (AD-8).
 pub const MIN_CRITERIA: usize = 2;
@@ -146,7 +143,7 @@ pub fn overlay(criteria: &[(&Dem, f64)], exclusions: &[&Dem]) -> (Dem, OverlaySt
     let reference = criteria[0].0;
     let (w, h) = (reference.width, reference.height);
     let total: f64 = criteria.iter().map(|(_, weight)| weight).sum();
-    let mut values = vec![OVERLAY_NODATA; w as usize * h as usize];
+    let mut values = vec![NODATA; w as usize * h as usize];
     let mut min: Option<f64> = None;
     let mut max: Option<f64> = None;
     let mut valid = 0u64;
@@ -185,7 +182,7 @@ pub fn overlay(criteria: &[(&Dem, f64)], exclusions: &[&Dem]) -> (Dem, OverlaySt
         max,
         nodata_cells: u64::from(w) * u64::from(h) - valid,
     };
-    (same_grid_as(reference, values, OVERLAY_NODATA), stats)
+    (same_grid_as(reference, values, NODATA), stats)
 }
 
 /// `raster.weighted_overlay` : commande du noyau.
@@ -284,39 +281,9 @@ inventory::submit! { Registration(|r| r.register(RasterWeightedOverlay)) }
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::test_support::Scratch;
     use crate::registry::Registry;
     use serde_json::{json, Value};
-    use std::path::PathBuf;
-
-    /// Dossier temporaire propre à un test, effacé à la fin, y compris s'il échoue.
-    struct Scratch(PathBuf);
-
-    impl Scratch {
-        fn new(name: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!(
-                "cassini-overlay-{}-{name}",
-                std::process::id()
-            ));
-            let _ = std::fs::remove_dir_all(&dir);
-            std::fs::create_dir_all(&dir).unwrap();
-            Scratch(dir)
-        }
-        fn join(&self, name: &str) -> PathBuf {
-            self.0.join(name)
-        }
-        /// Écrit `grid` sous `name` et rend son chemin en texte.
-        fn write(&self, name: &str, grid: &Dem) -> String {
-            let path = self.join(name);
-            grid.write_geotiff(&path).unwrap();
-            path.to_string_lossy().into_owned()
-        }
-    }
-
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
 
     /// Grille 3 × 3 de cellules de 10 m en Lambert-93.
     fn grid(values: [f32; 9]) -> Dem {

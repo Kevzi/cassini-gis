@@ -120,6 +120,25 @@ pub(crate) fn parse_reference(value: &Value) -> Option<Result<Reference, String>
     Some(k.and_then(|k| field.map(|f| (k, f))))
 }
 
+/// Premier texte imbriqué dans une liste ou un objet `value` qui est une référence `step:`,
+/// bien ou mal formée ; `None` pour une valeur de premier niveau ou sans référence imbriquée.
+fn nested_reference(value: &Value) -> Option<&str> {
+    let children: Box<dyn Iterator<Item = &Value>> = match value {
+        Value::Array(items) => Box::new(items.iter()),
+        Value::Object(map) => Box::new(map.values()),
+        _ => return None,
+    };
+    for child in children {
+        if parse_reference(child).is_some() {
+            return child.as_str();
+        }
+        if let Some(text) = nested_reference(child) {
+            return Some(text);
+        }
+    }
+    None
+}
+
 /// Traduit, dans les paramètres d'une étape de `spec`, chaque référence `step:k` d'un paramètre
 /// [`RasterPath`](crate::raster_path::RasterPath) en repère `out:<j>.1`, où `j` est la ligne du
 /// journal de l'étape `k` du plan (`journal_steps[k - 1]`) : les ouvertures dictées et les appels
@@ -216,6 +235,18 @@ impl Registry {
             let mut has_reference = false;
             if let Value::Object(map) = &call.params {
                 for (name, value) in map {
+                    // Une référence ne vaut qu'au premier niveau : imbriquée dans une liste ou
+                    // un objet (`criteria[i].raster`, `exclusions[i]`), elle n'est ni traduite ni
+                    // résolue, et finirait en « fichier introuvable » à l'exécution.
+                    if let Some(text) = nested_reference(value) {
+                        return Err(error(
+                            "plan.bad_reference",
+                            step,
+                            format!(
+                                "« {text} » est écrit à l'intérieur du paramètre « {name} » : les références step:k ne valent qu'au premier niveau d'un paramètre ; nommez le fichier."
+                            ),
+                        ));
+                    }
                     let Some(parsed) = parse_reference(value) else {
                         continue;
                     };
@@ -836,6 +867,43 @@ mod tests {
             "{}",
             err.message
         );
+    }
+
+    #[test]
+    fn a_reference_inside_a_list_is_refused_before_execution() {
+        let r = Registry::standard();
+        let overlay = |criteria: Value, exclusions: Value| {
+            slope_then(json!({"command": "raster.weighted_overlay", "params": {
+                "criteria": criteria, "exclusions": exclusions, "out": "score.tif"}}))
+        };
+        let plain = json!([{"raster": "a.tif", "weight": 1}, {"raster": "b.tif", "weight": 1}]);
+        // Un critère, un masque, une référence mal formée : refusés à l'étape 2.
+        for p in [
+            overlay(
+                json!([{"raster": "step:1", "weight": 1}, {"raster": "b.tif", "weight": 1}]),
+                json!([]),
+            ),
+            overlay(plain.clone(), json!(["step:1"])),
+            overlay(plain.clone(), json!(["step:01"])),
+            // Un paramètre objet (un point), et une référence plus profonde.
+            slope_then(
+                json!({"command": "terrain.viewshed", "params": {"dem": "mnt.tif",
+                "observer": {"x": "step:1.x", "y": 6850250, "epsg": 2154}}}),
+            ),
+            overlay(
+                json!([{"raster": "a.tif", "weight": 1, "extra": [["step:1"]]}]),
+                json!([]),
+            ),
+        ] {
+            let err = r.check_plan(&p).unwrap_err();
+            assert_eq!((err.code, err.step), ("plan.bad_reference", 2));
+            assert!(err.message.contains("premier niveau"), "{}", err.message);
+        }
+        // Des fichiers nommés passent, comme une référence de premier niveau.
+        assert_eq!(r.check_plan(&overlay(plain, json!(["masque.tif"]))), Ok(()));
+        let p = slope_then(json!({"command": "terrain.slope",
+            "params": {"dem": "step:1", "unit": "percent"}}));
+        assert_eq!(r.check_plan(&p), Ok(()));
     }
 
     #[test]

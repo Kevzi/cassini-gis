@@ -13,7 +13,7 @@ toute différence. Un fichier absent, illisible, sans système déclaré ou dont
 pas le système est une erreur nommée, qui ne cite que le nom du fichier, jamais son chemin (AD-9, AD-21), et
 n'ajoute rien au projet. Aucune reprojection (AD-19).
 
-Le travail avance par un ordonnanceur (par défaut `QTimer.singleShot`), jamais par une attente.
+Le déroulé (ordonnanceur, annulation, ordre soldé une fois) est celui d'`open_output.py`.
 `QgisBackend` est le seul endroit qui importe `qgis.core`, les tests mettent une doublure.
 """
 
@@ -23,12 +23,10 @@ import re
 
 try:  # importé à plat par les tests, en paquet par QGIS
     from .gestures import GestureError
+    from .open_output import INVALID, OpenOutputGesture
 except ImportError:  # pragma: no cover
     from gestures import GestureError
-
-INVALID = "layer.invalid_source"
-FAILED = "qgis.gesture_failed"
-CANCELLED = "qgis.cancelled"
+    from open_output import INVALID, OpenOutputGesture
 
 # Forme du membre `crs` qu'écrit l'écrivain du noyau (AD-30).
 _DECLARED = re.compile(r"urn:ogc:def:crs:EPSG::([1-9][0-9]*)")
@@ -75,37 +73,11 @@ class QgisBackend:
         return layer.id(), authid
 
 
-def _singleshot(fn):
-    from qgis.PyQt.QtCore import QTimer
+class LayerOpenVectorGesture(OpenOutputGesture):
+    UNEXPECTED = "Échec inattendu de l'ouverture du GeoJSON."
 
-    QTimer.singleShot(0, fn)
-
-
-class LayerOpenVectorGesture:
     def __init__(self, backend=None, schedule=None):
-        self._backend = backend if backend is not None else QgisBackend()
-        self._schedule = schedule if schedule is not None else _singleshot
-        self._done = None
-        self._params = None
-
-    def start(self, params, done):
-        self._done = done
-        self._params = params
-        self._schedule(self._run)
-
-    def cancel(self):
-        # Commande non annulable : le noyau ne l'annule pas ; par prudence, l'ordre est soldé.
-        self._finish(error=GestureError(CANCELLED, "Geste annulé."))
-
-    def _run(self):
-        if self._done is None:  # déjà soldé (annulation)
-            return
-        try:
-            self._finish(result=self._open())
-        except GestureError as exc:
-            self._finish(error=exc)
-        except Exception:  # un ordre sans réponse bloquerait le noyau
-            self._finish(error=GestureError(FAILED, "Échec inattendu de l'ouverture du GeoJSON."))
+        super().__init__(backend if backend is not None else QgisBackend(), schedule)
 
     def _open(self):
         path = (self._params or {}).get("path")
@@ -130,8 +102,3 @@ class LayerOpenVectorGesture:
         if not layer_id or crs != expected:
             raise unreadable
         return {"layer_id": layer_id, "name": name, "crs": crs}
-
-    def _finish(self, result=None, error=None):
-        done, self._done = self._done, None
-        if done is not None:
-            done(result=result, error=error)

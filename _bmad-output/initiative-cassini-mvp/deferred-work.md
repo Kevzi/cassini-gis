@@ -688,29 +688,45 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-traceur-coord-convert-de-bout-en-bout-mgrs-compris-plan.md`
   summary: Avec Qwen3.5-9B (prompt long), toute phrase sur le projet de test projet-test-villeneuve.qgz échoue en ai.prompt_too_long : l'inventaire du projet et le catalogue ne tiennent pas dans le contexte.
   evidence: Démo de 11.2 — l'ancien noyau installé, sans coord.convert, échoue de même sur ce projet ; la démo n'a réussi que sur un projet vide.
+  status: report, 2026-11-07, entrée 11.13 (`epic-geometrie-et-terrain-etendu/story-refactor-sweep-plan.md`)
+  resolution: Recette QGIS de 11.16 jouée sur ce projet avec le modèle ajusté (16/16) ; le cas du prompt long de Qwen3.5-9B n'est pas remesuré. À reconstater à la répétition de démo (entrée 11.14).
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-reprojection-d-un-point-par-qgis-data-transform-point-plan.md`
   summary: Le geste data.transform_point ne vérifie pas QgsCoordinateTransform.isValid() ; une transformation invalide rendrait le point source étiqueté du code cible (medium, non vérifié).
   evidence: Relecture de 11.4 ; à établir par une sonde sous QGIS sur un projet dont le contexte de transformation nomme une grille absente.
+  status: report, 2026-11-07, entrée 11.13 (`epic-geometrie-et-terrain-etendu/story-refactor-sweep-plan.md`)
+  resolution: Demande une sonde sous QGIS sur un projet dont le contexte de transformation nomme une grille absente ; à jouer avant la publication (étape 7). Hors du ménage : le geste vit dans l'extension et rien ne prouve le défaut.
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-un-seul-type-de-raster-rasterpath-partout-plan.md`
   summary: Apprendre au modèle local à citer un raster par `step:k` (sans champ) dans une chaîne pente → champ de vision.
   evidence: Le long prompt et l'entraînement restent inchangés au ticket 11.5 (décision du propriétaire) ; `check_plan` refuse désormais `step:k.file` sur un `RasterPath` ; à porter au ré-entraînement groupé (entrées 12 et 16).
+  status: report, 2026-11-07, entrée 11.13 (`epic-geometrie-et-terrain-etendu/story-refactor-sweep-plan.md`)
+  resolution: La forme `step:1` sans champ est apprise (`pente_seuil`, `terrain.slope` puis `raster.reclassify`, entrée 11.12 lot 2a, a9d0c064cc2081601c446d3697255330fe8de21b ; ré-entraînement de l'entrée 16, 93b2bfbb0405004da2d522b28b468db24b2fe4eb), mais aucune famille n'enchaîne une pente dans `terrain.viewshed` : la chaîne nommée reste au prochain ré-entraînement groupé.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-un-seul-type-de-raster-rasterpath-partout-plan.md`
   summary: Cacher à l'inventaire du modèle un raster intermédiaire consommé par `out:k.n` dans un plan.
   evidence: `intermediate_files` (`core/src/journal/mod.rs`) ne reconnaît que les sorties consommées par `layer_id` ; une pente lue par `terrain.viewshed` via `out:3.1` reste montrée au modèle (comportement antérieur inchangé).
+  status: report, 2026-11-07, entrée 11.13 (`epic-geometrie-et-terrain-etendu/story-refactor-sweep-plan.md`)
+  resolution: Change ce que voit le modèle dans l'inventaire : à traiter avec la traduction de `step:k` dans les listes (constat 143), dans un même ticket sur le journal.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-ecriture-geojson-du-noyau-et-ouverture-dictee-plan.md`
   summary: Jouer la sonde `probe_vector_output.py` (GeoJSON 2008 en EPSG:2154 ouvert par `layer.open_vector`) sous QGIS 4.x.
   evidence: le critère de l'entrée 11.8 nomme QGIS 3.44 et 4.x ; seul QGIS 3.44.15 est installé sur le poste (décision du propriétaire du 2026-11-06 : 3.44 seul, 4.x reporté).
+  status: report, 2026-11-07, entrée 11.13 (`epic-geometrie-et-terrain-etendu/story-refactor-sweep-plan.md`)
+  resolution: QGIS 4.x non installé sur le poste (décision du propriétaire du 2026-11-06) ; à jouer à son installation, avant la publication (étape 7).
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-ecriture-geojson-du-noyau-et-ouverture-dictee-plan.md`
   summary: Rendre le `layer_id` de l'ouverture dictée `layer.open_vector` citable par `step:k.layer_id` dans un plan, pour enchaîner une sortie vecteur du noyau dans une analyse QGIS.
   evidence: `core/src/serve/plans.rs` (`execute`) ne garde dans `outputs[k]` que le résultat de la commande du noyau ; la couche ouverte par l'étape dictée n'y est pas. Parité avec le raster tenue, mais l'entrée 15 (`terrain.peaks`) en aura besoin. Toujours ouverte après l'entrée 11.15 : `terrain.peaks` a été livrée sans l'exiger (un plan ne cite pas encore la couche de points ouverte).
+  status: report, 2026-11-07, entrée 11.13 (`epic-geometrie-et-terrain-etendu/story-refactor-sweep-plan.md`)
+  resolution: Fonction nouvelle (sortie vecteur citable dans un plan), pas un ménage : ticket à créer quand un plan devra enchaîner une sortie vecteur du noyau dans une analyse QGIS.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-ecriture-geojson-du-noyau-et-ouverture-dictee-plan.md`
   summary: Le refus d'un système non concordant par `QgisBackend.add_vector` (`vector_output.py`) n'est vérifié que par la sonde manuelle `probe_vector_output.py`.
   evidence: les tests unitaires passent par `FakeBackend`, qui refait le refus lui-même ; rejouer la sonde à chaque changement de `vector_output.py`, ou l'automatiser si une recette sous QGIS voit le jour.
+  status: report, 2026-11-07, entrée 11.13 (`epic-geometrie-et-terrain-etendu/story-refactor-sweep-plan.md`)
+  resolution: Convention des sondes de l'extension : rejouer `probe_vector_output.py` à chaque changement de `QgisBackend.add_vector`. L'entrée 11.13 ne touche que le déroulé commun (`open_output.py`), pas ce fond.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-reclassement-et-superposition-ponderee-de-rasters-plan.md`
   summary: Traduire et vérifier `step:k` dans les éléments d'une liste de rasters (`criteria[i].raster`, `exclusions[i]` de `raster.weighted_overlay`), pour qu'un plan enchaîne pente, reclassement et superposition ; nouvelle entrée avant le ré-entraînement (12).
   evidence: `raster_markers` et la vérification du plan (`core/src/plan.rs`) ne lisent que les paramètres de premier niveau ; décision du propriétaire du 2026-11-06 de ne pas l'étendre dans l'entrée 11.9.
+  status: report, 2026-11-07, entrée 11.13 (`epic-geometrie-et-terrain-etendu/story-refactor-sweep-plan.md`)
+  resolution: Fonction nouvelle qui touche le journal et le rejeu : ticket à créer. En attendant, la vérification du plan refuse tôt une référence imbriquée (constat 145).
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-reclassement-et-superposition-ponderee-de-rasters-plan.md`
   summary: La famille de refus « seuil sur la pente » du générateur (`refus_hors_registre`, cas 4, `NO_RASTER_THRESHOLD`, `training/src/families.rs`) apprend au modèle à refuser « les zones où la pente dépasse n % », que `terrain.slope` puis `raster.reclassify` savent désormais faire ; à remplacer par un plan au ré-entraînement (entrée 12).
   evidence: Le garde-fou `what_is_refused_out_of_registry_is_still_missing_from_the_registry` a échoué à l'arrivée de `raster.reclassify` (mot « reclass ») ; l'entrée 11.9 n'a ôté que ce mot du garde-fou, sans toucher au générateur ni aux exemples (frontière du plan).
@@ -719,6 +735,8 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-reclassement-et-superposition-ponderee-de-rasters-plan.md`
   summary: Jusqu'à l'entrée qui traduira `step:k` dans les éléments d'une liste, la vérification du plan (`core/src/plan.rs`) accepte un `step:k` écrit dans `criteria[i].raster` ou `exclusions[i]`, que le journal ouvre ensuite comme un fichier du projet (erreur « fichier introuvable » tardive) ; à refuser tôt par `plan.bad_reference`, ou à traiter dans cette même entrée.
   evidence: relecture `thorough` de 11.9 (blind-hunter, edge-case-hunter) ; `raster_markers` ne lit que les paramètres de premier niveau, tandis que `resolve_param` du journal descend désormais dans `liste.champ`.
+  status: close, 2026-11-07, entrée 11.13 (`epic-geometrie-et-terrain-etendu/story-refactor-sweep-plan.md`)
+  resolution: `check_plan` (`core/src/plan.rs`) refuse en `plan.bad_reference` toute référence `step:` écrite dans une liste ou un objet, à l'étape fautive ; test `a_reference_inside_a_list_is_refused_before_execution`.
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/bug-le-test-d-extinction-du-canal-d-ia-externe-avec-des-relais-m-plan.md`
   summary: Le test a_relay_that_stops_reading_does_not_hold_the_switch_off ne prouve le garde-fou des lignes en file (5.43) que sous charge ; au repos, sa suppression passerait sous le seuil d'1 s.
@@ -743,6 +761,8 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-familles-du-generateur-pour-les-nouvelles-commandes-plan.md`
   summary: Familles du générateur pour les commandes raster et de terrain de l'epic 11 (`terrain.aspect`, `terrain.hillshade`, `terrain.viewshed_cumulative`, `terrain.peaks`, `raster.reclassify`, `raster.weighted_overlay`, `terrain.cost_distance`, `terrain.least_cost_path`), thèmes raster de l'inventaire (coût, critères, masque), validateur étendu aux paramètres raster et à `step:k`, et remplacement du refus `NO_RASTER_THRESHOLD` par pente puis reclassement.
   evidence: Plan de 11.12 à environ 2 800 jetons ; découpé en trois par le propriétaire le 2026-11-07, deuxième lot. À faire avant l'entrée 16 (ré-entraînement groupé).
+  status: close, 2026-11-07, entrée 11.13 (`epic-geometrie-et-terrain-etendu/story-refactor-sweep-plan.md`)
+  resolution: Fait en cinq lots de l'entrée 11.12 : lot 1 (acc9283880a7e55ae32408b7e46b61e4edecf604), 2a (a9d0c064cc2081601c446d3697255330fe8de21b), 2b-1 (aea48552199f486227328f31ec6192f72ae4c49a), 2b-2 (28725d2ea0de50dae286eb4ae6f17417034bcefd), 3 (01ed24f4c2e7c3841df6f02174d7fe707d1049d5) ; appris à l'entrée 16.
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-familles-du-generateur-pour-les-nouvelles-commandes-plan.md`
   summary: Famille du générateur pour l'export au format (`layout.export_pdf` avec `page_size`, `orientation`, `grid`), remplacement du refus `ONLY_A4`, inversion du test `paper_and_orientation_refusals_stay_refusals` et correction de `docs/entrainement-du-modele.md` (refus A4 décrit comme juste).
@@ -759,6 +779,8 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-familles-du-generateur-pour-les-nouvelles-commandes-plan.md`
   summary: `cargo clippy --workspace --all-targets -- -D warnings` ne se construit pas sous WSL (GTK pour `cassini-app`, script de `llama-cpp-sys-2`) : le critère « clippy sur tout l'espace » des tickets n'y est vérifiable que par crate.
   evidence: Relecture de 11.12 lot 1 ; clippy vert sur `cassini-training` et `cassini-core`. À confirmer par la recette GitHub après le push, ou en installant les bibliothèques système sous WSL.
+  status: report, 2026-11-07, entrée 11.13 (`epic-geometrie-et-terrain-etendu/story-refactor-sweep-plan.md`)
+  resolution: Cause d'environnement (GTK, `llama-cpp-sys-2` sous WSL) : clippy vérifié par crate sous WSL, l'espace entier par la recette GitHub.
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-familles-du-generateur-lot-2a-derives-du-mnt-plan.md`
   summary: 11.12 lot 2b — thèmes raster de l'inventaire synthétique (coût, critères, masque), familles `raster.weighted_overlay`, `terrain.cost_distance`, `terrain.least_cost_path` et reclassement d'un raster autre que la pente, validateur étendu à `cost`, `criteria[i].raster` et `exclusions[i]`.
@@ -775,11 +797,17 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-re-entrainement-groupe-et-recette-du-modele-plan.md`
   summary: Renforcer le générateur avant le prochain ré-entraînement groupé sur quatre constats du modèle 11.16 : un carroyage sans système doit rendre la question du système, jamais un refus (F03 de `epic11_reel` : refus « aucune commande n'exporte de carte ») ; « dans quelle direction sont tournées les pentes » est une exposition (A01, rendu en pente + reclassement) ; un PDF qui nomme ses couches reste un refus (S18 de `plan_reel` : export de toutes les couches visibles) ; un point nommé (« le château d'eau en X / Y (Lambert-93) ») n'appelle pas de question (S20). Ajouter aussi la reprojection d'un fuseau UTM à l'autre (deux ratés en validation).
   evidence: Mesures GPU de 11.16 (`~/cassini-entrainement/11-16-mesures/`) ; modèle accepté par le propriétaire le 2026-11-07 sans second entraînement, toutes les barres tenues.
+  status: report, 2026-11-07, entrée 11.13 (`epic-geometrie-et-terrain-etendu/story-refactor-sweep-plan.md`)
+  resolution: Prochain ré-entraînement groupé ; hors du ménage (le ticket ne touche ni le générateur ni le modèle).
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-re-entrainement-groupe-et-recette-du-modele-plan.md`
   summary: Mesurer sur processeur (`duree_reel`, 4 fils) le temps de la phrase de démo avec le modèle 11.16 et le registre de l'epic 11 (quatorze commandes de plus dans le prompt) ; seules des durées GPU sont consignées depuis l'epic 11.
   evidence: Relecture de 11.16 ; exigence produit « longue phrase en moins de 30 s sur CPU », démo déjà à 32-35 s sur CPU avant l'epic 11. La croissance du prompt vient des tickets 11.2 à 11.11, pas de ce ré-entraînement.
+  status: report, 2026-11-07, entrée 11.13 (`epic-geometrie-et-terrain-etendu/story-refactor-sweep-plan.md`)
+  resolution: Mesure à faire avant la démonstration (entrée 11.14), avec le modèle installé.
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-re-entrainement-groupe-et-recette-du-modele-plan.md`
   summary: Ajouter à un essai réel des phrases qui donnent aux nouvelles commandes un point dans un autre système que le raster (WGS84 ou UTM pour `terrain.viewshed_cumulative`, `terrain.cost_distance`, `terrain.least_cost_path`) et une reprojection UTM 31N vers 32N, avant le prochain ré-entraînement groupé.
   evidence: Relecture de 11.16 : `epic11_reel` n'a que des points dans le système du raster ; la validation a manqué deux reprojections d'un fuseau à l'autre.
+  status: report, 2026-11-07, entrée 11.13 (`epic-geometrie-et-terrain-etendu/story-refactor-sweep-plan.md`)
+  resolution: Avec le prochain ré-entraînement groupé (constat 156).
