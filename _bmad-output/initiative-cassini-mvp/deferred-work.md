@@ -853,3 +853,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-second-jeu-de-test-reel-annecy-pret-pour-la-demonstration-plan.md`
   summary: Idée du propriétaire : une commande qui applique aux couches du projet une mise en forme conforme aux conventions des cartes topographiques (eau en bleu, routes selon leur importance, limites, PLU aux couleurs CNIG, relief), pour que l'IA puisse la demander.
   evidence: Le jeu d'Annecy a dû être mis en forme à la main (script `%TEMP%\\sonde-11-18\\style.py`) pour donner une carte lisible : les couches ouvertes brutes, MNT par-dessus, ne montraient rien. Commande nouvelle, donc changement du catalogue figé.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-inventaire-garde-entre-les-phrases.md`
+  summary: Calculer l'inventaire du projet en tâche de fond (QgsTask, lecture par QgsVectorLayerFeatureSource) dès l'ouverture du projet ou l'ajout d'une couche, pour que la première phrase ne paie plus la première lecture des grosses couches.
+  evidence: Annecy, 2026-11-08 : la 1re phrase prend 32,5 s, dont environ 24 s de lecture des valeurs de champs (250 000 routes, 600 000 bâtiments, 32 000 parcelles) ; les suivantes 4,3 s et 2,9 s, l'inventaire étant gardé. L'exigence est de moins de 30 s.

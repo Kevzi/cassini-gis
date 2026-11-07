@@ -2,6 +2,7 @@
 
 import os
 import sys
+import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -279,6 +280,196 @@ class InventoryTest(unittest.TestCase):
         g.cancel()
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0].code, "qgis.cancelled")
+
+
+class KeyedBackend(FakeBackend):
+    """Doublure qui donne une clé de faits : `keys` (id -> clé), None pour « en cours d'édition »."""
+
+    def __init__(self, layers, keys):
+        super().__init__(layers)
+        self.keys = keys
+
+    def facts_key(self, layer):
+        return self.keys.get(layer.lid)
+
+
+class FactsKeptTest(unittest.TestCase):
+    def setUp(self):
+        inventory._FACTS.clear()
+        self.layer = FakeLayer(
+            "r_1", "routes", "/d/routes.gpkg", "EPSG:2154", (0.0, 0.0, 1.0, 1.0),
+            fields=[("nature", "String")], count=3, values={"nature": ["Route", "Chemin"]},
+        )
+
+    def tearDown(self):
+        inventory._FACTS.clear()
+
+    def test_an_unchanged_layer_is_not_read_again(self):
+        backend = KeyedBackend([self.layer], {"r_1": ("r_1", "v1")})
+        first, _ = run(inventory.ProjectInventoryGesture, backend, {})
+        reads = len(backend.value_reads)
+        second, _ = run(inventory.ProjectInventoryGesture, backend, {})
+        self.assertEqual(len(backend.value_reads), reads)
+        self.assertEqual(first, second)
+
+    def test_a_changed_key_reads_the_layer_again(self):
+        backend = KeyedBackend([self.layer], {"r_1": ("r_1", "v1")})
+        run(inventory.ProjectInventoryGesture, backend, {})
+        reads = len(backend.value_reads)
+        backend.keys["r_1"] = ("r_1", "v2")
+        self.layer.values["nature"] = ["Route", "Chemin", "Piste"]
+        result, _ = run(inventory.ProjectInventoryGesture, backend, {})
+        self.assertGreater(len(backend.value_reads), reads)
+        self.assertEqual(result["layers"][0]["fields"][0]["values"], ["Chemin", "Piste", "Route"])
+
+    def test_a_layer_being_edited_is_always_read(self):
+        backend = KeyedBackend([self.layer], {"r_1": None})
+        run(inventory.ProjectInventoryGesture, backend, {})
+        reads = len(backend.value_reads)
+        run(inventory.ProjectInventoryGesture, backend, {})
+        self.assertEqual(len(backend.value_reads), 2 * reads)
+        self.assertEqual(inventory._FACTS, {})
+
+    def test_a_kept_result_is_not_shared_with_the_caller(self):
+        backend = KeyedBackend([self.layer], {"r_1": ("r_1", "v1")})
+        first, _ = run(inventory.ProjectInventoryGesture, backend, {})
+        first["layers"][0]["fields"].clear()
+        second, _ = run(inventory.ProjectInventoryGesture, backend, {})
+        self.assertEqual(len(second["layers"][0]["fields"]), 1)
+
+    def test_a_large_project_is_read_once_then_kept(self):
+        layers = [
+            FakeLayer("l%d" % i, "c", "/d/c.gpkg", "EPSG:2154", (0.0, 0.0, 1.0, 1.0),
+                      fields=[("nature", "String")], values={"nature": ["a"]})
+            for i in range(150)
+        ]
+        backend = KeyedBackend(layers, {l.lid: (l.lid, "v1") for l in layers})
+        run(inventory.ProjectInventoryGesture, backend, {})
+        reads = len(backend.value_reads)
+        run(inventory.ProjectInventoryGesture, backend, {})
+        self.assertEqual(len(backend.value_reads), reads)
+
+    def test_a_layer_gone_from_the_project_leaves_the_table(self):
+        other = FakeLayer("o_2", "autre", "/d/o.gpkg", "EPSG:2154", (0.0, 0.0, 1.0, 1.0))
+        backend = KeyedBackend([self.layer, other], {"r_1": ("r_1", "v1"), "o_2": ("o_2", "v1")})
+        run(inventory.ProjectInventoryGesture, backend, {})
+        backend.items = [self.layer]
+        run(inventory.ProjectInventoryGesture, backend, {})
+        self.assertEqual(sorted(k[0] for k in inventory._FACTS), ["r_1"])
+
+    def test_a_changed_layer_keeps_a_single_entry(self):
+        backend = KeyedBackend([self.layer], {"r_1": ("r_1", "v1")})
+        run(inventory.ProjectInventoryGesture, backend, {})
+        backend.keys["r_1"] = ("r_1", "v2")
+        run(inventory.ProjectInventoryGesture, backend, {})
+        self.assertEqual(list(inventory._FACTS), [("r_1", "v2")])
+
+    def test_the_kept_result_is_the_one_read_without_keeping(self):
+        plain, _ = run(inventory.ProjectInventoryGesture, FakeBackend([self.layer]), {})
+        backend = KeyedBackend([self.layer], {"r_1": ("r_1", "v1")})
+        run(inventory.ProjectInventoryGesture, backend, {})
+        kept, _ = run(inventory.ProjectInventoryGesture, backend, {})
+        self.assertEqual(kept, plain)
+
+    def test_a_key_that_fails_reads_the_layer_without_failing(self):
+        class Failing(KeyedBackend):
+            def facts_key(self, layer):
+                raise RuntimeError("objet C++ détruit")
+
+        backend = Failing([self.layer], {})
+        result, error = run(inventory.ProjectInventoryGesture, backend, {})
+        self.assertIsNone(error)
+        self.assertEqual(result["layers"][0]["fields"][0]["values"], ["Chemin", "Route"])
+        self.assertEqual(inventory._FACTS, {})
+
+
+class _Field:
+    def __init__(self, name, type_name):
+        self._n, self._t = name, type_name
+
+    def name(self):
+        return self._n
+
+    def typeName(self):
+        return self._t
+
+
+class _QgisLikeLayer:
+    """Les seules méthodes de `QgsVectorLayer` que lit `QgisBackend.facts_key`."""
+
+    def __init__(self, source, modified=False, subset="", count=3):
+        self._source, self._modified, self._subset, self._count = source, modified, subset, count
+
+    def id(self):
+        return "couche_1"
+
+    def isModified(self):
+        return self._modified
+
+    def source(self):
+        return self._source
+
+    def subsetString(self):
+        return self._subset
+
+    def featureCount(self):
+        return self._count
+
+    def fields(self):
+        return [_Field("nature", "String")]
+
+
+class FactsKeyTest(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.backend = inventory.QgisBackend()
+
+    def tearDown(self):
+        import shutil
+
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def touch(self, name, text="x"):
+        path = os.path.join(self.dir, name)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+        return path
+
+    def test_a_layer_being_edited_has_no_key(self):
+        path = self.touch("r.gpkg")
+        self.assertIsNone(self.backend.facts_key(_QgisLikeLayer(path + "|layername=r", modified=True)))
+
+    def test_a_source_that_is_not_a_local_file_has_no_key(self):
+        for source in ("Point?crs=EPSG:2154", "dbname='x' host=h table=t", os.path.join(self.dir, "absent.gpkg")):
+            self.assertIsNone(self.backend.facts_key(_QgisLikeLayer(source)), source)
+
+    def test_the_filter_and_the_count_change_the_key(self):
+        path = self.touch("r.gpkg") + "|layername=r"
+        base = self.backend.facts_key(_QgisLikeLayer(path))
+        self.assertNotEqual(base, self.backend.facts_key(_QgisLikeLayer(path, subset="a = 1")))
+        self.assertNotEqual(base, self.backend.facts_key(_QgisLikeLayer(path, count=4)))
+
+    def test_a_shapefile_key_follows_its_dbf(self):
+        shp = self.touch("p.shp")
+        dbf = self.touch("p.dbf", "a")
+        before = self.backend.facts_key(_QgisLikeLayer(shp))
+        with open(dbf, "w", encoding="utf-8") as f:
+            f.write("attributs modifiés")
+        self.assertNotEqual(before, self.backend.facts_key(_QgisLikeLayer(shp)))
+
+    def test_a_geopackage_key_follows_its_wal(self):
+        gpkg = self.touch("r.gpkg")
+        before = self.backend.facts_key(_QgisLikeLayer(gpkg + "|layername=r"))
+        self.touch("r.gpkg-wal", "écritures en attente")
+        self.assertNotEqual(before, self.backend.facts_key(_QgisLikeLayer(gpkg + "|layername=r")))
+
+    def test_a_csv_uri_is_read_as_its_file(self):
+        csv_path = self.touch("gares é.csv", "X,Y\n1,2\n")
+        encoded = csv_path.replace("\\", "/").replace(" ", "%20").replace("é", "%C3%A9")
+        uri = "file:///" + encoded.lstrip("/") + "?type=csv&xField=X&yField=Y"
+        key = self.backend.facts_key(_QgisLikeLayer(uri))
+        self.assertIsNotNone(key)
+        self.assertEqual(key[-1][0][0], "gares é.csv")
 
 
 class DescribeTest(unittest.TestCase):

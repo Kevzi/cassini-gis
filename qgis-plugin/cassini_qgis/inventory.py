@@ -17,6 +17,7 @@ QGIS passe par un « fond » injectable : `QgisBackend` est le seul endroit qui
 importe `qgis.core`, les tests mettent une doublure.
 """
 
+import copy
 import ntpath
 import os
 import posixpath
@@ -138,11 +139,71 @@ class QgisBackend:
     def feature_count(self, layer):
         return max(0, int(layer.featureCount()))  # -1 : le fournisseur ne sait pas compter
 
+    def facts_key(self, layer):
+        """Clé sous laquelle les faits d'une couche vectorielle restent valables : id, source,
+        filtre, nombre d'objets, champs et types, dates et tailles du fichier source et de ses
+        compagnons (voir `source_stamps`). None (rien n'est gardé) pour une couche qui a des
+        modifications non enregistrées ou dont la source n'est pas un fichier local."""
+        if layer.isModified():
+            return None
+        source = layer.source()
+        stamps = source_stamps(source)
+        if stamps is None:
+            return None
+        return (
+            layer.id(),
+            source,
+            layer.subsetString(),
+            int(layer.featureCount()),
+            tuple((f.name(), f.typeName()) for f in layer.fields()),
+            stamps,
+        )
+
     def geometry_of(self, layer):
         from qgis.core import QgsWkbTypes
 
         name = QgsWkbTypes.geometryDisplayString(layer.geometryType())
         return "NoGeometry" if name == "Null" else name
+
+
+def source_file(raw):
+    """Chemin du fichier local d'une source de couche (`x.gpkg|layername=…`,
+    `file:///d/x.csv?type=csv…`), ou None si la source n'est pas un fichier existant."""
+    if not isinstance(raw, str) or not raw:
+        return None
+    text = raw.split("|", 1)[0]
+    if text.startswith("file://"):
+        text = _percent_decoded(text.split("?", 1)[0][len("file://"):])
+        if re.match(r"^/[A-Za-z]:/", text):  # file:///C:/d/x.csv -> C:/d/x.csv
+            text = text[1:]
+    return text if os.path.isfile(text) else None
+
+
+def _percent_decoded(text):
+    """`%20` et autres échappements d'une adresse `file://`, en UTF-8 (sans module réseau)."""
+    return re.sub(
+        r"(?:%[0-9A-Fa-f]{2})+",
+        lambda m: bytes.fromhex(m.group(0).replace("%", "")).decode("utf-8", "replace"),
+        text,
+    )
+
+
+def source_stamps(raw):
+    """(nom, date, taille) du fichier d'une source et de ses compagnons qui portent les données :
+    `.dbf` d'un Shapefile (les attributs), `-wal` d'un GeoPackage ou d'une base SQLite (les
+    écritures pas encore reportées). None si la source n'est pas un fichier local."""
+    path = source_file(raw)
+    if path is None:
+        return None
+    stem = os.path.splitext(path)[0]
+    stamps = []
+    for candidate in (path, stem + ".dbf", stem + ".DBF", path + "-wal"):
+        try:
+            st = os.stat(candidate)
+        except OSError:
+            continue
+        stamps.append((os.path.basename(candidate), st.st_mtime_ns, st.st_size))
+    return tuple(stamps)
 
 
 def source_name(raw):
@@ -228,6 +289,14 @@ def _singleshot(fn):
     QTimer.singleShot(0, fn)
 
 
+# Faits des couches vectorielles déjà lus, d'une phrase à l'autre : `uniqueValues` sur des centaines
+# de milliers d'objets coûte des secondes par champ (20 s sur le projet d'Annecy, 2026-11-08). La
+# clé (`facts_key`, premier élément : l'id de la couche) change dès que la couche change ; une
+# seule entrée par couche, et celles des couches sorties du projet sont retirées à chaque
+# inventaire : la table ne dépasse jamais le projet.
+_FACTS = {}
+
+
 class _ReadGesture:
     """Squelette commun : un travail court, planifié, qui rend un résultat ou une erreur."""
 
@@ -287,6 +356,9 @@ class ProjectInventoryGesture(_ReadGesture):
             entry.update(self._facts(layer, kind))
             layers.append(entry)
             boxes.append(backend.extent_of(layer, project_crs))
+        present = {backend.id_of(layer) for layer in backend.layers()}
+        for gone in [k for k in _FACTS if k[0] not in present]:
+            del _FACTS[gone]
         return {
             "project_name": backend.project_name() or None,
             "layers": layers,
@@ -295,10 +367,27 @@ class ProjectInventoryGesture(_ReadGesture):
         }
 
     def _facts(self, layer, kind):
-        """Faits bruts d'une couche : sorte, géométrie, nombre d'objets, champs."""
+        """Faits bruts d'une couche : sorte, géométrie, nombre d'objets, champs. Ceux d'une couche
+        vectorielle inchangée sont repris de la phrase précédente (`_FACTS`)."""
         backend = self._backend
         if kind != "vector":
             return {"kind": kind, "geometry": None, "fields": []}
+        try:
+            key = backend.facts_key(layer) if hasattr(backend, "facts_key") else None
+        except Exception:  # une clé illisible : la couche est relue, l'inventaire n'échoue pas
+            key = None
+        if key is not None and key in _FACTS:
+            return copy.deepcopy(_FACTS[key])
+        facts = self._read_facts(layer, kind)
+        if key is not None:
+            # Une seule entrée par couche : l'ancienne clé d'une couche qui a changé sort.
+            for old in [k for k in _FACTS if k[0] == key[0]]:
+                del _FACTS[old]
+            _FACTS[key] = copy.deepcopy(facts)
+        return facts
+
+    def _read_facts(self, layer, kind):
+        backend = self._backend
         fields = []
         for name, qgis_type in backend.fields_of(layer):
             field = {"name": name, "type": qgis_type}
