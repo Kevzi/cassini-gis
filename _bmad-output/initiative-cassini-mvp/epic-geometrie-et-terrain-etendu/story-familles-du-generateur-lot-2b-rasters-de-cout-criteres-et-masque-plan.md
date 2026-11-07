@@ -1,7 +1,7 @@
 ---
 title: 'Familles du générateur pour les nouvelles commandes — lot 2b-1, raster de coût'
 type: 'feature'
-ticket: '12'
+lot_de_ticket: '12' # lot du ticket 12 ; le plan du ticket est celui du lot 3
 created: '2026-11-07'
 status: 'built'
 baseline_revision: 'a9d0c064cc2081601c446d3697255330fe8de21b'

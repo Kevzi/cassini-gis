@@ -1413,3 +1413,116 @@ journal (5.36), alors que les rasters du noyau, ouverts par le panneau (4.3), n'
 ne sont pas rouverts au rejeu. Dès qu'un raster de terrain précède un export, le nombre de
 couches de l'export change. Défaut du rejeu, indépendant du modèle : bogue 4.9
 (`_bmad-output/initiative-cassini-mvp/epic-raster-et-terrain/bug-le-rejeu-diverge-quand-un-raster-de-terrain-precede-un-export.md`).
+
+## Ré-entraînement de 11.16 : les quatorze commandes de l'epic 11
+
+Le générateur de 11.12 (cinq lots : géométrie, dérivés du MNT, raster de coût, critères et
+superposition, export au format) a été entraîné par la commande unique : même base
+(`Qwen/Qwen3.5-4B` @ `851bf6e`), même méthode, même révision de llama.cpp (`d812350`),
+8 000 exemples. Avant l'entraînement, l'attendu de S25 dans `plan_reel` est passé du refus au
+plan `data.transform_point` puis `terrain.viewshed` sur `step:1.point`, et un essai neuf,
+`epic11_reel`, a été ajouté : deux phrases par commande de l'epic 11 (28), plus une phrase de
+carroyage sans système (F03) qui attend une question.
+
+### L'entraînement
+
+| | 11.16 |
+|---|---|
+| Commit (arbre propre) | `ce7fe05` |
+| Sortie | `~/cassini-entrainement/11-16` |
+| Durée totale (RTX 3070 Ti, WSL) | 323 min, dont 49 min de validation |
+| Perte finale (500 pas) | 0,00697 |
+| Jetons par séquence | médiane 738, maximum 1 644 ; aucun exemple écarté pour longueur |
+| Validation (graine 2, glouton) | 293 / 300 : plans 236 / 241, questions 34 / 36, refus 23 / 23 |
+| Parité des découpeurs | 300 / 300, 0 écart (202 154 jetons) |
+| Essai `llama-completion` | base + adaptateur et fusionné rendent le plan attendu |
+
+Le jeu de validation n'est plus celui de 5.41 (il contient les nouvelles familles) : les deux
+taux ne se comparent pas. Ratés de validation : deux points UTM d'un fuseau à l'autre non
+reprojetés, un carroyage sans système planifié, deux noms de raster (un identifiant de couche ou
+un nom de fichier à la place de la `source`), un refus à tort (« pas de distance entre deux
+couches »), une mauvaise référence d'étape (`step:0`) dans une chaîne de six étapes.
+
+Modèle fusionné, sortie de l'entraînement `~/cassini-entrainement/11-16/cassini-composition-4b-Q4_K_M.gguf`,
+SHA-256 `9dbed14d801eda2705e4f743b2a0057ccb101db414ef2995b3c0e17296c3ea6e` (même empreinte sur la
+copie de `ajuste-11-16` et sur le fichier installé).
+
+### Essais réels (GPU, modèle fusionné, prompt court)
+
+`cargo test -p cassini-ai --release --features cuda --no-fail-fast --test plan_reel --test
+question_reel --test ecart_reel --test echelle_utm_reel --test terrain_reel --test epic11_reel
+-- --ignored --test-threads=1`, `CASSINI_TEST_MODEL` = la déclaration du modèle mesuré.
+
+| Essai | Barre (celles de 5.41) | 5.41 n° 2 | 11.16 |
+|---|---|---|---|
+| `plan_reel` | ≥ 23 / 25 | 23 / 25 | **23 / 25**, 1 fausse question |
+| `question_reel` | ≥ 11 / 12 | 12 / 12 | **12 / 12** |
+| `ecart_reel` | ≥ 32 / 40 | 34 / 40 | **34 / 40** (plans 20 / 26, questions 8 / 8, refus 6 / 6), 180 s |
+| `echelle_utm_reel` | ≥ 7 / 8 | 8 / 8 | **8 / 8** |
+| `terrain_reel` | ≥ 7 / 8 | 8 / 8 | **8 / 8** |
+| `epic11_reel` (nouveau) | chaque commande ≥ 1 / 2 | 0 / 28 | **27 / 28**, 14 / 14 commandes |
+
+`plan_reel` : S25 devient juste. Restent **S18** (« carte PDF A3 en portrait des routes et des
+gares » : l'export de toutes les couches visibles, alors que l'export ne sait pas choisir ses
+couches et que le refus reste attendu) et **S20** (« depuis le château d'eau en X / Y
+(Lambert-93) » : une question sur des coordonnées pourtant écrites). `epic11_reel` : **A01**
+(« dans quelle direction sont tournées les pentes ») rendu en pente puis reclassement ; **F03**
+(carroyage UTM sans zone) refusé (« aucune commande n'exporte de carte ») au lieu de la
+question du système. **L'essai `epic11_reel` reste donc rouge** sur ce modèle : il exige aussi la
+question de F03, que le tableau des cas du plan demande ; le modèle est accepté malgré cet échec
+(décision ci-dessous), et l'essai garde son exigence pour le prochain ré-entraînement.
+
+Écarts de `ecart_reel` : H08 et H11 (une question au lieu d'un plan), H13 (`label_field`), H17
+(`field`), H18 et H19 (une étape de moins). H08, H17, H18 et H19 l'étaient déjà en 5.41 ; H11 et
+H13 sont nouveaux, H23 et H40 sont devenus justes.
+
+**Décision du propriétaire (2026-11-07)** : accepter le modèle, qui tient chaque barre et
+apprend les quatorze commandes ; F03, A01, S18, S20 et la reprojection entre fuseaux UTM vont au
+prochain ré-entraînement groupé (`deferred-work.md`).
+
+### Installation
+
+Dossier des modèles du poste : le modèle de 11.16 sous la déclaration retenue par le panneau
+(`cassini-composition-4b.modele.json`, qui désigne `cassini-composition-4b-Q4_K_M.gguf`, lien dur
+vers le fichier de `ajuste-11-16`) ; celui de 5.41 gardé
+sous `cassini-composition-4b-5-41` (GGUF et déclaration). `cassini run model.list` voit les six
+modèles du dossier. Noyau et extension installés déjà identiques au dépôt.
+
+### Démo dans QGIS
+
+Le 2026-11-07, sonde enchaînée sur une copie du projet réel (`projet-sonde-11-16.qgz`) : MNT de
+Villeneuve-le-Roi en Lambert-93, plus quatre rasters de test dérivés du MNT sur sa grille, hors
+du dépôt (`donnees-test-cassini/derives-11-16/`, valeurs fictives : coût = 1 + pente en degrés / 5 ;
+note d'accessibilité = 10 × (1 − altitude normalisée) ; note de calme = 10 × min(1, pente en
+degrés / 15 + altitude normalisée / 2), arrondies au dixième ; masque = 1 sous 40 m, sinon 0). Modèle installé,
+noyau installé : **douze phrases sur douze** rendent un plan juste, exécuté, puis **le rejeu
+rend `identical: true`** (29 étapes).
+
+| Phrase | Résultat |
+|---|---|
+| phrase de démo de `CLAUDE.md` | plan de 5 étapes, PDF écrit ; 25,8 s |
+| référence MGRS d'un point WGS84 | `coord.convert` → `31UDP5698598162` |
+| distance et azimut entre deux points Lambert-93 | deux `data.transform_point` vers 4326, puis `geo.distance_azimuth` : 3 606 m, 55,9° |
+| champ de vision depuis un point WGS84 | `data.transform_point` vers 2154, puis `terrain.viewshed` sur `step:1.point` |
+| champ de vision cumulé de deux points, 2 km | `terrain.viewshed_cumulative` |
+| orientation des versants ; relief ombré | `terrain.aspect` ; `terrain.hillshade` |
+| points hauts | `terrain.peaks`, 20 sommets, couche de points ouverte |
+| pente au-delà de 10 % | `terrain.slope` en pourcentage, puis `raster.reclassify` (`min: 10`) |
+| chemin le moins coûteux sur le raster de coût | `terrain.least_cost_path`, 6 426 m |
+| accessibilité (2) et calme (1), zones inondables exclues | `raster.weighted_overlay`, masque compris |
+| export A3, carroyage Lambert-93 tous les 1 km | `layout.export_pdf` (`page_size: a3`, `grid` projeté 2154, 1 km) |
+
+Compositions de 3,6 à 13,3 s hors phrase de démo.
+
+Complément (relecture), même jour, seconde sonde sur une autre copie (`projet-sonde-11-16b.qgz`) :
+**quatre phrases sur quatre**, rejeu `identical: true` (5 étapes).
+
+| Phrase | Résultat |
+|---|---|
+| coût cumulé depuis un point Lambert-93 sur le raster de coût | `terrain.cost_distance`, 549 712 cellules atteintes |
+| point d'arrivée à 2 km à l'azimut 90° d'un point WGS84 | `geo.destination_point` |
+| recoupement de deux visées (45° et 315°) | `geo.bearing_intersection`, 2 601 m de chaque station |
+| « que vaut la référence MGRS 31UDP 56985 98162 en latitude et longitude » | `coord.convert` → le point de la phrase MGRS de la première sonde, au millionième de degré |
+
+La distance de la première sonde (3 606 m, 55,9°) se retrouve à la main par l'approximation
+plane locale sur les deux points reprojetés (≈ 3,60 km, ≈ 55,9°).

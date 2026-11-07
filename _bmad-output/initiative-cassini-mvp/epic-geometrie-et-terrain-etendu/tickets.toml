@@ -177,12 +177,23 @@ hitl = false
 risk = "low"
 
 [[entry]]
+id = 18
+type = "story"
+title = "Second jeu de test reel (Annecy) pret pour la demonstration"
+description = "Prepare hors du depot, dans ../donnees-test-cassini/annecy/, un second jeu de donnees reelles deja telecharge le 2026-11-07 (BD ALTI 25 m et RGE ALTI 5 m du 74, BD TOPO du 74, ADMIN EXPRESS, PLUi du Grand Annecy, cadastre d'Annecy, gares SNCF) : archives decompressees, MNT convertis en GeoTIFF par QGIS, gares du 74 en CSV a colonnes X/Y, projet QGIS de test, sources et licences dans LISEZMOI.txt, et le projet ajoute a la sonde en phrases enchainees. Il couvre ce que Villeneuve-le-Roi n'a pas : un relief fort, un gros MNT, un site a cheval sur les fuseaux UTM 31N et 32N, des Shapefile et un CSV reels."
+verify = "Le projet de test s'ouvre dans QGIS 3.44 avec chaque couche lisible et dans son systeme ; le noyau lit les deux MNT ; la sonde enchainee tourne sur ce projet ; LISEZMOI.txt nomme chaque source, sa date et sa licence ; rien de ce dossier n'est commite."
+covers = []
+after = []
+hitl = false
+risk = "low"
+
+[[entry]]
 id = 14
 type = "story"
 title = "Demonstration de bout en bout dans QGIS"
 description = "Une sonde, lancee sous le Python de QGIS sur le poste du proprietaire, enchaine par le vrai modele une conversion MGRS, une reprojection vers le systeme du MNT, un champ de vision cumule et un PDF A3 carroye, puis rejoue le journal."
 verify = "Une seule demande en francais suffit a l'enchainement ; la sonde rend OK, le PDF porte le carroyage demande, le rejeu apres fermeture et reouverture du projet est identique, et le proprietaire confirme la demonstration."
 covers = ["G2", "G4", "G7", "G11", "G12"]
-after = [13]
+after = [13, 18]
 hitl = true
 risk = "medium"

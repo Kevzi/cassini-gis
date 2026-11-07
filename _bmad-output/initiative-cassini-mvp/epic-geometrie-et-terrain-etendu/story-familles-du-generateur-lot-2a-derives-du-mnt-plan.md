@@ -1,7 +1,7 @@
 ---
 title: 'Familles du générateur pour les nouvelles commandes — lot 2a, dérivés du MNT'
 type: 'feature'
-ticket: '12'
+lot_de_ticket: '12' # lot du ticket 12 ; le plan du ticket est celui du lot 3
 created: '2026-11-07'
 status: 'built'
 baseline_revision: 'acc9283880a7e55ae32408b7e46b61e4edecf604'
