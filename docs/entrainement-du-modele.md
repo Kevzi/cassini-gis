@@ -100,8 +100,8 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `description` | décrire une couche, inventaire du projet, version, modèles installés |
 | `question_couche_absente` | une couche dont rien ne parle dans l'inventaire → question |
 | `question_champ_absent` | un critère qu'aucun champ ne porte → question, jamais un champ voisin deviné |
-| `refus` | courriel, suppression, reprojection, export de couche, style, itinéraire, téléchargement, 3D → refus affirmatif |
-| `refus_hors_registre` | cadrage ou zoom de la carte, PDF en A3, A0 ou portrait, altitude moyenne par zone (statistiques sur un raster ; depuis 5.41 aussi après une pente ou un champ de vision : « la pente puis sa moyenne par commune » est un refus entier), point de terrain écrit dans un autre système que le MNT (WGS84, UTM sur Lambert-93, Lambert-93 sur UTM ; 5.41, MNT à système connu seulement), seuil sur la pente (« où la pente dépasse 15 % » : aucune commande ne sélectionne des cellules d'un raster par leur valeur, depuis 4.6), MNT présent pour les deux derniers, trajet depuis plusieurs lieux (« de chaque gare », « de toutes les gares », « des gares ») → refus affirmatif, jamais un plan de substitution. Le champ de vision, la ligne de vue et la pente n'y sont plus depuis 4.6 : le registre les a |
+| `refus` | courriel, suppression, reprojection d'une couche, export de couche, style, itinéraire, téléchargement, 3D → refus affirmatif |
+| `refus_hors_registre` | cadrage ou zoom de la carte, PDF en A3, A0 ou portrait, altitude moyenne par zone (statistiques sur un raster ; depuis 5.41 aussi après une pente ou un champ de vision : « la pente puis sa moyenne par commune » est un refus entier), seuil sur la pente (« où la pente dépasse 15 % » : aucune commande ne sélectionne des cellules d'un raster par leur valeur, depuis 4.6), MNT présent pour l'altitude par zone et le seuil, trajet depuis plusieurs lieux (« de chaque gare », « de toutes les gares », « des gares ») → refus affirmatif, jamais un plan de substitution. Le point de terrain écrit dans un autre système que le MNT, refusé en 5.41, est un plan depuis 11.12 (`terrain_autre_systeme`). Le champ de vision, la ligne de vue et la pente n'y sont plus depuis 4.6 : le registre les a |
 | `pente` | « fais la carte des pentes du MNT en pourcentage » → `terrain.slope`, `dem` recopié de la `source` du raster de l'inventaire, `unit` telle qu'écrite (`degrees` : « en degrés », « en ° » ; `percent` : « en pourcentage », « en % », « en pour cent ») (4.6) |
 | `ligne_de_vue` | « y a-t-il une ligne de vue entre le point (... ; ...) en Lambert-93 et le point (... ; ...) en Lambert-93, œil à 2 m » → `terrain.line_of_sight`, deux points écrits en Lambert-93 ou en UTM 31N/32N, le système écrit à chaque point (le garde-fou en demande une occurrence par point), le MNT dans ce même système ; `observer_height` et `target_height` seulement s'ils sont écrits, jamais courbure ni réfraction (4.6) |
 | `champ_de_vision` | « calcule le champ de vision depuis le point ... (UTM 31N) sur 2 km » → `terrain.viewshed`, même règle de points et de MNT ; hauteurs et `radius` seulement s'ils sont écrits (4.6) ; depuis 5.41, le rayon aussi avant le point (« dans un rayon de 800 m autour du point … ») |
@@ -109,6 +109,12 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `appartenance_commune` | « qui appartiennent à la commune de X », « sur le territoire de X » → sélection de la commune par son nom, puis intersection ; sans couche de communes, ou sans nom de commune, une question. Une commune citée seule (« à Orly ») reste un contexte sans effet |
 | `question_isochrone` | isochrone ou cible à une durée de trajet d'un lieu nommé (« depuis la mairie de X », « les parcelles à 10 min à pied de la gare de X »), sans coordonnées → question qui demande le point en X et Y avec son système ; « d'une gare » → question qui demande laquelle |
 | `etape_unique` | une seule opération demandée, une autre couche citée pour le contexte (« je m'occuperai des écoles plus tard ») → une étape |
+| `conversion_coordonnees` | « donne la référence MGRS du point 48,8566 N, 2,3522 E (WGS84) », « convertis 31U DQ 52000 12000 en latitude et longitude » → `coord.convert` entre WGS84, UTM et MGRS, une ou deux formes demandées ; `mgrs_precision` (« à 3 chiffres ») et `utm_zone` (« dans le fuseau 32 ») seulement s'ils sont écrits ; un point en Lambert-93 vers l'UTM ou le MGRS → `data.transform_point` vers 4326, puis `coord.convert` sur `step:1.point` (11.12) |
+| `reprojection_point` | « reprojette le point … (Lambert-93) en WGS84 », « donne les coordonnées du point … (UTM 31N) en Lambert-93 », « … en Web Mercator (EPSG:3857) » → une étape `data.transform_point`, le système d'arrivée écrit (11.12) |
+| `distance_azimut` | « quelle distance sépare le point … du point … », « distance et azimut entre les points … et … (UTM 31N) » → `geo.distance_azimuth` ; `unit` seulement si elle est écrite (`gon` : « en grades », `deg` : « en degrés ») ; deux points en Lambert-93 → deux `data.transform_point` vers 4326, puis le calcul sur `step:1.point` et `step:2.point` ; système écrit à chaque point ou une fois pour les deux (11.12) |
+| `point_projete` | « quel point atteint-on à 3 km du point …, azimut 45° » → `geo.destination_point`, l'azimut toujours avec son unité (« 45° », « 45 degrés » → `deg` ; « 50 gr », « 50 grades » → `gon`) et la distance tels qu'écrits ; « résultat en MGRS » → `coord.convert` sur `step:1.point` (11.12) |
+| `recoupement` | « recoupe la visée du point … à l'azimut 40° avec celle du point … à l'azimut 310° » → `geo.bearing_intersection`, chaque station avec son azimut ; même suite MGRS que `point_projete` (11.12) |
+| `terrain_autre_systeme` | champ de vision ou ligne de vue depuis un point écrit dans un autre système que le MNT (WGS84, UTM d'une autre zone, Lambert-93 sur un MNT en UTM, MGRS) → `data.transform_point` vers l'`epsg` du MNT (précédé de `coord.convert` vers le WGS84 pour une référence MGRS), puis la commande de terrain sur `step:k.point` ; MNT à système connu seulement. Remplace le refus `NO_TERRAIN_CRS` de 5.41 (11.12) |
 | `redemande` | environ 5 % du jeu : un exemple d'une autre famille vu au tour de redemande (voir plus bas) |
 
 Depuis 5.15, `conditions_multiples` porte aussi les plans à **trois conditions** (cible
@@ -146,6 +152,35 @@ des familles, jamais des règles de prompt :
 pourtant `ecart_reel` comme mesure aveugle : le score qui suivra mesure en partie ce qu'on a
 cherché à corriger. Il faudra le lire avec cette réserve, et un jeu neuf, écrit par un autre
 auteur, redonnera une mesure aveugle.
+
+### Familles de géométrie (11.12, lot 1)
+
+Les cinq commandes de géométrie de l'epic 11 ont chacune leur famille (`conversion_coordonnees`,
+`reprojection_point`, `distance_azimut`, `point_projete`, `recoupement`), et
+`terrain_autre_systeme` montre la reprojection d'un point avant une commande de terrain. Règle
+de choix, celle du catalogue :
+
+- les deux systèmes dans WGS84, UTM et MGRS → `coord.convert` ;
+- un autre système en jeu (Lambert-93, Lambert II étendu, Web Mercator, ou le système d'un
+  MNT) → `data.transform_point`, puis `coord.convert` si le MGRS est demandé.
+
+Une conversion ou une reprojection est toujours une étape visible du plan. Tout nombre du plan
+(azimut, distance, précision, fuseau) est écrit dans la demande ; un `Angle` porte toujours son
+`unit` ; une référence MGRS est valide (tirée par `Mgrs::from_lat_lon` du noyau) et le plan la
+recopie sous sa forme canonique, sans espace. Chaque exemple passe `check_plan` puis
+`guard_coordinates` sans changement.
+
+**Refus retiré.** Le refus `NO_TERRAIN_CRS` de 5.41 (« aucune ne reprojette un point ») est
+faux depuis `data.transform_point` : il n'est plus engendré, et le garde-fou
+`what_is_refused_out_of_registry_is_still_missing_from_the_registry` échoue si une famille de
+refus le réintroduit. Le refus de reprojection d'une **couche** reste (`refus`) : `data.reproject`
+est encore planifiée.
+
+**Redemande.** Les plans de géométrie à une étape ne se corrompent pas (aucune couche) : le poids
+de `redemande` passe de 24 à 36 pour garder environ 5 % du jeu (419 sur 8 000 à la graine 1).
+
+Les familles raster et de terrain étendu (lot 2) et l'export au format (lot 3) restent à faire
+avant le ré-entraînement groupé (entrée 16).
 
 ### Les inventaires de QGIS (5.15)
 
