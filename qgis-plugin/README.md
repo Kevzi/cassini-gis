@@ -195,8 +195,8 @@ Recette manuelle de `analysis.isochrone` [ticket 11] (réseau apporté par l'uti
 Recette manuelle de `layout.export_pdf` [ticket 12] (jeu `../donnees-test-cassini/`) :
 
 1. Ouvrez `projet-test-villeneuve.qgz`. Choisissez `layout.export_pdf` : les champs sont
-   `title` et, facultatif, `scale` (le fichier `out` est nommé par le noyau, le panneau ne
-   l'affiche pas).
+   `title` et, facultatifs, `scale`, `page_size`, `orientation` et `grid` (le fichier `out`
+   est nommé par le noyau, le panneau ne l'affiche pas).
 2. Lancez avec un titre : un PDF A4 paysage apparaît dans le dossier de travail ; ouvert
    dans un lecteur, il montre le titre, la carte des couches visibles, la légende, la barre
    d'échelle, la flèche du nord et la ligne « Sources » (noms de fichiers, jamais de chemin).
@@ -214,10 +214,22 @@ Recette manuelle de `layout.export_pdf` [ticket 12] (jeu `../donnees-test-cassin
    `layout.bad_params`.
 5. Cadre vide : déplacez la carte de QGIS loin de toute donnée, puis lancez avec `scale`
    25000 : `layout.empty` (« déplacez la vue de QGIS sur les données »), aucun fichier.
-6. Sonde sous le vrai QGIS : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat"
+6. Format, orientation et carroyage [epic 11, entrée 11] : `page_size` vaut `a4` (défaut),
+   `a3`, `a2`, `a1` ou `a0`, `orientation` vaut `landscape` (défaut) ou `portrait` ; les
+   éléments gardent leur place en proportion de la page. `grid` pose une grille sur la
+   carte, à saisir en JSON : `{"kind": "projected", "epsg": 32631, "interval": {"value": 1,
+   "unit": "km"}}` trace un carroyage UTM 31 N au kilomètre (les lignes MGRS, sans leurs
+   étiquettes), `{"kind": "degrees", "interval": {"value": 0.01, "unit": "deg"}}` un
+   graticule WGS84 de 0,01° (`gon` accepté, 1 gon = 0,9°). Les étiquettes sont en décimal,
+   à gauche et en bas de la carte. Un `epsg` inconnu de QGIS donne `data.unknown_crs`, un
+   système géographique en `projected` ou plus de 200 lignes par axe sur la carte
+   `layout.bad_params`, sans fichier. Sans ces paramètres, le PDF reste une A4 paysage sans
+   grille, et un journal d'avant rejoue à l'identique.
+7. Sonde sous le vrai QGIS : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat"
    qgis-plugin/tests/probe_layout_export.py` doit finir par `RÉSULTAT : OK` (elle exporte
    aussi au 1:25 000 et relit l'échelle, repasse le centre en EPSG:4326 pour éprouver la
-   reprojection réelle, et vérifie qu'un cadre vide est refusé).
+   reprojection réelle, vérifie qu'un cadre vide est refusé, et qu'un export A3 paysage
+   carroyé UTM au kilomètre a la page A3 et la grille).
 
 Recette manuelle de la saisie en langage naturel et du plan [ticket 6] (QGIS 3.44, jeu
 `../donnees-test-cassini/`, un modèle GGUF dans le dossier des modèles : sans choix

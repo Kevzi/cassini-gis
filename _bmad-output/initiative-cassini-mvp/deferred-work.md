@@ -725,3 +725,11 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/bug-le-test-de-fermeture-du-canal-d-ia-externe-echoue-de-temps-e-plan.md`
   summary: Sous Windows, si un relais prend la seule instance de tube en attente juste avant la fermeture, `wake` peut attendre jusqu'à ~5 s (WaitNamedPipeW) une instance qui ne viendra plus, et retarder l'extinction.
   evidence: maybe-false, gravité medium non vérifiée ; existait avant 5.42 (relecture rapide de 5.42). Preuve : mesurer sous Windows le temps de `session.external {enabled:false}` avec un relais qui se connecte juste avant.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-format-orientation-et-carroyage-de-la-mise-en-page-plan.md`
+  summary: La famille de refus « papier » du générateur (`refus_hors_registre`, cas 1, `ONLY_A4`, `training/src/families.rs`) apprend au modèle à refuser « exporte en A3 », « en portrait », « en A0 », que `layout.export_pdf` sait désormais faire (`page_size`, `orientation`, `grid`) ; à remplacer par des plans au ré-entraînement (entrée 16), avec une famille pour le carroyage.
+  evidence: Le garde-fou `what_is_refused_out_of_registry_is_still_missing_from_the_registry` a échoué à l'arrivée de `page_size` et `orientation` ; l'entrée 11.11 n'a ôté que la vérification des noms de paramètres de l'export, sans toucher au générateur ni aux exemples (frontière du plan : ni exemple ni ré-entraînement).
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-format-orientation-et-carroyage-de-la-mise-en-page-plan.md`
+  summary: Plus rien n'échoue si le remplacement de la famille de refus `ONLY_A4` est oublié : le garde-fou `what_is_refused_out_of_registry_is_still_missing_from_the_registry` n'a plus de volet « papier », et `docs/entrainement-du-modele.md:1119` décrit encore ce refus comme juste.
+  evidence: Relecture rapide de 11.11 ; à l'entrée 16, remettre un garde-fou qui échoue tant qu'un exemple refuse un format ou une orientation désormais permis, et corriger la doc.

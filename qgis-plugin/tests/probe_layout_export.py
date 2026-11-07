@@ -11,11 +11,15 @@ posés, le projet n'a gagné aucune mise en page ; puis un export à `scale` 250
 et `center` dans le système du projet ; puis ce centre, reprojeté en EPSG:4326 par le vrai QGIS
 (`reproject_point`) et repassé comme au rejeu, est ramené dans le système du projet à moins d'un
 centimètre près, l'échelle relue valant encore 25000 ; puis un centre à 500 km des données donne
-un cadre vide, refusé (`layout.empty`) sans fichier ; puis un projet vide est refusé
-(`layout.empty`) sans fichier. Le jeu de données vit hors du dépôt (voir CLAUDE.md §5).
+un cadre vide, refusé (`layout.empty`) sans fichier ; puis un export A3 paysage avec un carroyage
+UTM 31 N (EPSG:32631) au kilomètre a une boîte de page de 1190,55 × 841,89 pt (± 1 pt), et sa
+carte de mise en page porte une grille active de ce système et de cet intervalle (le premier
+export, sans les nouveaux paramètres, garde 841,89 × 595,28 pt et aucune grille) ; puis un
+projet vide est refusé (`layout.empty`) sans fichier. Le jeu de données vit hors du dépôt (voir CLAUDE.md §5).
 """
 
 import os
+import re
 import sys
 import tempfile
 
@@ -39,10 +43,44 @@ out_empty = os.path.join(out_dir, "2-layout.export_pdf.pdf")
 out_scale = os.path.join(out_dir, "3-layout.export_pdf.pdf")
 out_wgs84 = os.path.join(out_dir, "4-layout.export_pdf.pdf")
 out_far = os.path.join(out_dir, "5-layout.export_pdf.pdf")
+out_a3 = os.path.join(out_dir, "6-layout.export_pdf.pdf")
 layouts_before = len(project.layoutManager().layouts())
 results = []
 gestures = []
 scaled = {}
+grids = []  # (système, intervalle X, intervalle Y, active) des grilles de chaque export
+
+
+def media_box(path):
+    """(largeur, hauteur) en points de la première boîte de page du PDF."""
+    with open(path, "rb") as f:
+        data = f.read()
+    m = re.search(rb"/MediaBox\s*\[\s*([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s*\]", data)
+    if m is None:
+        return None
+    x0, y0, x1, y1 = (float(v) for v in m.groups())
+    return (x1 - x0, y1 - y0)
+
+
+def close_to(box, want):
+    return box is not None and abs(box[0] - want[0]) <= 1 and abs(box[1] - want[1]) <= 1
+
+
+# Les grilles posées par le fond, relevées au moment de l'export (la mise en page est jetée après).
+from qgis.core import QgsLayoutExporter, QgsLayoutItemMap  # noqa: E402
+
+_export_to_pdf = QgsLayoutExporter.exportToPdf
+
+
+def _spy_export(self, *args, **kwargs):
+    for item in self.layout().items():
+        if isinstance(item, QgsLayoutItemMap):
+            for g in item.grids().asList():
+                grids.append((g.crs().authid(), g.intervalX(), g.intervalY(), g.enabled()))
+    return _export_to_pdf(self, *args, **kwargs)
+
+
+QgsLayoutExporter.exportToPdf = _spy_export
 
 
 def step_empty():
@@ -61,6 +99,22 @@ def step_empty():
     gestures[-1].start({"title": "Vide", "out": out_empty}, done)
 
 
+def step_a3():
+    grids.clear()
+    grid = {"kind": "projected", "epsg": 32631, "interval": {"value": 1, "unit": "km"}}
+
+    def done(result=None, error=None):
+        box = media_box(out_a3) if error is None and os.path.isfile(out_a3) else None
+        ok = error is None and close_to(box, (1190.55, 841.89))
+        ok = ok and grids == [("EPSG:32631", 1000.0, 1000.0, True)]
+        ok = ok and "grid" not in result and "page_size" not in result
+        results.append(("A3 paysage, carroyage UTM 1 km", (box, grids[:]) if error is None else error.code, ok))
+        QTimer.singleShot(0, step_empty)
+
+    gestures.append(layout_export.LayoutExportGesture())
+    gestures[-1].start({"title": "Villeneuve-le-Roi, A3 carroyé", "out": out_a3, "page_size": "a3", "grid": grid}, done)
+
+
 def step_far():
     # Centre à 500 km à l'est des données, dans le système du projet : aucune couche dans le cadre.
     c = scaled["center"]
@@ -69,7 +123,7 @@ def step_far():
     def done(result=None, error=None):
         ok = error is not None and error.code == "layout.empty" and not os.path.exists(out_far)
         results.append(("cadre vide", error.code if error else result, ok))
-        QTimer.singleShot(0, step_empty)
+        QTimer.singleShot(0, step_a3)
 
     gestures.append(layout_export.LayoutExportGesture())
     gestures[-1].start({"title": "Loin", "out": out_far, "scale": 25000, "center": far}, done)
@@ -129,6 +183,8 @@ def done_ok(result=None, error=None):
         ok = ok and set(gestures[0].items_placed) == set(layout_export.EXPECTED_ITEMS)
         ok = ok and len(project.layoutManager().layouts()) == layouts_before
         ok = ok and "scale" not in result and "center" not in result
+        # Sans les nouveaux paramètres : A4 paysage, aucune grille.
+        ok = ok and close_to(media_box(out_ok), (841.89, 595.28)) and grids == []
     results.append(("export", result if error is None else error.code, ok))
     QTimer.singleShot(0, step_scale)
 
@@ -140,8 +196,9 @@ QCoreApplication.exec()
 
 print("PDF :", out_ok)
 print("PDF au 1:25 000 :", out_scale)
+print("PDF A3 carroyé :", out_a3)
 for row in results:
     print(row)
-ok = len(results) == 5 and all(r[2] for r in results)
+ok = len(results) == 6 and all(r[2] for r in results)
 print("RÉSULTAT :", "OK" if ok else "ÉCHEC")
 sys.exit(0 if ok else 1)

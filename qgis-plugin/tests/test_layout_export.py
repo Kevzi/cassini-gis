@@ -17,13 +17,17 @@ class FakeLayer:
 
 
 class FakeBackend:
-    def __init__(self, layers=(), fail=False, partial=False, center=None, held=None, frame=None, crs="EPSG:2154"):
+    def __init__(
+        self, layers=(), fail=False, partial=False, center=None, held=None, frame=None, crs="EPSG:2154", grid_frame=None
+    ):
         self.layers = list(layers)
         self.fail, self.partial = fail, partial
         self.center = center  # centre de la carte de QGIS ; None : pas de carte
         self.held = held  # échelle relue sur la carte ; None : celle demandée
         self.frame = frame  # emprise de la carte de mise en page ; None : voir `export_pdf`
         self.crs = crs
+        self.grid_frame = grid_frame  # cadre de la carte dans le système de la grille
+        self.known = {2154, 4326, 32631}
         self.exported = None
         self.scale = "jamais passée"
         self.center_asked = []
@@ -41,6 +45,9 @@ class FakeBackend:
         if from_authid == "EPSG:9999":
             return None
         return (x + 10.0, y + 5.0)
+
+    def knows(self, epsg):
+        return epsg in self.known
 
     def project_crs(self):
         return self.crs
@@ -61,6 +68,12 @@ class FakeBackend:
         self.exported = (layers, title, sources_text, out, authid, box)
         self.kwargs = kwargs
         scale = kwargs.get("scale")
+        grid = kwargs.get("grid")
+        if grid is not None:
+            # Comme le vrai fond : la densité est jugée avant l'export, aucun fichier n'est écrit.
+            # Par défaut, un cadre de 10 km de côté (0,2° × 0,1° pour un graticule).
+            default = (0.0, 0.0, 10000.0, 10000.0) if grid["projected"] else (2.3, 48.7, 2.5, 48.8)
+            layout_export.check_grid_density(self.grid_frame or default, grid["interval"])
         if self.partial:
             with open(out, "wb") as f:
                 f.write(b"%PD")  # fichier à demi écrit
@@ -385,6 +398,154 @@ class LayoutExportTest(unittest.TestCase):
         (_, error), gesture = run(backend, {"title": "Carte", "out": self.out, "scale": 25000})
         self.assertEqual(error.code, "layout.export_failed")
         self.assertEqual(gesture.items_placed, [])
+
+    def test_defaults_keep_the_backend_arguments_unchanged(self):
+        backend = FakeBackend(TWO)
+        (result, error), _ = run(backend, {"title": "Carte", "out": self.out})
+        self.assertIsNone(error)
+        self.assertEqual(backend.kwargs, {})
+        self.assertEqual(layout_export.page_dimensions(None), (297.0, 210.0))
+        self.assertEqual(set(result), {"file", "page_count", "layer_count", "sources", "truncated"})
+        for extra in ({"page_size": None}, {"orientation": None}, {"grid": None}):
+            backend = FakeBackend(TWO)
+            (_, error), _ = run(backend, dict({"title": "Carte", "out": self.out}, **extra))
+            self.assertIsNone(error)
+            self.assertEqual(backend.kwargs, {}, extra)
+
+    def test_a3_landscape_with_a_utm_km_grid(self):
+        backend = FakeBackend(TWO)
+        grid = {"kind": "projected", "epsg": 32631, "interval": {"value": 1, "unit": "km"}}
+        (result, error), _ = run(backend, {"title": "Carte", "out": self.out, "page_size": "a3", "grid": grid})
+        self.assertIsNone(error)
+        self.assertEqual(
+            backend.kwargs,
+            {"page": ("a3", "landscape"), "grid": {"authid": "EPSG:32631", "interval": 1000.0, "projected": True}},
+        )
+        self.assertEqual(layout_export.page_dimensions(backend.kwargs["page"]), (420.0, 297.0))
+        self.assertNotIn("grid", result)  # le résultat ne change pas
+        self.assertTrue(os.path.isfile(self.out))
+
+    def test_portrait_with_a_degree_graticule(self):
+        backend = FakeBackend(TWO)
+        grid = {"kind": "degrees", "interval": {"value": 0.01, "unit": "deg"}}
+        params = {"title": "Carte", "out": self.out, "page_size": "a4", "orientation": "portrait", "grid": grid}
+        (result, error), _ = run(backend, params)
+        self.assertIsNone(error)
+        self.assertEqual(backend.kwargs["page"], ("a4", "portrait"))
+        self.assertEqual(layout_export.page_dimensions(backend.kwargs["page"]), (210.0, 297.0))
+        self.assertEqual(backend.kwargs["grid"], {"authid": "EPSG:4326", "interval": 0.01, "projected": False})
+
+    def test_orientation_alone_is_an_a4(self):
+        backend = FakeBackend(TWO)
+        (_, error), _ = run(backend, {"title": "Carte", "out": self.out, "orientation": "portrait"})
+        self.assertIsNone(error)
+        self.assertEqual(backend.kwargs, {"page": ("a4", "portrait")})
+        self.assertEqual(layout_export.page_dimensions(("a0", "landscape")), (1189.0, 841.0))
+
+    def test_grads_become_degrees(self):
+        backend = FakeBackend(TWO)
+        for interval, degrees in (({"value": 1, "unit": "gon"}, 0.9), ({"value": 0.5}, 0.5)):
+            grid = {"kind": "degrees", "interval": interval}
+            (_, error), _ = run(backend, {"title": "Carte", "out": self.out, "grid": grid})
+            self.assertIsNone(error)
+            self.assertAlmostEqual(backend.kwargs["grid"]["interval"], degrees)
+            self.assertEqual(backend.kwargs["grid"]["authid"], "EPSG:4326")
+
+    def test_values_outside_the_lists_are_refused_without_file(self):
+        km = {"value": 1, "unit": "km"}
+        for extra in (
+            {"page_size": "a5"},
+            {"page_size": "A4"},
+            {"page_size": 4},
+            {"orientation": "paysage"},
+            {"orientation": True},
+            {"grid": {"kind": "mgrs", "interval": km}},
+            {"grid": {"interval": km}},
+            {"grid": "utm"},
+            {"grid": {"kind": "projected", "interval": km}},
+            {"grid": {"kind": "projected", "epsg": "32631", "interval": km}},
+            {"grid": {"kind": "projected", "epsg": True, "interval": km}},
+            {"grid": {"kind": "projected", "epsg": 32631, "interval": {"value": 1, "unit": "deg"}}},
+            {"grid": {"kind": "projected", "epsg": 32631, "interval": {"value": 1}}},
+            {"grid": {"kind": "degrees", "interval": km}},
+            {"grid": {"kind": "degrees", "epsg": 4326, "interval": {"value": 1}}},
+            {"grid": {"kind": "degrees"}},
+        ):
+            backend = FakeBackend(TWO)
+            (result, error), _ = run(backend, dict({"title": "Carte", "out": self.out}, **extra))
+            self.assertIsNone(result, extra)
+            self.assertEqual(error.code, "layout.bad_params", extra)
+            self.assertIsNone(backend.exported, extra)
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_a_null_or_negative_interval_is_refused(self):
+        for interval in (
+            {"value": 0, "unit": "km"},
+            {"value": -1, "unit": "m"},
+            {"value": float("nan"), "unit": "m"},
+            {"value": "1", "unit": "m"},
+        ):
+            for grid in (
+                {"kind": "projected", "epsg": 32631, "interval": interval},
+                {"kind": "degrees", "interval": dict(interval, unit="deg")},
+            ):
+                backend = FakeBackend(TWO)
+                (_, error), _ = run(backend, {"title": "Carte", "out": self.out, "grid": grid})
+                self.assertEqual(error.code, "layout.bad_params", grid)
+                self.assertIsNone(backend.exported)
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_an_unknown_grid_system_is_refused_without_file(self):
+        backend = FakeBackend(TWO)
+        grid = {"kind": "projected", "epsg": 999999, "interval": {"value": 1, "unit": "km"}}
+        (result, error), _ = run(backend, {"title": "Carte", "out": self.out, "grid": grid})
+        self.assertIsNone(result)
+        self.assertEqual(error.code, "data.unknown_crs")
+        self.assertIn("999999", error.message)
+        self.assertIsNone(backend.exported)
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_a_grid_epsg_zero_is_an_unknown_system(self):
+        backend = FakeBackend(TWO)
+        grid = {"kind": "projected", "epsg": 0, "interval": {"value": 1, "unit": "km"}}
+        (result, error), _ = run(backend, {"title": "Carte", "out": self.out, "grid": grid})
+        self.assertIsNone(result)
+        self.assertEqual(error.code, "data.unknown_crs")
+        self.assertIsNone(backend.exported)
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_a_too_dense_grid_is_refused_without_file(self):
+        # Cadre de 25 km de large, écart de 124 m : 202 lignes, au-delà de 200 : refusé avant l'export.
+        backend = FakeBackend(TWO, grid_frame=(0.0, 0.0, 25000.0, 10000.0))
+        grid = {"kind": "projected", "epsg": 32631, "interval": {"value": 124, "unit": "m"}}
+        (result, error), gesture = run(backend, {"title": "Carte", "out": self.out, "grid": grid})
+        self.assertIsNone(result)
+        self.assertEqual(error.code, "layout.bad_params")
+        self.assertIn("200", error.message)
+        self.assertFalse(os.path.exists(self.out))
+        self.assertEqual(gesture.items_placed, [])
+        # 125 m : 201 lignes (bords compris), refusé ; 126 m : 199 lignes, permis.
+        grid["interval"]["value"] = 125
+        (_, error), _ = run(backend, {"title": "Carte", "out": self.out, "grid": grid})
+        self.assertEqual(error.code, "layout.bad_params")
+        grid["interval"]["value"] = 126
+        (_, error), _ = run(backend, {"title": "Carte", "out": self.out, "grid": grid})
+        self.assertIsNone(error)
+
+    def test_grid_density_helper(self):
+        layout_export.check_grid_density((0.0, 0.0, 199.0, 199.0), 1.0)  # 200 lignes : permis
+        for frame, interval in (
+            ((0.0, 0.0, 200.0, 1.0), 1.0),  # 201 lignes
+            ((0.0, 0.0, 2.01, 1.0), 0.01),
+            (None, 1.0),
+            ((0.0, 0.0, float("inf"), 1.0), 1.0),
+        ):
+            with self.assertRaises(layout_export.GridError):
+                layout_export.check_grid_density(frame, interval)
+        self.assertEqual(
+            [layout_export._decimals(v) for v in (1000.0, 0.01, 0.9, 0.25, 1e-9)],
+            [0, 2, 1, 2, 6],
+        )
 
     def test_expected_items_are_the_five_plus_title(self):
         self.assertEqual(

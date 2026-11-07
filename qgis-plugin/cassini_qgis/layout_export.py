@@ -1,7 +1,7 @@
 """Geste `layout.export_pdf` : la carte du projet en PDF par la mise en page de QGIS.
 
-Le noyau décide ; ce module exécute. Il monte en mémoire une mise en page A4 paysage
-(carte, titre, légende, barre d'échelle, flèche du nord, sources), l'exporte dans le
+Le noyau décide ; ce module exécute. Il monte en mémoire une mise en page (A4 paysage par
+défaut ; carte, titre, légende, barre d'échelle, flèche du nord, sources), l'exporte dans le
 fichier `out` nommé par le noyau (AD-10) puis la jette : rien n'est ajouté au projet,
 aucune couche n'est modifiée. La carte montre les couches visibles du projet, cadrée sur
 leur emprise réunie dans le SCR du projet, sauf celles que le noyau nomme dans `leave_out`
@@ -19,6 +19,20 @@ l'export à l'échelle). L'échelle est relue sur la carte de mise en page : si 
 touche le cadre, non plus (`layout.empty`). Le résultat ne porte les clés `scale` et `center`
 que si l'échelle a été demandée ; sans `scale`, cadrage et résultat sont ceux d'avant.
 
+Format, orientation et carroyage (epic 11, entrée 11). `page_size` (`a4` par défaut, `a3`,
+`a2`, `a1`, `a0`) et `orientation` (`landscape` par défaut, `portrait`) donnent la page ; les
+positions des éléments, pensées pour 297 × 210 mm, sont rapportées à la page en proportion
+(abscisses et largeurs × largeur / 297, ordonnées et hauteurs × hauteur / 210, polices par le
+plus petit des deux facteurs) : une A4 paysage garde les positions d'avant. `grid` pose une
+grille sur la carte : `{"kind": "degrees", "interval": Angle}` (graticule en EPSG:4326,
+intervalle en degrés, grades × 0,9) ou `{"kind": "projected", "epsg": n, "interval":
+Distance}` (quadrillage en EPSG:n, intervalle en mètres, km × 1 000), étiquettes en décimal,
+jamais en MGRS. Un `epsg` inconnu de QGIS rend `data.unknown_crs` ; une grille de plus de 200
+lignes par axe sur le cadre de la carte (AD-8), un système géographique pour `projected` ou un
+cadre qu'on ne sait pas ramener dans le système de la grille rendent `layout.bad_params` :
+tous avant l'export, sans fichier. Sans ces trois paramètres, le fond est appelé avec les
+arguments d'avant et le PDF est le même ; le résultat ne change jamais.
+
 La mise en page de QGIS ne tourne pas hors du fil principal : l'export est synchrone
 (commande non annulable). Accès à QGIS par un « fond » injectable ; `LayoutBackend` est
 le seul endroit qui touche `qgis.core`, les tests mettent une doublure.
@@ -30,9 +44,11 @@ import os
 try:  # importés à plat par les tests, en paquet par QGIS
     from .gestures import GestureError
     from .inventory import QgisBackend, _ReadGesture, _union, source_name
+    from .point_transform import UNKNOWN_CRS
 except ImportError:  # pragma: no cover
     from gestures import GestureError
     from inventory import QgisBackend, _ReadGesture, _union, source_name
+    from point_transform import UNKNOWN_CRS
 
 BAD_PARAMS = "layout.bad_params"
 EMPTY = "layout.empty"
@@ -41,6 +57,51 @@ EXPORT_FAILED = "layout.export_failed"
 MAX_SOURCES = 50  # borne du schéma de sortie du noyau (AD-8)
 MIN_SCALE = 100  # bornes de `scale`, les mêmes que le schéma du noyau
 MAX_SCALE = 100000000
+
+# Formats de page : dimensions en mm, en paysage (largeur, hauteur). Les noms QGIS sont en
+# majuscules (« A4 »).
+PAGE_SIZES = {"a4": (297.0, 210.0), "a3": (420.0, 297.0), "a2": (594.0, 420.0), "a1": (841.0, 594.0), "a0": (1189.0, 841.0)}
+ORIENTATIONS = ("landscape", "portrait")
+BASE_PAGE = (297.0, 210.0)  # page pour laquelle les positions des éléments sont écrites
+MAX_GRID_LINES = 200  # lignes de grille par axe, au plus (AD-8)
+
+
+class GridError(Exception):
+    """Levée par le fond quand la grille ne peut pas être posée (trop dense, système
+    géographique pour un quadrillage, cadre hors du système) : aucun export n'a eu lieu."""
+
+
+def page_dimensions(page):
+    """(largeur, hauteur) en mm d'une page (`size`, `orientation`) ; None : A4 paysage."""
+    if page is None:
+        return BASE_PAGE
+    size, orientation = page
+    w, h = PAGE_SIZES[size]
+    return (w, h) if orientation == "landscape" else (h, w)
+
+
+def check_grid_density(frame, interval):
+    """Refuse (`GridError`) une grille de plus de `MAX_GRID_LINES` lignes par axe sur le cadre
+    `frame` (xmin, ymin, xmax, ymax), exprimé dans le système de la grille."""
+    if frame is None:
+        raise GridError("Le cadre de la carte ne peut pas être ramené dans le système de la grille.")
+    for side in (frame[2] - frame[0], frame[3] - frame[1]):
+        # Lignes tracées sur un côté : un intervalle de plus que d'écarts entiers.
+        if not math.isfinite(side) or math.floor(side / interval) + 1 > MAX_GRID_LINES:
+            raise GridError(
+                "Carroyage trop serré : plus de %d lignes par axe sur la carte ; choisissez un intervalle plus grand."
+                % MAX_GRID_LINES
+            )
+
+
+def _decimals(interval):
+    """Décimales qu'il faut aux étiquettes pour écrire les multiples de `interval` (6 au plus)."""
+    for d in range(7):
+        scaled = interval * 10**d
+        if abs(scaled - round(scaled)) < 1e-9 * max(1.0, scaled):
+            return d
+    return 6
+
 
 # Éléments que la mise en page doit porter (rendus par le fond, vérifiés par les tests).
 EXPECTED_ITEMS = ("map", "title", "legend", "scalebar", "northarrow", "sources")
@@ -59,6 +120,12 @@ class LayoutBackend(QgisBackend):
             if layer is not None and node.isVisible():
                 found.append(layer)
         return found
+
+    def knows(self, epsg):
+        """Vrai si QGIS connaît le code EPSG `epsg`."""
+        from qgis.core import QgsCoordinateReferenceSystem
+
+        return QgsCoordinateReferenceSystem("EPSG:%d" % epsg).isValid()
 
     def reproject_point(self, x, y, from_authid, to_authid):
         """Point (x, y) du SCR `from_authid` dans le SCR `to_authid` ; None si l'un des deux est
@@ -95,20 +162,24 @@ class LayoutBackend(QgisBackend):
         center = rect.center()
         return self.reproject_point(center.x(), center.y(), canvas.mapSettings().destinationCrs().authid(), authid)
 
-    def export_pdf(self, layers, title, sources_text, out, authid, box, scale=None):
+    def export_pdf(self, layers, title, sources_text, out, authid, box, scale=None, page=None, grid=None):
         """Monte la mise en page, l'exporte dans `out`, rend `{"items": éléments posés (clés de
         `EXPECTED_ITEMS`), "scale": échelle relue sur la carte, "extent": emprise de la carte
         (xmin, ymin, xmax, ymax)}`. Avec `scale`, `box` est un
         petit rectangle centré : la carte y est cadrée puis tenue à 1:`scale` (`setScale` garde
-        le centre). Lève `RuntimeError` si l'export échoue."""
+        le centre). `page` : (`size`, `orientation`), A4 paysage si absent. `grid` : `{"authid":
+        système de la grille, "interval": écart en unités de ce système}`. Lève `GridError`
+        avant l'export si la grille ne peut pas être posée, `RuntimeError` si l'export échoue."""
         from qgis.core import (
             Qgis,
             QgsCoordinateReferenceSystem,
+            QgsCoordinateTransform,
             QgsLayout,
             QgsLayoutExporter,
             QgsLayoutItemLabel,
             QgsLayoutItemLegend,
             QgsLayoutItemMap,
+            QgsLayoutItemMapGrid,
             QgsLayoutItemPage,
             QgsLayoutItemPicture,
             QgsLayoutItemScaleBar,
@@ -121,19 +192,33 @@ class LayoutBackend(QgisBackend):
 
         layout = QgsLayout(QgsProject.instance())  # jamais ajoutée au gestionnaire du projet
         layout.initializeDefaults()
-        layout.pageCollection().page(0).setPageSize("A4", QgsLayoutItemPage.Orientation.Landscape)
+        size, orientation = page if page is not None else ("a4", "landscape")
+        layout.pageCollection().page(0).setPageSize(
+            size.upper(),
+            QgsLayoutItemPage.Orientation.Landscape
+            if orientation == "landscape"
+            else QgsLayoutItemPage.Orientation.Portrait,
+        )
+        # Positions écrites pour 297 × 210 mm, rapportées à la page (facteurs 1 en A4 paysage).
+        width, height = page_dimensions(page)
+        fx, fy = width / BASE_PAGE[0], height / BASE_PAGE[1]
+        ff = min(fx, fy)
 
         def place(item, x, y, w, h):
-            item.attemptMove(QgsLayoutPoint(x, y))
-            item.attemptResize(QgsLayoutSize(w, h))
+            item.attemptMove(QgsLayoutPoint(x * fx, y * fy))
+            item.attemptResize(QgsLayoutSize(w * fx, h * fy))
             layout.addLayoutItem(item)
             return item
+
+        def points(size):
+            # Taille de police entière quand le facteur vaut 1 : rendu d'avant à l'identique.
+            return size if ff == 1 else max(1, int(round(size * ff)))
 
         def label(text, x, y, w, h, size, bold=False):
             item = QgsLayoutItemLabel(layout)
             item.setText(text)
             font = QFont()
-            font.setPointSize(size)
+            font.setPointSize(points(size))
             font.setBold(bold)
             item.setFont(font)
             return place(item, x, y, w, h)
@@ -146,6 +231,39 @@ class LayoutBackend(QgisBackend):
         carte.zoomToExtent(QgsRectangle(*box))
         if scale is not None:
             carte.setScale(scale)
+        if grid is not None:
+            grid_crs = QgsCoordinateReferenceSystem(grid["authid"])
+            if not grid_crs.isValid():
+                raise GridError("Système de la grille inconnu de QGIS : %s." % grid["authid"])
+            if grid.get("projected") and grid_crs.isGeographic():
+                raise GridError(
+                    "Le quadrillage demande un système projeté ; pour des degrés, demandez un graticule."
+                )
+            frame = carte.extent()
+            try:
+                to_grid = QgsCoordinateTransform(carte.crs(), grid_crs, QgsProject.instance())
+                in_grid = to_grid.transformBoundingBox(frame)
+                in_grid = (in_grid.xMinimum(), in_grid.yMinimum(), in_grid.xMaximum(), in_grid.yMaximum())
+            except Exception:  # QgsCsException : cadre hors du domaine du système
+                in_grid = None
+            check_grid_density(in_grid, grid["interval"])
+            map_grid = QgsLayoutItemMapGrid("Carroyage", carte)
+            map_grid.setCrs(grid_crs)
+            map_grid.setIntervalX(grid["interval"])
+            map_grid.setIntervalY(grid["interval"])
+            map_grid.setStyle(QgsLayoutItemMapGrid.GridStyle.Solid)
+            map_grid.setAnnotationEnabled(True)
+            map_grid.setAnnotationFormat(QgsLayoutItemMapGrid.AnnotationFormat.Decimal)
+            map_grid.setAnnotationPrecision(_decimals(grid["interval"]))
+            # Étiquettes à gauche et en bas seulement : à droite, elles mordraient sur la légende,
+            # en haut sur le titre.
+            for side in (QgsLayoutItemMapGrid.BorderSide.Right, QgsLayoutItemMapGrid.BorderSide.Top):
+                map_grid.setAnnotationDisplay(QgsLayoutItemMapGrid.DisplayMode.HideAll, side)
+            grid_format = map_grid.annotationTextFormat()
+            grid_format.setSize(points(6))
+            map_grid.setAnnotationTextFormat(grid_format)
+            carte.grids().addGrid(map_grid)
+            map_grid.setEnabled(True)
 
         title_label = label(title, 10, 6, 277, 14, 18, bold=True)
 
@@ -167,7 +285,7 @@ class LayoutBackend(QgisBackend):
             scalebar.setUnits(Qgis.DistanceUnit.Kilometers)
             scalebar.setUnitLabel("km")
         scale_font = QFont()
-        scale_font.setPointSize(8)
+        scale_font.setPointSize(points(8))
         scalebar.setFont(scale_font)
         place(scalebar, 10, 185, 80, 12)
 
@@ -255,6 +373,62 @@ def _center_param(params):
     return (float(center["x"]), float(center["y"]), center["epsg"])
 
 
+def _page_param(params):
+    """(`size`, `orientation`) lus et vérifiés ; None si ni l'un ni l'autre n'est donné (ou tous
+    deux nuls) : le fond garde alors ses arguments d'avant."""
+    size = params.get("page_size")
+    orientation = params.get("orientation")
+    if size is None and orientation is None:
+        return None
+    if size is not None and (not isinstance(size, str) or size not in PAGE_SIZES):
+        raise GestureError(BAD_PARAMS, "Le format de page doit être a4, a3, a2, a1 ou a0.")
+    if orientation is not None and (not isinstance(orientation, str) or orientation not in ORIENTATIONS):
+        raise GestureError(BAD_PARAMS, "L'orientation doit être landscape ou portrait.")
+    return (size or "a4", orientation or "landscape")
+
+
+def _positive(value):
+    return _number(value) and value > 0
+
+
+def _grid_param(params):
+    """`grid` lu et vérifié : None si absent, sinon `{"authid", "interval", "projected"}`,
+    l'intervalle en degrés (graticule) ou en mètres (quadrillage)."""
+    grid = params.get("grid")
+    if grid is None:
+        return None
+    bad = GestureError(
+        BAD_PARAMS,
+        "Le carroyage doit être {kind: degrees, interval: angle} ou {kind: projected, epsg, interval: distance}, "
+        "avec un intervalle strictement positif.",
+    )
+    if not isinstance(grid, dict):
+        raise bad
+    interval = grid.get("interval")
+    if not isinstance(interval, dict) or not _positive(interval.get("value")):
+        raise bad
+    kind = grid.get("kind")
+    if kind == "degrees":
+        unit = interval.get("unit", "deg")
+        if set(grid) != {"kind", "interval"} or not set(interval) <= {"value", "unit"} or unit not in ("deg", "gon"):
+            raise bad
+        degrees = interval["value"] * (0.9 if unit == "gon" else 1.0)
+        return {"authid": "EPSG:4326", "interval": float(degrees), "projected": False}
+    if kind == "projected":
+        epsg = grid.get("epsg")
+        if (
+            set(grid) != {"kind", "epsg", "interval"}
+            or set(interval) != {"value", "unit"}
+            or interval["unit"] not in ("m", "km")
+            or not isinstance(epsg, int)
+            or isinstance(epsg, bool)
+        ):
+            raise bad
+        metres = interval["value"] * (1000.0 if interval["unit"] == "km" else 1.0)
+        return {"authid": "EPSG:%d" % epsg, "interval": float(metres), "projected": True, "epsg": epsg}
+    raise bad
+
+
 def _rounded(center):
     """(x, y) arrondis à 6 décimales : relus à l'identique par le noyau, et stables au rejeu."""
     return (round(float(center[0]), 6), round(float(center[1]), 6))
@@ -293,7 +467,11 @@ class LayoutExportGesture(_ReadGesture):
             raise GestureError(BAD_PARAMS, "La liste des couches à laisser hors de la carte est invalide.")
         scale = _scale_param(params)
         given_center = _center_param(params)
+        page = _page_param(params)
+        grid = _grid_param(params)
         backend = self._backend
+        if grid is not None and grid["projected"] and not backend.knows(grid["epsg"]):
+            raise GestureError(UNKNOWN_CRS, "Système de la grille inconnu de QGIS : EPSG:%d." % grid["epsg"])
         # Au rejeu, le noyau nomme les couches posées par une exécution précédente du même
         # journal : elles restent dans le projet, intactes, mais hors de la carte (ticket 5.36).
         leave_out = set(leave_out)
@@ -338,17 +516,25 @@ class LayoutExportGesture(_ReadGesture):
             # ULP près, et le résultat rejoué divergerait. Le centre arrondi cadre et est rendu.
             center = _rounded(center)
 
+        # Les nouveaux arguments ne passent au fond que s'ils sont donnés : sans eux, l'appel est
+        # celui d'avant.
+        extra = {}
+        if scale is not None:
+            extra["scale"] = scale
+        if page is not None:
+            extra["page"] = page
+        if grid is not None:
+            extra["grid"] = {"authid": grid["authid"], "interval": grid["interval"], "projected": grid["projected"]}
         try:
-            if scale is None:
-                done = backend.export_pdf(layers, title.strip(), sources_text, out, crs, _padded(box))
-            else:
-                done = backend.export_pdf(
-                    layers, title.strip(), sources_text, out, crs, _centered(center), scale=scale
-                )
+            framing = _padded(box) if scale is None else _centered(center)
+            done = backend.export_pdf(layers, title.strip(), sources_text, out, crs, framing, **extra)
             if scale is not None and round(done["scale"]) != scale:
                 raise RuntimeError("échelle non tenue : 1:%s au lieu de 1:%s" % (done["scale"], scale))
             if not os.path.isfile(out):
                 raise RuntimeError("fichier absent après l'export")
+        except GridError as e:
+            self._discard(out)
+            raise GestureError(BAD_PARAMS, str(e))
         except Exception:
             self._discard(out)
             raise GestureError(EXPORT_FAILED, "L'export PDF a échoué : aucun fichier n'a été écrit.")

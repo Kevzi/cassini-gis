@@ -6,6 +6,8 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::angle::Angle;
+use crate::commands::analysis_buffer::Distance;
 use crate::point::Point;
 use crate::registry::{CommandSpec, Delegated, Registration, RunsIn};
 
@@ -26,6 +28,59 @@ fn bounded_scale<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u32>, 
             "l'échelle doit être comprise entre 1:100 et 1:100 000 000",
         )),
         _ => Ok(v),
+    }
+}
+
+// Format de page. Pas de commentaire par variante : schemars en ferait une liste de `oneOf`,
+// alors que le panneau ne sait faire une liste déroulante que d'une énumération plate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+#[schemars(inline)]
+pub enum PageSize {
+    A4,
+    A3,
+    A2,
+    A1,
+    A0,
+}
+
+// Orientation de la page (même remarque).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+#[schemars(inline)]
+pub enum PageOrientation {
+    Landscape,
+    Portrait,
+}
+
+/// Carroyage de la carte : un graticule en WGS84 (`degrees`) ou un quadrillage dans un
+/// système projeté nommé (`projected`). Étiquettes en décimal, jamais en MGRS.
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum MapGrid {
+    Degrees {
+        /// Écart entre deux lignes du graticule, strictement positif.
+        #[serde(deserialize_with = "positive_angle")]
+        interval: Angle,
+    },
+    Projected {
+        /// Code EPSG du système de la grille (32631 pour UTM 31 N).
+        epsg: u32,
+        /// Écart entre deux lignes, en mètres ou kilomètres.
+        interval: Distance,
+    },
+}
+
+/// Refuse un intervalle de graticule nul ou négatif avant tout ordre à QGIS (une `Distance`
+/// le refuse déjà par son type).
+fn positive_angle<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Angle, D::Error> {
+    let a = Angle::deserialize(d)?;
+    if a.value > 0.0 {
+        Ok(a)
+    } else {
+        Err(serde::de::Error::custom(
+            "l'intervalle du graticule doit être strictement positif",
+        ))
     }
 }
 
@@ -53,6 +108,15 @@ pub struct LayoutExportPdfParams {
     /// la carte de QGIS. Centre of a map at a scale: given by the core on replay only.
     #[serde(default)]
     pub center: Option<Point>,
+    /// Format de page : a4 si absent.
+    #[serde(default)]
+    pub page_size: Option<PageSize>,
+    /// Orientation de la page : landscape si absente.
+    #[serde(default)]
+    pub orientation: Option<PageOrientation>,
+    /// Carroyage de la carte, seulement si la demande en donne un ; absent, aucun.
+    #[serde(default)]
+    pub grid: Option<MapGrid>,
 }
 
 /// Résultat de `layout.export_pdf`.
@@ -89,8 +153,8 @@ impl Delegated for LayoutExportPdf {
     fn spec() -> CommandSpec {
         CommandSpec::new::<LayoutExportPdfParams, LayoutExportPdfOutput>(
             "layout.export_pdf",
-            "Export PDF de la carte : produit une page A4 paysage montrant les couches visibles du projet, avec un titre, une légende, une barre d'échelle, une flèche du nord et les sources (noms des fichiers des couches). Avec `scale`, la carte est tenue à cette échelle (1:scale), centrée sur la carte affichée dans QGIS (à défaut, sur les couches visibles), et refusée si le cadre ne montre aucune couche ; sans `scale`, elle est cadrée sur l'emprise des couches. Ne modifie ni le projet ni les couches.",
-            "PDF map export: produces an A4 landscape page showing the visible layers of the project, with a title, a legend, a scale bar, a north arrow and the sources (file names of the layers). With `scale`, the map is held at that scale (1:scale), centred on the map shown in QGIS (failing that, on the visible layers), and refused if the frame shows no layer; without `scale`, it is framed on the extent of the layers. Does not modify the project or the layers.",
+            "Export PDF de la carte : produit une page (A4 paysage par défaut ; `page_size` de a4 à a0, `orientation` landscape ou portrait) montrant les couches visibles du projet, avec un titre, une légende, une barre d'échelle, une flèche du nord et les sources (noms des fichiers des couches). Avec `scale`, la carte est tenue à cette échelle (1:scale), centrée sur la carte affichée dans QGIS (à défaut, sur les couches visibles), et refusée si le cadre ne montre aucune couche ; sans `scale`, elle est cadrée sur l'emprise des couches. Avec `grid`, la carte porte un carroyage : `degrees` (graticule WGS84, intervalle en angle) ou `projected` (quadrillage dans le système `epsg`, intervalle en distance), étiquettes en décimal. Ne modifie ni le projet ni les couches.",
+            "PDF map export: produces a page (A4 landscape by default; `page_size` from a4 to a0, `orientation` landscape or portrait) showing the visible layers of the project, with a title, a legend, a scale bar, a north arrow and the sources (file names of the layers). With `scale`, the map is held at that scale (1:scale), centred on the map shown in QGIS (failing that, on the visible layers), and refused if the frame shows no layer; without `scale`, it is framed on the extent of the layers. With `grid`, the map carries a grid: `degrees` (WGS84 graticule, interval as an angle) or `projected` (grid in the `epsg` system, interval as a distance), with decimal labels. Does not modify the project or the layers.",
         )
         .runs_in(RunsIn::Qgis)
         .cancellable(false)
@@ -101,6 +165,8 @@ impl Delegated for LayoutExportPdf {
         .example(serde_json::json!({"title": "Parcelles constructibles à moins de 500 m d'une gare"}))
         .example(serde_json::json!({"title": "Réseau ferré de Villeneuve-le-Roi"}))
         .example(serde_json::json!({"title": "Gares de Villeneuve-le-Roi", "scale": 25000}))
+        .example(serde_json::json!({"title": "Carte carroyée", "page_size": "a3",
+            "grid": {"kind": "projected", "epsg": 32631, "interval": {"value": 1, "unit": "km"}}}))
         .tests(&[
             "layout_export_pdf_is_delegated",
             "layout_export_pdf_needs_a_title",
@@ -109,6 +175,9 @@ impl Delegated for LayoutExportPdf {
             "layout_export_pdf_leave_out_is_an_optional_list_of_ids",
             "layout_export_pdf_scale_is_an_optional_bounded_integer",
             "layout_export_pdf_center_is_filled_on_replay_from_the_result",
+            "layout_export_pdf_page_and_grid_are_optional",
+            "layout_export_pdf_page_values_are_closed",
+            "layout_export_pdf_grid_is_a_tagged_union",
         ])
     }
 }
@@ -299,6 +368,98 @@ mod tests {
             }),
         };
         assert_eq!(serde_json::to_value(&with).unwrap()["center"], point);
+        assert!(registry.check_contract().is_empty());
+    }
+    #[test]
+    fn layout_export_pdf_page_and_grid_are_optional() {
+        let registry = Registry::standard();
+        let spec = registry.spec("layout.export_pdf").unwrap();
+        let schema = &spec.params_schema;
+        let required = schema["required"].as_array().unwrap();
+        for name in ["page_size", "orientation", "grid"] {
+            assert!(schema["properties"].get(name).is_some(), "{name}");
+            assert!(!required.contains(&json!(name)), "{name}");
+        }
+        // Absents, la demande d'avant reste valide et ne pose rien.
+        let p: super::LayoutExportPdfParams =
+            serde_json::from_value(json!({"title": "Carte"})).unwrap();
+        assert!(p.page_size.is_none() && p.orientation.is_none() && p.grid.is_none());
+        assert!(registry.check_contract().is_empty());
+    }
+
+    #[test]
+    fn layout_export_pdf_page_values_are_closed() {
+        let registry = Registry::standard();
+        for size in ["a4", "a3", "a2", "a1", "a0"] {
+            for orientation in ["landscape", "portrait"] {
+                let params = json!({"title": "Carte", "page_size": size, "orientation": orientation});
+                assert!(
+                    registry.validate_params("layout.export_pdf", &params).is_ok(),
+                    "{params}"
+                );
+            }
+        }
+        for bad in [
+            json!({"title": "Carte", "page_size": "a5"}),
+            json!({"title": "Carte", "page_size": "A4"}),
+            json!({"title": "Carte", "page_size": 4}),
+            json!({"title": "Carte", "orientation": "paysage"}),
+            json!({"title": "Carte", "orientation": true}),
+        ] {
+            let err = registry
+                .validate_params("layout.export_pdf", &bad)
+                .unwrap_err();
+            assert_eq!(err.code(), "registry.invalid_params", "{bad}");
+        }
+    }
+
+    #[test]
+    fn layout_export_pdf_grid_is_a_tagged_union() {
+        let registry = Registry::standard();
+        let utm_km = json!({"kind": "projected", "epsg": 32631, "interval": {"value": 1, "unit": "km"}});
+        for good in [
+            utm_km.clone(),
+            json!({"kind": "projected", "epsg": 2154, "interval": {"value": 500, "unit": "m"}}),
+            json!({"kind": "degrees", "interval": {"value": 0.01, "unit": "deg"}}),
+            json!({"kind": "degrees", "interval": {"value": 1, "unit": "gon"}}),
+            json!({"kind": "degrees", "interval": {"value": 0.5}}),
+        ] {
+            let params = json!({"title": "Carte", "page_size": "a3", "grid": good});
+            assert!(
+                registry.validate_params("layout.export_pdf", &params).is_ok(),
+                "{params}"
+            );
+        }
+        let p: super::LayoutExportPdfParams =
+            serde_json::from_value(json!({"title": "Carte", "grid": utm_km})).unwrap();
+        match p.grid.unwrap() {
+            super::MapGrid::Projected { epsg, interval } => {
+                assert_eq!(epsg, 32631);
+                assert_eq!(interval.metres(), 1000.0);
+            }
+            other => panic!("{other:?}"),
+        }
+        for bad in [
+            json!({"kind": "mgrs", "interval": {"value": 1, "unit": "km"}}),
+            json!({"interval": {"value": 1, "unit": "km"}}),
+            json!({"kind": "projected", "interval": {"value": 1, "unit": "km"}}),
+            json!({"kind": "projected", "epsg": 32631}),
+            json!({"kind": "projected", "epsg": -1, "interval": {"value": 1, "unit": "km"}}),
+            json!({"kind": "projected", "epsg": 32631, "interval": {"value": 0, "unit": "km"}}),
+            json!({"kind": "projected", "epsg": 32631, "interval": {"value": -1, "unit": "m"}}),
+            json!({"kind": "projected", "epsg": 32631, "interval": {"value": 1, "unit": "deg"}}),
+            json!({"kind": "degrees", "interval": {"value": 0, "unit": "deg"}}),
+            json!({"kind": "degrees", "interval": {"value": -0.5, "unit": "gon"}}),
+            json!({"kind": "degrees", "interval": {"value": 1, "unit": "km"}}),
+            json!({"kind": "degrees"}),
+            json!({"kind": "degrees", "epsg": 4326, "interval": {"value": 1}}),
+            json!("utm"),
+        ] {
+            let err = registry
+                .validate_params("layout.export_pdf", &json!({"title": "Carte", "grid": bad}))
+                .unwrap_err();
+            assert_eq!(err.code(), "registry.invalid_params", "{bad}");
+        }
         assert!(registry.check_contract().is_empty());
     }
 }

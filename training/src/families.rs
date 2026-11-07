@@ -3933,15 +3933,9 @@ mod tests {
                 assert!(!id.contains(word), "{id}");
             }
         }
-        let pdf = registry.spec("layout.export_pdf").expect("export PDF");
-        let props = pdf.params_schema["properties"]
-            .as_object()
-            .expect("propriétés");
-        for name in props.keys() {
-            for word in ["paper", "format", "size", "orientation", "page"] {
-                assert!(!name.contains(word), "{name}");
-            }
-        }
+        // Format et orientation de page sont arrivés à l'entrée 11.11 (`page_size`,
+        // `orientation`) : le refus `ONLY_A4` est à remplacer par un plan au ré-entraînement
+        // (entrée 16), noté dans `deferred-work.md`.
     }
 
     #[test]

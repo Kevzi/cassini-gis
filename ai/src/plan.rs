@@ -1019,7 +1019,13 @@ mod tests {
         assert!(export["params"]["properties"].get("center").is_none());
         assert!(export["params"]["properties"].get("scale").is_some());
         assert!(!export.to_string().contains("\"center\""), "{export}");
-        assert!(export["params"].get("$defs").is_none(), "{export}");
+        // Le `Point` du centre, caché, quitte les définitions ; celles du carroyage restent
+        // (epic 11, entrée 11).
+        let defs = &export["params"]["$defs"];
+        assert!(defs.get("Point").is_none(), "{export}");
+        for kept in ["MapGrid", "Angle", "Distance"] {
+            assert!(defs.get(kept).is_some(), "{kept} : {export}");
+        }
         assert!(export["params"]["properties"].get("title").is_some());
         // La marque du `Point` reste au noyau : le modèle ne la voit pas.
         assert!(!text.contains("x-cassini"));
