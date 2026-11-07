@@ -1,7 +1,7 @@
 ---
 title: 'Familles du générateur pour les nouvelles commandes — lot géométrie'
 type: 'feature'
-ticket: '12'
+lot_de_ticket: '12' # lot du ticket 12 ; le plan du ticket est celui du lot 3
 created: '2026-11-07'
 status: 'built'
 baseline_revision: '59a09a30d14a2bc2baa5eaf9eb2c3fbd5afe1afb'

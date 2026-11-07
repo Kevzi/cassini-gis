@@ -1,7 +1,7 @@
 ---
 title: 'Familles du générateur pour les nouvelles commandes — lot 2b-2, critères, masques et superposition'
 type: 'feature'
-ticket: '12'
+lot_de_ticket: '12' # lot du ticket 12 ; le plan du ticket est celui du lot 3
 created: '2026-11-07'
 status: 'built'
 baseline_revision: 'aea48552199f486227328f31ec6192f72ae4c49a'
