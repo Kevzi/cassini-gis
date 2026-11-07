@@ -235,6 +235,33 @@ pub static FAMILIES: &[Family] = &[
         weight: 4,
         make: terrain_autre_systeme,
     },
+    // Dérivés du MNT (11.12, lot 2a) : une famille par commande, et le seuil sur la pente
+    // (`terrain.slope` puis `raster.reclassify`), qui remplace l'ancien refus.
+    Family {
+        name: "exposition",
+        weight: 3,
+        make: exposition,
+    },
+    Family {
+        name: "ombrage",
+        weight: 3,
+        make: ombrage,
+    },
+    Family {
+        name: "champ_de_vision_cumule",
+        weight: 4,
+        make: champ_de_vision_cumule,
+    },
+    Family {
+        name: "points_hauts",
+        weight: 4,
+        make: points_hauts,
+    },
+    Family {
+        name: "pente_seuil",
+        weight: 4,
+        make: pente_seuil,
+    },
     // Environ 5 % du jeu : un exemple d'une autre famille, vu au tour de redemande. Le poids
     // compte les tirages laissés (corruption acceptée par `check_plan`, premier essai qui
     // n'est pas un plan d'appels) : un sur deux environ. Relevé de 20 à 24 en 4.6 : les plans
@@ -2407,26 +2434,22 @@ fn refus(rng: &mut Rng) -> Option<Example> {
 const NO_FRAMING: &str = "Aucune commande du catalogue ne cadre ni ne zoome la carte.";
 const ONLY_A4: &str = "L'export PDF du catalogue produit seulement une page A4 paysage.";
 const NO_RASTER_STATS: &str = "Aucune commande du catalogue ne calcule de statistiques sur un raster : le décompte par zone ne compte que des points.";
-/// Décision du propriétaire (2026-11-04) : « où la pente dépasse 15 % » est un refus, jamais
-/// une pente calculée à la place de la sélection demandée.
-const NO_RASTER_THRESHOLD: &str =
-    "Aucune commande du catalogue ne sélectionne les cellules d'un raster par leur valeur.";
 /// Décision du propriétaire (2026-10-23, option a) : « de chaque gare », « de toutes les
 /// gares », « des gares » ; l'isochrone du catalogue part d'un seul point en coordonnées.
 pub const NO_MULTI_ORIGIN: &str = "L'isochrone du catalogue part d'un seul point donné en coordonnées : elle ne se calcule pas depuis plusieurs lieux à la fois.";
 
 /// Ce que le registre ne sait pas encore faire, quoi que l'inventaire contienne (un MNT pour
-/// les statistiques et le seuil sur un raster) : un refus affirmatif, jamais un plan de
-/// substitution (un décompte à la place d'une moyenne d'altitude, une pente à la place d'une
-/// sélection des cellules). Depuis 5.41 : un calcul de terrain suivi d'une statistique par zone
-/// (refus entier, jamais le seul calcul de terrain). Le point de terrain écrit dans un autre
-/// système que le MNT n'y est plus depuis 11.12 : `data.transform_point` le reprojette
-/// (`terrain_autre_systeme`).
+/// les statistiques sur un raster) : un refus affirmatif, jamais un plan de substitution (un
+/// décompte à la place d'une moyenne d'altitude). Depuis 5.41 : un calcul de terrain suivi
+/// d'une statistique par zone (refus entier, jamais le seul calcul de terrain). Le point de
+/// terrain écrit dans un autre système que le MNT n'y est plus depuis 11.12 :
+/// `data.transform_point` le reprojette (`terrain_autre_systeme`). Le seuil sur la pente non
+/// plus depuis 11.12, lot 2a : `raster.reclassify` le fait (`pente_seuil`).
 fn refus_hors_registre(rng: &mut Rng) -> Option<Example> {
     let mut b = Builder::new();
-    let roll = rng.below(5);
-    // Les statistiques et le seuil portent sur un MNT : il est là, ce n'est pas lui qui manque.
-    if matches!(roll, 2 | 4) {
+    let roll = rng.below(4);
+    // Les statistiques portent sur un MNT : il est là, ce n'est pas lui qui manque.
+    if roll == 2 {
         b.add(rng, "mnt", &[], &[], &[]);
     }
     let (body, q, reason): (String, bool, &str) = match roll {
@@ -2495,30 +2518,6 @@ fn refus_hors_registre(rng: &mut Rng) -> Option<Example> {
                 }
             };
             (body, q, NO_MULTI_ORIGIN)
-        }
-        // Un seuil sur la pente : aucune commande ne sélectionne des cellules par leur valeur.
-        4 => {
-            let n = *rng.pick(&[5u64, 10, 15, 20, 30]);
-            let (body, q) = match rng.below(5) {
-                0 => (format!("Où la pente dépasse-t-elle {n} %"), true),
-                1 => (
-                    format!("Montre les zones où la pente est supérieure à {n} degrés"),
-                    false,
-                ),
-                2 => (
-                    format!("Garde seulement les secteurs dont la pente fait plus de {n} %"),
-                    false,
-                ),
-                3 => (
-                    format!("Sélectionne les endroits du MNT où la pente reste sous {n} %"),
-                    false,
-                ),
-                _ => (
-                    format!("Quelles surfaces ont une pente de plus de {n} degrés"),
-                    true,
-                ),
-            };
-            (body, q, NO_RASTER_THRESHOLD)
         }
         _ => {
             let zkey = *rng.pick(&["communes", "quartiers", "parcelles"]);
@@ -2904,6 +2903,360 @@ fn champ_de_vision(rng: &mut Rng) -> Option<Example> {
         json!({"command": "terrain.viewshed", "params": params}),
     ]);
     Some(example("champ_de_vision", b, rng, request, expected))
+}
+
+// -- dérivés du MNT (11.12, lot 2a) -------------------------------------------
+//
+// Bâtis sur le MNT de l'inventaire synthétique, comme `pente` et `champ_de_vision` : le MNT
+// désigné par sa `source`, tout nombre du plan écrit dans la demande, un paramètre facultatif
+// seulement s'il est écrit.
+
+/// « Calcule l'exposition des versants du MNT » : `terrain.aspect` sur le `source` du MNT.
+fn exposition(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let epsg = terrain_epsg(rng);
+    let dem = b.add_dem(rng, epsg);
+    let of = dem_words(rng, &dem);
+    let (body, q) = match rng.below(6) {
+        0 => (format!("Calcule l'exposition des versants {of}"), false),
+        1 => (format!("Fais la carte d'exposition {of}"), false),
+        2 => (format!("Vers où sont tournés les versants {of}"), true),
+        3 => (format!("Donne l'orientation des versants {of}"), false),
+        4 => (
+            format!("Génère un raster d'exposition à partir {of}"),
+            false,
+        ),
+        _ => (format!("Peux-tu calculer l'exposition {of}"), true),
+    };
+    let request = finish(rng, &body, q, true);
+    let expected = calls(vec![
+        json!({"command": "terrain.aspect", "params": {"dem": dem.source}}),
+    ]);
+    Some(example("exposition", b, rng, request, expected))
+}
+
+/// Les directions d'où vient le soleil, rapportées au nord du quadrillage : nommées avec leur
+/// azimut écrit, jamais un azimut à calculer.
+const SUN_DIRECTIONS: &[(f64, &str)] = &[
+    (45.0, "au nord-est"),
+    (90.0, "à l'est"),
+    (135.0, "au sud-est"),
+    (180.0, "au sud"),
+    (225.0, "au sud-ouest"),
+    (270.0, "à l'ouest"),
+    (315.0, "au nord-ouest"),
+];
+const SUN_ALTITUDES: &[f64] = &[20.0, 30.0, 35.0, 45.0, 60.0];
+const Z_FACTORS: &[(f64, &str)] = &[(1.5, "1,5"), (2.0, "2"), (3.0, "3"), (5.0, "5")];
+
+/// « Ombrage du MNT, soleil à l'ouest (azimut 270°), hauteur du soleil 30° » :
+/// `terrain.hillshade`, azimut, hauteur et exagération seulement s'ils sont écrits, en degrés ou
+/// en grades (tous les angles d'une demande dans la même unité).
+fn ombrage(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let epsg = terrain_epsg(rng);
+    let dem = b.add_dem(rng, epsg);
+    let of = dem_words(rng, &dem);
+    let (mut body, q) = match rng.below(5) {
+        0 => (format!("Calcule l'ombrage {of}"), false),
+        1 => (format!("Fais un ombrage du relief à partir {of}"), false),
+        2 => (format!("Génère un estompage {of}"), false),
+        3 => (format!("Produis la carte d'ombrage {of}"), false),
+        _ => (format!("Peux-tu ombrer le relief {of}"), true),
+    };
+    let gon = rng.chance(1, 4);
+    let mut params = json!({"dem": dem.source});
+    if rng.chance(1, 2) {
+        let (deg, dir) = *rng.pick(SUN_DIRECTIONS);
+        let (angle, t) = angle_words(rng, gon, deg);
+        body.push_str(&match rng.below(3) {
+            0 => format!(", soleil {dir} (azimut {t})"),
+            1 => format!(", lumière venant de l'azimut {t}"),
+            _ => format!(", éclairage à l'azimut {t}"),
+        });
+        params["sun_azimuth"] = angle;
+    }
+    if rng.chance(1, 2) {
+        let deg = *rng.pick(SUN_ALTITUDES);
+        let (angle, t) = angle_words(rng, gon, deg);
+        body.push_str(&match rng.below(3) {
+            0 => format!(", soleil à {t} au-dessus de l'horizon"),
+            1 => format!(", hauteur du soleil {t}"),
+            _ => format!(" avec un soleil élevé de {t}"),
+        });
+        params["sun_altitude"] = angle;
+    }
+    if rng.chance(1, 3) {
+        let (z, t) = *rng.pick(Z_FACTORS);
+        body.push_str(&match rng.below(3) {
+            0 => format!(", exagération verticale de {t}"),
+            1 => format!(", facteur z de {t}"),
+            _ => format!(" avec une exagération du relief de {t}"),
+        });
+        params["z_factor"] = if z.fract() == 0.0 {
+            json!(z as u64)
+        } else {
+            json!(z)
+        };
+    }
+    let request = finish(rng, &body, q, false);
+    let expected = calls(vec![
+        json!({"command": "terrain.hillshade", "params": params}),
+    ]);
+    Some(example("ombrage", b, rng, request, expected))
+}
+
+/// « A, B et C » : des lieux énumérés, le dernier après « et ».
+fn enumerate(places: &[String]) -> String {
+    match places.split_last() {
+        Some((last, [])) => last.clone(),
+        Some((last, head)) => format!("{} et {last}", head.join(", ")),
+        None => String::new(),
+    }
+}
+
+/// « Combien de ces points voient chaque endroit : A, B et C » : `terrain.viewshed_cumulative`,
+/// deux à quatre points écrits dans le système du MNT (chacun avec son système), hauteurs et
+/// rayon seulement s'ils sont écrits, comme `champ_de_vision`.
+fn champ_de_vision_cumule(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let epsg = terrain_epsg(rng);
+    let dem = b.add_dem(rng, epsg);
+    let n = rng.range(2, 4) as usize;
+    let mut points = Vec::with_capacity(n);
+    let mut places = Vec::with_capacity(n);
+    for _ in 0..n {
+        let o = terrain_point(rng, epsg)?;
+        points.push(o.point);
+        places.push(o.place);
+    }
+    let pts = enumerate(&places);
+    let (mut body, q) = match rng.below(6) {
+        0 => (
+            format!("Combien de ces points voient chaque endroit : {pts}"),
+            true,
+        ),
+        1 => (format!("Calcule la visibilité cumulée depuis {pts}"), false),
+        2 => (
+            format!("Fais un champ de vision cumulé depuis {pts}"),
+            false,
+        ),
+        3 => (
+            format!(
+                "Compte, pour chaque endroit du terrain, combien de points le voient parmi {pts}"
+            ),
+            false,
+        ),
+        4 => (
+            format!("Quelles zones sont vues depuis {pts}, et par combien de ces points"),
+            true,
+        ),
+        _ => (
+            format!("Superpose les champs de vision depuis {pts}"),
+            false,
+        ),
+    };
+    let mut params = json!({"dem": dem.source, "observers": points});
+    if rng.chance(1, 2) {
+        let (h, text) = eye_clause(rng);
+        body.push_str(&text);
+        params["observer_height"] = h;
+    }
+    if rng.chance(1, 6) {
+        let (h, text) = target_clause(rng, true);
+        body.push_str(&text);
+        params["target_height"] = h;
+    }
+    if rng.chance(1, 2) {
+        let (r, text) = radius_clause(rng);
+        body.push_str(&text);
+        params["radius"] = r;
+    }
+    let request = finish(rng, &body, q, false);
+    let expected = calls(vec![
+        json!({"command": "terrain.viewshed_cumulative", "params": params}),
+    ]);
+    Some(example("champ_de_vision_cumule", b, rng, request, expected))
+}
+
+const PROMINENCES: &[u64] = &[5, 10, 20, 30, 50];
+const PEAK_SPACINGS: &[(u64, &str)] = &[
+    (100, "m"),
+    (200, "m"),
+    (250, "m"),
+    (500, "m"),
+    (1, "km"),
+    (2, "km"),
+];
+
+/// « Les 10 sommets les plus hauts du MNT, proéminence d'au moins 20 m » : `terrain.peaks`,
+/// nombre de sommets, proéminence et écart seulement s'ils sont écrits.
+fn points_hauts(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let epsg = terrain_epsg(rng);
+    let dem = b.add_dem(rng, epsg);
+    let of = dem_words(rng, &dem);
+    let mut params = json!({"dem": dem.source});
+    let (mut body, q) = if rng.chance(1, 2) {
+        // De 2 à 100 : « le sommet le plus haut » ne dirait pas le nombre 1.
+        let n = if rng.chance(1, 5) {
+            *rng.pick(&[50u64, 75, 100])
+        } else {
+            rng.range(2, 30)
+        };
+        params["max_count"] = json!(n);
+        match rng.below(4) {
+            0 => (format!("Trouve les {n} sommets les plus hauts {of}"), false),
+            1 => (format!("Liste les {n} points culminants {of}"), false),
+            2 => (format!("Repère les {n} plus hauts sommets {of}"), false),
+            _ => (format!("Quels sont les {n} sommets principaux {of}"), true),
+        }
+    } else {
+        match rng.below(4) {
+            0 => (format!("Trouve les sommets {of}"), false),
+            1 => (format!("Quels sont les points hauts {of}"), true),
+            2 => (format!("Repère les points hauts {of}"), false),
+            _ => (format!("Localise les sommets {of}"), false),
+        }
+    };
+    if rng.chance(1, 2) {
+        let p = *rng.pick(PROMINENCES);
+        body.push_str(&match rng.below(3) {
+            0 => format!(", proéminence d'au moins {p} m"),
+            1 => format!(" dont la proéminence dépasse {p} m"),
+            _ => format!(" avec une proéminence minimale de {p} m"),
+        });
+        params["min_prominence"] = json!({"value": p, "unit": "m"});
+    }
+    if rng.chance(1, 3) {
+        let (d, unit) = *rng.pick(PEAK_SPACINGS);
+        body.push_str(&match rng.below(3) {
+            0 => format!(", espacés d'au moins {d} {unit}"),
+            1 => format!(", distants d'au moins {d} {unit} les uns des autres"),
+            _ => format!(", séparés d'au moins {d} {unit}"),
+        });
+        params["min_distance"] = json!({"value": d, "unit": unit});
+    }
+    let request = finish(rng, &body, q, true);
+    let expected = calls(vec![json!({"command": "terrain.peaks", "params": params})]);
+    Some(example("points_hauts", b, rng, request, expected))
+}
+
+/// « Où la pente dépasse-t-elle 15 % » : `terrain.slope` dans l'unité du seuil, puis
+/// `raster.reclassify` sur `step:1`. « dépasse, plus de n » → `{min: n, value: 1}` ; « sous,
+/// moins de n » → `{max: n, value: 1}` (une cellule hors classe devient NoData : c'est la
+/// sélection). Deux ou trois classes : valeurs 1, 2, 3 dans l'ordre, bornes contiguës.
+fn pente_seuil(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let epsg = terrain_epsg(rng);
+    let dem = b.add_dem(rng, epsg);
+    let degrees = rng.chance(1, 2);
+    let unit = if degrees { "degrees" } else { "percent" };
+    let sym = if !degrees {
+        " %"
+    } else if rng.chance(1, 2) {
+        "°"
+    } else {
+        " degrés"
+    };
+    let u = |n: u64| format!("{n}{sym}");
+    let values: &[u64] = if degrees {
+        &[5, 10, 15, 20, 30, 35, 45]
+    } else {
+        &[2, 5, 10, 15, 20, 30, 50]
+    };
+    let of = if rng.chance(1, 2) {
+        format!(" {}", dem_words(rng, &dem))
+    } else {
+        String::new()
+    };
+    let (body, q, classes) = match rng.below(3) {
+        0 => {
+            let n = *rng.pick(values);
+            let t = u(n);
+            let (body, q) = match rng.below(5) {
+                0 => (format!("Où la pente{of} dépasse-t-elle {t}"), true),
+                1 => (
+                    format!("Montre les zones où la pente{of} est supérieure à {t}"),
+                    false,
+                ),
+                2 => (
+                    format!("Garde seulement les secteurs dont la pente fait plus de {t}"),
+                    false,
+                ),
+                3 => (
+                    format!("Quelles surfaces{of} ont une pente de plus de {t}"),
+                    true,
+                ),
+                _ => (
+                    format!("Repère les terrains en pente de plus de {t}"),
+                    false,
+                ),
+            };
+            (body, q, json!([{"min": n, "value": 1}]))
+        }
+        1 => {
+            let n = *rng.pick(values);
+            let t = u(n);
+            let (body, q) = match rng.below(4) {
+                0 => (
+                    format!("Sélectionne les endroits{of} où la pente reste sous {t}"),
+                    false,
+                ),
+                1 => (format!("Où la pente{of} est-elle inférieure à {t}"), true),
+                2 => (format!("Montre les zones de pente de moins de {t}"), false),
+                _ => (
+                    format!("Garde seulement les secteurs{of} dont la pente est sous {t}"),
+                    false,
+                ),
+            };
+            (body, q, json!([{"max": n, "value": 1}]))
+        }
+        _ => {
+            let i = rng.below(values.len() - 1);
+            let a = values[i];
+            if rng.chance(1, 2) {
+                let (ta, body) = (u(a), rng.below(3));
+                let body = match body {
+                    0 => format!(
+                        "Classe les pentes{of} en deux catégories : moins de {ta} et plus de {ta}"
+                    ),
+                    1 => {
+                        format!("Sépare les pentes{of} de moins de {ta} de celles de plus de {ta}")
+                    }
+                    _ => format!(
+                        "Reclasse la pente{of} en deux classes, sous {ta} et au-dessus de {ta}"
+                    ),
+                };
+                (
+                    body,
+                    false,
+                    json!([{"max": a, "value": 1}, {"min": a, "value": 2}]),
+                )
+            } else {
+                let c = values[rng.range((i + 1) as u64, (values.len() - 1) as u64) as usize];
+                let (ta, tc) = (u(a), u(c));
+                let body = match rng.below(3) {
+                    0 => format!("Classe les pentes{of} en moins de {ta}, de {ta} à {tc} et plus de {tc}"),
+                    1 => format!("Reclasse la pente{of} en trois classes : sous {ta}, entre {ta} et {tc}, au-delà de {tc}"),
+                    _ => format!("Découpe la pente{of} en trois catégories : moins de {ta}, {ta} à {tc}, plus de {tc}"),
+                };
+                (
+                    body,
+                    false,
+                    json!([{"max": a, "value": 1}, {"min": a, "max": c, "value": 2},
+                        {"min": c, "value": 3}]),
+                )
+            }
+        }
+    };
+    let request = finish(rng, &body, q, false);
+    let expected = calls(vec![
+        json!({"command": "terrain.slope", "params": {"dem": dem.source, "unit": unit}}),
+        json!({"command": "raster.reclassify",
+            "params": {"raster": "step:1", "classes": classes}}),
+    ]);
+    Some(example("pente_seuil", b, rng, request, expected))
 }
 
 // -- géométrie (11.12, lot 1) ------------------------------------------------
@@ -4147,6 +4500,18 @@ pub(crate) fn reprojects_no_point(expected: &Value) -> bool {
             })
 }
 
+/// Un refus qui dit qu'aucune commande ne sélectionne les cellules d'un raster par leur
+/// valeur : faux depuis `raster.reclassify` (11.9, famille `pente_seuil` en 11.12, lot 2a).
+/// Sert de garde-fou aux tests.
+#[cfg(test)]
+pub(crate) fn selects_no_cell(expected: &Value) -> bool {
+    expected["kind"] == "refusal"
+        && expected["reason"].as_str().is_some_and(|r| {
+            let r = r.to_lowercase();
+            (r.contains("sélectionn") || r.contains("seuil")) && r.contains("cellule")
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4604,7 +4969,8 @@ mod tests {
             for word in ["champ de vision", "ligne de vue", "pente", "visib"] {
                 assert!(!reason.contains(word), "{reason}");
             }
-            if [NO_RASTER_STATS, NO_RASTER_THRESHOLD].contains(&reason) {
+            assert!(!selects_no_cell(&e.expected), "{}", e.request);
+            if reason == NO_RASTER_STATS {
                 assert!(has_theme(&e, "mnt"), "MNT présent : {}", e.request);
             }
         }
@@ -4978,9 +5344,8 @@ mod tests {
         let registry = cassini_core::registry::Registry::standard();
         for spec in registry.specs() {
             let id = spec.id.as_str();
-            // Ni seuil ni calculatrice raster. `raster.reclassify` est arrivé à l'entrée 11.9 :
-            // le refus du seuil sur la pente (`NO_RASTER_THRESHOLD`) est à revoir au
-            // ré-entraînement (entrée 12), noté dans `deferred-work.md`.
+            // Ni calculatrice raster. Le seuil sur la pente n'est plus un refus depuis 11.12,
+            // lot 2a : `terrain.slope` puis `raster.reclassify` (`pente_seuil`).
             for word in ["threshold", "raster_calc"] {
                 assert!(!id.contains(word), "{id}");
             }
@@ -5006,6 +5371,7 @@ mod tests {
                     continue;
                 };
                 assert!(!reprojects_no_point(&e.expected), "{}", e.request);
+                assert!(!selects_no_cell(&e.expected), "{}", e.request);
             }
         }
         assert!(reprojects_no_point(&json!({"kind": "refusal", "reason":
@@ -5255,17 +5621,205 @@ mod tests {
         assert!(examples.iter().any(|e| e.request.contains("clocher")));
     }
 
-    #[test]
-    fn a_threshold_on_the_slope_is_refused() {
-        let examples = valid(refus_hors_registre, 300);
-        let thresholds: Vec<_> = examples
-            .iter()
-            .filter(|e| e.expected["reason"] == NO_RASTER_THRESHOLD)
-            .collect();
-        assert!(!thresholds.is_empty());
-        for e in thresholds {
-            assert!(e.request.contains("pente"), "{}", e.request);
+    // -- dérivés du MNT (11.12, lot 2a) ---------------------------------------
+
+    /// Les paramètres de la première étape d'un plan.
+    fn params0(e: &Example) -> &Value {
+        &e.expected["calls"][0]["params"]
+    }
+
+    /// Un angle facultatif d'un plan : unité écrite, valeur écrite ; jamais présent sans être
+    /// écrit (repères `markers`).
+    fn written_angle_only(examples: &[Example], key: &str, markers: &[&str]) {
+        written_only(examples, key, markers);
+        for e in examples {
+            if let Some(angle) = params0(e).get(key) {
+                written_angle(e, angle);
+            }
         }
+    }
+
+    #[test]
+    fn an_aspect_carries_the_dem_source_only() {
+        let examples = terrain_examples(exposition, "terrain.aspect", &["dem"]);
+        assert!(examples.iter().any(|e| e.request.contains("exposition")));
+        assert!(examples.iter().any(|e| e.request.contains("versants")));
+    }
+
+    #[test]
+    fn a_hillshade_takes_only_the_written_sun_and_exaggeration() {
+        let examples = terrain_examples(
+            ombrage,
+            "terrain.hillshade",
+            &["dem", "sun_azimuth", "sun_altitude", "z_factor"],
+        );
+        written_angle_only(&examples, "sun_azimuth", &["azimut"]);
+        written_angle_only(
+            &examples,
+            "sun_altitude",
+            &["horizon", "hauteur du soleil", "élevé de"],
+        );
+        written_only(&examples, "z_factor", &["exagération", "facteur z"]);
+        for e in &examples {
+            if let Some(z) = params0(e).get("z_factor") {
+                written(e, z);
+            }
+        }
+        // Degrés et grades vus ; une direction nommée porte son azimut écrit.
+        let units: std::collections::BTreeSet<&str> = examples
+            .iter()
+            .filter_map(|e| params0(e)["sun_azimuth"]["unit"].as_str())
+            .collect();
+        assert_eq!(units.into_iter().collect::<Vec<_>>(), ["deg", "gon"]);
+        assert!(examples
+            .iter()
+            .any(|e| e.request.contains("à l'ouest (azimut")));
+    }
+
+    #[test]
+    fn a_cumulative_viewshed_takes_two_to_four_written_points_of_the_dem_system() {
+        let examples = terrain_examples(
+            champ_de_vision_cumule,
+            "terrain.viewshed_cumulative",
+            &[
+                "dem",
+                "observers",
+                "observer_height",
+                "target_height",
+                "radius",
+            ],
+        );
+        let mut counts = std::collections::BTreeSet::new();
+        let mut systems = std::collections::BTreeSet::new();
+        for e in &examples {
+            let dem = cited_dem(e);
+            let observers = params0(e)["observers"].as_array().unwrap();
+            counts.insert(observers.len());
+            for o in observers {
+                if let Some(d) = dem.get("epsg") {
+                    assert_eq!(d, &o["epsg"], "{}", e.request);
+                }
+                systems.insert(o["epsg"].as_u64().unwrap());
+                written(e, &o["x"]);
+                written(e, &o["y"]);
+            }
+            // Le rayon peut s'écrire en lettres (« un kilomètre »), comme pour `champ_de_vision`.
+            for key in ["observer_height", "target_height"] {
+                if let Some(v) = params0(e).get(key) {
+                    written(e, &v["value"]);
+                }
+            }
+        }
+        assert_eq!(counts.into_iter().collect::<Vec<_>>(), [2, 3, 4]);
+        assert_eq!(
+            systems.into_iter().collect::<Vec<_>>(),
+            [2154, 32631, 32632]
+        );
+        written_only(&examples, "observer_height", EYE_MARKERS);
+        written_only(&examples, "target_height", &["cible"]);
+        written_only(&examples, "radius", &[" sur ", "rayon", "jusqu'à"]);
+    }
+
+    #[test]
+    fn peaks_take_only_the_written_count_prominence_and_spacing() {
+        let examples = terrain_examples(
+            points_hauts,
+            "terrain.peaks",
+            &["dem", "max_count", "min_prominence", "min_distance"],
+        );
+        written_only(&examples, "min_prominence", &["proéminence"]);
+        written_only(
+            &examples,
+            "min_distance",
+            &["espacés", "distants", "séparés"],
+        );
+        let (mut counted, mut uncounted) = (0, 0);
+        for e in &examples {
+            let p = params0(e);
+            match p.get("max_count") {
+                Some(n) => {
+                    counted += 1;
+                    let n = n.as_u64().unwrap();
+                    assert!((1..=100).contains(&n), "{}", e.request);
+                    written(e, &json!(n));
+                }
+                None => uncounted += 1,
+            }
+            for key in ["min_prominence", "min_distance"] {
+                if let Some(v) = p.get(key) {
+                    written(e, &v["value"]);
+                }
+            }
+        }
+        assert!(counted > 0 && uncounted > 0);
+    }
+
+    #[test]
+    fn a_slope_threshold_is_a_slope_then_a_reclassification_of_step_1() {
+        let registry = cassini_core::registry::Registry::standard();
+        let examples = valid(pente_seuil, 600);
+        let (mut above, mut below, mut two, mut three) = (0, 0, 0, 0);
+        for e in &examples {
+            assert_eq!(
+                commands(e),
+                ["terrain.slope", "raster.reclassify"],
+                "{}",
+                e.request
+            );
+            cited_dem(e);
+            let plan: cassini_core::plan::Plan =
+                serde_json::from_value(e.expected.clone()).unwrap();
+            let guarded =
+                cassini_core::point::guard_coordinates(&registry, plan.clone(), &e.request);
+            assert_eq!(guarded, plan, "{}", e.request);
+            // L'unité de la pente est celle du seuil.
+            let r = &e.request;
+            let degrees = r.contains("degrés") || r.contains('°');
+            assert_eq!(degrees, !r.contains('%'), "{r}");
+            let unit = &params0(e)["unit"];
+            assert_eq!(unit == "degrees", degrees, "{r}");
+            let p = &call(e, 1)["params"];
+            assert_eq!(p["raster"], "step:1", "{r}");
+            assert_eq!(p.as_object().unwrap().len(), 2, "{r}");
+            let classes = p["classes"].as_array().unwrap();
+            // Valeurs 1, 2, 3 dans l'ordre, bornes contiguës et croissantes, toutes écrites.
+            for (k, c) in classes.iter().enumerate() {
+                assert_eq!(c["value"], json!(k + 1), "{r}");
+                for bound in ["min", "max"] {
+                    if let Some(v) = c.get(bound) {
+                        written(e, v);
+                    }
+                }
+                if let (Some(lo), Some(hi)) = (c["min"].as_f64(), c["max"].as_f64()) {
+                    assert!(lo < hi, "{r}");
+                }
+            }
+            for pair in classes.windows(2) {
+                assert_eq!(pair[0]["max"], pair[1]["min"], "{r}");
+            }
+            assert!(classes.first().unwrap().get("min").is_none() || classes.len() == 1);
+            assert!(classes.last().unwrap().get("max").is_none() || classes.len() == 1);
+            match classes.len() {
+                1 if classes[0].get("min").is_some() => above += 1,
+                1 => below += 1,
+                2 => two += 1,
+                3 => three += 1,
+                n => panic!("{n} classes : {r}"),
+            }
+        }
+        assert!(above > 0 && below > 0 && two > 0 && three > 0);
+        assert!(examples
+            .iter()
+            .any(|e| e.request.contains("dépasse-t-elle")));
+    }
+
+    #[test]
+    fn the_cell_selection_guard_catches_the_old_refusal() {
+        // Le garde-fou de l'entrée 11.12, lot 2a : il reconnaît l'ancien refus, s'il revenait.
+        assert!(selects_no_cell(&refusal(
+            "Aucune commande du catalogue ne sélectionne les cellules d'un raster par leur valeur."
+        )));
+        assert!(!selects_no_cell(&refusal(NO_RASTER_STATS)));
     }
 
     #[test]
