@@ -811,3 +811,23 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
   evidence: Relecture de 11.16 : `epic11_reel` n'a que des points dans le système du raster ; la validation a manqué deux reprojections d'un fuseau à l'autre.
   status: report, 2026-11-07, entrée 11.13 (`epic-geometrie-et-terrain-etendu/story-refactor-sweep-plan.md`)
   resolution: Avec le prochain ré-entraînement groupé (constat 156).
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-second-jeu-de-test-reel-annecy-pret-pour-la-demonstration-plan.md`
+  summary: Le rejeu d'un journal qui contient une étape QGIS échouée diverge à tort ; il faut sauter le contrôle du fichier de sortie quand l'étape a redonné la même erreur.
+  evidence: Sonde enchaînée 11.18 sur Annecy (2026-11-07) : le plan 1 s'arrête sur `analysis.buffer` (`analysis.crs_not_metric`), puis le rejeu échoue en `replay.diverged` (« la sortie « out » de la commande analysis.buffer est absente ou vide »). `core/src/journal/mod.rs:999` accepte la même erreur, mais les lignes 1013-1023 exigent ensuite le fichier `out` même quand `outcome` est `Err`. Risque high (rejeu).
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-second-jeu-de-test-reel-annecy-pret-pour-la-demonstration-plan.md`
+  summary: Le modèle ne compose pas `data.transform_point` avant `terrain.viewshed` et `terrain.line_of_sight` quand le point est en WGS84 et le MNT en Lambert-93 ; le noyau refuse alors en `terrain.crs_mismatch`.
+  evidence: Sonde 11.18 sur Annecy, phrases 5 et 6. Cela rejoint le constat déjà reporté sur les points donnés dans un autre système que le raster ; à traiter par des exemples d'entraînement au prochain ré-entraînement groupé.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-second-jeu-de-test-reel-annecy-pret-pour-la-demonstration-plan.md`
+  summary: Une couche de points en EPSG:4326, le cas d'un CSV de gares en latitude et longitude, ne passe pas un tampon (`analysis.crs_not_metric`) tant que `data.reproject` reste seulement planifiée ; la phrase de démo transposée à Annecy échoue pour cette raison.
+  evidence: Sonde 11.18, phrases 1 et 10, couche `gares` lue depuis `gares-74-4326.csv`. Le jeu de Villeneuve donne ses gares en 2154 et ne montrait pas ce cas.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-second-jeu-de-test-reel-annecy-pret-pour-la-demonstration-plan.md`
+  summary: Sur le projet d'Annecy (10 couches, dont BD TOPO aux dizaines de champs), la composition prend 30 à 35 s par phrase sur GPU une fois les communes ramenées au 74 (37 à 60 s au premier passage), contre environ 14 s sur Villeneuve ; l'exigence est de moins de 30 s.
+  evidence: Sonde 11.18, noyau `--features gpu` installé le 2026-11-07, modèle `cassini-composition-4b`. La longueur de l'inventaire est la cause probable ; elle reste à mesurer.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-second-jeu-de-test-reel-annecy-pret-pour-la-demonstration-plan.md`
+  summary: Le carroyage UTM de 1 km en A3 est refusé (plus de 200 lignes par axe) sur le projet d'Annecy ; il faut vérifier quelle emprise la mise en page prend.
+  evidence: Sonde 11.18, refus aux deux passages, y compris après que les communes ont été ramenées à un fichier du 74 seul (279 entités). L'emprise des couches est d'environ 125 × 100 km (MNT 25 m), soit environ 130 lignes à 1 km, marge de 5 % comprise : moins de 200.
