@@ -583,8 +583,8 @@ Résultat : `layer_id`, `name`, `crs`, `feature_count` (un polygone).
 ### `layout.export_pdf`
 
 Export PDF de la carte : couches visibles, titre, légende, barre d'échelle, flèche du nord,
-sources. Aujourd'hui une page A4 paysage ; l'entrée 11 de l'epic 11 ajoute format,
-orientation et carroyage.
+sources. Une page A4 paysage par défaut ; format, orientation et carroyage au choix
+(epic 11, entrée 11).
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
@@ -593,9 +593,9 @@ orientation et carroyage.
 | `center` | `Point` | non | — | Fourni par le noyau au rejeu seulement (ticket 5.38). |
 | `leave_out` | liste de chaînes | non | — | Fourni par le noyau au rejeu seulement (ticket 5.36). |
 | `out` | chaîne | non | — | Fourni par le noyau. |
-| `page_size` | chaîne | non | `a4` (défaut), `a3`, `a2`, `a1`, `a0` | **Epic 11, entrée 11** : format de page. |
-| `orientation` | chaîne | non | `landscape` (défaut), `portrait` | **Epic 11, entrée 11** : orientation. |
-| `grid` | union étiquetée par `kind` | non | voir ci-dessous | **Epic 11, entrée 11** : carroyage ; absent, aucun. |
+| `page_size` | chaîne | non | `a4` (défaut), `a3`, `a2`, `a1`, `a0` | Format de page. |
+| `orientation` | chaîne | non | `landscape` (défaut), `portrait` | Orientation de la page. |
+| `grid` | union étiquetée par `kind` | non | voir ci-dessous | Carroyage ; absent, aucun. |
 
 `grid` est l'une de deux formes : `{"kind": "degrees", "interval": Angle}` (graticule en
 WGS84, étiquettes en degrés décimaux) ou `{"kind": "projected", "epsg": entier, "interval":
@@ -621,15 +621,15 @@ l'impression reste hors du produit.
             "scale": {"type": "integer", "required": false},
             "center": {"type": "Point", "required": false},
             "leave_out": {"type": "array", "required": false, "items": "string"},
-            "out": {"type": "string", "required": false}},
+            "out": {"type": "string", "required": false},
+            "page_size": {"type": "string", "required": false, "enum": ["a4", "a3", "a2", "a1", "a0"]},
+            "orientation": {"type": "string", "required": false, "enum": ["landscape", "portrait"]},
+            "grid": {"type": "union", "required": false, "tag": "kind",
+                     "variants": {"degrees": {"interval": {"type": "Angle", "required": true}},
+                                  "projected": {"epsg": {"type": "integer", "required": true},
+                                                "interval": {"type": "Distance", "required": true}}}}},
  "result": ["center", "file", "layer_count", "page_count", "scale", "sources", "truncated"],
- "planned_by": "epic 11, entrée 11 (page_size, orientation, grid) ; epic 10, entrée 15 (skipped_layers)",
- "planned_params": {"page_size": {"type": "string", "required": false, "enum": ["a4", "a3", "a2", "a1", "a0"]},
-                    "orientation": {"type": "string", "required": false, "enum": ["landscape", "portrait"]},
-                    "grid": {"type": "union", "required": false, "tag": "kind",
-                             "variants": {"degrees": {"interval": {"type": "Angle", "required": true}},
-                                          "projected": {"epsg": {"type": "integer", "required": true},
-                                                        "interval": {"type": "Distance", "required": true}}}}},
+ "planned_by": "epic 10, entrée 15 (skipped_layers)",
  "planned_result": ["skipped_layers"]}
 ```
 
