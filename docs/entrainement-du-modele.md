@@ -101,7 +101,7 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `question_couche_absente` | une couche dont rien ne parle dans l'inventaire → question |
 | `question_champ_absent` | un critère qu'aucun champ ne porte → question, jamais un champ voisin deviné |
 | `refus` | courriel, suppression, reprojection d'une couche, export de couche, style, itinéraire, téléchargement, 3D → refus affirmatif |
-| `refus_hors_registre` | cadrage ou zoom de la carte, PDF en A3, A0 ou portrait, altitude moyenne par zone (statistiques sur un raster ; depuis 5.41 aussi après une pente ou un champ de vision : « la pente puis sa moyenne par commune » est un refus entier), seuil sur la pente (« où la pente dépasse 15 % » : aucune commande ne sélectionne des cellules d'un raster par leur valeur, depuis 4.6), MNT présent pour l'altitude par zone et le seuil, trajet depuis plusieurs lieux (« de chaque gare », « de toutes les gares », « des gares ») → refus affirmatif, jamais un plan de substitution. Le point de terrain écrit dans un autre système que le MNT, refusé en 5.41, est un plan depuis 11.12 (`terrain_autre_systeme`). Le champ de vision, la ligne de vue et la pente n'y sont plus depuis 4.6 : le registre les a |
+| `refus_hors_registre` | cadrage ou zoom de la carte, PDF en A3, A0 ou portrait, altitude moyenne par zone (statistiques sur un raster ; depuis 5.41 aussi après une pente ou un champ de vision : « la pente puis sa moyenne par commune » est un refus entier), MNT présent pour l'altitude par zone, trajet depuis plusieurs lieux (« de chaque gare », « de toutes les gares », « des gares ») → refus affirmatif, jamais un plan de substitution. Le point de terrain écrit dans un autre système que le MNT, refusé en 5.41, est un plan depuis 11.12 (`terrain_autre_systeme`). Le champ de vision, la ligne de vue et la pente n'y sont plus depuis 4.6 : le registre les a. Le seuil sur la pente (« où la pente dépasse 15 % »), refusé de 4.6 à 11.12, est un plan depuis 11.12, lot 2a (`pente_seuil`) |
 | `pente` | « fais la carte des pentes du MNT en pourcentage » → `terrain.slope`, `dem` recopié de la `source` du raster de l'inventaire, `unit` telle qu'écrite (`degrees` : « en degrés », « en ° » ; `percent` : « en pourcentage », « en % », « en pour cent ») (4.6) |
 | `ligne_de_vue` | « y a-t-il une ligne de vue entre le point (... ; ...) en Lambert-93 et le point (... ; ...) en Lambert-93, œil à 2 m » → `terrain.line_of_sight`, deux points écrits en Lambert-93 ou en UTM 31N/32N, le système écrit à chaque point (le garde-fou en demande une occurrence par point), le MNT dans ce même système ; `observer_height` et `target_height` seulement s'ils sont écrits, jamais courbure ni réfraction (4.6) |
 | `champ_de_vision` | « calcule le champ de vision depuis le point ... (UTM 31N) sur 2 km » → `terrain.viewshed`, même règle de points et de MNT ; hauteurs et `radius` seulement s'ils sont écrits (4.6) ; depuis 5.41, le rayon aussi avant le point (« dans un rayon de 800 m autour du point … ») |
@@ -115,6 +115,11 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `point_projete` | « quel point atteint-on à 3 km du point …, azimut 45° » → `geo.destination_point`, l'azimut toujours avec son unité (« 45° », « 45 degrés » → `deg` ; « 50 gr », « 50 grades » → `gon`) et la distance tels qu'écrits ; « résultat en MGRS » → `coord.convert` sur `step:1.point` (11.12) |
 | `recoupement` | « recoupe la visée du point … à l'azimut 40° avec celle du point … à l'azimut 310° » → `geo.bearing_intersection`, chaque station avec son azimut ; même suite MGRS que `point_projete` (11.12) |
 | `terrain_autre_systeme` | champ de vision ou ligne de vue depuis un point écrit dans un autre système que le MNT (WGS84, UTM d'une autre zone, Lambert-93 sur un MNT en UTM, MGRS) → `data.transform_point` vers l'`epsg` du MNT (précédé de `coord.convert` vers le WGS84 pour une référence MGRS), puis la commande de terrain sur `step:k.point` ; MNT à système connu seulement. Remplace le refus `NO_TERRAIN_CRS` de 5.41 (11.12) |
+| `exposition` | « calcule l'exposition des versants du MNT » → `terrain.aspect`, `dem` seul (11.12, lot 2a) |
+| `ombrage` | « ombrage du MNT, soleil à l'ouest (azimut 270°), hauteur du soleil 30°, exagération verticale de 2 » → `terrain.hillshade` ; `sun_azimuth`, `sun_altitude` et `z_factor` seulement s'ils sont écrits, les angles en degrés ou en grades (`gon`), tous dans la même unité ; sans réglage écrit, `dem` seul (11.12, lot 2a) |
+| `champ_de_vision_cumule` | « combien de ces points voient chaque endroit : le point …, le point … et le point … » → `terrain.viewshed_cumulative`, deux à quatre points dans le système du MNT, chacun avec son système ; hauteurs et `radius` comme `champ_de_vision` (11.12, lot 2a) |
+| `points_hauts` | « les 10 sommets les plus hauts du MNT, proéminence d'au moins 20 m » → `terrain.peaks` ; `max_count` (2 à 100, écrit en chiffres), `min_prominence` et `min_distance` seulement s'ils sont écrits (11.12, lot 2a) |
+| `pente_seuil` | « où la pente dépasse-t-elle 15 % », « classe les pentes en moins de 5 %, de 5 % à 15 % et plus de 15 % » → `terrain.slope` dans l'unité du seuil, puis `raster.reclassify` sur `step:1` ; « dépasse, plus de n » → `{min: n, value: 1}`, « sous, moins de n » → `{max: n, value: 1}`, deux ou trois classes de valeurs 1, 2, 3 à bornes contiguës (11.12, lot 2a) |
 | `redemande` | environ 5 % du jeu : un exemple d'une autre famille vu au tour de redemande (voir plus bas) |
 
 Depuis 5.15, `conditions_multiples` porte aussi les plans à **trois conditions** (cible
@@ -179,8 +184,42 @@ est encore planifiée.
 **Redemande.** Les plans de géométrie à une étape ne se corrompent pas (aucune couche) : le poids
 de `redemande` passe de 24 à 36 pour garder environ 5 % du jeu (419 sur 8 000 à la graine 1).
 
-Les familles raster et de terrain étendu (lot 2) et l'export au format (lot 3) restent à faire
-avant le ré-entraînement groupé (entrée 16).
+Les dérivés du MNT sont faits au lot 2a (section suivante) ; les rasters de coût, de critères et
+de masque (lot 2b) et l'export au format (lot 3) restent à faire avant le ré-entraînement groupé
+(entrée 16).
+
+### Familles des dérivés du MNT (11.12, lot 2a)
+
+Quatre commandes de terrain de l'epic 11 ont chacune leur famille, bâtie sur le MNT de
+l'inventaire synthétique comme `pente` et `champ_de_vision` : `exposition`
+(`terrain.aspect`), `ombrage` (`terrain.hillshade`), `champ_de_vision_cumule`
+(`terrain.viewshed_cumulative`) et `points_hauts` (`terrain.peaks`). Tout nombre du plan
+(azimut, hauteur, exagération, nombre de sommets, proéminence, écart, rayon) est écrit dans
+la demande ; un paramètre facultatif n'est au plan que s'il est écrit ; un azimut d'ombrage
+se rapporte au nord du quadrillage, et une direction nommée porte son azimut (« soleil à
+l'ouest (azimut 270°) »), jamais un azimut à calculer. Les points d'une vision cumulée sont
+dans le système du MNT, chacun avec son système écrit.
+
+**Refus retiré.** Le refus `NO_RASTER_THRESHOLD` (« aucune commande ne sélectionne les cellules
+d'un raster par leur valeur ») est faux depuis `raster.reclassify` (11.9) : il n'est plus
+engendré. `pente_seuil` le remplace par `terrain.slope`, dans l'unité du seuil (« % » →
+`percent`, « degrés », « ° » → `degrees`), puis `raster.reclassify` sur `step:1` ; une cellule
+hors classe devient NoData, ce qui est la sélection voulue. Le garde-fou `selects_no_cell`
+échoue si un refus de ce genre revient. La statistique par zone sur un raster reste un refus
+(`NO_RASTER_STATS`).
+
+**Validateur.** Un paramètre raster de premier niveau (`dem`, `raster`) est la `source` d'un
+raster de l'inventaire ou le résultat d'une étape précédente (`step:k`) ; `check_plan` vérifie
+la référence et son type raster. Les éléments de liste (`criteria[i].raster`, `exclusions[i]`)
+ne sont pas concernés.
+
+**Redemande.** Ces plans, sans couche, ne se corrompent guère (seule `pente_seuil`, à deux
+étapes, perd une étape) : le poids de `redemande` reste à 36, pour 348 redemandes sur 8 000 à
+la graine 1 (4,35 %).
+
+Les rasters de coût, de critères et de masque, avec `raster.weighted_overlay`,
+`terrain.cost_distance` et `terrain.least_cost_path`, forment le lot 2b, reporté
+(`deferred-work.md`).
 
 ### Les inventaires de QGIS (5.15)
 

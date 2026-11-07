@@ -48,6 +48,8 @@ pub struct Summary {
 
 /// Paramètres de couche qui désignent une couche existante (ou une étape précédente).
 const LAYER_PARAMS: [&str; 3] = ["layer_id", "overlay_layer_id", "points_layer_id"];
+/// Paramètres raster de premier niveau : un MNT ou un raster d'entrée.
+const RASTER_PARAMS: [&str; 2] = ["dem", "raster"];
 
 /// Vérifie un exemple : plan lisible, `check_plan` du registre réel, couches et fichiers cités
 /// présents dans l'inventaire, plafond d'étapes, question et refus non vides. Rend le motif
@@ -103,9 +105,20 @@ pub fn validate(registry: &Registry, example: &Example) -> Result<(), String> {
                         }
                     }
                 }
-                if let Some(dem) = call.params.get("dem") {
-                    if !dem.as_str().is_some_and(|d| dems.contains(d)) {
-                        return Err(format!("étape {} : MNT absent « {dem} »", index + 1));
+                // Un paramètre raster de premier niveau est une `source` raster de l'inventaire
+                // ou le résultat d'une étape précédente (`step:k`) ; `check_plan` a déjà vérifié
+                // la référence et son type raster.
+                for name in RASTER_PARAMS {
+                    if let Some(raster) = call.params.get(name) {
+                        let known = raster
+                            .as_str()
+                            .is_some_and(|r| dems.contains(r) || r.starts_with("step:"));
+                        if !known {
+                            return Err(format!(
+                                "étape {} : raster absent « {raster} »",
+                                index + 1
+                            ));
+                        }
                     }
                 }
                 if let Some(path) = call.params["path"].as_str() {
@@ -373,8 +386,36 @@ mod tests {
         // Un chemin inventé, l'id de la couche, la source d'un vecteur : écartés.
         for bad in ["donnees/mnt.tif", "mnt_1", "donnees/gares.gpkg"] {
             let err = validate(&registry, &slope(json!(bad))).unwrap_err();
-            assert!(err.contains("MNT absent"), "{bad} : {err}");
+            assert!(err.contains("raster absent"), "{bad} : {err}");
         }
+    }
+
+    #[test]
+    fn a_raster_input_is_a_raster_of_the_inventory_or_a_previous_step() {
+        // 11.12, lot 2a : `raster.reclassify` lit le résultat d'une étape (`step:1`) ; un
+        // chemin inventé reste écarté.
+        let registry = Registry::standard();
+        let inventory = json!({"layers": [
+            {"layer_id": "mnt_1", "kind": "raster", "source": "donnees/mnt_5m.tif"}
+        ], "unloaded_files": []});
+        let threshold = |raster: Value| Example {
+            family: "essai",
+            inventory: inventory.clone(),
+            request: "Où la pente du MNT dépasse-t-elle 15 % ?".into(),
+            expected: json!({"kind": "calls", "calls": [
+                {"command": "terrain.slope",
+                    "params": {"dem": "donnees/mnt_5m.tif", "unit": "percent"}},
+                {"command": "raster.reclassify",
+                    "params": {"raster": raster, "classes": [{"min": 15, "value": 1}]}}]}),
+            retry: None,
+        };
+        assert_eq!(validate(&registry, &threshold(json!("step:1"))), Ok(()));
+        assert_eq!(
+            validate(&registry, &threshold(json!("donnees/mnt_5m.tif"))),
+            Ok(())
+        );
+        let err = validate(&registry, &threshold(json!("donnees/pente.tif"))).unwrap_err();
+        assert!(err.contains("raster absent"), "{err}");
     }
 
     #[test]
@@ -456,6 +497,48 @@ mod tests {
             "geo.distance_azimuth",
             "geo.destination_point",
             "geo.bearing_intersection",
+        ] {
+            assert!(planned.contains(command), "{command}");
+        }
+    }
+
+    #[test]
+    fn the_dem_families_of_the_default_set_cover_every_command_and_refuse_no_threshold() {
+        // 11.12, lot 2a : au jeu par défaut, chacune des cinq familles est là, sans rejet, chacune
+        // des cinq commandes figure dans un plan, chaque plan passe le garde-fou inchangé, et
+        // aucun refus ne dit qu'aucune commande ne sélectionne les cellules d'un raster.
+        const DEM: [&str; 5] = [
+            "exposition",
+            "ombrage",
+            "champ_de_vision_cumule",
+            "points_hauts",
+            "pente_seuil",
+        ];
+        let registry = Registry::standard();
+        let (examples, summary) = generate(DEFAULT_SEED, DEFAULT_COUNT);
+        for name in DEM {
+            let tally = &summary.families[name];
+            assert!(tally.kept > 0 && tally.rejected == 0, "{name} : {tally:?}");
+            for e in examples.iter().filter(|e| e.family == name) {
+                let plan: Plan = serde_json::from_value(e.expected.clone()).unwrap();
+                let guarded =
+                    cassini_core::point::guard_coordinates(&registry, plan.clone(), &e.request);
+                assert_eq!(guarded, plan, "{}", e.request);
+            }
+        }
+        let mut planned = HashSet::new();
+        for e in &examples {
+            assert!(!families::selects_no_cell(&e.expected), "{}", e.request);
+            for c in e.expected["calls"].as_array().into_iter().flatten() {
+                planned.insert(c["command"].as_str().unwrap_or_default().to_string());
+            }
+        }
+        for command in [
+            "terrain.aspect",
+            "terrain.hillshade",
+            "terrain.viewshed_cumulative",
+            "terrain.peaks",
+            "raster.reclassify",
         ] {
             assert!(planned.contains(command), "{command}");
         }
