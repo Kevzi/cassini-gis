@@ -1589,7 +1589,80 @@ impl Builder {
         } else {
             &["mnt", "mnt_5m", "mnt_25m"]
         };
-        self.add_sourced(rng, "mnt", epsg, files, &["dem/"])
+        let dem = self.add_sourced(rng, "mnt", epsg, files, &["dem/"]);
+        // Parfois un autre MNT du dossier, non ouvert (C02 et K02 d'`epic11_reel`, 2026-11-08) :
+        // la phrase n'en désigne aucun, le plan cite le MNT ouvert.
+        if rng.chance(1, 5) {
+            let other = *rng.pick(&["zone_sud", "secteur_est", "ancien", "2012", "brut", "ouest"]);
+            self.files.push(File {
+                theme: theme("mnt"),
+                path: format!("donnees/mnt_{other}.tif"),
+            });
+        }
+        dem
+    }
+
+    /// Deux MNT du même système, de résolutions distinctes (Annecy, 2026-11-08 : 25 m et 5 m) :
+    /// nom et fichier de chacun portent sa résolution (« MNT 5 m », `mnt_5m.tif`), pour qu'une
+    /// phrase les désigne par elle (« sur le MNT à 5 m »). Rend les deux couches et leurs
+    /// résolutions en mètres ; leurs `source` sont protégées comme celle de `add_dem`.
+    pub fn add_dem_pair(&mut self, rng: &mut Rng, epsg: u32) -> ((Layer, u32), (Layer, u32)) {
+        let mut res = [1u32, 5, 25];
+        rng.shuffle(&mut res);
+        let (r1, r2) = (res[0], res[1]);
+        let first = self.add_dem(rng, epsg);
+        let dir = first
+            .source
+            .rsplit_once('/')
+            .map_or(String::new(), |(d, _)| format!("{d}/"));
+        // Noms variés, dont un nom à l'allure de fichier (Annecy : « mnt_5m_annecy »), et un
+        // identifiant fait du nom comme dans QGIS ; le fichier vient d'un autre vocabulaire, pour
+        // que le plan cite la `source` et jamais l'identifiant (essai terrain-11-18, 2026-11-08).
+        let place = *rng.pick(&["vallee", "bassin", "massif", "secteur", "lac", "plateau"]);
+        let named = |rng: &mut Rng, r: u32| match rng.below(3) {
+            0 => format!("MNT {r} m"),
+            1 => format!("Modèle numérique de terrain {r} m"),
+            _ => format!("mnt_{r}m_{place}"),
+        };
+        // Le fichier `mnt_5m.tif` n'accompagne jamais un nom « mnt_5m_… », dont l'identifiant
+        // commencerait comme lui.
+        // RGE ALTI et BD ALTI n'existent qu'en Lambert-93 : en UTM, des noms neutres.
+        let lambert = epsg == 2154;
+        let file = |rng: &mut Rng, r: u32, name: &str| {
+            let n = if name.starts_with("mnt_") { 4 } else { 5 };
+            match (rng.below(n), lambert) {
+                (0, true) => format!("rgealti_{r}m.tif"),
+                (0, false) => format!("terrain_{r}m.tif"),
+                (1, _) => format!("mnt-{place}-{r}m.tif"),
+                (2, true) => format!("bdalti_{r}m_l93.tif"),
+                (2, false) => format!("elevation_{place}_{r}m.tif"),
+                (3, _) => format!("dem_{place}_{r}m.tif"),
+                _ => format!("mnt_{r}m.tif"),
+            }
+        };
+        let qgis_id = |rng: &mut Rng, name: &str| {
+            let slug: String = name
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+                .collect();
+            layer_id(rng, &slug)
+        };
+        let mut a = first.clone();
+        a.name = named(rng, r1);
+        a.id = qgis_id(rng, &a.name);
+        a.source = format!("{dir}{}", file(rng, r1, &a.name));
+        let mut b = first;
+        b.name = named(rng, r2);
+        b.id = qgis_id(rng, &b.name);
+        b.source = format!("{dir}{}", file(rng, r2, &b.name));
+        if let Some(last) = self.layers.last_mut() {
+            last.id = a.id.clone();
+            last.name = a.name.clone();
+            last.source = a.source.clone();
+        }
+        self.sourced.push(self.layers.len());
+        self.layers.push(b.clone());
+        ((a, r1), (b, r2))
     }
 
     /// Ajoute le raster du thème `key` qu'un plan cite par son `source` (le raster de coût de
@@ -1655,8 +1728,9 @@ impl Builder {
     }
 
     /// Termine l'inventaire : distractions par défaut, ordre mélangé. Les fichiers non ouverts
-    /// sont ceux que la famille a posés (`add_file`), et seulement eux : dans QGIS, l'extension
-    /// ne parcourt pas le disque et `unloaded_files` est toujours vide.
+    /// sont ceux que la famille a posés (`add_file`), plus le MNT non ouvert qu'`add_dem` pose
+    /// parfois : dans QGIS, l'extension ne parcourt pas le disque et `unloaded_files` est vide,
+    /// mais l'inventaire de l'épreuve en porte un (`mnt_zone_nord.tif`), qu'aucun plan ne cite.
     ///
     /// Une part des inventaires prend les formes que rend le produit depuis QGIS
     /// (`core/src/agent_inventory.rs`, clé absente plutôt que `null`) : raster sans nombre

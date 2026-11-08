@@ -857,3 +857,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-inventaire-garde-entre-les-phrases.md`
   summary: Calculer l'inventaire du projet en tâche de fond (QgsTask, lecture par QgsVectorLayerFeatureSource) dès l'ouverture du projet ou l'ajout d'une couche, pour que la première phrase ne paie plus la première lecture des grosses couches.
   evidence: Annecy, 2026-11-08 : la 1re phrase prend 32,5 s, dont environ 24 s de lecture des valeurs de champs (250 000 routes, 600 000 bâtiments, 32 000 parcelles) ; les suivantes 4,3 s et 2,9 s, l'inventaire étant gardé. L'exigence est de moins de 30 s.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-points-d-un-autre-systeme-pour-le-terrain.md`
+  summary: Le garde-fou AD-23 (`core/src/point.rs`, `guard_coordinates`) transforme en question un plan juste qui mêle un point reprojeté (`step:k.point` d'un `data.transform_point`) et un point écrit tel quel, par exemple un chemin de moindre coût du WGS84 vers le Lambert-93.
+  evidence: Essai du générateur (2026-11-08) : « Quel est le chemin le moins coûteux pour aller du point de longitude 2,2038 et de latitude 48,6378 (WGS84) au point X = 660300, Y = 6865780 en Lambert-93… » → plan transform puis least_cost_path (start = step:1.point, end écrit) rendu en question « Il manque à la demande un point en coordonnées ». Quand les deux points sont reprojetés, le plan passe. À vérifier dans le produit, puis corriger dans le garde-fou.
