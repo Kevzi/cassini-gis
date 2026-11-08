@@ -61,6 +61,9 @@ AD-31.
 - G12 (CAP-15) : le modèle de composition compose les nouvelles commandes dans un
   plan valide, après un ré-entraînement groupé, sans baisse du taux de plans
   conformes.
+- G13 (CAP-5) : `map.topographic_style` met les couches du projet aux couleurs de la
+  sémiologie IGN et du standard CNIG, sur demande, par des `layer.set_style` dictés
+  (changement de cap du 2026-11-08).
 
 ## Done when
 
@@ -88,6 +91,7 @@ métier) : le noyau fournit les briques. Aucune parité avec QGIS visée.
 - parent — `_bmad-output/initiative-cassini-mvp/initiative-cassini-mvp.md`, Notes (changement de cap du 2026-11-05)
 - spec — `../spec-cassini-mvp/spec-cassini-mvp.md`, CAP-15, CAP-5, CAP-6, Constraints, Non-goals
 - change — `../change-geometrie-et-terrain-avant-la-demo/change-geometrie-et-terrain-avant-la-demo.md`, §4.1 (liste des commandes)
+- change — `../change-styles-topographiques-officiels/change-styles-topographiques-officiels.md`, §4 (entrées 19 à 21, 2026-11-08)
 - constraint — `../architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md`, AD-6, AD-8, AD-9 (amendement 4.9), AD-10, AD-11, AD-19, AD-20, AD-21, AD-23, AD-24, AD-30, AD-31
 - constraint — `CLAUDE.md` §2.2 (aucune GPL dans le noyau), §2.9 (test civil), §8 (licence demandée avant toute dépendance)
 

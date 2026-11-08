@@ -589,6 +589,16 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
     fois au geste générique de l'extension, jamais par un geste à part. Le nombre
     de sorties est fixe et déclaré au registre. Un format de sortie variable est
     une énumération typée, dont le noyau déduit l'extension du fichier (AD-10).
+    *Amendement du 2026-11-08 :* une commande peut changer l'état du projet sans
+    produire ni couche ni fichier (`layer.set_style`, `layer.arrange`).
+    - Elle est d'entrée `project` et de sortie `none`.
+    - Sa ligne de la table fermée associe son `id` à un **geste fixe** de l'API de projet
+      de QGIS (style d'une couche, arbre des couches), et non à une chaîne d'algorithmes.
+      Elle garde sa version de chaîne.
+    - Elle ne rend que des identifiants ou des compteurs.
+    - Au rejeu, le même état revient parce que les paramètres journalisés, `StyleSpec`
+      compris, sont rejoués tels quels ; le résultat comparé ne sert qu'à vérifier la
+      couche visée.
     Un raster se désigne toujours par un chemin `RasterPath` (amendement du
     2026-11-05 ci-dessous), jamais par son identifiant de couche ; aucune
     commande `raster.*` ne refait un calcul de `terrain.*`.
@@ -798,6 +808,30 @@ flowchart LR
   `dictated_by_core`, offerte ni au modèle ni au client MCP, avec le même
   traitement au rejeu (couche d'origine hors de l'export rejoué, réécriture
   selon AD-10 et AD-11).
+- **Amendement du 2026-11-08 — plusieurs ordres dictés pour une demande**
+  (changement de cap
+  `../change-styles-topographiques-officiels/change-styles-topographiques-officiels.md`).
+  - **Lecture d'abord.** Avant de calculer, `map.topographic_style` lit l'inventaire du
+    projet par l'ordre `project.inventory`, comme `plan.propose` : une lecture, qui n'est
+    pas une étape du journal, de sorte que `project.inventory` reste une commande ordinaire
+    (`dictated_by_core: false`).
+  - **Ordres dictés après la ligne.** La ligne de `map.topographic_style` est journalisée
+    avec son résultat. La session dicte ensuite un `layer.set_style` par couche reconnue,
+    puis un seul `layer.arrange`. Ce sont deux commandes `dictated_by_core`, offertes ni au
+    modèle, ni au client MCP, ni au formulaire. Chaque ordre est une ligne du journal, juste
+    après celle de `map.topographic_style`, de même `origin` et de même `plan_step`.
+  - **Décisions du noyau.** La reconnaissance du thème, la table des couleurs et le nom des
+    groupes sont des décisions du noyau (AD-5). L'extension n'applique que le `StyleSpec`
+    neutre (AD-22) ou la liste de groupes qu'on lui dicte.
+  - **Rejeu.** Comme pour `layer.open_raster`, chaque ligne est rejouée seule (AD-11). La
+    ligne de `map.topographic_style` relit l'inventaire et compare son résultat, mais ne
+    dicte rien. Les lignes dictées sont rejouées avec leurs paramètres journalisés.
+  - **Échec.** Un ordre refusé arrête la suite par son erreur (AD-21). Les styles déjà
+    posés restent, chacun journalisé.
+  - **Bornes.** Le nombre d'ordres est borné par le nombre de couches du projet, et aucune
+    géométrie ne traverse le canal (AD-8).
+  - **Disponibilité.** Sans QGIS, ou sans les trois gestes annoncés, la commande n'est pas
+    offerte (AD-25).
 
 ### AD-31 — Géodésie et angles : une seule convention
 

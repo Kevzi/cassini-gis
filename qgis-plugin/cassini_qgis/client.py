@@ -25,7 +25,7 @@ import json
 PROTOCOL_VERSION = 2
 
 # Événements rendus au rappel `on_event(kind, payload)`.
-READY = "ready"  # payload : {"core_version", "protocol_version", "commands"}
+READY = "ready"  # payload : {"core_version", "protocol_version", "commands", "history"}
 FAILED = "failed"  # payload : message à afficher tel quel
 DIED = "died"  # payload : message
 ORDER_STARTED = "order_started"  # payload : id de la commande
@@ -510,12 +510,16 @@ class CoreClient:
             commands = result.get("commands")
             self._catalogue = [c for c in commands if isinstance(c, dict)] if isinstance(commands, list) else []
             self._ready = True
+            # Les étapes passées du journal, que le noyau rend pour le panneau (réouverture).
+            history = result.get("history")
+            history = [h for h in history if isinstance(h, dict)] if isinstance(history, list) else []
             self._finish(
                 READY,
                 {
                     "core_version": result.get("core_version"),
                     "protocol_version": result.get("protocol_version"),
                     "commands": self.catalogue(),
+                    "history": history,
                 },
             )
 

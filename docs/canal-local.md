@@ -34,6 +34,16 @@ Réponse d'une seconde session, quand le journal du projet est déjà tenu :
   réponse porte alors aussi `message`, le texte même de l'erreur `journal.read_only`.
   L'extension ne se dit pas prête : elle arrête le noyau et le panneau affiche ce message
   tel quel. Le champ est un ajout compatible, le protocole reste à la version 2.
+- `history` est toujours présent : les 200 dernières étapes du journal du projet
+  (`HISTORY_LIMIT`, `core/src/serve.rs`), dans l'ordre, chacune réduite à `step`, `command`,
+  `params`, son issue (`result`, `error` — le code seul — ou `cancelled`) et, s'il y a lieu,
+  `origin`, `plan_step`, `layer_id` et `at`, la date de l'étape en millisecondes depuis 1970
+  (UTC ; absente des journaux d'avant). `params` et `result` sont résumés au-delà de 200
+  octets, comme dans le journal. Liste vide pour un projet neuf ; une ligne illisible est
+  sautée. Le panneau en remplit son journal à l'ouverture d'un projet, avec la date et l'heure
+  locales ; un noyau relancé sur le même projet garde les lignes de la session. C'est
+  un ajout compatible, le protocole reste à la version 2 ; le noyau seul lit le journal
+  (AD-11), l'extension n'ouvre jamais le fichier.
 - Le démarrage ne lance **aucune commande journalisée** : l'extension lit `core_version` et
   `protocol_version` dans cette réponse, et non plus par un `system.about`. Le panneau peut
   ensuite demander `agent.models`, qui n'est pas journalisé. Ouvrir ou rouvrir un projet

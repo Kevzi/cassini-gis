@@ -577,7 +577,7 @@ fn layer(raw: &Value) -> Value {
 
 /// Nom WKB de QGIS ramené aux six géométries de l'entraînement ; `None` pour une couche
 /// sans géométrie ou d'une géométrie inconnue.
-fn geometry(wkb: &str) -> Option<&'static str> {
+pub(crate) fn geometry(wkb: &str) -> Option<&'static str> {
     let mut base = wkb.trim();
     for suffix in ["25D", "ZM", "Z", "M"] {
         if let Some(stripped) = base.strip_suffix(suffix) {
@@ -607,7 +607,7 @@ fn base_type(qgis_type: &str) -> String {
 }
 
 /// Type de l'entraînement : `integer`, `number`, ou `string` (tout le reste, dates comprises).
-fn field_type(qgis_type: &str) -> &'static str {
+pub(crate) fn field_type(qgis_type: &str) -> &'static str {
     match base_type(qgis_type).as_str() {
         "integer" | "integer64" | "int" | "int2" | "int4" | "int8" | "int16" | "int32"
         | "tinyint" | "smallint" | "mediumint" | "bigint" | "serial" | "bigserial" | "long"
@@ -619,7 +619,7 @@ fn field_type(qgis_type: &str) -> &'static str {
 }
 
 /// Seuls les champs texte portent des valeurs (une date, un booléen n'en portent pas).
-fn is_text(qgis_type: &str) -> bool {
+pub(crate) fn is_text(qgis_type: &str) -> bool {
     matches!(
         base_type(qgis_type).as_str(),
         "string"

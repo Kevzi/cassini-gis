@@ -134,15 +134,22 @@ class ClientTest(unittest.TestCase):
         self.assertEqual(
             self.events,
             [(client.READY, {"core_version": "0.1.0", "protocol_version": 2,
-                             "commands": catalogue})],
+                             "commands": catalogue, "history": []})],
         )
+
+    def test_hello_history_reaches_ready_filtered(self):
+        self.c.start("cassini", "/p.qgz")
+        past = [{"step": 1, "command": "system.about"}, {"step": 2, "command": "layer.add"}]
+        self.p.feed(reply(1, {"commands": [], "history": past[:1] + ["pas un objet"] + past[1:]}))
+        self.assertEqual(self.events[0][1]["history"], past)
 
     def test_hello_without_versions_is_ready_with_none(self):
         self.c.start("cassini", "/p.qgz")
         self.p.feed(reply(1, {"commands": []}))
         self.assertEqual(
             self.events,
-            [(client.READY, {"core_version": None, "protocol_version": None, "commands": []})],
+            [(client.READY, {"core_version": None, "protocol_version": None, "commands": [],
+                             "history": []})],
         )
         self.assertEqual(len(self.p.written), 1)
         self.assertFalse(self.p.closed)
@@ -534,8 +541,9 @@ class FakePanel:
         self.banners.append(kind)
         self.messages.append(message)
 
-    def set_ready(self, catalogue):
+    def set_ready(self, catalogue, history=()):
         self.ready = catalogue
+        self.history = list(history)
 
     def on_event(self, kind, payload):
         self.events.append((kind, payload))
@@ -756,6 +764,26 @@ class PanelBannerTest(unittest.TestCase):
             self.assertEqual(self.panel._banner_text(self.panel.t), refused)
             self.assertEqual(self.announced, [refused])
 
+    def test_set_ready_fills_the_log_from_history_once_per_project(self):
+        catalogue = [{"id": "system.about", "description_fr": "Version du noyau."}]
+        past = [{"step": 1, "command": "system.about", "params": {}, "result": {}}]
+        panel = self.panel
+        panel.project_file = "C:/a/p.qgz"
+        panel.focus = ("entry", object())
+        panel.last = {"kind": "done"}
+        panel.set_ready(catalogue, past)
+        self.assertEqual([e.label for e in panel.log.entries], ["Version du noyau."])
+        self.assertIsNone(panel.focus)
+        self.assertIsNone(panel.last)
+        # Noyau relancé sur le même projet : les lignes de la session restent.
+        panel.log.start("analysis.buffer", "Tampon", "14:02")
+        panel.set_ready(catalogue, past)
+        self.assertEqual(len(panel.log.entries), 2)
+        # Un autre projet : son journal remplace celui du précédent.
+        panel.project_file = "C:/a/q.qgz"
+        panel.set_ready(catalogue, [])
+        self.assertEqual(panel.log.entries, [])
+
     def test_set_ready_clears_the_message(self):
         self.panel.set_banner("refused", "lecture seule")
         self.panel.set_ready([])
@@ -857,8 +885,10 @@ class PluginBehaviourTest(unittest.TestCase):
         self.assertIsNone(self.p.panel.messages[-1])
 
     def test_ready_and_run_events_reach_the_panel(self):
-        self.p._on_event(self.mod.client.READY, {"commands": [{"id": "a"}]})
+        past = [{"step": 1, "command": "a"}]
+        self.p._on_event(self.mod.client.READY, {"commands": [{"id": "a"}], "history": past})
         self.assertEqual(self.p.panel.ready, [{"id": "a"}])
+        self.assertEqual(self.p.panel.history, past)
         self.p._on_event(self.mod.client.RUN_DONE, {"command": "a", "result": 1})
         self.assertEqual(self.p.panel.events[0][0], self.mod.client.RUN_DONE)
 

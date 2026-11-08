@@ -183,7 +183,7 @@ class CassiniPlugin:
         if self.panel is None:
             return
         if kind == client.READY:
-            self.panel.set_ready(payload.get("commands", []))
+            self.panel.set_ready(payload.get("commands", []), payload.get("history", []))
             self.list_models()  # la liste des Réglages, dès que le noyau est prêt
         elif kind in (client.FAILED, client.DIED):
             self.client = None

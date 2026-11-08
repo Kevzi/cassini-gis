@@ -76,12 +76,19 @@ fn first_per_name(entries: impl Iterator<Item = Exposed>) -> Vec<Exposed> {
         .collect()
 }
 
-/// Le catalogue d'outils autonome : une entrée par commande `runs_in: core`, schémas du registre.
+/// Le catalogue d'outils autonome : une entrée par commande `runs_in: core`, schémas du registre,
+/// sauf les mises en forme, qui demandent les gestes de QGIS (entrée 11.20). En relais, elles sont
+/// offertes dès que le catalogue de la session les marque disponibles (`catalogue_from_session`).
 pub(crate) fn catalogue(registry: &Registry) -> Vec<Exposed> {
     first_per_name(
         registry
             .specs()
-            .filter(|s| s.runs_in == Some(RunsIn::Core) && !s.dictated_by_core)
+            // Une mise en forme demande les gestes de QGIS (entrée 11.20) : jamais offerte seule.
+            .filter(|s| {
+                s.runs_in == Some(RunsIn::Core)
+                    && !s.dictated_by_core
+                    && s.required_gestures().is_empty()
+            })
             .map(|s| {
                 let description = format!("{}\n{}", s.description_fr, s.description_en);
                 let tool = Tool::new(
@@ -604,13 +611,16 @@ mod tests {
     fn the_catalogue_holds_every_core_command_and_no_qgis_one() {
         let registry = Registry::standard();
         let served = catalogue(&registry);
+        // Une mise en forme demande les gestes de QGIS (entrée 11.20) : hors du mode autonome.
         let core: Vec<&str> = registry
             .specs()
-            .filter(|s| s.runs_in == Some(RunsIn::Core))
+            .filter(|s| s.runs_in == Some(RunsIn::Core) && s.required_gestures().is_empty())
             .map(|s| s.id.as_str())
             .collect();
         let ids: Vec<&str> = served.iter().map(|e| e.id.as_str()).collect();
         assert_eq!(ids, core);
+        assert!(!ids.contains(&"map.topographic_style"));
+        assert!(!ids.contains(&"map.graduated_style"));
         for Exposed { id, tool } in &served {
             assert_eq!(tool.name, tool_name(id));
             let spec = registry.spec(id).unwrap();
@@ -645,6 +655,10 @@ mod tests {
         commands.push(json!({"id": "x.unavailable", "available": false}));
         let served = catalogue_from_session(&commands);
         let ids: Vec<&str> = served.iter().map(|e| e.id.as_str()).collect();
+        // En relais, une mise en forme que le noyau marque disponible est offerte (11.20) ;
+        // seul le mode autonome l'écarte.
+        assert!(ids.contains(&"map.topographic_style"));
+        assert!(ids.contains(&"map.graduated_style"));
         let expected: Vec<&str> = registry
             .specs()
             .filter(|s| !s.dictated_by_core)
@@ -675,7 +689,10 @@ mod tests {
             .collect();
         let relayed: Vec<Value> = served
             .iter()
-            .filter(|e| registry.spec(&e.id).unwrap().runs_in == Some(RunsIn::Core))
+            .filter(|e| {
+                let spec = registry.spec(&e.id).unwrap();
+                spec.runs_in == Some(RunsIn::Core) && spec.required_gestures().is_empty()
+            })
             .map(|e| serde_json::to_value(&e.tool).unwrap())
             .collect();
         assert_eq!(core, relayed);

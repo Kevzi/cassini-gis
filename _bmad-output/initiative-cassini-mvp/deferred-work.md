@@ -861,3 +861,33 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-points-d-un-autre-systeme-pour-le-terrain.md`
   summary: Le garde-fou AD-23 (`core/src/point.rs`, `guard_coordinates`) transforme en question un plan juste qui mêle un point reprojeté (`step:k.point` d'un `data.transform_point`) et un point écrit tel quel, par exemple un chemin de moindre coût du WGS84 vers le Lambert-93.
   evidence: Essai du générateur (2026-11-08) : « Quel est le chemin le moins coûteux pour aller du point de longitude 2,2038 et de latitude 48,6378 (WGS84) au point X = 660300, Y = 6865780 en Lambert-93… » → plan transform puis least_cost_path (start = step:1.point, end écrit) rendu en question « Il manque à la demande un point en coordonnées ». Quand les deux points sont reprojetés, le plan passe. À vérifier dans le produit, puis corriger dans le garde-fou.
+- source_plan: `epic-geometrie-et-terrain-etendu/story-table-de-semiologie-et-reconnaissance-dans-le-noyau-plan.md`
+  summary: Les teintes d'altitude ont des paliers fixes en mètres : un MNT de plaine (Villeneuve, 30 à 100 m) paraît presque uni. Il faudrait étirer la rampe aux altitudes minimale et maximale réelles du MNT, ce qui demande que `project.inventory` rende ces deux valeurs pour un raster (changement du catalogue).
+  evidence: Relecture de 11.20 (blind-hunter) : avec des paliers à 0, 100 et 200 m, toute la plage de Villeneuve tombe dans un seul intervalle.
+
+- source_plan: `epic-geometrie-et-terrain-etendu/story-table-de-semiologie-et-reconnaissance-dans-le-noyau-plan.md`
+  summary: Le dégradé `red_blue` ne passe pas par la couleur claire du milieu de RdBu : `ramp` n'a que `from` et `to`.
+  evidence: Relecture de 11.20 : l'interpolation linéaire de `#b2182b` à `#2166ac` donne des violets au lieu du blanc cassé `#f7f7f7`. Il faudrait un champ facultatif `mid`.
+
+- source_plan: `epic-geometrie-et-terrain-etendu/story-table-de-semiologie-et-reconnaissance-dans-le-noyau-plan.md`
+  summary: Les zones du PLU sont dessinées opaques, alors que le CNIG préconise 40 % de transparence : `categories` n'a pas d'`opacity`.
+  evidence: Relecture de 11.20 (rapport de construction).
+  resolution: Résolu par 11.21 (2026-11-08) : `categories` porte une `opacity` facultative, et la table pose 0,6 (40 % de transparence) sur les zones du PLU.
+
+- source_plan: `epic-geometrie-et-terrain-etendu/story-table-de-semiologie-et-reconnaissance-dans-le-noyau-plan.md`
+  summary: Le générateur refuse encore « change le style d'une couche » (`training/src/families.rs`, raison « Aucune commande du catalogue ne change le style d'une couche »), devenu faux avec `map.topographic_style` et `map.graduated_style`.
+  evidence: Rapport de construction de 11.20. À corriger dans l'entrée du prochain ré-entraînement groupé, avec les exemples des deux commandes et l'essai `style_reel`.
+
+- source_plan: `epic-geometrie-et-terrain-etendu/story-table-de-semiologie-et-reconnaissance-dans-le-noyau-plan.md`
+  summary: `map.graduated_style` ne sait pas inverser un dégradé (« du bleu au rouge »).
+  evidence: Relecture de 11.20 (blind-hunter).
+
+- source_plan: `epic-geometrie-et-terrain-etendu/story-gestes-layer-set-style-et-layer-arrange-dans-l-extension-et-plan.md`
+  summary: Essayer les gestes de style et la légende d'altitude (légende Python, moment du filtre par le contenu de la carte, titre caché) sous QGIS 4.x ; seule la série 3.44 a été vérifiée.
+  evidence: Relecture de 11.21 ; la sonde `probe_style.py` n'a tourné que sous QGIS 3.44.15.
+- source_plan: `epic-geometrie-et-terrain-etendu/story-gestes-layer-set-style-et-layer-arrange-dans-l-extension-et-plan.md`
+  summary: Les libellés de légende « Altitude (m) » et « Ombrage » sont écrits dans l'extension ; le noyau devrait les dicter dans le `StyleSpec` (AD-5).
+  evidence: Relecture de 11.21 ; demande du propriétaire de corriger la légende du MNT, faite au plus court dans l'extension.
+- source_plan: `epic-geometrie-et-terrain-etendu/story-gestes-layer-set-style-et-layer-arrange-dans-l-extension-et-plan.md`
+  summary: La valeur de catégorie « » (vide) est refusée par l'extension et acceptée par le noyau ; le noyau devrait la refuser aussi.
+  evidence: `fixtures/style-cases.json` porte ce cas avec `"core": null`.

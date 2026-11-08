@@ -15,6 +15,7 @@ try:  # importés à plat par les tests, en paquet par QGIS
         layout_export,
         point_transform,
         raster_output,
+        style_gestures,
         vector_output,
     )
 except ImportError:  # pragma: no cover
@@ -25,6 +26,7 @@ except ImportError:  # pragma: no cover
     import layout_export
     import point_transform
     import raster_output
+    import style_gestures
     import vector_output
 
 PROBE_ID = "test.qgis_probe"
@@ -42,4 +44,6 @@ def build_registry(probe):
     analysis.register_all(registry)
     registry.register("layout.export_pdf", layout_export.LayoutExportGesture)
     registry.register("data.transform_point", point_transform.PointTransformGesture)
+    registry.register("layer.set_style", style_gestures.SetStyleGesture)
+    registry.register("layer.arrange", style_gestures.ArrangeGesture)
     return registry

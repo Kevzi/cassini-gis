@@ -142,7 +142,9 @@ fn core_calls() -> Vec<(String, Value)> {
     let registry = Registry::standard();
     let mut calls = Vec::new();
     for spec in registry.specs() {
-        if spec.runs_in != Some(RunsIn::Core) {
+        // Une mise en forme demande les gestes de QGIS (entrée 11.20) : sans QGIS, elle est
+        // refusée par `style.unavailable` partout, ce que couvrent les essais du noyau.
+        if spec.runs_in != Some(RunsIn::Core) || !spec.required_gestures().is_empty() {
             continue;
         }
         assert!(

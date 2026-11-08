@@ -577,5 +577,62 @@ class LayoutExportTest(unittest.TestCase):
         )
 
 
+
+class LegendFitTest(unittest.TestCase):
+    """Choix de l'essai qui fait tenir la légende dans sa colonne (`choose_legend_step`)."""
+
+    @staticmethod
+    def sizer(width, height):
+        """Une légende de `width` × `height` mm en une colonne, texte entier, couches dépliées :
+        les colonnes partagent la hauteur, la réduction joue sur les deux côtés, et replier les
+        couches sur leur nom divise la hauteur par 4."""
+        seen = []
+
+        def measure(step):
+            shrink, columns, collapsed = step
+            seen.append(step)
+            h = height * shrink / columns / (4 if collapsed else 1)
+            return width * shrink * columns ** 0.5, h
+
+        return measure, seen
+
+    def test_a_small_legend_keeps_one_column_and_full_text(self):
+        measure, seen = self.sizer(40, 80)
+        self.assertEqual(layout_export.choose_legend_step(measure, 72, 173), (1.0, 1, False))
+        self.assertEqual(len(seen), 1)
+
+    def test_a_tall_legend_takes_columns_before_shrinking(self):
+        measure, _ = self.sizer(30, 300)
+        self.assertEqual(layout_export.choose_legend_step(measure, 72, 173), (1.0, 2, False))
+
+    def test_layers_are_collapsed_only_when_no_full_legend_fits(self):
+        measure, seen = self.sizer(30, 2000)
+        step = layout_export.choose_legend_step(measure, 72, 173)
+        self.assertTrue(step[2])
+        full = [s for s in layout_export.LEGEND_STEPS if not s[2]]
+        self.assertEqual(seen[: len(full)], full)  # chaque essai déplié avant de replier
+
+    def test_the_chosen_step_never_overflows_when_one_fits(self):
+        for height in (50, 200, 500, 1000, 2000, 4000):
+            for width in (20, 40, 60):
+                measure, _ = self.sizer(width, height)
+                step = layout_export.choose_legend_step(measure, 72, 173)
+                w, h = self.sizer(width, height)[0](step)
+                fits = [s for s in layout_export.LEGEND_STEPS
+                        if self.sizer(width, height)[0](s)[0] <= 72
+                        and self.sizer(width, height)[0](s)[1] <= 173]
+                if fits:
+                    self.assertEqual(step, fits[0])
+                    self.assertLessEqual(h, 173)
+                    self.assertLessEqual(w, 72)
+
+    def test_nothing_fits_leaves_the_smallest_step(self):
+        measure, _ = self.sizer(500, 100000)
+        self.assertEqual(
+            layout_export.choose_legend_step(measure, 72, 173), layout_export.LEGEND_STEPS[-1]
+        )
+        self.assertEqual(layout_export.LEGEND_STEPS[-1], (0.4, 3, True))
+
+
 if __name__ == "__main__":
     unittest.main()
