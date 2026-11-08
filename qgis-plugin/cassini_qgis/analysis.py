@@ -31,6 +31,7 @@ UNKNOWN_FIELD = "analysis.unknown_field"
 FAILED = "analysis.failed"
 CANCELLED = "qgis.cancelled"
 ORIGIN_OFF_NETWORK = "analysis.origin_off_network"
+UNKNOWN_CRS = "data.unknown_crs"
 
 _UNIT_TO_METERS = {"m": 1.0, "km": 1000.0}
 
@@ -155,6 +156,26 @@ def translate_convex_hull(params, previous):
     return {"INPUT": previous}
 
 
+def _epsg_code(value):
+    """Code EPSG entier strictement positif ; le noyau l'a déjà vérifié (u32)."""
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise GestureError(BAD_PARAMS, "Le système d'arrivée doit être un code EPSG entier positif.")
+    return value
+
+
+def translate_reproject(params, layer):
+    """Paramètres neutres de `data.reproject` -> paramètres de `native:reprojectlayer`.
+
+    `OPERATION` est laissé de côté : les réglages de transformation du projet s'appliquent
+    (AD-19 : la reprojection est celle de QGIS, jamais du noyau).
+    """
+    return {
+        "INPUT": layer,
+        "TARGET_CRS": "EPSG:%d" % _epsg_code(params.get("target_epsg")),
+        "CONVERT_CURVED_GEOMETRIES": False,
+    }
+
+
 # Champ de décompte écrit par `native:countpointsinpolygon` ; le noyau ne le connaît pas.
 _COUNT_FIELD = "NUMPOINTS"
 _MAX_ZONES = 100  # borne du schéma de sortie du noyau (AD-8)
@@ -193,7 +214,10 @@ def summarize_zonal_statistics(backend, layer, params):
 #               seule cette dernière étape écrit `out`, la première écrit en sortie
 #               temporaire ; `empty_error` (code, message) si la sortie de la première
 #               étape n'a aucune entité ;
-#   summary   : (facultatif) (fond, couche produite, params) -> dict qui complète le résultat.
+#   summary   : (facultatif) (fond, couche produite, params) -> dict qui complète le résultat ;
+#   target_crs: (facultatif) paramètre du noyau qui porte un code EPSG d'arrivée ; le fond
+#               doit le connaître (`crs_is_known`), sinon `data.unknown_crs`, avant tout
+#               lancement.
 ALGORITHMS = {
     "analysis.buffer": {
         "algorithm": "native:buffer",
@@ -245,6 +269,13 @@ ALGORITHMS = {
                             "vérifiez qu'elle se trouve sur le réseau choisi."),
         },
     },
+    "data.reproject": {
+        "algorithm": "native:reprojectlayer",
+        "translate": translate_reproject,
+        "output": "OUTPUT",
+        "input": "layer_id",
+        "target_crs": "target_epsg",
+    },
 }
 
 
@@ -255,6 +286,12 @@ class QgisBackend(_ReadBackend):
         from qgis.core import Qgis
 
         return layer.crs().mapUnits() == Qgis.DistanceUnit.Meters
+
+    def crs_is_known(self, epsg):
+        """Vrai si QGIS connaît le code EPSG `epsg`."""
+        from qgis.core import QgsCoordinateReferenceSystem
+
+        return QgsCoordinateReferenceSystem("EPSG:%d" % epsg).isValid()
 
     def run_algorithm(self, algorithm_id, parameters, finished, previous=None):
         """Lance l'algorithme en tâche annulable ; `finished(ok, results)` à la fin.
@@ -445,6 +482,10 @@ class ProcessingGesture:
                 "reprojetez-la d'abord dans un système en mètres (par exemple EPSG:2154)."
                 % (backend.name_of(layer), backend.crs_of(layer)),
             )
+        if entry.get("target_crs"):
+            code = _epsg_code(params.get(entry["target_crs"]))
+            if not backend.crs_is_known(code):
+                raise GestureError(UNKNOWN_CRS, "Système inconnu de QGIS : EPSG:%d." % code)
         if entry.get("geometry") and backend.geometry_of(layer) != entry["geometry"]:
             raise GestureError(
                 BAD_PARAMS,

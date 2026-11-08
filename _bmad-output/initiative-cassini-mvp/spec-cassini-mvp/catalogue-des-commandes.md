@@ -348,7 +348,7 @@ donne l'esquisse.
 | `terrain.cost_distance` | faite | core | epic 11, entrée 10 |
 | `terrain.least_cost_path` | faite | core | epic 11, entrée 10 |
 | `analysis.count_points_in_polygon` | planifiée | qgis | epic 10, entrée 2 |
-| `data.reproject` | planifiée | qgis | epic 10, entrée 7 |
+| `data.reproject` | faite | qgis | epic 10, entrée 7 |
 | `analysis.difference` | planifiée | qgis | epic 10, entrée 21 |
 | `analysis.area` | planifiée | qgis | epic 10, entrée 22 |
 | `data.convert` | planifiée | qgis | epic 10, entrée 9 |
@@ -1502,10 +1502,20 @@ Reprojette une couche entière vers un système, en nouvelle couche (epic 10, en
 | `target_epsg` | entier | oui | code EPSG | Système d'arrivée. |
 | `out` | chaîne | non | — | Fourni par le noyau. |
 
-Résultat : `layer_id`, `name`, `crs`, `feature_count`. Erreur : `data.unknown_crs`.
+Résultat : `layer_id`, `name`, `crs`, `feature_count`.
+
+La reprojection est celle de QGIS (`native:reprojectlayer`, contexte de transformation du
+projet), jamais du noyau (AD-19) ; la couche d'origine n'est pas modifiée, la nouvelle couche
+est écrite en `.gpkg` dans le dossier de travail. Même code source et cible : la couche est
+copiée. Livrée par l'entrée 7 de l'epic 10 (`core/src/commands/data_reproject.rs`, ligne de
+la table `ALGORITHMS` de `qgis-plugin/cassini_qgis/analysis.py`). Erreurs : `data.unknown_crs`
+(code cible inconnu de QGIS, nommé dans le message, rien lancé) ; `layer.not_found`,
+`layer.not_vector` ; `analysis.failed` (échec de l'algorithme dans QGIS, ou couche produite
+illisible) ; `qgis.cancelled` ; `registry.invalid_params` (paramètre absent, code nul,
+négatif ou non entier, champ en trop).
 
 ```json fiche
-{"id": "data.reproject", "status": "planifiee", "runs_in": "qgis", "dictated_by_core": false,
+{"id": "data.reproject", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
  "params": {"layer_id": {"type": "string", "required": true},
             "target_epsg": {"type": "integer", "required": true},
             "out": {"type": "string", "required": false}},

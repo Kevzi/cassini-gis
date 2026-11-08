@@ -1485,6 +1485,12 @@ pub struct Builder {
     /// Rang des couches dont le plan recopie la `source` (le MNT d'une commande de terrain) :
     /// elle ne disparaît jamais, une couche temporaire n'a pas de fichier à recopier.
     sourced: Vec<usize>,
+    /// Système des couches vecteur (et du projet) ; 2154 par défaut. Posé par une famille de
+    /// reprojection de couche (10.7), dont le plan dépend du système des couches.
+    vector_epsg: Option<u32>,
+    /// Vrai quand le plan dépend de l'`epsg` des couches (10.7) : aucune couche ni le projet ne
+    /// le perdent dans les formes de QGIS (les tirages ont lieu quand même).
+    keep_epsg: bool,
 }
 
 impl Builder {
@@ -1501,6 +1507,27 @@ impl Builder {
         self.excluded.contains(&t.group)
             || self.layers.iter().any(|l| l.theme.group == t.group)
             || self.files.iter().any(|f| f.theme.group == t.group)
+    }
+
+    /// Pose le système des couches vecteur, déjà tirées ou à venir (distractions comprises), et
+    /// celui du projet ; garde l'`epsg` de chaque couche dans l'inventaire rendu (10.7).
+    pub fn vector_system(&mut self, epsg: u32) {
+        self.vector_epsg = Some(epsg);
+        self.keep_epsg = true;
+        for layer in &mut self.layers {
+            if layer.theme.geom != Geom::Raster {
+                layer.epsg = epsg;
+            }
+        }
+    }
+
+    /// Change le système d'une couche déjà tirée (une couche en degrés, 10.7).
+    pub fn set_epsg(&mut self, id: &str, epsg: u32) {
+        for layer in &mut self.layers {
+            if layer.id == id {
+                layer.epsg = epsg;
+            }
+        }
     }
 
     /// Thèmes encore libres qui vérifient `pred`.
@@ -1567,7 +1594,10 @@ impl Builder {
             id: layer_id(rng, slug),
             name: (*rng.pick(t.names)).to_string(),
             source: format!("donnees/{file}.{ext}"),
-            epsg: 2154,
+            epsg: match self.vector_epsg {
+                Some(epsg) if t.geom != Geom::Raster => epsg,
+                _ => 2154,
+            },
             count: rng.range(3, 12_000),
             geometry: geometry(rng, t.geom),
             fields,
@@ -1743,7 +1773,8 @@ impl Builder {
             self.distract(rng, 1, |t| t.geom == Geom::Raster);
         }
         let mut layers: Vec<Value> = self.layers.iter().map(Layer::to_json).collect();
-        let mut project = json!({"name": rng.pick(PROJECTS), "epsg": 2154});
+        let mut project =
+            json!({"name": rng.pick(PROJECTS), "epsg": self.vector_epsg.unwrap_or(2154)});
         if rng.chance(1, 3) {
             qgis_shapes(
                 rng,
@@ -1751,6 +1782,7 @@ impl Builder {
                 &self.distractors,
                 &self.sourced,
                 &mut project,
+                self.keep_epsg,
             );
         }
         rng.shuffle(&mut layers);
@@ -1784,12 +1816,13 @@ fn qgis_shapes(
     distractors: &[usize],
     sourced: &[usize],
     project: &mut Value,
+    keep_epsg: bool,
 ) {
     let project = project.as_object_mut().expect("projet objet");
     if rng.chance(1, 4) {
         project.remove("name");
     }
-    if rng.chance(1, 8) {
+    if rng.chance(1, 8) && !keep_epsg {
         project.remove("epsg");
     }
     for (index, layer) in layers.iter_mut().enumerate() {
@@ -1803,7 +1836,7 @@ fn qgis_shapes(
             // Sortie temporaire d'une étape précédente : aucun fichier derrière.
             layer.remove("source");
         }
-        if rng.chance(1, 12) {
+        if rng.chance(1, 12) && !keep_epsg {
             layer.remove("epsg");
         }
     }

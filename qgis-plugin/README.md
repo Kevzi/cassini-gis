@@ -62,6 +62,16 @@ et les champs `rank`, `elevation`, `prominence` ; un fichier corrompu ou sans sy
 est l'erreur `layer.invalid_source`, sans chemin, et n'ajoute rien. Comme pour un raster, le
 noyau dicte ce geste après toute commande du noyau qui écrit un GeoJSON.
 
+Sonde de `data.reproject` [epic 10, entrée 7] sous le vrai QGIS et le vrai binaire (couche
+synthétique de trois points en EPSG:4326 écrite par la sonde, aucune donnée hors dépôt) :
+`cargo build` puis `python-qgis-ltr.bat qgis-plugin/tests/probe_reproject.py` -> `RÉSULTAT : OK`
+(`CASSINI_CORE` désigne le binaire s'il n'est pas sous `target/`). Le geste
+(`native:reprojectlayer`, une ligne de la table `ALGORITHMS`) ajoute une couche en EPSG:2154 aux
+mêmes entités, le point (3 ; 46,5) à moins de 1 cm de l'origine du Lambert-93 ; un code inconnu
+de QGIS est `data.unknown_crs`, qui nomme le code, sans rien lancer ni écrire. Par le noyau,
+`layer.add` puis `data.reproject`, projet fermé et rouvert : le rejeu rend `identical: true`.
+Le fichier d'origine est inchangé (empreinte).
+
 Garde statique (imports réseau et PyQt directs interdits, taille, versions de
 `metadata.txt`) : `python -I qgis-plugin/tests/check_extension.py`.
 

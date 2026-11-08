@@ -31,8 +31,9 @@ class FakeHandle:
 class FakeBackend:
     """`run_algorithm` garde l'appel ; le test appelle `finished` quand il veut."""
 
-    def __init__(self, layers=(), write=True, loaded_count=8, loadable=True):
+    def __init__(self, layers=(), write=True, loaded_count=8, loadable=True, loaded_crs="EPSG:2154"):
         self.items = {l.lid: l for l in layers}
+        self.loaded_crs, self.known, self.known_calls = loaded_crs, {2154, 4326, 32631, 32632}, []
         self.calls, self.handle, self.finished = [], FakeHandle(), None
         self.write, self.loaded_count, self.loadable = write, loaded_count, loadable
         self.pairs, self.counts_call = [], None
@@ -46,6 +47,10 @@ class FakeBackend:
 
     def crs_is_metric(self, layer):
         return layer.metric
+
+    def crs_is_known(self, epsg):
+        self.known_calls.append(epsg)
+        return epsg in self.known
 
     def name_of(self, layer):
         return layer.name
@@ -90,7 +95,7 @@ class FakeBackend:
     def load_output(self, path, name):
         if not self.loadable:
             return None
-        return FakeLayer("out_1", name, "EPSG:2154", count=self.loaded_count)
+        return FakeLayer("out_1", name, self.loaded_crs, count=self.loaded_count)
 
 
 def start(entry, backend, params):
@@ -593,6 +598,117 @@ class IsochroneTest(unittest.TestCase):
         registry = gestures.GestureRegistry()
         analysis.register_all(registry, backend_factory=lambda: self.backend)
         self.assertIn("analysis.isochrone", registry.ids())
+
+
+class ReprojectTest(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.out = os.path.join(self.dir.name, "1-data.reproject.gpkg")
+        self.entry = analysis.ALGORITHMS["data.reproject"]
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def params(self, **extra):
+        p = {"layer_id": "w", "target_epsg": 2154, "out": self.out}
+        p.update(extra)
+        return p
+
+    def backend(self, **kw):
+        layers = [
+            FakeLayer("w", crs="EPSG:4326", metric=False, count=5),
+            FakeLayer("g", count=5),
+            FakeLayer("r", name="mnt", vector=False),
+        ]
+        return FakeBackend(layers, loaded_count=5, **kw)
+
+    def test_degrees_to_lambert_93_gives_a_new_layer(self):
+        b = self.backend()
+        _, calls = start(self.entry, b, self.params())
+        algo, p = b.calls[0]
+        self.assertEqual(algo, "native:reprojectlayer")
+        self.assertEqual(p["INPUT"].lid, "w")  # la couche d'origine n'est que lue
+        self.assertEqual(p["TARGET_CRS"], "EPSG:2154")
+        self.assertFalse(p["CONVERT_CURVED_GEOMETRIES"])
+        self.assertNotIn("OPERATION", p)  # réglages de transformation du projet
+        self.assertEqual(p["OUTPUT"], self.out)  # exactement le fichier du noyau
+        b.finished(True, {})
+        result, error = calls[0]
+        self.assertIsNone(error)
+        self.assertEqual(
+            result, {"layer_id": "out_1", "name": "1-data.reproject", "feature_count": 5, "crs": "EPSG:2154"}
+        )
+
+    def test_same_system_copies_the_layer(self):
+        b = self.backend()
+        _, calls = start(self.entry, b, self.params(layer_id="g"))
+        self.assertEqual(b.calls[0][1]["TARGET_CRS"], "EPSG:2154")
+        b.finished(True, {})
+        self.assertEqual(calls[0][0]["crs"], "EPSG:2154")
+
+    def test_degrees_are_accepted_and_metres_to_wgs84_too(self):
+        b = self.backend(loaded_crs="EPSG:4326")
+        _, calls = start(self.entry, b, self.params(layer_id="g", target_epsg=4326))
+        self.assertEqual(b.calls[0][1]["TARGET_CRS"], "EPSG:4326")
+        b.finished(True, {})
+        self.assertEqual(calls[0][0]["crs"], "EPSG:4326")
+
+    def test_unknown_target_launches_nothing_and_names_the_code(self):
+        b = self.backend()
+        _, calls = start(self.entry, b, self.params(target_epsg=99999))
+        error = calls[0][1]
+        self.assertEqual(error.code, "data.unknown_crs")
+        self.assertIn("EPSG:99999", error.message)
+        self.assertEqual(b.known_calls, [99999])
+        self.assertEqual(b.calls, [])
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_unknown_layer_and_raster_refused(self):
+        b = self.backend()
+        _, calls = start(self.entry, b, self.params(layer_id="nope"))
+        self.assertEqual(calls[0][1].code, "layer.not_found")
+        _, calls = start(self.entry, b, self.params(layer_id="r"))
+        self.assertEqual(calls[0][1].code, "layer.not_vector")
+        self.assertEqual(b.calls, [])
+
+    def test_bad_code_refused_even_if_the_core_let_it_through(self):
+        for bad in (None, -2154, 0, 2154.5, "2154", True):
+            b = self.backend()
+            _, calls = start(self.entry, b, self.params(target_epsg=bad))
+            self.assertEqual(calls[0][1].code, "analysis.bad_params", bad)
+            self.assertEqual(b.calls, [])
+
+    def test_cancellation_leaves_no_file(self):
+        b = self.backend()
+        g, calls = start(self.entry, b, self.params())
+        g.cancel()
+        self.assertTrue(b.handle.cancelled)
+        b.finished(False, {})
+        self.assertEqual(calls[0][1].code, "qgis.cancelled")
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_failure_leaves_no_file(self):
+        b = self.backend()
+        _, calls = start(self.entry, b, self.params())
+        b.finished(False, {})
+        self.assertEqual(calls[0][1].code, "analysis.failed")
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_default_table_registers_the_reprojection(self):
+        registry = gestures.GestureRegistry()
+        analysis.register_all(registry, backend_factory=lambda: self.backend())
+        self.assertIn("data.reproject", registry.ids())
+
+    def test_a_metric_analysis_on_the_layer_in_degrees_is_still_refused(self):
+        b = self.backend()
+        _, calls = start(
+            analysis.ALGORITHMS["analysis.buffer"],
+            b,
+            {"layer_id": "w", "distance": {"value": 500, "unit": "m"}, "out": self.out},
+        )
+        self.assertEqual(calls[0][1].code, "analysis.crs_not_metric")
+        self.assertIn("reprojetez", calls[0][1].message)
+        self.assertEqual(b.calls, [])
 
 
 class FormHidesCoreFilledTest(unittest.TestCase):
