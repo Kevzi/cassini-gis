@@ -1,13 +1,15 @@
 """Journal de la session du panneau, résultat clair et état des boutons.
 
-Sans Qt. Le journal est celui de la session (il ne relit pas celui du noyau) et
-s'efface avec le panneau. Aucun chemin absolu ni code n'est jamais produit ici
+Sans Qt. Le journal commence par les étapes passées du projet, que le noyau rend à
+l'ouverture (`session.hello`, champ `history`) ; il ne relit jamais le fichier du
+journal lui-même (AD-11). Aucun chemin absolu ni code n'est jamais produit ici
 (AD-9, AD-23).
 """
 
 import json
 import os
 import re
+import time
 
 RUNNING = "running"
 DONE = "done"
@@ -59,6 +61,49 @@ class RunLog:
     def __init__(self):
         self.entries = []
 
+    @classmethod
+    def from_history(cls, history, describe):
+        """Journal rempli des étapes passées `history` (réponse de `session.hello`).
+
+        `describe(command)` rend le libellé d'une commande. L'heure est la date de l'étape (`at`,
+        en ms depuis 1970), à l'heure locale ; une étape d'un journal plus ancien n'en a pas. Son
+        état vient de son issue : `error` (le code seul, sans message), `cancelled` ou fini. Un
+        résultat que le journal a résumé (plus de 200 octets) n'est pas repris : le détail ne
+        montre jamais une empreinte comme si c'était le résultat.
+        """
+        log = cls()
+        for item in history or []:
+            if not isinstance(item, dict):
+                continue
+            command = item.get("command")
+            if not isinstance(command, str):
+                continue
+            step = item.get("plan_step")
+            step = step if isinstance(step, int) and not isinstance(step, bool) else None
+            label = describe(command)
+            if step is not None:
+                label = "%d. %s" % (step, label)
+            origin = EXTERNAL if item.get("origin") == EXTERNAL else None
+            result = item.get("result")
+            if _summarized(result):
+                result = None
+            params = item.get("params")
+            if _summarized(params):
+                params = None
+            entry = log.start(
+                command, label, past_time(item.get("at")), params=params, result=result,
+                step=step, origin=origin,
+            )
+            error = item.get("error")
+            if isinstance(error, str):
+                entry.status = ERROR
+                entry.error = (error, "")
+            elif item.get("cancelled") is True:
+                entry.status = CANCELLED
+            else:
+                entry.status = DONE
+        return log
+
     def start(
         self, command, label, when, params=None, result=None, step=None, refs=None,
         origin=None, call_id=None,
@@ -99,12 +144,29 @@ class RunLog:
         return entry
 
 
+def _summarized(value):
+    """Vrai pour la valeur qu'un journal a résumée : `{truncated, bytes, fingerprint}`."""
+    return isinstance(value, dict) and value.get("truncated") is True and "fingerprint" in value
+
+
+def past_time(at):
+    """`08/11 14:02` : date et heure locales d'une étape passée (`at` en ms), ou ``."""
+    if isinstance(at, bool) or not isinstance(at, (int, float)) or at <= 0:
+        return ""
+    try:
+        return time.strftime("%d/%m %H:%M", time.localtime(at / 1000))
+    except (OverflowError, OSError, ValueError):
+        return ""
+
+
 def line_text(entry, status_word, duration=None):
     """`✔ Terminée  system.about  14:02` ; `status_word` est le mot déjà traduit.
 
     `duration` : durée déjà mise en forme (« 41 ms »), ajoutée en fin de ligne.
     """
-    line = "%s %s  %s  %s" % (ICONS[entry.status], status_word, entry.label, entry.when)
+    line = "%s %s  %s" % (ICONS[entry.status], status_word, entry.label)
+    if entry.when:  # une étape passée, relue du journal, n'a pas d'heure
+        line = "%s  %s" % (line, entry.when)
     return "%s  (%s)" % (line, duration) if duration else line
 
 

@@ -241,6 +241,15 @@ impl<'a> Session<'a> {
         self.work_dir.join(JOURNAL_FILE)
     }
 
+    /// Les `limit` dernières étapes du journal, pour que le panneau les montre à la réouverture
+    /// du projet : chacune réduite à son numéro, sa commande, ses paramètres (résumés au-delà de
+    /// 200 octets), son issue (`result`, `error` ou `cancelled`) et, s'il y a lieu, `origin`,
+    /// `plan_step`, `layer_id` et `at` (date de l'étape, en ms depuis 1970). Une ligne
+    /// illisible est sautée ; un journal absent ou illisible rend une liste vide.
+    pub fn history(&self, limit: usize) -> Vec<Value> {
+        history_of(&self.journal_path(), limit)
+    }
+
     /// Exécute une commande par le routeur et journalise l'étape.
     ///
     /// Une commande refusée avant exécution (id inconnu, paramètres invalides,
@@ -380,6 +389,11 @@ impl<'a> Session<'a> {
         line.insert("id".into(), json!(id));
         line.insert("params".into(), canonical(&logged));
         line.insert("inputs".into(), Value::Array(inputs));
+        // Date et heure de l'étape, en millisecondes depuis 1970 (UTC), pour l'historique du
+        // panneau ; le rejeu ne la compare pas.
+        if let Ok(now) = std::time::SystemTime::now().duration_since(UNIX_EPOCH) {
+            line.insert("at".into(), json!(now.as_millis() as u64));
+        }
         if let Some(origin) = origin {
             line.insert("origin".into(), json!(origin));
         }
@@ -482,6 +496,44 @@ fn locate(project: &Path) -> Result<(PathBuf, PathBuf), JournalError> {
         .into_owned();
     let work_dir = project_dir.join(format!("{stem}.cassini"));
     Ok((project_dir, work_dir))
+}
+
+/// Voir `Session::history` ; lit le journal `path`.
+pub(crate) fn history_of(path: &Path, limit: usize) -> Vec<Value> {
+    let Ok(bytes) = fs::read(path) else {
+        return Vec::new();
+    };
+    let text = String::from_utf8_lossy(&bytes);
+    let mut kept: Vec<Value> = content_lines(&text)
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter_map(|line| {
+            let command = line.get("id")?.as_str()?;
+            let mut entry = json!({
+                "step": line.get("step").cloned().unwrap_or(Value::Null),
+                "command": command,
+                // Des paramètres longs (géométries, listes de points) sont résumés comme un
+                // résultat : la réponse à `session.hello` reste courte.
+                "params": summarize(&line.get("params").cloned().unwrap_or_else(|| json!({}))),
+            });
+            for key in [
+                "result",
+                "error",
+                "cancelled",
+                "origin",
+                "plan_step",
+                "layer_id",
+                "at",
+            ] {
+                if let Some(v) = line.get(key) {
+                    entry[key] = v.clone();
+                }
+            }
+            Some(entry)
+        })
+        .collect();
+    let skip = kept.len().saturating_sub(limit);
+    kept.drain(..skip);
+    kept
 }
 
 /// Ids des étapes déjà journalisées, dans l'ordre (vide si illisible).

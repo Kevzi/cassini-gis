@@ -12,6 +12,70 @@ import runlog  # noqa: E402
 import texts  # noqa: E402
 
 
+class HistoryTest(unittest.TestCase):
+    """Les étapes passées du projet, rendues par le noyau à l'ouverture."""
+
+    def test_past_steps_fill_the_log_with_their_outcome_and_no_time(self):
+        history = [
+            {"step": 1, "command": "system.about", "params": {}, "result": {"name": "cassini"}},
+            {"step": 2, "command": "analysis.buffer", "params": {"layer": "l"},
+             "error": "analysis.crs_not_metric", "plan_step": 1},
+            {"step": 3, "command": "terrain.slope", "params": {}, "cancelled": True},
+            {"step": 4, "command": "layer.add", "params": {}, "result": 1, "origin": "external"},
+            {"step": 5},  # sans commande : sautée
+            "pas un objet",
+        ]
+        log = runlog.RunLog.from_history(history, lambda c: "<%s>" % c)
+        self.assertEqual(
+            [(e.command, e.status, e.label, e.when) for e in log.entries],
+            [
+                ("system.about", runlog.DONE, "<system.about>", ""),
+                ("analysis.buffer", runlog.ERROR, "1. <analysis.buffer>", ""),
+                ("terrain.slope", runlog.CANCELLED, "<terrain.slope>", ""),
+                ("layer.add", runlog.DONE, "<layer.add>", ""),
+            ],
+        )
+        self.assertEqual(log.entries[0].result, {"name": "cassini"})
+        self.assertEqual(log.entries[1].error, ("analysis.crs_not_metric", ""))
+        self.assertEqual(log.entries[3].origin, runlog.EXTERNAL)
+        # Aucune ligne passée n'est « en cours » : la session suivante ne la ferme pas.
+        self.assertIsNone(log.current())
+        self.assertEqual(
+            runlog.line_text(log.entries[0], "Terminée"), "✔ Terminée  <system.about>"
+        )
+
+    def test_a_dated_step_shows_its_local_date_and_time(self):
+        import time
+
+        at = 1762600000000
+        log = runlog.RunLog.from_history(
+            [{"step": 1, "command": "system.about", "params": {}, "result": {}, "at": at}], str
+        )
+        expected = time.strftime("%d/%m %H:%M", time.localtime(at / 1000))
+        self.assertEqual(log.entries[0].when, expected)
+        self.assertEqual(
+            runlog.line_text(log.entries[0], "Terminée"),
+            "✔ Terminée  system.about  " + expected,
+        )
+        for bad in (None, True, "hier", -5, 10 ** 30):
+            self.assertEqual(runlog.past_time(bad), "")
+
+    def test_a_summarized_result_or_params_is_not_taken_for_the_real_one(self):
+        stub = {"truncated": True, "bytes": 900, "fingerprint": "ab12"}
+        log = runlog.RunLog.from_history(
+            [{"step": 1, "command": "c", "params": stub, "result": stub, "plan_step": True}], str
+        )
+        entry = log.entries[0]
+        self.assertIsNone(entry.result)
+        self.assertIsNone(entry.params)
+        self.assertIsNone(entry.step)  # un booléen n'est pas un numéro d'étape
+        self.assertEqual(entry.label, "c")
+
+    def test_no_history_gives_an_empty_log(self):
+        self.assertEqual(runlog.RunLog.from_history(None, str).entries, [])
+        self.assertEqual(runlog.RunLog.from_history([], str).entries, [])
+
+
 class ResultFolderTest(unittest.TestCase):
     def test_folder_of_an_existing_file(self):
         import tempfile

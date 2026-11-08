@@ -560,12 +560,27 @@ class CassiniPanel(QWidget):
         if plan_in_flight and last and last.get("plan") and last["kind"] == runlog.RUNNING:
             self.last = None  # plus d'« En cours… » d'une étape qui n'existe plus
 
-    def set_ready(self, catalogue):
+    def set_ready(self, catalogue, history=()):
         self._drop_stale_run()
         self.ready = True
         self.banner = None
         self.banner_message = None
         self.catalogue = list(catalogue)
+        # Le journal du panneau reprend celui du projet, que le noyau rend à l'ouverture :
+        # les étapes passées restent visibles, et celles d'un autre projet disparaissent.
+        # Un autre projet (ou le premier) : le journal du panneau reprend celui du projet, que
+        # le noyau rend à l'ouverture. Un noyau relancé sur le même projet garde les lignes de
+        # la session, dont celles que le journal ne tient pas (commande refusée avant d'être
+        # lancée, étape coupée par l'arrêt du noyau).
+        project = getattr(self, "project_file", None)
+        if getattr(self, "_history_project", object()) != project:
+            self._history_project = project
+            self.focus = None  # le détail cliqué visait une ligne de l'ancien journal
+            self.last = None
+            self._shown_result = None
+            self.log = runlog.RunLog.from_history(
+                history, lambda command: agentview.describe(command, self.catalogue, self.lang)
+            )
         self.selected = None
         self.render()
         _announce(self.title, self.t("live_ready"))
@@ -832,6 +847,8 @@ class CassiniPanel(QWidget):
         if item.error is None:
             return None
         code, message = item.error
+        if not message:  # une étape passée : le journal ne garde que le code
+            return self.t("step_error_code", n=item.step or 1, code=code)
         return self.t("step_error", n=item.step or 1, code=code, message=message)
 
     def _render_focus(self):

@@ -827,6 +827,9 @@ impl Executor for Channel<'_> {
     }
 }
 
+/// Nombre d'étapes passées que `session.hello` rend au panneau.
+const HISTORY_LIMIT: usize = 200;
+
 fn hello(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, RpcError> {
     if state.session.is_some() {
         return Err(RpcError::coded(
@@ -885,6 +888,9 @@ fn hello(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, RpcErro
     // La session dit dès la poignée de main si elle est en lecture seule : l'extension
     // n'a plus à lancer une commande pour le découvrir (ticket 5.32).
     let read_only = session.mode() == Mode::ReadOnly;
+    // Les dernières étapes du journal, pour le panneau à la réouverture du projet : un ajout
+    // compatible de la réponse, comme `read_only` ; rien n'est exécuté ni journalisé.
+    let history = session.history(HISTORY_LIMIT);
     state.session = Some(session);
     state.project = Some(project.to_string());
     state.announced = commands;
@@ -899,6 +905,7 @@ fn hello(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, RpcErro
         "core_version": crate::VERSION,
         "read_only": read_only,
         "commands": catalogue(state),
+        "history": history,
     });
     if read_only {
         result["message"] = json!(JournalError::ReadOnly.to_string());
@@ -1126,6 +1133,84 @@ mod tests {
         assert_eq!(r[1]["result"]["core_version"], crate::VERSION);
         let journal = std::fs::read_to_string(dir.join("p.cassini/journal.jsonl")).unwrap();
         assert_eq!(journal.lines().count(), 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_reopened_project_gets_its_past_steps_in_the_hello_answer() {
+        let dir = temp_dir();
+        let project = project_in(&dir);
+        let first = exchange(&[hello_line(2, &[], &project)]);
+        assert_eq!(first[0]["result"]["history"], json!([]));
+        exchange(&[
+            hello_line(2, &[], &project),
+            run_line(2, "system.about", json!({})),
+            run_line(3, "command.unknown_for_history", json!({})),
+        ]);
+        // Une ligne illisible est sautée, sans cacher les autres.
+        let journal = dir.join("p.cassini/journal.jsonl");
+        let mut text = std::fs::read_to_string(&journal).unwrap();
+        text.push_str("pas du json\n");
+        std::fs::write(&journal, text).unwrap();
+        let again = exchange(&[hello_line(2, &[], &project)]);
+        let history = again[0]["result"]["history"].as_array().unwrap();
+        assert_eq!(history.len(), 1, "{history:?}");
+        assert_eq!(history[0]["step"], 1);
+        assert_eq!(history[0]["command"], "system.about");
+        assert!(history[0]["result"].is_object());
+        assert!(history[0]["at"]
+            .as_u64()
+            .is_some_and(|ms| ms > 1_700_000_000_000));
+        assert!(history[0].get("versions").is_none() && history[0].get("inputs").is_none());
+        // La réouverture n'allonge pas le journal.
+        let lines = std::fs::read_to_string(&journal).unwrap();
+        assert_eq!(lines.lines().count(), 2);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_history_keeps_only_the_last_steps_and_their_outcome() {
+        let dir = temp_dir();
+        let path = dir.join("journal.jsonl");
+        let mut text = String::new();
+        for step in 1..=5 {
+            text.push_str(
+                &json!({"step": step, "id": "analysis.buffer", "params": {"layer": "l"},
+                    "error": "analysis.crs_not_metric", "plan_step": 1,
+                    "versions": {"core": "x"}})
+                .to_string(),
+            );
+            text.push('\n');
+        }
+        text.push_str(
+            &json!({"step": 6, "id": "terrain.slope", "params": {"dem": "d"},
+                "cancelled": true, "origin": "external", "at": 1_762_600_000_000_u64})
+            .to_string(),
+        );
+        text.push('\n');
+        text.push_str(
+            &json!({"step": 7, "id": "layer.add", "params": {"points": "x".repeat(500)},
+                "result": {"layer_id": "c_1"}, "layer_id": "c_1"})
+            .to_string(),
+        );
+        text.push('\n');
+        std::fs::write(&path, text).unwrap();
+        let history = crate::journal::history_of(&path, 3);
+        assert_eq!(history.len(), 3);
+        assert_eq!(history[0]["step"], 5);
+        assert_eq!(history[0]["error"], "analysis.crs_not_metric");
+        assert_eq!(history[0]["plan_step"], 1);
+        assert!(history[0].get("versions").is_none());
+        assert_eq!(history[1]["cancelled"], true);
+        assert_eq!(history[1]["origin"], "external");
+        assert_eq!(history[1]["at"], 1_762_600_000_000_u64);
+        assert_eq!(history[2]["layer_id"], "c_1");
+        // Des paramètres longs sont résumés, comme un résultat.
+        assert_eq!(history[2]["params"]["truncated"], true);
+        assert_eq!(
+            crate::journal::history_of(&dir.join("absent.jsonl"), 3),
+            Vec::<Value>::new()
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 
