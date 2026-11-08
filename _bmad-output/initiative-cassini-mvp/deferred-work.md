@@ -897,3 +897,6 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `epic-catalogue-etendu-qgis/story-traceur-reprojection-de-bout-en-bout-data-reproject-plan.md`
   summary: `data.reproject` (10.7) est construite avant les mises à niveau 10.1 à 10.6 (version de chaîne, annonce fidèle, résultat validé par le noyau, prompt filtré) ; elle passe par le chemin générique existant et devra être reprise par chacune de ces entrées.
   evidence: Dérogation décidée par le propriétaire le 2026-11-08 : construire `data.reproject` maintenant, avant 10.1-10.6 et avant les epics 6 et 7 ; l'ordre de l'epic 10 sera remis d'aplomb par `bmad-ticket`. Le ré-entraînement qui apprend les familles `reprojection_couche` et `reprojection_avant_analyse` est groupé dans 11.23 ; la phrase « Reprojette la couche des gares en WGS84 » est à essayer dans le panneau avec le modèle installé et à juger pour de bon après 11.23.
+- source_plan: `plan-bug-etapes-du-plan-en-langage-courant.md`
+  summary: Vérifier la pente maximale de 5 265,7 % rendue par `terrain.slope` sur `mnt-74-25m.tif` (Annecy) : artefact du MNT (bord, valeur de remplissage) ou du calcul de pente du noyau.
+  evidence: Captures du panneau du 2026-11-08, « Fais la carte des pentes du MNT à 25 m en pourcentage » ; la phrase ne fait que recopier le maximum du résultat.
