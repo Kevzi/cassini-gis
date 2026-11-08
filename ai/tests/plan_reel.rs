@@ -12,9 +12,13 @@
 //! la `source` du MNT ; S21 écrit le système une seule fois pour deux points, ce que le garde-fou
 //! des coordonnées accepte depuis le ticket 4.10 (décision du propriétaire, 2026-11-05) ; S23 et
 //! S24, terrain puis moyenne par commune, restent des refus (statistiques sur un raster).
-//! S25, un point écrit en WGS84 sur un MNT en Lambert-93, attend depuis 11.16 le plan que le
-//! générateur enseigne depuis 11.12 (lot 1) : `data.transform_point` vers le système du MNT,
-//! puis `terrain.viewshed` sur `step:1.point`. Un refus ou un champ de vision en 4326 est un échec.
+//! S25, un point écrit en WGS84 sur un MNT en Lambert-93, attend depuis 11.16 le plan
+//! `data.transform_point` vers le système du MNT, puis `terrain.viewshed` sur `step:1.point`.
+//! Depuis 11.23, c'est le **plan complété** qui est mesuré : le modèle recopie le point tel que
+//! la phrase le donne, et le noyau ajoute la conversion avant de montrer le plan (11.22,
+//! décision 3 du changement de cap du 2026-11-08) ; l'essai applique la même complétion
+//! (`common::completed`). Un plan qui compose déjà la conversion n'en reçoit pas une seconde.
+//! Un refus est un échec.
 //! `tests/epreuve-modele-local/` reste gelé : son `sentences.json` et son banc Python (étape 2)
 //! gardent S25 en refus ; seul cet essai porte l'attendu du registre réel.
 //!
@@ -110,7 +114,8 @@ fn expected(id: &str) -> Want {
             "target": {"x": 657100, "y": 6848200, "epsg": 2154},
             "observer_height": {"value": 2, "unit": "m"},
             "target_height": {"value": 2, "unit": "m"}}}]),
-        // Un point WGS84 sur un MNT en Lambert-93 : la reprojection est une étape visible (11.12).
+        // Un point WGS84 sur un MNT en Lambert-93 : la reprojection est une étape visible (11.12),
+        // ajoutée par le noyau au plan du modèle depuis 11.22 (plan complété).
         "S25" => json!([
             {"command": "data.transform_point", "params": {
                 "point": {"x": 2.415, "y": 48.735, "epsg": 4326}, "target_epsg": 2154}},
@@ -133,9 +138,10 @@ fn plan_reel_at_least_80_percent_of_the_plans_match() {
         return;
     };
     let registry = Registry::standard();
-    let inventory: Value = serde_json::from_str(INVENTORY).unwrap();
-    // Comme dans le produit : identifiants courts montrés, plan retraduit (ticket 5.19).
-    let (inventory, ids) = common::shown_inventory(&inventory);
+    let full: Value = serde_json::from_str(INVENTORY).unwrap();
+    // Comme dans le produit : identifiants courts montrés, plan retraduit (ticket 5.19), puis
+    // complété par les conversions de points (11.22).
+    let (inventory, ids) = common::shown_inventory(&full);
     let sentences: Vec<Value> = serde_json::from_str(SENTENCES).unwrap();
     let mut generator = model_files_generator(files);
     let (mut right, mut total, mut questions, mut guarded) = (0, 0, 0, 0);
@@ -146,9 +152,13 @@ fn plan_reel_at_least_80_percent_of_the_plans_match() {
         );
         let want = expected(id);
         total += 1;
-        let got = common::restored(
-            compose_plan_with(style, &registry, &inventory, text, &mut generator),
-            &ids,
+        let got = common::completed(
+            &registry,
+            common::restored(
+                compose_plan_with(style, &registry, &inventory, text, &mut generator),
+                &ids,
+            ),
+            &full,
         );
         let guard_answer = matches!(
             &got,
@@ -285,4 +295,59 @@ fn s25_reprojects_the_wgs84_point_into_the_dem_system_first() {
     assert_eq!(calls[1]["params"]["dem"], MNT);
     assert_eq!(calls[1]["command"], "terrain.viewshed");
     assert_eq!(calls[1]["params"]["observer"], "step:1.point");
+}
+
+/// Le plan que le modèle écrit pour S25 depuis 11.23 : le point recopié tel que la phrase le
+/// donne, en WGS84.
+fn s25_as_written() -> Plan {
+    serde_json::from_value(json!({"kind": "calls", "calls": [
+        {"command": "terrain.viewshed", "params": {
+            "dem": MNT, "observer": {"x": 2.415, "y": 48.735, "epsg": 4326},
+            "observer_height": {"value": 10, "unit": "m"},
+            "radius": {"value": 1, "unit": "km"}}}
+    ]}))
+    .unwrap()
+}
+
+#[test]
+fn s25_written_as_given_is_completed_into_the_expected_plan() {
+    // 11.23 : le plan du modèle (point tel qu'écrit) passe le garde-fou, et la complétion du
+    // noyau en fait l'attendu ; un plan qui a déjà la conversion n'en reçoit pas une seconde.
+    let registry = Registry::standard();
+    let inventory: Value = serde_json::from_str(INVENTORY).unwrap();
+    let raw = s25_as_written();
+    assert_eq!(registry.check_plan(&raw), Ok(()));
+    assert_eq!(
+        guard_coordinates(&registry, raw.clone(), &sentence("S25")),
+        raw
+    );
+    let Want::Plan(calls) = expected("S25") else {
+        panic!("S25 attend un plan");
+    };
+    let want: Plan = serde_json::from_value(json!({"kind": "calls", "calls": calls})).unwrap();
+    assert_eq!(common::complete_with(&registry, raw, &inventory), want);
+    assert_eq!(
+        common::complete_with(&registry, want.clone(), &inventory),
+        want
+    );
+}
+
+#[test]
+fn every_expected_plan_is_left_unchanged_by_the_completion() {
+    // Un attendu est un plan complété : la complétion n'y ajoute rien.
+    let registry = Registry::standard();
+    let inventory: Value = serde_json::from_str(INVENTORY).unwrap();
+    let sentences: Vec<Value> = serde_json::from_str(SENTENCES).unwrap();
+    for s in &sentences {
+        let id = s["id"].as_str().unwrap();
+        let Want::Plan(calls) = expected(id) else {
+            continue;
+        };
+        let plan: Plan = serde_json::from_value(json!({"kind": "calls", "calls": calls})).unwrap();
+        assert_eq!(
+            common::complete_with(&registry, plan.clone(), &inventory),
+            plan,
+            "{id}"
+        );
+    }
 }

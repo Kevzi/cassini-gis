@@ -13,6 +13,13 @@
 //! celles du générateur (`training/src/families.rs`). Le titre d'un export n'est pas comparé,
 //! seulement non vide. Une commande est apprise si au moins une de ses deux phrases rend le plan
 //! conforme. Un carroyage sans système (`GRID_QUESTION`) doit rendre une question, jamais un plan.
+//!
+//! Depuis 11.23, le plan mesuré est le **plan complété** : le noyau ajoute les conversions de
+//! points avant de montrer le plan (11.22), et l'essai applique la même complétion
+//! (`common::completed`). Quatre phrases de plus (`FOREIGN_POINTS`, report de la relecture de
+//! 11.16) donnent un point dans un autre système que le raster, ou passent d'un fuseau UTM à
+//! l'autre : elles sont mesurées et imprimées à part, hors du score des quatorze commandes et de
+//! sa barre (27 / 28).
 
 mod common;
 
@@ -154,6 +161,27 @@ const GRID_QUESTION: [(&str, &str); 1] = [(
     "Fais un PDF de la carte avec un carroyage UTM au kilomètre.",
 )];
 
+/// Des points écrits dans un autre système que le raster, et un passage d'un fuseau UTM à
+/// l'autre : mesurés à part, sur le plan complété.
+const FOREIGN_POINTS: [(&str, &str); 4] = [
+    (
+        "Y01",
+        "Combien de ces deux points voient chaque endroit du MNT : le point 48,7380 N, 2,4120 E (WGS84) et le point 48,7330 N, 2,4210 E (WGS84) ?",
+    ),
+    (
+        "Y02",
+        "Coût cumulé sur le raster de coût au départ du point 455 800 / 5 398 300 (UTM 31N).",
+    ),
+    (
+        "Y03",
+        "Chemin de moindre coût sur le raster de coût, du point 48,7290 N, 2,4050 E (WGS84) au point 657 100 / 6 848 000 (Lambert-93).",
+    ),
+    (
+        "Y04",
+        "Quelles sont les coordonnées UTM 32N du point 455 800 / 5 398 300 (UTM 31N) ?",
+    ),
+];
+
 /// Les quatorze commandes mesurées, dans l'ordre de `SENTENCES`.
 const COMMANDS: [&str; 14] = [
     "coord.convert",
@@ -273,6 +301,47 @@ fn expected(id: &str) -> Value {
     }
 }
 
+/// Le plan qu'écrit le modèle pour une phrase de `FOREIGN_POINTS` : les points recopiés tels que
+/// la phrase les donne (11.23).
+fn foreign_as_written(id: &str) -> Value {
+    match id {
+        "Y01" => json!([{"command": "terrain.viewshed_cumulative", "params": {
+            "dem": MNT, "observers": [wgs84(2.412, 48.738), wgs84(2.421, 48.733)]}}]),
+        "Y02" => json!([{"command": "terrain.cost_distance", "params": {
+            "cost": COUT, "sources": [utm31(455800, 5398300)]}}]),
+        "Y03" => json!([{"command": "terrain.least_cost_path", "params": {
+            "cost": COUT, "start": wgs84(2.405, 48.729), "end": lambert(657100, 6848000)}}]),
+        "Y04" => json!([{"command": "coord.convert", "params": {
+            "point": utm31(455800, 5398300), "to": ["utm"], "utm_zone": 32}}]),
+        _ => unreachable!("phrase inconnue : {id}"),
+    }
+}
+
+/// Le plan complété attendu d'une phrase de `FOREIGN_POINTS` : une conversion vers le système du
+/// raster (Lambert-93) juste avant la commande, pour chaque point d'un autre système.
+fn foreign_expected(id: &str) -> Value {
+    let to_lambert = |point: Value| json!({"command": "data.transform_point", "params": {"point": point, "target_epsg": 2154}});
+    match id {
+        "Y01" => json!([
+            to_lambert(wgs84(2.412, 48.738)),
+            to_lambert(wgs84(2.421, 48.733)),
+            {"command": "terrain.viewshed_cumulative", "params": {
+                "dem": MNT, "observers": ["step:1.point", "step:2.point"]}}
+        ]),
+        "Y02" => json!([
+            to_lambert(utm31(455800, 5398300)),
+            {"command": "terrain.cost_distance", "params": {
+                "cost": COUT, "sources": ["step:1.point"]}}
+        ]),
+        "Y03" => json!([
+            to_lambert(wgs84(2.405, 48.729)),
+            {"command": "terrain.least_cost_path", "params": {
+                "cost": COUT, "start": "step:1.point", "end": lambert(657100, 6848000)}}
+        ]),
+        _ => foreign_as_written(id),
+    }
+}
+
 /// Un raster de l'inventaire, dans la forme des inventaires de QGIS (celle du MNT de l'épreuve).
 fn raster(layer_id: &str, name: &str, source: &str) -> Value {
     json!({"layer_id": layer_id, "name": name, "kind": "raster", "geometry": null,
@@ -332,16 +401,22 @@ fn epic11_reel_every_command_has_at_least_one_matching_plan() {
         return;
     };
     let registry = Registry::standard();
-    // Comme dans le produit : identifiants courts montrés, plan retraduit (ticket 5.19).
-    let (inventory, ids) = common::shown_inventory(&inventory());
+    // Comme dans le produit : identifiants courts montrés, plan retraduit (ticket 5.19), puis
+    // complété par les conversions de points (11.22, mesuré depuis 11.23).
+    let full = inventory();
+    let (inventory, ids) = common::shown_inventory(&full);
     let mut generator = model_files_generator(files);
     let mut scores = vec![0usize; COMMANDS.len()];
     let mut right = 0;
     for (id, text) in SENTENCES {
         let want = expected(id);
-        let got = common::restored(
-            compose_plan_with(style, &registry, &inventory, text, &mut generator),
-            &ids,
+        let got = common::completed(
+            &registry,
+            common::restored(
+                compose_plan_with(style, &registry, &inventory, text, &mut generator),
+                &ids,
+            ),
+            &full,
         );
         let ok = match &got {
             Ok(Plan::Calls { calls }) => {
@@ -366,9 +441,13 @@ fn epic11_reel_every_command_has_at_least_one_matching_plan() {
     }
     let mut asked = true;
     for (id, text) in GRID_QUESTION {
-        let got = common::restored(
-            compose_plan_with(style, &registry, &inventory, text, &mut generator),
-            &ids,
+        let got = common::completed(
+            &registry,
+            common::restored(
+                compose_plan_with(style, &registry, &inventory, text, &mut generator),
+                &ids,
+            ),
+            &full,
         );
         let ok = matches!(&got, Ok(Plan::Question { .. }));
         eprintln!(
@@ -379,13 +458,38 @@ fn epic11_reel_every_command_has_at_least_one_matching_plan() {
         );
         asked &= ok;
     }
+    let mut foreign = 0;
+    for (id, text) in FOREIGN_POINTS {
+        let want = foreign_expected(id);
+        let got = common::completed(
+            &registry,
+            common::restored(
+                compose_plan_with(style, &registry, &inventory, text, &mut generator),
+                &ids,
+            ),
+            &full,
+        );
+        let ok = matches!(&got, Ok(Plan::Calls { calls })
+            if serde_json::to_value(calls).unwrap() == want);
+        eprintln!(
+            "{} {id} {text}
+     attendu : {want}
+     obtenu  : {got:?}",
+            if ok { "OK  " } else { "FAIL" }
+        );
+        if let Ok(plan) = &got {
+            assert_eq!(registry.check_plan(plan), Ok(()), "{id}");
+        }
+        foreign += usize::from(ok);
+    }
     for (command, score) in COMMANDS.iter().zip(&scores) {
         eprintln!("COMMANDE {command:<28} {score}/2");
     }
     let total = SENTENCES.len();
     eprintln!(
-        "SCORE {right}/{total} plans conformes ; carroyage sans système : {}",
-        if asked { "question" } else { "pas de question" }
+        "SCORE {right}/{total} plans conformes ; carroyage sans système : {} ; points d'un autre système (hors barre) : {foreign}/{}",
+        if asked { "question" } else { "pas de question" },
+        FOREIGN_POINTS.len()
     );
     let unlearned: Vec<&str> = COMMANDS
         .iter()
@@ -514,4 +618,49 @@ fn an_export_without_a_title_does_not_match() {
         comparable(titled),
         Some(json!([{"command": "layout.export_pdf", "params": {"page_size": "a3"}}]))
     );
+}
+
+#[test]
+fn the_foreign_points_written_as_given_are_completed_into_the_expected_plans() {
+    // 11.23 : le plan du modèle (points tels qu'écrits) est valide et passe le garde-fou ; la
+    // complétion du noyau en fait l'attendu, et laisse l'attendu tel quel.
+    let registry = Registry::standard();
+    let inventory = inventory();
+    for (id, text) in FOREIGN_POINTS {
+        let raw: Plan =
+            serde_json::from_value(json!({"kind": "calls", "calls": foreign_as_written(id)}))
+                .unwrap();
+        assert_eq!(registry.check_plan(&raw), Ok(()), "{id}");
+        assert_eq!(guard_coordinates(&registry, raw.clone(), text), raw, "{id}");
+        let want: Plan =
+            serde_json::from_value(json!({"kind": "calls", "calls": foreign_expected(id)}))
+                .unwrap();
+        assert_eq!(registry.check_plan(&want), Ok(()), "{id}");
+        assert_eq!(
+            common::complete_with(&registry, raw, &inventory),
+            want,
+            "{id}"
+        );
+        assert_eq!(
+            common::complete_with(&registry, want.clone(), &inventory),
+            want,
+            "{id}"
+        );
+    }
+}
+
+#[test]
+fn every_expected_plan_is_left_unchanged_by_the_completion() {
+    // Les points des phrases de `SENTENCES` sont dans le système de leur raster, ou portés par
+    // une commande sans raster : la complétion n'ajoute rien à leur attendu.
+    let registry = Registry::standard();
+    let inventory = inventory();
+    for (id, _) in SENTENCES {
+        let plan = expected_plan(id);
+        assert_eq!(
+            common::complete_with(&registry, plan.clone(), &inventory),
+            plan,
+            "{id}"
+        );
+    }
 }

@@ -7,6 +7,9 @@ use cassini_ai::plan::{resolve_model, AgentError, PromptStyle};
 use cassini_ai::ModelFiles;
 use cassini_core::agent_inventory::ShortIds;
 use cassini_core::plan::Plan;
+use cassini_core::plan_completion::complete_conversions;
+use cassini_core::registry::Registry;
+use serde_json::Value;
 
 /// Le modèle à essayer, lu de `CASSINI_TEST_MODEL` : un GGUF seul (long prompt) ou une
 /// déclaration `*.modele.json` (base, adaptateur et prompt qu'elle nomme), résolus par
@@ -55,4 +58,41 @@ pub fn restored(composed: Result<Plan, AgentError>, ids: &ShortIds) -> Result<Pl
         }
         plan
     })
+}
+
+/// Le plan composé, complété par les conversions de points comme le fait `plan.propose` avant de
+/// le montrer (amendement d'AD-19, 11.22) : depuis 11.23, les essais réels de terrain mesurent le
+/// plan complété, le modèle recopiant un point tel que la phrase le donne. Le système d'un raster
+/// est celui que `inventory` donne à sa `source` (dans le produit, l'en-tête du GeoTIFF) ; une
+/// question ou un refus passent inchangés.
+#[allow(dead_code)]
+pub fn completed(
+    registry: &Registry,
+    composed: Result<Plan, AgentError>,
+    inventory: &Value,
+) -> Result<Plan, AgentError> {
+    composed.map(|plan| complete_with(registry, plan, inventory))
+}
+
+/// La complétion d'un plan sur `inventory`, comme `completed`.
+#[allow(dead_code)]
+pub fn complete_with(registry: &Registry, plan: Plan, inventory: &Value) -> Plan {
+    let rasters: Vec<(String, u32)> = inventory["layers"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|l| l["kind"] == "raster")
+        .filter_map(|l| {
+            let source = l["source"].as_str()?.to_string();
+            let epsg = u32::try_from(l["epsg"].as_u64()?).ok()?;
+            Some((source, epsg))
+        })
+        .collect();
+    let raster_epsg = |raw: &str| {
+        rasters
+            .iter()
+            .find(|(source, _)| source == raw)
+            .map(|(_, epsg)| *epsg)
+    };
+    complete_conversions(registry, plan, &raster_epsg)
 }

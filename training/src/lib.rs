@@ -776,6 +776,52 @@ mod tests {
     }
 
     #[test]
+    fn the_default_set_teaches_styles_points_as_written_and_the_project_utm_zone() {
+        // 11.23 : au jeu par défaut, les deux commandes de style sont planifiées et aucun refus
+        // ne dit qu'aucune commande ne change le style ; aucune question ne demande de
+        // reprojeter une liste de points, et un point de terrain d'un autre système est recopié
+        // tel qu'écrit ; le carroyage UTM au fuseau du projet a au moins 60 exemples, recopies
+        // et questions comprises.
+        let registry = Registry::standard();
+        let (examples, summary) = generate(DEFAULT_SEED, DEFAULT_COUNT);
+        let mut planned = HashSet::new();
+        let mut copied_points = 0;
+        for e in &examples {
+            assert!(!families::styles_no_layer(&e.expected), "{}", e.request);
+            if let Some(q) = e.expected["question"].as_str() {
+                assert!(
+                    !q.contains("reprojet") && !q.contains("pas dans le système"),
+                    "{q}"
+                );
+            }
+            for c in e.expected["calls"].as_array().into_iter().flatten() {
+                planned.insert(c["command"].as_str().unwrap_or_default().to_string());
+            }
+            if e.family == "terrain_autre_systeme"
+                && e.expected["calls"].as_array().is_some_and(|c| c.len() == 1)
+            {
+                let plan: Plan = serde_json::from_value(e.expected.clone()).unwrap();
+                let guarded =
+                    cassini_core::point::guard_coordinates(&registry, plan.clone(), &e.request);
+                assert_eq!(guarded, plan, "{}", e.request);
+                copied_points += 1;
+            }
+        }
+        assert!(planned.contains("map.topographic_style"));
+        assert!(planned.contains("map.graduated_style"));
+        assert!(copied_points > 0);
+        let grid = &summary.families["carroyage_utm_projet"];
+        assert!(grid.kept >= 60 && grid.rejected == 0, "{grid:?}");
+        let grids: Vec<&Example> = examples
+            .iter()
+            .filter(|e| e.family == "carroyage_utm_projet")
+            .collect();
+        assert!(grids.iter().any(|e| e.expected["kind"] == "calls"));
+        assert!(grids.iter().any(|e| e.expected["kind"] == "question"));
+        assert!(grids.iter().all(|e| e.expected["kind"] != "refusal"));
+    }
+
+    #[test]
     fn paper_and_orientation_are_plans_never_refusals() {
         // 11.12, lot 3 (inverse le test de 5.40) : au jeu par défaut, aucun refus ne cite
         // « A4 », `export_pdf_format` a des plans pour A3, A0, portrait et chacune des deux
