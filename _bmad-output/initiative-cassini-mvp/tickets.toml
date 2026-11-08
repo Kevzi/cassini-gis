@@ -53,6 +53,16 @@ covers = ["CAP-11"]
 after = [{ epic = 2, needs = "le contrat du registre de commandes" }]
 
 [[epic]]
+id = 12
+slug = "epic-refonte-du-panneau"
+title = "Refonte du panneau : le fil de la demande"
+covers = ["CAP-13", "CAP-4"]
+after = [
+  { epic = 9, needs = "le panneau de l'extension (9.4) et son client du noyau" },
+  { epic = 5, needs = "le plan propose, valide et execute par l'agent, que le fil affiche" },
+]
+
+[[epic]]
 id = 11
 slug = "epic-geometrie-et-terrain-etendu"
 title = "Geometrie et terrain etendu, catalogue des commandes fige"

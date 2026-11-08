@@ -1,0 +1,39 @@
+# tickets.toml — epic 12, refonte du panneau : le fil de la demande.
+# L'ordre des tables est l'ordre de construction ; `id` nomme une entree pour de bon.
+# Les trois entrees touchent panel.py : une seule voie, chacune apres la precedente.
+
+[[entry]]
+id = 1
+type = "story"
+title = "Le fil et ses cartes"
+description = "Reorganise le panneau en fil : en-tete, bandeau, fil defilant (accueil, bulle de demande, cartes de composition, plan, resultat, question, refus, erreur, plan valide replie), replis Journal et Mode expert au-dessus de la saisie epinglee en bas, pied hors ligne ; bouton principal sarcelle et couleurs propres a Cassini en paire claire et sombre choisie d'apres la palette de QGIS."
+verify = "Captures du vrai panneau a 340 px sous QGIS 3.44 des six etats du fil, en theme clair et sombre, comparees a mockups/panneau-fil.html : aucun cadre a hauteur fixe, aucun texte coupe ; tests de l'extension verts."
+covers = ["CAP-13", "CAP-4"]
+after = ["9.4", "5.6"]
+hitl = false
+risk = "medium"
+references = ["ux-panneau-cassini/DESIGN.md#components", "ux-panneau-cassini/EXPERIENCE.md#information-architecture", "ux-panneau-cassini/mockups/panneau-fil.html"]
+
+[[entry]]
+id = 2
+type = "story"
+title = "Guidage : A vous, repere d'avancement et Reformuler"
+description = "Ajoute la ligne « A vous : … », le repere « Etape k sur n en cours », le bouton « Reformuler la demande » apres une erreur, un refus, une composition impossible ou une question (la phrase revient dans la saisie sans ecraser un texte tape), le remplacement de l'echange par une nouvelle demande, l'anneau de focus du bouton principal, le focus et les annonces des State Patterns."
+verify = "Sous QGIS sur Annecy, une phrase qui echoue puis Reformuler puis une phrase reussie, en captures ; tests de la logique du panneau sur chaque etat et chaque deplacement de focus."
+covers = ["CAP-13", "CAP-4"]
+after = [1]
+hitl = false
+risk = "medium"
+references = ["ux-panneau-cassini/EXPERIENCE.md#state-patterns", "ux-panneau-cassini/EXPERIENCE.md#accessibility-floor"]
+
+[[entry]]
+id = 3
+type = "story"
+title = "Rejouer le journal et mode expert dans le fil"
+description = "Ajoute le bouton « Rejouer le journal » dans le repli du Journal de session, qui rejoue par le noyau et dit si le resultat est identique, et affiche une commande lancee depuis le Mode expert dans le fil comme une demande (bulle « Mode expert : … » puis carte de resultat)."
+verify = "Sous QGIS, une session de deux etapes rejouee depuis le panneau affiche « identique » ; une commande experte apparait dans le fil avec son resultat ; tests de l'extension verts."
+covers = ["CAP-13"]
+after = [2]
+hitl = false
+risk = "medium"
+references = ["ux-panneau-cassini/EXPERIENCE.md#component-patterns", "ux-panneau-cassini/EXPERIENCE.md#key-flows"]
