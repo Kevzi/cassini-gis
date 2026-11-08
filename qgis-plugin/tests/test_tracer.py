@@ -772,7 +772,7 @@ class PanelBannerTest(unittest.TestCase):
         panel.focus = ("entry", object())
         panel.last = {"kind": "done"}
         panel.set_ready(catalogue, past)
-        self.assertEqual([e.label for e in panel.log.entries], ["Version du noyau."])
+        self.assertEqual([e.label for e in panel.log.entries], ["Vérification du noyau Cassini"])
         self.assertIsNone(panel.focus)
         self.assertIsNone(panel.last)
         # Noyau relancé sur le même projet : les lignes de la session restent.

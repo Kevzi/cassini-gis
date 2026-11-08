@@ -82,14 +82,55 @@ class AgentViewTest(unittest.TestCase):
         c = ctl(self.v)
         self.assertFalse(c["approve_enabled"] or c["reject_enabled"])
 
-    def test_labels_from_the_registry_with_fallback(self):
+    def test_labels_are_short_sentences_with_a_short_fallback(self):
         self.v.proposed("plan-1", PLAN)
         s1, s2, s3 = self.v.steps
+        # Paramètres incomplets (pas de distance) : titre court du registre, sans point.
         self.assertEqual(av.step_label(s1, CATALOGUE, "fr"),
-                         "1. Fait une zone tampon autour des entités d'une couche.")
-        self.assertEqual(av.step_label(s1, CATALOGUE, "en"), "1. Buffers the features of a layer.")
-        self.assertEqual(av.step_label(s2, CATALOGUE, "en"), "2. Exporte la carte en PDF.")
+                         "1. Fait une zone tampon autour des entités d'une couche")
+        self.assertEqual(av.step_label(s1, CATALOGUE, "en"), "1. Buffers the features of a layer")
+        # Paramètres lisibles : la phrase tirée des paramètres, dans la langue.
+        self.assertEqual(av.step_label(s2, CATALOGUE, "fr"), "2. Export PDF de la carte « Gares »")
+        self.assertEqual(av.step_label(s2, CATALOGUE, "en"), '2. PDF export of the map "Gares"')
         self.assertEqual(av.step_label(s3, CATALOGUE, "fr"), "3. inconnue.cmd")
+
+    def test_a_slope_step_reads_as_a_short_sentence_not_the_registry_description(self):
+        description = (
+            "Pente d'un MNT : calcule la pente de chaque cellule d'un modèle numérique "
+            "d'élévation (fichier GeoTIFF désigné par `dem`, chemin de fichier MNT recopié "
+            "de l'inventaire, pas un id de couche)."
+        )
+        catalogue = [{"id": "terrain.slope", "description_fr": description,
+                      "description_en": "DEM slope: computes the slope of each cell."}]
+        self.v.proposed("plan-1", {"calls": [{"command": "terrain.slope", "params": {
+            "dem": "C:/donnees/annecy/mnt-74-25m.tif", "unit": "percent"}}]})
+        (step,) = self.v.steps
+        self.assertEqual(av.step_label(step, catalogue, "fr"),
+                         "1. Pente de mnt-74-25m en pourcentage")
+        self.assertEqual(av.step_label(step, catalogue, "en"), "1. Slope of mnt-74-25m in percent")
+        line = av.step_line(step, catalogue, "fr")
+        self.assertNotIn("GeoTIFF", line)
+        self.assertNotIn("inventaire", line)
+        # Paramètres illisibles : le titre avant « : », jamais le texte entier.
+        self.v.proposed("plan-2", {"calls": [{"command": "terrain.slope", "params": {
+            "dem": "mnt.tif", "unit": "radians"}}]})
+        self.assertEqual(av.step_label(self.v.steps[0], catalogue, "fr"), "1. Pente d'un MNT")
+        self.assertEqual(av.step_label(self.v.steps[0], catalogue, "en"), "1. DEM slope")
+
+    def test_a_chained_reference_reads_as_the_step_it_cites(self):
+        self.v.proposed("plan-1", {"calls": [
+            {"command": "analysis.buffer", "params": {
+                "layer_id": "gares_1", "distance": {"value": 500, "unit": "m"}}},
+            {"command": "analysis.intersect", "params": {
+                "layer_id": "parcelles_1", "overlay_layer_id": "step:1.layer_id"}},
+        ]})
+        s2 = self.v.steps[1]
+        self.assertEqual(av.step_label(s2, CATALOGUE, "fr"),
+                         "2. Intersection de parcelles_1 avec le résultat de l'étape 1")
+        refs = {1: {"layer_id": "buffer_1", "name": "Tampon", "feature_count": 3}}
+        names = {"parcelles_1": "Parcelles"}.get
+        self.assertEqual(av.step_label(s2, CATALOGUE, "fr", names, refs),
+                         "2. Intersection de Parcelles avec Tampon")
 
     def test_line_has_marker_icon_and_word(self):
         self.v.proposed("plan-1", PLAN)

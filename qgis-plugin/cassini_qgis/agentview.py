@@ -7,10 +7,11 @@ son `plan_id`. Aucun chemin absolu ni code n'est produit ici (AD-9, AD-23).
 """
 
 try:  # importé à plat par les tests, en paquet par QGIS
-    from . import client, runlog, texts
+    from . import client, runlog, summary, texts
 except ImportError:  # pragma: no cover
     import client
     import runlog
+    import summary
     import texts
 
 # Phases du dialogue avec l'agent.
@@ -193,7 +194,11 @@ class AgentView:
 
 # -- libellés ----------------------------------------------------------------
 def describe(command, catalogue, lang):
-    """Description de la commande dans la langue (registre) ; repli : son id."""
+    """Description entière de la commande dans la langue (registre) ; repli : son id.
+
+    Écrite pour le modèle : seule la question d'accord de l'IA externe la montre. Une étape
+    se lit par `step_label`.
+    """
     for entry in catalogue or []:
         if isinstance(entry, dict) and entry.get("id") == command:
             text = texts.pick(lang, entry.get("description_fr", ""), entry.get("description_en", ""))
@@ -202,19 +207,24 @@ def describe(command, catalogue, lang):
     return command or "?"
 
 
-def step_label(step, catalogue, lang):
-    """`1. Fait une zone tampon autour des entités d'une couche.`"""
-    return "%d. %s" % (step.number, describe(step.command, catalogue, lang))
+def step_label(step, catalogue, lang, layer_name=None, refs=None):
+    """`1. Pente de mnt-74-25m en pourcentage` : la phrase courte tirée des paramètres
+    (`summary.label`), jamais la description du registre. `refs` : {k: résultat de l'étape
+    k}, pour nommer une référence `step:k.…`."""
+    return "%d. %s" % (
+        step.number,
+        summary.label(step.command, step.params, lang, layer_name, refs, catalogue),
+    )
 
 
-def step_line(step, catalogue, lang, current=None):
-    """`▶ … En cours…  2. Fait …` : marqueur, icône et mot, puis le libellé."""
+def step_line(step, catalogue, lang, current=None, layer_name=None, refs=None):
+    """`▶ … En cours…  2. Zone tampon …` : marqueur, icône et mot, puis le libellé."""
     marker = MARKER if current is not None and step.number == current else " "
     return "%s %s %s  %s" % (
         marker,
         ICONS[step.status],
         texts.tr(lang, step.status),
-        step_label(step, catalogue, lang),
+        step_label(step, catalogue, lang, layer_name, refs),
     )
 
 

@@ -188,7 +188,7 @@ class ExternalTest(unittest.TestCase):
         entry = self.panel.log.entries[-1]
         self.assertEqual((entry.origin, entry.call_id, entry.status),
                          (runlog.EXTERNAL, "external-3", runlog.RUNNING))
-        self.assertEqual(entry.label, "IA externe · Décrit une couche.")
+        self.assertEqual(entry.label, "IA externe · Décrit une couche")
         self.assertEqual(entry.params, {"layer_id": "l1"})
         self.assertTrue(external.busy(self.panel.state))
         self.p.feed(notification("external.call", {
@@ -198,7 +198,7 @@ class ExternalTest(unittest.TestCase):
         self.assertEqual(entry.status, runlog.DONE)
         self.assertEqual(entry.result, {"name": "Gares"})
         self.assertEqual(self.panel.outs[-1]["announce"],
-                         "IA externe · Décrit une couche. : Terminée.")
+                         "IA externe · Décrit une couche : Terminée.")
         line = runlog.line_text(entry, texts.tr("fr", "done"),
                                 external.duration_text(entry.duration_ms, "fr"))
         for part in ("Terminée", "IA externe", "41 ms"):

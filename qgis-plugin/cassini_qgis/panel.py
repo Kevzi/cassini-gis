@@ -579,7 +579,10 @@ class CassiniPanel(QWidget):
             self.last = None
             self._shown_result = None
             self.log = runlog.RunLog.from_history(
-                history, lambda command: agentview.describe(command, self.catalogue, self.lang)
+                history,
+                lambda command, params: summary.label(
+                    command, params, self.lang, _layer_name, None, self.catalogue
+                ),
             )
         self.selected = None
         self.render()
@@ -640,9 +643,11 @@ class CassiniPanel(QWidget):
             target = agent.find(payload.get("step"))
             command = payload.get("command") or (target.command if target else "?")
             label = (
-                agentview.step_label(target, self.catalogue, self.lang)
+                agentview.step_label(
+                    target, self.catalogue, self.lang, _layer_name, self._plan_refs
+                )
                 if target is not None
-                else agentview.describe(command, self.catalogue, self.lang)
+                else summary.short_title(command, self.catalogue, self.lang)
             )
             self._plan_entry = self.log.start(
                 command,
@@ -855,8 +860,8 @@ class CassiniPanel(QWidget):
         """Détail de la ligne du journal ou de l'étape du plan cliquée."""
         kind, item = self.focus
         if kind == "step":
-            label = agentview.step_label(item, self.catalogue, self.lang)
             refs = self.agent.step_results()
+            label = agentview.step_label(item, self.catalogue, self.lang, _layer_name, refs)
         else:
             label = item.label
             refs = item.refs
@@ -958,7 +963,14 @@ class CassiniPanel(QWidget):
         self.plan_list.clear()
         for step in agent.steps:
             self.plan_list.addItem(
-                agentview.step_line(step, self.catalogue, self.lang, agent.current)
+                agentview.step_line(
+                    step,
+                    self.catalogue,
+                    self.lang,
+                    agent.current,
+                    _layer_name,
+                    agent.step_results(),
+                )
             )
         self.plan_details.setVisible(has_steps)
         self.plan_details.button.setText(t("details"))

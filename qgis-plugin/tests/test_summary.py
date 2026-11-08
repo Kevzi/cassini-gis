@@ -560,5 +560,282 @@ class ReviewFixesTest(unittest.TestCase):
         self.assertIn("1234567,5 m", say("analysis.buffer", big))
 
 
+CATALOGUE_MD = os.path.join(
+    HERE, "..", "..", "_bmad-output", "initiative-cassini-mvp", "spec-cassini-mvp",
+    "catalogue-des-commandes.md",
+)
+L93 = {"x": 945000.0, "y": 6540000.0, "epsg": 2154}
+WGS = {"x": 2.35, "y": 48.85, "epsg": 4326}
+DEM = "C:/donnees/annecy/mnt-74-25m.tif"
+
+# Paramètres et résultat d'exemple de chaque commande `faite` du catalogue : la phrase
+# avant résultat (libellé d'étape) et la phrase après résultat doivent toutes deux exister.
+SAMPLES = {
+    "system.about": ({}, {"core_version": "0.1.0", "protocol_version": 1}),
+    "model.list": ({}, {"models": [{"name": "qwen"}]}),
+    "project.inventory": ({}, {"layers": [{"id": "gares_1"}, {"id": "parcelles_2"}]}),
+    "layer.add": ({"path": "C:/d/gares.gpkg"}, {"layer_id": "gares_1", "name": "Gares"}),
+    "layer.describe": ({"layer_id": "gares_1"},
+                       {"name": "Gares", "feature_count": 3, "fields": ["nom"], "geometry": "Point"}),
+    "layer.open_raster": ({"path": DEM}, {"layer_id": "mnt_1", "name": "mnt-74-25m"}),
+    "layer.open_vector": ({"path": "C:/d/routes.shp"},
+                          {"layer_id": "routes_1", "name": "routes", "crs": "EPSG:2154"}),
+    "analysis.buffer": (BUFFER, BUFFER_OUT),
+    "analysis.intersect": ({"layer_id": "parcelles_2", "overlay_layer_id": "tampon_3"},
+                           {"layer_id": "x_4", "name": "Intersection", "feature_count": 2}),
+    "analysis.select_by_attribute": (
+        {"layer_id": "parcelles_2", "field": "zone", "operator": "eq", "value": "U"},
+        {"layer_id": "x_5", "name": "Sélection", "feature_count": 12}),
+    "analysis.zonal_statistics": ({"layer_id": "parcelles_2", "points_layer_id": "gares_1"},
+                                  {"name": "Décompte", "feature_count": 4, "zones": [],
+                                   "truncated": False}),
+    "analysis.isochrone": ({"layer_id": "routes_1", "duration": {"value": 10, "unit": "min"},
+                            "mode": "walk"},
+                           {"layer_id": "iso_1", "name": "Isochrone", "feature_count": 1}),
+    "layout.export_pdf": ({"title": "Gares"}, {"file": "C:/d/gares.pdf", "page_count": 1}),
+    "terrain.slope": ({"dem": DEM, "unit": "percent"},
+                      {"file": "C:/d/pente.tif", "unit": "percent", "min": 0.0, "max": 152.34,
+                       "nodata_cells": 0}),
+    "terrain.viewshed": ({"dem": DEM, "observer": L93},
+                         {"file": "C:/d/vue.tif", "visible_cells": 1200, "hidden_cells": 800,
+                          "nodata_cells": 0}),
+    "terrain.line_of_sight": ({"dem": DEM, "observer": L93, "target": L93},
+                              {"visible": False, "unit": "m", "distance": 2500.0,
+                               "obstruction_distance": 830.0, "profile": [],
+                               "profile_step": 25.0, "nodata_samples": 0}),
+    "coord.convert": ({"point": WGS, "to": ["mgrs"]}, {"mgrs": "31UDQ5248011718"}),
+    "geo.distance_azimuth": ({"from": WGS, "to": WGS},
+                             {"distance": {"value": 1200, "unit": "m"},
+                              "azimuth": {"value": 45, "unit": "deg"},
+                              "back_azimuth": {"value": 225, "unit": "deg"}}),
+    "geo.destination_point": ({"from": WGS, "azimuth": {"value": 90, "unit": "deg"},
+                               "distance": {"value": 1, "unit": "km"}},
+                              {"point": WGS}),
+    "geo.bearing_intersection": ({"first": WGS, "first_azimuth": {"value": 10, "unit": "deg"},
+                                  "second": WGS, "second_azimuth": {"value": 80, "unit": "deg"}},
+                                 {"point": WGS, "distance_from_first": {"value": 500, "unit": "m"},
+                                  "distance_from_second": {"value": 700, "unit": "m"}}),
+    "data.transform_point": ({"point": WGS, "target_epsg": 2154},
+                             {"point": {"x": 652000.0, "y": 6862000.0, "epsg": 2154}}),
+    "data.reproject": ({"layer_id": "gares_1", "target_epsg": 2154},
+                       {"layer_id": "gares_2", "name": "Gares 2154", "feature_count": 3}),
+    "terrain.aspect": ({"dem": DEM}, {"file": "C:/d/expo.tif", "flat_cells": 12,
+                                      "nodata_cells": 0}),
+    "terrain.hillshade": ({"dem": DEM}, {"file": "C:/d/ombrage.tif", "nodata_cells": 0}),
+    "terrain.viewshed_cumulative": ({"dem": DEM, "observers": [L93, L93]},
+                                    {"file": "C:/d/cumul.tif", "observer_count": 2,
+                                     "max_count": 2, "visible_cells": 3000, "nodata_cells": 0}),
+    "terrain.peaks": ({"dem": DEM}, {"file": "C:/d/sommets.geojson", "feature_count": 2,
+                                     "peaks": [{"point": L93, "elevation": 2351.5,
+                                                "prominence": 120.0}],
+                                     "truncated": False, "unit": "m"}),
+    "raster.reclassify": ({"raster": "C:/d/pente.tif", "classes": [{"max": 10, "value": 1},
+                                                                   {"min": 10, "value": 2}]},
+                          {"file": "C:/d/classes.tif", "counts": [], "nodata_cells": 0}),
+    "raster.weighted_overlay": ({"criteria": [{"raster": "C:/d/a.tif", "weight": 0.5},
+                                              {"raster": "C:/d/b.tif", "weight": 0.5}]},
+                                {"file": "C:/d/aptitude.tif", "min": 1.0, "max": 4.5,
+                                 "nodata_cells": 0}),
+    "terrain.cost_distance": ({"cost": "C:/d/cout.tif", "sources": [L93]},
+                              {"file": "C:/d/cumul-cout.tif", "max": 900.0,
+                               "reachable_cells": 2500, "unreachable_cells": 0}),
+    "terrain.least_cost_path": ({"cost": "C:/d/cout.tif", "start": L93, "end": L93},
+                                {"file": "C:/d/chemin.geojson", "feature_count": 1,
+                                 "total_cost": 412.25, "length": {"value": 1830.0, "unit": "m"}}),
+    "map.topographic_style": ({}, {"styled": [{"layer_id": "mnt_1", "theme": "relief"}],
+                                   "unchanged": [], "groups": []}),
+    "map.graduated_style": ({"layer_id": "parcelles_2", "field": "surface"},
+                            {"layer_id": "parcelles_2", "field": "surface", "class_count": 5}),
+    "layer.set_style": ({"layer_id": "gares_1", "style": {"kind": "single"}},
+                        {"layer_id": "gares_1"}),
+    "layer.arrange": ({"groups": [{"name": "Relief", "layers": ["mnt_1"]}]},
+                      {"group_count": 1, "layer_count": 1}),
+}
+
+
+def done_commands():
+    """Ids des commandes au statut `faite` du catalogue (fiches ```json fiche```)."""
+    import json
+    import re
+
+    with open(CATALOGUE_MD, encoding="utf-8") as f:
+        text = f.read()
+    ids = []
+    for block in re.findall(r"```json fiche\n(.*?)```", text, re.S):
+        sheet = json.loads(block)
+        if sheet.get("status") == "faite":
+            ids.append(sheet["id"])
+    return ids
+
+
+class CatalogueCompletenessTest(unittest.TestCase):
+    """Chaque commande `faite` a sa phrase FR et EN, avant et après résultat."""
+
+    def test_every_done_command_has_its_sentences(self):
+        ids = done_commands()
+        self.assertGreater(len(ids), 30)  # le catalogue a bien été lu
+        for command in ids:
+            with self.subTest(command=command):
+                self.assertIn(command, SAMPLES, "exemple manquant dans SAMPLES")
+                self.assertIn(command, summary._SENTENCES, "phrase manquante dans summary")
+                params, result = SAMPLES[command]
+                seen = {}
+                for lang in ("fr", "en"):
+                    before = summary.label(command, params, lang, qgis_name)
+                    after = say(command, params, result, lang=lang)
+                    self.assertNotEqual(before, command)  # pas le repli sur l'id
+                    self.assertFalse(before.endswith("."), before)
+                    for done in ("Terminée", "Done"):
+                        self.assertNotIn(done, after)
+                    self.assertNotEqual(after, before + ".", "pas de phrase après résultat")
+                    self.assertNotIn("C:/", before + after)  # aucun chemin (AD-9)
+                    seen[lang] = (before, after)
+                self.assertNotEqual(seen["fr"], seen["en"])
+
+
+class LabelTest(unittest.TestCase):
+    """Libellé d'une étape : la phrase avant résultat, ou un repli court."""
+
+    DESCRIPTION = [{
+        "id": "terrain.slope",
+        "description_fr": "Pente d'un MNT : calcule la pente de chaque cellule d'un modèle "
+                          "numérique d'élévation (fichier GeoTIFF désigné par `dem`, chemin "
+                          "de fichier MNT recopié de l'inventaire, pas un id de couche).",
+        "description_en": "DEM slope: computes the slope of each cell (GeoTIFF file given by "
+                          "`dem`, a DEM file path copied from the inventory).",
+    }]
+
+    def test_slope_plan_and_result_never_show_the_registry_description(self):
+        params = {"dem": DEM, "unit": "percent"}
+        result = SAMPLES["terrain.slope"][1]
+        self.assertEqual(summary.label("terrain.slope", params, "fr"),
+                         "Pente de mnt-74-25m en pourcentage")
+        after = say("terrain.slope", params, result, catalogue=self.DESCRIPTION)
+        self.assertEqual(
+            after, "Pente de mnt-74-25m en pourcentage : fichier pente.tif, de 0 à 152,3 %.")
+        self.assertEqual(
+            say("terrain.slope", params, result, lang="en"),
+            "Slope of mnt-74-25m in percent: file pente.tif, from 0 to 152.3 %.")
+        for text in (after, summary.label("terrain.slope", params, "fr")):
+            self.assertNotIn("GeoTIFF", text)
+            self.assertNotIn("inventaire", text)
+
+    def test_unreadable_parameters_give_the_short_title(self):
+        for params in (None, {}, {"dem": DEM, "unit": "radians"}, {"dem": 3, "unit": "percent"}):
+            self.assertEqual(
+                summary.label("terrain.slope", params, "fr", catalogue=self.DESCRIPTION),
+                "Pente d'un MNT")
+            self.assertEqual(
+                say("terrain.slope", params, catalogue=self.DESCRIPTION), "Pente d'un MNT. Terminée.")
+        self.assertEqual(
+            summary.label("terrain.slope", None, "en", catalogue=self.DESCRIPTION), "DEM slope")
+
+    def test_unknown_command_gives_its_title_or_its_id(self):
+        catalogue = [{"id": "x.new", "description_fr": "Nouvelle chose. Elle fait beaucoup."}]
+        self.assertEqual(summary.label("x.new", {}, "fr", catalogue=catalogue), "Nouvelle chose")
+        self.assertEqual(summary.label("x.other", {}, "fr", catalogue=catalogue), "x.other")
+        self.assertEqual(summary.label(None, {}, "fr"), "?")
+
+    def test_a_long_first_sentence_is_cut_at_a_word(self):
+        catalogue = [{"id": "x.long", "description_fr": "mot " * 60}]
+        title = summary.short_title("x.long", catalogue, "fr")
+        self.assertTrue(title.endswith("…"))
+        self.assertLessEqual(len(title), 81)
+        self.assertNotIn("  ", title)
+
+    def test_a_raster_from_an_earlier_step_reads_as_that_step(self):
+        params = {"raster": "step:1.file", "classes": [{"value": 1}]}
+        self.assertEqual(summary.label("raster.reclassify", params, "fr"),
+                         "Reclassement du résultat de l'étape 1 en 1 classe")
+
+    # Clés « après résultat » (au passé ou au bilan) : jamais dans le libellé d'une étape proposée.
+    AFTER_KEYS = {
+        "about_result", "sum_layer_added", "sum_opened_raster", "sum_export_pdf",
+        "sum_reproject", "sum_converted", "sum_transformed_point", "sum_geo_measured",
+        "sum_geo_reached", "sum_geo_intersected", "sum_topo_styled", "sum_style_set",
+        "sum_arranged", "sum_out_layer", "sum_file", "sum_peaks_found", "sum_path_found",
+    }
+
+    def test_no_label_uses_an_after_result_key(self):
+        used = []
+        real = summary.texts.tr
+
+        def spy(lang, key, **values):
+            used.append(key)
+            return real(lang, key, **values)
+
+        summary.texts.tr = spy
+        try:
+            for command, (params, _) in SAMPLES.items():
+                for lang in ("fr", "en"):
+                    del used[:]
+                    summary.label(command, params, lang, qgis_name)
+                    with self.subTest(command=command, lang=lang):
+                        self.assertFalse(self.AFTER_KEYS & set(used), used)
+        finally:
+            summary.texts.tr = real
+
+    def test_real_registry_descriptions_give_clean_titles(self):
+        import re
+
+        core = os.path.join(HERE, "..", "..", "core", "src", "commands")
+        string = r'"((?:[^"\\]|\\.)*)"'
+        for command in ("coord.convert", "terrain.cost_distance", "terrain.least_cost_path"):
+            with open(os.path.join(core, command.replace(".", "_") + ".rs"), encoding="utf-8") as f:
+                source = f.read()
+            found = re.search(
+                r"CommandSpec::new::<[^>]*>\(\s*\"%s\",\s*%s,\s*%s" % (
+                    re.escape(command), string, string), source)
+            self.assertIsNotNone(found, command)
+            catalogue = [{"id": command, "description_fr": found.group(1),
+                          "description_en": found.group(2)}]
+            for lang in ("fr", "en"):
+                title = summary.short_title(command, catalogue, lang)
+                with self.subTest(command=command, lang=lang, title=title):
+                    self.assertNotIn("(", title)
+                    self.assertNotIn("`", title)
+                    self.assertFalse(title.rstrip("…").endswith("EPSG"), title)
+                    self.assertGreater(len(title), 5)
+                    self.assertNotIn("…. ", summary.fallback(command, lang, catalogue))
+
+    def test_a_cut_title_gives_a_single_period_before_done(self):
+        catalogue = [{"id": "x.long", "description_fr": "mot " * 60}]
+        text = summary.fallback("x.long", "fr", catalogue)
+        self.assertTrue(text.endswith("mot. Terminée."), text)
+
+    def test_contraction_only_touches_the_step_reference(self):
+        names = {"t_1": "de le test", "a_1": "à le bord"}.get
+        params = {"layer_id": "t_1", "distance": {"value": 5, "unit": "m"}}
+        self.assertEqual(summary.label("analysis.buffer", params, "fr", names),
+                         "Zone tampon de 5 m autour de de le test")
+        self.assertEqual(
+            summary.label("analysis.intersect", {"layer_id": "a_1", "overlay_layer_id": "t_1"},
+                          "fr", names),
+            "Intersection de à le bord avec de le test")
+        self.assertEqual(
+            summary.label("layout.export_pdf", {"title": "Vue de le test"}, "fr"),
+            "Export PDF de la carte « Vue de le test »")
+        ref = {"layer_id": "step:1.layer_id", "distance": {"value": 5, "unit": "m"}}
+        self.assertEqual(summary.label("analysis.buffer", ref, "fr"),
+                         "Zone tampon de 5 m autour du résultat de l'étape 1")
+        self.assertNotIn("\ue000", say("analysis.buffer", ref))
+
+    def test_history_labels_use_the_parameters(self):
+        import runlog
+
+        history = [
+            {"step": 1, "command": "terrain.slope", "params": {"dem": DEM, "unit": "percent"},
+             "result": SAMPLES["terrain.slope"][1], "plan_step": 1},
+            {"step": 2, "command": "terrain.slope",
+             "params": {"truncated": True, "bytes": 900, "fingerprint": "ab"}, "plan_step": 2},
+        ]
+        log = runlog.RunLog.from_history(
+            history,
+            lambda c, p: summary.label(c, p, "fr", catalogue=self.DESCRIPTION),
+        )
+        self.assertEqual([e.label for e in log.entries],
+                         ["1. Pente de mnt-74-25m en pourcentage", "2. Pente d'un MNT"])
+
+
 if __name__ == "__main__":
     unittest.main()

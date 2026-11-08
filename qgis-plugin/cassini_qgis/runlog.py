@@ -65,7 +65,8 @@ class RunLog:
     def from_history(cls, history, describe):
         """Journal rempli des étapes passées `history` (réponse de `session.hello`).
 
-        `describe(command)` rend le libellé d'une commande. L'heure est la date de l'étape (`at`,
+        `describe(command, params)` rend le libellé d'une étape ; `params` vaut None quand le
+        journal les a résumés (le libellé se replie alors sur un titre court). L'heure est la date de l'étape (`at`,
         en ms depuis 1970), à l'heure locale ; une étape d'un journal plus ancien n'en a pas. Son
         état vient de son issue : `error` (le code seul, sans message), `cancelled` ou fini. Un
         résultat que le journal a résumé (plus de 200 octets) n'est pas repris : le détail ne
@@ -80,9 +81,6 @@ class RunLog:
                 continue
             step = item.get("plan_step")
             step = step if isinstance(step, int) and not isinstance(step, bool) else None
-            label = describe(command)
-            if step is not None:
-                label = "%d. %s" % (step, label)
             origin = EXTERNAL if item.get("origin") == EXTERNAL else None
             result = item.get("result")
             if _summarized(result):
@@ -90,6 +88,9 @@ class RunLog:
             params = item.get("params")
             if _summarized(params):
                 params = None
+            label = describe(command, params)
+            if step is not None:
+                label = "%d. %s" % (step, label)
             entry = log.start(
                 command, label, past_time(item.get("at")), params=params, result=result,
                 step=step, origin=origin,
