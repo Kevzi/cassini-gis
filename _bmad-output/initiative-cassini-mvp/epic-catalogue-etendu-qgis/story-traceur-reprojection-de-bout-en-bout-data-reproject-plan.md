@@ -92,6 +92,14 @@ context:
   `target/debug` et `target/release` sont anciens et parlent le protocole 1.
 - Reste à faire : l'essai dans le panneau de « Reprojette la couche des gares en WGS84 » avec le
   modèle installé, une fois le noyau et l'extension installés (jugé pour de bon après 11.23).
+- Essai fait le 2026-11-08 : noyau `--features gpu` installé (ancien en `cassini.exe.avant-10-7`),
+  extension copiée ; sonde jetable `%TEMP%\sonde-10-7\` sur le projet Annecy (gares en 4326),
+  vrai modèle terrain-11-18b, projet archivé dans `_archives/sondes/`. Résultat consigné tel quel :
+  « Reprojette la couche des gares en Lambert-93 » et « … en WGS84 » → `agent.refused` (« Aucune
+  commande du catalogue ne reprojette une couche », 31,0 s puis 2,8 s) ; « Trouve les parcelles à
+  moins de 500 m d'une gare » → tampon puis intersection sans reprojection, refusé à l'exécution par
+  `analysis.crs_not_metric` ; rejeu identique (1 étape). Attendu : le modèle n'a pas encore appris
+  `data.reproject` ; la phrase est à rejouer après 11.23.
 
 ## Plan Change Log
 
