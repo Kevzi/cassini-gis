@@ -221,6 +221,28 @@ hitl = true
 risk = "high"
 
 [[entry]]
+id = 22
+type = "story"
+title = "Completion du plan par les conversions de points"
+description = "Changement de cap du 2026-11-08 (../change-conversion-des-points-ajoutee-au-plan/change-conversion-des-points-ajoutee-au-plan.md) : apres validation et garde-fou, avant plan.proposed, le noyau ajoute une etape data.transform_point par point d'une commande du noyau dont le systeme differe de celui de son raster (lu par le noyau, AD-20), si l'extension annonce data.transform_point ; references renumerotees ; step:k.point admis comme element d'un tableau de Point ; amendements d'AD-19 et des references (AD-23) ; phrase sur la completion dans les fiches de terrain et CAP-15. Un appel direct reste refuse par terrain.crs_mismatch."
+verify = "Essais du noyau : point WGS84 sur MNT Lambert-93, deux points de ligne de vue, liste de points du champ de vision cumule, plan deja converti sans seconde conversion, point deja dans le bon systeme, geste non annonce, appel direct refuse, rejeu identique ; sonde QGIS sur Annecy : la ligne de vue et le champ de vision cumule en WGS84 s'executent avec le modele installe."
+covers = ["G4", "G7"]
+after = []
+hitl = false
+risk = "high"
+
+[[entry]]
+id = 23
+type = "story"
+title = "Re-entrainement groupe : points tels qu'ecrits et commandes de style"
+description = "Generateur et entrainement par la commande unique : les points d'un autre systeme sont recopies tels quels (le noyau complete le plan, 11.22) ; exemples de map.topographic_style et map.graduated_style ; refus perime du style retire ; essai reel style_reel (au moins 9 phrases nouvelles sur 10) ; attendus des essais reels sur le plan complete. Apres 11.22, data.reproject et le choix du fuseau UTM."
+verify = "Validation et essais GPU contre les barres de 11.16, plus style_reel ; sonde QGIS Annecy ; installation sur decision du proprietaire."
+covers = ["G12", "G13"]
+after = [22]
+hitl = true
+risk = "medium"
+
+[[entry]]
 id = 14
 type = "story"
 title = "Demonstration de bout en bout dans QGIS"
