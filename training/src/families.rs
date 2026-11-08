@@ -223,6 +223,18 @@ pub static FAMILIES: &[Family] = &[
         weight: 4,
         make: reprojection_point,
     },
+    // Reprojection d'une couche entière (10.7) : demandée, ou avant une analyse en mètres sur
+    // une couche en degrés. Remplace le refus « aucune commande ne reprojette une couche ».
+    Family {
+        name: "reprojection_couche",
+        weight: 4,
+        make: reprojection_couche,
+    },
+    Family {
+        name: "reprojection_avant_analyse",
+        weight: 4,
+        make: reprojection_avant_analyse,
+    },
     Family {
         name: "distance_azimut",
         weight: 4,
@@ -2699,7 +2711,7 @@ fn refus(rng: &mut Rng) -> Option<Example> {
         "à mes collègues",
     ]);
     let commune = *rng.pick(COMMUNES);
-    let (body, reason): (String, &str) = match rng.below(16) {
+    let (body, reason): (String, &str) = match rng.below(14) {
         0 => (format!("Envoie la couche « {name} » par courriel {who}"), "Aucune commande du catalogue n'envoie de courriel."),
         1 => (format!("Envoie le résultat par mail {who}"), "Aucune commande du catalogue n'envoie de courriel."),
         2 => (format!("Supprime la couche « {name} » du projet"), "Aucune commande du catalogue ne retire de couche du projet."),
@@ -2718,19 +2730,19 @@ fn refus(rng: &mut Rng) -> Option<Example> {
             }
             None => (format!("Efface toutes les {pl} de la couche"), "Aucune commande du catalogue ne supprime d'entités dans une couche."),
         },
-        5 => (format!("Reprojette la couche « {name} » en WGS84"), "Aucune commande du catalogue ne reprojette une couche."),
-        6 => (format!("Convertis les {pl} en Lambert-93"), "Aucune commande du catalogue ne reprojette une couche."),
-        7 => (format!("Exporte la couche « {name} » en shapefile"), "Aucune commande du catalogue n'exporte une couche vers un fichier."),
-        8 => (format!("Enregistre les {pl} dans un fichier Excel"), "Aucune commande du catalogue n'exporte une couche vers un fichier."),
-        9 => (format!("Renomme la couche « {name} » en « {} »", rng.pick(USER_TITLES)), "Aucune commande du catalogue ne renomme une couche."),
-        10 => (format!("Mets les {pl} en rouge sur la carte"), "Aucune commande du catalogue ne change le style d'une couche."),
-        11 => (format!("Calcule l'itinéraire le plus court entre deux {pl}"), "Aucune commande du catalogue ne calcule d'itinéraire sur un réseau routier entre deux objets d'une couche : le chemin de moindre coût demande un raster de coût et deux points en coordonnées."),
-        12 => (format!("Télécharge le cadastre {}", de_place(commune)), "Aucune commande du catalogue ne télécharge de données : le projet utilise les fichiers de l'utilisateur."),
+        // La reprojection d'une couche n'est plus un refus depuis 10.7 : `data.reproject`
+        // (`reprojection_couche`, `reprojection_avant_analyse`).
+        5 => (format!("Exporte la couche « {name} » en shapefile"), "Aucune commande du catalogue n'exporte une couche vers un fichier."),
+        6 => (format!("Enregistre les {pl} dans un fichier Excel"), "Aucune commande du catalogue n'exporte une couche vers un fichier."),
+        7 => (format!("Renomme la couche « {name} » en « {} »", rng.pick(USER_TITLES)), "Aucune commande du catalogue ne renomme une couche."),
+        8 => (format!("Mets les {pl} en rouge sur la carte"), "Aucune commande du catalogue ne change le style d'une couche."),
+        9 => (format!("Calcule l'itinéraire le plus court entre deux {pl}"), "Aucune commande du catalogue ne calcule d'itinéraire sur un réseau routier entre deux objets d'une couche : le chemin de moindre coût demande un raster de coût et deux points en coordonnées."),
+        10 => (format!("Télécharge le cadastre {}", de_place(commune)), "Aucune commande du catalogue ne télécharge de données : le projet utilise les fichiers de l'utilisateur."),
         // Ce que l'export PDF ne fait pas (format hors liste, impression) vit dans
         // `refus_hors_registre` ; format, orientation et carroyage sont des plans
         // (`export_pdf_format`, 11.12, lot 3).
-        13 => ("Publie la carte sur internet".to_string(), "Aucune commande du catalogue ne publie de carte en ligne."),
-        14 => (format!("Modifie la valeur d'un champ pour toutes les {pl}"), "Aucune commande du catalogue ne modifie les attributs d'une couche."),
+        11 => ("Publie la carte sur internet".to_string(), "Aucune commande du catalogue ne publie de carte en ligne."),
+        12 => (format!("Modifie la valeur d'un champ pour toutes les {pl}"), "Aucune commande du catalogue ne modifie les attributs d'une couche."),
         _ => ("Affiche la carte en 3D".to_string(), "Aucune commande du catalogue n'affiche de vue en 3D."),
     };
     let request = finish(rng, &body, false, false);
@@ -4702,6 +4714,166 @@ fn reprojection_point(rng: &mut Rng) -> Option<Example> {
     ))
 }
 
+fn reproject_call(id: &str, target: u32) -> Value {
+    json!({"command": "data.reproject", "params": {"layer_id": id, "target_epsg": target}})
+}
+
+/// Système d'arrivée d'une reprojection de couche et ses formes écrites.
+const LAYER_TARGETS: &[(u32, &[&str])] = &[
+    (
+        2154,
+        &[
+            "en Lambert-93",
+            "en Lambert 93",
+            "vers l'EPSG:2154",
+            "en RGF93 / Lambert-93",
+            "dans le système Lambert-93 (EPSG:2154)",
+        ],
+    ),
+    (
+        4326,
+        &[
+            "en WGS84",
+            "en WGS 84",
+            "vers l'EPSG:4326",
+            "en latitude et longitude WGS84",
+            "en coordonnées GPS (WGS84)",
+        ],
+    ),
+    (
+        32631,
+        &["en UTM 31N", "en UTM zone 31 Nord", "vers l'EPSG:32631"],
+    ),
+    (
+        32632,
+        &["en UTM 32N", "en UTM zone 32 Nord", "vers l'EPSG:32632"],
+    ),
+    (3857, &["en Web Mercator (EPSG:3857)", "vers l'EPSG:3857"]),
+    (
+        27572,
+        &["en Lambert II étendu (EPSG:27572)", "vers l'EPSG:27572"],
+    ),
+];
+
+/// « Reprojette la couche « Gares » en Lambert-93 », « convertis les écoles en WGS84 » : une
+/// étape `data.reproject`, le système d'arrivée écrit (10.7). La couche est tirée dans un autre
+/// système que la cible : en degrés (EPSG:4326) vers un système en mètres, ou en Lambert-93
+/// vers le WGS84 ou un autre système. Un point en coordonnées reste `reprojection_point`.
+fn reprojection_couche(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let (target, forms) = *rng.pick(LAYER_TARGETS);
+    let source = if target == 2154 || target == 32631 || target == 32632 {
+        4326
+    } else {
+        2154
+    };
+    b.vector_system(if rng.chance(1, 2) { source } else { 2154 });
+    let t = pick_theme(rng, &b, vector)?;
+    let layer = b.add(rng, t.key, &[], &[], &[]);
+    b.set_epsg(&layer.id, source);
+    let words = *rng.pick(forms);
+    let what = match rng.below(4) {
+        0 | 1 => format!("la couche « {} »", layer.name),
+        2 => t.the_layer.to_string(),
+        _ => format!("les {}", t.noun.pl),
+    };
+    let (body, q) = match rng.below(7) {
+        0 | 1 => (format!("Reprojette {what} {words}"), false),
+        2 => (format!("Convertis {what} {words}"), false),
+        3 => (format!("Passe {what} {words}"), false),
+        4 => (format!("Transforme {what} {words}"), false),
+        5 => (format!("Peux-tu reprojeter {what} {words}"), true),
+        _ => {
+            let of = match what.strip_prefix("les ") {
+                Some(rest) => format!("des {rest}"),
+                None => format!("de {what}"),
+            };
+            (format!("Fais une copie {of} {words}"), false)
+        }
+    };
+    let request = finish(rng, &body, q, false);
+    Some(example(
+        "reprojection_couche",
+        b,
+        rng,
+        request,
+        calls(vec![reproject_call(&layer.id, target)]),
+    ))
+}
+
+/// Décale de `by` chaque référence d'étape (`step:k`, `step:k.champ`) d'un plan.
+fn shift_steps(value: &mut Value, by: usize) {
+    match value {
+        Value::String(s) => {
+            if let Some(rest) = s.strip_prefix("step:") {
+                let (k, tail) = rest.split_at(rest.find('.').unwrap_or(rest.len()));
+                if let Ok(k) = k.parse::<usize>() {
+                    *s = format!("step:{}{tail}", k + by);
+                }
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(|v| shift_steps(v, by)),
+        Value::Object(map) => map.values_mut().for_each(|v| shift_steps(v, by)),
+        _ => {}
+    }
+}
+
+/// Une analyse en mètres (tampon, recherche à distance) sur une couche en degrés
+/// (EPSG:4326) : `data.reproject` d'abord, puis l'analyse sur `step:1.layer_id` (10.7). La
+/// demande ne parle pas de reprojection : seul l'`epsg` de l'inventaire la commande. Le
+/// système d'arrivée est celui des autres couches vecteur en mètres de l'inventaire
+/// (Lambert-93, UTM 31N ou 32N), EPSG:2154 quand toutes sont en degrés. Une reprojection est
+/// toujours une étape visible du plan, jamais insérée en silence par le noyau.
+fn reprojection_avant_analyse(rng: &mut Rng) -> Option<Example> {
+    let (others, target) = match rng.below(20) {
+        0..=11 => (2154, 2154),
+        12..=14 => (32632, 32632),
+        15 | 16 => (32631, 32631),
+        _ => (4326, 2154),
+    };
+    let (mut b, body, q, mut steps) = if rng.chance(1, 2) {
+        let mut b = Builder::new();
+        b.vector_system(others);
+        let t = pick_theme(rng, &b, vector)?;
+        let layer = b.add(rng, t.key, &[], &[], &[]);
+        let d = dist(rng);
+        let around = match rng.below(4) {
+            0 => format!("de la couche « {} »", layer.name),
+            1 => format!("de {}", t.the_layer),
+            _ => t.noun.des(),
+        };
+        let dissolve = rng.chance(1, 5);
+        let mut body = tampon_head(rng, &d, &around);
+        if dissolve {
+            body.push_str(pick_str(rng, DISSOLVE));
+        }
+        (b, body, false, vec![buffer(&layer.id, &d, dissolve)])
+    } else {
+        let mut d = draft_distance(rng)?;
+        d.b.vector_system(others);
+        let (head, q) = open_find(rng, d.noun, &d.np, true);
+        (d.b, head, q, d.calls)
+    };
+    // L'analyse en mètres porte sur la couche de la première étape : c'est elle qui est en
+    // degrés, et elle seule est reprojetée.
+    let degrees = steps[0]["params"]["layer_id"].as_str()?.to_string();
+    b.set_epsg(&degrees, 4326);
+    for s in &mut steps {
+        shift_steps(s, 1);
+    }
+    steps[0]["params"]["layer_id"] = json!(step(1));
+    let mut plan = vec![reproject_call(&degrees, target)];
+    plan.extend(steps);
+    let request = finish(rng, &body, q, true);
+    Some(example(
+        "reprojection_avant_analyse",
+        b,
+        rng,
+        request,
+        calls(plan),
+    ))
+}
+
 /// « Quelle distance sépare le point … du point … », « distance et azimut entre les points …
 /// et … (UTM 31N), azimut en grades » : `geo.distance_azimuth`, `unit` seulement si elle est
 /// écrite (`gon` pour les grades). Des points en Lambert-93 sont d'abord reprojetés en WGS84,
@@ -5526,6 +5698,17 @@ pub(crate) fn reprojects_no_point(expected: &Value) -> bool {
             })
 }
 
+/// Un refus qui dit qu'aucune commande ne reprojette une couche : faux depuis `data.reproject`
+/// (10.7). Sert de garde-fou aux tests.
+#[cfg(test)]
+pub(crate) fn reprojects_no_layer(expected: &Value) -> bool {
+    expected["kind"] == "refusal"
+        && expected["reason"].as_str().is_some_and(|r| {
+            let r = r.to_lowercase();
+            r.contains("reproj") && r.contains("couche")
+        })
+}
+
 /// Un refus qui dit qu'aucune commande ne sélectionne les cellules d'un raster par leur
 /// valeur : faux depuis `raster.reclassify` (11.9, famille `pente_seuil` en 11.12, lot 2a).
 /// Sert de garde-fou aux tests.
@@ -5569,6 +5752,7 @@ pub(crate) fn refuses_a_known_page(expected: &Value) -> bool {
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
+    use std::collections::HashSet;
 
     #[test]
     fn thousands_are_separated_by_spaces() {
@@ -6554,6 +6738,9 @@ mod tests {
         // ne dit plus qu'aucune commande ne reprojette un point. Ce volet échoue si le refus
         // de 5.41 revient dans une famille de refus.
         assert!(registry.spec("data.transform_point").is_some());
+        // Couche reprojetée (10.7) : `data.reproject` est au registre, donc aucun refus ne dit
+        // plus qu'aucune commande ne reprojette une couche.
+        assert!(registry.spec("data.reproject").is_some());
         for make in [
             refus as fn(&mut Rng) -> Option<Example>,
             refus_hors_registre,
@@ -6564,6 +6751,7 @@ mod tests {
                     continue;
                 };
                 assert!(!reprojects_no_point(&e.expected), "{}", e.request);
+                assert!(!reprojects_no_layer(&e.expected), "{}", e.request);
                 assert!(!selects_no_cell(&e.expected), "{}", e.request);
                 // Format, orientation et carroyage (11.11) : plus aucun refus « A4 paysage »
                 // ni d'un format ou d'une orientation du catalogue (11.12, lot 3).
@@ -6582,6 +6770,126 @@ mod tests {
         assert!(!refuses_a_known_page(&refusal(NO_PRINTING)));
         assert!(reprojects_no_point(&json!({"kind": "refusal", "reason":
             "Les commandes de terrain du catalogue prennent un point écrit dans le système du MNT : aucune ne reprojette un point."})));
+        assert!(reprojects_no_layer(&refusal(
+            "Aucune commande du catalogue ne reprojette une couche."
+        )));
+        // Aucune famille, de refus ou non, ne rend ce refus.
+        for family in FAMILIES {
+            let mut rng = Rng::new(11);
+            for _ in 0..300 {
+                if let Some(e) = (family.make)(&mut rng) {
+                    assert!(!reprojects_no_layer(&e.expected), "{}", e.request);
+                }
+            }
+        }
+    }
+
+    // -- reprojection de couche (10.7) ----------------------------------------
+
+    fn layer_of<'a>(e: &'a Example, id: &str) -> &'a Value {
+        e.inventory["layers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|l| l["layer_id"] == id)
+            .unwrap_or_else(|| panic!("couche absente {id} : {}", e.request))
+    }
+
+    #[test]
+    fn a_requested_layer_reprojection_is_one_step_to_the_written_system() {
+        let mut targets = HashSet::new();
+        for e in valid(reprojection_couche, 300) {
+            assert_eq!(commands(&e), ["data.reproject"], "{}", e.request);
+            let params = &e.expected["calls"][0]["params"];
+            let target = params["target_epsg"].as_u64().unwrap();
+            targets.insert(target);
+            let layer = layer_of(&e, params["layer_id"].as_str().unwrap());
+            // La couche est dans un autre système que la cible, et l'inventaire le dit.
+            assert_ne!(layer["epsg"].as_u64(), Some(target), "{}", e.request);
+            assert!(layer["epsg"].is_u64(), "{}", e.request);
+            let r = e.request.to_lowercase();
+            let written = match target {
+                2154 => r.contains("lambert") || r.contains("2154"),
+                4326 => r.contains("wgs") || r.contains("4326"),
+                32631 => r.contains("31"),
+                32632 => r.contains("32"),
+                _ => r.contains(&target.to_string()),
+            };
+            assert!(written, "{}", e.request);
+            assert!(!r.contains("le point "), "{}", e.request);
+        }
+        for t in [2154, 4326, 32631, 32632, 3857, 27572] {
+            assert!(targets.contains(&t), "cible absente : {t}");
+        }
+    }
+
+    #[test]
+    fn a_metric_analysis_on_a_layer_in_degrees_reprojects_it_first() {
+        let registry = cassini_core::registry::Registry::standard();
+        let (mut buffers, mut searches, mut utm, mut fallback) = (0, 0, 0, 0);
+        for e in valid(reprojection_avant_analyse, 400) {
+            let plan: cassini_core::plan::Plan =
+                serde_json::from_value(e.expected.clone()).unwrap();
+            assert_eq!(registry.check_plan(&plan), Ok(()), "{}", e.request);
+            let calls = e.expected["calls"].as_array().unwrap();
+            assert_eq!(calls[0]["command"], "data.reproject", "{}", e.request);
+            assert_eq!(calls[1]["command"], "analysis.buffer", "{}", e.request);
+            assert_eq!(
+                calls[1]["params"]["layer_id"], "step:1.layer_id",
+                "{}",
+                e.request
+            );
+            let degrees = calls[0]["params"]["layer_id"].as_str().unwrap();
+            assert_eq!(layer_of(&e, degrees)["epsg"], 4326, "{}", e.request);
+            // La demande ne parle pas de reprojection : l'inventaire la commande.
+            let r = e.request.to_lowercase();
+            assert!(
+                !r.contains("reproj") && !r.contains("epsg"),
+                "{}",
+                e.request
+            );
+            // Cible : le système des autres couches vecteur en mètres, 2154 à défaut.
+            let target = calls[0]["params"]["target_epsg"].as_u64().unwrap();
+            let metric: HashSet<u64> = e.inventory["layers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|l| l["kind"] == "vector" && l["layer_id"] != degrees)
+                .filter_map(|l| l["epsg"].as_u64())
+                .filter(|&epsg| epsg != 4326)
+                .collect();
+            if metric.is_empty() {
+                assert_eq!(target, 2154, "{}", e.request);
+                fallback += 1;
+            } else {
+                assert_eq!(metric, HashSet::from([target]), "{}", e.request);
+            }
+            if target != 2154 {
+                utm += 1;
+            }
+            match calls.len() {
+                2 => buffers += 1,
+                3 => {
+                    assert_eq!(calls[2]["command"], "analysis.intersect", "{}", e.request);
+                    assert_eq!(calls[2]["params"]["overlay_layer_id"], "step:2.layer_id");
+                    searches += 1;
+                }
+                n => panic!("{n} étapes : {}", e.request),
+            }
+        }
+        assert!(buffers > 0 && searches > 0 && utm > 0 && fallback > 0);
+    }
+
+    #[test]
+    fn step_references_are_shifted_by_the_inserted_reprojection() {
+        let mut plan = json!([{"params": {"layer_id": "step:1.layer_id", "dem": "step:12",
+            "list": ["step:2.point", "stepper", "x"]}}]);
+        shift_steps(&mut plan, 1);
+        assert_eq!(
+            plan,
+            json!([{"params": {"layer_id": "step:2.layer_id", "dem": "step:13",
+            "list": ["step:3.point", "stepper", "x"]}}])
+        );
     }
 
     #[test]

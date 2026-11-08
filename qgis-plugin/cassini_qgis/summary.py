@@ -427,6 +427,15 @@ def _transform_point(lang, p, r, names):
     return texts.tr(lang, "sum_transformed_point", epsg=target, point=_point(lang, point, any_system=True))
 
 
+def _reproject(lang, p, r, names):
+    """La couche reprojetée par QGIS, en nouvelle couche ; affichage seul (AD-5)."""
+    target = p.get("target_epsg")
+    if not _is_int(target):
+        raise _Unreadable()
+    text = texts.tr(lang, "sum_reproject", layer=names.layer(p.get("layer_id")), epsg=target)
+    return text + (_out_layer(lang, r) if r else "")
+
+
 def _distance_azimuth(lang, p, r, names):
     """Distance et azimuts rendus ; affichage seul (AD-5)."""
     if not r:
@@ -476,6 +485,7 @@ _SENTENCES = {
     "geo.destination_point": _destination_point,
     "geo.bearing_intersection": _bearing_intersection,
     "data.transform_point": _transform_point,
+    "data.reproject": _reproject,
     "analysis.buffer": _buffer,
     "analysis.intersect": _intersect,
     "analysis.select_by_attribute": _select,

@@ -341,6 +341,37 @@ TRANSFORM = {"point": {"x": 3, "y": 46.5, "epsg": 4326}, "target_epsg": 2154}
 TRANSFORM_OUT = {"point": {"x": 700000.0000004, "y": 6599999.99961, "epsg": 2154}}
 
 
+REPROJECT = {"layer_id": "gares_1", "target_epsg": 2154}
+REPROJECT_OUT = {"layer_id": "r_5", "name": "1-data.reproject", "feature_count": 5, "crs": "EPSG:2154"}
+
+
+class ReprojectTest(unittest.TestCase):
+    def test_the_new_layer_is_named_with_its_code(self):
+        self.assertEqual(
+            say("data.reproject", REPROJECT, REPROJECT_OUT),
+            "Couche Gares reprojetée en EPSG:2154 : nouvelle couche 1-data.reproject, 5 entités.",
+        )
+        self.assertEqual(
+            say("data.reproject", REPROJECT, REPROJECT_OUT, lang="en"),
+            "Layer Gares reprojected to EPSG:2154: new layer 1-data.reproject, 5 features.",
+        )
+
+    def test_without_result_only_parameters(self):
+        self.assertEqual(say("data.reproject", REPROJECT), "Couche Gares reprojetée en EPSG:2154.")
+        self.assertEqual(
+            say("data.reproject", dict(REPROJECT, layer_id="step:1"), step_names={1: BUFFER_OUT}),
+            "Couche Tampon reprojetée en EPSG:2154.",
+        )
+
+    def test_unreadable_code_falls_back_to_the_description(self):
+        catalogue = [{"id": "data.reproject", "description_fr": "Reprojette une couche."}]
+        for bad in ("2154", None, 2154.5):
+            self.assertEqual(
+                say("data.reproject", dict(REPROJECT, target_epsg=bad), catalogue=catalogue),
+                "Reprojette une couche. Terminée.",
+            )
+
+
 class TransformPointTest(unittest.TestCase):
     def test_the_reprojected_point_is_shown_with_its_code(self):
         self.assertEqual(
