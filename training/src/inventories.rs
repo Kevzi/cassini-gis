@@ -1491,6 +1491,10 @@ pub struct Builder {
     /// Vrai quand le plan dépend de l'`epsg` des couches (10.7) : aucune couche ni le projet ne
     /// le perdent dans les formes de QGIS (les tirages ont lieu quand même).
     keep_epsg: bool,
+    /// Fuseau UTM du projet (`project.utm_epsg`) fixé par la famille dont le plan en dépend
+    /// (le carroyage UTM sans fuseau écrit) : `Some(Some(code))` présent, `Some(None)` absent.
+    /// `None` : tiré à la fin, et parfois retiré comme l'`epsg`.
+    utm: Option<Option<u32>>,
 }
 
 impl Builder {
@@ -1519,6 +1523,40 @@ impl Builder {
                 layer.epsg = epsg;
             }
         }
+    }
+
+    /// Fuseau UTM du projet tel que le noyau le déduirait du centre de l'emprise : celui des
+    /// couches vecteur ou du MNT quand elles sont en UTM ; sinon 31N, celui des projets du jeu
+    /// (Val-de-Marne, `PROJECTS`). Aucun tirage : la suite des autres familles ne bouge pas.
+    fn layers_utm(&self) -> u32 {
+        let utm = |e: u32| (32601..=32660).contains(&e);
+        if let Some(e) = self.vector_epsg.filter(|&e| utm(e)) {
+            return e;
+        }
+        if let Some(l) = self.layers.iter().find(|l| utm(l.epsg)) {
+            return l.epsg;
+        }
+        32631
+    }
+
+    /// Fixe le fuseau UTM du projet (`project.utm_epsg`) dont dépend le plan : présent si
+    /// `present`, absent sinon (projet dont l'emprise n'a pas pu être lue). Rend le code posé.
+    /// Sur des couches en Lambert-93, qui couvre toute la France métropolitaine, le fuseau est
+    /// tiré (31N le plus souvent, 30N à l'ouest, 32N à l'est) : le plan le recopie de
+    /// l'inventaire, il ne le devine pas.
+    pub fn project_utm(&mut self, rng: &mut Rng, present: bool) -> Option<u32> {
+        let code = present.then(|| {
+            let utm = |e: u32| (32601..=32660).contains(&e);
+            let from_layers =
+                self.vector_epsg.is_some_and(utm) || self.layers.iter().any(|l| utm(l.epsg));
+            if from_layers {
+                self.layers_utm()
+            } else {
+                *rng.pick(&[32631, 32631, 32630, 32632])
+            }
+        });
+        self.utm = Some(code);
+        code
     }
 
     /// Change le système d'une couche déjà tirée (une couche en degrés, 10.7).
@@ -1765,7 +1803,8 @@ impl Builder {
     /// Une part des inventaires prend les formes que rend le produit depuis QGIS
     /// (`core/src/agent_inventory.rs`, clé absente plutôt que `null`) : raster sans nombre
     /// d'objets, couche temporaire sans `source`, SCR qui n'est pas EPSG (sans `epsg`), table
-    /// sans géométrie (`geometry: null` sur un vecteur), projet non enregistré (sans `name`).
+    /// sans géométrie (`geometry: null` sur un vecteur), projet non enregistré (sans `name`),
+    /// projet sans fuseau UTM (`utm_epsg`, emprise illisible).
     pub fn finish(mut self, rng: &mut Rng) -> Value {
         let n = rng.range(1, 4) as usize;
         self.distract(rng, n, |t| t.geom != Geom::Raster);
@@ -1775,6 +1814,13 @@ impl Builder {
         let mut layers: Vec<Value> = self.layers.iter().map(Layer::to_json).collect();
         let mut project =
             json!({"name": rng.pick(PROJECTS), "epsg": self.vector_epsg.unwrap_or(2154)});
+        let utm = match self.utm {
+            Some(fixed) => fixed,
+            None => Some(self.layers_utm()),
+        };
+        if let Some(code) = utm {
+            project["utm_epsg"] = json!(code);
+        }
         if rng.chance(1, 3) {
             qgis_shapes(
                 rng,
@@ -1783,6 +1829,7 @@ impl Builder {
                 &self.sourced,
                 &mut project,
                 self.keep_epsg,
+                self.utm.is_some(),
             );
         }
         rng.shuffle(&mut layers);
@@ -1817,6 +1864,7 @@ fn qgis_shapes(
     sourced: &[usize],
     project: &mut Value,
     keep_epsg: bool,
+    keep_utm: bool,
 ) {
     let project = project.as_object_mut().expect("projet objet");
     if rng.chance(1, 4) {
@@ -1824,6 +1872,10 @@ fn qgis_shapes(
     }
     if rng.chance(1, 8) && !keep_epsg {
         project.remove("epsg");
+    }
+    // Emprise que QGIS n'a pas su ramener en degrés : pas de fuseau.
+    if !keep_utm && rng.chance(1, 4) {
+        project.remove("utm_epsg");
     }
     for (index, layer) in layers.iter_mut().enumerate() {
         let layer = layer.as_object_mut().expect("couche objet");

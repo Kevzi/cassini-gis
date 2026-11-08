@@ -111,7 +111,9 @@ fn representative() -> Value {
     json!({
         "project_name": "projet-test-villeneuve",
         "project_crs": "EPSG:2154",
-        "extent": {"xmin": 0.0, "ymin": 0.0, "xmax": 1.0, "ymax": 1.0, "crs": "EPSG:2154"},
+        "extent": {"xmin": 0.0, "ymin": 0.0, "xmax": 1.0, "ymax": 1.0, "crs": "EPSG:2154",
+            "lonlat": {"west": 2.38, "south": 48.71, "east": 2.44, "north": 48.75,
+                "crs": "EPSG:4326"}},
         "layers": [
             {"layer_id": "plu_9f3a", "name": "Zonage du PLU", "source": "plu.gpkg",
              "crs": "EPSG:2154", "kind": "vector", "geometry": "MultiPolygon", "feature_count": 87,
@@ -262,6 +264,8 @@ fn every_shape_the_product_renders_is_seen_in_the_generated_set() {
     assert_eq!(layers[2]["geometry"], "Point");
     // Un raster n'a pas de nombre d'objets dans QGIS : la clé manque.
     assert!(layers[3].get("feature_count").is_none());
+    // Le fuseau UTM du projet, déduit de l'emprise en degrés (Villeneuve-le-Roi : 31N).
+    assert_eq!(nominal["project"]["utm_epsg"], 32631);
     // Les formes de QGIS sont bien celles que le test croit couvrir.
     assert_eq!(edges["project"], json!({}));
     let edges = edges["layers"].as_array().unwrap();

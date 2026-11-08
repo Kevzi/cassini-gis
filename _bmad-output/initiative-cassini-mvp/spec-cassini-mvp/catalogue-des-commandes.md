@@ -416,7 +416,7 @@ Inventaire du projet ouvert : couches dans l'ordre de la légende, système du p
 
 | Résultat | Type | Sens |
 |---|---|---|
-| `extent` | emprise ou `null` | Étendue de l'ensemble, dans le système du projet. |
+| `extent` | emprise ou `null` | Étendue de l'ensemble, dans le système du projet ; porte aussi `lonlat` (`west`, `south`, `east`, `north`, `crs` = `EPSG:4326`), la même étendue en degrés WGS84 reprojetée par QGIS, absente quand aucune couche ne se reprojette en degrés valides. Le noyau en déduit le fuseau UTM du projet vu par le modèle (`project.utm_epsg`). |
 | `layers` | liste de couches | `layer_id`, `name`, `crs`, `kind`, `source`, `geometry`, `feature_count`, `fields`. |
 | `project_crs` | chaîne | Système du projet, code explicite. |
 | `project_name` | chaîne ou `null` | Nom du fichier de projet sans extension. |
