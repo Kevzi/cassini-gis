@@ -21,8 +21,9 @@ use serde_json::{json, Map, Value};
 /// Types nommés : la forme normalisée garde leur nom au lieu de leur type JSON, et leur
 /// définition est comparée une fois, à leur bloc ` ```json type `. Les quatre premiers sont
 /// les types partagés du catalogue ; les suivants, les types de mesure déjà au code et le
-/// contrat de réseau d'AD-28, et le gabarit de résumé d'AD-27.
-const NAMED_TYPES: [&str; 9] = [
+/// contrat de réseau d'AD-28, le gabarit de résumé d'AD-27 et la description de style du
+/// changement de cap du 2026-11-08.
+const NAMED_TYPES: [&str; 10] = [
     "Point",
     "MgrsRef",
     "Angle",
@@ -32,6 +33,7 @@ const NAMED_TYPES: [&str; 9] = [
     "Duration",
     "NetworkOptions",
     "SummaryRow",
+    "StyleSpec",
 ];
 
 const JSON_TYPES: [&str; 6] = ["string", "number", "integer", "boolean", "object", "array"];

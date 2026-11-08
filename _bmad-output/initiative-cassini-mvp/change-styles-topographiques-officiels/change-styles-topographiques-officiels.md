@@ -2,7 +2,7 @@
 type: change
 title: "Mise en forme topographique des couches selon les normes IGN et CNIG"
 date: 2026-11-08
-status: approuvé (propriétaire, 2026-11-08)
+status: approuvé (propriétaire, 2026-11-08 ; rangement et fiches du catalogue approuvés le même jour, entrée 11.19)
 scope: moderate
 ---
 
@@ -40,6 +40,12 @@ figé (catalogue des commandes, §1).
    correspond à rien garde son style, et Cassini le dit.
 4. **Moment :** sur demande seulement. La commande est journalisée et rejouable, et ne touche
    jamais aux fichiers d'origine (§2.6).
+
+5. **Rangement (ajout du 2026-11-08, après l'approbation) :** en plus des couleurs et
+   des classes, les couches sont rangées en groupes par thème (Hydrographie, Transport,
+   Bâti, Urbanisme, Relief…) et dans l'ordre d'affichage : relief en dessous, puis
+   surfaces, lignes, points. Sur Annecy, le MNT posé par-dessus cachait tout. Cet ajout
+   fait une troisième commande, `layer.arrange`, dictée comme `layer.set_style` (§4.1).
 
 **Test de CLAUDE.md §2.9 :** une carte aux couleurs IGN sert un bureau d'études, une
 collectivité ou un étudiant tels quels. C'est une fonction civile. La symbologie militaire
@@ -89,7 +95,7 @@ tourne sur la branche des exemples de terrain.
 
 ## 3. Approche retenue
 
-**Ajustement direct**, effort moyen, risque moyen. Deux commandes au catalogue, un amendement
+**Ajustement direct**, effort moyen, risque moyen. Trois commandes au catalogue, deux amendements
 d'architecture, trois entrées. Pas de retour en arrière, pas de réduction du MVP.
 
 Pourquoi le noyau décide et ne laisse pas le modèle choisir le style de chaque couche :
@@ -101,7 +107,7 @@ Pourquoi le noyau décide et ne laisse pas le modèle choisir le style de chaque
 
 ### 4.1 Catalogue des commandes (`spec-cassini-mvp/catalogue-des-commandes.md`)
 
-Deux fiches planifiées, ajoutées à la liste du §4 et en fiches au §6.
+Trois fiches planifiées, ajoutées à la liste du §4 et en fiches au §6. **Le catalogue fait foi** : il précise l'esquisse ci-dessous (entrée 11.19, après relecture), par exemple `layer_id` au lieu de `layer`, le groupe « Autres couches », la lecture de l'inventaire hors du journal et le rejeu.
 
 `map.topographic_style` — planifiée, `runs_in: core`, offerte au modèle.
 - `layers` : liste de `LayerId`, facultative. Absente : toutes les couches du projet.
@@ -111,6 +117,10 @@ Deux fiches planifiées, ajoutées à la liste du §4 et en fiches au §6.
 - `layer` : `LayerId`.
 - `style` : `StyleSpec`, un type nommé nouveau (§3 du catalogue).
 - Résultat : `layer_id`.
+
+`layer.arrange` — planifiée, `runs_in: qgis`, `dictated_by_core: true` (décision 5).
+- `groups` : liste de `{name, layers}`, de haut en bas.
+- Résultat : `group_count`, `layer_count`. `map.topographic_style` rend aussi `groups`.
 
 `StyleSpec` (neutre, AD-22), l'une de quatre formes :
 - `single` : `fill`, `stroke` (couleurs `#rrggbb`), `width_mm`, `opacity`.
@@ -132,7 +142,8 @@ Les identifiants, paramètres et champs ci-dessus sont figés à l'approbation d
 ### 4.3 Architecture (`architecture-noyau-et-facade-qgis.md`)
 
 - Amendement d'AD-30 (ouvertures dictées) : une commande du noyau peut dicter **plusieurs**
-  ordres d'une même commande `dictated_by_core` pour une seule demande. Chacun est une étape
+  ordres `dictated_by_core` (`layer.set_style`, puis `layer.arrange`) pour une seule demande,
+  après avoir lu l'inventaire hors du journal. Chacun est une étape
   du journal, et le rejeu les redonne dans le même ordre.
 - Amendement d'AD-24 : le genre de sortie `none`, pour une commande qui change l'état du
   projet sans produire ni couche ni fichier.
@@ -148,8 +159,9 @@ Les identifiants, paramètres et champs ci-dessus sont figés à l'approbation d
   - Les règles de reconnaissance par nom, fichier et champs, `map.topographic_style` et ses
     tests. Elles sont essayées sur les inventaires de Villeneuve et d'Annecy reproduits en
     fixtures synthétiques.
-- **11.21 — Geste `layer.set_style` dans l'extension, et démonstration.**
-  - La ligne de la table fermée et la traduction de `StyleSpec` en rendu QGIS.
+- **11.21 — Gestes `layer.set_style` et `layer.arrange` dans l'extension, et démonstration.**
+  - Les lignes de la table fermée, la traduction de `StyleSpec` en rendu QGIS et le rangement
+    de l'arbre des couches.
   - La sonde QGIS : Villeneuve et Annecy mis en forme par une phrase, PDF rendu en image et
     regardé (mémoire « vérifier le PDF à l'œil »), rejeu identique.
 - Les exemples du générateur pour `map.topographic_style` vont dans l'entrée du prochain
@@ -179,7 +191,10 @@ Les identifiants, paramètres et champs ci-dessus sont figés à l'approbation d
 - La phrase « mets la carte aux couleurs topographiques » donne, sur Villeneuve et sur
   Annecy, l'eau en bleu, les bois en vert, les routes classées par importance et le PLU aux
   couleurs CNIG. Le PDF rendu en image le montre.
-- Une couche non reconnue garde son style et figure dans `unchanged`.
+- Une couche non reconnue garde son style, figure dans `unchanged` et va au groupe « Autres
+  couches ».
+- Les couches sont rangées en groupes par thème, le relief en dessous : aucun MNT ne recouvre
+  la carte.
 - Le rejeu du journal redonne les mêmes styles.
 - Aucun fichier d'origine n'est modifié.
 - Le modèle ré-entraîné tient la barre de `style_reel` (au moins 9 phrases nouvelles sur 10),

@@ -40,7 +40,7 @@ CAP-2 a été retirée (préparation des données d'une commune par code INSEE) 
 
 - **CAP-5** — Export PDF
   - **intent:** l'utilisateur sort une carte présentable à un tiers depuis ce qu'il voit à l'écran.
-  - **success:** une commande du registre fait produire par le moteur de mise en page de QGIS un PDF portant titre, légende, échelle, flèche du nord et mention des sources, au format et à l'orientation demandés, avec un carroyage en option, qui s'ouvre dans un lecteur PDF standard.
+  - **success:** une commande du registre fait produire par le moteur de mise en page de QGIS un PDF portant titre, légende, échelle, flèche du nord et mention des sources, au format et à l'orientation demandés, avec un carroyage en option, qui s'ouvre dans un lecteur PDF standard. Sur demande, une commande du registre met les couches aux couleurs de la sémiologie publique de l'IGN et du standard CNIG du PLU, les classe par attribut quand la donnée le permet, et les range par thème et dans l'ordre d'affichage, sans modifier aucun fichier d'origine (changement de cap du 2026-11-08).
 
 - **CAP-6** — Registre de commandes
   - **intent:** chaque fonction du produit est décrite une seule fois et appelable à l'identique par l'extension QGIS, la CLI, l'agent local et un client MCP.
@@ -148,7 +148,7 @@ Sur une machine débranchée du réseau, l'utilisateur ouvre QGIS sur un projet 
 - **Modèle et configuration minimale.** Mistral ou Qwen, quelle quantification, et quelle configuration minimale de RAM et de CPU sont visées pour l'agent local ?
 - **Dessin du panneau.** L'expérience devient un panneau ancré dans QGIS, outil dense et d'expert, alors que l'argument de vente est qu'un opérateur non cartographe obtient sa réponse en parlant. À esquisser avant d'ouvrir l'epic de façade.
 - **Maturité de la lecture du relief.** `wbgeotiff` 0.1.2 et `wbraster` 0.2.1 lisent-ils de façon fiable les modèles d'élévation visés ? Bibliothèques jeunes, à trancher par un cas d'essai compilé en tête de l'epic terrain, avant de s'engager sur CAP-11.
-- **Connaissance des schémas français sans les données.** Garde-t-on la capacité à reconnaître un export cadastre Etalab ou un zonage GPU et à proposer la symbologie et le nommage de champs correspondants ?
+- **Connaissance des schémas français sans les données.** Garde-t-on la capacité à reconnaître un export cadastre Etalab ou un zonage GPU et à proposer la symbologie et le nommage de champs correspondants ? *Tranché le 2026-11-08 pour la symbologie : le noyau reconnaît les schémas BD TOPO, ADMIN EXPRESS et le standard CNIG du PLU d'après les noms et les champs (`map.topographic_style`), sans livrer aucune donnée ; le nommage des champs reste ouvert.*
 - **Systèmes des modèles d'élévation.** Le noyau lit le MNT dans son propre système et refuse une coordonnée exprimée dans un autre : quels systèmes doit-il savoir lire — Lambert-93 et WGS84 seuls, ou aussi les Lambert zones et NTF (EPSG:27572) des fichiers anciens ? *Tranché le 2026-11-03 (inception de l'epic terrain) : tout système projeté métrique doté d'un code EPSG ; un MNT en degrés est refusé.*
 - **Jeu de recette.** Avec quelles données la démo et les tests tournent-ils, puisque l'application n'en distribue aucune : des données fabriquées à la main, ou un échantillon réel sous licence ouverte versé dans le dépôt ?
 - **Phrases réelles de mesure de CAP-14.** D'où vient le jeu qui mesure le seuil de 70 % — collecte auprès d'utilisateurs, communauté QGIS ? À fournir par le propriétaire avant l'inception de l'epic 10, au plus tard à la publication (epic 7).
