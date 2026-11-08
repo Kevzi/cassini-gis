@@ -4,13 +4,26 @@
 # de l'extension, des modules au registre et des descriptions au prompt : elles forment
 # une seule voie, chacune apres la precedente.
 
+# ---- Traceur construit d'abord (derogation du proprietaire, 2026-11-08) ----
+
+[[entry]]
+id = 7
+type = "story"
+title = "Traceur : reprojection de bout en bout (data.reproject)"
+description = "Ajoute data.reproject, premiere primitive du catalogue etendu, par le chemin complet mis a niveau : commande Rust et schema, ligne de table avec version de chaine, annonce, prompt, plan compose dans le panneau, execution, journal et rejeu."
+verify = "Dans QGIS, le proprietaire tape « Reprojette la couche des gares en WGS84 », valide le plan, obtient la couche reprojetee, puis la rejoue depuis le journal apres fermeture et reouverture du projet."
+covers = ["CAP-14"]
+after = []
+hitl = true
+risk = "medium"
+
 # ---- Mise a niveau avant la premiere primitive (deferred-work, gate de revue E1) ----
 
 [[entry]]
 id = 1
 type = "story"
 title = "Resultat valide par le noyau et gabarit unique de resume"
-description = "Definit en Rust le gabarit de resume chiffre (rows, values avec unite, truncated) et fait valider par le noyau tout resultat recu de l'extension contre le schema de sortie de sa commande, rejete en qgis.bad_result ; les marqueurs du journal passent sous une cle reservee (bug latent summary.rs:24), et model.list cesse de rendre son dossier en chemin absolu (AD-9)."
+description = "Definit en Rust le gabarit de resume chiffre (rows, values avec unite, truncated) et fait valider par le noyau tout resultat recu de l'extension contre le schema de sortie de sa commande, rejete en qgis.bad_result ; les marqueurs du journal passent sous une cle reservee (bug latent summary.rs:24), et model.list cesse de rendre son dossier en chemin absolu (AD-9). Couvre aussi data.reproject, construite avant (10.7, 2026-11-08)."
 verify = "Tests du noyau sans QGIS : un resultat mal forme est rejete en qgis.bad_result et non journalise, un resultat qui porte lui-meme truncated: true n'est plus confondu avec un resume tronque au rejeu, et aucun resultat de model.list ne porte de chemin absolu."
 covers = ["CAP-6", "CAP-14"]
 after = ["epic-export-et-demo", "epic-publication"]
@@ -33,7 +46,7 @@ risk = "medium"
 id = 3
 type = "story"
 title = "Geste a chaine fixe et invariants de la table fermee"
-description = "Fait de chaque ligne de la table de l'extension une chaine fixe d'algorithmes avec gardes, temporaires non journalises et version de chaine (AD-24), migre les lignes existantes, declare une commande annulable seulement si chaque algorithme l'est, et fait refuser par la recette toute ligne qui cite un algorithme de la liste noire reseau ; le genre vector et les sorties layer et file sont livres ici, les genres raster et layout et la sortie table par la premiere primitive qui en a besoin, apres le reordonnancement de l'entree 8 (aujourd'hui 10 pour table, 12 pour raster, 15 pour layout ; la sortie raster d'une commande, d'abord en 25, est une sortie layer d'AD-24)."
+description = "Fait de chaque ligne de la table de l'extension une chaine fixe d'algorithmes avec gardes, temporaires non journalises et version de chaine (AD-24), migre les lignes existantes, declare une commande annulable seulement si chaque algorithme l'est, et fait refuser par la recette toute ligne qui cite un algorithme de la liste noire reseau ; le genre vector et les sorties layer et file sont livres ici, les genres raster et layout et la sortie table par la premiere primitive qui en a besoin, apres le reordonnancement de l'entree 8 (aujourd'hui 10 pour table, 12 pour raster, 15 pour layout ; la sortie raster d'une commande, d'abord en 25, est une sortie layer d'AD-24). La ligne data.reproject (native:reprojectlayer, construite en 10.7 avant cette entree) est migree comme les autres."
 verify = "Tests de l'extension sur les deux series de QGIS : une chaine de deux algorithmes ecrit seulement la sortie nommee par le noyau, un test confronte la table au registre sur l'annulabilite, et la recette echoue sur une ligne de test qui nomme native:filedownloader."
 covers = ["CAP-6", "CAP-14"]
 after = [2]
@@ -45,7 +58,7 @@ references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qg
 id = 4
 type = "story"
 title = "Annonce fidele : chaine presente, fournisseurs charges, versions journalisees"
-description = "L'extension envoie session.hello une fois les fournisseurs de traitement charges, n'annonce une commande que si toute sa chaine existe dans le QGIS hote, et porte la version de QGIS et la version de chaine de chaque commande, que le noyau journalise et que le rejeu compare (AD-25, AD-11)."
+description = "L'extension envoie session.hello une fois les fournisseurs de traitement charges, n'annonce une commande que si toute sa chaine existe dans le QGIS hote, et porte la version de QGIS et la version de chaine de chaque commande, que le noyau journalise et que le rejeu compare (AD-25, AD-11). data.reproject (10.7) est annoncee par la meme regle."
 verify = "Test de l'extension avec un algorithme retire du registre de traitement : la commande est annoncee indisponible, un plan qui la nomme est refuse avant d'etre montre ; test du noyau : le journal porte les versions et le rejeu signale une version de chaine changee."
 covers = ["CAP-6", "CAP-14"]
 after = [3]
@@ -57,7 +70,7 @@ references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qg
 id = 5
 type = "story"
 title = "Le modele ne voit que les commandes disponibles"
-description = "La partie fixe du prompt ne decrit que les commandes annoncees disponibles par l'entree 4, et le cache de la 5.12 est garde par ensemble annonce, pour que le catalogue etendu ne fasse pas depasser 30 s par phrase sur processeur."
+description = "La partie fixe du prompt ne decrit que les commandes annoncees disponibles par l'entree 4, et le cache de la 5.12 est garde par ensemble annonce, pour que le catalogue etendu ne fasse pas depasser 30 s par phrase sur processeur. data.reproject (10.7) en fait partie."
 verify = "Test du noyau : deux sessions qui annoncent le meme ensemble reutilisent le meme prefixe en cache, une commande indisponible n'apparait pas dans le prompt ; mesure consignee de la duree d'une phrase avec le catalogue complet, a 4 coeurs."
 covers = ["CAP-14"]
 after = [4, "5.12"]
@@ -77,18 +90,7 @@ hitl = false
 risk = "medium"
 references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-28"]
 
-# ---- Traceur, puis mesure de depart ----
-
-[[entry]]
-id = 7
-type = "story"
-title = "Traceur : reprojection de bout en bout (data.reproject)"
-description = "Ajoute data.reproject, premiere primitive du catalogue etendu, par le chemin complet mis a niveau : commande Rust et schema, ligne de table avec version de chaine, annonce, prompt, plan compose dans le panneau, execution, journal et rejeu."
-verify = "Dans QGIS, le proprietaire tape « Reprojette la couche des gares en WGS84 », valide le plan, obtient la couche reprojetee, puis la rejoue depuis le journal apres fermeture et reouverture du projet."
-covers = ["CAP-14"]
-after = [5, 6]
-hitl = true
-risk = "medium"
+# ---- Mesure de depart ----
 
 [[entry]]
 id = 8
@@ -97,7 +99,7 @@ title = "Jeu de phrases reelles et mesure de couverture de depart"
 description = "Le proprietaire fournit le jeu de phrases reelles d'utilisateurs ; un harnais, repris de l'epreuve du modele local, mesure la part couverte (plan valide ou question justifiee) et consigne la mesure de depart, ainsi que le taux de plans conformes de l'epreuve sur le catalogue d'avant l'epic ; la couverture sert a reordonner les primitives suivantes."
 verify = "Le harnais tourne hors ligne sur le jeu fourni et ecrit un rapport consigne de la couverture de depart, phrase par phrase, avec la commande manquante pour chaque phrase non couverte, et le taux de plans conformes de depart."
 covers = ["CAP-14"]
-after = [7]
+after = [6, 7]
 hitl = true
 risk = "medium"
 
