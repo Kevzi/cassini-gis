@@ -1,5 +1,7 @@
 """Le fil de la demande [12.1] : quelles cartes montrer, leurs titres et lignes, les
-comptes des replis et les couleurs propres à Cassini.
+comptes des replis et les couleurs propres à Cassini. Son guidage [12.2] : la ligne
+« À vous », le repère d'avancement, « Reformuler la demande », la cible du focus et les
+annonces de chaque état.
 
 Sans Qt. Le panneau ne fait que poser les widgets que ce module désigne (AD-4) : toute
 décision d'affichage testable sans Qt vit ici. Les couleurs suivent `DESIGN.md` : fonds,
@@ -254,16 +256,195 @@ def reason_line(reason, has_text):
     return reason if reason and has_text else ""
 
 
-def primary(c):
-    """Le seul bouton principal visible : « approve », « send » ou None.
+def primary(c, rephrase=False):
+    """Le seul bouton principal visible : « approve », « rephrase », « send » ou None.
 
-    `c` : activations de `agentview.controls`. Désactivé, un bouton perd sa couleur.
+    `c` : activations de `agentview.controls` ; `rephrase` : « Reformuler la demande » est
+    montré [12.2], et Envoyer redevient alors natif. Désactivé, un bouton perd sa couleur.
     """
     if c.get("approve_visible") and c.get("approve_enabled"):
         return "approve"
+    if rephrase:
+        return "rephrase"
     if c.get("send_enabled"):
         return "send"
     return None
+
+
+# -- guidage [12.2] : « À vous », repère d'avancement, Reformuler, focus -------------
+# Cibles du focus (le panneau les traduit en widgets).
+FOCUS_INPUT = "input"
+FOCUS_APPROVE = "approve"
+FOCUS_REPHRASE = "rephrase"
+FOCUS_COMPOSING = "composing_title"
+FOCUS_PLAN_TITLE = "plan_title"
+FOCUS_RESULT_TITLE = "result_title"
+
+
+def is_request(exchange):
+    return bool(exchange and exchange.get("kind") == "request" and exchange.get("text"))
+
+
+def guidance(view, exchange, last, focus=None, rephrased=False, controls=None):
+    """Ce que le fil demande à l'utilisateur, d'après `EXPERIENCE.md` (State Patterns).
+
+    Rend {"card", "cue", "values", "rephrase"} : la carte qui porte la ligne « À vous »
+    (None : aucune, elle n'est jamais dans deux cartes), sa clé de texte et ses valeurs, et
+    si « Reformuler la demande » y est proposé. La ligne est là si et seulement si
+    l'utilisateur doit agir : plan proposé, question, échec de composition, refus, erreur
+    d'étape d'un plan. Jamais pendant la composition ni l'exécution ; jamais pour une
+    commande experte (aucune phrase à rendre). `rephrased` : la phrase est déjà revenue
+    dans la saisie, le bouton disparaît (Envoyer redevient le bouton principal).
+    `controls` : activations de `agentview.controls` ; un plan proposé dont ni Valider ni
+    Refuser n'est possible (refus en cours, IA externe au travail) n'a pas de ligne.
+    Un détail cliqué (`focus`) ne retire ni la ligne ni Reformuler : l'utilisateur doit
+    toujours agir.
+    """
+    none = {"card": None, "cue": None, "values": {}, "rephrase": False}
+    phase = view.phase
+    if phase == agentview.PROPOSED:
+        possible = controls is None or controls.get("approve_enabled") or controls.get(
+            "reject_enabled"
+        )
+        if view.rejecting or not possible:
+            return none
+        return {"card": PLAN, "cue": "act_plan", "values": {}, "rephrase": False}
+    if phase != agentview.IDLE:
+        return none
+    can = is_request(exchange) and not rephrased
+    notice = view.notice[0] if view.notice is not None else None
+    if notice == "question":
+        return {"card": QUESTION, "cue": "act_question", "values": {}, "rephrase": False}
+    if notice == "propose_error":
+        return {"card": FAILED, "cue": "act_rephrase", "values": {}, "rephrase": can}
+    if notice == "plan_rejected":
+        return {"card": REJECTED, "cue": "act_rephrase", "values": {}, "rephrase": can}
+    if (
+        is_request(exchange) and last and last.get("plan")
+        and last.get("kind") == runlog.ERROR
+    ):
+        # `{suggestion}` vient du noyau ; sans elle, la consigne générale.
+        suggestion = last.get("suggestion")
+        if isinstance(suggestion, str) and suggestion.strip():
+            return {"card": RESULT, "cue": "act_error",
+                    "values": {"suggestion": suggestion.strip()}, "rephrase": can}
+        return {"card": RESULT, "cue": "act_rephrase", "values": {}, "rephrase": can}
+    return none
+
+
+def cue_text(guide, lang):
+    """Texte de la ligne « À vous », ou ""."""
+    if not guide.get("cue"):
+        return ""
+    return texts.tr(lang, guide["cue"], **guide.get("values", {}))
+
+
+def focus_target(view, exchange, last, focus, guide):
+    """Où va le focus dans cet état (`EXPERIENCE.md`, State Patterns et Accessibility Floor).
+
+    Sur l'action que nomme la ligne « À vous » ; au titre de la carte du plan pendant
+    l'exécution (après Valider le plan) ; au titre de la carte de résultat une fois fini ;
+    à la saisie au repos. None : le focus ne bouge pas (détail cliqué, commande experte
+    en cours, qui garde son Arrêter).
+    """
+    if focus is not None:
+        return None
+    phase = view.phase
+    if phase == agentview.PROPOSED:
+        return FOCUS_APPROVE
+    if phase == agentview.GENERATING:
+        # Arrêter est grisé (la composition n'est pas annulable) : il ne peut pas prendre le
+        # focus ; le titre de la carte le garde dans le fil.
+        return FOCUS_COMPOSING
+    if phase == agentview.EXECUTING:
+        return FOCUS_PLAN_TITLE
+    if guide.get("rephrase"):
+        return FOCUS_REPHRASE
+    if guide.get("card") is not None:
+        # Question, ou phrase déjà revenue dans la saisie par Reformuler : c'est là qu'on agit.
+        return FOCUS_INPUT
+    if last is not None:
+        if last.get("kind") == runlog.RUNNING:
+            return None
+        return FOCUS_RESULT_TITLE
+    return FOCUS_INPUT
+
+
+def may_move_focus(focus_inside, input_focused, input_has_text):
+    """Le focus ne se déplace que s'il est déjà dans le panneau, et jamais pendant que
+    l'utilisateur tape dans la saisie (l'annonce suffit alors)."""
+    return bool(focus_inside and not (input_focused and input_has_text))
+
+
+def rephrase(exchange, last_request, current_input):
+    """Geste « Reformuler la demande » : {"text", "note", "done"}.
+
+    La phrase rendue est celle de la bulle (`exchange`, une demande tapée) ; à défaut, la
+    dernière demande envoyée (`last_request`).
+
+    `text` : la phrase à remettre dans la saisie (None : rien n'y est écrit) ; `note` : clé
+    du texte qui dit pourquoi rien n'est écrit ; `done` : la phrase est dans la saisie, le
+    bouton peut disparaître. Même règle que `agentview.request_to_restore` : jamais
+    par-dessus un texte déjà tapé. Si la saisie contient déjà la phrase (rendue après un
+    échec de composition), il n'y a rien à faire.
+    """
+    if is_request(exchange):
+        last_request = exchange.get("text")
+    text = agentview.restorable(last_request, current_input)
+    if text is not None:
+        return {"text": text, "note": None, "done": True}
+    if not last_request:
+        return {"text": None, "note": None, "done": False}
+    if (current_input or "").strip() == last_request.strip():
+        return {"text": None, "note": None, "done": True}
+    return {"text": None, "note": "rephrase_blocked", "done": False}
+
+
+def progress_text(view, lang, emphasis=None):
+    """Repère « Étape k sur n en cours » pendant l'exécution, sinon "".
+
+    `emphasis` : couleur des chiffres (texte riche, chiffres en demi-gras), ou None pour
+    le texte brut (annonces, noms accessibles).
+    """
+    if view.phase != agentview.EXECUTING or view.current is None or not view.steps:
+        return ""
+    k, n = int(view.current), len(view.steps)
+    if emphasis:
+        k = "<b style='color:%s'>%d</b>" % (emphasis, k)
+        n = "<b style='color:%s'>%d</b>" % (emphasis, n)
+    return texts.tr(lang, "progress", k=k, n=n)
+
+
+def plan_title_name(view, lang):
+    """Nom accessible du titre de la carte du plan : le titre, et le repère pendant
+    l'exécution (le focus s'y pose après Valider le plan)."""
+    title = plan_title(view, lang) if view.steps else ""
+    if view.phase == agentview.EXECUTING and view.current is not None and view.steps:
+        return texts.tr(
+            lang, "plan_title_progress", title=title, k=view.current, n=len(view.steps)
+        )
+    return title
+
+
+def outcome_announcement(last, lang):
+    """Annonce de la fin d'un plan ou d'une commande experte (zone vivante)."""
+    kind = last.get("kind")
+    if not last.get("plan"):
+        return texts.tr(lang, {
+            runlog.DONE: "live_done", runlog.CANCELLED: "live_cancelled",
+        }.get(kind, "live_error"))
+    if kind == runlog.ERROR:
+        message = last.get("message", "") or ""
+        if last.get("step") is None:
+            return texts.tr(lang, "live_compose_failed", message=message).strip()
+        return texts.tr(lang, "live_step_error", k=last["step"], message=message).strip()
+    return result_title(last, lang)
+
+
+def failed_announcement(view, lang):
+    """Annonce d'un échec de composition, avec le message du noyau."""
+    values = view.notice[1] if view.notice is not None else {}
+    return texts.tr(lang, "live_compose_failed", message=values.get("message", "") or "").strip()
 
 
 def log_fold_label(n, lang):
@@ -343,6 +524,19 @@ def styles(c):
     Fonds, textes et bordures des cartes viennent de la palette de QGIS (`palette(...)`) ;
     seules les valeurs de `c` (paire claire ou sombre) sont propres à Cassini.
     """
+    # Lignes d'étape : styles ajoutés par le panneau à la feuille de la carte, l'étape en cours repérée
+    # par la propriété `current`. Une feuille propre à chaque ligne lui faisait résoudre sa
+    # police pour un autre écran que la carte (lignes coupées à 150 %, défaut de 12.1).
+    step = (
+        "QFrame#cassiniStep { border: none; border-left: 3px solid transparent; }"
+        " QFrame#cassiniStep:focus { border: 2px solid %(accent)s; }" % c
+    )
+    step_current = (
+        "QFrame#cassiniStep[current=\"true\"] { background: %(accent_tint)s;"
+        " border: none; border-left: 3px solid %(accent)s; }"
+        " QFrame#cassiniStep[current=\"true\"]:focus { border: 2px solid %(accent)s;"
+        " border-left: 3px solid %(accent)s; }" % c
+    )
     return {
         "card": (
             "QFrame#cassiniCard { background: palette(base); border: 1px solid palette(mid);"
@@ -355,17 +549,8 @@ def styles(c):
             " border-bottom-right-radius: 2px; }"
             " QFrame#cassiniBubble QLabel { background: transparent; border: none; }" % c
         ),
-        "step_current": (
-            "QFrame#cassiniStep { background: %(accent_tint)s;"
-            " border: none; border-left: 3px solid %(accent)s; }"
-            " QFrame#cassiniStep QLabel { background: transparent; border: none; }"
-            " QFrame#cassiniStep:focus { border: 2px solid %(accent)s;"
-            " border-left: 3px solid %(accent)s; }" % c
-        ),
-        "step": (
-            "QFrame#cassiniStep { border: none; border-left: 3px solid transparent; }"
-            " QFrame#cassiniStep:focus { border: 2px solid %(accent)s; }" % c
-        ),
+        "step_current": step_current,
+        "step": step,
         "primary": (
             "QPushButton { background: %(accent_strong)s; color: %(on_accent_strong)s;"
             " border: 1px solid %(accent_strong_border)s; border-radius: 2px;"
@@ -380,6 +565,16 @@ def styles(c):
         ),
         "input": (
             "QPlainTextEdit:focus { border: 2px solid %(accent)s; }" % c
+        ),
+        # Ligne « À vous » (`act-cue`) : fond AlternateBase du thème, trait gauche sarcelle.
+        "cue": (
+            "QLabel#cassiniCue { background: palette(alternate-base); border: none;"
+            " border-left: 3px solid %(accent)s; padding: 4px 8px; }" % c
+        ),
+        # Titre de carte qui reçoit le focus (plan, résultat, composition) : anneau sarcelle.
+        "title": (
+            "QLabel#cassiniCardTitle { border: 2px solid transparent; }"
+            " QLabel#cassiniCardTitle:focus { border: 2px solid %(accent)s; }" % c
         ),
         "chevron": c["accent"],
     }

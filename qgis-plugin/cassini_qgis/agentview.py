@@ -234,7 +234,18 @@ def request_to_restore(view, last_request, current_input):
     Seule une question du garde-fou (`view.restore_request`) rend la phrase d'origine, et
     seulement si la saisie est vide : ce que l'utilisateur a déjà tapé n'est pas écrasé.
     """
-    if not view.restore_request or not last_request:
+    if not view.restore_request:
+        return None
+    return restorable(last_request, current_input)
+
+
+def restorable(last_request, current_input):
+    """La phrase `last_request` si elle peut revenir dans la saisie, sinon None.
+
+    Règle commune à la question du garde-fou et à « Reformuler la demande » [12.2] :
+    seulement dans une saisie vide, jamais par-dessus un texte déjà tapé.
+    """
+    if not last_request:
         return None
     if current_input and current_input.strip():
         return None

@@ -736,6 +736,8 @@ class PanelBannerTest(unittest.TestCase):
         for name in ("_render_models", "_render_external", "_render_agent", "_render_result",
                      "_render_thread", "_render_log", "_render_commands", "_render_buttons"):
             setattr(panel, name, lambda: None)
+        panel._focus_inside = lambda: False  # guidage du focus [12.2] : hors de ce test
+        panel._move_focus = lambda inside: None
         panel.log = types.SimpleNamespace(entries=[])
         panel.agent = types.SimpleNamespace(phase=self.mod.agentview.IDLE)
         panel.render()
