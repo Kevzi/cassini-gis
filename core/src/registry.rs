@@ -12,6 +12,13 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 
+/// Commande qui lit l'inventaire du projet auprès de QGIS.
+pub const INVENTORY: &str = "project.inventory";
+
+/// Champ caché du résultat d'une commande qui dicte des ordres (`CommandSpec::dictates`) : une
+/// liste de `{command, params}`, ôtée du résultat avant toute journalisation ou comparaison.
+pub const ORDERS_FIELD: &str = "orders";
+
 /// Version du protocole du noyau.
 pub const PROTOCOL_VERSION: u32 = 2;
 
@@ -70,6 +77,22 @@ pub struct CommandSpec {
     /// vrai : le catalogue des autres commandes reste celui d'avant.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub dictated_by_core: bool,
+    /// Paramètre qui reçoit l'inventaire du projet, lu par le noyau auprès de QGIS juste avant
+    /// l'exécution, hors du journal (amendement d'AD-30, entrée 11.20). Ôté des paramètres de
+    /// l'appelant, jamais journalisé ; même lecture au rejeu. Métadonnée interne : jamais sérialisée.
+    #[serde(skip)]
+    pub inventory_param: Option<String>,
+    /// Commandes `dictated_by_core` que cette commande peut demander au noyau de dicter après sa
+    /// ligne, sous le champ caché [`ORDERS_FIELD`] de son résultat, ôté avant journalisation
+    /// (amendement d'AD-30). Métadonnée interne : jamais sérialisée.
+    #[serde(skip)]
+    pub dictates: Vec<String>,
+    /// Vrai pour une commande du genre de sortie `none` (amendement d'AD-24) : elle change l'état
+    /// du projet sans produire ni couche ni fichier. Le `layer_id` de son résultat désigne une
+    /// couche existante : il n'est ni journalisé comme couche posée, ni lié au rejeu.
+    /// Métadonnée interne : jamais sérialisée.
+    #[serde(skip)]
+    pub output_none: bool,
     /// Schéma JSON des paramètres, engendré depuis le type Rust.
     pub params_schema: Value,
     /// Schéma JSON du résultat, engendré depuis le type Rust.
@@ -98,6 +121,9 @@ impl CommandSpec {
             leave_out_param: None,
             replay_param: None,
             dictated_by_core: false,
+            inventory_param: None,
+            dictates: Vec::new(),
+            output_none: false,
             params_schema: schema_value::<P>(),
             output_schema: schema_value::<O>(),
             examples: Vec::new(),
@@ -159,6 +185,36 @@ impl CommandSpec {
     pub fn dictated_by_core(mut self) -> Self {
         self.dictated_by_core = true;
         self
+    }
+
+    /// Déclare le paramètre qui reçoit l'inventaire du projet, lu hors du journal (entrée 11.20).
+    pub fn inventory_param(mut self, name: &str) -> Self {
+        self.inventory_param = Some(name.to_string());
+        self
+    }
+
+    /// Déclare les commandes dictées que la commande peut demander après sa ligne (entrée 11.20).
+    pub fn dictates(mut self, ids: &[&str]) -> Self {
+        self.dictates = ids.iter().map(|n| n.to_string()).collect();
+        self
+    }
+
+    /// Déclare le genre de sortie `none` (amendement d'AD-24).
+    pub fn output_none(mut self) -> Self {
+        self.output_none = true;
+        self
+    }
+
+    /// Les gestes que l'extension doit annoncer pour que la commande soit offerte (AD-25) :
+    /// `project.inventory` si elle lit l'inventaire, puis chaque commande qu'elle dicte. Vide pour
+    /// toute autre commande.
+    pub fn required_gestures(&self) -> Vec<&str> {
+        self.inventory_param
+            .as_ref()
+            .map(|_| INVENTORY)
+            .into_iter()
+            .chain(self.dictates.iter().map(String::as_str))
+            .collect()
     }
 
     /// Déclare les noms des tests qui prouvent la commande.

@@ -884,7 +884,9 @@ fn hello(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, RpcErro
         // L'extension sait ouvrir un raster du noyau : la session le lui dicte (ticket 4.9).
         .with_raster_opening(commands.contains(OPEN_RASTER))
         // De même pour un GeoJSON du noyau (AD-30, ticket 11.8).
-        .with_vector_opening(commands.contains(OPEN_VECTOR));
+        .with_vector_opening(commands.contains(OPEN_VECTOR))
+        // Une mise en forme n'est exécutée que si l'extension annonce ses gestes (entrée 11.20).
+        .with_gestures(commands.iter().cloned());
     // La session dit dès la poignée de main si elle est en lecture seule : l'extension
     // n'a plus à lancer une commande pour le découvrir (ticket 5.32).
     let read_only = session.mode() == Mode::ReadOnly;
@@ -918,6 +920,15 @@ fn hello(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, RpcErro
 /// à un plan, ni à `command.run`.
 fn is_available(state: &State<'_>, id: &str, runs_in: Option<RunsIn>) -> bool {
     if state.registry.spec(id).is_some_and(|s| s.dictated_by_core) {
+        return false;
+    }
+    // Une mise en forme du noyau n'est offerte que si l'extension annonce tous ses gestes
+    // (`project.inventory`, `layer.set_style`, `layer.arrange` ; AD-25, entrée 11.20).
+    if state.registry.spec(id).is_some_and(|s| {
+        !s.required_gestures()
+            .iter()
+            .all(|g| state.announced.contains(*g))
+    }) {
         return false;
     }
     runs_in != Some(RunsIn::Qgis) || state.announced.contains(id)
@@ -963,9 +974,13 @@ fn check_available(state: &State<'_>, id: &str) -> Result<(), RpcError> {
             ));
         }
         if !is_available(state, id, spec.runs_in) {
-            return Err(RpcError::business(ErrorReport::from(
-                RegistryError::Unavailable(id.to_string()),
-            )));
+            // Une mise en forme refusée l'est par `style.unavailable` (entrée 11.20).
+            let error = if spec.required_gestures().is_empty() {
+                RegistryError::Unavailable(id.to_string())
+            } else {
+                crate::style::unavailable()
+            };
+            return Err(RpcError::business(ErrorReport::from(error)));
         }
     }
     Ok(())
@@ -998,7 +1013,9 @@ impl<E: Executor> Executor for Announced<E> {
 /// appel en cours n'est posé, donc `request.cancel` répond `request.unknown`.
 fn journal_replay(state: &mut State<'_>) -> Result<Value, RpcError> {
     let project = state.project.clone().expect("session vérifiée");
-    let replay = Replay::load(state.registry, Path::new(&project)).map_err(RpcError::business)?;
+    let replay = Replay::load(state.registry, Path::new(&project))
+        .map_err(RpcError::business)?
+        .with_gestures(state.announced.iter().cloned());
     let router = Router::new(state.registry).with_qgis(Announced {
         announced: state.announced.clone(),
         inner: Channel {
@@ -3463,7 +3480,13 @@ mod tests {
         assert_eq!(entry["available"], json!(false));
         assert!(commands
             .iter()
-            .filter(|e| e["id"] != "layer.open_raster" && e["id"] != "layer.open_vector")
+            .filter(|e| ![
+                "layer.open_raster",
+                "layer.open_vector",
+                "layer.set_style",
+                "layer.arrange"
+            ]
+            .contains(&e["id"].as_str().unwrap()))
             .all(|e| e.get("dictated_by_core").is_none()));
         c.send(json!({"jsonrpc":"2.0","id":2,"method":"command.run",
             "params":{"command":"layer.open_raster","params":{"path":"out:1.1"}}}));
@@ -3816,6 +3839,144 @@ mod tests {
             *chosen.lock().unwrap(),
             vec![None, Some("b.gguf".to_string()), None]
         );
+        c.close().1.unwrap();
+    }
+
+    // --- Mise en forme topographique et dégradé (entrée 11.20). ---
+
+    const STYLE_GESTURES: [&str; 3] = ["project.inventory", "layer.set_style", "layer.arrange"];
+
+    fn available(hello: &Value, id: &str) -> Value {
+        hello["result"]["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["id"] == id)
+            .unwrap()["available"]
+            .clone()
+    }
+
+    #[test]
+    fn the_styling_commands_are_offered_only_with_their_gestures() {
+        for (announced, topographic, graduated) in [
+            (vec![], false, false),
+            (vec!["layer.set_style"], false, true),
+            (vec!["project.inventory", "layer.set_style"], false, true),
+            (STYLE_GESTURES.to_vec(), true, true),
+        ] {
+            let mut c = Client::start(CANCEL_GRACE);
+            c.send(json!({"jsonrpc":"2.0","id":1,"method":"session.hello",
+                "params":{"protocol_version":2,"commands":announced,"project":c.project}}));
+            let hello = c.recv();
+            assert_eq!(
+                available(&hello, "map.topographic_style"),
+                json!(topographic)
+            );
+            assert_eq!(available(&hello, "map.graduated_style"), json!(graduated));
+            assert_eq!(available(&hello, "layer.set_style"), json!(false));
+            assert_eq!(available(&hello, "layer.arrange"), json!(false));
+            if !topographic {
+                c.send(
+                    run_line(2, "map.topographic_style", json!({}))
+                        .parse()
+                        .unwrap(),
+                );
+                let refused = c.recv();
+                assert_eq!(code_of(&refused), "style.unavailable", "{refused}");
+                c.assert_silent();
+                assert!(c.journal().is_empty());
+            }
+            c.close().1.unwrap();
+        }
+    }
+
+    #[test]
+    fn a_topographic_style_reads_the_inventory_then_dictates_styles_and_the_arrangement() {
+        let mut c = Client::start(CANCEL_GRACE);
+        c.hello_with(&STYLE_GESTURES);
+        c.send(
+            run_line(2, "map.topographic_style", json!({}))
+                .parse()
+                .unwrap(),
+        );
+        let order = c.recv();
+        assert_eq!(order["params"]["command"], "project.inventory");
+        c.send(reply(&order["id"], json!({"project_crs": "EPSG:2154", "extent": null, "layers": [
+            {"layer_id": "routes_1", "name": "routes", "kind": "vector", "geometry": "LineString",
+             "crs": "EPSG:2154", "fields": []},
+            {"layer_id": "mnt_2", "name": "mnt", "kind": "raster", "geometry": null,
+             "crs": "EPSG:2154", "fields": []}
+        ]})));
+        for layer in ["routes_1", "mnt_2"] {
+            let order = c.recv();
+            assert_eq!(order["params"]["command"], "layer.set_style", "{order}");
+            assert_eq!(order["params"]["params"]["layer_id"], layer);
+            c.send(reply(&order["id"], json!({"layer_id": layer})));
+        }
+        let order = c.recv();
+        assert_eq!(order["params"]["command"], "layer.arrange");
+        assert_eq!(
+            order["params"]["params"]["groups"],
+            json!([{"name": "Transport", "layers": ["routes_1"]},
+                   {"name": "Relief", "layers": ["mnt_2"]}])
+        );
+        c.send(reply(
+            &order["id"],
+            json!({"group_count": 2, "layer_count": 2}),
+        ));
+        let done = c.recv();
+        assert_eq!(done["id"], 2);
+        assert!(done["result"].get("orders").is_none(), "{done}");
+        assert_eq!(done["result"]["styled"].as_array().unwrap().len(), 2);
+        let journal = c.journal();
+        let ids: Vec<&str> = journal.iter().map(|l| l["id"].as_str().unwrap()).collect();
+        assert_eq!(
+            ids,
+            [
+                "map.topographic_style",
+                "layer.set_style",
+                "layer.set_style",
+                "layer.arrange"
+            ]
+        );
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn a_graduated_style_dictates_one_set_style_over_the_channel() {
+        let mut c = Client::start(CANCEL_GRACE);
+        c.hello_with(&["layer.set_style"]);
+        c.send(
+            run_line(
+                2,
+                "map.graduated_style",
+                json!({"layer_id": "communes_1", "field": "population", "ramp": "blues"}),
+            )
+            .parse()
+            .unwrap(),
+        );
+        let order = c.recv();
+        assert_eq!(order["method"], "order.execute", "{order}");
+        assert_eq!(order["params"]["command"], "layer.set_style");
+        assert_eq!(order["params"]["params"]["layer_id"], "communes_1");
+        assert_eq!(
+            order["params"]["params"]["style"],
+            json!({"kind": "graduated", "field": "population", "method": "jenks",
+                   "class_count": 5, "ramp": {"from": "#f7fbff", "to": "#08306b"}})
+        );
+        c.send(reply(&order["id"], json!({"layer_id": "communes_1"})));
+        let done = c.recv();
+        assert_eq!(done["id"], 2);
+        assert_eq!(
+            done["result"],
+            json!({"layer_id": "communes_1", "field": "population", "class_count": 5})
+        );
+        c.assert_silent();
+        let journal = c.journal();
+        let ids: Vec<&str> = journal.iter().map(|l| l["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, ["map.graduated_style", "layer.set_style"]);
+        assert!(journal.iter().all(|l| l.get("layer_id").is_none()));
+        assert!(!journal[0].to_string().contains("orders"));
         c.close().1.unwrap();
     }
 }

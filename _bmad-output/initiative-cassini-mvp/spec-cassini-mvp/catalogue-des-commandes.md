@@ -249,15 +249,19 @@ l'extension le traduit en rendu de QGIS. Union étiquetée par `kind` :
 |---|---|---|
 | `single` | `stroke`, `fill`, `width_mm`, `opacity` | Un seul symbole. `fill` absent : trait seul (ligne, contour) ; `stroke` absent : surface sans contour ; au moins l'un des deux. |
 | `categories` | `field`, `classes`, `other` | Un symbole par valeur de `field` ; `classes` = `{values, label, stroke, fill, width_mm}` ; `other` = `{label, stroke, fill, width_mm}`, le symbole des valeurs non listées (absent : non dessinées). |
+| `graduated` | `field`, `method`, `class_count`, `ramp`, `stroke`, `width_mm` | Dégradé selon un champ numérique d'un vecteur : QGIS calcule `class_count` classes par `method` (`equal_interval`, `quantile`, `jenks`) sur les valeurs réelles, et colore de `ramp.from` à `ramp.to`. Le noyau ne calcule aucun seuil. |
 | `elevation_ramp` | `stops`, `opacity` | Teintes d'altitude d'un MNT : `stops` = `{value, color}`, valeurs croissantes, en mètres. |
 | `hillshade` | `opacity` | Un raster d'ombrage **déjà présent** (sortie de `terrain.hillshade` ou fichier de relief ombré) rendu en gris et posé en fondu (mode produit) sur les couches du dessous. Le style ne calcule aucun ombrage. |
 
 Une couleur est une chaîne `#rrggbb` ; `width_mm` est en millimètres de carte ; `opacity`
-va de 0 à 1 (1 par défaut). Une couleur mal formée, une épaisseur négative, une opacité
+va de 0 à 1 (1 par défaut) ; `graduated` n'a **pas** d'`opacity`. Une couleur mal formée, une épaisseur négative, une opacité
 hors de [0, 1], des `stops` non croissants, ou un `single` sans `stroke` ni `fill` sont
 refusés par `style.invalid` (AD-21). Les `single` et `categories` vont aux vecteurs, les
 `elevation_ramp` et `hillshade` aux rasters ; l'inverse est refusé par
-`style.geometry_mismatch`. Ce bloc fait foi sur le changement de cap du 2026-11-08, qui en
+`style.geometry_mismatch`. `class_count` va de 2 à 12, sinon `style.invalid` ; un `field`
+non numérique est refusé par `style.field_missing` (l'extension le vérifie) ; `graduated` va
+aux vecteurs (sinon `style.geometry_mismatch`). Variante `graduated` ajoutée sur décision du
+propriétaire du 2026-11-08 (entrée 20). Ce bloc fait foi sur le changement de cap du 2026-11-08, qui en
 donne l'esquisse.
 
 ```json type
@@ -280,6 +284,14 @@ donne l'esquisse.
                                        "stroke": {"type": "string", "required": true},
                                        "fill": {"type": "string", "required": false},
                                        "width_mm": {"type": "number", "required": false}}}},
+   "graduated": {"field": {"type": "string", "required": true},
+                 "method": {"type": "string", "required": true, "enum": ["equal_interval", "quantile", "jenks"]},
+                 "class_count": {"type": "integer", "required": true},
+                 "ramp": {"type": "object", "required": true,
+                          "fields": {"from": {"type": "string", "required": true},
+                                     "to": {"type": "string", "required": true}}},
+                 "stroke": {"type": "string", "required": false},
+                 "width_mm": {"type": "number", "required": false}},
    "elevation_ramp": {"stops": {"type": "array", "required": true,
                                 "items": {"type": "object",
                                           "fields": {"value": {"type": "number", "required": true},
@@ -340,9 +352,10 @@ donne l'esquisse.
 | `network.prepare` | planifiée | qgis | epic 10, entrée 14 |
 | `layout.export_atlas` | planifiée | qgis | epic 10, entrée 15 |
 | `geocode.ban` | planifiée | core | epic 10, entrée 16 |
-| `map.topographic_style` | planifiée | core | epic 11, entrée 20 |
-| `layer.set_style` | planifiée (dictée) | qgis | epic 11, entrée 21 |
-| `layer.arrange` | planifiée (dictée) | qgis | epic 11, entrée 21 |
+| `map.topographic_style` | faite | core | epic 11, entrée 20 (geste : 21) |
+| `map.graduated_style` | faite | core | epic 11, entrée 20 (geste : 21) |
+| `layer.set_style` | faite (dictée) | qgis | epic 11, entrée 20 (geste : 21) |
+| `layer.arrange` | faite (dictée) | qgis | epic 11, entrée 20 (geste : 21) |
 | `terrain.flow_accumulation` | réservée | core | après la démo |
 | `terrain.watershed` | réservée | core | après la démo |
 | `terrain.flood_extent` | réservée | core | après la démo |
@@ -1258,7 +1271,9 @@ longueur nuls. Livrée par l'entrée 10 de l'epic 11
 
 Les commandes des entrées 1 à 15 sont faites (§5). Le changement de cap du 2026-11-08
 (`../change-styles-topographiques-officiels/change-styles-topographiques-officiels.md`)
-ajoute la mise en forme topographique, entrées 19 à 21.
+ajoute la mise en forme topographique, entrées 19 à 21. Les fiches ci-dessous sont faites
+dans le noyau par l'entrée 20 (`core/src/style/`, `core/src/commands/`) ; les gestes QGIS de
+`layer.set_style` et `layer.arrange` viennent avec l'entrée 21.
 
 ### `map.topographic_style`
 
@@ -1275,21 +1290,37 @@ type, bâti par usage, MNT en teintes d'altitude.
 
 Il dicte ensuite, juste après la ligne de `map.topographic_style` dans le journal, un
 `layer.set_style` par couche reconnue, puis un seul `layer.arrange`, qui range **toutes**
-les couches du projet en groupes par thème et dans l'ordre d'affichage : points, puis
-lignes, puis surfaces, puis relief (amendement d'AD-30). Une couche non reconnue garde son
-style et va au groupe « Autres couches », placé selon sa sorte (un raster au-dessus du
-relief, sous les surfaces) : un MNT non reconnu ne recouvre donc jamais la carte. Avec
-`layers`, seules ces couches sont mises en forme, mais le rangement porte toujours sur
-tout le projet.
+les couches de l'inventaire en groupes par thème et dans l'ordre d'affichage (amendement
+d'AD-30), de haut en bas :
+
+- « Autres couches » : les vecteurs non reconnus, souvent les résultats de l'utilisateur
+  (tampons, parcelles sélectionnées), en haut de tout ;
+- les groupes des thèmes, points, puis lignes, puis surfaces ;
+- « Autres rasters » : les rasters non reconnus (pente, champ de vision…) ;
+- « Relief » en dessous de tout, l'ombrage au-dessus des teintes d'altitude.
+
+Une couche non reconnue garde son style ; un MNT non reconnu ne recouvre donc jamais la
+carte. Avec `layers`, seules ces couches sont mises en forme, mais le rangement porte
+toujours sur tout le projet.
+
+Le thème se lit dans le nom de la couche, dans le **radical** de son fichier (et le
+`layername=` d'un GeoPackage), jamais dans ses dossiers. Un raster dérivé (pente,
+exposition, visibilité, coût) n'est jamais un MNT. Les valeurs de `typezone` rejoignent
+leur zone par préfixe (`1AU`, `AUc` : AUc ; `2AU`, `AUs` : AUs ; `Ah`, `Ap` : A ; `Nh`,
+`Nd` : N).
 
 **Sans QGIS** (CLI `run`, MCP autonome), ou si l'extension n'annonce pas
 `project.inventory`, `layer.set_style` et `layer.arrange`, la commande n'est pas offerte
 (AD-25) ; appelée quand même, elle est refusée par `style.unavailable`, sans rien écrire.
+En relais MCP, elle est offerte dès que le catalogue de la session la marque disponible ;
+seul le mode MCP autonome l'écarte.
 
 **Au rejeu**, chaque ligne est rejouée seule (AD-11) : la ligne de `map.topographic_style`
-relit l'inventaire et compare son résultat, mais ne dicte rien ; les lignes dictées qui
-la suivent sont rejouées avec leurs paramètres journalisés, `StyleSpec` compris. Les
-mêmes styles et le même rangement reviennent donc.
+relit l'inventaire, sans les couches d'une exécution précédente, et compare son résultat,
+mais ne dicte rien ; les lignes dictées qui la suivent sont rejouées avec leurs paramètres
+journalisés, `StyleSpec` compris. Les mêmes styles et le même rangement reviennent donc. Un
+rejeu dont l'exécutant n'annonce pas les gestes d'une ligne de mise en forme (la commande,
+ou la ligne dictée elle-même) s'arrête à cette ligne sur `style.unavailable`.
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
@@ -1301,18 +1332,64 @@ mêmes styles et le même rangement reviennent donc.
 | `unchanged` | liste | `{layer_id, reason}` : couches laissées telles quelles, avec la raison. |
 | `groups` | liste | `{name, layers}` : les groupes posés, de haut en bas. |
 
-Erreurs : `qgis.layer_missing`, une couche de `layers` absente du projet ; `style.unavailable`.
+Erreurs : `qgis.layer_missing`, une couche de `layers` absente du projet ; `style.invalid`,
+une liste `layers` vide ; `style.unavailable`, sans QGIS, sans les gestes, ou un inventaire
+sans liste de couches ou dont une couche n'a pas d'identifiant.
 
 ```json fiche
-{"id": "map.topographic_style", "status": "planifiee", "runs_in": "core", "dictated_by_core": false,
+{"id": "map.topographic_style", "status": "faite", "runs_in": "core", "dictated_by_core": false,
  "params": {"layers": {"type": "array", "required": false, "items": "string"}},
  "result": ["groups", "styled", "unchanged"]}
+```
+
+### `map.graduated_style`
+
+Colore une couche vecteur en dégradé selon un champ numérique, par exemple « colore les
+communes selon la population » (décision du propriétaire du 2026-11-08, entrée 20 ; geste :
+21). Offerte au modèle. Le noyau ne voit pas les valeurs : il compose un `StyleSpec`
+`graduated`, avec les couleurs `from` et `to` du dégradé nommé prises dans sa table
+(ColorBrewer, licence Apache-2.0 ; `red_blue` est divergent, du rouge au bleu), et QGIS
+calcule les seuils sur les vraies valeurs. Le noyau dicte ensuite un seul `layer.set_style`,
+juste après la ligne de la commande, comme pour `map.topographic_style` ; au rejeu, la ligne
+mère ne dicte rien et la ligne dictée est rejouée. Aucun inventaire n'est lu : l'extension
+vérifie que le champ existe et qu'il est numérique (`style.field_missing`).
+
+**Sans QGIS** (CLI `run`, MCP autonome), ou si l'extension n'annonce pas `layer.set_style`,
+la commande n'est pas offerte ; appelée quand même, elle est refusée par `style.unavailable`,
+sans rien écrire. En relais MCP, elle est offerte dès que le catalogue de la session la marque
+disponible ; seul le mode MCP autonome l'écarte. Un `layer_id` vide est refusé par
+`style.invalid`.
+
+| Paramètre | Type | Oblig. | Unité / valeurs | Sens |
+|---|---|---|---|---|
+| `layer_id` | chaîne | oui | identifiant de couche | Couche vecteur à colorer. |
+| `field` | chaîne | oui | champ numérique | Champ du dégradé. |
+| `method` | chaîne | non | `equal_interval`, `quantile`, `jenks` ; défaut `jenks` | Calcul des seuils, par QGIS. |
+| `class_count` | entier | non | 2 à 12 ; défaut 5 | Nombre de classes (`style.invalid` hors des bornes). |
+| `ramp` | chaîne | non | `yellow_red`, `blues`, `greens`, `reds`, `purples`, `greys`, `red_blue` ; défaut `yellow_red` | Dégradé nommé. |
+
+| Résultat | Type | Sens |
+|---|---|---|
+| `layer_id` | chaîne | La couche colorée (une couche existante : genre de sortie `none`). |
+| `field` | chaîne | Le champ du dégradé. |
+| `class_count` | entier | Le nombre de classes demandé. |
+
+Erreurs : `style.invalid`, `style.unavailable` ; celles de `layer.set_style`.
+
+```json fiche
+{"id": "map.graduated_style", "status": "faite", "runs_in": "core", "dictated_by_core": false,
+ "params": {"layer_id": {"type": "string", "required": true},
+            "field": {"type": "string", "required": true},
+            "method": {"type": "string", "required": false, "enum": ["equal_interval", "quantile", "jenks"]},
+            "class_count": {"type": "integer", "required": false},
+            "ramp": {"type": "string", "required": false, "enum": ["yellow_red", "blues", "greens", "reds", "purples", "greys", "red_blue"]}},
+ "result": ["class_count", "field", "layer_id"]}
 ```
 
 ### `layer.set_style`
 
 Applique un `StyleSpec` à une couche du projet (entrée 21). Dictée par le noyau après
-`map.topographic_style`, jamais offerte au modèle, au client MCP ni au formulaire. Le style
+`map.topographic_style` ou `map.graduated_style`, jamais offerte au modèle, au client MCP ni au formulaire. Le style
 est celui de la couche dans le projet : le fichier de données n'est pas touché.
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
@@ -1325,7 +1402,7 @@ Résultat : `layer_id`. Erreurs : `qgis.layer_missing`, `style.invalid`,
 (une rampe ou un ombrage sur un vecteur, un symbole sur un raster).
 
 ```json fiche
-{"id": "layer.set_style", "status": "planifiee", "runs_in": "qgis", "dictated_by_core": true,
+{"id": "layer.set_style", "status": "faite", "runs_in": "qgis", "dictated_by_core": true,
  "params": {"layer_id": {"type": "string", "required": true},
             "style": {"type": "StyleSpec", "required": true}},
  "result": ["layer_id"]}
@@ -1337,18 +1414,20 @@ Range les couches du projet dans des groupes et dans un ordre d'affichage (entr�
 décision du propriétaire du 2026-11-08 : « groupes + ordre »). Dictée par le noyau après les
 `layer.set_style` de `map.topographic_style`. Les groupes sont donnés de haut en bas, et les
 couches de chaque groupe de haut en bas ; le noyau choisit les noms des groupes (AD-5).
-Chaque couche du projet figure exactement une fois : le noyau les liste toutes.
+Dans une exécution normale, le noyau liste chaque couche qu'il connaît, une fois. Une
+couche du projet absente de la liste n'est **pas** une erreur : elle reste au-dessus des
+groupes, intacte. C'est le cas au rejeu, où les couches posées par une exécution précédente
+sont encore au projet.
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
 | `groups` | liste | oui | `{name, layers}` | Groupes à poser, de haut en bas ; `layers`, identifiants de couche de haut en bas. |
 
 Résultat : `group_count`, `layer_count`. Erreurs : `qgis.layer_missing` ;
-`arrange.invalid` (un groupe vide, une couche citée deux fois, une couche du projet
-absente de la liste).
+`arrange.invalid` (un groupe vide, une couche citée deux fois).
 
 ```json fiche
-{"id": "layer.arrange", "status": "planifiee", "runs_in": "qgis", "dictated_by_core": true,
+{"id": "layer.arrange", "status": "faite", "runs_in": "qgis", "dictated_by_core": true,
  "params": {"groups": {"type": "array", "required": true,
                        "items": {"type": "object",
                                  "fields": {"name": {"type": "string", "required": true},

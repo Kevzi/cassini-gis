@@ -38,7 +38,7 @@ use crate::error::ErrorReport;
 use crate::exec::{Executor, Router};
 use crate::geojson::VECTOR_EXTENSIONS;
 use crate::raster_path::RASTER_EXTENSIONS;
-use crate::registry::{Registry, RegistryError, PROTOCOL_VERSION};
+use crate::registry::{Registry, RegistryError, INVENTORY, ORDERS_FIELD, PROTOCOL_VERSION};
 
 /// Nom du journal, dans le dossier de travail.
 const JOURNAL_FILE: &str = "journal.jsonl";
@@ -154,6 +154,12 @@ pub struct Session<'a> {
     /// Vrai si l'exécutant QGIS annonce `layer.open_vector` : la session la dicte alors après
     /// chaque étape du noyau qui écrit un GeoJSON (AD-30, ticket 11.8).
     opens_vectors: bool,
+    /// Commandes que l'exécutant QGIS annonce. Une commande qui lit l'inventaire ou dicte des
+    /// ordres (`CommandSpec::required_gestures`) n'est exécutée que si tous ses gestes y sont
+    /// (entrée 11.20) ; sinon `style.unavailable`, sans rien écrire. Vide sans QGIS.
+    gestures: HashSet<String>,
+    /// Ordres que la dernière étape demande de dicter juste après sa ligne (amendement d'AD-30).
+    pending_orders: Vec<(String, Value)>,
 }
 
 impl<'a> Session<'a> {
@@ -193,6 +199,8 @@ impl<'a> Session<'a> {
             registry_version: registry_version(registry),
             opens_rasters: false,
             opens_vectors: false,
+            gestures: HashSet::new(),
+            pending_orders: Vec::new(),
         })
     }
 
@@ -218,6 +226,15 @@ impl<'a> Session<'a> {
     pub fn with_vector_opening(self, announced: bool) -> Self {
         Session {
             opens_vectors: announced,
+            ..self
+        }
+    }
+
+    /// Dit quelles commandes l'exécutant QGIS annonce : une mise en forme (`map.topographic_style`,
+    /// `map.graduated_style`) n'est exécutée que si tous ses gestes y sont (entrée 11.20).
+    pub fn with_gestures<I: IntoIterator<Item = String>>(self, announced: I) -> Self {
+        Session {
+            gestures: announced.into_iter().collect(),
             ..self
         }
     }
@@ -301,6 +318,12 @@ impl<'a> Session<'a> {
     ) -> Result<Value, ErrorReport> {
         let step = self.next_step;
         let value = self.call_step(id, params, origin, plan_step)?;
+        // Les ordres que l'étape demande (`layer.set_style`, puis `layer.arrange`) : chacun une
+        // étape du journal, dans l'ordre, juste après sa ligne ; le premier refus arrête la suite
+        // et devient l'erreur de l'appel (amendement d'AD-30, entrée 11.20).
+        for (command, order) in std::mem::take(&mut self.pending_orders) {
+            self.call_step(&command, order, origin, plan_step)?;
+        }
         if let Some(opener) = self.opener_of(id) {
             for path in self.outputs_written(id, step) {
                 self.call_step(opener, json!({ "path": path }), origin, plan_step)?;
@@ -345,6 +368,8 @@ impl<'a> Session<'a> {
         origin: Option<&str>,
         plan_step: Option<usize>,
     ) -> Result<Value, ErrorReport> {
+        // Seule l'étape qui vient de réussir peut laisser des ordres à dicter.
+        self.pending_orders.clear();
         if self.mode == Mode::ReadOnly {
             return Err(JournalError::ReadOnly.into());
         }
@@ -375,14 +400,38 @@ impl<'a> Session<'a> {
             if let Some((name, _)) = &spec.replay_param {
                 map.remove(name);
             }
+            // L'inventaire n'est jamais celui de l'appelant : le noyau le lit lui-même (11.20).
+            if let Some(name) = &spec.inventory_param {
+                map.remove(name);
+            }
+        }
+        // Une mise en forme sans les gestes qu'elle demande n'est pas exécutée, et rien n'est
+        // écrit (AD-25, entrée 11.20).
+        let gestures = spec.required_gestures();
+        if !gestures.iter().all(|g| self.gestures.contains(*g)) {
+            return Err(crate::style::unavailable().into());
         }
         let Resolved {
             logged,
-            exec,
+            mut exec,
             inputs,
         } = resolver.resolve_call(id, spec, step, params, &prior)?;
+        // L'inventaire est lu auprès de QGIS, hors du journal, juste avant l'exécution.
+        if let Some(name) = &spec.inventory_param {
+            let inventory = read_inventory(&self.router)?;
+            if let Value::Object(map) = &mut exec {
+                map.insert(name.clone(), inventory);
+            }
+        }
 
         let outcome = self.router.call(id, exec);
+        // Les ordres cachés du résultat sont ôtés avant tout : ils ne sont ni journalisés, ni
+        // rendus à l'appelant, mais dictés juste après cette ligne.
+        let outcome = outcome.and_then(|value| {
+            let (value, orders) = take_orders(spec, value)?;
+            self.pending_orders = orders;
+            Ok(value)
+        });
 
         let mut line = Map::new();
         line.insert("step".into(), json!(step));
@@ -404,7 +453,12 @@ impl<'a> Session<'a> {
         match &outcome {
             Ok(value) => {
                 // L'id de couche rendu par l'étape : le rejeu le lie à celui qu'il obtient.
-                if let Some(layer_id) = value.get("layer_id").and_then(Value::as_str) {
+                // Une commande du genre `none` (amendement d'AD-24) ne pose aucune couche.
+                if let Some(layer_id) = value
+                    .get("layer_id")
+                    .and_then(Value::as_str)
+                    .filter(|_| !spec.output_none)
+                {
                     line.insert("layer_id".into(), json!(layer_id));
                 }
                 line.insert(
@@ -467,6 +521,49 @@ impl<'a> Session<'a> {
         file.sync_data().map_err(io_error)?;
         Ok(())
     }
+}
+
+/// Lit l'inventaire du projet auprès de QGIS, hors du journal. QGIS absent : `style.unavailable`.
+fn read_inventory(router: &Router) -> Result<Value, RegistryError> {
+    router.call(INVENTORY, json!({})).map_err(|e| match e {
+        RegistryError::Unavailable(_) => crate::style::unavailable(),
+        other => other,
+    })
+}
+
+/// Sépare d'un résultat le champ caché des ordres à dicter, pour une commande qui en déclare
+/// (`CommandSpec::dictates`). Seuls les ordres qu'elle déclare sont gardés.
+fn take_orders(
+    spec: &crate::registry::CommandSpec,
+    mut value: Value,
+) -> Result<(Value, Vec<(String, Value)>), RegistryError> {
+    if spec.dictates.is_empty() {
+        return Ok((value, Vec::new()));
+    }
+    let raw = value
+        .as_object_mut()
+        .and_then(|m| m.remove(ORDERS_FIELD))
+        .unwrap_or(Value::Null);
+    let mut orders = Vec::new();
+    for o in raw.as_array().into_iter().flatten() {
+        let command = o.get("command").and_then(Value::as_str).unwrap_or_default();
+        // Un ordre que la commande ne déclare pas est un défaut du noyau : jamais ignoré.
+        if !spec.dictates.iter().any(|d| d == command) {
+            return Err(RegistryError::Failed {
+                code: "registry.invalid_order".to_string(),
+                message: format!(
+                    "La commande « {} » demande l'ordre « {command} », qu'elle ne déclare pas : \
+                     rien n'est dicté.",
+                    spec.id
+                ),
+            });
+        }
+        orders.push((
+            command.to_string(),
+            o.get("params").cloned().unwrap_or(json!({})),
+        ));
+    }
+    Ok((value, orders))
 }
 
 /// Lignes non vides d'un texte de journal : la seule définition d'une ligne écrite.
@@ -818,6 +915,10 @@ pub struct Replay<'a> {
     lines: Vec<Value>,
     ids: Vec<String>,
     warnings: Vec<String>,
+    /// Commandes que l'exécutant QGIS du rejeu annonce. Une ligne de mise en forme dont les
+    /// gestes n'y sont pas s'arrête sur `style.unavailable` (entrée 11.20). Vide par défaut :
+    /// sans QGIS (CLI `replay`), aucune mise en forme ne se rejoue.
+    gestures: HashSet<String>,
 }
 
 impl<'a> Replay<'a> {
@@ -881,7 +982,24 @@ impl<'a> Replay<'a> {
             lines,
             ids,
             warnings,
+            gestures: HashSet::new(),
         })
+    }
+
+    /// Dit quelles commandes l'exécutant QGIS du rejeu annonce (entrée 11.20).
+    pub fn with_gestures<I: IntoIterator<Item = String>>(mut self, announced: I) -> Self {
+        self.gestures = announced.into_iter().collect();
+        self
+    }
+
+    /// Gestes qu'une ligne de mise en forme demande : ceux de la commande, ou la commande dictée
+    /// elle-même (`layer.set_style`, `layer.arrange`). Vide pour toute autre ligne.
+    fn styling_gestures<'s>(&self, spec: &'s crate::registry::CommandSpec) -> Vec<&'s str> {
+        let mut gestures = spec.required_gestures();
+        if self.registry.specs().any(|s| s.dictates.contains(&spec.id)) {
+            gestures.push(spec.id.as_str());
+        }
+        gestures
     }
 
     /// Avertissements relevés avant la première étape (entrées non portables).
@@ -1003,6 +1121,14 @@ impl<'a> Replay<'a> {
                 .spec(id)
                 .ok_or_else(|| crate::registry::RegistryError::UnknownCommand(id.to_string()))
                 .map_err(|e| ErrorReport::from(e).at_step(step))?;
+            // Une mise en forme sans ses gestes s'arrête net, nommée, à cette étape.
+            if !self
+                .styling_gestures(spec)
+                .iter()
+                .all(|g| self.gestures.contains(*g))
+            {
+                return Err(ErrorReport::from(crate::style::unavailable()).at_step(step));
+            }
             let mut params = line.get("params").cloned().unwrap_or_else(|| json!({}));
             substitute(&mut params, &bound);
             // Après la substitution : les ids du journal ne doivent pas devenir ceux de ce rejeu.
@@ -1023,11 +1149,24 @@ impl<'a> Replay<'a> {
             let resolved = resolver
                 .resolve_call(id, spec, step, params, &self.ids[..i])
                 .map_err(|e| e.at_step(step))?;
-            let outcome = router.call(id, resolved.exec);
+            let mut exec = resolved.exec;
+            // La ligne d'une mise en forme relit l'inventaire, sans les couches d'une exécution
+            // précédente, mais ne dicte rien : ses ordres sont les lignes qui la suivent (11.20).
+            if let Some(name) = &spec.inventory_param {
+                let inventory =
+                    read_inventory(router).map_err(|e| ErrorReport::from(e).at_step(step))?;
+                if let Value::Object(map) = &mut exec {
+                    map.insert(name.clone(), without_layers(inventory, &leave_out));
+                }
+            }
+            let outcome = router
+                .call(id, exec)
+                .and_then(|value| take_orders(spec, value).map(|(value, _)| value));
             // La couche est dans le projet même si l'étape diverge : on s'en souvient.
             if let Some(new) = outcome
                 .as_ref()
                 .ok()
+                .filter(|_| !spec.output_none)
                 .and_then(|v| v.get("layer_id"))
                 .and_then(Value::as_str)
             {
@@ -1056,8 +1195,11 @@ impl<'a> Replay<'a> {
                     "la commande {id} ne redonne pas le même résultat ou la même erreur"
                 )));
             }
-            if let (Ok(value), Some(old)) = (&outcome, line.get("layer_id").and_then(Value::as_str))
-            {
+            if let (Ok(value), Some(old), false) = (
+                &outcome,
+                line.get("layer_id").and_then(Value::as_str),
+                spec.output_none,
+            ) {
                 if let Some(new) = value.get("layer_id").and_then(Value::as_str) {
                     bound.insert(old.to_string(), new.to_string());
                 }
@@ -1090,6 +1232,25 @@ impl<'a> Replay<'a> {
             identical: true,
         })
     }
+}
+
+/// L'inventaire sans les couches dont l'id est dans `leave_out` (un tableau d'ids) : au rejeu, la
+/// mise en forme ne voit que ce que l'exécution d'origine voyait (ticket 5.36, entrée 11.20).
+fn without_layers(mut inventory: Value, leave_out: &Value) -> Value {
+    let gone: HashSet<&str> = leave_out
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    if let Some(layers) = inventory.get_mut("layers").and_then(Value::as_array_mut) {
+        layers.retain(|l| {
+            l.get("layer_id")
+                .and_then(Value::as_str)
+                .is_none_or(|id| !gone.contains(id))
+        });
+    }
+    inventory
 }
 
 /// Nombre de dossiers de repli `replay-<n>/` essayés après `replay/` : un plafond,

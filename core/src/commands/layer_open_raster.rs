@@ -76,12 +76,13 @@ mod tests {
         assert_eq!(spec.path_params, vec!["path".to_string()]);
         assert!(spec.dictated_by_core);
         // Le catalogue le dit ; aucune autre commande ne porte la marque, hormis sa sœur
-        // vecteur `layer.open_vector` (AD-30).
+        // vecteur `layer.open_vector` (AD-30) et les gestes de la mise en forme (entrée 11.20).
         let entry = serde_json::to_value(spec).unwrap();
         assert_eq!(entry["dictated_by_core"], json!(true));
+        let dictated = [OPEN_RASTER, OPEN_VECTOR, "layer.set_style", "layer.arrange"];
         for other in registry
             .specs()
-            .filter(|s| s.id != OPEN_RASTER && s.id != OPEN_VECTOR)
+            .filter(|s| !dictated.contains(&s.id.as_str()))
         {
             assert!(!other.dictated_by_core, "{}", other.id);
             let entry = serde_json::to_value(other).unwrap();

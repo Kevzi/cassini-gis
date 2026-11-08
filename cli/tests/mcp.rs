@@ -46,9 +46,10 @@ fn tools_list_gives_every_core_command_with_its_schemas() {
         .as_array()
         .expect("une liste d'outils");
     let registry = Registry::standard();
+    // Une mise en forme demande les gestes de QGIS (entrée 11.20) : hors du mode autonome.
     let core: Vec<_> = registry
         .specs()
-        .filter(|s| s.runs_in == Some(RunsIn::Core))
+        .filter(|s| s.runs_in == Some(RunsIn::Core) && s.required_gestures().is_empty())
         .collect();
     assert_eq!(tools.len(), core.len());
     for (tool, spec) in tools.iter().zip(core) {
@@ -348,9 +349,10 @@ fn tool_names(reply: &Value) -> Vec<String> {
 }
 
 fn core_names() -> Vec<String> {
+    // Une mise en forme demande les gestes de QGIS (entrée 11.20) : hors du mode autonome.
     Registry::standard()
         .specs()
-        .filter(|s| s.runs_in == Some(RunsIn::Core))
+        .filter(|s| s.runs_in == Some(RunsIn::Core) && s.required_gestures().is_empty())
         .map(|s| tool_name(&s.id))
         .collect()
 }
@@ -372,9 +374,11 @@ fn the_relay_serves_the_catalogue_of_the_session_and_runs_a_qgis_command() {
     // Canal allumé : le catalogue de la session, commandes QGIS annoncées comprises.
     session.switch(true);
     let reply = client.request("tools/list", json!({}));
+    // Une mise en forme n'est offerte que si la session annonce tous ses gestes (11.20).
     let mut expected: Vec<String> = Registry::standard()
         .specs()
         .filter(|s| s.runs_in == Some(RunsIn::Core))
+        .filter(|s| s.required_gestures().iter().all(|g| ANNOUNCED.contains(g)))
         .map(|s| s.id.clone())
         .collect();
     expected.extend(ANNOUNCED.iter().map(|s| s.to_string()));

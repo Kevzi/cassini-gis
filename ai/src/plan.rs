@@ -1233,7 +1233,15 @@ mod tests {
             .filter(|s| s.dictated_by_core)
             .map(|s| s.id.clone())
             .collect();
-        assert_eq!(dictated, ["layer.open_raster", "layer.open_vector"]);
+        assert_eq!(
+            dictated,
+            [
+                "layer.arrange",
+                "layer.open_raster",
+                "layer.open_vector",
+                "layer.set_style"
+            ]
+        );
         let mut bare = registry();
         for id in &dictated {
             assert!(bare.remove(id));
@@ -1244,7 +1252,8 @@ mod tests {
             system_text(&full, &inventory()),
             system_text(&bare, &inventory())
         );
-        for id in ["layer.open_raster", "layer.open_vector"] {
+        for id in &dictated {
+            let id = id.as_str();
             assert!(!plan_grammar(&full).contains(id), "{id}");
             assert!(!fixed_system_text(&full).contains(id), "{id}");
             assert!(!system_text(&full, &inventory()).contains(id), "{id}");

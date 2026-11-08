@@ -857,3 +857,23 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-inventaire-garde-entre-les-phrases.md`
   summary: Calculer l'inventaire du projet en tâche de fond (QgsTask, lecture par QgsVectorLayerFeatureSource) dès l'ouverture du projet ou l'ajout d'une couche, pour que la première phrase ne paie plus la première lecture des grosses couches.
   evidence: Annecy, 2026-11-08 : la 1re phrase prend 32,5 s, dont environ 24 s de lecture des valeurs de champs (250 000 routes, 600 000 bâtiments, 32 000 parcelles) ; les suivantes 4,3 s et 2,9 s, l'inventaire étant gardé. L'exigence est de moins de 30 s.
+
+- source_plan: `epic-geometrie-et-terrain-etendu/story-table-de-semiologie-et-reconnaissance-dans-le-noyau-plan.md`
+  summary: Les teintes d'altitude ont des paliers fixes en mètres : un MNT de plaine (Villeneuve, 30 à 100 m) paraît presque uni. Il faudrait étirer la rampe aux altitudes minimale et maximale réelles du MNT, ce qui demande que `project.inventory` rende ces deux valeurs pour un raster (changement du catalogue).
+  evidence: Relecture de 11.20 (blind-hunter) : avec des paliers à 0, 100 et 200 m, toute la plage de Villeneuve tombe dans un seul intervalle.
+
+- source_plan: `epic-geometrie-et-terrain-etendu/story-table-de-semiologie-et-reconnaissance-dans-le-noyau-plan.md`
+  summary: Le dégradé `red_blue` ne passe pas par la couleur claire du milieu de RdBu : `ramp` n'a que `from` et `to`.
+  evidence: Relecture de 11.20 : l'interpolation linéaire de `#b2182b` à `#2166ac` donne des violets au lieu du blanc cassé `#f7f7f7`. Il faudrait un champ facultatif `mid`.
+
+- source_plan: `epic-geometrie-et-terrain-etendu/story-table-de-semiologie-et-reconnaissance-dans-le-noyau-plan.md`
+  summary: Les zones du PLU sont dessinées opaques, alors que le CNIG préconise 40 % de transparence : `categories` n'a pas d'`opacity`.
+  evidence: Relecture de 11.20 (rapport de construction).
+
+- source_plan: `epic-geometrie-et-terrain-etendu/story-table-de-semiologie-et-reconnaissance-dans-le-noyau-plan.md`
+  summary: Le générateur refuse encore « change le style d'une couche » (`training/src/families.rs`, raison « Aucune commande du catalogue ne change le style d'une couche »), devenu faux avec `map.topographic_style` et `map.graduated_style`.
+  evidence: Rapport de construction de 11.20. À corriger dans l'entrée du prochain ré-entraînement groupé, avec les exemples des deux commandes et l'essai `style_reel`.
+
+- source_plan: `epic-geometrie-et-terrain-etendu/story-table-de-semiologie-et-reconnaissance-dans-le-noyau-plan.md`
+  summary: `map.graduated_style` ne sait pas inverser un dégradé (« du bleu au rouge »).
+  evidence: Relecture de 11.20 (blind-hunter).

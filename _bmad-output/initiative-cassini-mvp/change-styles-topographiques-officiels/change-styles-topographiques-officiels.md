@@ -47,6 +47,13 @@ figé (catalogue des commandes, §1).
    surfaces, lignes, points. Sur Annecy, le MNT posé par-dessus cachait tout. Cet ajout
    fait une troisième commande, `layer.arrange`, dictée comme `layer.set_style` (§4.1).
 
+6. **Dégradé gradué (ajout du 2026-11-08) :** `StyleSpec` gagne une cinquième forme, `graduated`. C'est un dégradé de couleurs selon un champ numérique d'un vecteur, en `class_count` classes, par intervalles égaux, quantiles ou seuils naturels (`jenks`). QGIS calcule les seuils sur les valeurs réelles ; le noyau ne choisit que le champ, la méthode, le nombre de classes et les deux couleurs extrêmes.
+
+7. **Commande de dégradé (ajout du 2026-11-08, demande du propriétaire) :** `map.graduated_style`, offerte au modèle, colore une couche selon un champ numérique (« colore les communes selon la population »).
+   - Paramètres : `layer_id` et `field` ; `method` (seuils naturels par défaut), `class_count` (5 par défaut, de 2 à 12) et `ramp`, un dégradé nommé (`yellow_red` par défaut, `blues`, `greens`, `reds`, `purples`, `greys`, `red_blue`).
+   - Le noyau compose le `graduated` et dicte un seul `layer.set_style`, comme `map.topographic_style`.
+   - Les dégradés sont sourcés, par exemple ColorBrewer, sous licence Apache-2.0. Le catalogue fait foi.
+
 **Test de CLAUDE.md §2.9 :** une carte aux couleurs IGN sert un bureau d'études, une
 collectivité ou un étudiant tels quels. C'est une fonction civile. La symbologie militaire
 (APP-6) reste hors périmètre (spec, Non-goals), et rien ici ne s'en approche.
@@ -173,6 +180,10 @@ Les identifiants, paramètres et champs ci-dessus sont figés à l'approbation d
     propriétaire peut compléter, sur le modèle d'`ecart_reel`.
   - Barre : au moins 9 sur 10 rendent `map.topographic_style`, avec les bonnes couches quand la
     phrase en nomme.
+  - Le même essai porte quelques phrases de dégradé (« colore les communes selon la
+    population », « mets les parcelles en dégradé de bleus par surface »), qui doivent rendre
+    `map.graduated_style` avec la bonne couche, le bon champ et, quand la phrase le dit, le
+    bon dégradé.
   - Une phrase hors sujet, comme « mets les routes en rose fluo », reçoit une question ou un
     refus, jamais la mise aux normes.
 - 11.14, la démonstration, prend 11.21 dans `after`.

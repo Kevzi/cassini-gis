@@ -2548,3 +2548,434 @@ fn a_slope_reclassify_least_cost_path_plan_replays_identically() {
     drop(s);
     let _ = fs::remove_dir_all(dir);
 }
+
+// --- Mise en forme topographique (entrée 11.20) : dictée, journal propre, rejeu. ---
+
+/// QGIS de test de la mise en forme : rend l'inventaire synthétique de Villeneuve, plus les
+/// couches ajoutées par cette « session » (`generation`), et note chaque ordre reçu.
+struct StyleQgis {
+    generation: u32,
+    created: std::cell::RefCell<Vec<String>>,
+    seen: std::rc::Rc<std::cell::RefCell<Vec<(String, Value)>>>,
+    /// Refuse le n-ième `layer.set_style` (à partir de 1).
+    refuse_style: Option<usize>,
+}
+
+impl StyleQgis {
+    fn new(generation: u32) -> Self {
+        StyleQgis {
+            generation,
+            created: Default::default(),
+            seen: Default::default(),
+            refuse_style: None,
+        }
+    }
+
+    fn count(&self, id: &str) -> usize {
+        self.seen.borrow().iter().filter(|(c, _)| c == id).count()
+    }
+}
+
+impl Executor for StyleQgis {
+    fn execute(&self, id: &str, p: Value) -> Result<Value, RegistryError> {
+        self.seen.borrow_mut().push((id.to_string(), p.clone()));
+        match id {
+            "project.inventory" => {
+                let mut inv = crate::commands::map_topographic_style::fixtures::villeneuve();
+                // Les couches posées par le journal, de cette session et des précédentes.
+                let layers = inv["layers"].as_array_mut().unwrap();
+                for g in 1..=self.generation {
+                    let id = format!("ajout_g{g}");
+                    if g < self.generation || self.created.borrow().contains(&id) {
+                        layers.push(json!({"layer_id": id, "name": "points", "kind": "vector",
+                            "geometry": "Point", "crs": "EPSG:2154", "fields": []}));
+                    }
+                }
+                Ok(inv)
+            }
+            "layer.add" => {
+                let id = format!("ajout_g{}", self.generation);
+                self.created.borrow_mut().push(id.clone());
+                Ok(json!({"layer_id": id, "name": "points"}))
+            }
+            "layer.set_style" => {
+                if self.refuse_style == Some(self.count("layer.set_style")) {
+                    return Err(RegistryError::Delegated {
+                        code: "style.field_missing".into(),
+                        message: "champ absent".into(),
+                    });
+                }
+                Ok(json!({"layer_id": p["layer_id"]}))
+            }
+            "layer.arrange" => {
+                let groups = p["groups"].as_array().unwrap();
+                let layers: usize = groups
+                    .iter()
+                    .map(|g| g["layers"].as_array().unwrap().len())
+                    .sum();
+                Ok(json!({"group_count": groups.len(), "layer_count": layers}))
+            }
+            other => panic!("commande inattendue : {other}"),
+        }
+    }
+}
+
+/// Les trois gestes de la mise en forme, tels que l'extension les annonce.
+fn style_gestures() -> Vec<String> {
+    ["project.inventory", "layer.set_style", "layer.arrange"]
+        .map(String::from)
+        .to_vec()
+}
+
+#[test]
+fn the_topographic_style_dictates_its_orders_and_keeps_the_inventory_out_of_the_journal() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis = StyleQgis::new(1);
+    let seen = qgis.seen.clone();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(qgis)
+        .with_gestures(style_gestures());
+    // L'inventaire de l'appelant est ignoré : seul celui que le noyau lit compte.
+    let out = s
+        .call(
+            "map.topographic_style",
+            json!({"inventory": {"layers": []}}),
+        )
+        .unwrap();
+    let mut keys: Vec<&String> = out.as_object().unwrap().keys().collect();
+    keys.sort();
+    assert_eq!(keys, ["groups", "styled", "unchanged"]);
+    assert_eq!(out["styled"].as_array().unwrap().len(), 5);
+
+    let l = lines(&s);
+    let ids: Vec<&str> = l.iter().map(|x| x["id"].as_str().unwrap()).collect();
+    assert_eq!(
+        ids,
+        [
+            "map.topographic_style",
+            "layer.set_style",
+            "layer.set_style",
+            "layer.set_style",
+            "layer.set_style",
+            "layer.set_style",
+            "layer.arrange"
+        ]
+    );
+    assert_eq!(l[0]["params"], json!({}));
+    // Aucune ligne ne prend une couche existante pour une couche posée.
+    assert!(l.iter().all(|x| x.get("layer_id").is_none()));
+    let raw = fs::read_to_string(s.journal_path()).unwrap();
+    for word in [
+        "inventory",
+        "RGEALTI",
+        "project_crs",
+        "orders",
+        "contenance",
+    ] {
+        assert!(!raw.contains(word), "« {word} » dans le journal : {raw}");
+    }
+    assert_eq!(l[6]["result"], json!({"group_count": 4, "layer_count": 5}));
+    // QGIS a reçu l'inventaire une fois, puis les ordres dans l'ordre du journal.
+    let order: Vec<String> = seen.borrow().iter().map(|(c, _)| c.clone()).collect();
+    assert_eq!(order[0], "project.inventory");
+    assert_eq!(&order[1..], &ids[1..]);
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_refused_style_order_stops_the_sequence() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let mut qgis = StyleQgis::new(1);
+    qgis.refuse_style = Some(2);
+    let seen = qgis.seen.clone();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(qgis)
+        .with_gestures(style_gestures());
+    let err = s.call("map.topographic_style", json!({})).unwrap_err();
+    assert_eq!(err.code, "style.field_missing");
+    let l = lines(&s);
+    assert_eq!(l.len(), 3, "{l:?}");
+    assert!(l[0].get("result").is_some());
+    assert!(l[1].get("result").is_some());
+    assert_eq!(l[2]["error"], "style.field_missing");
+    assert!(!seen.borrow().iter().any(|(c, _)| c == "layer.arrange"));
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_styling_without_its_gestures_or_without_qgis_writes_nothing() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    // Gestes non annoncés : rien n'est lu, rien n'est écrit.
+    let qgis = StyleQgis::new(1);
+    let seen = qgis.seen.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    for id in ["map.topographic_style", "map.graduated_style"] {
+        let params = if id == "map.graduated_style" {
+            json!({"layer_id": "c", "field": "f"})
+        } else {
+            json!({})
+        };
+        let err = s.call(id, params).unwrap_err();
+        assert_eq!(err.code, "style.unavailable", "{id}");
+    }
+    assert!(seen.borrow().is_empty());
+    assert!(lines(&s).is_empty());
+    drop(s);
+    // Sans QGIS (CLI `run`), même annoncés : le bouchon ne lit rien.
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_gestures(style_gestures());
+    let err = s.call("map.topographic_style", json!({})).unwrap_err();
+    assert_eq!(err.code, "style.unavailable");
+    assert!(lines(&s).is_empty());
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_styling_journal_replays_identically_and_applies_each_style_once() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(StyleQgis::new(1))
+        .with_gestures(style_gestures());
+    // Une couche posée par le journal, non reconnue : elle va aux « Autres couches ».
+    s.call("layer.add", json!({"path": "pts.csv", "crs": "EPSG:2154"}))
+        .unwrap();
+    let out = s.call("map.topographic_style", json!({})).unwrap();
+    assert!(out["unchanged"].to_string().contains("ajout_g1"));
+    s.call(
+        "map.graduated_style",
+        json!({"layer_id": "parcelles_2", "field": "contenance"}),
+    )
+    .unwrap();
+    let l = lines(&s);
+    assert_eq!(l.len(), 10);
+    assert_eq!(l[0]["layer_id"], "ajout_g1");
+    assert_eq!(l[8]["id"], "map.graduated_style");
+    assert_eq!(l[9]["id"], "layer.set_style");
+    assert_eq!(l[9]["params"]["style"]["kind"], "graduated");
+    drop(s);
+
+    // Seconde session : l'ancienne couche est encore au projet, la nouvelle s'appelle autrement.
+    let qgis = StyleQgis::new(2);
+    let seen = qgis.seen.clone();
+    let mut replayed = HashSet::new();
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .with_gestures(style_gestures())
+        .run(&Router::new(&registry).with_qgis(qgis), &mut replayed)
+        .unwrap();
+    // Seule la couche posée par ce rejeu est retenue : un style ne pose aucune couche.
+    assert_eq!(replayed, HashSet::from(["ajout_g2".to_string()]));
+    assert_eq!(
+        report,
+        ReplayReport {
+            steps: 10,
+            identical: true
+        }
+    );
+    let count = |id: &str| seen.borrow().iter().filter(|(c, _)| c == id).count();
+    assert_eq!(count("project.inventory"), 1);
+    assert_eq!(count("layer.set_style"), 6);
+    assert_eq!(count("layer.arrange"), 1);
+    // Le rangement rejoué porte la couche de ce rejeu, jamais celle de l'origine.
+    let arranged = seen
+        .borrow()
+        .iter()
+        .find(|(c, _)| c == "layer.arrange")
+        .unwrap()
+        .1
+        .to_string();
+    assert!(
+        arranged.contains("ajout_g2") && !arranged.contains("ajout_g1"),
+        "{arranged}"
+    );
+    // Un second rejeu, avec la mémoire du premier : toujours identique.
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .with_gestures(style_gestures())
+        .run(
+            &Router::new(&registry).with_qgis(StyleQgis::new(3)),
+            &mut replayed,
+        )
+        .unwrap();
+    assert!(report.identical);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_styling_line_replayed_without_its_gestures_stops_on_style_unavailable() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(StyleQgis::new(1))
+        .with_gestures(style_gestures());
+    s.call("system.about", json!({})).unwrap();
+    s.call(
+        "map.graduated_style",
+        json!({"layer_id": "parcelles_2", "field": "contenance"}),
+    )
+    .unwrap();
+    drop(s);
+    let replay_with = |gestures: Vec<String>| {
+        Replay::load(&registry, &project)
+            .unwrap()
+            .with_gestures(gestures)
+            .run(
+                &Router::new(&registry).with_qgis(StyleQgis::new(2)),
+                &mut HashSet::new(),
+            )
+            .unwrap_err()
+    };
+    // Sans gestes annoncés (CLI `replay`, sans QGIS) : arrêt à la ligne mère, nommé.
+    let err = replay_with(Vec::new());
+    assert_eq!(
+        (err.code.as_str(), err.step),
+        ("style.unavailable", Some(2))
+    );
+    // La ligne dictée sans son geste : arrêt à la ligne 3, et non une divergence obscure.
+    let err = Replay::load(&registry, &project)
+        .unwrap()
+        .run(
+            &Router::new(&registry).with_qgis(StyleQgis::new(2)),
+            &mut HashSet::new(),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "style.unavailable");
+    let err = replay_with(vec!["layer.arrange".to_string()]);
+    assert_eq!(
+        (err.code.as_str(), err.step),
+        ("style.unavailable", Some(2))
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_dictated_style_line_replayed_without_its_gesture_stops_on_style_unavailable() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(StyleQgis::new(1))
+        .with_gestures(style_gestures());
+    s.call(
+        "map.graduated_style",
+        json!({"layer_id": "parcelles_2", "field": "contenance"}),
+    )
+    .unwrap();
+    drop(s);
+    // Le journal amputé de sa ligne mère : la ligne dictée reste seule.
+    let journal = project
+        .parent()
+        .unwrap()
+        .join("p.cassini")
+        .join(JOURNAL_FILE);
+    let text = fs::read_to_string(&journal).unwrap();
+    let second = text.lines().nth(1).unwrap().to_string();
+    fs::write(&journal, second + "\n").unwrap();
+    let err = Replay::load(&registry, &project)
+        .unwrap()
+        .with_gestures(["map.graduated_style".to_string()])
+        .run(
+            &Router::new(&registry).with_qgis(StyleQgis::new(2)),
+            &mut HashSet::new(),
+        )
+        .unwrap_err();
+    assert_eq!(
+        (err.code.as_str(), err.step),
+        ("style.unavailable", Some(1))
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn partial_gestures_refuse_the_topographic_style_but_not_the_graduated_one() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis = StyleQgis::new(1);
+    let seen = qgis.seen.clone();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(qgis)
+        .with_gestures([
+            "project.inventory".to_string(),
+            "layer.set_style".to_string(),
+        ]);
+    let err = s.call("map.topographic_style", json!({})).unwrap_err();
+    assert_eq!(err.code, "style.unavailable");
+    assert!(seen.borrow().is_empty(), "rien n'est lu");
+    assert!(lines(&s).is_empty(), "rien n'est écrit");
+    let out = s
+        .call(
+            "map.graduated_style",
+            json!({"layer_id": "parcelles_2", "field": "contenance"}),
+        )
+        .unwrap();
+    assert!(out.get("orders").is_none());
+    let ids: Vec<String> = lines(&s)
+        .iter()
+        .map(|l| l["id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(ids, ["map.graduated_style", "layer.set_style"]);
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+/// Commande de test qui demande un ordre qu'elle ne déclare pas.
+struct BadOrders;
+impl crate::registry::Command for BadOrders {
+    type Params = serde_json::Map<String, Value>;
+    type Output = Value;
+    fn spec() -> crate::registry::CommandSpec {
+        crate::registry::CommandSpec::new::<serde_json::Map<String, Value>, Value>(
+            "test.bad_orders",
+            "Test.",
+            "Test.",
+        )
+        .runs_in(crate::registry::RunsIn::Core)
+        .cancellable(false)
+        .dictates(&["layer.set_style"])
+        .tests(&["t"])
+    }
+    fn run(
+        &self,
+        _p: serde_json::Map<String, Value>,
+    ) -> Result<Value, crate::registry::CommandFailure> {
+        Ok(json!({"ok": true, "orders": [
+            {"command": "layer.set_style", "params": {"layer_id": "a", "style": {"kind": "hillshade"}}},
+            {"command": "layer.arrange", "params": {"groups": []}}
+        ]}))
+    }
+}
+
+#[test]
+fn an_undeclared_order_is_an_error_and_nothing_is_dictated() {
+    let (dir, project, _) = temp_project();
+    let mut registry = Registry::standard();
+    registry.register(BadOrders);
+    let qgis = StyleQgis::new(1);
+    let seen = qgis.seen.clone();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(qgis)
+        .with_gestures(style_gestures());
+    let err = s.call("test.bad_orders", json!({})).unwrap_err();
+    assert_eq!(err.code, "registry.invalid_order");
+    assert!(err.message.contains("layer.arrange"));
+    assert!(seen.borrow().is_empty());
+    let l = lines(&s);
+    assert_eq!(l.len(), 1);
+    assert_eq!(l[0]["error"], "registry.invalid_order");
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}

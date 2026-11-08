@@ -23,6 +23,7 @@ pub mod point;
 pub mod raster_path;
 pub mod registry;
 pub mod serve;
+pub mod style;
 
 /// Version du moteur, alignée sur celle du workspace.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
