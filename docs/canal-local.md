@@ -212,7 +212,25 @@ refusé, jamais réparé. Réponse :
 ```
 
 Une étape peut citer la sortie d'une étape précédente : `step:<k>` (sortie entière) ou
-`step:<k>.<champ>` (un champ de premier niveau). L'extension affiche le plan tel quel.
+`step:<k>.<champ>` (un champ de premier niveau). Dans un tableau de `Point` (`observers`,
+`sources`), un élément peut aussi être `step:<k>.point`, et seulement là. L'extension affiche le
+plan tel quel.
+
+**Étapes ajoutées par le noyau** (amendement d'AD-19, 2026-11-08, ticket 11.22). Le plan rendu
+peut porter des étapes que le modèle n'a pas écrites : pour chaque point littéral d'une commande du
+noyau dont le système diffère de celui de son raster (lu dans l'en-tête du GeoTIFF), le noyau
+ajoute une étape `data.transform_point` juste avant la commande, qui reçoit `step:<k>.point` à
+la place du point ; les références suivantes sont renumérotées. Seulement si l'extension
+annonce `data.transform_point` à `session.hello`. Ces étapes s'affichent, s'exécutent, se
+journalisent et se rejouent comme les autres. `command.run` n'est jamais complété : il reste
+refusé par `terrain.crs_mismatch`.
+
+```json
+{"jsonrpc":"2.0","id":5,"result":{"plan_id":"plan-3","plan":{"kind":"calls","calls":[
+  {"command":"data.transform_point","params":{"point":{"x":6.17,"y":45.9075,"epsg":4326},"target_epsg":2154}},
+  {"command":"data.transform_point","params":{"point":{"x":6.1294,"y":45.8992,"epsg":4326},"target_epsg":2154}},
+  {"command":"terrain.line_of_sight","params":{"dem":"mnt.tif","observer":"step:1.point","target":"step:2.point"}}]}}}
+```
 
 Quand la commande existe mais qu'un mot de la demande ne désigne rien de l'inventaire
 (« les pharmacies » sans couche de pharmacies, « les parcelles chères » sans champ de

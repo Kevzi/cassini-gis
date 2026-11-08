@@ -891,3 +891,6 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `epic-geometrie-et-terrain-etendu/story-gestes-layer-set-style-et-layer-arrange-dans-l-extension-et-plan.md`
   summary: La valeur de catégorie « » (vide) est refusée par l'extension et acceptée par le noyau ; le noyau devrait la refuser aussi.
   evidence: `fixtures/style-cases.json` porte ce cas avec `"core": null`.
+- source_plan: `epic-geometrie-et-terrain-etendu/story-completion-du-plan-par-les-conversions-de-points-plan.md`
+  summary: Les mesures du modèle et la composition par la CLI notent le plan brut du modèle, sans la complétion par les conversions de points ; les attendus des essais réels sur le plan complété (11.23) doivent l'appliquer.
+  evidence: Relecture de 11.22 : seul `plan.propose` complète un plan ; le changement de cap du 2026-11-08 veut que `terrain_reel`, `epic11_reel` et S25 mesurent le plan complété.

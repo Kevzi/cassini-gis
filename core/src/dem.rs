@@ -129,57 +129,95 @@ pub struct Dem {
     pub values: Vec<f32>,
 }
 
+/// En-tête d'un MNT, lu sans décoder la grille : le décodeur, prêt à lire l'image, la taille,
+/// le géoréférencement, les clés GeoTIFF et le code EPSG contrôlé.
+struct Header {
+    decoder: Decoder<BufReader<File>>,
+    width: u32,
+    height: u32,
+    geo: (f64, f64, f64, f64),
+    keys: GeoKeys,
+    epsg: u32,
+}
+
+/// Code EPSG d'un MNT, lu dans son en-tête seul (ticket 11.22) : mêmes contrôles que
+/// [`Dem::open`] jusqu'au système, sans décoder la grille, pour qu'un gros MNT ne ralentisse
+/// pas la proposition d'un plan.
+pub fn epsg_of(path: &Path) -> Result<u32, DemError> {
+    Ok(read_header(path)?.epsg)
+}
+
+/// Ouvre un GeoTIFF et contrôle son en-tête : bandes, format, taille, géoréférencement, système.
+fn read_header(path: &Path) -> Result<Header, DemError> {
+    let file = File::open(path).map_err(|e| {
+        DemError::unreadable(format!(
+            "Impossible d'ouvrir le MNT « {} » : {e}.",
+            path.display()
+        ))
+    })?;
+    let mut limits = Limits::default();
+    limits.decoding_buffer_size = MAX_DECODED_BYTES;
+    limits.intermediate_buffer_size = MAX_DECODED_BYTES;
+    let mut decoder = Decoder::new(BufReader::new(file))
+        .map_err(|e| {
+            DemError::unreadable(format!(
+                "« {} » n'est pas un TIFF lisible : {e}.",
+                path.display()
+            ))
+        })?
+        .with_limits(limits);
+
+    let (width, height) = decoder.dimensions().map_err(map_read_error)?;
+    let bits = decoder
+        .find_tag_unsigned_vec::<u16>(Tag::BitsPerSample)
+        .map_err(map_read_error)?
+        .and_then(|b| b.into_iter().max())
+        .unwrap_or(1);
+    check_size(width, height, bits)?;
+    let samples = decoder
+        .find_tag_unsigned::<u16>(Tag::SamplesPerPixel)
+        .map_err(map_read_error)?
+        .unwrap_or(1);
+    if samples != 1 {
+        return Err(DemError::unsupported(format!(
+            "Le MNT a {samples} bandes ; seuls les MNT à une bande sont lus."
+        )));
+    }
+    let sample_format = decoder
+        .find_tag_unsigned_vec::<u16>(Tag::SampleFormat)
+        .map_err(map_read_error)?
+        .unwrap_or_else(|| vec![1]);
+    if sample_format.iter().any(|f| !matches!(f, 1..=3)) {
+        return Err(DemError::unsupported(format!(
+            "Format d'échantillon {sample_format:?} non lu : entiers ou flottants seulement."
+        )));
+    }
+
+    let geo = read_georeferencing(&mut decoder)?;
+    let keys = read_geokeys(&mut decoder)?;
+    let epsg = check_crs(&keys)?;
+    Ok(Header {
+        decoder,
+        width,
+        height,
+        geo,
+        keys,
+        epsg,
+    })
+}
+
 impl Dem {
     /// Lit un GeoTIFF à une bande en système projeté métrique.
     pub fn open(path: &Path) -> Result<Dem, DemError> {
-        let file = File::open(path).map_err(|e| {
-            DemError::unreadable(format!(
-                "Impossible d'ouvrir le MNT « {} » : {e}.",
-                path.display()
-            ))
-        })?;
-        let mut limits = Limits::default();
-        limits.decoding_buffer_size = MAX_DECODED_BYTES;
-        limits.intermediate_buffer_size = MAX_DECODED_BYTES;
-        let mut decoder = Decoder::new(BufReader::new(file))
-            .map_err(|e| {
-                DemError::unreadable(format!(
-                    "« {} » n'est pas un TIFF lisible : {e}.",
-                    path.display()
-                ))
-            })?
-            .with_limits(limits);
-
-        let (width, height) = decoder.dimensions().map_err(map_read_error)?;
-        let bits = decoder
-            .find_tag_unsigned_vec::<u16>(Tag::BitsPerSample)
-            .map_err(map_read_error)?
-            .and_then(|b| b.into_iter().max())
-            .unwrap_or(1);
-        check_size(width, height, bits)?;
-        let samples = decoder
-            .find_tag_unsigned::<u16>(Tag::SamplesPerPixel)
-            .map_err(map_read_error)?
-            .unwrap_or(1);
-        if samples != 1 {
-            return Err(DemError::unsupported(format!(
-                "Le MNT a {samples} bandes ; seuls les MNT à une bande sont lus."
-            )));
-        }
-        let sample_format = decoder
-            .find_tag_unsigned_vec::<u16>(Tag::SampleFormat)
-            .map_err(map_read_error)?
-            .unwrap_or_else(|| vec![1]);
-        if sample_format.iter().any(|f| !matches!(f, 1..=3)) {
-            return Err(DemError::unsupported(format!(
-                "Format d'échantillon {sample_format:?} non lu : entiers ou flottants seulement."
-            )));
-        }
-
-        let geo = read_georeferencing(&mut decoder)?;
+        let Header {
+            mut decoder,
+            width,
+            height,
+            geo,
+            keys,
+            epsg,
+        } = read_header(path)?;
         let (origin_x, origin_y, cell_size_x, cell_size_y) = geo;
-        let keys = read_geokeys(&mut decoder)?;
-        let epsg = check_crs(&keys)?;
         let (origin_x, origin_y) = if keys.get(GT_RASTER_TYPE) == Some(RASTER_PIXEL_IS_POINT) {
             // Le point de rattachement est le centre de la cellule : on revient à son coin.
             (origin_x - cell_size_x / 2.0, origin_y + cell_size_y / 2.0)
@@ -954,6 +992,57 @@ mod tests {
         bytes[at + 8] = 5;
         std::fs::write(&p, bytes).unwrap();
         assert_eq!(open_err(&p).code, "dem.unsupported");
+    }
+
+    #[test]
+    fn the_header_alone_gives_the_same_system_and_the_same_refusals() {
+        // Ticket 11.22 : `epsg_of` fait les contrôles de `Dem::open` jusqu'au système.
+        for name in ["mnt-plan-incline-2154.tif", "mnt-colline-2154.tif"] {
+            let path = fixtures_dir().join(name);
+            assert_eq!(epsg_of(&path), Ok(Dem::open(&path).unwrap().epsg), "{name}");
+        }
+        let dir = scratch("en-tete");
+        let degrees = dir.join("4326.tif");
+        raw_tiff::<GrayI16>(&degrees, 2, 2, &[1, 2, 3, 4], |d| {
+            georef(d)?;
+            geokeys(d, &[(GT_MODEL_TYPE, 2), (GEOGRAPHIC_TYPE, 4326)])
+        });
+        let unknown = dir.join("user.tif");
+        raw_tiff::<GrayI16>(&unknown, 2, 2, &[1, 2, 3, 4], |d| {
+            georef(d)?;
+            geokeys(d, &[(GT_MODEL_TYPE, 1), (PROJECTED_CS_TYPE, USER_DEFINED)])
+        });
+        let text = dir.join("texte.tif");
+        std::fs::write(&text, "ceci n'est pas un TIFF").unwrap();
+        for path in [degrees, unknown, text, dir.join("absent.tif")] {
+            assert_eq!(
+                epsg_of(&path).unwrap_err(),
+                open_err(&path),
+                "{}",
+                path.display()
+            );
+        }
+    }
+
+    #[test]
+    fn the_system_is_read_without_decoding_the_image() {
+        // En-tête valide, image hors du fichier : `Dem::open` échoue au décodage, `epsg_of` non.
+        let dir = scratch("sans-image");
+        let p = dir.join("tronque.tif");
+        raw_tiff::<Gray32Float>(&p, 2, 2, &[1.0; 4], projected);
+        let mut bytes = std::fs::read(&p).unwrap();
+        assert_eq!(&bytes[..2], b"II", "TIFF petit-boutiste attendu");
+        let ifd = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
+        let count = u16::from_le_bytes(bytes[ifd..ifd + 2].try_into().unwrap()) as usize;
+        let entry = (0..count)
+            .map(|i| ifd + 2 + 12 * i)
+            .find(|at| u16::from_le_bytes(bytes[*at..*at + 2].try_into().unwrap()) == 273)
+            .expect("entrée StripOffsets");
+        // Une seule bande : la valeur est l'adresse elle-même, envoyée loin après la fin.
+        bytes[entry + 8..entry + 12].copy_from_slice(&0x00F0_0000u32.to_le_bytes());
+        std::fs::write(&p, bytes).unwrap();
+        assert!(Dem::open(&p).is_err());
+        assert_eq!(epsg_of(&p), Ok(2154));
     }
 
     #[test]

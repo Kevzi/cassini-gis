@@ -3,8 +3,9 @@
 //! Une étape peut citer la sortie d'une étape précédente par une chaîne, valeur d'un
 //! paramètre de premier niveau : `step:<k>` (k à partir de 1) pour la sortie entière, ou
 //! `step:<k>.<champ>` pour un champ de premier niveau de cette sortie (le type du paramètre
-//! est alors comparé au schéma de ce champ). Cette convention est isolée ici pour pouvoir
-//! être remplacée.
+//! est alors comparé au schéma de ce champ). Seule exception au premier niveau : un élément
+//! d'un tableau de `Point` peut être `step:<k>.<champ>` vers un `Point` (amendement d'AD-23,
+//! 2026-11-08, ticket 11.22). Cette convention est isolée ici pour pouvoir être remplacée.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -168,12 +169,13 @@ pub fn raster_markers(spec: &CommandSpec, params: &Value, journal_steps: &[usize
     Value::Object(out)
 }
 
-/// Remplace, dans les paramètres de l'étape `step`, chaque référence de premier niveau par
-/// la valeur obtenue : `step:<k>` par la sortie entière de l'étape `k`, `step:<k>.<champ>`
-/// par ce champ de sa sortie. `outputs` porte les sorties déjà obtenues, l'étape 1 en
-/// premier. Une valeur qui n'est pas une référence reste intacte. Une référence mal formée,
-/// vers une étape non encore exécutée, ou vers un champ absent de la sortie rend une erreur
-/// typée : rien n'est deviné.
+/// Remplace, dans les paramètres de l'étape `step`, chaque référence de premier niveau, ou
+/// élément d'un tableau (le plan vérifié ne l'admet que dans un tableau de `Point`), par la
+/// valeur obtenue : `step:<k>` par la sortie entière de l'étape `k`, `step:<k>.<champ>` par ce
+/// champ de sa sortie. `outputs` porte les sorties déjà obtenues, l'étape 1 en premier. Une
+/// valeur qui n'est pas une référence reste intacte. Une référence mal formée, vers une étape
+/// non encore exécutée, ou vers un champ absent de la sortie rend une erreur typée : rien n'est
+/// deviné.
 pub fn resolve_references(
     params: &Value,
     outputs: &[Value],
@@ -182,32 +184,41 @@ pub fn resolve_references(
     let Value::Object(map) = params else {
         return Ok(params.clone());
     };
+    let resolve = |name: &str, value: &Value| -> Result<Value, PlanError> {
+        let Some(parsed) = parse_reference(value) else {
+            return Ok(value.clone());
+        };
+        let (k, field) = parsed.map_err(|m| error("plan.bad_reference", step, m))?;
+        let output = outputs.get(k - 1).filter(|_| k < step).ok_or_else(|| {
+            error(
+                "plan.bad_reference",
+                step,
+                format!("« step:{k} » ne désigne pas une étape déjà exécutée."),
+            )
+        })?;
+        match field {
+            None => Ok(output.clone()),
+            Some(f) => output.get(&f).cloned().ok_or_else(|| {
+                error(
+                    "plan.missing_output",
+                    step,
+                    format!(
+                        "La sortie de l'étape {k} n'a pas de champ « {f} » : le paramètre « {name} » ne peut pas être résolu."
+                    ),
+                )
+            }),
+        }
+    };
     let mut resolved = Map::new();
     for (name, value) in map {
-        let new_value = match parse_reference(value) {
-            None => value.clone(),
-            Some(parsed) => {
-                let (k, field) = parsed.map_err(|m| error("plan.bad_reference", step, m))?;
-                let output = outputs.get(k - 1).filter(|_| k < step).ok_or_else(|| {
-                    error(
-                        "plan.bad_reference",
-                        step,
-                        format!("« step:{k} » ne désigne pas une étape déjà exécutée."),
-                    )
-                })?;
-                match field {
-                    None => output.clone(),
-                    Some(f) => output.get(&f).cloned().ok_or_else(|| {
-                        error(
-                            "plan.missing_output",
-                            step,
-                            format!(
-                                "La sortie de l'étape {k} n'a pas de champ « {f} » : le paramètre « {name} » ne peut pas être résolu."
-                            ),
-                        )
-                    })?,
-                }
-            }
+        let new_value = match value {
+            Value::Array(items) => Value::Array(
+                items
+                    .iter()
+                    .map(|item| resolve(name, item))
+                    .collect::<Result<_, _>>()?,
+            ),
+            other => resolve(name, other)?,
         };
         resolved.insert(name.clone(), new_value);
     }
@@ -232,42 +243,51 @@ impl Registry {
                     format!("La commande « {} » n'existe pas.", call.command),
                 )
             })?;
-            let mut has_reference = false;
+            // Les paramètres tenus par une référence de premier niveau : leur valeur n'est connue
+            // qu'à l'exécution. Un élément `step:k.point` d'un tableau de `Point` est remplacé,
+            // pour la validation seule, par un point quelconque : le tableau garde sa longueur
+            // et ses points littéraux restent validés.
+            let mut referenced: Vec<String> = Vec::new();
+            let mut checked = call.params.clone();
             if let Value::Object(map) = &call.params {
                 for (name, value) in map {
-                    // Une référence ne vaut qu'au premier niveau : imbriquée dans une liste ou
-                    // un objet (`criteria[i].raster`, `exclusions[i]`), elle n'est ni traduite ni
-                    // résolue, et finirait en « fichier introuvable » à l'exécution.
+                    // Une référence `step:k.<champ>` est admise comme élément d'un tableau de
+                    // `Point`, et seulement là (amendement d'AD-23, 2026-11-08) : elle y désigne
+                    // un `Point` rendu par une étape précédente, contrôlé comme au premier niveau.
+                    let point_items = param_schema(&spec.params_schema, name)
+                        .and_then(|s| point_items_schema(&s, &spec.params_schema));
+                    if let (Some(items), Value::Array(elements)) = (&point_items, value) {
+                        let mut stand_ins = Vec::with_capacity(elements.len());
+                        for element in elements {
+                            if let Some(parsed) = parse_reference(element) {
+                                let (k, field) =
+                                    parsed.map_err(|m| error("plan.bad_reference", step, m))?;
+                                self.check_reference(calls, step, spec, name, items, k, &field)?;
+                                stand_ins.push(STAND_IN_POINT.clone());
+                            } else if let Some(text) = nested_reference(element) {
+                                return Err(nested_error(step, text, name));
+                            } else {
+                                stand_ins.push(element.clone());
+                            }
+                        }
+                        checked[name.as_str()] = Value::Array(stand_ins);
+                        continue;
+                    }
+                    // Ailleurs, une référence ne vaut qu'au premier niveau : imbriquée dans une
+                    // liste ou un objet (`criteria[i].raster`, `exclusions[i]`), elle n'est ni
+                    // traduite ni résolue, et finirait en « fichier introuvable » à l'exécution.
                     if let Some(text) = nested_reference(value) {
-                        return Err(error(
-                            "plan.bad_reference",
-                            step,
-                            format!(
-                                "« {text} » est écrit à l'intérieur du paramètre « {name} » : les références step:k ne valent qu'au premier niveau d'un paramètre ; nommez le fichier."
-                            ),
-                        ));
+                        return Err(nested_error(step, text, name));
                     }
                     let Some(parsed) = parse_reference(value) else {
                         continue;
                     };
-                    has_reference = true;
+                    referenced.push(name.clone());
                     let (k, field) = parsed.map_err(|m| error("plan.bad_reference", step, m))?;
                     if k >= step {
-                        return Err(error(
-                            "plan.bad_reference",
-                            step,
-                            format!(
-                                "« step:{k} » ne désigne pas une étape précédente de l'étape {step}."
-                            ),
-                        ));
+                        return Err(previous_error(step, k));
                     }
-                    let source = self.spec(&calls[k - 1].command).ok_or_else(|| {
-                        error(
-                            "plan.bad_reference",
-                            step,
-                            format!("l'étape {k} cite une commande inconnue."),
-                        )
-                    })?;
+                    let source = self.cited_spec(calls, step, k)?;
                     let expected = param_schema(&spec.params_schema, name).ok_or_else(|| {
                         error(
                             "registry.invalid_params",
@@ -304,38 +324,10 @@ impl Registry {
                         }
                         continue;
                     }
-                    let given = match &field {
-                        None => normalize(&source.output_schema, &source.output_schema, 0),
-                        Some(f) => {
-                            // Champ de premier niveau, éventuellement derrière un `$ref`.
-                            let root = &source.output_schema;
-                            let top = normalize(root, root, 0);
-                            let Some(prop) = top.get("properties").and_then(|p| p.get(f)) else {
-                                return Err(error(
-                                    "plan.bad_reference",
-                                    step,
-                                    format!(
-                                        "la sortie de l'étape {k} ({}) n'a pas de champ « {f} ».",
-                                        source.id
-                                    ),
-                                ));
-                            };
-                            prop.clone()
-                        }
-                    };
-                    if normalize(&expected, &spec.params_schema, 0) != given {
-                        return Err(error(
-                            "plan.type_mismatch",
-                            step,
-                            format!(
-                                "Le paramètre « {name} » de {} n'a pas le type de la sortie de l'étape {k} ({}).",
-                                spec.id, source.id
-                            ),
-                        ));
-                    }
+                    self.check_reference(calls, step, spec, name, &expected, k, &field)?;
                 }
             }
-            self.validate_unreferenced(&call.command, &call.params, spec, has_reference)
+            self.validate_unreferenced(&call.command, &checked, spec, &referenced)
                 .map_err(|e| {
                     // `validate_params` ne rend que ces deux causes.
                     let code = match e {
@@ -352,6 +344,108 @@ impl Registry {
 }
 
 impl Registry {
+    /// La commande de l'étape `k`, citée par l'étape `step`.
+    fn cited_spec(
+        &self,
+        calls: &[PlannedCall],
+        step: usize,
+        k: usize,
+    ) -> Result<&CommandSpec, PlanError> {
+        self.spec(&calls[k - 1].command).ok_or_else(|| {
+            error(
+                "plan.bad_reference",
+                step,
+                format!("l'étape {k} cite une commande inconnue."),
+            )
+        })
+    }
+
+    /// Contrôle une référence `step:k` ou `step:k.<champ>` (hors raster), à la place d'une valeur
+    /// du schéma `expected` du paramètre `name` de l'étape `step` : étape précédente, champ
+    /// présent dans sa sortie, même type.
+    #[allow(clippy::too_many_arguments)]
+    fn check_reference(
+        &self,
+        calls: &[PlannedCall],
+        step: usize,
+        spec: &CommandSpec,
+        name: &str,
+        expected: &Value,
+        k: usize,
+        field: &Option<String>,
+    ) -> Result<(), PlanError> {
+        if k >= step {
+            return Err(previous_error(step, k));
+        }
+        let source = self.cited_spec(calls, step, k)?;
+        let given = match field {
+            None => normalize(&source.output_schema, &source.output_schema, 0),
+            Some(f) => {
+                // Champ de premier niveau, éventuellement derrière un `$ref`.
+                let root = &source.output_schema;
+                let top = normalize(root, root, 0);
+                let Some(prop) = top.get("properties").and_then(|p| p.get(f)) else {
+                    return Err(error(
+                        "plan.bad_reference",
+                        step,
+                        format!(
+                            "la sortie de l'étape {k} ({}) n'a pas de champ « {f} ».",
+                            source.id
+                        ),
+                    ));
+                };
+                prop.clone()
+            }
+        };
+        if normalize(expected, &spec.params_schema, 0) != given {
+            return Err(error(
+                "plan.type_mismatch",
+                step,
+                format!(
+                    "Le paramètre « {name} » de {} n'a pas le type de la sortie de l'étape {k} ({}).",
+                    spec.id, source.id
+                ),
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Point qui tient lieu, pour la seule validation d'un plan, d'un élément `step:k.point` d'un
+/// tableau de `Point`.
+static STAND_IN_POINT: std::sync::LazyLock<Value> =
+    std::sync::LazyLock::new(|| serde_json::json!({"x": 0.0, "y": 0.0, "epsg": 4326}));
+
+/// Une référence imbriquée hors d'un tableau de `Point` : refusée avant l'exécution.
+fn nested_error(step: usize, text: &str, name: &str) -> PlanError {
+    error(
+        "plan.bad_reference",
+        step,
+        format!(
+            "« {text} » est écrit à l'intérieur du paramètre « {name} » : les références step:k ne valent qu'au premier niveau d'un paramètre ; nommez le fichier."
+        ),
+    )
+}
+
+/// Une référence vers l'étape `k`, qui n'est pas antérieure à l'étape `step`.
+fn previous_error(step: usize, k: usize) -> PlanError {
+    error(
+        "plan.bad_reference",
+        step,
+        format!("« step:{k} » ne désigne pas une étape précédente de l'étape {step}."),
+    )
+}
+
+/// Le schéma des éléments d'un paramètre tableau dont les éléments sont des [`Point`]
+/// (`Vec<Point>`, `observers`, `sources`) ; `None` pour tout autre paramètre.
+///
+/// [`Point`]: crate::point::Point
+pub(crate) fn point_items_schema(schema: &Value, root: &Value) -> Option<Value> {
+    let items = crate::point::items_schema(schema, root, 0)?;
+    crate::point::is_point(items, root).then(|| items.clone())
+}
+
+impl Registry {
     /// Valide les paramètres d'une étape. Sans référence : tous. Avec références : les
     /// paramètres littéraux, la valeur d'une référence n'étant connue qu'à l'exécution. Les clés
     /// de référence sont remplacées par la valeur d'un exemple déclaré de la commande ; faute
@@ -362,21 +456,16 @@ impl Registry {
         id: &str,
         params: &Value,
         spec: &crate::registry::CommandSpec,
-        has_reference: bool,
+        refs: &[String],
     ) -> Result<(), crate::registry::RegistryError> {
-        if !has_reference {
+        if refs.is_empty() {
             return self.validate_params(id, params);
         }
         let Value::Object(map) = params else {
             return self.validate_params(id, params);
         };
-        let refs: Vec<String> = map
-            .iter()
-            .filter(|(_, v)| parse_reference(v).is_some())
-            .map(|(k, _)| k.clone())
-            .collect();
         let mut literal = map.clone();
-        for key in &refs {
+        for key in refs {
             literal.remove(key);
         }
         // Une clé de référence manquante à son tour : on la comble par un exemple, au plus une fois.
@@ -814,8 +903,8 @@ mod tests {
 
     #[test]
     fn values_that_are_not_references_are_left_intact() {
-        let params = json!({"path": "gares.gpkg", "nested": {"x": "step:1"}, "list": ["step:1"],
-            "n": 1, "flag": true, "stepless": "step"});
+        let params = json!({"path": "gares.gpkg", "nested": {"x": "step:1"}, "list": [["step:1"]],
+            "names": ["a", "step"], "n": 1, "flag": true, "stepless": "step"});
         assert_eq!(resolve_references(&params, &[], 1).unwrap(), params);
         assert_eq!(
             resolve_references(&json!(null), &[], 1).unwrap(),
@@ -904,6 +993,97 @@ mod tests {
         let p = slope_then(json!({"command": "terrain.slope",
             "params": {"dem": "step:1", "unit": "percent"}}));
         assert_eq!(r.check_plan(&p), Ok(()));
+    }
+
+    // ---- `step:k.point` dans un tableau de `Point` (ticket 11.22, amendement d'AD-23) ----
+
+    fn wgs84() -> Value {
+        json!({"x": 2.4069, "y": 48.7353, "epsg": 4326})
+    }
+
+    fn converted_then(second: Value) -> Plan {
+        plan(json!([
+            {"command": "data.transform_point", "params": {"point": wgs84(), "target_epsg": 2154}},
+            second
+        ]))
+    }
+
+    #[test]
+    fn a_point_reference_is_admitted_inside_a_list_of_points() {
+        let r = Registry::standard();
+        let p = converted_then(json!({"command": "terrain.viewshed_cumulative", "params": {
+            "dem": "mnt.tif", "observers": ["step:1.point", observer()]}}));
+        assert_eq!(r.check_plan(&p), Ok(()));
+        let p = converted_then(json!({"command": "terrain.cost_distance", "params": {
+            "cost": "cout.tif", "sources": ["step:1.point"]}}));
+        assert_eq!(r.check_plan(&p), Ok(()));
+        // Le littéral voisin reste validé : un point sans epsg est refusé.
+        let p = converted_then(json!({"command": "terrain.viewshed_cumulative", "params": {
+            "dem": "mnt.tif", "observers": ["step:1.point", {"x": 1, "y": 2}]}}));
+        assert_eq!(
+            r.check_plan(&p).unwrap_err().code,
+            "registry.invalid_params"
+        );
+    }
+
+    #[test]
+    fn a_point_reference_in_a_list_must_cite_an_earlier_point() {
+        let r = Registry::standard();
+        let cumulative = |observers: Value| {
+            converted_then(json!({"command": "terrain.viewshed_cumulative", "params": {
+                "dem": "mnt.tif", "observers": observers}}))
+        };
+        // Vers une étape ultérieure ou elle-même, vers un champ absent, vers un champ qui n'est
+        // pas un `Point`, vers la sortie entière, ou mal formée.
+        for (observers, code) in [
+            (json!(["step:2.point"]), "plan.bad_reference"),
+            (json!(["step:3.point"]), "plan.bad_reference"),
+            (json!(["step:1.nope"]), "plan.bad_reference"),
+            (json!(["step:1"]), "plan.type_mismatch"),
+            (json!(["step:01.point"]), "plan.bad_reference"),
+        ] {
+            let err = r.check_plan(&cumulative(observers.clone())).unwrap_err();
+            assert_eq!((err.code, err.step), (code, 2), "{observers}");
+        }
+        let p = plan(json!([
+            {"command": "terrain.slope", "params": {"dem": "mnt.tif", "unit": "degrees"}},
+            {"command": "terrain.viewshed_cumulative", "params": {
+                "dem": "mnt.tif", "observers": ["step:1.file"]}}
+        ]));
+        assert_eq!(r.check_plan(&p).unwrap_err().code, "plan.type_mismatch");
+        // Plus profond qu'un élément : refusé comme ailleurs.
+        let err = r
+            .check_plan(&cumulative(
+                json!([{"x": "step:1.point", "y": 1, "epsg": 2154}]),
+            ))
+            .unwrap_err();
+        assert_eq!(err.code, "plan.bad_reference");
+        assert!(err.message.contains("premier niveau"), "{}", err.message);
+    }
+
+    #[test]
+    fn a_point_reference_is_refused_in_a_list_that_is_not_of_points() {
+        let r = Registry::standard();
+        let p = converted_then(json!({"command": "raster.weighted_overlay", "params": {
+            "criteria": [{"raster": "a.tif", "weight": 1}, {"raster": "b.tif", "weight": 1}],
+            "exclusions": ["step:1.point"], "out": "score.tif"}}));
+        let err = r.check_plan(&p).unwrap_err();
+        assert_eq!((err.code, err.step), ("plan.bad_reference", 2));
+        assert!(err.message.contains("premier niveau"), "{}", err.message);
+    }
+
+    #[test]
+    fn a_point_reference_in_a_list_is_resolved_in_place() {
+        let outputs = [json!({"point": observer()}), json!({"point": wgs84()})];
+        let params =
+            json!({"dem": "mnt.tif", "observers": ["step:1.point", wgs84(), "step:2.point"]});
+        let resolved = resolve_references(&params, &outputs, 3).unwrap();
+        assert_eq!(
+            resolved,
+            json!({"dem": "mnt.tif", "observers": [observer(), wgs84(), wgs84()]})
+        );
+        let err = resolve_references(&params, &outputs, 2).unwrap_err();
+        assert_eq!((err.code, err.step), ("plan.bad_reference", 2));
     }
 
     #[test]

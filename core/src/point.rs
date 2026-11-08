@@ -184,7 +184,11 @@ fn property_schema<'a>(
 }
 
 /// Sous-schéma des éléments d'un tableau, cherché aussi dans ses alternatives.
-fn items_schema<'a>(schema: &'a Value, root: &'a Value, depth: usize) -> Option<&'a Value> {
+pub(crate) fn items_schema<'a>(
+    schema: &'a Value,
+    root: &'a Value,
+    depth: usize,
+) -> Option<&'a Value> {
     if depth > MAX_DEPTH {
         return None;
     }
@@ -618,8 +622,16 @@ struct Found<'a> {
     doubtful: bool,
 }
 
-/// Parcourt une valeur littérale avec son schéma (s'il est connu).
-fn walk<'a>(value: &'a Value, schema: Option<&Value>, root: &Value, found: &mut Found<'a>) {
+/// Parcourt une valeur littérale avec son schéma (s'il est connu). `cites_a_point` dit si une
+/// référence, élément d'un tableau de `Point` de schéma d'éléments donné, désigne un `Point`
+/// d'une étape précédente (amendement d'AD-23, 2026-11-08) : seul cet emplacement l'admet.
+fn walk<'a>(
+    value: &'a Value,
+    schema: Option<&Value>,
+    root: &Value,
+    found: &mut Found<'a>,
+    cites_a_point: &dyn Fn(&Value, &Value) -> bool,
+) {
     if schema.is_some_and(|s| admits(s, root, MGRS_MARK, 0)) {
         match value {
             Value::String(text) => found.mgrs.push(text),
@@ -640,13 +652,21 @@ fn walk<'a>(value: &'a Value, schema: Option<&Value>, root: &Value, found: &mut 
             }
             for (name, item) in map {
                 let sub = schema.and_then(|s| property_schema(s, root, name, 0));
-                walk(item, sub, root, found);
+                walk(item, sub, root, found, cites_a_point);
             }
         }
         Value::Array(items) => {
             let sub = schema.and_then(|s| items_schema(s, root, 0));
             for item in items {
-                walk(item, sub, root, found);
+                if let Some(items_schema) = sub.filter(|i| is_point(i, root)) {
+                    if parse_reference(item).is_some() {
+                        if !cites_a_point(items_schema, item) {
+                            found.doubtful = true;
+                        }
+                        continue;
+                    }
+                }
+                walk(item, sub, root, found, cites_a_point);
             }
         }
         Value::Number(n) => {
@@ -748,8 +768,11 @@ fn invents_a_point(
             continue;
         };
         let root = &spec.params_schema;
+        let cites_a_point = |items: &Value, element: &Value| {
+            reference_is_a(registry, calls, step, items, root, element, POINT_MARK)
+        };
         let Value::Object(params) = &call.params else {
-            walk(&call.params, Some(root), root, &mut found);
+            walk(&call.params, Some(root), root, &mut found, &cites_a_point);
             continue;
         };
         for (name, value) in params {
@@ -769,7 +792,7 @@ fn invents_a_point(
                 }
                 continue;
             }
-            walk(value, schema, root, &mut found);
+            walk(value, schema, root, &mut found, &cites_a_point);
         }
     }
     if found.doubtful {
@@ -1389,6 +1412,34 @@ mod tests {
                 "duration": {"value": 10, "unit": "min"}}}
         ]));
         assert_eq!(guard_coordinates(&registry, plan.clone(), "10 min"), plan);
+    }
+
+    #[test]
+    fn a_converted_point_inside_a_list_of_points_passes_the_guard() {
+        // Ticket 11.22 : le cas mixte du report — un point converti, cité dans la liste, et un
+        // point écrit tel quel — ne devient plus une question.
+        let registry = Registry::standard();
+        let request = "Champ de vision cumulé depuis 2.4069, 48.7353 (WGS84) et 652030, 6850250 en EPSG:2154 sur mnt.tif, converti en EPSG:2154";
+        let plan = calls(json!([
+            {"command": "data.transform_point", "params": {
+                "point": {"x": 2.4069, "y": 48.7353, "epsg": 4326}, "target_epsg": 2154}},
+            {"command": "terrain.viewshed_cumulative", "params": {"dem": "mnt.tif",
+                "observers": ["step:1.point", {"x": 652030, "y": 6850250, "epsg": 2154}]}}
+        ]));
+        assert_eq!(guard_coordinates(&registry, plan.clone(), request), plan);
+        // Une référence qui ne désigne pas un `Point`, ou une étape ultérieure, reste un doute.
+        for reference in ["step:1", "step:2.point", "step:1.nope"] {
+            let plan = calls(json!([
+                {"command": "data.transform_point", "params": {
+                    "point": {"x": 2.4069, "y": 48.7353, "epsg": 4326}, "target_epsg": 2154}},
+                {"command": "terrain.viewshed_cumulative", "params": {"dem": "mnt.tif",
+                    "observers": [reference, {"x": 652030, "y": 6850250, "epsg": 2154}]}}
+            ]));
+            assert!(
+                is_guard(&guard_coordinates(&registry, plan, request)),
+                "{reference}"
+            );
+        }
     }
 
     #[test]

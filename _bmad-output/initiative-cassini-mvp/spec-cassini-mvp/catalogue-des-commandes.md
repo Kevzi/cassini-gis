@@ -762,6 +762,8 @@ valide (`terrain.no_elevation`) ; rayon d'au plus 500 cellules (`terrain.viewshe
 | `hidden_cells` | entier | Cellules du rayon masquées. |
 | `nodata_cells` | entier | Cellules sans donnée. |
 
+Dans un plan, un observateur d'un autre système que le MNT est converti par une étape `data.transform_point` que le noyau ajoute avant de montrer le plan (amendement d'AD-19, 2026-11-08) ; `terrain.crs_mismatch` reste l'erreur d'un appel direct.
+
 ```json fiche
 {"id": "terrain.viewshed", "status": "faite", "runs_in": "core", "dictated_by_core": false,
  "params": {"dem": {"type": "RasterPath", "required": true},
@@ -799,6 +801,8 @@ Ligne de vue entre deux points sur un MNT. Mêmes erreurs que `terrain.viewshed`
 | `profile_step` | nombre | Écart entre deux échantillons, en mètres. |
 | `nodata_samples` | entier | Échantillons sans altitude. |
 | `unit` | chaîne | Toujours `m`. |
+
+Dans un plan, un observateur ou une cible d'un autre système que le MNT est converti par une étape `data.transform_point` que le noyau ajoute avant de montrer le plan (amendement d'AD-19, 2026-11-08) ; `terrain.crs_mismatch` reste l'erreur d'un appel direct.
 
 ```json fiche
 {"id": "terrain.line_of_sight", "status": "faite", "runs_in": "core", "dictated_by_core": false,
@@ -1079,6 +1083,8 @@ observateurs sont contrôlés avant que rien ne soit écrit. Calcul non annulabl
 5 s au pire par observateur au rayon maximal, soit environ 2 min 30 s pour 32 (décision du
 propriétaire, 2026-11-06 : gardé tel quel, et dit). Livrée par l'entrée 7 de l'epic 11 (`core/src/commands/terrain_viewshed_cumulative.rs`).
 
+Dans un plan, chaque observateur d'un autre système que le MNT est converti par une étape `data.transform_point` que le noyau ajoute avant de montrer le plan, la liste recevant `step:k.point` à sa place (amendement d'AD-19, 2026-11-08) ; `terrain.crs_mismatch` reste l'erreur d'un appel direct.
+
 ```json fiche
 {"id": "terrain.viewshed_cumulative", "status": "faite", "runs_in": "core", "dictated_by_core": false,
  "params": {"dem": {"type": "RasterPath", "required": true},
@@ -1233,6 +1239,8 @@ non annulable : au pire 144 octets par cellule en plus du raster (cumul, prédé
 écrite et tas), soit environ 36 Gio au plafond de 1 Gio. Livrée par l'entrée 10
 de l'epic 11 (`core/src/cost.rs`, `core/src/commands/terrain_cost_distance.rs`).
 
+Dans un plan, chaque source d'un autre système que le raster de coût est convertie par une étape `data.transform_point` que le noyau ajoute avant de montrer le plan, la liste recevant `step:k.point` à sa place (amendement d'AD-19, 2026-11-08) ; `terrain.crs_mismatch` reste l'erreur d'un appel direct.
+
 ```json fiche
 {"id": "terrain.cost_distance", "status": "faite", "runs_in": "core", "dictated_by_core": false,
  "params": {"cost": {"type": "RasterPath", "required": true},
@@ -1269,6 +1277,8 @@ cellules, les sommets intermédiaires alignés retirés ; `total_cost` vaut le c
 cellule d'arrivée. Départ et arrivée dans une même cellule : deux sommets confondus, coût et
 longueur nuls. Livrée par l'entrée 10 de l'epic 11
 (`core/src/commands/terrain_least_cost_path.rs`).
+
+Dans un plan, un départ ou une arrivée d'un autre système que le raster de coût est converti par une étape `data.transform_point` que le noyau ajoute avant de montrer le plan (amendement d'AD-19, 2026-11-08) ; `terrain.crs_mismatch` reste l'erreur d'un appel direct.
 
 ```json fiche
 {"id": "terrain.least_cost_path", "status": "faite", "runs_in": "core", "dictated_by_core": false,
