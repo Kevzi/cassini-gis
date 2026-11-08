@@ -25,7 +25,7 @@ class HistoryTest(unittest.TestCase):
             {"step": 5},  # sans commande : sautée
             "pas un objet",
         ]
-        log = runlog.RunLog.from_history(history, lambda c: "<%s>" % c)
+        log = runlog.RunLog.from_history(history, lambda c, p: "<%s>" % c)
         self.assertEqual(
             [(e.command, e.status, e.label, e.when) for e in log.entries],
             [
@@ -49,7 +49,8 @@ class HistoryTest(unittest.TestCase):
 
         at = 1762600000000
         log = runlog.RunLog.from_history(
-            [{"step": 1, "command": "system.about", "params": {}, "result": {}, "at": at}], str
+            [{"step": 1, "command": "system.about", "params": {}, "result": {}, "at": at}],
+            lambda c, p: c,
         )
         expected = time.strftime("%d/%m %H:%M", time.localtime(at / 1000))
         self.assertEqual(log.entries[0].when, expected)
@@ -63,13 +64,14 @@ class HistoryTest(unittest.TestCase):
     def test_a_summarized_result_or_params_is_not_taken_for_the_real_one(self):
         stub = {"truncated": True, "bytes": 900, "fingerprint": "ab12"}
         log = runlog.RunLog.from_history(
-            [{"step": 1, "command": "c", "params": stub, "result": stub, "plan_step": True}], str
+            [{"step": 1, "command": "c", "params": stub, "result": stub, "plan_step": True}],
+            lambda c, p: "%s %r" % (c, p),
         )
         entry = log.entries[0]
         self.assertIsNone(entry.result)
         self.assertIsNone(entry.params)
         self.assertIsNone(entry.step)  # un booléen n'est pas un numéro d'étape
-        self.assertEqual(entry.label, "c")
+        self.assertEqual(entry.label, "c None")  # le libellé ne reçoit pas l'empreinte
 
     def test_no_history_gives_an_empty_log(self):
         self.assertEqual(runlog.RunLog.from_history(None, str).entries, [])

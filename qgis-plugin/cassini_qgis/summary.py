@@ -9,20 +9,42 @@ n'est produit (AD-9) : une couche s'affiche par son nom, un fichier par son seul
   `step:k.champ` d'un plan.
 
 Résultat absent ou illisible : phrase des seuls paramètres. Commande hors table, ou
-paramètres illisibles : description du registre, puis « Terminée ».
+paramètres illisibles : titre court de la description du registre (`short_title`), puis
+« Terminée ». La description entière, écrite pour le modèle, n'est jamais montrée.
+
+`label` rend la phrase « avant résultat » : c'est le libellé d'une étape du plan et d'une
+ligne du journal.
 """
 
 import math
 import re
 
 try:  # importé à plat par les tests, en paquet par QGIS
-    from . import agentview, runlog, texts
+    from . import runlog, texts
 except ImportError:  # pragma: no cover
-    import agentview
     import runlog
     import texts
 
 _STEP_REF = re.compile(r"^step:(\d+)(?:\.(.+))?$")
+_SENTENCE_END = re.compile(r"\.(?:\s|$)")
+_SHORT_MAX = 80  # un titre plus long est coupé au mot, suivi de « … »
+_TITLE_END = re.compile(r":\s")  # « Pente d'un MNT : … », jamais « EPSG:4326 »
+_ASIDE = re.compile(r"\s*[(;]")  # parenthèse ou point-virgule : précisions pour le modèle
+# Une référence d'étape substituée (`sum_step_result`) est bornée par ces deux marques, pour
+# que la contraction « de le » → « du » ne touche qu'elle, jamais le texte de l'utilisateur.
+_REF_OPEN, _REF_CLOSE = "\ue000", "\ue001"
+_CONTRACTIONS = (
+    (re.compile(r"\bde " + _REF_OPEN + "le "), _REF_OPEN + "du "),
+    (re.compile(r"\bà " + _REF_OPEN + "le "), _REF_OPEN + "au "),
+)
+
+
+def _finish(lang, text):
+    """Contracte « de le », « à le » devant une référence d'étape, puis ôte les marques."""
+    if texts.normalize(lang) == "fr":
+        for pattern, replacement in _CONTRACTIONS:
+            text = pattern.sub(replacement, text)
+    return text.replace(_REF_OPEN, "").replace(_REF_CLOSE, "")
 
 
 class _Unreadable(Exception):
@@ -60,6 +82,48 @@ def file_name(path):
     return re.split(r"[\\/]", path.rstrip("\\/"))[-1]
 
 
+def _raster(value, names):
+    """Un raster cité : son nom de fichier sans dossier ni extension (`mnt-74-25m`), ou
+    l'étape qui l'a produit pour une référence `step:k.file`."""
+    if isinstance(value, str) and _STEP_REF.match(value):
+        return names.layer(value)
+    name = file_name(value)
+    stem = re.sub(r"\.[A-Za-z0-9]{1,5}$", "", name)
+    return stem or name
+
+
+def _cells(lang, n):
+    """Un nombre de cellules : `12 345` en français, `12,345` en anglais."""
+    if not _is_int(n):
+        raise _Unreadable()
+    return scale_number(lang, n)
+
+
+def _rounded(lang, value):
+    """Une valeur rendue au dixième (`152,3`)."""
+    if not _is_number(value) or not math.isfinite(value):
+        raise _Unreadable()
+    return number(lang, round(float(value), 1))
+
+
+def _file_part(lang, r):
+    """` : fichier pente.tif` ; fichier illisible : rien."""
+    try:
+        return texts.tr(lang, "sum_file", file=file_name(r.get("file")))
+    except _Unreadable:
+        return ""
+
+
+def _range_part(lang, r, symbol=""):
+    """`, de 0 à 152,3 %` quand min et max sont rendus ; sinon rien."""
+    low, high = r.get("min"), r.get("max")
+    if not (_is_number(low) and _is_number(high)):
+        return ""
+    return texts.tr(
+        lang, "sum_range", min=_rounded(lang, low), max=_rounded(lang, high) + symbol
+    )
+
+
 def _text(value):
     """Texte de l'utilisateur (titre, valeur) : un chemin absolu y est masqué."""
     if not isinstance(value, str):
@@ -74,6 +138,9 @@ class _Names:
         self.lang = lang
         self.layer_name = layer_name
         self.step_names = step_names if isinstance(step_names, dict) else {}
+        # Libellé d'une étape pas encore faite (`label`) : forme d'action, jamais au passé.
+        # Une étape finie sans résultat lisible garde la forme au passé (`sentence`).
+        self.ahead = False
 
     def _step_result(self, k):
         result = self.step_names.get(k)
@@ -91,7 +158,7 @@ class _Names:
             name = result.get("name") if isinstance(result, dict) else None
             if isinstance(name, str) and name:
                 return name
-            return texts.tr(self.lang, "sum_step_result", n=k)
+            return _REF_OPEN + texts.tr(self.lang, "sum_step_result", n=k) + _REF_CLOSE
         name = None
         if self.layer_name is not None:
             try:
@@ -245,7 +312,8 @@ def scale_number(lang, n):
 
 
 def _export_pdf(lang, p, r, names):
-    text = texts.tr(lang, "sum_export_pdf", title=_text(p.get("title")))
+    key = "sum_export_pdf_ask" if names.ahead else "sum_export_pdf"
+    text = texts.tr(lang, key, title=_text(p.get("title")))
     # L'échelle tenue, rendue par le geste seulement si elle a été demandée (ticket 5.38) ;
     # sans échelle lisible au résultat (absent ou incomplet), celle des paramètres.
     scale = r.get("scale") if r else None
@@ -432,7 +500,8 @@ def _reproject(lang, p, r, names):
     target = p.get("target_epsg")
     if not _is_int(target):
         raise _Unreadable()
-    text = texts.tr(lang, "sum_reproject", layer=names.layer(p.get("layer_id")), epsg=target)
+    key = "sum_reproject_ask" if names.ahead else "sum_reproject"
+    text = texts.tr(lang, key, layer=names.layer(p.get("layer_id")), epsg=target)
     return text + (_out_layer(lang, r) if r else "")
 
 
@@ -479,7 +548,256 @@ def _bearing_intersection(lang, p, r, names):
     )
 
 
+# -- commandes de terrain et de raster (noyau), de style et de rangement (QGIS)
+def _about(lang, p, r, names):
+    return texts.tr(lang, "sum_about")
+
+
+def _open_raster(lang, p, r, names):
+    file = file_name(p.get("path"))
+    name = r.get("name") if r else None
+    if not isinstance(name, str) or not name:
+        return texts.tr(lang, "sum_open_raster", file=file)
+    return texts.tr(lang, "sum_opened_raster", file=file, name=name)
+
+
+_SLOPE_SYMBOLS = {"percent": " %", "degrees": "°"}
+
+
+def _slope(lang, p, r, names):
+    unit = p.get("unit")
+    if unit not in _SLOPE_SYMBOLS:
+        raise _Unreadable()
+    text = texts.tr(
+        lang,
+        "sum_slope",
+        dem=_raster(p.get("dem"), names),
+        unit=texts.tr(lang, "sum_slope_" + unit),
+    )
+    if not r:
+        return text
+    return text + _file_part(lang, r) + _range_part(lang, r, _SLOPE_SYMBOLS[unit])
+
+
+def _aspect(lang, p, r, names):
+    text = texts.tr(lang, "sum_aspect", dem=_raster(p.get("dem"), names))
+    if not r:
+        return text
+    text += _file_part(lang, r)
+    flat = r.get("flat_cells")
+    if _is_int(flat) and flat > 0:
+        text += texts.tr(lang, "sum_flat", n=_cells(lang, flat))
+    return text
+
+
+def _hillshade(lang, p, r, names):
+    text = texts.tr(lang, "sum_hillshade", dem=_raster(p.get("dem"), names))
+    return text + (_file_part(lang, r) if r else "")
+
+
+def _viewshed(lang, p, r, names):
+    text = texts.tr(lang, "sum_viewshed", dem=_raster(p.get("dem"), names))
+    if not r:
+        return text
+    text += _file_part(lang, r)
+    visible, hidden = r.get("visible_cells"), r.get("hidden_cells")
+    if _is_int(visible) and _is_int(hidden):
+        text += texts.tr(
+            lang, "sum_viewshed_cells", visible=_cells(lang, visible), hidden=_cells(lang, hidden)
+        )
+    return text
+
+
+def _viewshed_cumulative(lang, p, r, names):
+    observers = p.get("observers")
+    if not isinstance(observers, list) or not observers:
+        raise _Unreadable()
+    text = texts.tr(
+        lang,
+        "sum_viewshed_cumulative",
+        observers=count(lang, "observers", len(observers)),
+        dem=_raster(p.get("dem"), names),
+    )
+    if not r:
+        return text
+    text += _file_part(lang, r)
+    visible, most = r.get("visible_cells"), r.get("max_count")
+    if _is_int(visible) and _is_int(most):
+        text += texts.tr(
+            lang,
+            "sum_viewshed_seen",
+            visible=_cells(lang, visible),
+            max=count(lang, "observers", most),
+        )
+    return text
+
+
+def _metres_length(lang, value):
+    """Une distance rendue en mètres par le noyau (`1,2 km`, `850 m`)."""
+    return _length(lang, {"value": value, "unit": "m"})
+
+
+def _line_of_sight(lang, p, r, names):
+    text = texts.tr(lang, "sum_line_of_sight", dem=_raster(p.get("dem"), names))
+    if not r:
+        return text
+    visible = r.get("visible")
+    try:
+        distance = _metres_length(lang, r.get("distance"))
+        if visible is True:
+            return text + texts.tr(lang, "sum_los_visible", distance=distance)
+        if visible is False:
+            obstruction = _metres_length(lang, r.get("obstruction_distance"))
+            return text + texts.tr(
+                lang, "sum_los_hidden", obstruction=obstruction, distance=distance
+            )
+    except _Unreadable:
+        pass
+    return text
+
+
+def _peaks(lang, p, r, names):
+    text = texts.tr(lang, "sum_peaks", dem=_raster(p.get("dem"), names))
+    if not r:
+        return text
+    n = r.get("feature_count")
+    try:
+        file = file_name(r.get("file"))
+    except _Unreadable:
+        return text
+    if not _is_int(n):
+        return text + texts.tr(lang, "sum_file", file=file)
+    text += texts.tr(lang, "sum_peaks_found", file=file, count=count(lang, "peaks", n))
+    peaks = r.get("peaks")
+    first = peaks[0] if isinstance(peaks, list) and peaks else None
+    if isinstance(first, dict) and _is_number(first.get("elevation")):
+        text += texts.tr(lang, "sum_peaks_top", elevation=_rounded(lang, first["elevation"]))
+    return text
+
+
+def _cost_distance(lang, p, r, names):
+    sources = p.get("sources")
+    if not isinstance(sources, list) or not sources:
+        raise _Unreadable()
+    text = texts.tr(
+        lang,
+        "sum_cost_distance",
+        sources=count(lang, "sources", len(sources)),
+        cost=_raster(p.get("cost"), names),
+    )
+    if not r:
+        return text
+    text += _file_part(lang, r)
+    reached = r.get("reachable_cells")
+    if _is_int(reached):
+        text += texts.tr(lang, "sum_cost_reached", n=_cells(lang, reached))
+    return text
+
+
+def _least_cost_path(lang, p, r, names):
+    text = texts.tr(lang, "sum_least_cost_path", cost=_raster(p.get("cost"), names))
+    if not r:
+        return text
+    try:
+        return text + texts.tr(
+            lang,
+            "sum_path_found",
+            file=file_name(r.get("file")),
+            length=_length(lang, r.get("length")),
+            total=_rounded(lang, r.get("total_cost")),
+        )
+    except _Unreadable:
+        return text + _file_part(lang, r)
+
+
+def _reclassify(lang, p, r, names):
+    classes = p.get("classes")
+    if not isinstance(classes, list) or not classes:
+        raise _Unreadable()
+    text = texts.tr(
+        lang,
+        "sum_reclassify",
+        raster=_raster(p.get("raster"), names),
+        classes=count(lang, "classes", len(classes)),
+    )
+    return text + (_file_part(lang, r) if r else "")
+
+
+def _weighted_overlay(lang, p, r, names):
+    criteria = p.get("criteria")
+    if not isinstance(criteria, list) or not criteria:
+        raise _Unreadable()
+    text = texts.tr(
+        lang, "sum_weighted_overlay", criteria=count(lang, "criteria", len(criteria))
+    )
+    if not r:
+        return text
+    return text + _file_part(lang, r) + _range_part(lang, r)
+
+
+def _topographic_style(lang, p, r, names):
+    styled = r.get("styled") if r else None
+    if isinstance(styled, list):
+        return texts.tr(lang, "sum_topo_styled", layers=count(lang, "layers", len(styled)))
+    layers = p.get("layers")
+    if isinstance(layers, list) and layers:
+        target = count(lang, "layers", len(layers))
+    elif layers is None or layers == []:
+        target = texts.tr(lang, "sum_topo_all")
+    else:
+        raise _Unreadable()
+    return texts.tr(lang, "sum_topo_style", target=target)
+
+
+def _graduated_style(lang, p, r, names):
+    field = p.get("field")
+    if not isinstance(field, str) or not field:
+        raise _Unreadable()
+    text = texts.tr(lang, "sum_graduated", layer=names.layer(p.get("layer_id")), field=field)
+    n = r.get("class_count") if r else None
+    if _is_int(n):
+        text += texts.tr(lang, "sum_graduated_classes", classes=count(lang, "classes", n))
+    return text
+
+
+def _set_style(lang, p, r, names):
+    layer = names.layer(p.get("layer_id"))
+    return texts.tr(lang, "sum_style_set" if r else "sum_set_style", layer=layer)
+
+
+def _arrange(lang, p, r, names):
+    groups = p.get("groups")
+    if not isinstance(groups, list) or not groups:
+        raise _Unreadable()
+    if r and _is_int(r.get("group_count")) and _is_int(r.get("layer_count")):
+        return texts.tr(
+            lang,
+            "sum_arranged",
+            layers=count(lang, "layers", r["layer_count"]),
+            groups=count(lang, "groups", r["group_count"]),
+        )
+    return texts.tr(lang, "sum_arrange", groups=count(lang, "groups", len(groups)))
+
+
 _SENTENCES = {
+    "system.about": _about,
+    "terrain.slope": _slope,
+    "terrain.aspect": _aspect,
+    "terrain.hillshade": _hillshade,
+    "terrain.viewshed": _viewshed,
+    "terrain.viewshed_cumulative": _viewshed_cumulative,
+    "terrain.line_of_sight": _line_of_sight,
+    "terrain.peaks": _peaks,
+    "terrain.cost_distance": _cost_distance,
+    "terrain.least_cost_path": _least_cost_path,
+    "raster.reclassify": _reclassify,
+    "raster.weighted_overlay": _weighted_overlay,
+    "map.topographic_style": _topographic_style,
+    "map.graduated_style": _graduated_style,
+    "layer.set_style": _set_style,
+    "layer.arrange": _arrange,
+    "layer.open_raster": _open_raster,
+    "layer.open_vector": _layer_add,
     "coord.convert": _coord_convert,
     "geo.distance_azimuth": _distance_azimuth,
     "geo.destination_point": _destination_point,
@@ -499,10 +817,50 @@ _SENTENCES = {
 }
 
 
+def short_title(command, catalogue, lang):
+    """Titre court d'une commande : la description du registre avant « : » quand elle en a
+    un, sinon sa première phrase, sans point final ; jamais la description entière, écrite
+    pour le modèle. Sans description : l'id de la commande."""
+    text = ""
+    for entry in catalogue or []:
+        if isinstance(entry, dict) and entry.get("id") == command:
+            text = texts.pick(lang, entry.get("description_fr", ""), entry.get("description_en", ""))
+            break
+    text = text.strip() if isinstance(text, str) else ""
+    if not text:
+        return command if isinstance(command, str) and command else "?"
+    end = _SENTENCE_END.search(text)
+    first = text[: end.start()] if end else text
+    head = _TITLE_END.split(first, 1)[0].strip()
+    title = head if head else first.strip()
+    title = _ASIDE.split(title, 1)[0]
+    title = title.rstrip(".,: ").strip()
+    if len(title) > _SHORT_MAX:
+        cut = title[:_SHORT_MAX].rsplit(" ", 1)[0].rstrip(",;")
+        title = cut + "…"
+    return title or (command if isinstance(command, str) and command else "?")
+
+
 def fallback(command, lang, catalogue=None):
-    """Description du registre, puis « Terminée »."""
-    description = agentview.describe(command, catalogue, lang).strip().rstrip(".")
-    return "%s. %s." % (description, texts.tr(lang, "done"))
+    """Titre court de la commande, puis « Terminée »."""
+    title = short_title(command, catalogue, lang).rstrip("….")
+    return "%s. %s." % (title, texts.tr(lang, "done"))
+
+
+def label(command, params, lang, layer_name=None, step_names=None, catalogue=None):
+    """Libellé d'une étape, avant son résultat : `Pente de mnt-74-25m en pourcentage`.
+
+    Sans point final. Commande hors table ou paramètres illisibles : le titre court.
+    """
+    make = _SENTENCES.get(command)
+    if make is not None and isinstance(params, dict):
+        try:
+            names = _Names(lang, layer_name, step_names)
+            names.ahead = True
+            return _finish(lang, make(lang, params, None, names))
+        except Exception:  # _Unreadable compris : jamais d'exception jusqu'à l'utilisateur
+            pass
+    return short_title(command, catalogue, lang)
 
 
 def sentence(command, params, result, lang, layer_name=None, step_names=None, catalogue=None):
@@ -520,7 +878,7 @@ def sentence(command, params, result, lang, layer_name=None, step_names=None, ca
         return fallback(command, lang, catalogue)
     except Exception:  # jamais d'exception jusqu'à l'utilisateur
         return fallback(command, lang, catalogue)
-    return text + "."
+    return _finish(lang, text) + "."
 
 
 def detail(item, label, lang, layer_name=None, refs=None, catalogue=None, error_text=None):

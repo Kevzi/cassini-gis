@@ -10,10 +10,11 @@ quand le noyau meurt, est relancé ou arrêté. Aucun chemin absolu n'est affich
 import json
 
 try:  # importé à plat par les tests, en paquet par QGIS
-    from . import agentview, runlog, texts
+    from . import agentview, runlog, summary, texts
 except ImportError:  # pragma: no cover
     import agentview
     import runlog
+    import summary
     import texts
 
 CHANNEL_TAKEN = "external.channel_taken"
@@ -178,8 +179,9 @@ def busy(state):
 
 
 def label(command, catalogue, lang):
-    """`IA externe · Décrit une couche.` : la ligne est marquée comme venant de l'IA externe."""
-    return "%s · %s" % (texts.tr(lang, "external_tag"), agentview.describe(command, catalogue, lang))
+    """`IA externe · Décrit une couche` : la ligne est marquée comme venant de l'IA externe,
+    et se lit par le titre court de la commande, jamais sa description entière."""
+    return "%s · %s" % (texts.tr(lang, "external_tag"), summary.short_title(command, catalogue, lang))
 
 
 def duration_text(duration_ms, lang):
