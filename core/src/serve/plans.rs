@@ -7,6 +7,8 @@
 //! `Session::call` (journal, chemins, annulation), une à la fois, les références `step:k`
 //! étant résolues depuis les sorties déjà obtenues : le journal garde les valeurs résolues,
 //! sauf un raster (`RasterPath`), dont `step:k` devient le repère `out:<ligne du journal>.1`.
+//! Avant d'être gardé, le plan du modèle est complété par les conversions de points
+//! (`plan_completion`, ticket 11.22) : seul `plan.propose` le fait, jamais `command.run`.
 
 use std::path::Path;
 
@@ -17,11 +19,13 @@ use crate::agent_inventory::{
     model_inventory, ModelInventory, ShortIds, WorkFile, INVENTORY_BUDGET_CHARS,
     INVENTORY_LOW_CHARS,
 };
+use crate::dem::epsg_of;
 use crate::error::ErrorReport;
 use crate::exec::Executor;
 use crate::journal::intermediate_files;
 use crate::plan::{raster_markers, resolve_references, Plan};
-use crate::registry::{Registry, RegistryError};
+use crate::plan_completion::{complete_conversions, TRANSFORM_POINT};
+use crate::registry::{Registry, RegistryError, RunsIn};
 
 /// Ce qui compose un plan depuis une demande en langage naturel (port du noyau ; son
 /// implémentation par le modèle local vit hors de `core`, qui ne dépend pas de l'IA).
@@ -214,6 +218,21 @@ pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<V
         }
     }
     verify(state, &plan).map_err(RpcError::business)?;
+    // Le plan vérifié du modèle, garde-fou d'AD-23 compris, est complété par les conversions de
+    // points (amendement d'AD-19, ticket 11.22) si l'extension annonce le geste, puis revérifié :
+    // le plan complété est gardé, montré, exécuté et journalisé comme un plan ordinaire.
+    if is_available(state, TRANSFORM_POINT, Some(RunsIn::Qgis)) {
+        let session = state.session.as_ref();
+        // Le système du raster est lu dans l'en-tête du GeoTIFF, par la règle de chemin d'un
+        // appel (AD-9, AD-20) ; illisible ou introuvable, il est inconnu et rien n'est ajouté.
+        let raster_epsg = |raw: &str| {
+            session
+                .and_then(|s| s.input_path(raw))
+                .and_then(|path| epsg_of(&path).ok())
+        };
+        plan = complete_conversions(state.registry, plan, &raster_epsg);
+        verify(state, &plan).map_err(RpcError::business)?;
+    }
     state.next_plan += 1;
     let id = format!("plan-{}", state.next_plan);
     let shown = serde_json::to_value(&plan).expect("un plan se sérialise");

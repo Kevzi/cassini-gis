@@ -258,6 +258,21 @@ impl<'a> Session<'a> {
         self.work_dir.join(JOURNAL_FILE)
     }
 
+    /// Chemin absolu d'un fichier d'entrée `raw` tel qu'un appel le résoudrait : relatif au
+    /// dossier du projet, ou absolu (AD-9). Lecture seule, rien n'est journalisé (ticket 11.22).
+    /// `None` si le chemin ne se représente pas depuis le projet.
+    pub fn input_path(&self, raw: &str) -> Option<PathBuf> {
+        let resolver = Resolver {
+            registry: self.registry,
+            project_dir: &self.project_dir,
+            out_dir: &self.work_dir,
+        };
+        resolver
+            .resolve_path(raw)
+            .ok()
+            .map(|(_, absolute, _)| absolute)
+    }
+
     /// Les `limit` dernières étapes du journal, pour que le panneau les montre à la réouverture
     /// du projet : chacune réduite à son numéro, sa commande, ses paramètres (résumés au-delà de
     /// 200 octets), son issue (`result`, `error` ou `cancelled`) et, s'il y a lieu, `origin`,

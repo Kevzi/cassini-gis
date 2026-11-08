@@ -3659,6 +3659,147 @@ mod tests {
             {"command":"terrain.viewshed","params":{"dem":"step:1","observer":dem_center()}}]})
     }
 
+    // ---- Ticket 11.22 : conversions de points ajoutées au plan par le noyau ----
+
+    /// L'extension annonce la conversion d'un point et l'inventaire.
+    const CONVERSION: [&str; 2] = ["data.transform_point", "project.inventory"];
+
+    /// Deux points WGS84 ; le MNT de test est en Lambert-93.
+    fn wgs_a() -> Value {
+        json!({"x": 2.40, "y": 48.73, "epsg": 4326})
+    }
+
+    fn wgs_b() -> Value {
+        json!({"x": 2.41, "y": 48.74, "epsg": 4326})
+    }
+
+    /// Ligne de vue entre deux points WGS84 sur `dem/plan.tif`, tel que le modèle l'écrit.
+    fn line_of_sight_in_wgs84() -> Value {
+        json!({"kind":"calls","calls":[
+            {"command":"terrain.line_of_sight","params":{"dem":"dem/plan.tif",
+                "observer":wgs_a(),"target":wgs_b()}}]})
+    }
+
+    /// Répond à l'ordre de conversion comme le geste de QGIS, par le point `to`.
+    fn answer_conversion(c: &Client, order: &Value, from: Value, to: &Value) {
+        assert_eq!(
+            order["params"]["params"],
+            json!({"point": from, "target_epsg": 2154})
+        );
+        c.send(reply(&order["id"], json!({"point": to})));
+    }
+
+    #[test]
+    fn a_wgs84_point_on_a_lambert_dem_is_converted_by_a_step_the_core_adds() {
+        let mut c = Client::start_with(CANCEL_GRACE, composer(line_of_sight_in_wgs84()));
+        with_dem(&c);
+        c.hello_with(&CONVERSION);
+        let proposed = c.propose(2);
+        assert_eq!(proposed["result"]["plan_id"], "plan-1", "{proposed}");
+        assert_eq!(
+            proposed["result"]["plan"],
+            json!({"kind":"calls","calls":[
+                {"command":"data.transform_point","params":{"point":wgs_a(),"target_epsg":2154}},
+                {"command":"data.transform_point","params":{"point":wgs_b(),"target_epsg":2154}},
+                {"command":"terrain.line_of_sight","params":{"dem":"dem/plan.tif",
+                    "observer":"step:1.point","target":"step:2.point"}}]})
+        );
+        let (a, b) = (
+            json!({"x": 652100.0, "y": 6850100.0, "epsg": 2154}),
+            json!({"x": 652300.0, "y": 6850200.0, "epsg": 2154}),
+        );
+        c.execute(3, "plan-1");
+        let order = c.expect_step("plan-1", 1, "data.transform_point");
+        answer_conversion(&c, &order, wgs_a(), &a);
+        let order = c.expect_step("plan-1", 2, "data.transform_point");
+        answer_conversion(&c, &order, wgs_b(), &b);
+        let notice = c.recv();
+        assert_eq!(notice["params"]["command"], "terrain.line_of_sight");
+        let done = c.recv();
+        assert_eq!(done["id"], 3, "{done}");
+        let steps = done["result"]["steps"].as_array().unwrap();
+        assert_eq!(steps.len(), 3);
+        assert!(steps[2]["result"]["visible"].is_boolean(), "{done}");
+        // Les conversions sont des lignes ordinaires, avec leur place dans le plan ; la ligne de
+        // vue garde les points résolus.
+        let journal = c.journal();
+        let ids: Vec<&str> = journal.iter().map(|l| l["id"].as_str().unwrap()).collect();
+        assert_eq!(
+            ids,
+            [
+                "data.transform_point",
+                "data.transform_point",
+                "terrain.line_of_sight"
+            ]
+        );
+        let steps: Vec<&Value> = journal.iter().map(|l| &l["plan_step"]).collect();
+        assert_eq!(steps, [&json!(1), &json!(2), &json!(3)]);
+        assert_eq!(journal[2]["params"]["observer"], a);
+        assert_eq!(journal[2]["params"]["target"], b);
+        // Le rejeu redemande les deux conversions et redonne la même ligne de vue.
+        c.send(json!({"jsonrpc":"2.0","id":4,"method":"journal.replay"}));
+        let order = c.recv();
+        answer_conversion(&c, &order, wgs_a(), &a);
+        let order = c.recv();
+        answer_conversion(&c, &order, wgs_b(), &b);
+        let replayed = c.recv();
+        assert_eq!(
+            replayed["result"],
+            json!({"steps": 3, "identical": true}),
+            "{replayed}"
+        );
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn a_list_of_wgs84_observers_is_completed_point_by_point() {
+        let plan = json!({"kind":"calls","calls":[
+            {"command":"terrain.viewshed_cumulative","params":{"dem":"dem/plan.tif",
+                "observers":[wgs_a(), dem_center(), wgs_b()]}}]});
+        let mut c = Client::start_with(CANCEL_GRACE, composer(plan));
+        with_dem(&c);
+        c.hello_with(&CONVERSION);
+        let proposed = c.propose(2);
+        assert_eq!(
+            proposed["result"]["plan"]["calls"][2]["params"]["observers"],
+            json!(["step:1.point", dem_center(), "step:2.point"]),
+            "{proposed}"
+        );
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn without_the_announced_gesture_or_with_an_unreadable_dem_the_plan_is_unchanged() {
+        // Geste non annoncé : le plan reste celui du modèle.
+        let mut c = Client::start_with(CANCEL_GRACE, composer(line_of_sight_in_wgs84()));
+        with_dem(&c);
+        c.hello_with(&["project.inventory"]);
+        let proposed = c.propose(2);
+        assert_eq!(proposed["result"]["plan"], line_of_sight_in_wgs84());
+        c.close().1.unwrap();
+        // MNT introuvable : rien n'est ajouté, l'exécution rendra son erreur habituelle.
+        let mut c = Client::start_with(CANCEL_GRACE, composer(line_of_sight_in_wgs84()));
+        c.hello_with(&CONVERSION);
+        let proposed = c.propose(2);
+        assert_eq!(proposed["result"]["plan"], line_of_sight_in_wgs84());
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn a_direct_call_is_never_completed_and_stays_refused() {
+        let mut c = Client::start(CANCEL_GRACE);
+        with_dem(&c);
+        c.hello_with(&CONVERSION);
+        c.send(json!({"jsonrpc":"2.0","id":2,"method":"command.run",
+            "params":{"command":"terrain.line_of_sight","params":{"dem":"dem/plan.tif",
+                "observer":wgs_a(),"target":wgs_b()}}}));
+        let refused = c.recv();
+        assert_eq!(code_of(&refused), "terrain.crs_mismatch", "{refused}");
+        // Aucune conversion n'a été demandée à l'extension.
+        c.assert_silent();
+        c.close().1.unwrap();
+    }
+
     #[test]
     fn a_raster_cited_by_step_is_journaled_as_a_marker_and_replays_on_the_new_raster() {
         let mut c = Client::start_with(CANCEL_GRACE, composer(slope_then_viewshed()));

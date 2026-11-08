@@ -446,6 +446,24 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   terrain continue d'exiger le système du MNT : une conversion n'est jamais
   insérée en silence avant un calcul, elle est une étape `coord.convert`
   visible du plan.
+- **Amendement (2026-11-08, ticket 11.22) :** la conversion d'un point vers le
+  système du raster d'une commande du noyau est une étape `data.transform_point`
+  (exécutée par QGIS), que **le noyau ajoute au plan** dans `plan.propose`, après
+  la vérification du plan du modèle et le garde-fou d'AD-23, avant de le montrer :
+  - un point par étape ;
+  - juste avant la commande qui l'emploie ;
+  - la commande reçoit `step:k.point`, et les références suivantes sont
+    renumérotées.
+
+  Le noyau ne l'ajoute que si le système du point diffère de celui du raster, lu
+  par le noyau dans l'en-tête du GeoTIFF (AD-20), et si l'extension annonce
+  `data.transform_point`. Un raster cité par `step:k` est suivi jusqu'à l'étape
+  `k` (une commande du noyau garde la grille de son raster) ; un système inconnu
+  ou un raster illisible n'ajoute rien. Un point déjà cité par une référence n'est
+  jamais converti une seconde fois. Le plan complété est revérifié, puis gardé,
+  montré, exécuté et journalisé comme un plan ordinaire. Un appel direct
+  (`command.run`, MCP, CLI `run`) ou un rejeu n'est jamais complété : il reste
+  refusé par `terrain.crs_mismatch`.
 
 ### AD-20 — Le noyau lit ses rasters lui-même, derrière un seul module remplaçable
 
@@ -556,6 +574,12 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
     - **D'une étape.** Le paramètre entier est une référence `step:` vers un
       champ que le schéma de sortie de cette étape déclare `Point`. Une
       coordonnée lue dans l'inventaire du projet ne compte pas.
+      *Amendement du 2026-11-08 (ticket 11.22) :* `step:k.point` est aussi admis
+      comme **élément d'un tableau de `Point`** (`observers`, `sources`), et
+      seulement là ; il désigne le `point` rendu par une étape `k` précédente, et
+      la vérification du plan comme le garde-fou le contrôlent comme au premier
+      niveau. Le garde-fou s'applique au plan du modèle, avant la complétion
+      d'AD-19 ; les étapes que celle-ci ajoute sont du noyau.
     - **Où.** Une fonction pure du noyau, appliquée au plan validé, sans changer
       le prompt ni le tour de redemande ; tous les chemins de composition y
       passent (canal, ligne de commande, mesures). Une sortie rejetée par la

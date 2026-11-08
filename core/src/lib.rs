@@ -19,6 +19,7 @@ pub mod geojson;
 pub mod horn;
 pub mod journal;
 pub mod plan;
+pub mod plan_completion;
 pub mod point;
 pub mod raster_path;
 pub mod registry;
