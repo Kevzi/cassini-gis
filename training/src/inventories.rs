@@ -1592,6 +1592,41 @@ impl Builder {
         self.add_sourced(rng, "mnt", epsg, files, &["dem/"])
     }
 
+    /// Deux MNT du même système, de résolutions distinctes (Annecy, 2026-11-08 : 25 m et 5 m) :
+    /// nom et fichier de chacun portent sa résolution (« MNT 5 m », `mnt_5m.tif`), pour qu'une
+    /// phrase les désigne par elle (« sur le MNT à 5 m »). Rend les deux couches et leurs
+    /// résolutions en mètres ; leurs `source` sont protégées comme celle de `add_dem`.
+    pub fn add_dem_pair(&mut self, rng: &mut Rng, epsg: u32) -> ((Layer, u32), (Layer, u32)) {
+        let mut res = [1u32, 5, 25];
+        rng.shuffle(&mut res);
+        let (r1, r2) = (res[0], res[1]);
+        let first = self.add_dem(rng, epsg);
+        let dir = first
+            .source
+            .rsplit_once('/')
+            .map_or(String::new(), |(d, _)| format!("{d}/"));
+        let named = |rng: &mut Rng, r: u32| match rng.below(2) {
+            0 => format!("MNT {r} m"),
+            _ => format!("Modèle numérique de terrain {r} m"),
+        };
+        let mut a = first.clone();
+        a.id = layer_id(rng, &format!("mnt_{r1}m"));
+        a.name = named(rng, r1);
+        a.source = format!("{dir}mnt_{r1}m.tif");
+        let mut b = first;
+        b.id = layer_id(rng, &format!("mnt_{r2}m"));
+        b.name = named(rng, r2);
+        b.source = format!("{dir}mnt_{r2}m.tif");
+        if let Some(last) = self.layers.last_mut() {
+            last.id = a.id.clone();
+            last.name = a.name.clone();
+            last.source = a.source.clone();
+        }
+        self.sourced.push(self.layers.len());
+        self.layers.push(b.clone());
+        ((a, r1), (b, r2))
+    }
+
     /// Ajoute le raster du thème `key` qu'un plan cite par son `source` (le raster de coût de
     /// 11.12, lot 2b-1), dans le système `epsg`, sa `source` protégée comme celle du MNT.
     pub fn add_raster(&mut self, rng: &mut Rng, key: &str, epsg: u32) -> Layer {
