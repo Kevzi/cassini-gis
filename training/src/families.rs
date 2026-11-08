@@ -2855,7 +2855,7 @@ fn refus_hors_registre(rng: &mut Rng) -> Option<Example> {
             let zones = b.add(rng, zkey, &[], &[], &[]);
             let z = &zones.theme.noun;
             let stat = *rng.pick(&["moyenne", "maximale", "minimale", "médiane"]);
-            let (body, q) = match rng.below(7) {
+            let (body, q) = match rng.below(8) {
                 0 => (
                     format!("Calcule l'altitude {stat} de chaque {}", z.sg),
                     false,
@@ -2886,6 +2886,45 @@ fn refus_hors_registre(rng: &mut Rng) -> Option<Example> {
                     format!("Calcule la pente du MNT et sa valeur {stat} par {}", z.sg),
                     false,
                 ),
+                // La forme de S24 (essai terrain-11-18) : point écrit, hauteur et rayon, puis la
+                // statistique par zone ; le plan entier reste refusé.
+                6 => {
+                    let o = lambert_origin(rng);
+                    // Une forme « X / Y (système) » parmi les autres, sans figer celle de S24.
+                    let p = if rng.chance(1, 3) {
+                        let x = o.point["x"].as_u64().unwrap();
+                        let y = o.point["y"].as_u64().unwrap();
+                        let (xs, ys) = if rng.chance(1, 2) {
+                            (thousands(x), thousands(y))
+                        } else {
+                            (x.to_string(), y.to_string())
+                        };
+                        let crs = *rng.pick(&["Lambert-93", "Lambert 93", "EPSG:2154"]);
+                        format!("le point {xs} / {ys} ({crs})")
+                    } else {
+                        o.place
+                    };
+                    let mut body = format!("Calcule le champ de vision depuis {p}");
+                    if rng.chance(2, 3) {
+                        body.push_str(&eye_clause(rng).1);
+                    }
+                    if rng.chance(2, 3) {
+                        body.push_str(&radius_clause(rng).1);
+                    }
+                    let its = match stat {
+                        "moyenne" => "sa moyenne",
+                        "maximale" => "son maximum",
+                        "minimale" => "son minimum",
+                        _ => "sa médiane",
+                    };
+                    let tail = match rng.below(3) {
+                        0 => format!(", puis {its} par {}", z.sg),
+                        1 => format!(", puis sa valeur {stat} par {}", z.sg),
+                        _ => format!(", puis calcule {its} pour chaque {}", z.sg),
+                    };
+                    body.push_str(&tail);
+                    (body, false)
+                }
                 _ => {
                     let p = lambert_origin(rng).place;
                     let tail = match rng.below(2) {
@@ -5847,7 +5886,8 @@ mod tests {
                 .unwrap()
                 .iter()
                 .filter(|l| {
-                    l["kind"] == "raster" && l["layer_id"].as_str().unwrap().starts_with("mnt")
+                    let id = l["layer_id"].as_str().unwrap();
+                    l["kind"] == "raster" && ["mnt", "MNT", "Mod"].iter().any(|p| id.starts_with(p))
                 })
                 .collect();
             if dems.len() < 2 {
@@ -5861,8 +5901,17 @@ mod tests {
                 .find(|l| l["source"] == cited)
                 .expect("MNT cité absent");
             let name = layer["name"].as_str().unwrap();
-            // « MNT 5 m » : « à 5 m », « de 5 m », ou le nom de la couche entre guillemets.
-            let res = name.rsplit(' ').nth(1).unwrap();
+            // « MNT 5 m » ou « mnt_5m_vallee » : « à 5 m », « de 5 m », ou le nom entre guillemets.
+            let res: String = name
+                .split(|c: char| !c.is_ascii_digit())
+                .find(|d| !d.is_empty())
+                .unwrap()
+                .to_string();
+            // Le fichier n'est pas l'identifiant : le plan cite la `source`.
+            assert!(!layer["layer_id"]
+                .as_str()
+                .unwrap()
+                .starts_with(cited.rsplit('/').next().unwrap().trim_end_matches(".tif")));
             assert!(
                 e.request.contains(&format!("« {name} »"))
                     || e.request.contains(&format!("à {res} m"))
@@ -5884,6 +5933,43 @@ mod tests {
         assert!(examples
             .iter()
             .any(|e| e.request.starts_with("Que voit-on depuis")));
+    }
+
+    #[test]
+    fn an_unopened_dem_of_the_folder_is_never_the_one_cited() {
+        // C02 et K02 d'`epic11_reel` (2026-11-08) : un MNT du dossier non ouvert, que la phrase
+        // ne désigne pas ; le plan cite le MNT ouvert.
+        let mut seen = 0;
+        for family in [champ_de_vision, points_hauts, champ_de_vision_cumule] {
+            for e in valid(family, 300) {
+                let files: Vec<&str> = e.inventory["unloaded_files"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter_map(|f| f["path"].as_str())
+                    .collect();
+                if files.is_empty() {
+                    continue;
+                }
+                // La phrase ne désigne pas le MNT non ouvert.
+                for f in &files {
+                    let stem = f.rsplit('/').next().unwrap().trim_end_matches(".tif");
+                    assert!(!e.request.contains(stem), "{}", e.request);
+                }
+                let Some(calls) = e.expected["calls"].as_array() else {
+                    continue;
+                };
+                seen += 1;
+                let dem = calls[calls.len() - 1]["params"]["dem"].as_str().unwrap();
+                assert!(!files.contains(&dem), "{}", e.request);
+                assert!(e.inventory["layers"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|l| l["source"] == dem));
+            }
+        }
+        assert!(seen > 0, "aucun MNT non ouvert");
     }
 
     #[test]
@@ -6011,6 +6097,11 @@ mod tests {
             .collect();
         assert!(stats.iter().any(|e| e.request.contains("pente")));
         assert!(stats.iter().any(|e| e.request.contains("voit")));
+        // La forme de S24 : point écrit, puis la statistique par zone.
+        assert!(stats.iter().any(|e| e
+            .request
+            .starts_with("Calcule le champ de vision depuis le point")
+            && e.request.contains(", puis ")));
         for e in stats {
             assert_eq!(e.expected["kind"], "refusal", "{}", e.request);
         }
