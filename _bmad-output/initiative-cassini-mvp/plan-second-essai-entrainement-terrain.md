@@ -3,7 +3,7 @@ title: 'Exemples corrigés et second essai du ré-entraînement terrain'
 type: 'feature'
 ticket: ''
 created: '2026-11-08'
-status: 'built'
+status: 'done'
 baseline_revision: '2c0012673d9f85c786f1f9ceb8fb6c84e2365ee0'
 route: 'oneshot'
 route_source: 'auto'
@@ -33,6 +33,32 @@ Puis tests du générateur, entraînement par la commande unique vers `~/cassini
 ## Implementation Notes
 
 Route courte : trois retouches du générateur, moins de 100 lignes. Le fichier non ouvert vient de `Builder::add_dem`, donc de toutes les familles de terrain. Ses noms ne reprennent pas `mnt_zone_nord`, le fichier de l'essai.
+
+Entraînement (2026-11-08, 9 h 05 → 15 h 49, commit `099deaa`, `~/cassini-entrainement/terrain-11-18b`) :
+- Validation : 292/300.
+- Fusionné, SHA-256 `24a3f063…`, copié dans `C:\Users\kevin\cassini-modeles\ajuste-terrain-11-18b\`. **Non installé.**
+
+Essais GPU (`--features cuda`), barres de 11.16 :
+
+| Essai | Barre | 11.16 | terrain-11-18 | terrain-11-18b |
+|---|---|---|---|---|
+| `plan_reel` | ≥ 23/25 | 23/25 | 22/25 | **24/25** |
+| `question_reel` | ≥ 11/12 | 12/12 | 12/12 | 12/12 |
+| `ecart_reel` | ≥ 32/40 | 34/40 | 36/40 | 32/40 (tout juste) |
+| `echelle_utm_reel` | ≥ 7/8 | 8/8 | 8/8 | 8/8 |
+| `terrain_reel` | ≥ 7/8 | 8/8 | 8/8 | 7/8 |
+| `epic11_reel` | chaque commande ≥ 1/2 | 27/28 | 26/28 | **28/28** (F03 rouge comme en 11.16) |
+
+**Toutes les barres sont tenues.**
+
+Sonde QGIS sur Annecy, modèle neuf sans installation :
+- Phrase 1, champ de vision WGS84 sur le MNT à 5 m : plan juste (conversion, puis le fichier `mnt/mnt-annecy-5m.tif`). Le noyau refuse le rayon de 5 km (`terrain.viewshed_too_large`, au plus 2,5 km à 5 m) : c'est une borne du noyau, pas une faute du modèle.
+- Phrase 2, ligne de vue : la conversion manque encore (`terrain.crs_mismatch`).
+- Phrase 3, champ de vision cumulé en WGS84 : un plan sans conversion, au lieu de la question attendue (`terrain.crs_mismatch`).
+- Phrase 4, pente : juste.
+- Rejeu identique.
+
+Installation : décision du propriétaire.
 
 ## Verification
 
