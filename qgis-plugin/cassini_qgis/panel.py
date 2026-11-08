@@ -9,8 +9,9 @@ import os
 import time
 
 from qgis.PyQt.QtCore import QEvent, QRect, QSettings, Qt, QTimer, QUrl
-from qgis.PyQt.QtGui import QDesktopServices, QFontDatabase, QIcon, QPalette
+from qgis.PyQt.QtGui import QDesktopServices, QFontDatabase, QIcon, QPalette, QTextCursor
 from qgis.PyQt.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -205,27 +206,34 @@ def _clear(layout):
 class _StepRow(QFrame):
     """Une étape : icône, mot d'état en demi-gras, libellé, et son message en erreur.
 
-    L'étape en cours porte le marqueur (`step_current`). Un clic montre son détail.
+    L'étape en cours porte le marqueur (propriété `current`, stylée par la feuille de la
+    carte). Un clic montre son détail.
+
+    `parent` : la carte qui la reçoit. Créés sans parent, la ligne et ses libellés
+    résolvaient leur police pour l'écran principal (96 ppp) et la gardaient une fois posés
+    dans la carte (Qt ne compare pas la résolution des polices) ; peints à 144 ppp sur un
+    écran mis à l'échelle (150 %), ils débordaient de leur taille mesurée : mot d'état
+    tronqué, texte rogné en hauteur (défaut de 12.1 relevé en 12.2).
     """
 
-    def __init__(self, icon, word, text, message="", style="", on_click=None):
-        super().__init__()
+    def __init__(self, icon, word, text, message="", current=False, on_click=None, parent=None):
+        super().__init__(parent)
         self.setObjectName("cassiniStep")
+        self.setProperty("current", bool(current))
         self._on_click = on_click
-        if style:
-            self.setStyleSheet(style)
         row = QHBoxLayout(self)
         row.setContentsMargins(4, 3, 4, 3)
         row.setSpacing(6)
         top = Qt.AlignmentFlag.AlignTop
-        row.addWidget(QLabel(icon), 0, top)
-        row.addWidget(_title(QLabel(word)), 0, top)
+        # Libellés créés dans la ligne : leur police est résolue pour l'écran de la carte.
+        row.addWidget(QLabel(icon, self), 0, top)
+        row.addWidget(_title(QLabel(word, self)), 0, top)
         col = QVBoxLayout()
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(2)
-        col.addWidget(_wrap(QLabel(text), plain=True, selectable=False))
+        col.addWidget(_wrap(QLabel(text, self), plain=True, selectable=False))
         if message:
-            col.addWidget(_wrap(QLabel(message), plain=True, selectable=False))
+            col.addWidget(_wrap(QLabel(message, self), plain=True, selectable=False))
         row.addLayout(col, 1)
         self.setAccessibleName(" ".join(p for p in (word, text, message) if p))
         if on_click is not None:  # au clavier aussi : Tab, puis Entrée ou Espace
@@ -337,6 +345,13 @@ class CassiniPanel(QWidget):
         self._styles = None  # feuilles de style de la paire claire ou sombre
         self._primary_shown = None
         self._styling = False
+        # Guidage [12.2].
+        self._cues = []  # lignes « À vous »
+        self._titles = []  # titres de carte qui prennent le focus
+        self._rephrase_buttons = []  # (bouton, ligne meta) de chaque carte
+        self._rephrased = False  # la phrase est revenue dans la saisie : bouton retiré
+        self._rephrase_note = None  # clé du texte quand rien n'a pu être remis
+        self._focus_target = None  # dernière cible du focus appliquée (une fois par état)
         self._build()
         expert = str(settings.value(EXPERT_KEY, "false")).lower() in ("true", "1")
         self.expert.set_open(expert)
@@ -375,6 +390,37 @@ class CassiniPanel(QWidget):
         row.addWidget(label, 1)
         layout.addLayout(row)
         return label
+
+    def _focusable(self, label):
+        """Titre de carte qui reçoit le focus du guidage [12.2] (et entre dans la tabulation)."""
+        label.setObjectName("cassiniCardTitle")
+        label.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        self._titles.append(label)
+        return label
+
+    def _new_cue(self, layout):
+        """Ligne « À vous » (`act-cue`), cachée tant qu'il n'y a rien à faire."""
+        cue = _wrap(QLabel(), plain=True, selectable=False)
+        cue.setObjectName("cassiniCue")
+        cue.setVisible(False)
+        self._cues.append(cue)
+        layout.addWidget(cue)
+        return cue
+
+    def _new_rephrase(self, layout):
+        """« Reformuler la demande » et sa ligne `meta` ; rend (bouton, ligne)."""
+        button = QPushButton()
+        button.clicked.connect(self._rephrase)
+        button.setVisible(False)
+        detail = self._meta(_wrap(QLabel(), selectable=False))
+        detail.setVisible(False)
+        row = QHBoxLayout()
+        row.addWidget(button, 0, Qt.AlignmentFlag.AlignTop)
+        row.addStretch(1)
+        layout.addLayout(row)
+        layout.addWidget(detail)
+        self._rephrase_buttons.append((button, detail))
+        return button, detail
 
     def _build(self):
         col = QVBoxLayout(self)
@@ -543,7 +589,7 @@ class CassiniPanel(QWidget):
 
         # Carte de composition : « Je prépare un plan… », indicateur, Arrêter.
         self.composing_card, cl = self._new_card()
-        self.composing_title = self._card_title(cl)
+        self.composing_title = self._focusable(self._card_title(cl))
         self.plan_progress = QProgressBar()
         self.plan_progress.setRange(0, 0)  # indéterminée : la composition ne se mesure pas
         self.plan_progress.setTextVisible(False)
@@ -570,6 +616,8 @@ class CassiniPanel(QWidget):
         fdl.setContentsMargins(0, 0, 0, 0)
         fdl.addWidget(self.failed_details_view)
         fl.addWidget(self.failed_text)
+        self.failed_cue = self._new_cue(fl)
+        self.failed_rephrase, self.failed_rephrase_detail = self._new_rephrase(fl)
         fl.addWidget(self.failed_details)
         fil.addWidget(self.failed_card)
 
@@ -580,11 +628,14 @@ class CassiniPanel(QWidget):
         self.question_left_out = self._meta(_wrap(QLabel()))
         ql.addWidget(self.question_text)
         ql.addWidget(self.question_left_out)
+        self.question_cue = self._new_cue(ql)
         fil.addWidget(self.question_card)
 
         # Carte de refus.
         self.rejected_card, rl = self._new_card()
         self.rejected_title = self._card_title(rl)
+        self.rejected_cue = self._new_cue(rl)
+        self.rejected_rephrase, self.rejected_rephrase_detail = self._new_rephrase(rl)
         fil.addWidget(self.rejected_card)
 
         # Carte du plan validé, repliée : « ✔ Plan validé — n étapes », « Voir ».
@@ -603,7 +654,13 @@ class CassiniPanel(QWidget):
 
         # Carte du plan : titre, étapes en lecture seule, Valider / Refuser ou Arrêter.
         self.plan_card, pl = self._new_card()
-        self.plan_title = self._card_title(pl)
+        self.plan_title = self._focusable(self._card_title(pl))
+        # Repère d'avancement (`progress-cue`) : « Étape k sur n en cours », sous le titre.
+        self.progress_cue = self._meta(_wrap(QLabel(), selectable=False))
+        self.progress_cue.setTextFormat(Qt.TextFormat.RichText)
+        self.progress_cue.setVisible(False)
+        self.progress_cue.setContentsMargins(22, 0, 0, 0)  # aligné sur le texte du titre
+        pl.addWidget(self.progress_cue)
         self.plan_steps = QVBoxLayout()
         self.plan_steps.setContentsMargins(0, 0, 0, 0)
         self.plan_steps.setSpacing(2)
@@ -612,6 +669,7 @@ class CassiniPanel(QWidget):
         self.left_out_note = self._meta(_wrap(QLabel()))
         self.left_out_note.setVisible(False)
         pl.addWidget(self.left_out_note)
+        self.plan_cue = self._new_cue(pl)
         self.approve_button = QPushButton()
         self.approve_button.clicked.connect(self._approve)
         self.reject_button = QPushButton()
@@ -636,13 +694,15 @@ class CassiniPanel(QWidget):
 
         # Carte de résultat : une ligne par étape en clair, Ouvrir le dossier, Détails.
         self.result_card, resl = self._new_card()
-        self.result_title = self._card_title(resl)
+        self.result_title = self._focusable(self._card_title(resl))
         self.result_rows = QVBoxLayout()
         self.result_rows.setContentsMargins(0, 0, 0, 0)
         self.result_rows.setSpacing(2)
         resl.addLayout(self.result_rows)
         self.result_text = _wrap(QLabel(), plain=True)
         resl.addWidget(self.result_text)
+        self.result_cue = self._new_cue(resl)
+        self.result_rephrase, self.result_rephrase_detail = self._new_rephrase(resl)
         self.open_folder_button = QPushButton()
         self.open_folder_button.clicked.connect(self._open_folder)
         self.result_stop = QPushButton()
@@ -741,11 +801,14 @@ class CassiniPanel(QWidget):
         order = [
             self.settings_button, self.lang_box, self.model_box, self.external_switch,
             self.external_ask, self.banner_button, self.external_stop, self.external_cut,
-            self.approval_allow, self.approval_deny, self.failed_details.button,
-            self.plan_toggle, self.approve_button, self.reject_button, self.plan_stop_button,
-            self.plan_details.button, self.details.button, self.result_stop,
-            self.open_folder_button, self.log_fold.button, self.log_list, self.expert.button,
-            self.command_list, self.run_button, self.stop_button, self.input, self.send_button,
+            self.approval_allow, self.approval_deny, self.composing_title,
+            self.failed_rephrase, self.failed_details.button, self.rejected_rephrase,
+            self.plan_toggle, self.plan_title, self.approve_button, self.reject_button,
+            self.plan_stop_button, self.plan_details.button, self.result_title,
+            # Résultat : du titre (ou de Reformuler) à la saisie, puis le reste de la carte.
+            self.result_rephrase, self.input, self.send_button, self.details.button,
+            self.result_stop, self.open_folder_button, self.log_fold.button, self.log_list,
+            self.expert.button, self.command_list, self.run_button, self.stop_button,
         ]
         for a, b in zip(order, order[1:]):
             QWidget.setTabOrder(a, b)
@@ -844,6 +907,8 @@ class CassiniPanel(QWidget):
     def _on_plan_event(self, kind, payload):
         agent = self.agent
         self.focus = None  # tout nouvel événement efface le détail cliqué
+        self._rephrased = False  # un nouvel état : Reformuler peut revenir
+        self._rephrase_note = None
         if kind == client.PLAN_PROPOSED:
             self._plan_entries = {}
             self._plan_refs = {}
@@ -868,9 +933,10 @@ class CassiniPanel(QWidget):
                 self._actions.list_models()  # la liste a changé : la redemander
             if self._last_request and not self.input.toPlainText().strip():
                 self.input.setPlainText(self._last_request)  # à corriger sans tout retaper
-            _announce(self.failed_text, self.t("live_error"))
+            _announce(self.failed_text, thread.failed_announcement(agent, self.lang))
         elif kind == client.PLAN_REJECTED:
             agent.rejected()
+            _announce(self.rejected_title, self.t("plan_rejected"))
         elif kind == client.PLAN_STEP:
             self._close_plan_entry(runlog.DONE)
             agent.step(payload.get("step"), payload.get("command"))
@@ -893,6 +959,9 @@ class CassiniPanel(QWidget):
             )
             self._plan_entries[payload.get("step")] = self._plan_entry
             self.last = {"kind": runlog.RUNNING, "plan": True, "command": label}
+            # « Étape k sur n en cours » : annoncée sans déplacer le focus.
+            # Une seule fois : le nom du titre porte déjà le repère.
+            _announce(self.progress_cue, thread.progress_text(agent, self.lang))
         elif kind == client.PLAN_DONE:
             self._close_plan_entry(runlog.DONE)
             self.last = agentview.outcome(runlog.DONE, payload, agent)
@@ -900,7 +969,7 @@ class CassiniPanel(QWidget):
             self._keep_plan_results()
             self.last["steps"] = list(agent.steps)
             self.last["refs"] = self._plan_refs
-            _announce(self.result_text, self.t("live_done"))
+            _announce(self.result_text, thread.outcome_announcement(self.last, self.lang))
         elif kind == client.PLAN_EXEC_FAILED:
             self.last = agentview.outcome(runlog.ERROR, payload, agent)
             self._close_plan_entry(runlog.ERROR, self.last["step"])
@@ -908,13 +977,13 @@ class CassiniPanel(QWidget):
             self._keep_plan_results(
                 self.last["step"], (self.last.get("code", ""), self.last.get("message", ""))
             )
-            _announce(self.result_text, self.t("live_error"))
+            _announce(self.result_text, thread.outcome_announcement(self.last, self.lang))
         elif kind == client.PLAN_CANCELLED:
             self.last = agentview.outcome(runlog.CANCELLED, payload, agent)
             self._close_plan_entry(runlog.CANCELLED, self.last["step"])
             agent.cancelled(self.last["step"], payload.get("outputs"))
             self._keep_plan_results()
-            _announce(self.result_text, self.t("live_cancelled"))
+            _announce(self.result_text, thread.outcome_announcement(self.last, self.lang))
         self.render()
 
     def on_models(self, kind, payload):
@@ -972,6 +1041,8 @@ class CassiniPanel(QWidget):
             )
             self._exchange = thread.expert_exchange(label, time.strftime("%H:%M"))
             self._plan_open = False
+            self._rephrased = False
+            self._rephrase_note = None
             self.agent.reset()  # le plan fini précédent quitte le fil (il reste au journal)
         elif kind == client.RUN_DONE:
             self.running = False
@@ -997,6 +1068,7 @@ class CassiniPanel(QWidget):
     # -- affichage -----------------------------------------------------
     def render(self):
         t = self.t
+        inside = self._focus_inside()  # lu avant de cacher des cartes (Qt déplace le focus)
         self.title.setText(t("app_title"))
         self.settings_button.setAccessibleName(t("settings"))
         self.settings_button.setToolTip(t("settings"))
@@ -1040,6 +1112,50 @@ class CassiniPanel(QWidget):
         self.footer.setText(t("offline"))
         self._render_commands()
         self._render_buttons()
+        self._move_focus(inside)
+
+    def _focus_inside(self):
+        """Le focus clavier est-il dans le panneau (hors fenêtre des réglages) ?"""
+        widget = QApplication.focusWidget()
+        return widget is not None and (widget is self or self.isAncestorOf(widget))
+
+    def _move_focus(self, inside):
+        """Le focus va, une fois par état, où le dit `thread.focus_target` ; jamais hors du
+        panneau ni pendant que l'utilisateur tape (l'annonce suffit alors)."""
+        target = thread.focus_target(
+            self.agent, self._exchange, self.last, self.focus, self._guide()
+        )
+        if target == self._focus_target:
+            return
+        if target is None or not thread.may_move_focus(
+            inside, self.input.hasFocus(), bool(self.input.toPlainText().strip())
+        ):
+            self._focus_target = target  # rien à faire, ou l'utilisateur tape : pas de reprise
+            return
+        if target == thread.FOCUS_REPHRASE:
+            widget = next(
+                (b for b, _d in self._rephrase_buttons if b.isVisibleTo(self)), None
+            )
+        else:
+            widget = {
+                thread.FOCUS_INPUT: self.input,
+                thread.FOCUS_APPROVE: self.approve_button,
+                thread.FOCUS_COMPOSING: self.composing_title,
+                thread.FOCUS_PLAN_TITLE: self.plan_title,
+                thread.FOCUS_RESULT_TITLE: self.result_title,
+            }.get(target)
+        if widget is not None:
+            # Après la mise en page et le calage du fil : le widget est alors visible.
+            QTimer.singleShot(0, lambda w=widget, k=target: self._set_focus(w, k))
+
+    def _set_focus(self, widget, target):
+        """Pose le focus ; la cible n'est retenue qu'une fois le focus posé : un widget
+        grisé (Valider pendant un appel de l'IA externe) le recevra au rendu suivant."""
+        if widget.isVisible() and widget.isEnabled():
+            widget.setFocus(Qt.FocusReason.OtherFocusReason)
+            self._focus_target = target
+            if self.thread_body.isAncestorOf(widget):
+                self.thread_scroll.ensureWidgetVisible(widget, 0, 0)
 
     # -- le fil ----------------------------------------------------------
     def _apply_styles(self):
@@ -1050,9 +1166,16 @@ class CassiniPanel(QWidget):
         try:
             self._styles = thread.styles(thread.colors(self._dark()))
             for card in self._cards:
-                card.setStyleSheet(self._styles["card"])
+                # Lignes d'étape stylées par la carte, jamais par une feuille propre.
+                card.setStyleSheet(" ".join(
+                    self._styles[k] for k in ("card", "step", "step_current")
+                ))
             self.bubble.setStyleSheet(self._styles["bubble"])
             self.input.setStyleSheet(self._styles["input"])
+            for cue in self._cues:
+                cue.setStyleSheet(self._styles["cue"])
+            for title in self._titles:
+                title.setStyleSheet(self._styles["title"])
             self.logo.setPixmap(self._logo(24))
             for icon in self._small_logos:
                 icon.setPixmap(self._logo(16))
@@ -1077,15 +1200,24 @@ class CassiniPanel(QWidget):
             self._fit_bubble()
             self._fit_folds()
 
+    def _guide(self):
+        """Guidage de l'état courant (logique dans `thread.guidance`)."""
+        return thread.guidance(
+            self.agent, self._exchange, self.last, self.focus, self._rephrased,
+            self._controls(),
+        )
+
     def _style_primary(self, c):
         """Un seul bouton principal visible (DESIGN.md, `button-primary`)."""
-        which = thread.primary(c)
+        which = thread.primary(c, self._guide()["rephrase"])
         if which == self._primary_shown or self._styles is None:
             return
         self._primary_shown = which
         style = self._styles["primary"]
         self.send_button.setStyleSheet(style if which == "send" else "")
         self.approve_button.setStyleSheet(style if which == "approve" else "")
+        for button, _detail in self._rephrase_buttons:
+            button.setStyleSheet(style if which == "rephrase" else "")
 
     def _fit_bubble(self):
         """La bulle épouse sa phrase, sans dépasser 85 % du fil."""
@@ -1204,10 +1336,58 @@ class CassiniPanel(QWidget):
         )
         self.plan_toggle.setAccessibleName(thread.folded_name(n, self._plan_open, lang))
         self.result_card.setVisible(thread.RESULT in kinds)
+        self._render_guidance()
         self._fit_bubble()
         if kinds != self._kinds_shown:
             self._kinds_shown = kinds
             QTimer.singleShot(0, self._scroll_to_newest)
+
+    def _render_guidance(self):
+        """Ligne « À vous », Reformuler et repère d'avancement [12.2] (`thread.guidance`)."""
+        t = self.t
+        guide = self._guide()
+        text = thread.cue_text(guide, self.lang)
+        where = {
+            thread.PLAN: (self.plan_cue, None),
+            thread.QUESTION: (self.question_cue, None),
+            thread.FAILED: (self.failed_cue, self.failed_rephrase),
+            thread.REJECTED: (self.rejected_cue, self.rejected_rephrase),
+            thread.RESULT: (self.result_cue, self.result_rephrase),
+        }
+        cue, button = where.get(guide["card"], (None, None))
+        for label in self._cues:
+            label.setText(text if label is cue else "")
+            label.setVisible(label is cue and bool(text))
+        detail = t(self._rephrase_note or "rephrase_detail")
+        for b, d in self._rephrase_buttons:
+            shown = b is button and guide["rephrase"]
+            b.setText(t("rephrase"))
+            b.setAccessibleName(t("rephrase"))
+            b.setAccessibleDescription(detail if shown else "")
+            b.setVisible(shown)
+            d.setText(detail)
+            d.setVisible(shown)
+        dim = self.palette().color(QPalette.ColorRole.WindowText).name()
+        progress = thread.progress_text(self.agent, self.lang, emphasis=dim)
+        self.progress_cue.setText(progress)
+        self.progress_cue.setVisible(bool(progress))
+        self.plan_title.setAccessibleName(thread.plan_title_name(self.agent, self.lang))
+
+    def _rephrase(self):
+        """« Reformuler la demande » : la phrase revient dans une saisie vide, jamais
+        par-dessus un texte déjà tapé ; le focus va dans la saisie."""
+        out = thread.rephrase(self._exchange, self._last_request, self.input.toPlainText())
+        if out["text"] is not None:
+            self.input.setPlainText(out["text"])
+        if out["done"]:  # curseur à la fin, phrase rendue ou déjà là
+            cursor = self.input.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            self.input.setTextCursor(cursor)
+        self._rephrased = out["done"]
+        self._rephrase_note = out["note"]
+        self.render()
+        self.input.setFocus(Qt.FocusReason.OtherFocusReason)
+        _announce(self.input, self.t(out["note"] or "rephrase_detail"))
 
     def _render_log(self):
         t = self.t
@@ -1237,15 +1417,14 @@ class CassiniPanel(QWidget):
         `rows` : (icône, mot, texte, message, en cours ?) de `thread`. Rend les lignes.
         """
         _clear(layout)
-        style = self._styles or {}
         widgets = []
         for index, (icon, word, text, message, current) in enumerate(rows):
             if index:
                 layout.addWidget(_hline())
             click = (lambda i=index: on_click(i)) if on_click is not None else None
             row = _StepRow(
-                icon, word, text, message,
-                style.get("step_current" if current else "step", ""), click,
+                icon, word, text, message, current, click,
+                layout.parentWidget(),  # police résolue pour l'écran de la carte
             )
             layout.addWidget(row)
             widgets.append(row)
@@ -1268,6 +1447,7 @@ class CassiniPanel(QWidget):
             self.focus = ("entry", self.log.entries[row])
             self._render_result()  # sans refaire les listes pendant le clic
             self._render_thread()
+            self._style_primary(self._controls())
             _announce(self.result_text, self.result_text.text())
 
     def _plan_clicked(self, row):
@@ -1275,6 +1455,7 @@ class CassiniPanel(QWidget):
             self.focus = ("step", self.agent.steps[row])
             self._render_result()
             self._render_thread()
+            self._style_primary(self._controls())
             _announce(self.result_text, self.result_text.text())
 
     def _focus_error(self, focus):
@@ -1447,7 +1628,7 @@ class CassiniPanel(QWidget):
             thread.plan_rows(agent, self.catalogue, lang, _layer_name) if has_steps else [],
             self._plan_clicked,
         )
-        chain = [self.plan_toggle] + rows + [self.approve_button]  # ordre du fil
+        chain = [self.plan_toggle, self.plan_title] + rows + [self.approve_button]  # ordre du fil
         for a, b in zip(chain, chain[1:]):
             QWidget.setTabOrder(a, b)
         self.plan_details.setVisible(has_steps)
@@ -1479,6 +1660,9 @@ class CassiniPanel(QWidget):
         c = self._controls()
         self.send_button.setEnabled(c["send_enabled"])
         self._style_primary(c)
+        if self._rephrase_note is not None:  # « saisie remplie » : plus vrai après une frappe
+            self._rephrase_note = None
+            self._render_guidance()
 
     def _render_commands(self):
         current = self.selected["id"] if self.selected else None
@@ -1654,6 +1838,8 @@ class CassiniPanel(QWidget):
             self._exchange = thread.request_exchange(text, time.strftime("%H:%M"))
             self.last = None
             self._plan_open = False
+            self._rephrased = False
+            self._rephrase_note = None
             self.agent.generating()
             self.input.clear()
             self.focus = None  # l'étape cliquée n'existe plus
@@ -1665,6 +1851,7 @@ class CassiniPanel(QWidget):
         if self.agent.phase != agentview.PROPOSED or plan_id is None:
             return
         if self._actions.approve(plan_id):  # seul le plan_id repart (AD-5, AD-23)
+            self.plan_title.setAccessibleDescription("")  # plus « Un plan est proposé. »
             self.agent.executing()
             self.focus = None
             self.render()

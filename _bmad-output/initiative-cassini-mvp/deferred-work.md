@@ -900,3 +900,6 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `plan-bug-etapes-du-plan-en-langage-courant.md`
   summary: Vérifier la pente maximale de 5 265,7 % rendue par `terrain.slope` sur `mnt-74-25m.tif` (Annecy) : artefact du MNT (bord, valeur de remplissage) ou du calcul de pente du noyau.
   evidence: Captures du panneau du 2026-11-08, « Fais la carte des pentes du MNT à 25 m en pourcentage » ; la phrase ne fait que recopier le maximum du résultat.
+- source_plan: `epic-refonte-du-panneau/story-guidage-a-vous-repere-d-avancement-et-reformuler-plan.md`
+  summary: Le texte indicatif de la saisie grisée (« Validez ou refusez d'abord le plan ci-dessus. », « Patientez : une étape est en cours. ») est coupé sur sa deuxième ligne à 144 dpi : la hauteur de la saisie ne suit pas.
+  evidence: Captures du 2026-11-08 à 144 dpi (`%TEMP%\capture-panneau\planche-12-2-relecture.png`), états plan proposé et exécution.
