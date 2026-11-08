@@ -238,42 +238,37 @@ swatch!(
     "Dégradé des courbes, haut : brun foncé."
 );
 
-// --- Teintes d'altitude d'un MNT : teintes hypsométriques des cartes de relief de l'IGN. ---
+// --- Teintes d'altitude d'un MNT : plaines claires comme le fond du Plan IGN (révisé le
+// 2026-11-08), puis verts, bruns, et blanc de haute montagne. ---
 swatch!(
     ALT_0,
-    "#9cc58a",
-    CHOSEN,
-    "Teinte hypsométrique, 0 m : vert."
+    "#fef6da",
+    PLAN_IGN,
+    "Teinte hypsométrique, 0 m : crème, « orographie : relief - desert » du Plan IGN, sa teinte de fond claire (fond « bckgrd » blanc)."
 );
 swatch!(
-    ALT_100,
-    "#c3d99a",
+    ALT_300,
+    "#f7f2d8",
     CHOSEN,
-    "Teinte hypsométrique, 100 m : vert clair."
+    "Teinte hypsométrique, 300 m : crème à peine plus soutenu, les plaines restent claires."
 );
 swatch!(
-    ALT_200,
-    "#e5e6a6",
+    ALT_600,
+    "#e3ecc8",
     CHOSEN,
-    "Teinte hypsométrique, 200 m : jaune vert."
-);
-swatch!(
-    ALT_500,
-    "#eed9a0",
-    CHOSEN,
-    "Teinte hypsométrique, 500 m : jaune."
+    "Teinte hypsométrique, 600 m : vert très pâle."
 );
 swatch!(
     ALT_1000,
-    "#ddb57f",
+    "#c8dca4",
     CHOSEN,
-    "Teinte hypsométrique, 1000 m : ocre."
+    "Teinte hypsométrique, 1000 m : vert clair."
 );
 swatch!(
     ALT_1500,
-    "#c9925f",
+    "#ddb57f",
     CHOSEN,
-    "Teinte hypsométrique, 1500 m : brun clair."
+    "Teinte hypsométrique, 1500 m : ocre."
 );
 swatch!(
     ALT_2000,
@@ -328,9 +323,8 @@ pub const SWATCHES: &[Swatch] = &[
     CONTOUR_LOW,
     CONTOUR_HIGH,
     ALT_0,
-    ALT_100,
-    ALT_200,
-    ALT_500,
+    ALT_300,
+    ALT_600,
     ALT_1000,
     ALT_1500,
     ALT_2000,
@@ -404,15 +398,15 @@ pub fn ramp(name: &str) -> Option<&'static NamedRamp> {
     RAMPS.iter().find(|r| r.name == name)
 }
 
-/// Paliers de la rampe d'altitudes, en mètres, fixes. Resserrés en bas, mais un relief de plaine
-/// (Villeneuve-le-Roi, 30 à 100 m) n'en couvre qu'un ou deux et paraît presque plat, alors qu'un
-/// relief de montagne (Annecy, 400 à 2700 m) les parcourt presque tous. Étirer la rampe entre le
-/// minimum et le maximum réels du MNT est reporté : le noyau ne lit pas le raster ici.
+/// Paliers de la rampe d'altitudes, en mètres, fixes. Les plaines (0 à 300 m) restent crème,
+/// proches du fond du Plan IGN (révisé le 2026-11-08) : une carte de plaine, Villeneuve-le-Roi
+/// (30 à 150 m), se lit claire, sous ses couches. Un relief de montagne (Annecy, 400 à 2700 m)
+/// parcourt les verts, les bruns et le blanc des sommets. Étirer la rampe entre le minimum et le
+/// maximum réels du MNT est reporté : le noyau ne lit pas le raster ici.
 pub const ELEVATION_STOPS: &[(f64, Swatch)] = &[
     (0.0, ALT_0),
-    (100.0, ALT_100),
-    (200.0, ALT_200),
-    (500.0, ALT_500),
+    (300.0, ALT_300),
+    (600.0, ALT_600),
     (1000.0, ALT_1000),
     (1500.0, ALT_1500),
     (2000.0, ALT_2000),
@@ -420,8 +414,35 @@ pub const ELEVATION_STOPS: &[(f64, Swatch)] = &[
     (4000.0, ALT_4000),
 ];
 
-/// Opacité de l'ombrage posé en fondu sur les teintes d'altitude.
-pub const HILLSHADE_OPACITY: f64 = 0.5;
+/// Opacité de l'ombrage posé en fondu sur les teintes d'altitude. Choisie (2026-11-08) en
+/// regardant les cartes de Villeneuve-le-Roi et d'Annecy : à 0,5, une plaine paraissait kaki.
+pub const HILLSHADE_OPACITY: f64 = 0.4;
+/// Source de [`HILLSHADE_OPACITY`].
+pub const HILLSHADE_OPACITY_SOURCE: &str =
+    "choisi : ombrage léger, une plaine reste claire et la montagne garde son relief";
+
+/// Opacité des zones du PLU : 40 % de transparence, comme le préconise le CNIG.
+pub const PLU_OPACITY: f64 = 0.6;
+/// Source de [`PLU_OPACITY`].
+pub const PLU_OPACITY_SOURCE: &str = concat!(
+    "CNIG, standard PLU, « Préconisations de symbologie », section Zones : ",
+    "https://github.com/cnigfr/DDU-SG5-SYMBOLISATION/blob/HEAD/Archives/PLU/preconisations.md ",
+    "— transparence de 40 %"
+);
+
+/// Échelle de visibilité du bâti et des parcelles (décision 8 du changement de cap, ajout du
+/// 2026-11-08) : dessinés seulement aux échelles plus grandes que 1:100 000.
+pub const DETAIL_MAX_SCALE: u64 = 100_000;
+/// Source de [`DETAIL_MAX_SCALE`].
+pub const DETAIL_MAX_SCALE_SOURCE: &str =
+    "choisi : détail affiché à partir du 1:100 000, comme les cartes topographiques";
+
+/// Échelle de visibilité des petites routes (importance 5 et 6, et autres routes) : dessinées
+/// seulement aux échelles plus grandes que 1:100 000 (décision 8, ajout du 2026-11-08).
+pub const SMALL_ROADS_MAX_SCALE: u64 = 100_000;
+/// Source de [`SMALL_ROADS_MAX_SCALE`].
+pub const SMALL_ROADS_MAX_SCALE_SOURCE: &str =
+    "choisi : petites routes affichées à partir du 1:100 000, comme les cartes IGN";
 
 /// Nombre de classes et méthode du dégradé des courbes de niveau à champ d'altitude.
 pub const CONTOUR_CLASSES: u32 = 5;
@@ -578,6 +599,7 @@ fn class(values: &[&str], label: &str, stroke: Swatch, fill: Option<Swatch>, w: 
         stroke: hex(stroke),
         fill: fill.map(hex),
         width_mm: Some(w),
+        max_scale: None,
     }
 }
 
@@ -587,6 +609,40 @@ fn single(stroke: Option<Swatch>, fill: Option<Swatch>, w: Option<f64>) -> Style
         fill: fill.map(hex),
         width_mm: w,
         opacity: None,
+        max_scale: None,
+    }
+}
+
+/// Le même style, dessiné seulement aux échelles plus grandes que 1:`scale`.
+fn shown_from(style: StyleSpec, scale: u64) -> StyleSpec {
+    match style {
+        StyleSpec::Single {
+            stroke,
+            fill,
+            width_mm,
+            opacity,
+            ..
+        } => StyleSpec::Single {
+            stroke,
+            fill,
+            width_mm,
+            opacity,
+            max_scale: Some(scale),
+        },
+        StyleSpec::Categories {
+            field,
+            classes,
+            other,
+            opacity,
+            ..
+        } => StyleSpec::Categories {
+            field,
+            classes,
+            other,
+            opacity,
+            max_scale: Some(scale),
+        },
+        other => other,
     }
 }
 
@@ -645,7 +701,10 @@ pub fn style_for(theme: Theme, layer: &LayerFacts) -> StyleSpec {
                     stroke: hex(PLU_STROKE),
                     fill: None,
                     width_mm: Some(w),
+                    max_scale: None,
                 }),
+                opacity: Some(PLU_OPACITY),
+                max_scale: None,
             }
         }
         Theme::Roads => match layer.field_named(&["importance"]) {
@@ -657,7 +716,13 @@ pub fn style_for(theme: Theme, layer: &LayerFacts) -> StyleSpec {
                     .enumerate()
                     .map(|(i, (color, w))| {
                         let value = (i + 1).to_string();
-                        class(&[&value], &format!("Importance {value}"), *color, None, w)
+                        let mut c =
+                            class(&[&value], &format!("Importance {value}"), *color, None, w);
+                        // Importance 5 et 6 : petites routes, dessinées à partir du 1:100 000.
+                        if i >= 4 {
+                            c.max_scale = Some(SMALL_ROADS_MAX_SCALE);
+                        }
+                        c
                     })
                     .collect();
                 StyleSpec::Categories {
@@ -668,7 +733,10 @@ pub fn style_for(theme: Theme, layer: &LayerFacts) -> StyleSpec {
                         stroke: hex(ROAD_6),
                         fill: None,
                         width_mm: Some(width::ROADS[5]),
+                        max_scale: Some(SMALL_ROADS_MAX_SCALE),
                     }),
+                    opacity: None,
+                    max_scale: None,
                 }
             }
             None => single(Some(ROAD_2), None, Some(width::ROADS[3])),
@@ -699,61 +767,21 @@ pub fn style_for(theme: Theme, layer: &LayerFacts) -> StyleSpec {
                         stroke: hex(FOREST),
                         fill: Some(hex(FOREST)),
                         width_mm: Some(w),
+                        max_scale: None,
                     }),
+                    opacity: None,
+                    max_scale: None,
                 }
             }
             None => single(None, Some(FOREST), None),
         },
-        Theme::Buildings => match layer.text_field_named(&["usage_1", "usage1"]) {
-            Some(field) => {
-                let w = width::BUILDING;
-                StyleSpec::Categories {
-                    field: field.name.clone(),
-                    classes: vec![
-                        class(
-                            &["Industriel", "Commercial et services"],
-                            "Industriel ou commercial",
-                            DARK_GREY,
-                            Some(BUILDING_WORK),
-                            w,
-                        ),
-                        class(
-                            &["Religieux"],
-                            "Religieux",
-                            DARK_GREY,
-                            Some(BUILDING_RELIGIOUS),
-                            w,
-                        ),
-                        class(&["Sportif"], "Sportif", DARK_GREY, Some(BUILDING_SPORT), w),
-                    ],
-                    other: Some(StyleOther {
-                        label: "Autre bâtiment".to_string(),
-                        stroke: hex(DARK_GREY),
-                        fill: Some(hex(BUILDING)),
-                        width_mm: Some(w),
-                    }),
-                }
-            }
-            None => single(Some(DARK_GREY), Some(BUILDING), Some(width::BUILDING)),
-        },
+        Theme::Buildings => shown_from(buildings(layer), DETAIL_MAX_SCALE),
         Theme::AdminLimits => single(Some(ADMIN), None, Some(width::ADMIN)),
-        Theme::Parcels => single(Some(DARK_GREY), None, Some(width::PARCEL)),
-        Theme::Contours => match layer.numeric_field_named(&["altitude", "alti", "elevation", "z"])
-        {
-            // Dégradé de bruns, seuils calculés par QGIS sur les vraies altitudes.
-            Some(field) => StyleSpec::Graduated {
-                field: field.name.clone(),
-                method: GraduatedMethod::EqualInterval,
-                class_count: CONTOUR_CLASSES,
-                ramp: ColorRamp {
-                    from: hex(CONTOUR_LOW),
-                    to: hex(CONTOUR_HIGH),
-                },
-                stroke: None,
-                width_mm: Some(width::CONTOUR),
-            },
-            None => single(Some(CONTOUR), None, Some(width::CONTOUR)),
-        },
+        Theme::Parcels => shown_from(
+            single(Some(DARK_GREY), None, Some(width::PARCEL)),
+            DETAIL_MAX_SCALE,
+        ),
+        Theme::Contours => contours(layer),
         Theme::Dem => StyleSpec::ElevationRamp {
             stops: ELEVATION_STOPS
                 .iter()
@@ -767,6 +795,65 @@ pub fn style_for(theme: Theme, layer: &LayerFacts) -> StyleSpec {
         Theme::Hillshade => StyleSpec::Hillshade {
             opacity: Some(HILLSHADE_OPACITY),
         },
+    }
+}
+
+/// Le bâti : par usage quand la couche porte `usage_1`, sinon un seul gris.
+fn buildings(layer: &LayerFacts) -> StyleSpec {
+    match layer.text_field_named(&["usage_1", "usage1"]) {
+        Some(field) => {
+            let w = width::BUILDING;
+            StyleSpec::Categories {
+                field: field.name.clone(),
+                classes: vec![
+                    class(
+                        &["Industriel", "Commercial et services"],
+                        "Industriel ou commercial",
+                        DARK_GREY,
+                        Some(BUILDING_WORK),
+                        w,
+                    ),
+                    class(
+                        &["Religieux"],
+                        "Religieux",
+                        DARK_GREY,
+                        Some(BUILDING_RELIGIOUS),
+                        w,
+                    ),
+                    class(&["Sportif"], "Sportif", DARK_GREY, Some(BUILDING_SPORT), w),
+                ],
+                other: Some(StyleOther {
+                    label: "Autre bâtiment".to_string(),
+                    stroke: hex(DARK_GREY),
+                    fill: Some(hex(BUILDING)),
+                    width_mm: Some(w),
+                    max_scale: None,
+                }),
+                opacity: None,
+                max_scale: None,
+            }
+        }
+        None => single(Some(DARK_GREY), Some(BUILDING), Some(width::BUILDING)),
+    }
+}
+
+/// Les courbes de niveau : dégradé de bruns sur un champ numérique d'altitude, sinon un brun.
+fn contours(layer: &LayerFacts) -> StyleSpec {
+    match layer.numeric_field_named(&["altitude", "alti", "elevation", "z"]) {
+        // Dégradé de bruns, seuils calculés par QGIS sur les vraies altitudes.
+        Some(field) => StyleSpec::Graduated {
+            field: field.name.clone(),
+            method: GraduatedMethod::EqualInterval,
+            class_count: CONTOUR_CLASSES,
+            ramp: ColorRamp {
+                from: hex(CONTOUR_LOW),
+                to: hex(CONTOUR_HIGH),
+            },
+            stroke: None,
+            width_mm: Some(width::CONTOUR),
+            max_scale: None,
+        },
+        None => single(Some(CONTOUR), None, Some(width::CONTOUR)),
     }
 }
 
@@ -947,5 +1034,82 @@ mod tests {
     #[test]
     fn the_elevation_stops_increase() {
         assert!(ELEVATION_STOPS.windows(2).all(|w| w[0].0 < w[1].0));
+    }
+
+    #[test]
+    fn buildings_and_parcels_are_drawn_from_the_1_to_100000_only() {
+        assert!(DETAIL_MAX_SCALE_SOURCE.starts_with("choisi"));
+        let bare = with_fields(json!([]));
+        let rich = with_fields(json!([
+            {"name": "usage_1", "type": "String", "values": ["Résidentiel"]},
+            {"name": "importance", "type": "String", "values": ["1"]},
+            {"name": "typezone", "type": "String", "values": ["U"]}
+        ]));
+        for theme in ALL {
+            for layer in [&bare, &rich] {
+                let want =
+                    matches!(theme, Theme::Buildings | Theme::Parcels).then_some(DETAIL_MAX_SCALE);
+                assert_eq!(style_for(theme, layer).max_scale(), want, "{theme:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn small_roads_are_drawn_from_the_1_to_100000_only() {
+        assert!(SMALL_ROADS_MAX_SCALE_SOURCE.starts_with("choisi"));
+        let roads = with_fields(json!([{"name": "importance", "type": "String", "values": ["1"]}]));
+        let StyleSpec::Categories { classes, other, .. } = style_for(Theme::Roads, &roads) else {
+            panic!("routes par importance");
+        };
+        let scales: Vec<Option<u64>> = classes.iter().map(|c| c.max_scale).collect();
+        let small = Some(SMALL_ROADS_MAX_SCALE);
+        assert_eq!(scales, vec![None, None, None, None, small, small]);
+        assert_eq!(other.unwrap().max_scale, small);
+        // Les autres thèmes par classes n'ont pas de seuil par classe.
+        let plu = with_fields(json!([{"name": "typezone", "type": "String", "values": ["U"]}]));
+        let StyleSpec::Categories { classes, other, .. } = style_for(Theme::PluZones, &plu) else {
+            panic!("PLU par zone");
+        };
+        assert!(classes.iter().all(|c| c.max_scale.is_none()));
+        assert!(other.unwrap().max_scale.is_none());
+    }
+
+    /// Clarté d'une couleur `#rrggbb`, de 0 (noir) à 1 (blanc), moyenne des trois canaux.
+    fn lightness(hex: &str) -> f64 {
+        let channel = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).unwrap() as f64 / 255.0;
+        (channel(1) + channel(3) + channel(5)) / 3.0
+    }
+
+    #[test]
+    fn the_lowlands_are_cream_and_the_mountains_keep_their_relief() {
+        // Plaines (0 à 300 m) très claires, proches du fond du Plan IGN.
+        for (value, s) in ELEVATION_STOPS.iter().filter(|(v, _)| *v <= 300.0) {
+            assert!(lightness(s.hex) > 0.9, "{value} m : {}", s.hex);
+        }
+        assert_eq!(ALT_0.source, PLAN_IGN);
+        // Puis des verts, des bruns plus sombres, et le blanc des neiges en haut.
+        assert!(lightness(ALT_2000.hex) < 0.6, "{}", ALT_2000.hex);
+        assert_eq!(ELEVATION_STOPS.last().unwrap().1.hex, "#ffffff");
+        assert!(HILLSHADE_OPACITY < 0.5 && HILLSHADE_OPACITY_SOURCE.starts_with("choisi"));
+    }
+
+    #[test]
+    fn plu_zones_are_drawn_with_the_cnig_transparency() {
+        assert!(PLU_OPACITY_SOURCE.contains("transparence de 40 %"));
+        let plu = with_fields(json!([{"name": "typezone", "type": "String", "values": ["U"]}]));
+        let StyleSpec::Categories { opacity, .. } = style_for(Theme::PluZones, &plu) else {
+            panic!("PLU par zone");
+        };
+        assert_eq!(opacity, Some(0.6));
+        for theme in ALL.into_iter().filter(|t| *t != Theme::PluZones) {
+            let rich = with_fields(json!([
+                {"name": "importance", "type": "String", "values": ["1"]},
+                {"name": "nature", "type": "String", "values": ["Bois"]},
+                {"name": "usage_1", "type": "String", "values": ["Religieux"]}
+            ]));
+            if let StyleSpec::Categories { opacity, .. } = style_for(theme, &rich) {
+                assert_eq!(opacity, None, "{theme:?}");
+            }
+        }
     }
 }

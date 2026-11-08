@@ -34,6 +34,10 @@ pub enum StyleSpec {
         /// Opacité, de 0 à 1 (1 par défaut).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         opacity: Option<f64>,
+        /// Dénominateur d'échelle : la couche n'est dessinée qu'aux échelles plus grandes que
+        /// 1:`max_scale` ; absent, à toute échelle (ajout du 2026-11-08, décision 8).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_scale: Option<u64>,
     },
     /// Un symbole par valeur du champ `field` ; `other` dessine les valeurs non listées.
     Categories {
@@ -41,6 +45,14 @@ pub enum StyleSpec {
         classes: Vec<StyleClass>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         other: Option<StyleOther>,
+        /// Opacité de la couche, de 0 à 1 (1 par défaut) : les zones d'un PLU laissent voir le
+        /// fond (ajout du 2026-11-08).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        opacity: Option<f64>,
+        /// Dénominateur d'échelle : la couche n'est dessinée qu'aux échelles plus grandes que
+        /// 1:`max_scale` ; absent, à toute échelle (ajout du 2026-11-08, décision 8).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_scale: Option<u64>,
     },
     /// Dégradé selon un champ numérique d'un vecteur : QGIS calcule les seuils sur les vraies
     /// valeurs ; le noyau ne choisit que le champ, la méthode, le nombre de classes et les deux
@@ -54,6 +66,10 @@ pub enum StyleSpec {
         stroke: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         width_mm: Option<f64>,
+        /// Dénominateur d'échelle : la couche n'est dessinée qu'aux échelles plus grandes que
+        /// 1:`max_scale` ; absent, à toute échelle (ajout du 2026-11-08, décision 8).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_scale: Option<u64>,
     },
     /// Teintes d'altitude d'un MNT : `stops` en mètres, valeurs croissantes.
     ElevationRamp {
@@ -80,6 +96,11 @@ pub struct StyleClass {
     pub fill: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub width_mm: Option<f64>,
+    /// Dénominateur d'échelle propre à la classe : elle n'est dessinée qu'aux échelles plus
+    /// grandes que 1:`max_scale` ; le `max_scale` de la couche s'applique en plus (ajout du
+    /// 2026-11-08).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_scale: Option<u64>,
 }
 
 /// Le symbole des valeurs non listées d'un style `categories`.
@@ -92,6 +113,11 @@ pub struct StyleOther {
     pub fill: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub width_mm: Option<f64>,
+    /// Dénominateur d'échelle propre à la classe : elle n'est dessinée qu'aux échelles plus
+    /// grandes que 1:`max_scale` ; le `max_scale` de la couche s'applique en plus (ajout du
+    /// 2026-11-08).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_scale: Option<u64>,
 }
 
 /// Méthode de calcul des seuils d'un dégradé, appliquée par QGIS aux valeurs réelles.
@@ -140,6 +166,17 @@ impl StyleSpec {
         }
     }
 
+    /// Le dénominateur d'échelle au-delà duquel la couche n'est plus dessinée, pour les formes
+    /// vecteur ; None : visible à toute échelle (et toujours pour les rasters).
+    pub fn max_scale(&self) -> Option<u64> {
+        match self {
+            StyleSpec::Single { max_scale, .. }
+            | StyleSpec::Categories { max_scale, .. }
+            | StyleSpec::Graduated { max_scale, .. } => *max_scale,
+            StyleSpec::ElevationRamp { .. } | StyleSpec::Hillshade { .. } => None,
+        }
+    }
+
     /// Toutes les couleurs du style, dans l'ordre où elles apparaissent.
     pub fn colors(&self) -> Vec<&str> {
         let mut out: Vec<&str> = Vec::new();
@@ -179,7 +216,8 @@ impl StyleSpec {
 
     /// Vérifie le style : couleurs `#rrggbb`, épaisseurs positives ou nulles, opacités dans
     /// [0, 1], paliers croissants, un `single` qui a un trait ou un remplissage, un dégradé de 2 à
-    /// 12 classes. Refus : `style.invalid` (AD-21), avec la cause en français.
+    /// 12 classes, une échelle de visibilité d'au moins 1. Refus : `style.invalid` (AD-21), avec
+    /// la cause en français.
     pub fn validate(&self) -> Result<(), CommandFailure> {
         let invalid = |why: String| Err(CommandFailure::new(STYLE_INVALID, why));
         for color in self.colors() {
@@ -189,6 +227,22 @@ impl StyleSpec {
                 ));
             }
         }
+        let class_scales: Vec<Option<u64>> = match self {
+            StyleSpec::Categories { classes, other, .. } => classes
+                .iter()
+                .map(|c| c.max_scale)
+                .chain(other.iter().map(|o| o.max_scale))
+                .collect(),
+            _ => Vec::new(),
+        };
+        if class_scales.into_iter().flatten().any(|scale| scale < 1) {
+            return invalid(
+                "L'échelle de visibilité `max_scale` d'une classe vaut au moins 1.".into(),
+            );
+        }
+        if self.max_scale().is_some_and(|scale| scale < 1) {
+            return invalid("L'échelle de visibilité `max_scale` vaut au moins 1.".to_string());
+        }
         let mut widths: Vec<Option<f64>> = Vec::new();
         let mut opacities: Vec<Option<f64>> = Vec::new();
         match self {
@@ -197,6 +251,7 @@ impl StyleSpec {
                 fill,
                 width_mm,
                 opacity,
+                ..
             } => {
                 if stroke.is_none() && fill.is_none() {
                     return invalid(
@@ -211,6 +266,8 @@ impl StyleSpec {
                 field,
                 classes,
                 other,
+                opacity,
+                ..
             } => {
                 if field.trim().is_empty() {
                     return invalid("Le champ des classes est vide.".to_string());
@@ -223,6 +280,7 @@ impl StyleSpec {
                 }
                 widths.extend(classes.iter().map(|c| c.width_mm));
                 widths.push(other.as_ref().and_then(|o| o.width_mm));
+                opacities.push(*opacity);
             }
             StyleSpec::Graduated {
                 field,
@@ -368,5 +426,27 @@ mod tests {
             parse(json!({"kind": "single", "stroke": "#000000"})).target(),
             StyleTarget::Vector
         );
+    }
+
+    /// Les cas partagés avec l'extension (`fixtures/style-cases.json`, lus aussi par
+    /// `qgis-plugin/tests/test_style_gestures.py`) : le noyau admet et refuse les mêmes styles.
+    /// Un style qui ne se lit pas (forme inconnue, champ inconnu, type faux) compte comme refusé ;
+    /// `core`, quand le cas le donne, est la réponse du noyau là où l'extension est plus stricte.
+    #[test]
+    fn the_shared_style_cases_agree_with_the_extension() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixtures/style-cases.json");
+        let text = std::fs::read_to_string(path).expect("fixtures/style-cases.json");
+        let cases: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let cases = cases["cases"].as_array().unwrap();
+        assert!(cases.len() >= 30);
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let expected = case.get("core").unwrap_or(&case["code"]);
+            let got = match serde_json::from_value::<StyleSpec>(case["style"].clone()) {
+                Err(_) => Some(STYLE_INVALID.to_string()),
+                Ok(style) => style.validate().err().map(|e| e.code.to_string()),
+            };
+            assert_eq!(got.as_deref(), expected.as_str(), "{name}");
+        }
     }
 }

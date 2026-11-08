@@ -869,6 +869,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `epic-geometrie-et-terrain-etendu/story-table-de-semiologie-et-reconnaissance-dans-le-noyau-plan.md`
   summary: Les zones du PLU sont dessinées opaques, alors que le CNIG préconise 40 % de transparence : `categories` n'a pas d'`opacity`.
   evidence: Relecture de 11.20 (rapport de construction).
+  resolution: Résolu par 11.21 (2026-11-08) : `categories` porte une `opacity` facultative, et la table pose 0,6 (40 % de transparence) sur les zones du PLU.
 
 - source_plan: `epic-geometrie-et-terrain-etendu/story-table-de-semiologie-et-reconnaissance-dans-le-noyau-plan.md`
   summary: Le générateur refuse encore « change le style d'une couche » (`training/src/families.rs`, raison « Aucune commande du catalogue ne change le style d'une couche »), devenu faux avec `map.topographic_style` et `map.graduated_style`.
@@ -877,3 +878,13 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `epic-geometrie-et-terrain-etendu/story-table-de-semiologie-et-reconnaissance-dans-le-noyau-plan.md`
   summary: `map.graduated_style` ne sait pas inverser un dégradé (« du bleu au rouge »).
   evidence: Relecture de 11.20 (blind-hunter).
+
+- source_plan: `epic-geometrie-et-terrain-etendu/story-gestes-layer-set-style-et-layer-arrange-dans-l-extension-et-plan.md`
+  summary: Essayer les gestes de style et la légende d'altitude (légende Python, moment du filtre par le contenu de la carte, titre caché) sous QGIS 4.x ; seule la série 3.44 a été vérifiée.
+  evidence: Relecture de 11.21 ; la sonde `probe_style.py` n'a tourné que sous QGIS 3.44.15.
+- source_plan: `epic-geometrie-et-terrain-etendu/story-gestes-layer-set-style-et-layer-arrange-dans-l-extension-et-plan.md`
+  summary: Les libellés de légende « Altitude (m) » et « Ombrage » sont écrits dans l'extension ; le noyau devrait les dicter dans le `StyleSpec` (AD-5).
+  evidence: Relecture de 11.21 ; demande du propriétaire de corriger la légende du MNT, faite au plus court dans l'extension.
+- source_plan: `epic-geometrie-et-terrain-etendu/story-gestes-layer-set-style-et-layer-arrange-dans-l-extension-et-plan.md`
+  summary: La valeur de catégorie « » (vide) est refusée par l'extension et acceptée par le noyau ; le noyau devrait la refuser aussi.
+  evidence: `fixtures/style-cases.json` porte ce cas avec `"core": null`.

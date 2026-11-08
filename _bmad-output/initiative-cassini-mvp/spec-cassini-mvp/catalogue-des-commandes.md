@@ -247,14 +247,22 @@ l'extension le traduit en rendu de QGIS. Union étiquetée par `kind` :
 
 | `kind` | Champs | Sens |
 |---|---|---|
-| `single` | `stroke`, `fill`, `width_mm`, `opacity` | Un seul symbole. `fill` absent : trait seul (ligne, contour) ; `stroke` absent : surface sans contour ; au moins l'un des deux. |
-| `categories` | `field`, `classes`, `other` | Un symbole par valeur de `field` ; `classes` = `{values, label, stroke, fill, width_mm}` ; `other` = `{label, stroke, fill, width_mm}`, le symbole des valeurs non listées (absent : non dessinées). |
-| `graduated` | `field`, `method`, `class_count`, `ramp`, `stroke`, `width_mm` | Dégradé selon un champ numérique d'un vecteur : QGIS calcule `class_count` classes par `method` (`equal_interval`, `quantile`, `jenks`) sur les valeurs réelles, et colore de `ramp.from` à `ramp.to`. Le noyau ne calcule aucun seuil. |
+| `single` | `stroke`, `fill`, `width_mm`, `opacity`, `max_scale` | Un seul symbole. `fill` absent : trait seul (ligne, contour) ; `stroke` absent : surface sans contour ; au moins l'un des deux. |
+| `categories` | `field`, `classes`, `other`, `opacity`, `max_scale` | Un symbole par valeur de `field` ; `classes` = `{values, label, stroke, fill, width_mm, max_scale}` ; `other` = `{label, stroke, fill, width_mm, max_scale}`, le symbole des valeurs non listées (absent : non dessinées). |
+| `graduated` | `field`, `method`, `class_count`, `ramp`, `stroke`, `width_mm`, `max_scale` | Dégradé selon un champ numérique d'un vecteur : QGIS calcule `class_count` classes par `method` (`equal_interval`, `quantile`, `jenks`) sur les valeurs réelles, et colore de `ramp.from` à `ramp.to`. Le noyau ne calcule aucun seuil. |
 | `elevation_ramp` | `stops`, `opacity` | Teintes d'altitude d'un MNT : `stops` = `{value, color}`, valeurs croissantes, en mètres. |
-| `hillshade` | `opacity` | Un raster d'ombrage **déjà présent** (sortie de `terrain.hillshade` ou fichier de relief ombré) rendu en gris et posé en fondu (mode produit) sur les couches du dessous. Le style ne calcule aucun ombrage. |
+| `hillshade` | `opacity` | Un raster d'ombrage **déjà présent** (sortie de `terrain.hillshade` ou fichier de relief ombré) rendu en gris et posé en fondu (mode produit) sur les couches du dessous. Un raster que QGIS dessine déjà en relief ombré (un MNT au rendu d'ombrage) garde ce rendu : seuls l'opacité et le fondu changent (ajout du 2026-11-08). Le style ne calcule aucun ombrage. |
 
 Une couleur est une chaîne `#rrggbb` ; `width_mm` est en millimètres de carte ; `opacity`
-va de 0 à 1 (1 par défaut) ; `graduated` n'a **pas** d'`opacity`. Une couleur mal formée, une épaisseur négative, une opacité
+va de 0 à 1 (1 par défaut) ; elle est portée par `single`, `categories` (opacité de toute
+la couche, par exemple les zones d'un PLU qui laissent voir le fond : ajout du 2026-11-08),
+`elevation_ramp` et `hillshade`, et `graduated` n'en a **pas**. `max_scale`, facultatif
+sur les trois formes vecteur, est un dénominateur d'échelle entier : la couche n'est dessinée
+qu'aux échelles plus grandes que 1:`max_scale` (en zoomant davantage) ; absent, elle l'est à
+toute échelle ; une valeur sous 1 est refusée par `style.invalid` (ajout du 2026-11-08, voir
+le changement de cap, décision 8). Une classe de `categories`, et `other`, peuvent porter leur
+propre `max_scale`, de même sens et de mêmes bornes : la classe n'est dessinée qu'aux échelles
+plus grandes que 1:`max_scale`, et celui de la couche s'applique en plus. Une couleur mal formée, une épaisseur négative, une opacité
 hors de [0, 1], des `stops` non croissants, ou un `single` sans `stroke` ni `fill` sont
 refusés par `style.invalid` (AD-21). Les `single` et `categories` vont aux vecteurs, les
 `elevation_ramp` et `hillshade` aux rasters ; l'inverse est refusé par
@@ -270,7 +278,8 @@ donne l'esquisse.
    "single": {"stroke": {"type": "string", "required": false},
               "fill": {"type": "string", "required": false},
               "width_mm": {"type": "number", "required": false},
-              "opacity": {"type": "number", "required": false}},
+              "opacity": {"type": "number", "required": false},
+              "max_scale": {"type": "integer", "required": false}},
    "categories": {"field": {"type": "string", "required": true},
                   "classes": {"type": "array", "required": true,
                               "items": {"type": "object",
@@ -278,12 +287,16 @@ donne l'esquisse.
                                                    "label": {"type": "string", "required": true},
                                                    "stroke": {"type": "string", "required": true},
                                                    "fill": {"type": "string", "required": false},
-                                                   "width_mm": {"type": "number", "required": false}}}},
+                                                   "width_mm": {"type": "number", "required": false},
+                                                   "max_scale": {"type": "integer", "required": false}}}},
                   "other": {"type": "object", "required": false,
                             "fields": {"label": {"type": "string", "required": true},
                                        "stroke": {"type": "string", "required": true},
                                        "fill": {"type": "string", "required": false},
-                                       "width_mm": {"type": "number", "required": false}}}},
+                                       "width_mm": {"type": "number", "required": false},
+                                       "max_scale": {"type": "integer", "required": false}}},
+                  "opacity": {"type": "number", "required": false},
+                  "max_scale": {"type": "integer", "required": false}},
    "graduated": {"field": {"type": "string", "required": true},
                  "method": {"type": "string", "required": true, "enum": ["equal_interval", "quantile", "jenks"]},
                  "class_count": {"type": "integer", "required": true},
@@ -291,7 +304,8 @@ donne l'esquisse.
                           "fields": {"from": {"type": "string", "required": true},
                                      "to": {"type": "string", "required": true}}},
                  "stroke": {"type": "string", "required": false},
-                 "width_mm": {"type": "number", "required": false}},
+                 "width_mm": {"type": "number", "required": false},
+                 "max_scale": {"type": "integer", "required": false}},
    "elevation_ramp": {"stops": {"type": "array", "required": true,
                                 "items": {"type": "object",
                                           "fields": {"value": {"type": "number", "required": true},

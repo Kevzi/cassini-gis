@@ -54,6 +54,10 @@ figé (catalogue des commandes, §1).
    - Le noyau compose le `graduated` et dicte un seul `layer.set_style`, comme `map.topographic_style`.
    - Les dégradés sont sourcés, par exemple ColorBrewer, sous licence Apache-2.0. Le catalogue fait foi.
 
+8. **Visibilité selon l'échelle (ajout du 2026-11-08) :** bâti et parcelles n'apparaissent qu'à partir du 1:50 000 ; champ facultatif `max_scale` des formes vecteur de `StyleSpec`.
+   - Ajusté le 2026-11-08 : une classe peut porter son propre `max_scale` (petites routes à partir du 1:100 000) ; seuil du détail (bâti, parcelles) porté au 1:100 000 ; légende d'altitude en barre continue, bornée par les altitudes réelles du MNT.
+   - Ajusté le 2026-11-08 : zones du PLU translucides (`opacity` facultative de `categories`, 0,6 soit 40 % de transparence, CNIG) ; plaines crème comme le fond du Plan IGN (0 à 300 m) et ombrage allégé (opacité choisie : 0,4).
+
 **Test de CLAUDE.md §2.9 :** une carte aux couleurs IGN sert un bureau d'études, une
 collectivité ou un étudiant tels quels. C'est une fonction civile. La symbologie militaire
 (APP-6) reste hors périmètre (spec, Non-goals), et rien ici ne s'en approche.

@@ -602,7 +602,15 @@ la CI n'a pas :
 
 - **Les sondes sous le vrai QGIS** (`qgis-plugin/tests/probe_*.py`), lancées par
   `python-qgis-ltr.bat` : elles enchaînent les commandes dans un vrai projet, le
-  ferment, le rouvrent et rejouent le journal.
+  ferment, le rouvrent et rejouent le journal. `probe_style.py` met en forme des
+  copies des projets de Villeneuve-le-Roi et d'Annecy (`map.topographic_style`,
+  `map.graduated_style`), exporte le PDF et rejoue. Elle passe par les deux
+  commandes que le noyau dicte à l'extension, `layer.set_style` et
+  `layer.arrange`, dont les refus sont `qgis.layer_missing`, `style.invalid`,
+  `style.field_missing`, `style.geometry_mismatch` et `arrange.invalid`. Elle
+  demande `../donnees-test-cassini/` avec les deux projets de test, Villeneuve-le-Roi
+  et Annecy ; elle se lance avec `QT_QPA_PLATFORM=windows`, et ses PDF se
+  regardent rendus en image.
 - **Les mesures du vrai modèle** (`ai/tests/*_reel.rs`) : justesse des plans
   (`plan_reel`), des questions (`question_reel`), score sur le jeu tenu à l'écart
   (`ecart_reel`) et durée par phrase (`duree_reel`). Elles demandent un modèle

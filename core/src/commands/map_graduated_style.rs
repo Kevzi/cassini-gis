@@ -137,6 +137,7 @@ impl Command for MapGraduatedStyle {
             },
             stroke: None,
             width_mm: None,
+            max_scale: None,
         };
         style.validate()?;
         Ok(MapGraduatedStyleOutput {

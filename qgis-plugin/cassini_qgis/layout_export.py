@@ -37,8 +37,11 @@ Lisibilité (2026-11-07). La grille est portée par une seconde carte, sans fond
 sur la première : une couche en mode de fusion fait rastériser la carte, et QGIS couperait les
 étiquettes qui dépassent du cadre. Étiquettes à gauche (Y seuls) et en bas (X seuls). La flèche du
 nord est dans le coin haut droit de la carte ; la légende tient la colonne de droite, en une, deux
-ou trois colonnes, puis en plus petit (`fit_legend`). Textes en `MAP_FONT` (Helvetica) quand elle
-est installée, sinon dans la police par défaut de QGIS.
+ou trois colonnes, puis en plus petit, puis chaque couche repliée sur son nom (`fit_legend`) :
+elle ne déborde jamais de la page. Elle ne montre que ce que la carte dessine : les couches que
+l'échelle masque en sont absentes, et le filtre de QGIS sur le contenu de la carte ôte les classes
+absentes du cadre (2026-11-08). Textes en `MAP_FONT` (Helvetica) quand elle est installée, sinon
+dans la police par défaut de QGIS.
 
 La mise en page de QGIS ne tourne pas hors du fil principal : l'export est synchrone
 (commande non annulable). Accès à QGIS par un « fond » injectable ; `LayoutBackend` est
@@ -52,10 +55,12 @@ try:  # importés à plat par les tests, en paquet par QGIS
     from .gestures import GestureError
     from .inventory import QgisBackend, _ReadGesture, _union, source_name
     from .point_transform import UNKNOWN_CRS
+    from .style_gestures import install_legend
 except ImportError:  # pragma: no cover
     from gestures import GestureError
     from inventory import QgisBackend, _ReadGesture, _union, source_name
     from point_transform import UNKNOWN_CRS
+    from style_gestures import install_legend
 
 BAD_PARAMS = "layout.bad_params"
 EMPTY = "layout.empty"
@@ -122,17 +127,90 @@ def with_family(text_format, family):
     return text_format
 
 
-def fit_legend(legend, max_width, max_height, family=None):
-    """Fait tenir la légende dans `max_width` × `max_height` mm : une, deux puis trois colonnes,
-    puis des textes et symboles plus petits. Si rien ne tient, une seule colonne au plus petit :
-    la légende déborde alors vers le bas, jamais hors de la page à droite."""
-    from qgis.core import QgsLegendStyle
+# Essais de `fit_legend`, dans l'ordre : (réduction des textes, colonnes, couches repliées).
+# D'abord la légende entière, en une, deux puis trois colonnes, de plus en plus petite ; si rien
+# ne tient, chaque couche est repliée sur son seul nom, puis rapetissée encore.
+LEGEND_STEPS = tuple(
+    [(shrink, columns, False) for shrink in (1.0, 0.85, 0.7) for columns in (1, 2, 3)]
+    + [(shrink, columns, True) for shrink in (1.0, 0.85, 0.7, 0.55, 0.4) for columns in (1, 2, 3)]
+)
 
-    styles = (QgsLegendStyle.Style.Title, QgsLegendStyle.Style.Group, QgsLegendStyle.Style.Subgroup,
-              QgsLegendStyle.Style.SymbolLabel)
+
+def choose_legend_step(measure, max_width, max_height):
+    """Rend le premier essai de `LEGEND_STEPS` dont la taille, `measure(essai)` → (largeur,
+    hauteur) en mm, tient dans `max_width` × `max_height` ; sinon le dernier, le plus petit.
+    `measure` pose l'essai sur la légende : le dernier mesuré est celui qui reste."""
+    for step in LEGEND_STEPS:
+        width, height = measure(step)
+        if width <= max_width and height <= max_height:
+            return step
+    return LEGEND_STEPS[-1]
+
+
+def settle_legend_filter(layout, legend):
+    """Calcule tout de suite le filtre de la légende sur le contenu de la carte.
+
+    QGIS le calcule en arrière-plan, puis au dessin de la légende : avant, la légende garde les
+    classes absentes du cadre, et sa taille mesurée n'est pas celle du PDF. Dessiner la seule
+    zone de la légende, en très basse résolution, le fait calculer comme à l'export (relevé sous
+    QGIS 3.44 ; à revoir sous 4.x si le calcul change de moment)."""
+    from qgis.core import QgsLayoutExporter
+    from qgis.PyQt.QtCore import QRectF, QSize
+
+    pos, size = legend.positionWithUnits(), legend.sizeWithUnits()
+    region = QRectF(pos.x(), pos.y(), max(size.width(), 1.0), max(size.height(), 1.0))
+    QgsLayoutExporter(layout).renderRegionToImage(region, QSize(), 10)
+
+
+def legend_content_size(layout, legend):
+    """(largeur, hauteur) en mm du contenu de la légende, tel que QGIS le dessinera.
+
+    `adjustBoxSize` ne redimensionne pas l'élément avant le premier dessin : la taille vient
+    donc du moteur de légende lui-même, avec les réglages en cours de l'élément."""
+    from qgis.core import QgsLayoutUtils, QgsLegendRenderer
+
+    context = QgsLayoutUtils.createRenderContextForLayout(layout, None)
+    size = QgsLegendRenderer(legend.model(), legend.legendSettings()).minimumSize(context)
+    return size.width(), size.height()
+
+
+def collapse_legend(legend):
+    """Chaque couche de la légende réduite à son seul nom.
+
+    Un ordre de nœuds vide ne montre que le titre de la couche ; le filtre sur la carte, qui
+    ôterait une couche sans nœud, est levé (les couches que l'échelle masque sont déjà hors de la
+    légende). Un titre caché (l'ombrage, voir `apply_legend_labels`) redevient visible."""
+    from qgis.core import QgsLegendRenderer, QgsLegendStyle, QgsMapLayerLegendUtils
+
+    legend.setLegendFilterByMapEnabled(False)
+    model = legend.model()
+    for node in model.rootGroup().findLayers():
+        QgsMapLayerLegendUtils.setLegendNodeOrder(node, [])
+        if QgsLegendRenderer.nodeLegendStyle(node, model) == QgsLegendStyle.Style.Hidden:
+            QgsLegendRenderer.setNodeLegendStyle(node, QgsLegendStyle.Style.Subgroup)
+        model.refreshLayerLegend(node)
+
+
+def fit_legend(layout, legend, max_width, max_height, family=None):
+    """Fait tenir la légende dans `max_width` × `max_height` mm (voir `LEGEND_STEPS`) et rend
+    `(essai retenu, tient)`.
+
+    Garantie : le cadre de la légende ne dépasse jamais sa colonne. Si même le dernier essai
+    (couches repliées sur leur nom, texte à 40 %, trois colonnes) ne tient pas, le cadre est
+    borné à la colonne et la légende y est coupée (`tient` vaut False) : elle ne mord jamais sur
+    les sources. Repliée, la légende n'est plus filtrée sur la carte : elle peut citer une couche
+    sans objet dans le cadre (accepté)."""
+    from qgis.core import QgsLayoutSize, QgsLegendStyle
+
+    styles = (QgsLegendStyle.Style.Title, QgsLegendStyle.Style.Group,
+              QgsLegendStyle.Style.Subgroup, QgsLegendStyle.Style.SymbolLabel)
     sizes = {s: legend.style(s).textFormat().size() for s in styles}
     symbol = (legend.symbolWidth(), legend.symbolHeight())
-    for shrink in (1.0, 0.85, 0.7):
+    state = {"collapsed": False}
+    settle_legend_filter(layout, legend)
+
+    def measure(step):
+        shrink, columns, collapsed = step
         for s in styles:
             style = legend.style(s)
             text = with_family(style.textFormat(), family)
@@ -141,16 +219,25 @@ def fit_legend(legend, max_width, max_height, family=None):
             legend.setStyle(s, style)
         legend.setSymbolWidth(symbol[0] * shrink)
         legend.setSymbolHeight(symbol[1] * shrink)
-        for columns in (1, 2, 3):
-            legend.setColumnCount(columns)
-            legend.setSplitLayer(columns > 1)
-            legend.adjustBoxSize()
-            size = legend.sizeWithUnits()
-            if size.width() <= max_width and size.height() <= max_height:
-                return
-    legend.setColumnCount(1)
-    legend.setSplitLayer(False)
-    legend.adjustBoxSize()
+        if collapsed and not state["collapsed"]:
+            collapse_legend(legend)
+            # Le modèle vient de changer : le recalcul est forcé avant de mesurer.
+            settle_legend_filter(layout, legend)
+            state["collapsed"] = True
+        legend.setColumnCount(columns)
+        legend.setSplitLayer(columns > 1)
+        return legend_content_size(layout, legend)
+
+    step = choose_legend_step(measure, max_width, max_height)
+    width, height = measure(step)  # l'essai retenu est celui qui reste posé
+    fits = width <= max_width and height <= max_height
+    if not fits:
+        # Rien ne tient : cadre borné à la colonne, contenu coupé au cadre, jamais sur les
+        # sources (sinon QGIS agrandirait la légende à son contenu en la dessinant).
+        legend.setResizeToContents(False)
+        width, height = min(width, max_width), min(height, max_height)
+    legend.attemptResize(QgsLayoutSize(width, height))
+    return step, fits
 
 
 def _decimals(interval):
@@ -160,6 +247,38 @@ def _decimals(interval):
         if abs(scaled - round(scaled)) < 1e-9 * max(1.0, scaled):
             return d
     return 6
+
+
+# Bas de la colonne de la légende, en mm sur la page de base : les sources sont en dessous.
+LEGEND_BOTTOM = 195
+
+# Propriétés posées sur une couche par `layer.set_style` (voir `style_gestures.py`), lues ici
+# pour la légende : le titre de la couche, le libellé de son premier nœud (le nom de bande d'un
+# raster), et `none` pour n'en montrer aucun nœud.
+LEGEND_TITLE = "cassini/legend_title"
+LEGEND_FIRST_LABEL = "cassini/legend_first_label"
+LEGEND_NODES = "cassini/legend_nodes"
+
+
+def apply_legend_labels(node, layer):
+    """Pose sur le nœud de légende `node` les libellés que le style a laissés sur `layer`.
+
+    `none` : la couche tient en une ligne, son titre. Une couche sans nœud serait ôtée par le
+    filtre sur la carte : elle garde donc son premier nœud, libellé du titre, et le titre
+    lui-même est caché (relevé sous QGIS 3.44)."""
+    from qgis.core import QgsLegendRenderer, QgsLegendStyle, QgsMapLayerLegendUtils
+
+    title = layer.customProperty(LEGEND_TITLE)
+    if title:
+        node.setUseLayerName(False)  # sinon `setName` renommerait la couche elle-même
+        node.setName(str(title))
+    first = layer.customProperty(LEGEND_FIRST_LABEL)
+    if first:
+        QgsMapLayerLegendUtils.setLegendNodeUserLabel(node, 0, str(first))
+    if layer.customProperty(LEGEND_NODES) == "none":
+        QgsMapLayerLegendUtils.setLegendNodeOrder(node, [0])
+        QgsMapLayerLegendUtils.setLegendNodeUserLabel(node, 0, str(title or layer.name()))
+        QgsLegendRenderer.setNodeLegendStyle(node, QgsLegendStyle.Style.Hidden)
 
 
 # Éléments que la mise en page doit porter (rendus par le fond, vérifiés par les tests).
@@ -356,10 +475,23 @@ class LayoutBackend(QgisBackend):
         legend.setAutoUpdateModel(False)  # sinon la légende reprend aussi les couches masquées
         root = legend.model().rootGroup()
         root.clear()
+        map_scale = carte.scale()
         for layer in layers:
-            root.addLayer(layer)
-        place(legend, 215, 22, 72, 100)
-        fit_legend(legend, 72 * fx, (195 - 22) * fy, family)
+            # Une couche que l'échelle de la carte masque n'est pas dessinée : pas de légende.
+            if layer.hasScaleBasedVisibility() and not layer.isInScaleRange(map_scale):
+                continue
+            install_legend(layer)  # légende de Cassini d'un projet rouvert (style_gestures)
+            node = root.addLayer(layer)
+            apply_legend_labels(node, layer)
+            legend.model().refreshLayerLegend(node)
+        # Seules les classes présentes dans le cadre de la carte restent à la légende.
+        legend.setLegendFilterByMapEnabled(True)
+        legend.updateFilterByMap()
+        place(legend, 215, 22, 72, LEGEND_BOTTOM - 22)
+        # Relevés par les sondes : l'essai retenu, et s'il tient sans couper la légende.
+        self.legend_step, self.legend_fits = fit_legend(
+            layout, legend, 72 * fx, (LEGEND_BOTTOM - 22) * fy, family
+        )
 
         scalebar = QgsLayoutItemScaleBar(layout)
         scalebar.setLinkedMap(carte)

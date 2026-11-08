@@ -67,14 +67,24 @@ def close_to(box, want):
 
 
 # Les grilles posées par le fond, relevées au moment de l'export (la mise en page est jetée après).
-from qgis.core import QgsLayoutExporter, QgsLayoutItemMap  # noqa: E402
+from qgis.core import QgsLayoutExporter, QgsLayoutItemLegend, QgsLayoutItemMap  # noqa: E402
 
 _export_to_pdf = QgsLayoutExporter.exportToPdf
 grid_maps = []  # (fond, entités des couches, Y à gauche, X en bas) des cartes qui portent une grille
 
 
+legend_bottoms = []  # (bas de la légende, bas permis) en mm, pour chaque export
+
+
 def _spy_export(self, *args, **kwargs):
+    # Le bas de la légende se relève après l'export : QGIS la redimensionne en la dessinant.
+    result = _export_to_pdf(self, *args, **kwargs)
+    page_height = self.layout().pageCollection().page(0).pageSize().height()
     for item in self.layout().items():
+        if isinstance(item, QgsLayoutItemLegend):
+            bottom = item.positionWithUnits().y() + item.sizeWithUnits().height()
+            limit = layout_export.LEGEND_BOTTOM * page_height / layout_export.BASE_PAGE[1]
+            legend_bottoms.append((round(bottom, 1), round(limit, 1)))
         if isinstance(item, QgsLayoutItemMap):
             for g in item.grids().asList():
                 grids.append((g.crs().authid(), g.intervalX(), g.intervalY(), g.enabled()))
@@ -86,7 +96,7 @@ def _spy_export(self, *args, **kwargs):
                     g.annotationDisplay(Side.Left) == Mode.LatitudeOnly,
                     g.annotationDisplay(Side.Bottom) == Mode.LongitudeOnly,
                 ))
-    return _export_to_pdf(self, *args, **kwargs)
+    return result
 
 
 QgsLayoutExporter.exportToPdf = _spy_export
@@ -114,10 +124,80 @@ def step_empty():
         for n, v in saved:
             n.setItemVisibilityChecked(v)
         results.append(("projet masqué", error.code if error else result, error is not None and error.code == "layout.empty" and not os.path.exists(out_empty)))
-        QCoreApplication.quit()
+        QTimer.singleShot(0, step_collapsed)
 
     gestures.append(layout_export.LayoutExportGesture())
     gestures[-1].start({"title": "Vide", "out": out_empty}, done)
+
+
+def synthetic_project(layer_count, classes_per_layer):
+    """Projet en mémoire : `layer_count` couches de carrés en Lambert-93, chacune en
+    `classes_per_layer` catégories toutes présentes dans le cadre (rien n'est lu sur disque)."""
+    from qgis.core import (
+        QgsCategorizedSymbolRenderer,
+        QgsCoordinateReferenceSystem,
+        QgsFeature,
+        QgsGeometry,
+        QgsRendererCategory,
+        QgsSymbol,
+        QgsVectorLayer,
+    )
+
+    project.clear()
+    project.setCrs(QgsCoordinateReferenceSystem("EPSG:2154"))
+    for n in range(layer_count):
+        layer = QgsVectorLayer("Polygon?crs=EPSG:2154&field=v:string", "couche %04d" % n, "memory")
+        features = []
+        for k in range(classes_per_layer):
+            f = QgsFeature(layer.fields())
+            x, y = 650000 + (k % 20) * 100, 6850000 + (k // 20) * 100 + n
+            f.setGeometry(QgsGeometry.fromWkt(
+                "POLYGON((%d %d,%d %d,%d %d,%d %d,%d %d))" % (x, y, x + 80, y, x + 80, y + 80, x, y + 80, x, y)))
+            f.setAttribute("v", "classe %03d" % k)
+            features.append(f)
+        layer.dataProvider().addFeatures(features)
+        if classes_per_layer > 1:
+            categories = [
+                QgsRendererCategory("classe %03d" % k, QgsSymbol.defaultSymbol(layer.geometryType()),
+                                    "Classe numéro %03d" % k)
+                for k in range(classes_per_layer)
+            ]
+            layer.setRenderer(QgsCategorizedSymbolRenderer("v", categories))
+        project.addMapLayer(layer)
+
+
+def step_collapsed():
+    # 300 classes dans le cadre : aucune légende dépliée ne tient, la couche est repliée.
+    synthetic_project(1, 300)
+    out = os.path.join(out_dir, "7-layout.export_pdf.pdf")
+
+    def done(result=None, error=None):
+        backend = gestures[-1]._backend
+        bottom, limit = legend_bottoms[-1]
+        ok = error is None and backend.legend_step[2] and backend.legend_fits and bottom <= limit + 0.5
+        results.append(("légende repliée", (backend.legend_step, backend.legend_fits, bottom), ok))
+        QTimer.singleShot(0, step_clipped)
+
+    gestures.append(layout_export.LayoutExportGesture())
+    gestures[-1].start({"title": "Légende repliée", "out": out}, done)
+
+
+def step_clipped():
+    # 1500 couches : même repliée au plus petit, la légende ne tient pas ; elle est bornée à sa
+    # colonne et coupée, au-dessus des sources.
+    synthetic_project(1500, 1)
+    out = os.path.join(out_dir, "8-layout.export_pdf.pdf")
+
+    def done(result=None, error=None):
+        backend = gestures[-1]._backend
+        bottom, limit = legend_bottoms[-1]
+        ok = error is None and backend.legend_fits is False and bottom <= limit + 0.5
+        results.append(("légende coupée", (backend.legend_step, backend.legend_fits, bottom), ok))
+        print("PDF de la légende coupée :", out)
+        QCoreApplication.quit()
+
+    gestures.append(layout_export.LayoutExportGesture())
+    gestures[-1].start({"title": "Légende coupée", "out": out}, done)
 
 
 def step_a3():
@@ -217,7 +297,7 @@ def done_ok(result=None, error=None):
 
 gestures.append(layout_export.LayoutExportGesture())
 QTimer.singleShot(0, lambda: gestures[0].start({"title": "Villeneuve-le-Roi : essai", "out": out_ok}, done_ok))
-QTimer.singleShot(90000, QCoreApplication.quit)
+QTimer.singleShot(300000, QCoreApplication.quit)
 QCoreApplication.exec()
 
 print("PDF :", out_ok)
@@ -225,6 +305,10 @@ print("PDF au 1:25 000 :", out_scale)
 print("PDF A3 carroyé :", out_a3)
 for row in results:
     print(row)
-ok = len(results) == 6 and all(r[2] for r in results)
+# La légende ne déborde jamais de sa colonne : son bas reste au-dessus des sources.
+print("Bas des légendes (mm, permis) :", legend_bottoms)
+legend_ok = bool(legend_bottoms) and all(b <= limit + 0.5 for b, limit in legend_bottoms)
+results.append(("légendes dans la page", legend_bottoms, legend_ok))
+ok = len(results) == 9 and all(r[2] for r in results)
 print("RÉSULTAT :", "OK" if ok else "ÉCHEC")
 sys.exit(0 if ok else 1)
