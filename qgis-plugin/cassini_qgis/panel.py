@@ -8,14 +8,15 @@ formulaire par schéma et le journal sont dans des modules sans Qt, testés seul
 import os
 import time
 
-from qgis.PyQt.QtCore import QSettings, Qt, QUrl
-from qgis.PyQt.QtGui import QDesktopServices, QFontDatabase, QIcon
+from qgis.PyQt.QtCore import QEvent, QRect, QSettings, Qt, QTimer, QUrl
+from qgis.PyQt.QtGui import QDesktopServices, QFontDatabase, QIcon, QPalette
 from qgis.PyQt.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -25,12 +26,13 @@ from qgis.PyQt.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
-from . import agentview, client, external, form, models, runlog, summary, texts
+from . import agentview, client, external, form, models, runlog, summary, texts, thread
 
 
 class LayerCombo(QComboBox):
@@ -163,15 +165,103 @@ def _mono(widget):
     return widget
 
 
-class _Fold(QWidget):
-    """Groupe repliable natif : une flèche à bascule et un contenu."""
+def _wrap(label, plain=False, selectable=True):
+    """Libellé qui passe à la ligne ; `plain` : texte venu d'ailleurs, jamais interprété."""
+    label.setWordWrap(True)
+    if plain:
+        label.setTextFormat(Qt.TextFormat.PlainText)
+    if selectable:
+        label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+    return label
 
-    def __init__(self, on_toggle=None):
+
+def _hline():
+    """Filet du thème."""
+    line = QFrame()
+    line.setFrameShape(QFrame.Shape.HLine)
+    line.setFrameShadow(QFrame.Shadow.Sunken)
+    return line
+
+
+def _card(name="cassiniCard"):
+    """Carte du fil : un simple cadre stylé (DESIGN.md, `card`), qui grandit avec son contenu."""
+    frame = QFrame()
+    frame.setObjectName(name)
+    layout = QVBoxLayout(frame)
+    layout.setContentsMargins(8, 8, 8, 8)
+    layout.setSpacing(6)
+    return frame, layout
+
+
+def _clear(layout):
+    while layout.count():
+        item = layout.takeAt(0)
+        widget = item.widget()
+        if widget is not None:
+            widget.setParent(None)
+            widget.deleteLater()
+
+
+class _StepRow(QFrame):
+    """Une étape : icône, mot d'état en demi-gras, libellé, et son message en erreur.
+
+    L'étape en cours porte le marqueur (`step_current`). Un clic montre son détail.
+    """
+
+    def __init__(self, icon, word, text, message="", style="", on_click=None):
+        super().__init__()
+        self.setObjectName("cassiniStep")
+        self._on_click = on_click
+        if style:
+            self.setStyleSheet(style)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(4, 3, 4, 3)
+        row.setSpacing(6)
+        top = Qt.AlignmentFlag.AlignTop
+        row.addWidget(QLabel(icon), 0, top)
+        row.addWidget(_title(QLabel(word)), 0, top)
+        col = QVBoxLayout()
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(2)
+        col.addWidget(_wrap(QLabel(text), plain=True, selectable=False))
+        if message:
+            col.addWidget(_wrap(QLabel(message), plain=True, selectable=False))
+        row.addLayout(col, 1)
+        self.setAccessibleName(" ".join(p for p in (word, text, message) if p))
+        if on_click is not None:  # au clavier aussi : Tab, puis Entrée ou Espace
+            self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def mousePressEvent(self, event):
+        if self._on_click is not None:
+            self._on_click()
+        super().mousePressEvent(event)
+
+    def keyPressEvent(self, event):
+        keys = (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space)
+        if self._on_click is not None and event.key() in keys:
+            self._on_click()
+            return
+        super().keyPressEvent(event)
+
+
+class _Fold(QWidget):
+    """Groupe repliable natif : une flèche à bascule et un contenu.
+
+    `wide` : ligne de repli pleine largeur (Journal, Mode expert).
+    """
+
+    def __init__(self, on_toggle=None, wide=False):
         super().__init__()
         self._on_toggle = on_toggle
         self.button = QToolButton()
         self.button.setCheckable(True)
         self.button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        if wide:
+            self.button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            # Jamais plus haut que son contenu : la place libre revient au fil.
+            self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        else:
+            self.button.setAutoRaise(True)  # repli plat dans une carte (« Détails techniques »)
         self.button.toggled.connect(self._toggled)
         self.body = QWidget()
         self.body.setVisible(False)
@@ -237,27 +327,58 @@ class CassiniPanel(QWidget):
         self._fields = []
         self._inputs = {}
         self.project_file = None  # fichier du projet ouvert, pour « Parcourir… »
+        # Le fil [12.1] : l'échange en cours (bulle) et ce que le panneau en montre.
+        self._exchange = None  # `thread.request_exchange` / `thread.expert_exchange`
+        self._plan_open = False  # « Voir » sur la carte du plan validé
+        self._kinds_shown = None  # cartes affichées, pour caler le fil sur la plus récente
+        self._cards = []  # cadres stylés en `card`
+        self._small_logos = []  # logos 16 px des titres de carte
+        self._metas = []  # libellés en `meta` (couleur atténuée du thème)
+        self._styles = None  # feuilles de style de la paire claire ou sombre
+        self._primary_shown = None
+        self._styling = False
         self._build()
         expert = str(settings.value(EXPERT_KEY, "false")).lower() in ("true", "1")
         self.expert.set_open(expert)
         self.render()
 
     # -- construction --------------------------------------------------
-    def _logo(self):
-        dark = self.palette().window().color().lightness() < 128
-        name = "logo-cassini-dark.svg" if dark else "logo-cassini-light.svg"
-        return QIcon(os.path.join(ASSETS, name)).pixmap(24, 24)
+    def _dark(self):
+        return thread.is_dark(self.palette().window().color().lightness())
+
+    def _logo(self, size=24):
+        name = "logo-cassini-dark.svg" if self._dark() else "logo-cassini-light.svg"
+        return QIcon(os.path.join(ASSETS, name)).pixmap(size, size)
+
+    def _meta(self, label):
+        """Détail secondaire (`meta`) : un cran sous le corps, couleur atténuée du thème."""
+        font = label.font()
+        if font.pointSizeF() > 1:
+            font.setPointSizeF(font.pointSizeF() - 1)
+        label.setFont(font)
+        self._metas.append(label)
+        return label
+
+    def _new_card(self):
+        frame, layout = _card()
+        self._cards.append(frame)
+        return frame, layout
+
+    def _card_title(self, layout):
+        """Titre de carte précédé du petit logo 16 px ; rend le libellé du titre."""
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        icon = QLabel()
+        self._small_logos.append(icon)
+        label = _title(_wrap(QLabel()))
+        row.addWidget(icon, 0, Qt.AlignmentFlag.AlignTop)
+        row.addWidget(label, 1)
+        layout.addLayout(row)
+        return label
 
     def _build(self):
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        outer.addWidget(scroll)
-        body = QWidget()
-        scroll.setWidget(body)
-        col = QVBoxLayout(body)
+        col = QVBoxLayout(self)
+        col.setContentsMargins(8, 8, 8, 8)
         col.setSpacing(8)
 
         # En-tête : logo, titre, Réglages.
@@ -372,109 +493,200 @@ class CassiniPanel(QWidget):
         al.addLayout(arow)
         col.addWidget(self.approval_zone)
 
-        # Saisie principale en langage naturel [Epic 5].
-        self.input = RequestEdit(self._send)
-        self.input.setMaximumHeight(72)
-        self.input.textChanged.connect(self._input_changed)
-        self.input_reason = QLabel()
-        self.input_reason.setWordWrap(True)
-        self.send_button = QPushButton()
-        self.send_button.clicked.connect(self._send)
-        col.addWidget(self.input)
-        col.addWidget(self.input_reason)
-        col.addWidget(self.send_button)
+        # Le fil [12.1] : seul à défiler, il prend toute la hauteur libre. Cartes dans
+        # l'ordre où elles répondent à la demande (EXPERIENCE.md, Information Architecture).
+        self.thread_scroll = QScrollArea()
+        self.thread_scroll.setWidgetResizable(True)
+        self.thread_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.thread_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.thread_body = QWidget()
+        self.thread_body.setAutoFillBackground(False)
+        self.thread_scroll.setWidget(self.thread_body)
+        self.thread_scroll.viewport().setAutoFillBackground(False)
+        fil = QVBoxLayout(self.thread_body)
+        fil.setContentsMargins(0, 0, 0, 0)
+        fil.setSpacing(8)
+        col.addWidget(self.thread_scroll, 1)
 
-        # Plan de l'agent : réplique, indicateur, étapes en lecture seule, verdict.
-        self.plan_zone = QWidget()
-        pl = QVBoxLayout(self.plan_zone)
-        pl.setContentsMargins(0, 0, 0, 0)
-        self.plan_title = _title(QLabel())
-        self.plan_notice = QLabel()
-        self.plan_notice.setWordWrap(True)
-        self.plan_notice.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse
-        )
-        # Couches de résultat que le modèle ne voit plus (ticket 5.33).
-        self.left_out_note = QLabel()
-        self.left_out_note.setWordWrap(True)
-        self.left_out_note.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse
-        )
-        self.left_out_note.setVisible(False)
+        # Carte d'accueil : seule dans le fil au repos.
+        self.welcome_card, wl = self._new_card()
+        self.welcome_title = self._card_title(wl)
+        self.welcome_text = _wrap(QLabel())
+        self.examples_title = _title(_wrap(QLabel()))
+        self.examples = _wrap(QLabel())
+        self.examples.setTextFormat(Qt.TextFormat.RichText)
+        wl.addWidget(self.welcome_text)
+        wl.addWidget(self.examples_title)
+        wl.addWidget(self.examples)
+        fil.addWidget(self.welcome_card)
+
+        # Bulle de la demande, à droite, avec « Vous · heure » au-dessus.
+        self.bubble_zone = QWidget()
+        bz = QVBoxLayout(self.bubble_zone)
+        bz.setContentsMargins(0, 0, 0, 0)
+        bz.setSpacing(2)
+        self.bubble_meta = self._meta(QLabel())
+        self.bubble_meta.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.bubble = QFrame()
+        self.bubble.setObjectName("cassiniBubble")
+        bbl = QVBoxLayout(self.bubble)
+        bbl.setContentsMargins(8, 8, 8, 8)
+        self.bubble_text = _wrap(QLabel(), plain=True)  # la phrase exacte de l'utilisateur
+        bbl.addWidget(self.bubble_text)
+        brow = QHBoxLayout()
+        brow.setContentsMargins(0, 0, 0, 0)
+        brow.addStretch(1)
+        brow.addWidget(self.bubble)
+        bz.addWidget(self.bubble_meta)
+        bz.addLayout(brow)
+        fil.addWidget(self.bubble_zone)
+
+        # Carte de composition : « Je prépare un plan… », indicateur, Arrêter.
+        self.composing_card, cl = self._new_card()
+        self.composing_title = self._card_title(cl)
         self.plan_progress = QProgressBar()
         self.plan_progress.setRange(0, 0)  # indéterminée : la composition ne se mesure pas
         self.plan_progress.setTextVisible(False)
-        self.plan_list = QListWidget()
-        self.plan_list.setMaximumHeight(130)
-        self.plan_list.setWordWrap(True)
-        self.plan_list.itemClicked.connect(self._plan_clicked)
-        self.plan_list.itemActivated.connect(self._plan_clicked)
+        self.plan_progress.setMaximumHeight(6)
+        self.composing_detail = self._meta(_wrap(QLabel()))
+        self.compose_stop = QPushButton()
+        self.compose_stop.setEnabled(False)  # la composition n'est pas annulable (client)
+        self.compose_stop_reason = self._meta(_wrap(QLabel()))
+        crow = QHBoxLayout()
+        crow.addWidget(self.compose_stop_reason, 1)
+        crow.addWidget(self.compose_stop, 0, Qt.AlignmentFlag.AlignTop)
+        cl.addWidget(self.plan_progress)
+        cl.addWidget(self.composing_detail)
+        cl.addLayout(crow)
+        fil.addWidget(self.composing_card)
+
+        # Carte d'échec de composition : message du noyau, code sous Détails techniques.
+        self.failed_card, fl = self._new_card()
+        self.failed_title = self._card_title(fl)
+        self.failed_text = _wrap(QLabel(), plain=True)
+        self.failed_details = _Fold()
+        self.failed_details_view = _mono(_wrap(QLabel(), plain=True))
+        fdl = QVBoxLayout(self.failed_details.body)
+        fdl.setContentsMargins(0, 0, 0, 0)
+        fdl.addWidget(self.failed_details_view)
+        fl.addWidget(self.failed_text)
+        fl.addWidget(self.failed_details)
+        fil.addWidget(self.failed_card)
+
+        # Carte de question : la question de Cassini en clair.
+        self.question_card, ql = self._new_card()
+        self.question_title = self._card_title(ql)
+        self.question_text = _wrap(QLabel(), plain=True)
+        self.question_left_out = self._meta(_wrap(QLabel()))
+        ql.addWidget(self.question_text)
+        ql.addWidget(self.question_left_out)
+        fil.addWidget(self.question_card)
+
+        # Carte de refus.
+        self.rejected_card, rl = self._new_card()
+        self.rejected_title = self._card_title(rl)
+        fil.addWidget(self.rejected_card)
+
+        # Carte du plan validé, repliée : « ✔ Plan validé — n étapes », « Voir ».
+        self.plan_folded_card, pfl = self._new_card()
+        pfrow = QHBoxLayout()
+        self.plan_folded_text = _title(_wrap(QLabel()))
+        self.plan_toggle = QToolButton()
+        self.plan_toggle.setCheckable(True)
+        self.plan_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.plan_toggle.setAutoRaise(True)
+        self.plan_toggle.toggled.connect(self._plan_toggled)
+        pfrow.addWidget(self.plan_folded_text, 1)
+        pfrow.addWidget(self.plan_toggle)
+        pfl.addLayout(pfrow)
+        fil.addWidget(self.plan_folded_card)
+
+        # Carte du plan : titre, étapes en lecture seule, Valider / Refuser ou Arrêter.
+        self.plan_card, pl = self._new_card()
+        self.plan_title = self._card_title(pl)
+        self.plan_steps = QVBoxLayout()
+        self.plan_steps.setContentsMargins(0, 0, 0, 0)
+        self.plan_steps.setSpacing(2)
+        pl.addLayout(self.plan_steps)
+        # Couches de résultat que le modèle ne voit plus (ticket 5.33).
+        self.left_out_note = self._meta(_wrap(QLabel()))
+        self.left_out_note.setVisible(False)
+        pl.addWidget(self.left_out_note)
         self.approve_button = QPushButton()
         self.approve_button.clicked.connect(self._approve)
         self.reject_button = QPushButton()
         self.reject_button.clicked.connect(self._reject)
         self.plan_stop_button = QPushButton()
         self.plan_stop_button.clicked.connect(self._stop)
-        self.plan_reason = QLabel()
-        self.plan_reason.setWordWrap(True)
+        plan_buttons = QHBoxLayout()
+        plan_buttons.addWidget(self.approve_button, 1)
+        plan_buttons.addWidget(self.reject_button, 1)
+        plan_buttons.addStretch(0)
+        plan_buttons.addWidget(self.plan_stop_button)
+        pl.addLayout(plan_buttons)
+        self.plan_reason = self._meta(_wrap(QLabel()))
+        pl.addWidget(self.plan_reason)
         self.plan_details = _Fold()
-        self.plan_details_view = _mono(QPlainTextEdit())
-        self.plan_details_view.setReadOnly(True)
-        self.plan_details_view.setMaximumHeight(120)
+        self.plan_details_view = _mono(_wrap(QLabel(), plain=True))
         pdl = QVBoxLayout(self.plan_details.body)
         pdl.setContentsMargins(0, 0, 0, 0)
         pdl.addWidget(self.plan_details_view)
-        plan_buttons = QHBoxLayout()
-        plan_buttons.addWidget(self.approve_button)
-        plan_buttons.addWidget(self.reject_button)
-        plan_buttons.addWidget(self.plan_stop_button)
-        pl.addWidget(self.plan_notice)
-        pl.addWidget(self.plan_progress)
-        pl.addWidget(self.plan_title)
-        pl.addWidget(self.plan_list)
-        # Sous le plan, ou sous la question quand la liste des étapes est cachée.
-        pl.addWidget(self.left_out_note)
-        pl.addLayout(plan_buttons)
-        pl.addWidget(self.plan_reason)
         pl.addWidget(self.plan_details)
-        col.addWidget(self.plan_zone)
+        fil.addWidget(self.plan_card)
 
-        # Résultat.
-        self.result_title = _title(QLabel())
-        self.result_text = QLabel()
-        self.result_text.setWordWrap(True)
-        self.result_text.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse
-        )
+        # Carte de résultat : une ligne par étape en clair, Ouvrir le dossier, Détails.
+        self.result_card, resl = self._new_card()
+        self.result_title = self._card_title(resl)
+        self.result_rows = QVBoxLayout()
+        self.result_rows.setContentsMargins(0, 0, 0, 0)
+        self.result_rows.setSpacing(2)
+        resl.addLayout(self.result_rows)
+        self.result_text = _wrap(QLabel(), plain=True)
+        resl.addWidget(self.result_text)
         self.open_folder_button = QPushButton()
         self.open_folder_button.clicked.connect(self._open_folder)
+        self.result_stop = QPushButton()
+        self.result_stop.clicked.connect(self._stop)
         self.details = _Fold()
-        self.details_view = _mono(QPlainTextEdit())
-        self.details_view.setReadOnly(True)
-        self.details_view.setMaximumHeight(120)
+        self.details_view = _mono(_wrap(QLabel(), plain=True))
         dl = QVBoxLayout(self.details.body)
         dl.setContentsMargins(0, 0, 0, 0)
         dl.addWidget(self.details_view)
-        col.addWidget(self.result_title)
-        col.addWidget(self.result_text)
-        col.addWidget(self.open_folder_button)
-        col.addWidget(self.details)
+        rrow = QHBoxLayout()
+        rrow.addWidget(self.details, 1, Qt.AlignmentFlag.AlignTop)
+        self.result_stop_reason = self._meta(_wrap(QLabel()))
+        rrow.addWidget(self.result_stop_reason, 1, Qt.AlignmentFlag.AlignTop)
+        rrow.addWidget(self.result_stop, 0, Qt.AlignmentFlag.AlignTop)
+        rrow.addWidget(self.open_folder_button, 0, Qt.AlignmentFlag.AlignTop)
+        resl.addLayout(rrow)
+        fil.addWidget(self.result_card)
+        fil.addStretch(1)
 
-        # Journal de la session.
-        self.log_title = _title(QLabel())
+        # Repli Journal : fermé par défaut, son compte dans le libellé.
+        self.log_fold = _Fold(self._fold_toggled, wide=True)
+        lfl = QVBoxLayout(self.log_fold.body)
+        lfl.setContentsMargins(0, 0, 0, 0)
         self.log_list = QListWidget()
-        self.log_list.setMaximumHeight(110)
         self.log_list.setWordWrap(True)
         self.log_list.itemClicked.connect(self._log_clicked)
         self.log_list.itemActivated.connect(self._log_clicked)
         self.log_empty = QLabel()
-        col.addWidget(self.log_title)
-        col.addWidget(self.log_empty)
-        col.addWidget(self.log_list)
+        lfl.addWidget(self.log_empty)
+        lfl.addWidget(self.log_list)
+        col.addWidget(self.log_fold)
 
-        # Mode expert.
-        self.expert = _Fold(self._expert_toggled)
-        el = QVBoxLayout(self.expert.body)
+        # Repli Mode expert : son contenu défile à part s'il dépasse la moitié du panneau.
+        self.expert = _Fold(self._expert_toggled, wide=True)
+        efl = QVBoxLayout(self.expert.body)
+        efl.setContentsMargins(0, 0, 0, 0)
+        self.expert_scroll = QScrollArea()
+        self.expert_scroll.setWidgetResizable(True)
+        self.expert_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.expert_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.expert_inner = QWidget()
+        self.expert_scroll.setWidget(self.expert_inner)
+        efl.addWidget(self.expert_scroll)
+        el = QVBoxLayout(self.expert_inner)
         el.setContentsMargins(0, 0, 0, 0)
         self.command_list = QListWidget()
         self.command_list.setMaximumHeight(130)
@@ -503,24 +715,41 @@ class CassiniPanel(QWidget):
         el.addWidget(self.form_error)
         col.addWidget(self.expert)
 
-        # Pied : information, pas une panne.
-        self.footer = QLabel()
-        self.footer.setWordWrap(True)
-        self.footer.setEnabled(False)
-        col.addWidget(self.footer)
-        col.addStretch(1)
+        # Saisie épinglée en bas : champ multiligne et Envoyer, aligné sur le bas du champ.
+        self.input = RequestEdit(self._send)
+        lines = self.input.fontMetrics().lineSpacing()
+        self.input.setFixedHeight(2 * lines + 14)
+        self.input.textChanged.connect(self._input_changed)
+        self.send_button = QPushButton()
+        self.send_button.clicked.connect(self._send)
+        irow = QHBoxLayout()
+        irow.setSpacing(6)
+        irow.addWidget(self.input, 1)
+        irow.addWidget(self.send_button, 0, Qt.AlignmentFlag.AlignBottom)
+        col.addLayout(irow)
+        # Raison de la saisie grisée quand du texte cache le texte indicatif.
+        self.input_reason = self._meta(_wrap(QLabel()))
+        self.input_reason.setVisible(False)
+        col.addWidget(self.input_reason)
 
-        # Ordre de tabulation = ordre vertical.
+        # Pied : information, pas une panne, sous un filet du thème.
+        col.addWidget(_hline())
+        self.footer = self._meta(_wrap(QLabel(), selectable=False))
+        col.addWidget(self.footer)
+
+        # Ordre de tabulation = ordre du fil, puis replis, saisie, Envoyer.
         order = [
             self.settings_button, self.lang_box, self.model_box, self.external_switch,
             self.external_ask, self.banner_button, self.external_stop, self.external_cut,
-            self.approval_allow, self.approval_deny, self.input,
-            self.send_button, self.plan_list, self.approve_button, self.reject_button,
-            self.plan_stop_button, self.plan_details.button, self.details.button, self.log_list,
-            self.expert.button, self.command_list, self.run_button, self.stop_button,
+            self.approval_allow, self.approval_deny, self.failed_details.button,
+            self.plan_toggle, self.approve_button, self.reject_button, self.plan_stop_button,
+            self.plan_details.button, self.details.button, self.result_stop,
+            self.open_folder_button, self.log_fold.button, self.log_list, self.expert.button,
+            self.command_list, self.run_button, self.stop_button, self.input, self.send_button,
         ]
         for a, b in zip(order, order[1:]):
             QWidget.setTabOrder(a, b)
+        self._apply_styles()
 
     # -- état ----------------------------------------------------------
     def t(self, key, **values):
@@ -554,6 +783,8 @@ class CassiniPanel(QWidget):
         # Interrupteur éteint, question fermée, appels externes en cours annulés.
         self.external.lost(self.log)
         plan_in_flight = self.agent.phase != agentview.IDLE
+        if self.agent.phase in (agentview.GENERATING, agentview.PROPOSED):
+            self._exchange = None  # la demande n'a plus de réponse : le fil repart à l'accueil
         self._close_plan_entry(runlog.ERROR)
         self.agent.forget()
         last = self.last
@@ -578,6 +809,8 @@ class CassiniPanel(QWidget):
             self.focus = None  # le détail cliqué visait une ligne de l'ancien journal
             self.last = None
             self._shown_result = None
+            self._exchange = None  # le fil repart de la carte d'accueil
+            self._plan_open = False
             self.log = runlog.RunLog.from_history(
                 history,
                 lambda command, params: summary.label(
@@ -615,6 +848,7 @@ class CassiniPanel(QWidget):
             self._plan_entries = {}
             self._plan_refs = {}
             agent.proposed(payload.get("plan_id"), payload.get("plan"), payload.get("left_out"))
+            self._plan_open = False
             _announce(self.plan_title, self.t("live_plan"))
         elif kind == client.PLAN_QUESTION:
             agent.question(
@@ -627,14 +861,14 @@ class CassiniPanel(QWidget):
             )
             if restored is not None:
                 self.input.setPlainText(restored)  # à compléter par le point
-            _announce(self.plan_notice, self.t("live_question"))
+            _announce(self.question_text, self.t("live_question"))
         elif kind == client.PLAN_FAILED:
             agent.failed(payload.get("code", ""), payload.get("message", ""))
             if models.asks_list_again(payload.get("code")):
                 self._actions.list_models()  # la liste a changé : la redemander
             if self._last_request and not self.input.toPlainText().strip():
                 self.input.setPlainText(self._last_request)  # à corriger sans tout retaper
-            _announce(self.plan_notice, self.t("live_error"))
+            _announce(self.failed_text, self.t("live_error"))
         elif kind == client.PLAN_REJECTED:
             agent.rejected()
         elif kind == client.PLAN_STEP:
@@ -732,6 +966,13 @@ class CassiniPanel(QWidget):
                 payload["command"], payload["command"], time.strftime("%H:%M"), params=params
             )
             self.last = {"kind": runlog.RUNNING, "command": payload["command"]}
+            # Un Lancer expert remplace l'échange en cours, comme une demande.
+            label = summary.label(
+                payload["command"], params, self.lang, _layer_name, None, self.catalogue
+            )
+            self._exchange = thread.expert_exchange(label, time.strftime("%H:%M"))
+            self._plan_open = False
+            self.agent.reset()  # le plan fini précédent quitte le fil (il reste au journal)
         elif kind == client.RUN_DONE:
             self.running = False
             entry = self.log.finish(runlog.DONE)
@@ -783,17 +1024,197 @@ class CassiniPanel(QWidget):
 
         self._render_external()
 
-        self.input.setPlaceholderText(t("input_hint"))
         self.input.setAccessibleName(t("input_name"))
         self.send_button.setText(t("send"))
         self._render_agent()
 
-        self.result_title.setText(t("result_title"))
         self.details.button.setText(t("details"))
         self.details.button.setAccessibleName(t("details"))
         self._render_result()
+        self._render_thread()
+        self._render_log()
 
-        self.log_title.setText(t("log_title"))
+        self.expert.button.setText(t("expert_title"))
+        self.expert.button.setAccessibleName(t("expert_title"))
+        self.expert.setEnabled(usable and self.agent.phase == agentview.IDLE)
+        self.footer.setText(t("offline"))
+        self._render_commands()
+        self._render_buttons()
+
+    # -- le fil ----------------------------------------------------------
+    def _apply_styles(self):
+        """Paire claire ou sombre des couleurs de Cassini, lue dans la palette de QGIS."""
+        if self._styling:
+            return
+        self._styling = True
+        try:
+            self._styles = thread.styles(thread.colors(self._dark()))
+            for card in self._cards:
+                card.setStyleSheet(self._styles["card"])
+            self.bubble.setStyleSheet(self._styles["bubble"])
+            self.input.setStyleSheet(self._styles["input"])
+            self.logo.setPixmap(self._logo(24))
+            for icon in self._small_logos:
+                icon.setPixmap(self._logo(16))
+            dim = self.palette().color(QPalette.ColorRole.PlaceholderText)
+            for label in self._metas:
+                palette = label.palette()
+                palette.setColor(QPalette.ColorRole.WindowText, dim)
+                label.setPalette(palette)
+            self._primary_shown = None  # à reposer avec la nouvelle paire
+        finally:
+            self._styling = False
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.PaletteChange and self._styles is not None:
+            self._apply_styles()
+            self.render()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._styles is not None:
+            self._fit_bubble()
+            self._fit_folds()
+
+    def _style_primary(self, c):
+        """Un seul bouton principal visible (DESIGN.md, `button-primary`)."""
+        which = thread.primary(c)
+        if which == self._primary_shown or self._styles is None:
+            return
+        self._primary_shown = which
+        style = self._styles["primary"]
+        self.send_button.setStyleSheet(style if which == "send" else "")
+        self.approve_button.setStyleSheet(style if which == "approve" else "")
+
+    def _fit_bubble(self):
+        """La bulle épouse sa phrase, sans dépasser 85 % du fil."""
+        available = self.thread_scroll.viewport().width()
+        widest = thread.bubble_width(available)
+        metrics = self.bubble_text.fontMetrics()
+        lines = (self.bubble_text.text() or " ").splitlines() or [" "]
+        natural = max(metrics.horizontalAdvance(line) for line in lines) + 24
+        self.bubble.setFixedWidth(max(48, min(widest, natural)))
+
+    def _fit_folds(self):
+        """Les replis dépliés prennent leur contenu, ensemble au plus la moitié du panneau,
+        et le fil garde toujours une hauteur visible (`thread.fold_heights`)."""
+        height = self.height()
+        # Hauteur des lignes à la ligne près : `sizeHintForRow` sous-estime le texte replié.
+        metrics = self.log_list.fontMetrics()
+        width = max(80, self.width() - 40)
+        content = 0
+        for i in range(self.log_list.count()):
+            box = metrics.boundingRect(
+                QRect(0, 0, width, 100000), int(Qt.TextFlag.TextWordWrap),
+                self.log_list.item(i).text(),
+            )
+            content += box.height() + 6
+        content += 2 * self.log_list.frameWidth() + 4
+        inner = self.expert_inner.sizeHint().height() + 2
+        log_open = self.log_fold.is_open() and self.log_list.isVisibleTo(self.log_fold)
+        expert_open = self.expert.is_open()
+        # Ce que prend le reste du panneau : tout sauf le fil et le contenu des replis.
+        reserved = height - self.thread_scroll.height()
+        reserved -= self.log_list.height() if log_open else 0
+        reserved -= self.expert_scroll.height() if expert_open else 0
+        log_h, expert_h = thread.fold_heights(
+            content if log_open else None, inner if expert_open else None, height, reserved
+        )
+        if log_open:
+            self.log_list.setFixedHeight(max(24, log_h))
+        if expert_open:
+            self.expert_scroll.setFixedHeight(expert_h)
+        # Le repli prend sa hauteur tout de suite, pas au prochain tour : chaque mise en page
+        # est refaite de l'intérieur vers l'extérieur (sinon la taille du repli reste l'ancienne).
+        for fold in (self.log_fold, self.expert):
+            for widget in (fold.body, fold):
+                if widget.layout() is not None:
+                    widget.layout().invalidate()
+                    widget.layout().activate()
+            fold.updateGeometry()
+        if self.layout() is not None:
+            self.layout().invalidate()
+            self.layout().activate()
+
+    def _fold_toggled(self, _opened):
+        self._fit_folds()
+
+    def _plan_toggled(self, opened):
+        self._plan_open = bool(opened)
+        self._render_thread()
+
+    def _scroll_to_newest(self):
+        """Le fil se cale sur la carte la plus récente, sans cacher la bulle s'il tient."""
+        cards = [w for w in (self.welcome_card, self.bubble_zone, self.composing_card,
+                             self.failed_card, self.question_card, self.rejected_card,
+                             self.plan_folded_card, self.plan_card, self.result_card)
+                 if w.isVisible()]
+        if not cards:
+            return
+        self.thread_body.layout().activate()  # géométrie à jour avant de la lire
+        newest = cards[-1]
+        bar = self.thread_scroll.verticalScrollBar()
+        view = self.thread_scroll.viewport().height()
+        top, bottom = newest.y(), newest.y() + newest.height()
+        if self.bubble_zone.isVisible() and bottom - self.bubble_zone.y() <= view:
+            top = self.bubble_zone.y()  # bulle et carte tiennent ensemble : les deux à l'écran
+        # Défiler juste assez pour voir la carte ; si elle dépasse, montrer son haut.
+        value = min(max(bar.value(), bottom - view), top)
+        bar.setValue(max(0, min(bar.maximum(), value)))
+
+    def _render_thread(self):
+        """Quelles cartes du fil se voient (logique dans `thread.cards`)."""
+        t = self.t
+        lang = self.lang
+        kinds = thread.cards(self.agent, self._exchange, self.last, self.focus)
+        self.welcome_card.setVisible(thread.WELCOME in kinds)
+        self.welcome_title.setText(t("welcome_title"))
+        self.welcome_text.setText(t("welcome_text"))
+        self.examples_title.setText(t("examples_title"))
+        chevron = self._styles["chevron"] if self._styles else ""
+        dim = self.palette().color(QPalette.ColorRole.PlaceholderText).name()
+        self.examples.setText("<br>".join(
+            "<span style='color:%s'>›</span> <span style='color:%s'>%s</span>"
+            % (chevron, dim, t(key)) for key in ("example_1", "example_2", "example_3")
+        ))
+
+        self.bubble_zone.setVisible(thread.BUBBLE in kinds)
+        self.bubble_text.setText(thread.bubble_text(self._exchange, lang))
+        self.bubble_meta.setText(thread.bubble_meta(self._exchange, lang))
+        self.bubble.setAccessibleName(thread.bubble_name(self._exchange, lang))
+
+        self.composing_card.setVisible(thread.COMPOSING in kinds)
+        self.failed_card.setVisible(thread.FAILED in kinds)
+        self.question_card.setVisible(thread.QUESTION in kinds)
+        self.rejected_card.setVisible(thread.REJECTED in kinds)
+        folded = thread.PLAN_FOLDED in kinds
+        if not folded and self.plan_toggle.isChecked():
+            self.plan_toggle.blockSignals(True)
+            self.plan_toggle.setChecked(False)
+            self.plan_toggle.blockSignals(False)
+            self._plan_open = False
+        self.plan_folded_card.setVisible(folded)
+        self.plan_card.setVisible(thread.PLAN in kinds or (folded and self._plan_open))
+        n = len(self.agent.steps)
+        self.plan_folded_text.setText(thread.folded_summary(self.agent, self.last, lang))
+        self.plan_toggle.setText(t("plan_hide") if self._plan_open else t("plan_show"))
+        self.plan_toggle.setArrowType(
+            Qt.ArrowType.DownArrow if self._plan_open else Qt.ArrowType.RightArrow
+        )
+        self.plan_toggle.setAccessibleName(thread.folded_name(n, self._plan_open, lang))
+        self.result_card.setVisible(thread.RESULT in kinds)
+        self._fit_bubble()
+        if kinds != self._kinds_shown:
+            self._kinds_shown = kinds
+            QTimer.singleShot(0, self._scroll_to_newest)
+
+    def _render_log(self):
+        t = self.t
+        n = len(self.log.entries)
+        label = thread.log_fold_label(n, self.lang)
+        self.log_fold.button.setText(label)
+        self.log_fold.button.setAccessibleName(label)
         self.log_empty.setText(t("log_empty"))
         self.log_empty.setVisible(not self.log.entries)
         self.log_list.setVisible(bool(self.log.entries))
@@ -806,15 +1227,29 @@ class CassiniPanel(QWidget):
                     entry, t(entry.status), external.duration_text(entry.duration_ms, self.lang)
                 )
             )
-        self.log_list.setAccessibleName(t("log_title"))
+        self.log_list.setAccessibleName(label)
         self.log_list.scrollToBottom()
+        self._fit_folds()
 
-        self.expert.button.setText(t("expert_title"))
-        self.expert.button.setAccessibleName(t("expert_title"))
-        self.expert.setEnabled(usable and self.agent.phase == agentview.IDLE)
-        self.footer.setText(t("offline"))
-        self._render_commands()
-        self._render_buttons()
+    def _fill_rows(self, layout, rows, on_click=None, current_style=""):
+        """Lignes d'étapes d'une carte, séparées par un filet du thème.
+
+        `rows` : (icône, mot, texte, message, en cours ?) de `thread`. Rend les lignes.
+        """
+        _clear(layout)
+        style = self._styles or {}
+        widgets = []
+        for index, (icon, word, text, message, current) in enumerate(rows):
+            if index:
+                layout.addWidget(_hline())
+            click = (lambda i=index: on_click(i)) if on_click is not None else None
+            row = _StepRow(
+                icon, word, text, message,
+                style.get("step_current" if current else "step", ""), click,
+            )
+            layout.addWidget(row)
+            widgets.append(row)
+        return widgets
 
     def _open_folder(self):
         folder = runlog.result_folder(self._shown_result)
@@ -832,13 +1267,14 @@ class CassiniPanel(QWidget):
         if 0 <= row < len(self.log.entries):
             self.focus = ("entry", self.log.entries[row])
             self._render_result()  # sans refaire les listes pendant le clic
+            self._render_thread()
             _announce(self.result_text, self.result_text.text())
 
-    def _plan_clicked(self, item):
-        row = self.plan_list.row(item)
+    def _plan_clicked(self, row):
         if 0 <= row < len(self.agent.steps):
             self.focus = ("step", self.agent.steps[row])
             self._render_result()
+            self._render_thread()
             _announce(self.result_text, self.result_text.text())
 
     def _focus_error(self, focus):
@@ -867,117 +1303,157 @@ class CassiniPanel(QWidget):
             refs = item.refs
         result = item.result if item.status == runlog.DONE else None
         error = self._focus_error(self.focus) if item.status == runlog.ERROR else None
+        self.result_title.setText(self.t("result_title"))
         self.result_text.setText(
             summary.detail(item, label, self.lang, _layer_name, refs, self.catalogue, error)
         )
         self._shown_result = result
         folder = runlog.result_folder(result)
         self.open_folder_button.setVisible(folder is not None)
-        self.details_view.setPlainText(runlog.step_details(item.params, result))
+        self.details_view.setText(runlog.step_details(item.params, result))
         self.details.setVisible(True)
 
     def _render_result(self):
+        """Carte de résultat : plan exécuté ou arrêté, commande experte, détail cliqué."""
+        t = self.t
         last = self.last
         self.details.setVisible(False)
-        self.open_folder_button.setText(self.t("open_folder"))
+        self.open_folder_button.setText(t("open_folder"))
+        self.open_folder_button.setAccessibleName(t("open_folder"))
+        self.result_stop.setVisible(False)
+        self.result_stop_reason.setVisible(False)
+        self.result_text.setVisible(True)
+        self._fill_rows(self.result_rows, [])
         if self.focus is not None:
             self._render_focus()
             return
-        self._shown_result = last.get("result") if last and last["kind"] == runlog.DONE else None
+        self._shown_result = thread.shown_result(last)
         folder = runlog.result_folder(self._shown_result)
         self.open_folder_button.setVisible(folder is not None)
         if last is None:
-            self.result_text.setText(self.t("result_none"))
+            self.result_title.setText(t("result_title"))
+            self.result_text.setText(t("result_none"))
             return
         kind = last["kind"]
         command = last.get("command", "")
-        if kind == runlog.RUNNING:
-            self.result_text.setText("%s  %s" % (self.t("running"), command))
-        elif last.get("plan"):
-            lines = [agentview.outcome_text(last, self.lang)]
+        self.result_title.setText(thread.result_title(last, self.lang))
+        details = ""
+        if last.get("plan"):
+            refs = last.get("refs") or self.agent.step_results()
+            rows = thread.result_rows(
+                last.get("steps") or self.agent.steps,
+                last,
+                self.lang,
+                lambda s: "%d. %s" % (s.number, self._sentence(s.command, s.params, s.result, refs)),
+                lambda s: agentview.step_label(s, self.catalogue, self.lang, _layer_name, refs),
+            )
+            self._fill_rows(self.result_rows, rows)
+            closing = thread.closing(last, self.lang)
+            self.result_text.setText(closing or "")
+            self.result_text.setVisible(bool(closing))
             if kind == runlog.DONE:
-                for step in last.get("steps") or []:
-                    lines.append(
-                        "%d. %s"
-                        % (
-                            step.number,
-                            self._sentence(step.command, step.params, step.result, last.get("refs")),
-                        )
-                    )
-            self.result_text.setText("\n".join(lines))
-            if kind == runlog.DONE:
-                self.details_view.setPlainText(runlog.technical_details(last.get("result")))
-                self.details.setVisible(True)
+                details = runlog.technical_details(last.get("result"))
+            else:
+                details = thread.error_details(last)
+        elif kind == runlog.RUNNING:
+            self.result_text.setVisible(False)
+            c = runlog.controls(
+                self.ready and self.banner is None, True, True,
+                agentview.is_cancellable(command, self.catalogue),
+            )
+            self.result_stop.setText(t("stop"))
+            self.result_stop.setEnabled(c["stop_enabled"])
+            stop_reason = t(c["stop_reason"]) if c["stop_reason"] else ""
+            self.result_stop.setAccessibleName(
+                "%s, %s" % (t("stop"), stop_reason) if stop_reason else t("stop")
+            )
+            self.result_stop.setVisible(True)
+            self.result_stop_reason.setText(stop_reason)  # à côté du bouton grisé
+            self.result_stop_reason.setVisible(bool(stop_reason))
         elif kind == runlog.DONE:
             self.result_text.setText(
                 self._sentence(command, last.get("params"), last.get("result"))
             )
-            self.details_view.setPlainText(
-                runlog.step_details(last.get("params"), last.get("result"))
-            )
-            self.details.setVisible(True)
+            details = runlog.step_details(last.get("params"), last.get("result"))
         elif kind == runlog.CANCELLED:
-            self.result_text.setText(self.t("cancelled_generic", command=command))
+            self.result_text.setText(t("cancelled_generic", command=command))
         else:
-            self.result_text.setText(
-                self.t("step_error", n=1, code=last.get("code", ""), message=last.get("message", ""))
-            )
+            self.result_text.setText(last.get("message", "") or t("live_error"))
+            details = thread.error_details(last)
+        self.details_view.setText(details)
+        self.details.setVisible(bool(details))
 
-    def _render_agent(self):
-        """Saisie et zone plan, d'après l'état du plan (logique dans `agentview`)."""
-        t = self.t
-        agent = self.agent
-        c = agentview.controls(
-            agent,
+    def _controls(self):
+        return agentview.controls(
+            self.agent,
             self.ready and self.banner is None,
             self.running,
             bool(self.input.toPlainText().strip()),
             self.catalogue,
             external.busy(self.external),
         )
+
+    def _render_agent(self):
+        """Saisie et cartes de l'agent, d'après l'état du plan (logique dans `agentview`)."""
+        t = self.t
+        lang = self.lang
+        agent = self.agent
+        c = self._controls()
         self.input.setEnabled(c["input_enabled"])
         self.send_button.setEnabled(c["send_enabled"])
-        reason = t(c["input_reason"]) if c["input_reason"] else ""
-        self.input_reason.setText(reason)
-        self.input_reason.setVisible(bool(reason))
+        # Grisée, la saisie dit pourquoi à la place de son texte indicatif.
+        hint = thread.input_hint(agent, c["input_reason"], self.running, self._exchange, lang)
+        self.input.setPlaceholderText(hint)
+        reason = hint if c["input_reason"] else ""
+        self.input.setAccessibleDescription(reason)
+        line = thread.reason_line(reason, bool(self.input.toPlainText().strip()))
+        self.input_reason.setText(line)
+        self.input_reason.setVisible(bool(line))
         self.send_button.setAccessibleName("%s, %s" % (t("send"), reason) if reason else t("send"))
 
-        notice = agentview.notice_text(agent, self.lang)
-        if agent.notice is not None and agent.notice[0] == "question":
-            notice = "%s %s" % (t("question_title"), notice)
-        self.plan_notice.setText(notice or "")
-        self.plan_notice.setVisible(bool(notice))
-        left_out = agentview.left_out_text(agent, self.lang)
-        self.left_out_note.setText(left_out or "")
-        self.left_out_note.setVisible(bool(left_out))
+        # Carte de composition.
+        self.composing_title.setText(t("composing_title"))
+        self.composing_detail.setText(t("composing_detail"))
         self.plan_progress.setVisible(c["progress_visible"])
-        self.plan_progress.setAccessibleName(t("generating"))
+        self.plan_progress.setAccessibleName(t("composing_title"))
+        self.compose_stop.setText(t("stop"))
+        self.compose_stop.setAccessibleName("%s, %s" % (t("stop"), t("compose_not_cancellable")))
+        self.compose_stop_reason.setText(t("compose_not_cancellable"))
 
+        # Cartes d'échec, de question, de refus.
+        key, values = agent.notice if agent.notice is not None else (None, {})
+        self.failed_title.setText(t("compose_failed_title"))
+        self.failed_text.setText(values.get("message", "") if key == "propose_error" else "")
+        self.failed_text.setVisible(bool(self.failed_text.text()))
+        code = values.get("code", "") if key == "propose_error" else ""
+        self.failed_details.button.setText(t("details"))
+        self.failed_details.button.setAccessibleName(t("details"))
+        self.failed_details_view.setText(str(code or ""))
+        self.failed_details.setVisible(bool(code))
+        self.question_title.setText(t("question_title"))
+        self.question_text.setText(values.get("text", "") if key == "question" else "")
+        self.rejected_title.setText(t("plan_rejected"))
+        left_out = agentview.left_out_text(agent, lang) or ""
+        self.left_out_note.setText(left_out)
+        self.left_out_note.setVisible(bool(left_out))
+        self.question_left_out.setText(left_out)
+        self.question_left_out.setVisible(bool(left_out))
+
+        # Carte du plan : titre, étapes, boutons, Détails techniques.
         has_steps = bool(agent.steps)
-        self.plan_title.setText(t("plan_title"))
-        self.plan_title.setVisible(
-            has_steps and agent.phase in (agentview.PROPOSED, agentview.EXECUTING)
+        self.plan_title.setText(thread.plan_title(agent, lang) if has_steps else "")
+        rows = self._fill_rows(
+            self.plan_steps,
+            thread.plan_rows(agent, self.catalogue, lang, _layer_name) if has_steps else [],
+            self._plan_clicked,
         )
-        self.plan_list.setVisible(has_steps)
-        self.plan_list.setAccessibleName(t("plan_steps_name"))
-        self.plan_list.clear()
-        for step in agent.steps:
-            self.plan_list.addItem(
-                agentview.step_line(
-                    step,
-                    self.catalogue,
-                    self.lang,
-                    agent.current,
-                    _layer_name,
-                    agent.step_results(),
-                )
-            )
+        chain = [self.plan_toggle] + rows + [self.approve_button]  # ordre du fil
+        for a, b in zip(chain, chain[1:]):
+            QWidget.setTabOrder(a, b)
         self.plan_details.setVisible(has_steps)
         self.plan_details.button.setText(t("details"))
         self.plan_details.button.setAccessibleName(t("details"))
-        self.plan_details_view.setPlainText(
-            runlog.technical_details(agent.plan) if has_steps else ""
-        )
+        self.plan_details_view.setText(runlog.technical_details(agent.plan) if has_steps else "")
 
         self.approve_button.setText(t("approve"))
         self.approve_button.setAccessibleName(t("approve"))
@@ -996,21 +1472,13 @@ class CassiniPanel(QWidget):
         self.plan_stop_button.setEnabled(c["stop_enabled"])
         self.plan_reason.setText(stop_reason)
         self.plan_reason.setVisible(bool(stop_reason))
-        self.plan_zone.setVisible(
-            bool(notice) or has_steps or c["progress_visible"] or c["approve_visible"]
-        )
+        self._style_primary(c)
 
     def _input_changed(self):
-        """À chaque frappe, seul l'état d'Envoyer change : la zone plan n'est pas refaite."""
-        c = agentview.controls(
-            self.agent,
-            self.ready and self.banner is None,
-            self.running,
-            bool(self.input.toPlainText().strip()),
-            self.catalogue,
-            external.busy(self.external),
-        )
+        """À chaque frappe, seuls Envoyer et le bouton principal changent."""
+        c = self._controls()
         self.send_button.setEnabled(c["send_enabled"])
+        self._style_primary(c)
 
     def _render_commands(self):
         current = self.selected["id"] if self.selected else None
@@ -1150,6 +1618,7 @@ class CassiniPanel(QWidget):
         self.selected = next((e for e in self.catalogue if e["id"] == command), None)
         self._build_form(self.selected)
         self._render_buttons()
+        self._fit_folds()
 
     def _run(self):
         if self.selected is None or self.running:
@@ -1181,11 +1650,15 @@ class CassiniPanel(QWidget):
             return
         if self._actions.propose(text, self.model):  # la demande part sans les blancs des bords
             self._last_request = text
+            # Une nouvelle demande remplace l'échange précédent ; il reste au journal.
+            self._exchange = thread.request_exchange(text, time.strftime("%H:%M"))
+            self.last = None
+            self._plan_open = False
             self.agent.generating()
             self.input.clear()
             self.focus = None  # l'étape cliquée n'existe plus
             self.render()
-            _announce(self.plan_notice, self.t("generating"))
+            _announce(self.composing_title, self.t("composing_title"))
 
     def _approve(self):
         plan_id = self.agent.plan_id
@@ -1345,6 +1818,7 @@ class CassiniPanel(QWidget):
         self.settings_button.setFocus()
 
     def _expert_toggled(self, opened):
+        self._fit_folds()
         try:
             QSettings().setValue(EXPERT_KEY, "true" if opened else "false")
         except Exception:
