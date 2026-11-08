@@ -92,7 +92,7 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `constructible` | vocabulaire d'urbanisme : « parcelles constructibles », avec ou sans distance et PDF |
 | `export_pdf` | « sors-moi la carte en PDF », titre donné par l'utilisateur ou déduit de la demande |
 | `export_pdf_scale` | « exporte la carte en PDF au 1:25 000 » → `scale: 25000`, l'entier écrit ; échelles courantes de 1:1 000 à 1:250 000, écrites « au 1:25 000 », « au 1/25000 », « au 25 000e », « au 1:25k » (multiple de 1 000 seulement) ou « à l'échelle 1/25 000 » ; la carte seule ou au bout d'une recherche (5.38) ; depuis 5.40, aussi sans le mot « PDF » (« imprime la carte au 1/50000 », « sors-moi la carte au 25 000e »), un export et jamais un refus de format |
-| `export_pdf_format` | « exporte la carte en PDF au format A3 » → `page_size: "a3"`, « en portrait » ou « à la française » → `orientation: "portrait"` (« paysage », « à l'italienne » → `landscape`), « avec un carroyage Lambert-93 tous les 1 km » → `grid: {kind: projected, epsg: 2154, interval: {value: 1, unit: km}}`, « avec un graticule tous les 0,01° » → `grid: {kind: degrees, interval: {value: 0.01, unit: deg}}` (grades → `gon`) ; seuls les paramètres écrits, jamais `scale` ; la carte seule ou au bout d'une recherche ; un carroyage sans système (« carroyage UTM au kilomètre », « quadrillage tous les 500 m ») → question qui demande le système (11.12, lot 3) |
+| `export_pdf_format` | « exporte la carte en PDF au format A3 » → `page_size: "a3"`, « en portrait » ou « à la française » → `orientation: "portrait"` (« paysage », « à l'italienne » → `landscape`), « avec un carroyage Lambert-93 tous les 1 km » → `grid: {kind: projected, epsg: 2154, interval: {value: 1, unit: km}}`, « avec un graticule tous les 0,01° » → `grid: {kind: degrees, interval: {value: 0.01, unit: deg}}` (grades → `gon`) ; seuls les paramètres écrits, jamais `scale` ; la carte seule ou au bout d'une recherche ; un carroyage « UTM » sans fuseau (« carroyage UTM au kilomètre ») → `epsg` = `project.utm_epsg` de l'inventaire, question quand il n'y en a pas ; un carroyage sans système (« quadrillage tous les 500 m ») → question qui demande le système (11.12, lot 3 ; fuseau de l'inventaire, 2026-11-08) |
 | `isochrone` | « zone atteinte en 10 minutes à pied depuis le point ... (Lambert-93) » |
 | `isochrone_utm` | « zone atteinte en 10 minutes à pied depuis le point 412 300 / 5 412 000 (UTM 31N) » → même isochrone, code 32631 ou 32632 ; zone 31N ou 32N, écrite « UTM 31N », « UTM 31 N », « UTM zone 31 Nord » ou « UTM31N » (5.37) |
 | `isochrone_vers_cible` | « les écoles à 10 min à pied du point ... (Lambert-93) » → isochrone, puis intersection de la cible avec l'étape 1 ; la couche du lieu (gares, écoles...) est souvent dans l'inventaire, seules les coordonnées donnent l'origine ; une fois sur trois, le lieu est nommé avec ses coordonnées (« de la gare de X (652 000 / 6 862 000, Lambert-93) ») et reste un plan |
@@ -298,11 +298,22 @@ jamais `scale` (qui reste à `export_pdf_scale`). Formats écrits « au format A
 **Carroyage** (décision du propriétaire, 2026-11-07). Toute demande de carroyage nomme son
 système : Lambert-93 → `epsg: 2154`, UTM 30N, 31N ou 32N → 32630, 32631, 32632, tous les
 100 m à 10 km ; degrés (de 0,01° à 5°) ou grades (de 0,5 à 20 gr) → graticule. L'intervalle
-est écrit avec son unité, à la française (« 0,01° » → `0.01`), et recopié. Une fois sur huit,
-le carroyage ne nomme pas son système (« carroyage UTM au kilomètre », « quadrillage tous les
-500 m ») : la réponse est la question « Dans quel système veux-tu le carroyage : Lambert-93,
-UTM avec sa zone (30N, 31N ou 32N), ou un graticule en degrés ou en grades ? », jamais un plan. Aucune
-étiquette MGRS n'est promise.
+est écrit avec son unité, à la française (« 0,01° » → `0.01`), et recopié. Une fois sur six,
+le carroyage ne nomme pas son système en entier. Sans aucun système (« quadrillage tous les
+500 m », « grille de 1 km », « carroyage kilométrique »), la réponse est la question « Dans
+quel système veux-tu le carroyage : Lambert-93, UTM avec sa zone (30N, 31N ou 32N), ou un
+graticule en degrés ou en grades ? », jamais un plan. Aucune étiquette MGRS n'est promise.
+
+**Fuseau du projet** (2026-11-08, `plan-fuseau-utm-depuis-l-emprise.md`). Un carroyage « UTM »
+sans fuseau (« carroyage UTM au kilomètre », « carroyage UTM tous les 2 km », une fois sur deux
+des carroyages sans système) prend le fuseau du projet que montre l'inventaire,
+`project.utm_epsg` : `grid: {kind: projected, epsg: <utm_epsg>, interval}` ; « au kilomètre »
+vaut 1 km. L'inventaire de ces exemples le porte trois fois sur quatre, tiré parmi 32631 (deux
+fois sur quatre), 32630 et 32632 sur des couches en Lambert-93, pour que le plan le recopie au
+lieu de le deviner ; sans lui, c'est la question du système. Un fuseau écrit (« UTM 31N »)
+l'emporte toujours, même quand l'inventaire en porte un autre. Au jeu par défaut (graine 1,
+8 000 exemples), 5 plans recopient le fuseau et 3 questions le demandent : peu d'exemples, à
+surveiller au ré-entraînement groupé (11.23).
 
 **Refus.** Le cas « papier » de `refus_hors_registre`, qui refusait A3, A0 et portrait (« seulement
 une page A4 paysage »), est remplacé par ce que l'export ne fait pas : un format hors de la
@@ -684,6 +695,7 @@ ancienne ne les rend pas, et les clés d'avant gardent leur sens) :
 | `layers[].geometry` | nom WKB de QGIS (`MultiPolygon`, `PointZ`, `NoGeometry`…) ; `null` hors vecteur |
 | `layers[].feature_count` | nombre d'objets d'une couche vecteur |
 | `layers[].fields` | `{name, type, values?}` : type tel que QGIS le nomme ; pour un champ ni numérique ni date, au plus 11 valeurs distinctes non nulles, triées |
+| `extent.lonlat` | `{west, south, east, north, crs: "EPSG:4326"}` : l'union, en degrés WGS84, des étendues des couches reprojetées par QGIS ; une couche sans SCR valide, dont la reprojection échoue, ou dont l'étendue n'est pas finie ou sort de [-180, 180] × [-90, 90] reste hors de l'union ; la clé manque quand aucune couche n'y entre (2026-11-08) |
 
 L'extension ne décide rien : elle lit au plus 11 valeurs par champ (une de plus que le
 plafond du noyau, pour qu'il sache qu'il y en a trop), ne parcourt pas le disque et ne modifie
@@ -691,7 +703,7 @@ aucun fichier.
 
 **Ce que décide le noyau** :
 
-- forme `{"project": {name, epsg}, "layers": [...], "unloaded_files": []}` ; par couche,
+- forme `{"project": {name, epsg, utm_epsg}, "layers": [...], "unloaded_files": []}` ; par couche,
   `layer_id`, `name`, `kind`, `geometry`, `epsg`, `feature_count`, `source`, `fields` ;
 - SCR : `EPSG:2154` devient `2154` ; un SCR qui n'est pas EPSG (`IGNF:LAMB93`) n'a pas de clé
   `epsg` ;
@@ -704,6 +716,16 @@ aucun fichier.
 - raster : `geometry: null`, `fields: []`, et pas de `feature_count`, que QGIS n'a pas pour un
   raster (c'est le seul écart de forme avec le générateur, qui en tire un au hasard) ;
 - `unloaded_files` vaut toujours `[]`.
+- fuseau du projet (2026-11-08) : `utm_epsg` est le code EPSG du fuseau UTM normal du centre
+  de `extent.lonlat` (l'emprise en degrés WGS84, reprojetée par QGIS), 326xx au nord, 327xx au
+  sud ; le noyau ne convertit aucune coordonnée (AD-19). Le centre décide quand l'emprise
+  chevauche deux fuseaux. Pas de clé sans `lonlat`, sans son code `EPSG:4326`, avec une valeur
+  hors bornes, ouest après est, sud après nord, une emprise de plus de 12° de longitude (plus de
+  deux fuseaux : couche du monde, ou antiméridien passé, de -180 à 180), ou un centre hors du
+  domaine de l'UTM (80° S à 84° N) : un carroyage « UTM » sans fuseau mène alors à la question.
+  Dans le générateur, `utm_epsg` est celui des couches en UTM (vecteur ou MNT), sinon 31N
+  (projets du Val-de-Marne), et il manque comme l'`epsg` dans une part des formes de QGIS
+  (une fois sur quatre de celles-ci) ;
 
 `training/tests/forme_inventaire.rs` traduit une sortie représentative de `project.inventory`
 et la confronte au jeu engendré (graine 1) : mêmes clés, mêmes sortes de valeurs, types et

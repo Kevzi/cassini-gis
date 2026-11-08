@@ -10,7 +10,9 @@ QGIS, valable pour la session seulement (AD-9).
 L'inventaire rapporte aussi des faits bruts (sorte de couche, géométrie WKB, nombre
 d'objets, champs avec leur type QGIS, quelques valeurs des champs texte, nom du
 projet) : c'est le noyau qui les met dans la forme vue par le modèle et qui décide du
-plafond de valeurs.
+plafond de valeurs. L'étendue d'ensemble porte aussi sa version en degrés WGS84
+(`extent.lonlat`), reprojetée par QGIS : le noyau en déduit le fuseau UTM du projet sans
+convertir lui-même une coordonnée (AD-19).
 
 Le travail avance par un ordonnanceur (par défaut `QTimer.singleShot`). L'accès à
 QGIS passe par un « fond » injectable : `QgisBackend` est le seul endroit qui
@@ -18,6 +20,7 @@ importe `qgis.core`, les tests mettent une doublure.
 """
 
 import copy
+import math
 import ntpath
 import os
 import posixpath
@@ -265,10 +268,44 @@ def _distinct_texts(found, limit):
     return texts or None
 
 
-def _extent(box, crs):
+# Degrés WGS84, ordre longitude puis latitude (celui des API de QGIS).
+LONLAT_AUTHID = "EPSG:4326"
+
+
+def _extent(box, crs, lonlat=None):
     if box is None:
         return None
-    return {"xmin": box[0], "ymin": box[1], "xmax": box[2], "ymax": box[3], "crs": crs}
+    out = {"xmin": box[0], "ymin": box[1], "xmax": box[2], "ymax": box[3], "crs": crs}
+    if lonlat is not None:
+        out["lonlat"] = {
+            "west": lonlat[0], "south": lonlat[1], "east": lonlat[2], "north": lonlat[3],
+            "crs": LONLAT_AUTHID,
+        }
+    return out
+
+
+def _finite_box(box):
+    """`box` si ses quatre nombres sont finis, None sinon (un NaN casserait le JSON du canal)."""
+    if box is None:
+        return None
+    try:
+        if all(math.isfinite(v) for v in box):
+            return tuple(float(v) for v in box)
+    except TypeError:
+        return None
+    return None
+
+
+def _degrees_box(box):
+    """`box` si c'est une étendue en degrés (longitudes dans [-180, 180], latitudes dans
+    [-90, 90]), None sinon : une couche sans SCR rend des mètres, finis mais hors bornes."""
+    box = _finite_box(box)
+    if box is None:
+        return None
+    west, south, east, north = box
+    if all(-180.0 <= v <= 180.0 for v in (west, east)) and all(-90.0 <= v <= 90.0 for v in (south, north)):
+        return box
+    return None
 
 
 def _union(boxes):
@@ -344,6 +381,7 @@ class ProjectInventoryGesture(_ReadGesture):
         project_dir = backend.project_dir()
         layers = []
         boxes = []
+        lonlats = []
         for layer in backend.layers():
             kind = backend.kind_of(layer)
             raw = backend.source_of(layer)
@@ -356,6 +394,7 @@ class ProjectInventoryGesture(_ReadGesture):
             entry.update(self._facts(layer, kind))
             layers.append(entry)
             boxes.append(backend.extent_of(layer, project_crs))
+            lonlats.append(self._lonlat(layer))
         present = {backend.id_of(layer) for layer in backend.layers()}
         for gone in [k for k in _FACTS if k[0] not in present]:
             del _FACTS[gone]
@@ -363,8 +402,19 @@ class ProjectInventoryGesture(_ReadGesture):
             "project_name": backend.project_name() or None,
             "layers": layers,
             "project_crs": project_crs,
-            "extent": _extent(_union(boxes), project_crs),
+            "extent": _extent(_union(boxes), project_crs, _union(lonlats)),
         }
+
+    def _lonlat(self, layer):
+        """Étendue d'une couche en degrés WGS84, reprojetée par QGIS ; None si elle manque, si la
+        couche n'a pas de SCR valide, si la reprojection échoue ou sort des bornes des degrés :
+        la couche reste hors de l'union, l'inventaire n'échoue pas pour autant."""
+        try:
+            if not self._backend.crs_of(layer):
+                return None
+            return _degrees_box(self._backend.extent_of(layer, LONLAT_AUTHID))
+        except Exception:
+            return None
 
     def _facts(self, layer, kind):
         """Faits bruts d'une couche : sorte, géométrie, nombre d'objets, champs. Ceux d'une couche

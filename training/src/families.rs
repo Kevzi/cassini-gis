@@ -1772,25 +1772,53 @@ fn number_json(v: f64) -> Value {
     }
 }
 
-/// Un carroyage demandé : la proposition écrite (espace en tête) et le `grid` du plan, ou
-/// `None` quand la demande ne nomme pas son système (décision 1 du propriétaire, 2026-11-07 :
-/// la réponse est alors une question).
-fn grid_words(rng: &mut Rng, with_system: bool) -> (String, Option<Value>) {
+/// Un carroyage demandé, tel que la demande l'écrit.
+enum GridAsk {
+    /// Système nommé : le `grid` du plan.
+    Written(Value),
+    /// « UTM » sans fuseau : l'intervalle écrit ; le fuseau vient de l'inventaire
+    /// (`project.utm_epsg`), ou une question quand il n'y en a pas.
+    UtmWithoutZone(Value),
+    /// Aucun système (« quadrillage tous les 500 m ») : une question (décision 1 du
+    /// propriétaire, 2026-11-07), Lambert-93 et UTM étant tous deux possibles.
+    NoSystem,
+}
+
+/// Un carroyage demandé : la proposition écrite (espace en tête) et ce qu'elle nomme.
+fn grid_words(rng: &mut Rng, with_system: bool) -> (String, GridAsk) {
     if !with_system {
-        let text = match rng.below(5) {
-            0 => " avec un carroyage UTM au kilomètre".to_string(),
-            1 => format!(
-                " avec un quadrillage tous les {}",
-                distance_step_text(rng, 500, "m")
+        let km = |v: u64| json!({"value": v, "unit": "km"});
+        return match rng.below(6) {
+            0 | 1 => (
+                " avec un carroyage UTM au kilomètre".to_string(),
+                GridAsk::UtmWithoutZone(km(1)),
             ),
-            2 => format!(
-                " avec un carroyage UTM tous les {}",
-                distance_step_text(rng, 1, "km")
+            2 => {
+                let v = *rng.pick(&[1, 1, 2, 5]);
+                (
+                    format!(
+                        " avec un carroyage UTM tous les {}",
+                        distance_step_text(rng, v, "km")
+                    ),
+                    GridAsk::UtmWithoutZone(km(v)),
+                )
+            }
+            3 => (
+                format!(
+                    " avec un quadrillage tous les {}",
+                    distance_step_text(rng, 500, "m")
+                ),
+                GridAsk::NoSystem,
             ),
-            3 => format!(" avec une grille de {}", distance_step_text(rng, 1, "km")),
-            _ => " avec un carroyage kilométrique".to_string(),
+            4 => (
+                format!(" avec une grille de {}", distance_step_text(rng, 1, "km")),
+                GridAsk::NoSystem,
+            ),
+            _ => (
+                " avec un carroyage kilométrique".to_string(),
+                GridAsk::NoSystem,
+            ),
         };
-        return (text, None);
     }
     if rng.chance(1, 3) {
         // Graticule, en degrés ou en grades.
@@ -1823,7 +1851,7 @@ fn grid_words(rng: &mut Rng, with_system: bool) -> (String, Option<Value>) {
         let unit = if gon { "gon" } else { "deg" };
         let grid = json!({"kind": "degrees",
             "interval": {"value": number_json(v), "unit": unit}});
-        return (text, Some(grid));
+        return (text, GridAsk::Written(grid));
     }
     let (epsg, sys) = if rng.chance(1, 2) {
         (2154, (*rng.pick(&["Lambert-93", "Lambert 93"])).to_string())
@@ -1847,7 +1875,22 @@ fn grid_words(rng: &mut Rng, with_system: bool) -> (String, Option<Value>) {
     };
     let grid = json!({"kind": "projected", "epsg": epsg,
         "interval": {"value": value, "unit": unit}});
-    (text, Some(grid))
+    (text, GridAsk::Written(grid))
+}
+
+/// Le `grid` du plan pour ce que la demande nomme, l'inventaire de `b` en main : un carroyage
+/// UTM sans fuseau prend celui du projet (`project.utm_epsg`, présent trois fois sur quatre),
+/// fixé dans l'inventaire ; `None` quand il faut demander le système.
+fn grid_for(rng: &mut Rng, b: &mut Builder, ask: GridAsk) -> Option<Value> {
+    match ask {
+        GridAsk::Written(grid) => Some(grid),
+        GridAsk::UtmWithoutZone(interval) => {
+            let present = rng.chance(3, 4);
+            let epsg = b.project_utm(rng, present)?;
+            Some(json!({"kind": "projected", "epsg": epsg, "interval": interval}))
+        }
+        GridAsk::NoSystem => None,
+    }
 }
 
 /// Un intervalle de quadrillage écrit avec son unité : « 1 000 m », « 500 mètres », « 2 km ».
@@ -1907,11 +1950,13 @@ const GRID_SYSTEM_QUESTION: &str = "Dans quel système veux-tu le carroyage : La
 /// Export PDF au format, à l'orientation et/ou avec le carroyage écrits dans la demande
 /// (11.12, lot 3) : la carte seule, ou au bout d'une recherche une fois sur trois. Un
 /// paramètre n'est au plan que si la demande le nomme ; jamais `scale` (`export_pdf_scale`).
-/// Un carroyage sans système (une fois sur huit) mène à une question.
+/// Un carroyage sans système écrit (une fois sur six) mène à une question, sauf un carroyage
+/// « UTM » sans fuseau quand l'inventaire porte le fuseau du projet (`project.utm_epsg`) : il
+/// est recopié. Un fuseau écrit l'emporte toujours sur celui de l'inventaire.
 fn export_pdf_format(rng: &mut Rng) -> Option<Example> {
-    let asks = rng.chance(1, 8);
+    let unnamed = rng.chance(1, 6);
     // Au moins un des trois ; le carroyage toujours quand il manque son système.
-    let mask = if asks {
+    let mask = if unnamed {
         4 | rng.below(4)
     } else {
         1 + rng.below(7)
@@ -1919,12 +1964,13 @@ fn export_pdf_format(rng: &mut Rng) -> Option<Example> {
     let size = (mask & 1 != 0).then(|| *rng.pick(&PAGE_SIZES));
     let portrait = (mask & 2 != 0).then(|| rng.chance(1, 2));
     let pw = page_words(rng, size.map(|s| s.1), portrait);
-    let (gw, grid) = if mask & 4 != 0 {
-        grid_words(rng, !asks)
+    let (gw, ask) = if mask & 4 != 0 {
+        let (gw, ask) = grid_words(rng, !unnamed);
+        (gw, Some(ask))
     } else {
         (String::new(), None)
     };
-    let params = |title: &str| {
+    let params = |title: &str, grid: &Option<Value>| {
         let mut p = json!({"title": title});
         if let Some((v, _)) = size {
             p["page_size"] = json!(v);
@@ -1932,7 +1978,7 @@ fn export_pdf_format(rng: &mut Rng) -> Option<Example> {
         if let Some(port) = portrait {
             p["orientation"] = json!(if port { "portrait" } else { "landscape" });
         }
-        if let Some(g) = &grid {
+        if let Some(g) = grid {
             p["grid"] = g.clone();
         }
         json!({"command": "layout.export_pdf", "params": p})
@@ -1941,6 +1987,9 @@ fn export_pdf_format(rng: &mut Rng) -> Option<Example> {
         // La carte seule.
         let mut b = Builder::new();
         b.distract(rng, 2, vector);
+        let grid = ask.map(|a| grid_for(rng, &mut b, a));
+        let asks = matches!(grid, Some(None));
+        let grid = grid.flatten();
         let titled = rng.chance(1, 2);
         let title = if titled {
             (*rng.pick(USER_TITLES)).to_string()
@@ -1967,7 +2016,7 @@ fn export_pdf_format(rng: &mut Rng) -> Option<Example> {
         let expected = if asks {
             question(GRID_SYSTEM_QUESTION.to_string())
         } else {
-            calls(vec![params(&title)])
+            calls(vec![params(&title, &grid)])
         };
         return Some(example("export_pdf_format", b, rng, request, expected));
     }
@@ -1979,6 +2028,9 @@ fn export_pdf_format(rng: &mut Rng) -> Option<Example> {
     if d.calls.len() >= MAX_DRAFT_STEPS {
         return None;
     }
+    let grid = ask.map(|a| grid_for(rng, &mut d.b, a));
+    let asks = matches!(grid, Some(None));
+    let grid = grid.flatten();
     let (mut body, _) = open_find(rng, d.noun, &d.np, false);
     let (clause, title) = if rng.chance(1, 3) {
         let title = (*rng.pick(USER_TITLES)).to_string();
@@ -1999,7 +2051,7 @@ fn export_pdf_format(rng: &mut Rng) -> Option<Example> {
     let expected = if asks {
         question(GRID_SYSTEM_QUESTION.to_string())
     } else {
-        d.calls.push(params(&title));
+        d.calls.push(params(&title, &grid));
         calls(d.calls)
     };
     Some(example("export_pdf_format", d.b, rng, request, expected))
@@ -6921,10 +6973,12 @@ mod tests {
         let registry = cassini_core::registry::Registry::standard();
         let examples = valid(export_pdf_format, 800);
         let (mut questions, mut searches, mut alone) = (0, 0, 0);
+        let (mut from_inventory, mut utm_questions, mut written_over_inventory) = (0, 0, 0);
         let mut seen = BTreeSet::new();
         for e in &examples {
             assert_eq!(e.family, "export_pdf_format");
             let r = e.request.to_lowercase();
+            let project_utm = e.inventory["project"]["utm_epsg"].as_u64();
             assert!(
                 !r.contains("mgrs") && !r.contains("exemplaire"),
                 "{}",
@@ -6938,6 +6992,11 @@ mod tests {
                     .iter()
                     .any(|w| r.contains(w));
                 assert!(!named, "{}", e.request);
+                // Un carroyage UTM sans fuseau ne se demande que si l'inventaire n'en a pas.
+                if r.contains("utm") {
+                    utm_questions += 1;
+                    assert_eq!(project_utm, None, "{}", e.request);
+                }
                 assert!(
                     ["carroyage", "quadrillage", "grille"]
                         .iter()
@@ -7020,9 +7079,10 @@ mod tests {
                         "projected" => {
                             seen.insert("projected".into());
                             let epsg = grid["epsg"].as_u64().unwrap();
+                            let zone_written = ["utm 3", "utm zone"].iter().any(|w| r.contains(w));
                             if epsg == 2154 {
                                 assert!(r.contains("lambert"), "{}", e.request);
-                            } else {
+                            } else if zone_written {
                                 assert!((32630..=32632).contains(&epsg), "{epsg}");
                                 assert!(
                                     {
@@ -7033,6 +7093,15 @@ mod tests {
                                     "{}",
                                     e.request
                                 );
+                                // Le fuseau écrit l'emporte sur celui de l'inventaire.
+                                if project_utm.is_some_and(|u| u != epsg) {
+                                    written_over_inventory += 1;
+                                }
+                            } else {
+                                // « UTM » sans fuseau : celui du projet, recopié.
+                                assert!(r.contains("utm"), "{}", e.request);
+                                assert_eq!(Some(epsg), project_utm, "{}", e.request);
+                                from_inventory += 1;
                             }
                             match unit {
                                 "m" => &[" m", "mètre"],
@@ -7051,7 +7120,8 @@ mod tests {
                         words
                             .iter()
                             .any(|w| e.request.contains(&format!("{number}{w}"))
-                                || e.request.contains(&format!("{number} {}", w.trim()))),
+                                || e.request.contains(&format!("{number} {}", w.trim())))
+                            || (value == 1.0 && unit == "km" && r.contains("au kilomètre")),
                         "{number} {unit} : {}",
                         e.request
                     );
@@ -7069,6 +7139,12 @@ mod tests {
             assert_eq!(guarded, plan, "{}", e.request);
         }
         assert!(questions > 0 && searches > 0 && alone > 0);
+        // Les trois cas du fuseau : recopié de l'inventaire, demandé faute d'inventaire, écrit
+        // et différent de celui de l'inventaire.
+        assert!(
+            from_inventory > 0 && utm_questions > 0 && written_over_inventory > 0,
+            "{from_inventory} {utm_questions} {written_over_inventory}"
+        );
         for v in [
             "a4",
             "a3",

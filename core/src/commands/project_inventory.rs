@@ -26,6 +26,22 @@ pub struct InventoryExtent {
     pub ymax: f64,
     /// SCR de l'étendue, en code explicite (ex. `EPSG:2154`).
     pub crs: String,
+    /// La même étendue en degrés WGS84 (`EPSG:4326`), reprojetée par QGIS ; absente d'une
+    /// extension antérieure ou quand QGIS ne sait pas la reprojeter. Le noyau en déduit le
+    /// fuseau UTM du projet (`crate::agent_inventory`), sans convertir de coordonnée.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lonlat: Option<LonLatExtent>,
+}
+
+/// Étendue en degrés WGS84 : longitudes ouest et est, latitudes sud et nord.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct LonLatExtent {
+    pub west: f64,
+    pub south: f64,
+    pub east: f64,
+    pub north: f64,
+    /// SCR de l'étendue, en code explicite : toujours `EPSG:4326` (AD-19).
+    pub crs: String,
 }
 
 /// Une couche du projet.

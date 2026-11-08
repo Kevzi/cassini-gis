@@ -845,6 +845,8 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-second-jeu-de-test-reel-annecy-pret-pour-la-demonstration-plan.md`
   summary: Le modèle choisit parfois un fuseau UTM sans rapport avec le lieu de la carte pour « un carroyage UTM » (EPSG:32621 au lieu de 32632 à Annecy, 1 essai sur 3) ; il faut des exemples d'entraînement où le fuseau se déduit de l'emprise du projet.
   evidence: Sonde 11.18, phrase « Exporte la carte en A3 paysage avec un carroyage UTM tous les 1 km » : 32632 à deux essais, 32621 au troisième, puis refus « plus de 200 lignes » parce que le cadre est à 5 000 km. À traiter avec le prochain ré-entraînement groupé.
+  status: résolu côté code, 2026-11-08 (`plan-fuseau-utm-depuis-l-emprise.md`) ; le modèle l'apprend au ré-entraînement groupé 11.23
+  resolution: L'extension ajoute à l'emprise de `project.inventory` sa version en degrés WGS84 reprojetée par QGIS (`extent.lonlat`) ; le noyau en tire le code EPSG du fuseau UTM du centre et le montre au modèle (`project.utm_epsg`, 32632 sur le projet d'Annecy, sonde QGIS 3.44 du 2026-11-08). Le générateur recopie ce code pour un carroyage « UTM » sans fuseau écrit, et garde la question quand l'inventaire n'en a pas ; un fuseau écrit l'emporte toujours.
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-second-jeu-de-test-reel-annecy-pret-pour-la-demonstration-plan.md`
   summary: À la réouverture d'un projet, le panneau n'affiche que l'historique de la session en cours, alors que le journal garde toutes les étapes passées (`journal.jsonl` complété, numérotation reprise) ; l'utilisateur ne retrouve pas ce qu'il a fait.

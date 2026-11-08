@@ -5,7 +5,7 @@
 //! appris sur des inventaires d'une autre forme, celle du générateur de `training/` :
 //!
 //! ```json
-//! {"project": {"name": "...", "epsg": 2154},
+//! {"project": {"name": "...", "epsg": 2154, "utm_epsg": 32631},
 //!  "layers": [{"layer_id": "...", "name": "...", "kind": "vector", "geometry": "MultiPolygon",
 //!              "epsg": 2154, "feature_count": 120, "source": "plu.gpkg",
 //!              "fields": [{"name": "typezone", "type": "string", "values": ["N", "U"]}]}],
@@ -521,8 +521,55 @@ pub fn agent_inventory(raw: &Value) -> Value {
     if let Some(code) = text(raw, "project_crs").and_then(epsg) {
         project.insert("epsg".into(), json!(code));
     }
+    if let Some(code) = raw.get("extent").and_then(utm_epsg) {
+        project.insert("utm_epsg".into(), json!(code));
+    }
     // L'extension ne parcourt pas le disque : aucun fichier non ouvert n'est connu.
     json!({"project": project, "layers": layers, "unloaded_files": []})
+}
+
+/// Code EPSG du fuseau UTM normal du centre de l'emprise en degrés WGS84 (`extent.lonlat`,
+/// reprojetée par QGIS, `crs` = `EPSG:4326`) : 326xx au nord, 327xx au sud. Le noyau ne
+/// convertit aucune coordonnée (AD-19) : il lit une longitude et une latitude déjà en degrés et
+/// en tire un numéro de fuseau. Le centre décide quand l'emprise chevauche deux fuseaux. Rien
+/// quand l'emprise manque, n'a pas le code `EPSG:4326`, est illisible (valeur non finie, hors
+/// bornes, ouest après est, sud après nord), couvre plus de deux fuseaux (plus de 12° de
+/// longitude : une couche du monde, ou une emprise qui passe l'antiméridien et s'étend de -180 à
+/// 180) ou que son centre sort du domaine de l'UTM (80° S à 84° N).
+/// Largeur en longitude au-delà de laquelle l'emprise couvre plus de deux fuseaux UTM.
+const MAX_UTM_SPAN_DEGREES: f64 = 12.0;
+
+fn utm_epsg(extent: &Value) -> Option<u32> {
+    use crate::geodesy::{utm_zone, MAX_LATITUDE, MIN_LATITUDE};
+    let lonlat = extent.get("lonlat")?;
+    if !lonlat
+        .get("crs")
+        .and_then(Value::as_str)
+        .is_some_and(|c| c.eq_ignore_ascii_case("EPSG:4326"))
+    {
+        return None;
+    }
+    let get = |key: &str| {
+        lonlat
+            .get(key)
+            .and_then(Value::as_f64)
+            .filter(|v| v.is_finite())
+    };
+    let (west, south, east, north) = (get("west")?, get("south")?, get("east")?, get("north")?);
+    let lon_ok = |v: f64| (-180.0..=180.0).contains(&v);
+    let lat_ok = |v: f64| (-90.0..=90.0).contains(&v);
+    if !(lon_ok(west) && lon_ok(east) && lat_ok(south) && lat_ok(north)) {
+        return None;
+    }
+    if west > east || south > north || east - west > MAX_UTM_SPAN_DEGREES {
+        return None;
+    }
+    let (lon, lat) = ((west + east) / 2.0, (south + north) / 2.0);
+    if !(MIN_LATITUDE..=MAX_LATITUDE).contains(&lat) {
+        return None;
+    }
+    let base = if lat >= 0.0 { 32600 } else { 32700 };
+    Some(base + u32::from(utm_zone(lat, lon)))
 }
 
 fn text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
@@ -692,6 +739,73 @@ mod tests {
                 "unloaded_files": []
             })
         );
+    }
+
+    fn with_lonlat(west: f64, south: f64, east: f64, north: f64) -> Value {
+        json!({"project_crs": "EPSG:2154", "layers": [], "extent": {
+            "xmin": 0.0, "ymin": 0.0, "xmax": 1.0, "ymax": 1.0, "crs": "EPSG:2154",
+            "lonlat": {"west": west, "south": south, "east": east, "north": north,
+                "crs": "EPSG:4326"}}})
+    }
+
+    #[test]
+    fn the_project_utm_zone_comes_from_the_centre_of_the_wgs84_extent() {
+        for (raw, code) in [
+            (with_lonlat(5.9, 45.7, 6.4, 46.1), 32632),     // Annecy
+            (with_lonlat(2.35, 48.68, 2.45, 48.75), 32631), // Villeneuve-le-Roi
+            (with_lonlat(-1.8, 47.1, -1.4, 47.3), 32630),   // Nantes
+            (with_lonlat(55.2, -21.4, 55.9, -20.8), 32740), // La Réunion, au sud
+            (with_lonlat(5.0, 45.0, 7.4, 46.0), 32632),     // à cheval : le centre (6,2° E) décide
+        ] {
+            assert_eq!(
+                agent_inventory(&raw)["project"]["utm_epsg"],
+                json!(code),
+                "{raw}"
+            );
+        }
+        assert_eq!(
+            agent_inventory(&with_lonlat(2.35, 48.68, 2.45, 48.75))["project"],
+            json!({"epsg": 2154, "utm_epsg": 32631})
+        );
+    }
+
+    #[test]
+    fn without_a_readable_wgs84_extent_there_is_no_utm_zone() {
+        let mut cases = vec![
+            json!({"project_crs": "EPSG:2154", "layers": [], "extent": null}),
+            json!({"project_crs": "EPSG:2154", "layers": []}),
+            json!({"extent": {"xmin": 0.0, "ymin": 0.0, "xmax": 1.0, "ymax": 1.0,
+                "crs": "EPSG:2154"}}),
+            json!({"extent": {"lonlat": {"west": "6", "south": 45.0, "east": 6.2,
+                "north": 46.0}}}),
+            json!({"extent": {"lonlat": {"west": 6.0, "south": 45.0, "east": 6.2}}}),
+            json!({"extent": {"lonlat": null}}),
+            // Sans code, ou dans un autre système : rien n'est lu.
+            json!({"extent": {"lonlat": {"west": 5.9, "south": 45.7, "east": 6.4,
+                "north": 46.1}}}),
+            json!({"extent": {"lonlat": {"west": 5.9, "south": 45.7, "east": 6.4,
+                "north": 46.1, "crs": "EPSG:4258"}}}),
+        ];
+        for (w, s, e, n) in [
+            (190.0, 45.0, 195.0, 46.0),       // longitude hors bornes
+            (6.0, -95.0, 6.2, 46.0),          // latitude hors bornes
+            (6.2, 45.0, 6.0, 46.0),           // ouest après est
+            (6.0, 46.0, 6.2, 45.0),           // sud après nord
+            (10.0, 85.0, 12.0, 89.0),         // au-delà de 84° N
+            (10.0, -89.0, 12.0, -85.0),       // en deçà de 80° S
+            (f64::MAX, 45.0, f64::MAX, 46.0), // hors bornes, fini
+            (-180.0, -85.0, 180.0, 83.6),     // une couche du monde (Natural Earth)
+            (-180.0, -21.0, 180.0, -20.0),    // antiméridien passé : -180 à 180
+            (-1.0, 45.0, 11.5, 46.0),         // plus de 12° : trois fuseaux
+        ] {
+            cases.push(with_lonlat(w, s, e, n));
+        }
+        for raw in cases {
+            assert!(
+                agent_inventory(&raw)["project"].get("utm_epsg").is_none(),
+                "{raw}"
+            );
+        }
     }
 
     #[test]

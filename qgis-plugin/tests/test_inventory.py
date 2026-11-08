@@ -14,9 +14,10 @@ import inventory  # noqa: E402
 class FakeLayer:
     def __init__(
         self, lid, name, source, crs, box, vector=True, fields=(), count=0, geom="Polygon",
-        kind=None, wkb="MultiPolygon", values=None,
+        kind=None, wkb="MultiPolygon", values=None, lonlat=None,
     ):
         self.lid, self.name, self.source, self.crs, self.box = lid, name, source, crs, box
+        self.lonlat = lonlat  # étendue « reprojetée » en degrés WGS84, None par défaut
         self.vector, self.fields, self.count, self.geom = vector, list(fields), count, geom
         self.kind = kind or ("vector" if vector else "raster")
         self.wkb = wkb
@@ -75,6 +76,10 @@ class FakeBackend:
         return layer.crs
 
     def extent_of(self, layer, to_authid=None):
+        if to_authid == "EPSG:4326":
+            if isinstance(layer.lonlat, Exception):
+                raise layer.lonlat
+            return layer.lonlat
         return layer.box
 
     def is_vector(self, layer):
@@ -137,6 +142,44 @@ class InventoryTest(unittest.TestCase):
         layers = [FakeLayer("e", "vide", "vide.gpkg", "EPSG:2154", None), TWO[0]]
         result, _ = run(inventory.ProjectInventoryGesture, FakeBackend(layers), {})
         self.assertEqual(result["extent"]["xmax"], 10.0)
+
+    def test_the_extent_carries_its_wgs84_version_reprojected_by_qgis(self):
+        layers = [
+            FakeLayer("a", "lacs", "lacs.gpkg", "EPSG:2154", (0.0, 1.0, 10.0, 11.0), lonlat=(6.0, 45.8, 6.2, 45.95)),
+            FakeLayer("b", "routes", "routes.gpkg", "EPSG:2154", (2.0, 3.0, 12.0, 9.0), lonlat=(6.05, 45.7, 6.3, 45.9)),
+            FakeLayer("c", "vide", "vide.gpkg", "EPSG:2154", None),
+        ]
+        result, error = run(inventory.ProjectInventoryGesture, FakeBackend(layers), {})
+        self.assertIsNone(error)
+        self.assertEqual(
+            result["extent"],
+            {
+                "xmin": 0.0, "ymin": 1.0, "xmax": 12.0, "ymax": 11.0, "crs": "EPSG:2154",
+                "lonlat": {"west": 6.0, "south": 45.7, "east": 6.3, "north": 45.95, "crs": "EPSG:4326"},
+            },
+        )
+        # Les clés de premier niveau ne changent pas.
+        self.assertEqual(sorted(result), ["extent", "layers", "project_crs", "project_name"])
+
+    def test_an_unreadable_wgs84_extent_is_left_out_without_error(self):
+        nan = float("nan")
+        for lonlat in [(nan, 45.0, 6.0, 46.0), (float("inf"), 0, 1, 2), RuntimeError("transformation"), ("a", 1, 2, 3)]:
+            layer = FakeLayer("a", "lacs", "lacs.gpkg", "EPSG:2154", (0.0, 1.0, 10.0, 11.0), lonlat=lonlat)
+            result, error = run(inventory.ProjectInventoryGesture, FakeBackend([layer]), {})
+            self.assertIsNone(error)
+            self.assertNotIn("lonlat", result["extent"], repr(lonlat))
+            self.assertEqual(result["extent"]["xmax"], 10.0)
+
+    def test_a_layer_out_of_degrees_or_without_crs_stays_out_of_the_wgs84_union(self):
+        good = FakeLayer("a", "lacs", "lacs.gpkg", "EPSG:2154", (0.0, 1.0, 10.0, 11.0), lonlat=(6.0, 45.8, 6.2, 45.95))
+        metres = FakeLayer("b", "brut", "brut.gpkg", "EPSG:2154", (0.0, 1.0, 10.0, 11.0), lonlat=(899987.5, 6500012.5, 1024987.5, 6600012.5))
+        no_crs = FakeLayer("c", "sans", "sans.gpkg", "", (0.0, 1.0, 10.0, 11.0), lonlat=(1.0, 40.0, 2.0, 41.0))
+        result, error = run(inventory.ProjectInventoryGesture, FakeBackend([metres, good, no_crs]), {})
+        self.assertIsNone(error)
+        self.assertEqual(
+            result["extent"]["lonlat"],
+            {"west": 6.0, "south": 45.8, "east": 6.2, "north": 45.95, "crs": "EPSG:4326"},
+        )
 
     def test_csv_uri_source_gives_the_file_name(self):
         self.assertEqual(inventory.source_name("file:///d/data/gares.csv?type=csv&xField=X"), "gares.csv")
