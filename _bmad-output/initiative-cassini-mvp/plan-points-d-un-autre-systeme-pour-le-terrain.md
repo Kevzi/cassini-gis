@@ -36,6 +36,30 @@ Route courte, générateur seul. `Builder::add_dem_pair` pose deux MNT de résol
 
 Constat (2026-11-08) : un plan qui mêle un point reprojeté (`step:k.point`) et un point écrit tel quel rend une question au garde-fou AD-23 (`guard_coordinates`). Le générateur n'engendre donc que des exemples où les deux points sont reprojetés. Le cas mixte est reporté.
 
+Entraînement (2026-11-08, 1 h 15 → 6 h 12, commit `4bba470`, `~/cassini-entrainement/terrain-11-18`, 300 min) :
+- Perte finale 0,00809 ; 0 exemple écarté pour longueur.
+- Validation 293/300 (plans 242/246, questions 33/36, refus 18/18). Ratés : 2 questions « liste de points dans un autre système » non posées, 1 conversion UTM 32N → 31N oubliée, 4 ratés ordinaires.
+- Fusionné SHA-256 `c20ba327…`, copié dans `C:\Users\kevin\cassini-modeles\ajuste-terrain-11-18\`. **Non installé.**
+
+Essais GPU (`--features cuda`), contre les barres de 5.41 reprises en 11.16 :
+
+| Essai | Barre | 11.16 | terrain-11-18 |
+|---|---|---|---|
+| `plan_reel` | ≥ 23/25 | 23/25 | **22/25** (S18, S20, S24 nouveau) : **barre non tenue** |
+| `question_reel` | ≥ 11/12 | 12/12 | 12/12 |
+| `ecart_reel` | ≥ 32/40 | 34/40 | 36/40 |
+| `echelle_utm_reel` | ≥ 7/8 | 8/8 | 8/8 |
+| `terrain_reel` | ≥ 7/8 | 8/8 | 8/8 |
+| `epic11_reel` | chaque commande ≥ 1/2 | 27/28 | 26/28 (C02, K02 : l'autre MNT de l'inventaire, `mnt_zone_nord`, quand la phrase n'en désigne aucun ; F03 rouge comme en 11.16) |
+
+Sonde QGIS sur Annecy, modèle neuf sans installation (`CASSINI_MODELS` = son dossier) :
+- Phrase 1, champ de vision depuis un point WGS84 « sur le MNT à 5 m » : la conversion est présente, mais `dem` = identifiant de la couche (`mnt_5m_annecy_…`) au lieu de son fichier, d'où `dem.unreadable`.
+- Phrase 2, ligne de vue : ni conversion, ni le bon `dem`.
+- Phrase 3, champ de vision cumulé en WGS84 : question, mais celle du garde-fou.
+- Phrase 4, pente du MNT à 25 m : juste.
+
+**Arrêt (règle de 11.16 : une barre manque) : décision du propriétaire.** Causes probables : (1) les paires de MNT engendrées ont des identifiants (`mnt_5m_…`) très proches de leur fichier (`mnt_5m.tif`), et le modèle cite l'identifiant quand le nom de la couche (Annecy : « mnt_5m_annecy ») ressemble à un identifiant ; (2) aucun exemple à deux MNT où la phrase n'en désigne aucun ; (3) S24, refus « puis sa moyenne par commune » après un champ de vision, rendu en plan invalide.
+
 ## Verification
 
 **Commands:**
