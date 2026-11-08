@@ -731,11 +731,10 @@ class PanelBannerTest(unittest.TestCase):
         del panel.render  # le vrai render de la classe
         for name in ("title", "settings_button", "settings_zone", "lang_label", "lang_box",
                      "model_label", "banner_zone", "banner_text", "banner_button", "input",
-                     "send_button", "result_title", "details", "log_title", "log_empty",
-                     "log_list", "expert", "footer"):
+                     "send_button", "details", "expert", "footer"):
             setattr(panel, name, Recorder())
         for name in ("_render_models", "_render_external", "_render_agent", "_render_result",
-                     "_render_commands", "_render_buttons"):
+                     "_render_thread", "_render_log", "_render_commands", "_render_buttons"):
             setattr(panel, name, lambda: None)
         panel.log = types.SimpleNamespace(entries=[])
         panel.agent = types.SimpleNamespace(phase=self.mod.agentview.IDLE)
