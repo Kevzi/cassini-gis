@@ -88,6 +88,13 @@ class ClosedTableTest(unittest.TestCase):
     def test_the_table_is_exactly_the_delegated_commands(self):
         self.assertEqual(compare(self.fiches, self.table), [])
 
+    def test_the_style_gesture_announces_the_result_ramp_kind(self):
+        # Décision du 2026-11-09 : sans `result_ramp` annoncée, le noyau ouvre ses rasters de
+        # résultat sans style.
+        kinds = delegated.build_registry(object).style_kinds()
+        self.assertIn("result_ramp", kinds)
+        self.assertIn("hillshade", kinds)
+
     def test_the_catalogue_names_delegated_commands(self):
         # Garde contre une lecture vide qui rendrait la recette vraie sans rien comparer.
         self.assertIn("analysis.buffer", delegated_ids(self.fiches))

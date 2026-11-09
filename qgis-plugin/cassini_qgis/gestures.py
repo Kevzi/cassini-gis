@@ -26,12 +26,21 @@ class GestureError(Exception):
 class GestureRegistry:
     def __init__(self):
         self._factories = {}
+        self._style_kinds = set()
 
     def register(self, command_id, factory):
         self._factories[command_id] = factory
 
     def ids(self):
         return sorted(self._factories)
+
+    def announce_style_kinds(self, kinds):
+        """Note les formes de style que le geste `layer.set_style` sait appliquer."""
+        self._style_kinds.update(kinds)
+
+    def style_kinds(self):
+        """Formes de style annoncées à `session.hello` (`style_kinds`), triées."""
+        return sorted(self._style_kinds)
 
     def create(self, command_id):
         """Rend un geste neuf, ou None si l'id n'est pas enregistré."""

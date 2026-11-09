@@ -88,6 +88,9 @@ class FakeBackend:
     def apply_hillshade(self, layer, opacity):
         layer.applied = ("hillshade", opacity)
 
+    def apply_result_ramp(self, layer, stops, interpolation, transparent, unit, opacity):
+        layer.applied = ("result_ramp", stops, interpolation, transparent, unit, opacity)
+
     def apply_visibility(self, layer, max_scale):
         layer.visibility = max_scale
 
@@ -387,10 +390,58 @@ class SetStyleTest(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual(backend.layers["ombre"].applied, ("hillshade", 0.55))
 
+    def test_a_viewshed_ramp_hides_its_dictated_values(self):
+        backend = project()
+        style = {
+            "kind": "result_ramp",
+            "interpolation": "discrete",
+            "stops": [{"value": 1, "color": "#B2182B", "label": "Visible"}],
+            "transparent": [0, -9999],
+            "opacity": 0.5,
+        }
+        _, error = set_style(backend, "mnt", style)
+        self.assertIsNone(error)
+        self.assertEqual(
+            backend.layers["mnt"].applied,
+            ("result_ramp", [(1.0, "#b2182b", "Visible")], "discrete", [0.0, -9999.0], None, 0.5),
+        )
+
+    def test_a_slope_ramp_is_interpolated_with_its_unit(self):
+        backend = project()
+        style = {
+            "kind": "result_ramp",
+            "interpolation": "linear",
+            "unit": "°",
+            "stops": [{"value": 0, "color": "#ffffcc"}, {"value": 42.5, "color": "#800026"}],
+        }
+        _, error = set_style(backend, "mnt", style)
+        self.assertIsNone(error)
+        self.assertEqual(
+            backend.layers["mnt"].applied,
+            (
+                "result_ramp",
+                [(0.0, "#ffffcc", None), (42.5, "#800026", None)],
+                "linear",
+                [],
+                "°",
+                1.0,
+            ),
+        )
+
+    def test_legend_numbers_are_french_without_scientific_notation(self):
+        label = style_gestures.number_label
+        self.assertEqual(label(1234567.5), "1\u202f234\u202f567,5")
+        self.assertEqual(label(88.91202545166016), "88,91")
+        self.assertEqual(label(0.0), "0")
+        self.assertEqual(label(-0.001), "0")
+        self.assertEqual(label(-12.5), "-12,5")
+        self.assertEqual(label(360), "360")
+
     def test_raster_styles_on_a_vector_are_a_geometry_mismatch(self):
         backend = project()
         stops = [{"value": 0, "color": "#000000"}, {"value": 1, "color": "#ffffff"}]
-        for style in ({"kind": "elevation_ramp", "stops": stops}, {"kind": "hillshade"}):
+        ramp = {"kind": "result_ramp", "interpolation": "linear", "stops": stops}
+        for style in ({"kind": "elevation_ramp", "stops": stops}, {"kind": "hillshade"}, ramp):
             _, error = set_style(backend, "plu", style)
             self.assertEqual(error.code, "style.geometry_mismatch")
         self.assertIsNone(backend.layers["plu"].applied)

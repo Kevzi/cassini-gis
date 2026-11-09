@@ -34,11 +34,13 @@ use summary::{same_result, summarize};
 
 use crate::commands::layer_open_raster::OPEN_RASTER;
 use crate::commands::layer_open_vector::OPEN_VECTOR;
+use crate::commands::layer_set_style::SET_STYLE;
 use crate::error::ErrorReport;
 use crate::exec::{Executor, Router};
 use crate::geojson::VECTOR_EXTENSIONS;
 use crate::raster_path::RASTER_EXTENSIONS;
 use crate::registry::{Registry, RegistryError, INVENTORY, ORDERS_FIELD, PROTOCOL_VERSION};
+use crate::style::spec::RESULT_RAMP_KIND;
 
 /// Nom du journal, dans le dossier de travail.
 const JOURNAL_FILE: &str = "journal.jsonl";
@@ -158,6 +160,10 @@ pub struct Session<'a> {
     /// ordres (`CommandSpec::required_gestures`) n'est exécutée que si tous ses gestes y sont
     /// (entrée 11.20) ; sinon `style.unavailable`, sans rien écrire. Vide sans QGIS.
     gestures: HashSet<String>,
+    /// Formes de `StyleSpec` que l'extension annonce savoir appliquer (`style_kinds` de
+    /// `session.hello`). Le style d'un raster de résultat n'est dicté que si `result_ramp` y est
+    /// (décision du propriétaire, 2026-11-09). Vide sans QGIS ou pour une extension plus ancienne.
+    style_kinds: HashSet<String>,
     /// Ordres que la dernière étape demande de dicter juste après sa ligne (amendement d'AD-30).
     pending_orders: Vec<(String, Value)>,
 }
@@ -200,6 +206,7 @@ impl<'a> Session<'a> {
             opens_rasters: false,
             opens_vectors: false,
             gestures: HashSet::new(),
+            style_kinds: HashSet::new(),
             pending_orders: Vec::new(),
         })
     }
@@ -235,6 +242,15 @@ impl<'a> Session<'a> {
     pub fn with_gestures<I: IntoIterator<Item = String>>(self, announced: I) -> Self {
         Session {
             gestures: announced.into_iter().collect(),
+            ..self
+        }
+    }
+
+    /// Dit quelles formes de `StyleSpec` l'extension sait appliquer (`style_kinds` de
+    /// `session.hello`) : le style d'un raster de résultat demande `result_ramp`.
+    pub fn with_style_kinds<I: IntoIterator<Item = String>>(self, announced: I) -> Self {
+        Session {
+            style_kinds: announced.into_iter().collect(),
             ..self
         }
     }
@@ -322,8 +338,11 @@ impl<'a> Session<'a> {
     /// même `origin` et de même `plan_step` (ticket 4.9) ; une sortie GeoJSON l'est de même par
     /// `layer.open_vector`, si l'extension l'annonce (AD-30, ticket 11.8). La sortie entre au
     /// projet par une étape journalisée, avec son `layer_id`, que le rejeu rejoue et sait laisser
-    /// hors de la carte. Une ouverture en échec est l'erreur de l'appel, nommée (AD-21). Le
-    /// résultat rendu est celui de l'étape demandée.
+    /// hors de la carte. Une ouverture en échec est l'erreur de l'appel, nommée (AD-21). Un
+    /// raster ouvert d'une commande qui déclare son style (`CommandSpec::result_style`) est suivi,
+    /// si l'extension annonce `layer.set_style`, d'une étape `layer.set_style` sur la couche
+    /// ouverte, au style composé par le noyau (bogue du fond noir, 2026-11-09). Le résultat rendu
+    /// est celui de l'étape demandée.
     fn call_logged(
         &mut self,
         id: &str,
@@ -340,8 +359,18 @@ impl<'a> Session<'a> {
             self.call_step(&command, order, origin, plan_step)?;
         }
         if let Some(opener) = self.opener_of(id) {
+            let style = self.result_style_of(id, opener, &value)?;
             for path in self.outputs_written(id, step) {
-                self.call_step(opener, json!({ "path": path }), origin, plan_step)?;
+                let opened = self.call_step(opener, json!({ "path": path }), origin, plan_step)?;
+                // Le style du raster de résultat, juste après son ouverture, sur la couche
+                // qu'elle rend : un refus est l'erreur de l'appel, comme un ordre de mise en
+                // forme (bogue du fond noir, 2026-11-09).
+                if let (Some(style), Some(layer_id)) =
+                    (&style, opened.get("layer_id").and_then(Value::as_str))
+                {
+                    let order = json!({ "layer_id": layer_id, "style": style });
+                    self.call_step(SET_STYLE, order, origin, plan_step)?;
+                }
             }
         }
         Ok(value)
@@ -364,6 +393,45 @@ impl<'a> Session<'a> {
             return None;
         };
         self.registry.spec(opener).map(|_| opener)
+    }
+
+    /// Style à dicter après l'ouverture d'un raster de `id` : celui que la commande déclare
+    /// (`CommandSpec::result_style`), composé d'après son résultat `value`, si l'ouverture est
+    /// celle d'un raster, si l'extension annonce `layer.set_style` et si elle annonce savoir
+    /// appliquer la forme `result_ramp` (`style_kinds` de `session.hello`, décision du
+    /// propriétaire du 2026-11-09) ; `Ok(None)` sinon, et le raster est ouvert sans style, comme
+    /// avant. Un style composé invalide ou non sérialisable est un défaut du noyau, nommé
+    /// (`style.invalid`), jamais un style sauté en silence.
+    fn result_style_of(
+        &self,
+        id: &str,
+        opener: &str,
+        value: &Value,
+    ) -> Result<Option<Value>, ErrorReport> {
+        let Some(style) = self.registry.spec(id).and_then(|spec| spec.result_style) else {
+            return Ok(None);
+        };
+        if opener != OPEN_RASTER
+            || !self.gestures.contains(SET_STYLE)
+            || !self.style_kinds.contains(RESULT_RAMP_KIND)
+            || self.registry.spec(SET_STYLE).is_none()
+        {
+            return Ok(None);
+        }
+        let composed = style.compose(value);
+        let core_fault = |why: String| {
+            ErrorReport::from(RegistryError::Failed {
+                code: crate::style::spec::STYLE_INVALID.to_string(),
+                message: format!(
+                    "Le noyau a composé un style invalide pour le résultat de « {id} » ({why}) : \
+                     le raster n'est pas ouvert."
+                ),
+            })
+        };
+        composed.validate().map_err(|e| core_fault(e.message))?;
+        serde_json::to_value(&composed)
+            .map(Some)
+            .map_err(|e| core_fault(e.to_string()))
     }
 
     /// Repères `out:<step>.<n>` des sorties que l'étape `step` (commande `id`, réussie) a écrites.
@@ -960,6 +1028,9 @@ pub struct Replay<'a> {
     /// gestes n'y sont pas s'arrête sur `style.unavailable` (entrée 11.20). Vide par défaut :
     /// sans QGIS (CLI `replay`), aucune mise en forme ne se rejoue.
     gestures: HashSet<String>,
+    /// Formes de `StyleSpec` que l'exécutant du rejeu annonce. Une ligne `layer.set_style` de
+    /// forme `result_ramp` s'arrête sur `style.unavailable` si elle n'y est pas.
+    style_kinds: HashSet<String>,
 }
 
 impl<'a> Replay<'a> {
@@ -1024,7 +1095,14 @@ impl<'a> Replay<'a> {
             ids,
             warnings,
             gestures: HashSet::new(),
+            style_kinds: HashSet::new(),
         })
+    }
+
+    /// Dit quelles formes de `StyleSpec` l'exécutant du rejeu sait appliquer.
+    pub fn with_style_kinds<I: IntoIterator<Item = String>>(mut self, announced: I) -> Self {
+        self.style_kinds = announced.into_iter().collect();
+        self
     }
 
     /// Dit quelles commandes l'exécutant QGIS du rejeu annonce (entrée 11.20).
@@ -1037,7 +1115,11 @@ impl<'a> Replay<'a> {
     /// elle-même (`layer.set_style`, `layer.arrange`). Vide pour toute autre ligne.
     fn styling_gestures<'s>(&self, spec: &'s crate::registry::CommandSpec) -> Vec<&'s str> {
         let mut gestures = spec.required_gestures();
-        if self.registry.specs().any(|s| s.dictates.contains(&spec.id)) {
+        // Une commande dictée par une mise en forme, ou `layer.set_style` que la session dicte
+        // après l'ouverture d'un raster de résultat (bogue du fond noir, 2026-11-09).
+        let dictated = self.registry.specs().any(|s| s.dictates.contains(&spec.id))
+            || (spec.id == SET_STYLE && self.registry.specs().any(|s| s.result_style.is_some()));
+        if dictated {
             gestures.push(spec.id.as_str());
         }
         gestures
@@ -1200,6 +1282,13 @@ impl<'a> Replay<'a> {
                 .iter()
                 .all(|g| self.gestures.contains(*g))
             {
+                return Err(ErrorReport::from(crate::style::unavailable()).at_step(step));
+            }
+            // Un style de raster de résultat demande que l'exécutant sache appliquer sa forme.
+            let kind = (id == SET_STYLE)
+                .then(|| line.get("params")?.get("style")?.get("kind")?.as_str())
+                .flatten();
+            if kind == Some(RESULT_RAMP_KIND) && !self.style_kinds.contains(RESULT_RAMP_KIND) {
                 return Err(ErrorReport::from(crate::style::unavailable()).at_step(step));
             }
             let mut params = line.get("params").cloned().unwrap_or_else(|| json!({}));

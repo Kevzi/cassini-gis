@@ -9,7 +9,9 @@ thème ni de couleur (AD-5) :
   catégories par valeur, dégradé dont QGIS calcule les classes sur les vraies valeurs,
   pseudo-couleur interpolée d'un MNT, ombrage posé en fondu « produit » (gris, sauf pour un
   raster que QGIS dessine déjà en relief ombré : ce rendu est gardé, seuls l'opacité et le
-  fondu changent). Une forme vecteur porte aussi sa visibilité selon l'échelle
+  fondu changent), pseudo-couleur d'un raster de résultat du noyau, par classes ou
+  interpolée, ses valeurs dictées transparentes (`result_ramp`, dictée après l'ouverture d'un
+  champ de vision, d'une pente… : bogue du fond noir, 2026-11-09). Une forme vecteur porte aussi sa visibilité selon l'échelle
   (`max_scale`). Seul le style de la couche dans le projet change : le fichier de données
   n'est jamais touché ;
 - `layer.arrange` pose les groupes, dans l'ordre, sous les couches que le noyau n'a pas
@@ -56,19 +58,27 @@ FIELDS = {
     "graduated": {"field", "method", "class_count", "ramp", "stroke", "width_mm", "max_scale"},
     "elevation_ramp": {"stops", "opacity"},
     "hillshade": {"opacity"},
+    "result_ramp": {"stops", "interpolation", "transparent", "unit", "opacity"},
 }
+# Formes annoncées au noyau à `session.hello` (`style_kinds`) : `result_ramp` y figure, et le
+# noyau ne dicte le style d'un raster de résultat qu'à cette condition (décision du 2026-11-09).
+STYLE_KINDS = tuple(sorted(FIELDS))
 TARGETS = {
     "single": VECTOR,
     "categories": VECTOR,
     "graduated": VECTOR,
     "elevation_ramp": RASTER,
     "hillshade": RASTER,
+    "result_ramp": RASTER,
 }
 CLASS_FIELDS = {"values", "label", "stroke", "fill", "width_mm", "max_scale"}
 OTHER_FIELDS = {"label", "stroke", "fill", "width_mm", "max_scale"}
 METHODS = ("equal_interval", "quantile", "jenks")
 CLASS_COUNT = (2, 12)
 COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
+INTERPOLATIONS = ("discrete", "linear")
+# Paliers et valeurs transparentes d'une rampe de résultat, au plus (`RESULT_RAMP_MAX` du noyau).
+RESULT_RAMP_MAX = 32
 
 
 def _invalid(why):
@@ -224,6 +234,56 @@ def _elevation_ramp(body, out):
     out["opacity"] = _opacity(body.get("opacity"))
 
 
+def _result_ramp(body, out):
+    interpolation = body.get("interpolation")
+    if not isinstance(interpolation, str) or interpolation not in INTERPOLATIONS:
+        raise _invalid("interpolation inconnue « %s »" % (interpolation,))
+    out["interpolation"] = interpolation
+    least = 1 if interpolation == "discrete" else 2
+    stops = body.get("stops")
+    if not isinstance(stops, list) or len(stops) < least:
+        raise _invalid("une rampe de résultat demande au moins %d palier(s)" % least)
+    if len(stops) > RESULT_RAMP_MAX:
+        raise _invalid("une rampe de résultat a au plus %d paliers" % RESULT_RAMP_MAX)
+    out["stops"] = []
+    for n, raw in enumerate(stops, start=1):
+        what = "le palier %d" % n
+        _object(raw, {"value", "color", "label"}, what)
+        if not _number(raw.get("value")):
+            raise _invalid("la valeur du palier %d n'est pas un nombre" % n)
+        value = float(raw["value"])
+        if out["stops"] and value <= out["stops"][-1][0]:
+            raise _invalid("les paliers de la rampe ne sont pas croissants")
+        label = raw.get("label")
+        if label is not None and not isinstance(label, str):
+            raise _invalid("le libellé du palier %d n'est pas un texte" % n)
+        out["stops"].append((value, _color(raw.get("color"), what, True), label))
+    transparent = body.get("transparent", [])
+    if not isinstance(transparent, list) or len(transparent) > RESULT_RAMP_MAX:
+        raise _invalid("les valeurs transparentes sont une liste d'au plus %d nombres"
+                       % RESULT_RAMP_MAX)
+    if not all(_number(v) for v in transparent):
+        raise _invalid("une valeur transparente n'est pas un nombre")
+    out["transparent"] = [float(v) for v in transparent]
+    unit = body.get("unit")
+    if unit is not None and not isinstance(unit, str):
+        raise _invalid("l'unité n'est pas un texte")
+    out["unit"] = unit
+    out["opacity"] = _opacity(body.get("opacity"))
+
+
+def number_label(value):
+    """Une valeur de légende en français : virgule décimale, espace entre les milliers, au plus
+    deux décimales, jamais de notation scientifique (`1234567.5` : « 1 234 567,5 »)."""
+    text = "{:,.2f}".format(value)
+    whole, _, decimals = text.partition(".")
+    decimals = decimals.rstrip("0")
+    whole = whole.replace(",", "\u202f")
+    if whole == "-0" and not decimals:
+        whole = "0"
+    return whole + ("," + decimals if decimals else "")
+
+
 def normalize_style(style):
     """Vérifie un `StyleSpec` et le rend normalisé ; `GestureError(style.invalid)` sinon.
 
@@ -253,6 +313,8 @@ def normalize_style(style):
         _graduated(body, out)
     elif kind == "elevation_ramp":
         _elevation_ramp(body, out)
+    elif kind == "result_ramp":
+        _result_ramp(body, out)
     else:  # hillshade
         out["opacity"] = _opacity(body.get("opacity"))
     return out
@@ -497,6 +559,66 @@ class QgisBackend:
         else:
             _set_legend(layer, _default_raster_legend(layer))
             _legend_labels(layer, first_label=ELEVATION_LEGEND)
+        layer.triggerRepaint()
+
+    def apply_result_ramp(self, layer, stops, interpolation, transparent, unit, opacity):
+        """Raster de résultat du noyau : pseudo-couleur aux paliers dictés, par classes
+        (`discrete` : une valeur prend la couleur du premier palier qui lui est supérieur ou
+        égal) ou interpolée (`linear`), et ses valeurs dictées transparentes. Le sans-donnée du
+        fichier l'est déjà pour QGIS ; le dire ici ne coûte rien. Fondu normal : une couche
+        ombrée avant ne garde pas son mode « produit »."""
+        from qgis.core import (
+            Qgis,
+            QgsColorRampLegendNodeSettings,
+            QgsColorRampShader,
+            QgsRasterShader,
+            QgsRasterTransparency,
+            QgsSingleBandPseudoColorRenderer,
+        )
+        from qgis.PyQt.QtGui import QColor
+
+        # « 38.5° », mais « 12 % » : le degré colle au nombre, les autres unités non.
+        suffix = "" if not unit else (unit if unit == "°" else " " + unit)
+        ramp = QgsColorRampShader(stops[0][0], stops[-1][0])
+        ramp.setColorRampType(
+            Qgis.ShaderInterpolationMethod.Discrete
+            if interpolation == "discrete"
+            else Qgis.ShaderInterpolationMethod.Linear
+        )
+        ramp.setColorRampItemList(
+            [
+                QgsColorRampShader.ColorRampItem(
+                    value, QColor(color), label if label is not None else number_label(value) + suffix
+                )
+                for value, color, label in stops
+            ]
+        )
+        # Interpolée : les valeurs au-delà du dernier palier gardent sa couleur. Par classes,
+        # QGIS ne dessine pas une valeur au-dessus du dernier palier, quel que soit ce réglage :
+        # le noyau pose donc son dernier palier au maximum des valeurs (catalogue, `result_ramp`).
+        ramp.setClip(False)
+        if interpolation == "linear" and unit:
+            # Barre continue de la légende, bornes suivies de l'unité (« 38.5° », « 12 % »).
+            settings = QgsColorRampLegendNodeSettings()
+            settings.setUseContinuousLegend(True)
+            settings.setSuffix(suffix)
+            ramp.setLegendSettings(settings)
+        shader = QgsRasterShader()
+        shader.setRasterShaderFunction(ramp)
+        renderer = QgsSingleBandPseudoColorRenderer(layer.dataProvider(), 1, shader)
+        renderer.setClassificationMin(stops[0][0])
+        renderer.setClassificationMax(stops[-1][0])
+        renderer.setOpacity(opacity)
+        # Opacité 0 : la cellule de cette valeur n'est pas dessinée (QGIS 3.30 et après).
+        hidden = QgsRasterTransparency()
+        hidden.setTransparentSingleValuePixelList(
+            [QgsRasterTransparency.TransparentSingleValuePixel(v, v, 0.0) for v in transparent]
+        )
+        renderer.setRasterTransparency(hidden)
+        layer.setRenderer(renderer)
+        layer.setBlendMode(_normal_blend())
+        _set_legend(layer, _default_raster_legend(layer))
+        _legend_labels(layer)
         layer.triggerRepaint()
 
     def _plain_stretch(self, layer):
@@ -837,6 +959,15 @@ class SetStyleGesture(OpenOutputGesture):
             )
         elif kind == "elevation_ramp":
             backend.apply_elevation_ramp(layer, style["stops"], style["opacity"])
+        elif kind == "result_ramp":
+            backend.apply_result_ramp(
+                layer,
+                style["stops"],
+                style["interpolation"],
+                style["transparent"],
+                style["unit"],
+                style["opacity"],
+            )
         else:
             backend.apply_hillshade(layer, style["opacity"])
         if target == VECTOR:

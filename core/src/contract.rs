@@ -128,6 +128,15 @@ fn check_spec(spec: &CommandSpec, out: &mut Vec<ContractViolation>) {
             "au moins un test doit être déclaré pour la commande.",
         ));
     }
+    // Le style d'un raster de résultat est composé d'après le résultat entier : une commande qui
+    // écrit plusieurs sorties les styliserait toutes pareil (bogue du fond noir, 2026-11-09).
+    if spec.result_style.is_some() && spec.output_params.len() != 1 {
+        out.push(violation(
+            "contract.result_style",
+            id,
+            "un style de résultat (`result_style`) ne se déclare que sur une commande à une seule sortie.",
+        ));
+    }
     check_path_params(spec, out);
     for (which, schema) in [
         ("des paramètres", &spec.params_schema),
@@ -473,6 +482,12 @@ mod tests {
     }
 
     command!(Healthy, |s| s);
+    command!(StyledTwoOutputs, |s| s
+        .output_params(&["a", "b"])
+        .output_ext(".tif")
+        .result_style(crate::style::ResultStyle::Slope));
+    command!(StyledNoOutput, |s| s
+        .result_style(crate::style::ResultStyle::Slope));
     command!(BadIdCapital, |mut s| {
         s.id = "Buffer".into();
         s
@@ -702,6 +717,14 @@ mod tests {
     fn a_complete_command_has_no_violation() {
         assert!(only(Healthy).check_contract().is_empty());
         assert!(only(BoundedGeometries).check_contract().is_empty());
+    }
+
+    #[test]
+    fn a_result_style_needs_exactly_one_output() {
+        assert!(codes(&only(StyledTwoOutputs)).contains(&"contract.result_style"));
+        assert!(codes(&only(StyledNoOutput)).contains(&"contract.result_style"));
+        // Le registre standard la tient : chaque commande stylée a une seule sortie.
+        assert!(!codes(&Registry::standard()).contains(&"contract.result_style"));
     }
 
     #[test]

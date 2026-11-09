@@ -3,15 +3,19 @@
 //! - [`spec`] : `StyleSpec`, la description de style neutre envoyée à QGIS (AD-22) ;
 //! - [`table`] : la table de sémiologie, chaque couleur sourcée (IGN, CNIG) ;
 //! - [`recognize`] : le thème d'une couche, d'après son nom, son fichier et ses champs ;
-//! - [`arrange`] : les groupes et l'ordre d'affichage.
+//! - [`arrange`] : les groupes et l'ordre d'affichage ;
+//! - [`result`] : le style des rasters de résultat du noyau, dicté après leur ouverture.
 //!
 //! La commande `map.topographic_style` (`crate::commands::map_topographic_style`) assemble le tout.
 //! Rien ici ne dépend de QGIS : tout se teste sur des inventaires synthétiques.
 
 pub mod arrange;
 pub mod recognize;
+pub mod result;
 pub mod spec;
 pub mod table;
+
+pub use result::ResultStyle;
 
 use crate::registry::RegistryError;
 

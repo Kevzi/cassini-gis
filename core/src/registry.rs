@@ -93,6 +93,13 @@ pub struct CommandSpec {
     /// Métadonnée interne : jamais sérialisée.
     #[serde(skip)]
     pub output_none: bool,
+    /// Style que la session dicte (`layer.set_style`) juste après l'ouverture dictée du raster
+    /// écrit (`layer.open_raster`), composé d'après le résultat de la commande, si l'extension
+    /// annonce `layer.set_style` (bogue du fond noir, 2026-11-09). Sans le geste, le raster est
+    /// ouvert sans style, comme avant : ce n'est pas un geste requis. Métadonnée interne :
+    /// jamais sérialisée.
+    #[serde(skip)]
+    pub result_style: Option<crate::style::ResultStyle>,
     /// Schéma JSON des paramètres, engendré depuis le type Rust.
     pub params_schema: Value,
     /// Schéma JSON du résultat, engendré depuis le type Rust.
@@ -124,6 +131,7 @@ impl CommandSpec {
             inventory_param: None,
             dictates: Vec::new(),
             output_none: false,
+            result_style: None,
             params_schema: schema_value::<P>(),
             output_schema: schema_value::<O>(),
             examples: Vec::new(),
@@ -202,6 +210,12 @@ impl CommandSpec {
     /// Déclare le genre de sortie `none` (amendement d'AD-24).
     pub fn output_none(mut self) -> Self {
         self.output_none = true;
+        self
+    }
+
+    /// Déclare le style dicté après l'ouverture du raster écrit (bogue du fond noir).
+    pub fn result_style(mut self, style: crate::style::ResultStyle) -> Self {
+        self.result_style = Some(style);
         self
     }
 

@@ -91,7 +91,9 @@ tableau lisible, puis un bloc ` ```json fiche ` que lit la recette :
 - Une commande déléguée qui produit une couche vecteur rend `layer_id`, `name`, `crs`
   (code explicite, `EPSG:2154`) et `feature_count`.
 - Une commande qui écrit un raster rend `file` (GeoTIFF Float32, sans-donnée -9999) ; le
-  noyau dicte ensuite `layer.open_raster` (AD-9, AD-24). Une commande du noyau qui rend
+  noyau dicte ensuite `layer.open_raster` (AD-9, AD-24), puis, si l'extension annonce
+  `layer.set_style` et la forme `result_ramp` (`style_kinds` de `session.hello`), le style de ce résultat sur la couche ouverte (`result_ramp`, ou
+  `hillshade` pour un ombrage : changement de cap du 2026-11-09). Une commande du noyau qui rend
   des entités écrit un GeoJSON et le noyau dicte `layer.open_vector` (AD-30). Un seul écrivain
   du noyau écrit ces fichiers ; il refuse un nombre non fini ou un dossier absent par
   `geojson.unwritable`, sans rien écrire.
@@ -251,12 +253,13 @@ l'extension le traduit en rendu de QGIS. Union étiquetée par `kind` :
 | `categories` | `field`, `classes`, `other`, `opacity`, `max_scale` | Un symbole par valeur de `field` ; `classes` = `{values, label, stroke, fill, width_mm, max_scale}` ; `other` = `{label, stroke, fill, width_mm, max_scale}`, le symbole des valeurs non listées (absent : non dessinées). |
 | `graduated` | `field`, `method`, `class_count`, `ramp`, `stroke`, `width_mm`, `max_scale` | Dégradé selon un champ numérique d'un vecteur : QGIS calcule `class_count` classes par `method` (`equal_interval`, `quantile`, `jenks`) sur les valeurs réelles, et colore de `ramp.from` à `ramp.to`. Le noyau ne calcule aucun seuil. |
 | `elevation_ramp` | `stops`, `opacity` | Teintes d'altitude d'un MNT : `stops` = `{value, color}`, valeurs croissantes, en mètres. |
+| `result_ramp` | `stops`, `interpolation`, `transparent`, `unit`, `opacity` | Un raster de résultat du noyau (champ de vision, pente, exposition, coût, superposition) : `stops` = `{value, color, label}`, valeurs strictement croissantes, `label` facultatif (texte de légende) ; `interpolation` vaut `discrete` (une couleur par classe : une valeur prend la couleur du premier palier qui lui est supérieur ou égal) ou `linear` (couleurs interpolées) ; `transparent`, les valeurs dessinées transparentes (0 d'un champ de vision, -9999 partout) ; `unit`, l'unité en texte de légende (`°`, `%`). Changement de cap du 2026-11-09 (`../change-style-des-rasters-de-resultat/`). |
 | `hillshade` | `opacity` | Un raster d'ombrage **déjà présent** (sortie de `terrain.hillshade` ou fichier de relief ombré) rendu en gris et posé en fondu (mode produit) sur les couches du dessous. Un raster que QGIS dessine déjà en relief ombré (un MNT au rendu d'ombrage) garde ce rendu : seuls l'opacité et le fondu changent (ajout du 2026-11-08). Le style ne calcule aucun ombrage. |
 
 Une couleur est une chaîne `#rrggbb` ; `width_mm` est en millimètres de carte ; `opacity`
 va de 0 à 1 (1 par défaut) ; elle est portée par `single`, `categories` (opacité de toute
 la couche, par exemple les zones d'un PLU qui laissent voir le fond : ajout du 2026-11-08),
-`elevation_ramp` et `hillshade`, et `graduated` n'en a **pas**. `max_scale`, facultatif
+`elevation_ramp`, `hillshade` et `result_ramp`, et `graduated` n'en a **pas**. `max_scale`, facultatif
 sur les trois formes vecteur, est un dénominateur d'échelle entier : la couche n'est dessinée
 qu'aux échelles plus grandes que 1:`max_scale` (en zoomant davantage) ; absent, elle l'est à
 toute échelle ; une valeur sous 1 est refusée par `style.invalid` (ajout du 2026-11-08, voir
@@ -265,11 +268,17 @@ propre `max_scale`, de même sens et de mêmes bornes : la classe n'est dessiné
 plus grandes que 1:`max_scale`, et celui de la couche s'applique en plus. Une couleur mal formée, une épaisseur négative, une opacité
 hors de [0, 1], des `stops` non croissants, ou un `single` sans `stroke` ni `fill` sont
 refusés par `style.invalid` (AD-21). Les `single` et `categories` vont aux vecteurs, les
-`elevation_ramp` et `hillshade` aux rasters ; l'inverse est refusé par
+`elevation_ramp`, `hillshade` et `result_ramp` aux rasters ; l'inverse est refusé par
 `style.geometry_mismatch`. `class_count` va de 2 à 12, sinon `style.invalid` ; un `field`
 non numérique est refusé par `style.field_missing` (l'extension le vérifie) ; `graduated` va
 aux vecteurs (sinon `style.geometry_mismatch`). Variante `graduated` ajoutée sur décision du
-propriétaire du 2026-11-08 (entrée 20). Ce bloc fait foi sur le changement de cap du 2026-11-08, qui en
+propriétaire du 2026-11-08 (entrée 20). Une `result_ramp` a au moins un palier (`discrete`)
+ou deux (`linear`), au plus 32 paliers et 32 valeurs transparentes, toutes finies ; sinon
+`style.invalid`. En `discrete`, une valeur au-dessus du dernier palier n'est pas dessinée
+(règle de QGIS) : le noyau pose donc le dernier palier au maximum des valeurs du raster. Une
+extension annonce les formes qu'elle sait appliquer dans `style_kinds` de `session.hello`
+(`docs/canal-local.md`) ; le noyau ne dicte une `result_ramp` qu'à une extension qui l'y
+annonce (décision du propriétaire, 2026-11-09). Ce bloc fait foi sur le changement de cap du 2026-11-08, qui en
 donne l'esquisse.
 
 ```json type
@@ -311,7 +320,16 @@ donne l'esquisse.
                                           "fields": {"value": {"type": "number", "required": true},
                                                      "color": {"type": "string", "required": true}}}},
                       "opacity": {"type": "number", "required": false}},
-   "hillshade": {"opacity": {"type": "number", "required": false}}}}
+   "hillshade": {"opacity": {"type": "number", "required": false}},
+   "result_ramp": {"stops": {"type": "array", "required": true,
+                             "items": {"type": "object",
+                                       "fields": {"value": {"type": "number", "required": true},
+                                                  "color": {"type": "string", "required": true},
+                                                  "label": {"type": "string", "required": false}}}},
+                   "interpolation": {"type": "string", "required": true, "enum": ["discrete", "linear"]},
+                   "transparent": {"type": "array", "required": false, "items": "number"},
+                   "unit": {"type": "string", "required": false},
+                   "opacity": {"type": "number", "required": false}}}}
 ```
 
 ## 4. Liste des identifiants
@@ -495,7 +513,21 @@ modifie rien.
 
 Ouvre dans le projet un raster écrit par une étape précédente. **Dictée par le noyau**
 après chaque sortie raster (amendement 4.9 d'AD-9) ; refusée par `command.run`
-(`registry.dictated`).
+(`registry.dictated`). Si l'extension annonce `layer.set_style` et la forme `result_ramp`
+(`style_kinds` de `session.hello`), le noyau dicte juste après
+le style du raster sur la couche ouverte (`layer_id` rendu), de même `origin` et de même
+`plan_step` : `result_ramp` composée d'après la commande et son résultat (champ de vision : 0
+transparent, 1 coloré à demi ; champ de vision cumulé : 0 transparent, puis dégradé de 1 à
+`max_count` ; pente, en degrés ou en %, coût cumulé et superposition : dégradé
+ColorBrewer ; exposition : une classe par direction, N, NE, E, SE, S, SO, O, NO, le nord coupé
+autour de 0 et 360° ; -9999 transparent partout), ou `hillshade` pour `terrain.hillshade`.
+Sans le geste ou sans la forme annoncée, le raster est ouvert sans style, sans erreur ; un
+style refusé est l'erreur de l'appel, journalisée à sa ligne ; un style que le noyau composerait
+invalide est une erreur `style.invalid` du noyau, avant l'ouverture (changement de cap du
+2026-11-09, amendement du même jour d'AD-30). Au rejeu, la ligne de style est rejouée sur la
+couche rejouée, et demande le geste et la forme (`style.unavailable` sinon). Un journal écrit
+avant ce changement n'a pas de ligne de style : il se rejoue sans style, à l'identique (AD-11,
+le journal n'est jamais re-décidé).
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
@@ -1413,7 +1445,8 @@ Erreurs : `style.invalid`, `style.unavailable` ; celles de `layer.set_style`.
 ### `layer.set_style`
 
 Applique un `StyleSpec` à une couche du projet (entrée 21). Dictée par le noyau après
-`map.topographic_style` ou `map.graduated_style`, jamais offerte au modèle, au client MCP ni au formulaire. Le style
+`map.topographic_style` ou `map.graduated_style`, et après l'ouverture dictée d'un raster de
+résultat (`layer.open_raster`, changement de cap du 2026-11-09), jamais offerte au modèle, au client MCP ni au formulaire. Le style
 est celui de la couche dans le projet : le fichier de données n'est pas touché.
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |

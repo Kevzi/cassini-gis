@@ -182,6 +182,8 @@ impl Command for TerrainCostDistance {
         .path_params(&["cost"])
         .output_params(&["out"])
         .output_ext(".tif")
+        // Style dicté après l'ouverture du raster (bogue du fond noir, 2026-11-09).
+        .result_style(crate::style::ResultStyle::CostDistance)
         .example(serde_json::json!({
             "cost": "mnt-colline-2154.tif",
             "sources": [{"x": 652250, "y": 6850250, "epsg": 2154}]

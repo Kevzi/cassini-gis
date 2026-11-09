@@ -856,6 +856,29 @@ flowchart LR
     géométrie ne traverse le canal (AD-8).
   - **Disponibilité.** Sans QGIS, ou sans les trois gestes annoncés, la commande n'est pas
     offerte (AD-25).
+- **Amendement du 2026-11-09 — style dicté après l'ouverture d'un raster de résultat**
+  (décision du propriétaire ; changement de cap
+  `../change-style-des-rasters-de-resultat/change-style-des-rasters-de-resultat.md`).
+  - **Second chemin de dictée.** Hors du mécanisme des ordres qu'une commande demande
+    (`dictates`), la session dicte elle-même un `layer.set_style` juste après l'ouverture
+    dictée (`layer.open_raster`) du raster d'une commande du noyau qui déclare son style de
+    résultat (`result_style` au registre, une commande à une seule sortie). L'ordre vise le
+    `layer_id` que l'ouverture rend ; il porte le même `origin` et le même `plan_step` et
+    devient une ligne du journal.
+  - **Décision du noyau.** Le style est composé par le noyau d'après la commande et son
+    résultat (forme `result_ramp` d'AD-22, ou `hillshade` pour un ombrage) ; l'extension ne
+    fait que l'appliquer (AD-4, AD-5).
+  - **Condition.** L'ordre n'est dicté que si l'extension annonce le geste `layer.set_style`
+    **et** la forme `result_ramp` dans `style_kinds` de `session.hello`. Sinon le raster est
+    ouvert sans style, sans erreur : une extension plus ancienne que ce changement garde la
+    conduite d'avant (AD-25). Ce n'est pas un geste requis des commandes de terrain.
+  - **Échec.** Un style refusé par l'extension est l'erreur de l'appel, journalisée à sa ligne
+    (AD-21) ; un style que le noyau composerait invalide est une erreur nommée du noyau
+    (`style.invalid`), avant l'ouverture, jamais un style sauté en silence.
+  - **Rejeu.** La ligne est rejouée seule, avec son style journalisé et l'id de la couche
+    rejouée (AD-11). Un exécutant qui n'annonce pas le geste, ou pas la forme `result_ramp`,
+    arrête le rejeu à cette ligne sur `style.unavailable`. Un journal écrit avant ce
+    changement n'a pas de ligne de style : il se rejoue sans style, à l'identique.
 
 ### AD-31 — Géodésie et angles : une seule convention
 

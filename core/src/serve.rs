@@ -239,6 +239,8 @@ struct State<'a> {
     link: Rc<Link<'a>>,
     session: Option<Session<'a>>,
     announced: HashSet<String>,
+    /// Formes de `StyleSpec` annoncées à `session.hello` (`style_kinds`), pour le rejeu.
+    style_kinds: HashSet<String>,
     /// Chemin du projet de la session, tel que reçu à `session.hello`.
     project: Option<String>,
     /// Compositeur de plans, absent si le noyau n'en a pas (`agent.unavailable`).
@@ -343,6 +345,7 @@ fn serve_with<'a>(
             link: link.clone(),
             session: None,
             announced: HashSet::new(),
+            style_kinds: HashSet::new(),
             project: None,
             composer,
             pending: None,
@@ -869,6 +872,19 @@ fn hello(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, RpcErro
                 .collect::<Option<HashSet<String>>>()
         })
         .ok_or_else(|| invalid_params("commands doit être une liste d'identifiants."))?;
+    // Formes de style que l'extension sait appliquer : un ajout compatible, absent d'une
+    // extension plus ancienne (décision du propriétaire, 2026-11-09).
+    let style_kinds = match params.get("style_kinds") {
+        None | Some(Value::Null) => HashSet::new(),
+        Some(v) => v
+            .as_array()
+            .and_then(|a| {
+                a.iter()
+                    .map(|v| v.as_str().map(str::to_string))
+                    .collect::<Option<HashSet<String>>>()
+            })
+            .ok_or_else(|| invalid_params("style_kinds doit être une liste de noms de formes."))?,
+    };
     let project = params
         .get("project")
         .and_then(Value::as_str)
@@ -886,7 +902,9 @@ fn hello(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, RpcErro
         // De même pour un GeoJSON du noyau (AD-30, ticket 11.8).
         .with_vector_opening(commands.contains(OPEN_VECTOR))
         // Une mise en forme n'est exécutée que si l'extension annonce ses gestes (entrée 11.20).
-        .with_gestures(commands.iter().cloned());
+        .with_gestures(commands.iter().cloned())
+        // Le style d'un raster de résultat demande la forme `result_ramp` (2026-11-09).
+        .with_style_kinds(style_kinds.iter().cloned());
     // La session dit dès la poignée de main si elle est en lecture seule : l'extension
     // n'a plus à lancer une commande pour le découvrir (ticket 5.32).
     let read_only = session.mode() == Mode::ReadOnly;
@@ -896,6 +914,7 @@ fn hello(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, RpcErro
     state.session = Some(session);
     state.project = Some(project.to_string());
     state.announced = commands;
+    state.style_kinds = style_kinds;
     // Les relais ne voient que les commandes disponibles, sans aucun chemin (AD-25, AD-9).
     let available = catalogue(state)
         .into_iter()
@@ -1015,7 +1034,8 @@ fn journal_replay(state: &mut State<'_>) -> Result<Value, RpcError> {
     let project = state.project.clone().expect("session vérifiée");
     let replay = Replay::load(state.registry, Path::new(&project))
         .map_err(RpcError::business)?
-        .with_gestures(state.announced.iter().cloned());
+        .with_gestures(state.announced.iter().cloned())
+        .with_style_kinds(state.style_kinds.iter().cloned());
     let router = Router::new(state.registry).with_qgis(Announced {
         announced: state.announced.clone(),
         inner: Channel {
@@ -3538,6 +3558,64 @@ mod tests {
         assert_eq!(journal[1]["id"], "layer.open_raster");
         assert_eq!(journal[1]["params"], json!({"path": "out:1.1"}));
         assert_eq!(journal[1]["layer_id"], "raster_1");
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn the_result_style_is_dictated_only_when_the_extension_announces_result_ramp() {
+        // Décision du propriétaire du 2026-11-09 : `layer.set_style` annoncé ne suffit pas,
+        // l'extension doit annoncer savoir appliquer `result_ramp` (`style_kinds`).
+        for kinds in [
+            None,
+            Some(json!(["hillshade"])),
+            Some(json!(["result_ramp"])),
+        ] {
+            let mut c = Client::start(CANCEL_GRACE);
+            with_dem(&c);
+            let mut params = json!({"protocol_version":2,
+                "commands":["layer.open_raster", "layer.set_style"], "project":c.project});
+            if let Some(kinds) = &kinds {
+                params["style_kinds"] = kinds.clone();
+            }
+            c.send(json!({"jsonrpc":"2.0","id":1,"method":"session.hello","params":params}));
+            assert!(c.recv()["result"].is_object());
+            c.send(json!({"jsonrpc":"2.0","id":2,"method":"command.run",
+                "params":{"command":"terrain.slope","params":{"dem":"dem/plan.tif","unit":"degrees"}}}));
+            let work = c.dir.join("p.cassini");
+            answer_open(&c, &work, "1-terrain.slope.tif", "raster_1");
+            let styled = kinds == Some(json!(["result_ramp"]));
+            if styled {
+                let order = c.recv();
+                assert_eq!(order["params"]["command"], "layer.set_style", "{order}");
+                assert_eq!(order["params"]["params"]["layer_id"], "raster_1");
+                assert_eq!(order["params"]["params"]["style"]["kind"], "result_ramp");
+                c.send(reply(&order["id"], json!({"layer_id": "raster_1"})));
+            }
+            let done = c.recv();
+            assert_eq!(done["id"], 2, "{done}");
+            let ids: Vec<String> = c
+                .journal()
+                .iter()
+                .map(|l| l["id"].as_str().unwrap().to_string())
+                .collect();
+            let expected: &[&str] = if styled {
+                &["terrain.slope", "layer.open_raster", "layer.set_style"]
+            } else {
+                &["terrain.slope", "layer.open_raster"]
+            };
+            assert_eq!(ids, expected, "{kinds:?}");
+            c.assert_silent();
+            c.close().1.unwrap();
+        }
+    }
+
+    #[test]
+    fn malformed_style_kinds_are_invalid_params() {
+        let mut c = Client::start(CANCEL_GRACE);
+        c.send(json!({"jsonrpc":"2.0","id":1,"method":"session.hello",
+            "params":{"protocol_version":2,"commands":[],"style_kinds":"result_ramp",
+                "project":c.project}}));
+        assert_eq!(c.recv()["error"]["code"], -32602);
         c.close().1.unwrap();
     }
 
