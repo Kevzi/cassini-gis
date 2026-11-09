@@ -18,7 +18,14 @@ pub const STYLE_INVALID: &str = "style.invalid";
 /// Plus petit et plus grand nombre de classes d'un dégradé (`graduated`).
 pub const GRADUATED_CLASSES: (u32, u32) = (2, 12);
 
-/// Le style d'une couche, l'une de cinq formes, étiquetée par `kind`.
+/// Nom de la forme `result_ramp`, que l'extension annonce dans `style_kinds` de `session.hello`
+/// quand elle sait l'appliquer (décision du propriétaire, 2026-11-09).
+pub const RESULT_RAMP_KIND: &str = "result_ramp";
+
+/// Nombre maximal de paliers et de valeurs transparentes d'une rampe de résultat (`result_ramp`).
+pub const RESULT_RAMP_MAX: usize = 32;
+
+/// Le style d'une couche, l'une de six formes, étiquetée par `kind`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum StyleSpec {
@@ -82,6 +89,42 @@ pub enum StyleSpec {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         opacity: Option<f64>,
     },
+    /// Un raster de résultat du noyau (champ de vision, pente, coût…) : paliers de couleur
+    /// croissants, interpolés ou par classes, et valeurs rendues transparentes, sans-donnée
+    /// comprise (décision du propriétaire, 2026-11-09).
+    ResultRamp {
+        stops: Vec<ResultStop>,
+        interpolation: RampInterpolation,
+        /// Valeurs dessinées transparentes (0 d'un champ de vision, -9999 partout).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        transparent: Vec<f64>,
+        /// Unité, en texte de légende (`°`, `%`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        unit: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        opacity: Option<f64>,
+    },
+}
+
+/// Un palier d'une rampe de résultat : une valeur, sa couleur et, au besoin, son libellé de
+/// légende.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ResultStop {
+    pub value: f64,
+    pub color: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+/// Coloration entre les paliers d'une rampe de résultat : `discrete`, une couleur par classe
+/// (une valeur prend la couleur du premier palier qui lui est supérieur ou égal) ; `linear`,
+/// couleurs interpolées d'un palier au suivant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RampInterpolation {
+    Discrete,
+    Linear,
 }
 
 /// Une classe d'un style `categories`.
@@ -155,14 +198,16 @@ pub enum StyleTarget {
 
 impl StyleSpec {
     /// La sorte de couche que ce style vise : `single`, `categories` et `graduated` vont aux
-    /// vecteurs, `elevation_ramp` et `hillshade` aux rasters (`style.geometry_mismatch` sinon,
+    /// vecteurs, `elevation_ramp`, `hillshade` et `result_ramp` aux rasters (`style.geometry_mismatch` sinon,
     /// relevé par l'extension).
     pub fn target(&self) -> StyleTarget {
         match self {
             StyleSpec::Single { .. }
             | StyleSpec::Categories { .. }
             | StyleSpec::Graduated { .. } => StyleTarget::Vector,
-            StyleSpec::ElevationRamp { .. } | StyleSpec::Hillshade { .. } => StyleTarget::Raster,
+            StyleSpec::ElevationRamp { .. }
+            | StyleSpec::Hillshade { .. }
+            | StyleSpec::ResultRamp { .. } => StyleTarget::Raster,
         }
     }
 
@@ -173,7 +218,9 @@ impl StyleSpec {
             StyleSpec::Single { max_scale, .. }
             | StyleSpec::Categories { max_scale, .. }
             | StyleSpec::Graduated { max_scale, .. } => *max_scale,
-            StyleSpec::ElevationRamp { .. } | StyleSpec::Hillshade { .. } => None,
+            StyleSpec::ElevationRamp { .. }
+            | StyleSpec::Hillshade { .. }
+            | StyleSpec::ResultRamp { .. } => None,
         }
     }
 
@@ -207,6 +254,9 @@ impl StyleSpec {
                 }
             }
             StyleSpec::ElevationRamp { stops, .. } => {
+                out.extend(stops.iter().map(|s| s.color.as_str()));
+            }
+            StyleSpec::ResultRamp { stops, .. } => {
                 out.extend(stops.iter().map(|s| s.color.as_str()));
             }
             StyleSpec::Hillshade { .. } => {}
@@ -314,6 +364,47 @@ impl StyleSpec {
                 opacities.push(*opacity);
             }
             StyleSpec::Hillshade { opacity } => opacities.push(*opacity),
+            StyleSpec::ResultRamp {
+                stops,
+                interpolation,
+                transparent,
+                opacity,
+                ..
+            } => {
+                let least = match interpolation {
+                    RampInterpolation::Discrete => 1,
+                    RampInterpolation::Linear => 2,
+                };
+                if stops.len() < least {
+                    return invalid(format!(
+                        "Une rampe de résultat {} a au moins {least} palier{}.",
+                        if least == 1 {
+                            "par classes"
+                        } else {
+                            "interpolée"
+                        },
+                        if least == 1 { "" } else { "s" }
+                    ));
+                }
+                if stops.len() > RESULT_RAMP_MAX || transparent.len() > RESULT_RAMP_MAX {
+                    return invalid(format!(
+                        "Une rampe de résultat a au plus {RESULT_RAMP_MAX} paliers et \
+                         {RESULT_RAMP_MAX} valeurs transparentes."
+                    ));
+                }
+                if stops.iter().any(|s| !s.value.is_finite())
+                    || stops.windows(2).any(|w| w[0].value >= w[1].value)
+                {
+                    return invalid(
+                        "Les paliers d'une rampe de résultat doivent être strictement croissants."
+                            .to_string(),
+                    );
+                }
+                if transparent.iter().any(|v| !v.is_finite()) {
+                    return invalid("Une valeur transparente n'est pas un nombre fini.".into());
+                }
+                opacities.push(*opacity);
+            }
         }
         if widths
             .into_iter()
@@ -366,6 +457,11 @@ mod tests {
             json!({"kind": "elevation_ramp", "stops": [{"value": 0.0, "color": "#9cc58a"},
                    {"value": 100.5, "color": "#c3d99a"}]}),
             json!({"kind": "hillshade", "opacity": 0.5}),
+            json!({"kind": "result_ramp", "interpolation": "discrete",
+                   "stops": [{"value": 1.0, "color": "#b2182b", "label": "Visible"}],
+                   "transparent": [0.0, -9999.0], "opacity": 0.5}),
+            json!({"kind": "result_ramp", "interpolation": "linear", "unit": "°",
+                   "stops": [{"value": 0.0, "color": "#ffffcc"}, {"value": 45.5, "color": "#800026"}]}),
         ] {
             let style = parse(value.clone());
             style.validate().unwrap();
@@ -387,6 +483,35 @@ mod tests {
                        {"value": 10, "color": "#ffffff"}]}),
         );
         refused(json!({"kind": "elevation_ramp", "stops": [{"value": 10, "color": "#000000"}]}));
+    }
+
+    #[test]
+    fn a_bad_result_ramp_is_refused_as_style_invalid() {
+        let one = json!([{"value": 1, "color": "#000000"}]);
+        let two = json!([{"value": 1, "color": "#000000"}, {"value": 2, "color": "#ffffff"}]);
+        let ramp = |stops: &serde_json::Value, interpolation: &str| json!({"kind": "result_ramp", "interpolation": interpolation, "stops": stops});
+        parse(ramp(&one, "discrete")).validate().unwrap();
+        parse(ramp(&two, "linear")).validate().unwrap();
+        assert!(refused(ramp(&one, "linear")).contains("2 paliers"));
+        refused(ramp(&json!([]), "discrete"));
+        refused(ramp(
+            &json!([{"value": 2, "color": "#000000"}, {"value": 1, "color": "#ffffff"}]),
+            "linear",
+        ));
+        refused(ramp(&json!([{"value": 1, "color": "rouge"}]), "discrete"));
+        let mut opaque = ramp(&two, "linear");
+        opaque["opacity"] = json!(2.0);
+        refused(opaque);
+        let many: Vec<serde_json::Value> = (0..=RESULT_RAMP_MAX)
+            .map(|v| json!({"value": v, "color": "#000000"}))
+            .collect();
+        refused(ramp(&json!(many), "discrete"));
+        // Une interpolation inconnue, ou un champ inconnu dans un palier, ne se lit pas.
+        assert!(serde_json::from_value::<StyleSpec>(ramp(&two, "spline")).is_err());
+        let extra = json!({"kind": "result_ramp", "interpolation": "linear",
+                           "stops": [{"value": 1, "color": "#000000", "size": 2}]});
+        assert!(serde_json::from_value::<StyleSpec>(extra).is_err());
+        assert_eq!(parse(ramp(&two, "linear")).target(), StyleTarget::Raster);
     }
 
     #[test]

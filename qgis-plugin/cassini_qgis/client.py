@@ -120,6 +120,9 @@ class _NoGestures:
     def ids(self):
         return []
 
+    def style_kinds(self):
+        return []
+
     def create(self, command_id):
         return None
 
@@ -161,6 +164,8 @@ class CoreClient:
             {
                 "protocol_version": PROTOCOL_VERSION,
                 "commands": self._gestures.ids(),
+                # Formes de style que l'extension sait appliquer (ajout compatible, 2026-11-09).
+                "style_kinds": self._gestures.style_kinds(),
                 "project": self._project,
             },
             "hello",

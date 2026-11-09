@@ -203,6 +203,8 @@ impl Command for RasterWeightedOverlay {
         .path_params(&["criteria.raster", "exclusions"])
         .output_params(&["out"])
         .output_ext(".tif")
+        // Style dicté après l'ouverture du raster (bogue du fond noir, 2026-11-09).
+        .result_style(crate::style::ResultStyle::WeightedOverlay)
         .example(serde_json::json!({"criteria": [
             {"raster": "mnt-colline-2154.tif", "weight": 2.0},
             {"raster": "mnt-colline-2154.tif", "weight": 1.0}

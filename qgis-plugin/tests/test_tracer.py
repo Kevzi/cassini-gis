@@ -123,6 +123,8 @@ class ClientTest(unittest.TestCase):
         self.assertEqual(hello["method"], "session.hello")
         self.assertEqual(hello["params"]["project"], "C:/a/p.qgz")
         self.assertEqual(hello["params"]["protocol_version"], 2)
+        # Sans geste, aucune forme de style annoncée : le noyau n'en dicte aucune.
+        self.assertEqual(hello["params"]["style_kinds"], [])
         catalogue = [{"id": "system.about", "available": True}]
         data = reply(1, {"protocol_version": 2, "core_version": "0.1.0",
                          "read_only": False, "commands": catalogue})
@@ -136,6 +138,16 @@ class ClientTest(unittest.TestCase):
             [(client.READY, {"core_version": "0.1.0", "protocol_version": 2,
                              "commands": catalogue, "history": [], "read_only": False})],
         )
+
+    def test_hello_announces_the_style_kinds_of_the_registry(self):
+        registry = gestures.GestureRegistry()
+        registry.register("layer.set_style", object)
+        registry.announce_style_kinds(["result_ramp", "hillshade"])
+        c = client.CoreClient(self.p, lambda k, v: None, registry)
+        c.start("cassini", "C:\\a\\p.qgz")
+        hello = self.sent()[0]
+        self.assertEqual(hello["params"]["commands"], ["layer.set_style"])
+        self.assertEqual(hello["params"]["style_kinds"], ["hillshade", "result_ramp"])
 
     def test_hello_history_reaches_ready_filtered(self):
         self.c.start("cassini", "/p.qgz")

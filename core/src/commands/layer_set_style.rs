@@ -1,7 +1,8 @@
 //! Commande `layer.set_style` : applique un `StyleSpec` à une couche du projet (changement de cap
 //! du 2026-11-08). Déclaration seule, entrée 11.20 : le geste vit dans l'extension (entrée 21).
 //!
-//! Elle est **dictée par le noyau**, après `map.topographic_style` ou `map.graduated_style`, jamais
+//! Elle est **dictée par le noyau**, après `map.topographic_style` ou `map.graduated_style`, ou
+//! après l'ouverture dictée d'un raster de résultat (2026-11-09), jamais
 //! offerte au modèle, au client MCP ni au formulaire, et refusée par `command.run`. Le style est
 //! celui de la couche dans le projet : le fichier de données n'est pas touché. Genre de sortie
 //! `none` (amendement d'AD-24) : son `layer_id` désigne une couche existante, pas une couche posée.
@@ -42,8 +43,8 @@ impl Delegated for LayerSetStyle {
     fn spec() -> CommandSpec {
         CommandSpec::new::<LayerSetStyleParams, LayerSetStyleOutput>(
             SET_STYLE,
-            "Applique une description de style à une couche du projet, sans toucher son fichier ; dictée par le noyau après une mise en forme.",
-            "Applies a style description to a project layer, without touching its file; dictated by the core after a styling command.",
+            "Applique une description de style à une couche du projet, sans toucher son fichier ; dictée par le noyau après une mise en forme, ou après l'ouverture dictée d'un raster de résultat.",
+            "Applies a style description to a project layer, without touching its file; dictated by the core after a styling command, or after the dictated opening of a result raster.",
         )
         .runs_in(RunsIn::Qgis)
         .cancellable(false)

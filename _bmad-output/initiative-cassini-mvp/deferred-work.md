@@ -905,3 +905,6 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `epic-refonte-du-panneau/story-guidage-a-vous-repere-d-avancement-et-reformuler-plan.md`
   summary: Le texte indicatif de la saisie grisée (« Validez ou refusez d'abord le plan ci-dessus. », « Patientez : une étape est en cours. ») est coupé sur sa deuxième ligne à 144 dpi : la hauteur de la saisie ne suit pas.
   evidence: Captures du 2026-11-08 à 144 dpi (`%TEMP%\capture-panneau\planche-12-2-relecture.png`), états plan proposé et exécution.
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-bug-fond-noir-des-rasters-de-resultat.md`
+  summary: sonder le style `result_ramp` sous QGIS 4.x (transparence, rampe, légende continue) et rendre exposition, coût et superposition dans QGIS.
+  evidence: la sonde du 2026-11-09 n'a tourné que sous QGIS 3.44 et seulement pour champ de vision, cumulé et pente ; les tests de l'extension passent par un faux moteur.

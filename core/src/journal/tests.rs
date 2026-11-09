@@ -3151,3 +3151,306 @@ fn an_undeclared_order_is_an_error_and_nothing_is_dictated() {
     drop(s);
     let _ = fs::remove_dir_all(dir);
 }
+
+// --- Style des rasters de résultat (bogue du fond noir, 2026-11-09). ---
+
+/// QGIS de test qui ouvre les rasters (ids `<prefix><n>`) et pose les styles (ou les refuse).
+struct ResultStyleQgis {
+    seen: std::rc::Rc<std::cell::RefCell<Vec<(String, Value)>>>,
+    prefix: &'static str,
+    refuse_style: bool,
+}
+
+impl ResultStyleQgis {
+    fn new(prefix: &'static str) -> Self {
+        ResultStyleQgis {
+            seen: Default::default(),
+            prefix,
+            refuse_style: false,
+        }
+    }
+}
+
+impl Executor for ResultStyleQgis {
+    fn execute(&self, id: &str, p: Value) -> Result<Value, RegistryError> {
+        self.seen.borrow_mut().push((id.to_string(), p.clone()));
+        match id {
+            "layer.open_raster" => {
+                let n = self.seen.borrow().len();
+                let stem = Path::new(p["path"].as_str().unwrap())
+                    .file_stem()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned();
+                Ok(json!({"layer_id": format!("{}{n}", self.prefix), "name": stem}))
+            }
+            "layer.set_style" if self.refuse_style => Err(RegistryError::Delegated {
+                code: "style.invalid".into(),
+                message: "Style refusé : forme inconnue « result_ramp ».".into(),
+            }),
+            "layer.set_style" => Ok(json!({"layer_id": p["layer_id"]})),
+            other => panic!("commande inattendue : {other}"),
+        }
+    }
+}
+
+/// L'ouverture des rasters et le geste de style, tels que l'extension les annonce.
+fn result_style_gestures() -> Vec<String> {
+    ["layer.open_raster", "layer.set_style"]
+        .map(String::from)
+        .to_vec()
+}
+
+/// Les formes de style que la nouvelle extension annonce, dont `result_ramp`.
+fn result_ramp_kind() -> Vec<String> {
+    vec!["hillshade".to_string(), "result_ramp".to_string()]
+}
+
+fn viewshed_params() -> Value {
+    json!({"dem": "colline.tif",
+        "observer": {"x": 652030, "y": 6850250, "epsg": 2154},
+        "radius": {"value": 200, "unit": "m"}})
+}
+
+fn with_hill(dir: &Path) {
+    fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/mnt-colline-2154.tif"),
+        dir.join("colline.tif"),
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_result_raster_is_opened_then_styled_on_the_opened_layer() {
+    let (dir, project, _) = temp_project();
+    with_dem(&dir);
+    with_hill(&dir);
+    let registry = Registry::standard();
+    let qgis = ResultStyleQgis::new("r");
+    let seen = qgis.seen.clone();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(qgis)
+        .with_raster_opening(true)
+        .with_gestures(result_style_gestures())
+        .with_style_kinds(result_ramp_kind());
+    let slope = s.call_in_plan("terrain.slope", slope_params(), 2).unwrap();
+    // Le résultat rendu reste celui de la pente.
+    assert!(slope.get("layer_id").is_none());
+    assert_eq!(slope["unit"], "degrees");
+    s.call_from("terrain.viewshed", viewshed_params(), Some("external"))
+        .unwrap();
+    let l = lines(&s);
+    let ids: Vec<&str> = l.iter().map(|l| l["id"].as_str().unwrap()).collect();
+    assert_eq!(
+        ids,
+        [
+            "terrain.slope",
+            "layer.open_raster",
+            "layer.set_style",
+            "terrain.viewshed",
+            "layer.open_raster",
+            "layer.set_style"
+        ]
+    );
+    // Le style vise la couche que l'ouverture vient de rendre, avec l'origine de l'étape.
+    for (open, style, origin, plan_step) in [
+        (1, 2, Value::Null, json!(2)),
+        (4, 5, json!("external"), Value::Null),
+    ] {
+        assert_eq!(l[style]["params"]["layer_id"], l[open]["layer_id"]);
+        assert!(l[style].get("layer_id").is_none(), "{}", l[style]);
+        for line in [&l[open], &l[style]] {
+            assert_eq!(line.get("origin").cloned().unwrap_or(Value::Null), origin);
+            assert_eq!(
+                line.get("plan_step").cloned().unwrap_or(Value::Null),
+                plan_step
+            );
+        }
+    }
+    let slope_style = &l[2]["params"]["style"];
+    assert_eq!(slope_style["kind"], "result_ramp");
+    // Un plan incliné : pente constante, une seule classe à sa valeur.
+    assert_eq!(slope_style["interpolation"], "discrete");
+    assert_eq!(slope_style["stops"][0]["value"], slope["min"]);
+    assert_eq!(slope_style["unit"], "°");
+    assert_eq!(slope_style["transparent"], json!([-9999.0]));
+    assert_eq!(
+        l[5]["params"]["style"],
+        json!({"kind": "result_ramp", "interpolation": "discrete",
+               "stops": [{"value": 1.0, "color": "#b2182b", "label": "Visible"}],
+               "transparent": [0.0, -9999.0], "opacity": 0.5})
+    );
+    // L'extension reçoit l'ordre de style tel qu'il est journalisé.
+    let seen = seen.borrow();
+    assert_eq!(seen.len(), 4);
+    assert_eq!(seen[1].0, "layer.set_style");
+    assert_eq!(seen[1].1, l[2]["params"]);
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_cumulative_viewshed_ramps_to_its_highest_count_and_a_hillshade_keeps_its_style() {
+    let (dir, project, _) = temp_project();
+    with_dem(&dir);
+    with_hill(&dir);
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(ResultStyleQgis::new("r"))
+        .with_raster_opening(true)
+        .with_gestures(result_style_gestures())
+        .with_style_kinds(result_ramp_kind());
+    let out = s
+        .call(
+            "terrain.viewshed_cumulative",
+            json!({"dem": "colline.tif",
+                "observers": [{"x": 652030, "y": 6850250, "epsg": 2154},
+                              {"x": 652130, "y": 6850250, "epsg": 2154}],
+                "radius": {"value": 200, "unit": "m"}}),
+        )
+        .unwrap();
+    let top = out["max_count"].as_f64().unwrap();
+    assert!(
+        top > 1.0,
+        "deux observateurs qui voient une même cellule : {out}"
+    );
+    s.call("terrain.hillshade", json!({"dem": "dem/plan.tif"}))
+        .unwrap();
+    let l = lines(&s);
+    let cumulative = &l[2]["params"]["style"];
+    assert_eq!(cumulative["interpolation"], "linear");
+    assert_eq!(cumulative["transparent"], json!([0.0, -9999.0]));
+    let stops = cumulative["stops"].as_array().unwrap();
+    assert_eq!(stops.first().unwrap()["value"], json!(1.0));
+    assert_eq!(stops.last().unwrap()["value"], json!(top));
+    assert_eq!(l[5]["id"], "layer.set_style");
+    assert_eq!(
+        l[5]["params"]["style"],
+        json!({"kind": "hillshade", "opacity": crate::style::table::HILLSHADE_OPACITY})
+    );
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_extension_without_the_style_gesture_or_the_result_ramp_kind_opens_the_raster_without_style() {
+    let (dir, project, _) = temp_project();
+    with_dem(&dir);
+    let registry = Registry::standard();
+    // Sans le geste `layer.set_style`, formes annoncées ou non ; puis avec le geste mais sans la
+    // forme `result_ramp` (extension plus ancienne que le changement du 2026-11-09).
+    let cases: [(Vec<String>, Vec<String>); 2] = [
+        (vec!["layer.open_raster".to_string()], result_ramp_kind()),
+        (result_style_gestures(), vec!["hillshade".to_string()]),
+    ];
+    for (gestures, kinds) in cases {
+        let qgis = ResultStyleQgis::new("r");
+        let seen = qgis.seen.clone();
+        let mut s = Session::open(&registry, &project)
+            .unwrap()
+            .with_qgis(qgis)
+            .with_raster_opening(true)
+            .with_gestures(gestures.clone())
+            .with_style_kinds(kinds);
+        let before = lines(&s).len();
+        s.call("terrain.slope", slope_params()).unwrap();
+        let ids: Vec<Value> = lines(&s)[before..]
+            .iter()
+            .map(|l| l["id"].clone())
+            .collect();
+        assert_eq!(
+            ids,
+            [json!("terrain.slope"), json!("layer.open_raster")],
+            "{gestures:?}"
+        );
+        let seen: Vec<String> = seen.borrow().iter().map(|(id, _)| id.clone()).collect();
+        assert_eq!(seen, ["layer.open_raster"], "{gestures:?}");
+        drop(s);
+    }
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_refused_result_style_is_the_error_of_the_call_journaled_at_its_step() {
+    let (dir, project, _) = temp_project();
+    with_dem(&dir);
+    let registry = Registry::standard();
+    let mut qgis = ResultStyleQgis::new("r");
+    qgis.refuse_style = true;
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(qgis)
+        .with_raster_opening(true)
+        .with_gestures(result_style_gestures())
+        .with_style_kinds(result_ramp_kind());
+    let err = s.call("terrain.slope", slope_params()).unwrap_err();
+    assert_eq!(err.code, "style.invalid");
+    let l = lines(&s);
+    assert_eq!(l.len(), 3);
+    assert!(l[0]["result"].is_object());
+    assert_eq!(l[1]["layer_id"], "r1");
+    assert_eq!(l[2]["id"], "layer.set_style");
+    assert_eq!(l[2]["error"], "style.invalid");
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_styled_result_raster_replays_identically_on_the_replayed_layer() {
+    let (dir, project, _) = temp_project();
+    with_dem(&dir);
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(ResultStyleQgis::new("r"))
+        .with_raster_opening(true)
+        .with_gestures(result_style_gestures())
+        .with_style_kinds(result_ramp_kind());
+    s.call("terrain.slope", slope_params()).unwrap();
+    let logged = lines(&s)[2]["params"]["style"].clone();
+    drop(s);
+    // Le rejeu pose le style journalisé sur la couche qu'il vient d'ouvrir, pas sur l'ancienne.
+    let qgis = ResultStyleQgis::new("neuf");
+    let seen = qgis.seen.clone();
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .with_gestures(result_style_gestures())
+        .with_style_kinds(result_ramp_kind())
+        .run(&Router::new(&registry).with_qgis(qgis), &mut HashSet::new())
+        .unwrap();
+    assert_eq!(
+        report,
+        ReplayReport {
+            steps: 3,
+            identical: true
+        }
+    );
+    let seen = seen.borrow();
+    let ids: Vec<&str> = seen.iter().map(|(id, _)| id.as_str()).collect();
+    assert_eq!(ids, ["layer.open_raster", "layer.set_style"]);
+    assert_eq!(seen[1].1, json!({"layer_id": "neuf1", "style": logged}));
+    drop(seen);
+    // Un exécutant de rejeu qui n'annonce pas le geste, ou pas la forme `result_ramp`, s'arrête
+    // à la ligne de style, sans la lui envoyer.
+    for (gestures, kinds) in [
+        (vec!["layer.open_raster".to_string()], result_ramp_kind()),
+        (result_style_gestures(), vec!["hillshade".to_string()]),
+    ] {
+        let qgis = ResultStyleQgis::new("x");
+        let seen = qgis.seen.clone();
+        let err = Replay::load(&registry, &project)
+            .unwrap()
+            .with_gestures(gestures)
+            .with_style_kinds(kinds)
+            .run(&Router::new(&registry).with_qgis(qgis), &mut HashSet::new())
+            .unwrap_err();
+        assert_eq!(
+            (err.code.as_str(), err.step),
+            ("style.unavailable", Some(3))
+        );
+        assert!(seen.borrow().iter().all(|(id, _)| id != "layer.set_style"));
+    }
+    let _ = fs::remove_dir_all(dir);
+}

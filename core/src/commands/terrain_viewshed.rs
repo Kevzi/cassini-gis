@@ -271,6 +271,8 @@ impl Command for TerrainViewshed {
         .path_params(&["dem"])
         .output_params(&["out"])
         .output_ext(".tif")
+        // Style dicté après l'ouverture du raster (bogue du fond noir, 2026-11-09).
+        .result_style(crate::style::ResultStyle::Viewshed)
         .example(serde_json::json!({
             "dem": "mnt-colline-2154.tif",
             "observer": {"x": 652030, "y": 6850250, "epsg": 2154},

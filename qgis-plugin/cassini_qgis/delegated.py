@@ -45,5 +45,8 @@ def build_registry(probe):
     registry.register("layout.export_pdf", layout_export.LayoutExportGesture)
     registry.register("data.transform_point", point_transform.PointTransformGesture)
     registry.register("layer.set_style", style_gestures.SetStyleGesture)
+    # Les formes de style que ce geste sait appliquer, dont `result_ramp` : sans cette annonce,
+    # le noyau ouvre ses rasters de résultat sans style (décision du 2026-11-09).
+    registry.announce_style_kinds(style_gestures.STYLE_KINDS)
     registry.register("layer.arrange", style_gestures.ArrangeGesture)
     return registry

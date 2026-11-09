@@ -29,6 +29,15 @@ Réponse d'une seconde session, quand le journal du projet est déjà tenu :
 {"jsonrpc":"2.0","id":1,"result":{"protocol_version":2,"core_version":"0.1.0","read_only":true,"message":"Le journal de ce projet est tenu par une autre session : cette session est en lecture seule, rien n'est exécuté ni écrit.","commands":[…]}}
 ```
 
+- `style_kinds` (facultatif, ajout compatible du 2026-11-09) : les formes de `StyleSpec` que le
+  geste `layer.set_style` de l'extension sait appliquer, par exemple
+  `["categories", "elevation_ramp", "graduated", "hillshade", "result_ramp", "single"]`. Le
+  noyau ne dicte le style d'un raster de résultat (après `layer.open_raster`) qu'à une extension
+  qui annonce `layer.set_style` et `result_ramp` ; une extension qui ne l'envoie pas (plus
+  ancienne) reçoit ses rasters ouverts sans style, sans erreur. Au rejeu, une ligne
+  `layer.set_style` de forme `result_ramp` s'arrête sur `style.unavailable` si la forme n'est
+  pas annoncée. Une valeur qui n'est pas une liste de textes est refusée (`-32602`). Le
+  protocole reste à la version 2.
 - `read_only` est toujours présent (ticket 5.32). Il vaut `true` quand le journal du projet
   est déjà tenu par une autre session (une seconde fenêtre QGIS sur le même projet). La
   réponse porte alors aussi `message`, le texte même de l'erreur `journal.read_only`.

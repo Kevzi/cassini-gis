@@ -166,6 +166,8 @@ impl Command for TerrainHillshade {
         .path_params(&["dem"])
         .output_params(&["out"])
         .output_ext(".tif")
+        // Style dicté après l'ouverture du raster (bogue du fond noir, 2026-11-09).
+        .result_style(crate::style::ResultStyle::Hillshade)
         .example(serde_json::json!({"dem": "mnt-colline-2154.tif"}))
         .example(serde_json::json!({
             "dem": "mnt-plan-incline-2154.tif",
