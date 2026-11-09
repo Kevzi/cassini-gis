@@ -5,7 +5,7 @@
 //!
 //! Les 25 phrases de l'épreuve (`sentences.json`) et l'inventaire de l'épreuve sont lus tels quels,
 //! jamais modifiés. Les plans attendus sont réécrits pour le registre réel, chaînes `step:k.champ`
-//! comprises. Là où le registre réel n'a pas la commande (retrait, reprojection, cadrage,
+//! comprises. Là où le registre réel n'a pas la commande (retrait, cadrage,
 //! statistiques sur un raster) ou ne sait pas porter une option demandée (papier A3, couches
 //! nommées du PDF), le refus est la réponse attendue. Depuis 5.41, le terrain a ses commandes
 //! (ticket 4.6) : S20 (champ de vision), S21 (ligne de vue) et S22 (pente) attendent un plan sur
@@ -18,6 +18,9 @@
 //! la phrase le donne, et le noyau ajoute la conversion avant de montrer le plan (11.22,
 //! décision 3 du changement de cap du 2026-11-08) ; l'essai applique la même complétion
 //! (`common::completed`). Un plan qui compose déjà la conversion n'en reçoit pas une seconde.
+//! S05 « Mets les bâtiments en Lambert-93 », refus tant que le registre ne reprojetait pas une
+//! couche, attend depuis le second essai de 11.23 `data.reproject` des bâtiments (en 4326 dans
+//! l'inventaire de l'épreuve) vers 2154 (commande de 10.7).
 //! Un refus est un échec.
 //! `tests/epreuve-modele-local/` reste gelé : son `sentences.json` et son banc Python (étape 2)
 //! gardent S25 en refus ; seul cet essai porte l'attendu du registre réel.
@@ -76,6 +79,10 @@ fn expected(id: &str) -> Want {
         "S01" => json!([{"command": "layer.add", "params": {"path": "donnees/ecoles.geojson"}}]),
         "S02" => json!([{"command": "layer.describe", "params": {"layer_id": GARES}}]),
         "S03" => json!([{"command": "project.inventory", "params": {}}]),
+        // Les bâtiments sont en 4326 dans l'inventaire de l'épreuve : depuis 10.7, le registre
+        // reprojette une couche (second essai de 11.23).
+        "S05" => json!([{"command": "data.reproject",
+            "params": {"layer_id": BATIMENTS, "target_epsg": 2154}}]),
         "S06" => json!([select(PARCELLES, "section", "eq", "AB")]),
         "S07" => json!([buffer(GARES, 300, "m")]),
         "S08" => json!([{"command": "analysis.buffer", "params": {
@@ -124,7 +131,7 @@ fn expected(id: &str) -> Want {
                 "observer_height": {"value": 10, "unit": "m"},
                 "radius": {"value": 1, "unit": "km"}}}
         ]),
-        // S04 S05 S09 S10 S15 S18 S23 S24 : refus.
+        // S04 S09 S10 S15 S18 S23 S24 : refus.
         _ => return Want::Refusal,
     };
     Want::Plan(plan)

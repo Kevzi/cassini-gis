@@ -1821,6 +1821,22 @@ impl Builder {
         }
     }
 
+    /// Ajoute une couche vecteur de distraction en degrés (EPSG:4326), qu'aucun plan ne cite
+    /// (second essai de 11.23) : une analyse en mètres sur une autre couche, déjà en mètres, ne
+    /// reprojette rien. Rend faux si aucun thème vecteur n'est libre.
+    pub fn distract_in_degrees(&mut self, rng: &mut Rng) -> bool {
+        let before = self.layers.len();
+        self.distract(rng, 1, |t| t.geom != Geom::Raster);
+        match self.layers.get_mut(before) {
+            Some(layer) => {
+                layer.epsg = 4326;
+                self.keep_epsg = true;
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Termine l'inventaire : distractions par défaut, ordre mélangé. Les fichiers non ouverts
     /// sont ceux que la famille a posés (`add_file`), plus le MNT non ouvert qu'`add_dem` pose
     /// parfois : dans QGIS, l'extension ne parcourt pas le disque et `unloaded_files` est vide,

@@ -127,9 +127,10 @@ pub static FAMILIES: &[Family] = &[
     },
     // Le carroyage UTM au fuseau du projet (`project.utm_epsg`, 2026-11-08), appris en 11.23 :
     // sa propre famille, `export_pdf_format` n'en donnant qu'une poignée au jeu par défaut.
+    // Second essai de 11.23 (constat F03) : poids 3 → 4, et deux questions pour trois recopies.
     Family {
         name: "carroyage_utm_projet",
-        weight: 3,
+        weight: 4,
         make: carroyage_utm_projet,
     },
     Family {
@@ -241,6 +242,13 @@ pub static FAMILIES: &[Family] = &[
         name: "reprojection_avant_analyse",
         weight: 4,
         make: reprojection_avant_analyse,
+    },
+    // Second essai de 11.23 (constat S07) : la même analyse sur une couche déjà en mètres,
+    // à côté d'une couche en degrés, ne reprojette rien.
+    Family {
+        name: "analyse_couche_metrique",
+        weight: 4,
+        make: analyse_couche_metrique,
     },
     Family {
         name: "distance_azimut",
@@ -1966,7 +1974,7 @@ fn page_words(rng: &mut Rng, size: Option<&str>, portrait: Option<bool>) -> Stri
 }
 
 /// Question quand le carroyage demandé ne nomme pas son système.
-const GRID_SYSTEM_QUESTION: &str = "Dans quel système veux-tu le carroyage : Lambert-93, UTM avec sa zone (30N, 31N ou 32N), ou un graticule en degrés ou en grades ?";
+pub(crate) const GRID_SYSTEM_QUESTION: &str = "Dans quel système veux-tu le carroyage : Lambert-93, UTM avec sa zone (30N, 31N ou 32N), ou un graticule en degrés ou en grades ?";
 
 /// Export PDF au format, à l'orientation et/ou avec le carroyage écrits dans la demande
 /// (11.12, lot 3) : la carte seule, ou au bout d'une recherche une fois sur trois. Un
@@ -2092,7 +2100,8 @@ const UTM_GRID_STEPS: [(u64, &str); 6] = [
 /// `plan-fuseau-utm-depuis-l-emprise.md`, appris en 11.23) : sa propre famille, parce qu'au jeu
 /// par défaut `export_pdf_format` n'en donnait qu'une poignée.
 /// - « carroyage UTM » sans fuseau, l'inventaire le porte : `grid` sur `utm_epsg`, recopié ;
-/// - le même sans `utm_epsg` : la question du système ;
+/// - le même sans `utm_epsg` : la question du système, jamais un fuseau deviné (deux questions
+///   pour trois recopies depuis le second essai de 11.23) ;
 /// - un fuseau écrit l'emporte, même quand l'inventaire en porte un autre, dans les deux sens
 ///   (« UTM 31N » avec `utm_epsg = 32632`, « UTM 32N » avec 32631) ;
 /// - aucun système (« quadrillage tous les 500 m ») : la question, jamais un refus (constat F03
@@ -2107,10 +2116,12 @@ fn carroyage_utm_projet(rng: &mut Rng) -> Option<Example> {
     let iv = distance_step_text(rng, value, unit);
     let interval = json!({"value": value, "unit": unit});
     let (gw, grid) = match roll {
-        // « UTM » sans fuseau : celui de l'inventaire, recopié (quatre fois sur huit), ou la
-        // question quand il manque (une fois sur huit).
+        // « UTM » sans fuseau : celui de l'inventaire, recopié (trois fois sur huit), ou la
+        // question quand il manque (deux fois sur huit). Au premier essai de 11.23 (quatre
+        // recopies pour une question), le modèle inventait un fuseau absent de l'inventaire
+        // (constat F03) : les questions font désormais plus de la moitié des recopies.
         0..=4 => {
-            let present = roll < 4;
+            let present = roll < 3;
             let code = b.project_utm(rng, present);
             let (gw, interval) = match rng.below(6) {
                 0 => (format!(" avec un carroyage UTM tous les {iv}"), interval),
@@ -2284,13 +2295,23 @@ fn style_topographique(rng: &mut Rng) -> Option<Example> {
     Some(example("style_topographique", b, rng, request, expected))
 }
 
-/// Méthode des seuils écrite : forme écrite et valeur du registre.
+/// Méthode des seuils écrite : forme écrite et valeur du registre. Depuis le second essai de
+/// 11.23 (constat ST08 : « à intervalles égaux » perdu), plus de tournures, aussi entre
+/// virgules, et une méthode écrite une fois sur deux.
 const GRADUATED_METHODS: &[(&str, &str)] = &[
     (" en quantiles", "quantile"),
     (" par quantiles", "quantile"),
+    (", par quantiles", "quantile"),
+    (" avec des classes de même effectif", "quantile"),
     (" en intervalles égaux", "equal_interval"),
     (" à intervalles égaux", "equal_interval"),
+    (", à intervalles égaux", "equal_interval"),
+    (" par intervalles égaux", "equal_interval"),
+    (" avec des classes d'égale amplitude", "equal_interval"),
     (" par seuils naturels", "jenks"),
+    (", par seuils naturels", "jenks"),
+    (" selon les seuils naturels", "jenks"),
+    (" par ruptures naturelles", "jenks"),
     (" par la méthode de Jenks", "jenks"),
 ];
 
@@ -2338,7 +2359,7 @@ fn style_degrade(rng: &mut Rng) -> Option<Example> {
     if !missing {
         let field = layer.field(def.role)?;
         params["field"] = json!(field.name);
-        if rng.chance(1, 3) {
+        if rng.chance(1, 2) {
             let (w, m) = *rng.pick(GRADUATED_METHODS);
             body.push_str(w);
             params["method"] = json!(m);
@@ -3495,6 +3516,29 @@ fn eye_clause(rng: &mut Rng) -> (Value, String) {
     (h, text)
 }
 
+/// Une même hauteur pour l'observateur et la cible d'une ligne de vue (« , 2 m de hauteur de
+/// chaque côté ») : `observer_height` et `target_height` (second essai de 11.23).
+fn both_heights_clause(rng: &mut Rng) -> (Value, String) {
+    let (h, n) = height(rng, BOTH_HEIGHTS);
+    let text = match rng.below(6) {
+        0 => format!(", {n} m de hauteur de chaque côté"),
+        1 => format!(", à {n} m de hauteur des deux côtés"),
+        2 => format!(", observateur et cible à {n} m du sol"),
+        3 => format!(", {n} m de haut aux deux extrémités"),
+        4 => format!(", hauteur de {n} m pour les deux points"),
+        _ => format!(" avec {n} m de hauteur de part et d'autre"),
+    };
+    (h, text)
+}
+
+const BOTH_HEIGHTS: &[(f64, &str)] = &[
+    (1.6, "1,6"),
+    (1.8, "1,8"),
+    (2.0, "2"),
+    (5.0, "5"),
+    (10.0, "10"),
+];
+
 /// La hauteur de la cible, écrite (« , cible à 10 m du sol »).
 fn target_clause(rng: &mut Rng, plural: bool) -> (Value, String) {
     let (h, n) = height(rng, TARGET_HEIGHTS);
@@ -3603,15 +3647,24 @@ fn ligne_de_vue(rng: &mut Rng) -> Option<Example> {
     };
     let mut body = body;
     let mut params = json!({"dem": dem.source, "observer": a.point, "target": c.point});
-    if rng.chance(1, 2) {
-        let (h, text) = eye_clause(rng);
+    if rng.chance(1, 4) {
+        // Une hauteur pour les deux bouts (second essai de 11.23, constat S21 : « 2 m de
+        // hauteur de chaque côté » perdait la hauteur de la cible).
+        let (h, text) = both_heights_clause(rng);
         body.push_str(&text);
-        params["observer_height"] = h;
-    }
-    if rng.chance(1, 3) {
-        let (h, text) = target_clause(rng, false);
-        body.push_str(&text);
+        params["observer_height"] = h.clone();
         params["target_height"] = h;
+    } else {
+        if rng.chance(1, 2) {
+            let (h, text) = eye_clause(rng);
+            body.push_str(&text);
+            params["observer_height"] = h;
+        }
+        if rng.chance(1, 3) {
+            let (h, text) = target_clause(rng, false);
+            body.push_str(&text);
+            params["target_height"] = h;
+        }
     }
     if rng.chance(1, 4) {
         body.push_str(&format!(
@@ -5136,7 +5189,7 @@ fn reproject_call(id: &str, target: u32) -> Value {
 }
 
 /// Système d'arrivée d'une reprojection de couche et ses formes écrites.
-const LAYER_TARGETS: &[(u32, &[&str])] = &[
+pub(crate) const LAYER_TARGETS: &[(u32, &[&str])] = &[
     (
         2154,
         &[
@@ -5248,7 +5301,56 @@ fn reprojection_avant_analyse(rng: &mut Rng) -> Option<Example> {
         15 | 16 => (32631, 32631),
         _ => (4326, 2154),
     };
-    let (mut b, body, q, mut steps) = if rng.chance(1, 2) {
+    let (mut b, body, q, mut steps) = metric_analysis(rng, others)?;
+    // L'analyse en mètres porte sur la couche de la première étape : c'est elle qui est en
+    // degrés, et elle seule est reprojetée.
+    let degrees = steps[0]["params"]["layer_id"].as_str()?.to_string();
+    b.set_epsg(&degrees, 4326);
+    for s in &mut steps {
+        shift_steps(s, 1);
+    }
+    steps[0]["params"]["layer_id"] = json!(step(1));
+    let mut plan = vec![reproject_call(&degrees, target)];
+    plan.extend(steps);
+    let request = finish(rng, &body, q, true);
+    Some(example(
+        "reprojection_avant_analyse",
+        b,
+        rng,
+        request,
+        calls(plan),
+    ))
+}
+
+/// Le contraire de `reprojection_avant_analyse` (second essai de 11.23, constat S07) : la même
+/// analyse en mètres, sur une couche déjà dans un système en mètres (Lambert-93, UTM 31N ou
+/// 32N), dans un inventaire qui porte aussi une couche en degrés qu'aucun plan ne cite. Le plan
+/// est l'analyse seule : une couche en mètres n'est jamais reprojetée, quelle que soit la
+/// présence d'autres couches en degrés.
+fn analyse_couche_metrique(rng: &mut Rng) -> Option<Example> {
+    let others = match rng.below(20) {
+        0..=13 => 2154,
+        14..=16 => 32632,
+        _ => 32631,
+    };
+    let (mut b, body, q, steps) = metric_analysis(rng, others)?;
+    if !b.distract_in_degrees(rng) {
+        return None;
+    }
+    let request = finish(rng, &body, q, true);
+    Some(example(
+        "analyse_couche_metrique",
+        b,
+        rng,
+        request,
+        calls(steps),
+    ))
+}
+
+/// Une analyse en mètres (tampon, ou recherche à distance) sur des couches vecteur toutes dans
+/// le système `others` : l'inventaire, la phrase, sa forme interrogative et les étapes.
+fn metric_analysis(rng: &mut Rng, others: u32) -> Option<(Builder, String, bool, Vec<Value>)> {
+    Some(if rng.chance(1, 2) {
         let mut b = Builder::new();
         b.vector_system(others);
         let t = pick_theme(rng, &b, vector)?;
@@ -5270,25 +5372,7 @@ fn reprojection_avant_analyse(rng: &mut Rng) -> Option<Example> {
         d.b.vector_system(others);
         let (head, q) = open_find(rng, d.noun, &d.np, true);
         (d.b, head, q, d.calls)
-    };
-    // L'analyse en mètres porte sur la couche de la première étape : c'est elle qui est en
-    // degrés, et elle seule est reprojetée.
-    let degrees = steps[0]["params"]["layer_id"].as_str()?.to_string();
-    b.set_epsg(&degrees, 4326);
-    for s in &mut steps {
-        shift_steps(s, 1);
-    }
-    steps[0]["params"]["layer_id"] = json!(step(1));
-    let mut plan = vec![reproject_call(&degrees, target)];
-    plan.extend(steps);
-    let request = finish(rng, &body, q, true);
-    Some(example(
-        "reprojection_avant_analyse",
-        b,
-        rng,
-        request,
-        calls(plan),
-    ))
+    })
 }
 
 /// « Quelle distance sépare le point … du point … », « distance et azimut entre les points …
@@ -7324,6 +7408,46 @@ mod tests {
     }
 
     #[test]
+    fn a_metric_analysis_on_a_layer_already_in_metres_reprojects_nothing() {
+        // Second essai de 11.23 (constat S07) : la couche analysée est en mètres, une autre
+        // couche de l'inventaire est en degrés ; le plan n'a aucun `data.reproject`.
+        let (mut buffers, mut searches, mut utm) = (0, 0, 0);
+        for e in valid(analyse_couche_metrique, 400) {
+            let calls = e.expected["calls"].as_array().unwrap();
+            assert!(
+                calls.iter().all(|c| c["command"] != "data.reproject"),
+                "{}",
+                e.request
+            );
+            let first = calls[0]["params"]["layer_id"].as_str().unwrap();
+            let epsg = layer_of(&e, first)["epsg"].as_u64();
+            // L'`epsg` de la couche analysée reste à l'inventaire, dans un système en mètres.
+            assert!(
+                matches!(epsg, Some(2154 | 32631 | 32632)),
+                "{epsg:?} : {}",
+                e.request
+            );
+            if epsg != Some(2154) {
+                utm += 1;
+            }
+            let degrees = e.inventory["layers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|l| l["epsg"] == 4326)
+                .count();
+            assert_eq!(degrees, 1, "{}", e.request);
+            match calls[0]["command"].as_str().unwrap() {
+                "analysis.buffer" if calls.len() == 1 => buffers += 1,
+                _ => searches += 1,
+            }
+            let r = e.request.to_lowercase();
+            assert!(!r.contains("reproj") && !r.contains("epsg"), "{r}");
+        }
+        assert!(buffers > 0 && searches > 0 && utm > 0);
+    }
+
+    #[test]
     fn step_references_are_shifted_by_the_inserted_reprojection() {
         let mut plan = json!([{"params": {"layer_id": "step:1.layer_id", "dem": "step:12",
             "list": ["step:2.point", "stepper", "x"]}}]);
@@ -7781,9 +7905,33 @@ mod tests {
             ],
         );
         points_in_the_dem_system(&examples, &["observer", "target"]);
-        written_only(&examples, "observer_height", EYE_MARKERS);
-        written_only(&examples, "target_height", &["cible"]);
+        let eye: Vec<&str> = EYE_MARKERS.iter().chain(BOTH_MARKERS).copied().collect();
+        let target: Vec<&str> = ["cible"].iter().chain(BOTH_MARKERS).copied().collect();
+        written_only(&examples, "observer_height", &eye);
+        written_only(&examples, "target_height", &target);
+        // Une hauteur écrite pour les deux bouts (constat S21) : la même des deux côtés.
+        let both: Vec<&Example> = examples
+            .iter()
+            .filter(|e| BOTH_MARKERS.iter().any(|m| e.request.contains(m)))
+            .collect();
+        assert!(both.len() > 20, "{}", both.len());
+        for e in &both {
+            let p = params0(e);
+            assert_eq!(p["observer_height"], p["target_height"], "{}", e.request);
+        }
+        assert!(both
+            .iter()
+            .any(|e| e.request.contains("de hauteur de chaque côté")));
     }
+
+    /// Les tournures d'une même hauteur pour l'observateur et la cible.
+    const BOTH_MARKERS: &[&str] = &[
+        "chaque côté",
+        "deux côtés",
+        "deux extrémités",
+        "pour les deux points",
+        "de part et d'autre",
+    ];
 
     #[test]
     fn a_viewshed_takes_the_written_point_and_only_the_written_radius() {
@@ -8571,6 +8719,20 @@ mod tests {
         }
         assert!(planned > 0 && asked > 0);
         assert_eq!(seen.len(), 3, "{seen:?}");
+        // Chaque tournure de méthode donne sa `method` (constat ST08 : « à intervalles égaux »
+        // perdu au premier essai de 11.23), et chacune est tirée.
+        let examples = valid(style_degrade, 1500);
+        for (w, m) in GRADUATED_METHODS {
+            let words = w.trim_start_matches(',').trim();
+            let with: Vec<&Example> = examples
+                .iter()
+                .filter(|e| e.request.contains(words))
+                .collect();
+            assert!(!with.is_empty(), "tournure jamais tirée : {words}");
+            for e in with {
+                assert_eq!(params0(e)["method"], *m, "{}", e.request);
+            }
+        }
         // Chaque plan passe le validateur du registre (dégradé et méthode nommés).
         let registry = cassini_core::registry::Registry::standard();
         let mut rng = Rng::new(5);
