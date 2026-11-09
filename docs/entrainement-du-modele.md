@@ -114,7 +114,7 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `conversion_coordonnees` | « donne la référence MGRS du point 48,8566 N, 2,3522 E (WGS84) », « convertis 31U DQ 52000 12000 en latitude et longitude » → `coord.convert` entre WGS84, UTM et MGRS, une ou deux formes demandées ; `mgrs_precision` (« à 3 chiffres ») et `utm_zone` (« dans le fuseau 32 ») seulement s'ils sont écrits ; un point en Lambert-93 vers l'UTM ou le MGRS → `data.transform_point` vers 4326, puis `coord.convert` sur `step:1.point` (11.12) ; depuis 11.23, un point UTM vers le fuseau voisin (« … (UTM 31N) en UTM dans le fuseau 32 ») → `coord.convert` vers `utm`, `utm_zone` écrit (report de 11.16) |
 | `reprojection_point` | « reprojette le point … (Lambert-93) en WGS84 », « donne les coordonnées du point … (UTM 31N) en Lambert-93 », « … en Web Mercator (EPSG:3857) » → une étape `data.transform_point`, le système d'arrivée écrit (11.12) |
 | `reprojection_couche` | « reprojette la couche « Gares » en Lambert-93 », « convertis les écoles en WGS84 », « passe la couche des parcelles en UTM 32N » → une étape `data.reproject`, le système d'arrivée écrit ; la couche est tirée dans un autre système que la cible. Remplace le refus « aucune commande ne reprojette une couche » (10.7) |
-| `reprojection_avant_analyse` | tampon ou recherche à distance (« les écoles à moins de 500 m des gares ») sur une couche en degrés (`epsg: 4326` dans l'inventaire), sans que la demande parle de reprojection → `data.reproject` de cette couche, puis l'analyse sur `step:1.layer_id` (les étapes suivantes décalées d'un rang) ; cible : le système des autres couches vecteur en mètres de l'inventaire (Lambert-93, UTM 31N ou 32N), EPSG:2154 quand toutes sont en degrés ; l'`epsg` des couches n'est jamais effacé de ces inventaires (10.7) |
+| `reprojection_avant_analyse` | tampon ou recherche à distance (« les écoles à moins de 500 m des gares ») sur une couche en degrés (`epsg: 4326` dans l'inventaire), sans que la demande parle de reprojection → `data.reproject` de cette couche, puis l'analyse sur `step:1.layer_id` (les étapes suivantes décalées d'un rang) ; cible : le système des autres couches vecteur en mètres de l'inventaire (Lambert-93, UTM 31N ou 32N), le système du projet, en mètres, quand toutes sont en degrés (depuis le ré-entraînement après 11.23 ; 2154 avant) ; l'`epsg` des couches n'est jamais effacé de ces inventaires (10.7) ; depuis après 11.23, une seconde couche en degrés non citée, une source `.csv` et des inventaires longs (recette d'Annecy) |
 | `analyse_couche_metrique` | la même analyse (tampon ou recherche à distance) sur une couche déjà en mètres (Lambert-93, UTM 31N ou 32N), dans un inventaire qui porte aussi une couche vecteur en degrés qu'aucun plan ne cite → l'analyse seule, jamais un `data.reproject` (second essai de 11.23, constat S07) |
 | `conversion_format` | « exporte les gares en shapefile », « convertis la couche « Écoles » en GeoPackage », « enregistre les parcelles au format GeoJSON » → une étape `data.convert`, `format` tel qu'écrit (`gpkg` : « GeoPackage », « gpkg » ; `shp` : « shapefile », « shp » ; `geojson` : « GeoJSON »), jamais un système de coordonnées dans la demande ; `out` n'est jamais écrit (le noyau le fournit). Remplace le refus « aucune commande n'exporte une couche vers un fichier » ; un tableur (Excel, CSV) reste un refus (10.9) |
 | `distance_azimut` | « quelle distance sépare le point … du point … », « distance et azimut entre les points … et … (UTM 31N) » → `geo.distance_azimuth` ; `unit` seulement si elle est écrite (`gon` : « en grades », `deg` : « en degrés ») ; deux points en Lambert-93 → deux `data.transform_point` vers 4326, puis le calcul sur `step:1.point` et `step:2.point` ; système écrit à chaque point ou une fois pour les deux (11.12) |
@@ -427,6 +427,54 @@ le générateur, puis un second et dernier entraînement (règle de 11.16), mêm
 
 `training/tests/recouvrement.rs` reste vert sans changer la graine ; `redemande` garde son poids
 (379 redemandes sur 8 000).
+
+### Ré-entraînement après 11.23 : reprojection avant analyse, conversion, refus manqués
+
+Le modèle `ajuste-11-23c` rate encore des demandes réelles : à la recette QGIS du 2026-11-09 sur
+Annecy (projet en 2154, huit couches en 2154, parcelles en GeoJSON et gares en CSV en 4326), une
+zone tampon autour des gares part sans `data.reproject` ; il ne connaît pas `data.convert` ; aux
+essais GPU, il manque des refus, perd un dégradé nommé, écrit mal une zone UTM d'arrivée, pose une
+question sur une zone du PLU dite en mots, et saute ou ajoute une étape dans les plans à deux
+sélections. Chaque correction est une famille ou un poids, jamais une phrase ; mêmes base,
+méthode, `DEFAULT_COUNT` et `DEFAULT_SEED`.
+
+- **Inventaires** (`inventories.rs`). Une couche ponctuelle a une source `.csv` une fois sur huit,
+  en degrés comme en mètres (`extension`) ; `Builder::as_csv`, `Builder::long_inventory`
+  (couches de distraction de plus, inventaires d'une dizaine de couches) et
+  `Builder::project_system` (projet en mètres dont toutes les couches sont en degrés : aucun
+  projet réel n'est en 4326) ; la couche en degrés de `distract_in_degrees` vient d'un CSV une
+  fois sur trois si elle est ponctuelle.
+- **`reprojection_avant_analyse`** (poids 4 → 6, au-dessus d'`analyse_couche_metrique`) : une
+  seconde couche en degrés, non citée et jamais reprojetée, deux fois sur trois ; la couche
+  analysée en `.csv` une fois sur deux (si ponctuelle) ; un inventaire long une fois sur deux. Le
+  cas « toutes les couches en 4326 » pose le projet en 2154, 31N ou 32N et vise ce système (avant :
+  projet rendu en 4326, cible 2154). `analyse_couche_metrique` reçoit aussi le CSV et les
+  inventaires longs, pour que ni l'un ni l'autre ne commande à eux seuls une reprojection.
+- **`conversion_format`** : poids 4 → 5.
+- **`refus`** (poids 7 → 8, 17 branches) : vue 3D de la carte, d'une couche ou d'une partie d'une
+  couche (deux branches) ; tableur d'un sous-ensemble filtré, avec un but ou un destinataire
+  (« pour l'envoyer à la DDT ») → `NO_SPREADSHEET` ; modification d'attributs et suppression
+  d'entités en plusieurs tournures.
+- **`refus_hors_registre`** (poids 7 → 9) : le PDF qui choisit ses couches passe d'un sur douze à
+  un sur six, avec parfois un titre ; la statistique d'altitude par zone d'un sur quatre à un sur
+  trois.
+- **`style_degrade`** : le dégradé nommé accompagne la méthode une fois sur deux (une sur trois
+  sans elle), six tournures de dégradé de plus, et les précisions (méthode, classes, dégradé) se
+  disent dans tous les ordres.
+- **`conversion_coordonnees`** : le point UTM vers le fuseau voisin une fois sur deux (une sur
+  quatre avant), le fuseau écrit « dans le fuseau 32 », « dans la zone 32 », « en UTM zone 32 »,
+  « vers l'UTM 32N » → `to: ["utm"]`, `utm_zone`.
+- **Zones du PLU en mots** (`area`, `zone_category`) : une fois sur trois, la zone du PLU se dit par
+  sa catégorie, « en zone agricole » → `typezone` `eq` `A`, « urbaine » → `eq` `U`, « naturelle »
+  → `begins_with` `N` (`N`, `Nh`), « à urbaniser » → `begins_with` `AU` (`AUc`, `AUs`).
+- **Deux sélections** (`draft_multi`) : les plans « zone puis référence filtrée » et « cible
+  filtrée, zone et distance » sont tirés deux fois plus souvent.
+- **Recouvrement.** La tête « Exporte la carte » suivie d'un format et d'une orientation rendait
+  F01 d'`epic11_reel` : elle devient « Exporte-moi la carte » ; la graine ne change pas.
+
+Au jeu par défaut (graine 1, 8 000) : 182 `reprojection_avant_analyse`, 132
+`analyse_couche_metrique`, 113 `conversion_format`, 234 `refus`, 255 `refus_hors_registre`, 401
+redemandes (5,0 %), aucun exemple écarté.
 
 ### Les inventaires de QGIS (5.15)
 
