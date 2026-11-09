@@ -89,7 +89,11 @@ Recette manuelle du panneau [9.4] (dans QGIS, avec un noyau installé) :
 5. Sans noyau installé : le bandeau propose « Choisir le noyau ».
 6. Ouvrez le même projet dans une seconde fenêtre QGIS. La réponse de
    `session.hello` dit que la session est en lecture seule (`read_only`). Le
-   panneau de la seconde fenêtre affiche le message du noyau et ne se dit pas prêt.
+   noyau de la seconde fenêtre reste lancé ; son panneau affiche le bandeau « Ce
+   projet est ouvert dans une autre fenêtre QGIS. Ici, vous pouvez seulement
+   rejouer. », grise saisie, Envoyer, Lancer, modèle et IA externe avec leur
+   raison, et ne laisse que « Rejouer le journal » (AD-11). Fermez la première
+   fenêtre, puis « Relancer » dans le bandeau : la session reprend l'écriture.
 
 Recette manuelle de `layer.add` [9.5] (dans QGIS, avec un noyau qui annonce la
 commande) :

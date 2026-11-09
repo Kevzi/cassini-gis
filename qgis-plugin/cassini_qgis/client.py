@@ -1,9 +1,12 @@
 """Client du canal local : JSON-RPC 2.0, un objet JSON par ligne.
 
 Le client ne contient aucune logique métier. Il lance le noyau (processus
-enfant), envoie `session.hello` et rend sa réponse (versions et catalogue, ou
-refus si la session est en lecture seule) par un rappel, sans lancer aucune
-commande journalisée ; il sert ensuite d'exécutant au noyau : il traite
+enfant), envoie `session.hello` et rend sa réponse (versions, catalogue, et si la
+session est en lecture seule) par un rappel, sans lancer aucune commande
+journalisée. Une session en lecture seule reste ouverte (AD-11) : le client y
+refuse `command.run`, `plan.*`, `agent.models` et `session.external`, et n'envoie
+de travail que `journal.replay` (les ordres du rejeu restent servis). Il sert
+ensuite d'exécutant au noyau : il traite
 `order.execute` en lançant le geste enregistré et relaie `request.cancel`.
 Il porte aussi les plans de l'agent (`plan.propose`, `plan.execute`,
 `plan.reject`, notification `plan.step`) sans jamais les composer ni les
@@ -25,7 +28,8 @@ import json
 PROTOCOL_VERSION = 2
 
 # Événements rendus au rappel `on_event(kind, payload)`.
-READY = "ready"  # payload : {"core_version", "protocol_version", "commands", "history"}
+# payload : {"core_version", "protocol_version", "commands", "history", "read_only"}
+READY = "ready"
 FAILED = "failed"  # payload : message à afficher tel quel
 DIED = "died"  # payload : message
 ORDER_STARTED = "order_started"  # payload : id de la commande
@@ -131,6 +135,7 @@ class CoreClient:
         self._current = None  # ordre en cours : {"id", "command", "gesture"}
         self._catalogue = []  # entrées reçues à session.hello
         self._ready = False
+        self._read_only = False  # session en lecture seule : seul le rejeu part (AD-11)
         self._run = None  # command.run en vol : {"id", "command"}
         self._replay = None  # journal.replay en vol : id de la requête
         # plan.* en vol : {"id", "kind"} (propose, execute, reject) ; pour execute, aussi
@@ -192,6 +197,10 @@ class CoreClient:
         """Catalogue reçu à `session.hello` (liste d'entrées telles que le noyau les décrit)."""
         return list(self._catalogue)
 
+    def read_only(self):
+        """La session est-elle en lecture seule (journal tenu par une autre session) ?"""
+        return self._read_only
+
     def run_busy(self):
         return self._run is not None
 
@@ -201,7 +210,7 @@ class CoreClient:
         La réponse arrive par le signal de lecture, sous forme d'un événement
         RUN_DONE, RUN_CANCELLED ou RUN_FAILED. Rend False si rien n'est parti.
         """
-        if not self._can_send():
+        if not self._can_write():
             return False
         ident = self._request(
             "command.run", {"command": command, "params": params or {}}, "run"
@@ -219,7 +228,8 @@ class CoreClient:
         Le noyau conduit tout : il réexécute les étapes et envoie ses ordres à
         l'extension, qui les exécute comme d'habitude (AD-11). Le rejeu n'est pas
         annulable. Le verdict arrive par REPLAY_DONE ou REPLAY_FAILED. Rend False
-        si rien n'est parti (noyau pas prêt, commande ou rejeu déjà en vol).
+        si rien n'est parti (noyau pas prêt, commande ou rejeu déjà en vol). Seule
+        requête servie en session en lecture seule : le rejeu n'écrit pas au journal.
         """
         if not self._can_send():
             return False
@@ -237,6 +247,10 @@ class CoreClient:
             and not self._closing
         )
 
+    def _can_write(self):
+        """Une requête autre que le rejeu : jamais en session en lecture seule (AD-11)."""
+        return self._can_send() and not self._read_only
+
     def plan_busy(self):
         return self._plan is not None
 
@@ -249,7 +263,7 @@ class CoreClient:
         La liste arrive par MODELS, l'échec par MODELS_FAILED. Rend False si rien
         n'est parti (noyau pas prêt, ou une autre requête en vol).
         """
-        if not self._can_send():
+        if not self._can_write():
             return False
         self._models = self._request("agent.models", {}, "models")
         return True
@@ -262,7 +276,7 @@ class CoreClient:
         PLAN_QUESTION ou PLAN_FAILED. La composition n'est pas annulable. Rend False
         si rien n'est parti.
         """
-        if not self._can_send() or not isinstance(request, str):
+        if not self._can_write() or not isinstance(request, str):
             return False
         params = {"request": request}
         if isinstance(model, str) and model:
@@ -277,7 +291,7 @@ class CoreClient:
         Chaque étape s'annonce par PLAN_STEP ; le verdict arrive par PLAN_DONE,
         PLAN_EXEC_FAILED ou PLAN_CANCELLED. Rend False si rien n'est parti.
         """
-        if not self._can_send() or not isinstance(plan_id, str):
+        if not self._can_write() or not isinstance(plan_id, str):
             return False
         ident = self._request("plan.execute", {"plan_id": plan_id}, "execute")
         self._plan = {"id": ident, "kind": "execute", "step": None, "outputs": {}}
@@ -285,7 +299,7 @@ class CoreClient:
 
     def reject_plan(self, plan_id):
         """Envoie `plan.reject` ; le verdict arrive par PLAN_REJECTED ou PLAN_FAILED."""
-        if not self._can_send() or not isinstance(plan_id, str):
+        if not self._can_write() or not isinstance(plan_id, str):
             return False
         ident = self._request("plan.reject", {"plan_id": plan_id}, "reject")
         self._plan = {"id": ident, "kind": "reject"}
@@ -312,9 +326,10 @@ class CoreClient:
         """Envoie `session.external` ; servi même pendant une requête en vol.
 
         Le verdict arrive par EXTERNAL_STATE (ce que le noyau a répondu) ou
-        EXTERNAL_FAILED. Rend False si rien n'est parti (noyau pas prêt ou fermé).
+        EXTERNAL_FAILED. Rend False si rien n'est parti (noyau pas prêt ou fermé, session
+        en lecture seule).
         """
-        if not self._ready or self._closing:
+        if not self._ready or self._closing or self._read_only:
             return False
         params = {"enabled": True, "ask": bool(ask)} if enabled else {"enabled": False}
         self._request("session.external", params, "external")
@@ -498,15 +513,11 @@ class CoreClient:
         elif step == "hello":
             # Versions et lecture seule viennent de la poignée de main : aucune
             # commande n'est lancée au démarrage, le journal reste intact (5.32).
+            # En lecture seule, le noyau reste vivant : on peut encore rejouer (AD-11).
             result = msg.get("result")
             if not isinstance(result, dict):
                 result = {}
-            if result.get("read_only") is True:
-                message = result.get("message")
-                if not isinstance(message, str) or not message:
-                    message = "Le journal de ce projet est tenu par une autre session : cette session est en lecture seule."
-                self._fail(message)
-                return
+            self._read_only = result.get("read_only") is True
             commands = result.get("commands")
             self._catalogue = [c for c in commands if isinstance(c, dict)] if isinstance(commands, list) else []
             self._ready = True
@@ -520,6 +531,7 @@ class CoreClient:
                     "protocol_version": result.get("protocol_version"),
                     "commands": self.catalogue(),
                     "history": history,
+                    "read_only": self._read_only,
                 },
             )
 

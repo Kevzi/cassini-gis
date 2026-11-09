@@ -188,14 +188,19 @@ class CassiniPlugin:
         if self.panel is None:
             return
         if kind == client.READY:
-            self.panel.set_ready(payload.get("commands", []), payload.get("history", []))
-            self.list_models()  # la liste des Réglages, dès que le noyau est prêt
+            # Lecture seule : le noyau reste vivant, le panneau ne laisse que le rejeu (AD-11).
+            read_only = payload.get("read_only") is True
+            self.panel.set_ready(
+                payload.get("commands", []), payload.get("history", []), read_only=read_only
+            )
+            if not read_only:
+                self.list_models()  # la liste des Réglages, dès que le noyau est prêt
         elif kind in (client.FAILED, client.DIED):
             self.client = None
             self.process = None
             self.project_path = None
-            # FAILED : le noyau a répondu non (protocole, lecture seule), son message
-            # est affiché tel quel ; DIED : il s'est arrêté.
+            # FAILED : le noyau a répondu non (protocole), son message est affiché tel
+            # quel ; DIED : il s'est arrêté.
             if kind == client.FAILED:
                 self._banner("refused", payload)
             else:

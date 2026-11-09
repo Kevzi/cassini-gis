@@ -323,21 +323,31 @@ def is_cancellable(command, catalogue):
 
 
 # -- activations -------------------------------------------------------------
-def controls(view, ready, other_busy, has_text, catalogue, external_busy=False):
+def controls(view, ready, other_busy, has_text, catalogue, external_busy=False, read_only=False):
     """État des contrôles de la saisie et du plan.
 
     `ready` : noyau prêt et sans bandeau ; `other_busy` : une commande experte
     est en vol ; `external_busy` : un appel de l'IA externe est en vol ou
     attend l'accord (saisie, Valider et Refuser grisés, raison
-    `input_reason_external`). Rend un dict : `input_enabled`, `send_enabled`,
+    `input_reason_external`) ; `read_only` : session en lecture seule (AD-11), tout est
+    grisé avec la raison `read_only_reason`, le bandeau le dit aussi ; seul le repli du mode
+    expert s'ouvre encore, pour montrer pourquoi Lancer est grisé. Rend un dict :
+    `input_enabled`, `send_enabled`,
     `input_reason` (clé de texts ou None), `progress_visible`, `approve_visible`,
     `approve_enabled`, `reject_visible`, `reject_enabled`, `stop_visible`,
-    `stop_enabled`, `stop_reason` (clé de texts ou None), `expert_enabled`.
+    `stop_enabled`, `stop_reason` (clé de texts ou None), `expert_enabled` (le repli
+    s'ouvre), et `run_reason`, `model_reason`, `external_reason` : raison propre à la
+    lecture seule de Lancer, du choix du modèle et de l'interrupteur de l'IA externe
+    (clé de texts ou None ; ces contrôles sont alors grisés, faute d'état prêt).
     """
+    session = bool(ready or read_only)  # noyau prêt, lecture seule comprise
     phase = view.phase
     idle = phase == IDLE
+    ready = bool(ready and not read_only)  # en lecture seule, rien ne part d'ici
     input_enabled = bool(ready and idle and not other_busy and not external_busy)
-    if not ready or input_enabled:
+    if read_only:
+        reason = "read_only_reason"
+    elif not ready or input_enabled:
         reason = None  # hors état prêt, le bandeau dit pourquoi
     elif external_busy and phase in (IDLE, PROPOSED):
         reason = "input_reason_external"
@@ -366,5 +376,8 @@ def controls(view, ready, other_busy, has_text, catalogue, external_busy=False):
         "stop_visible": executing,
         "stop_enabled": bool(executing and ready and cancellable),
         "stop_reason": stop_reason,
-        "expert_enabled": bool(ready and idle),
+        "expert_enabled": bool(session and idle),
+        "run_reason": "read_only_reason" if read_only else None,
+        "model_reason": "read_only_reason" if read_only else None,
+        "external_reason": "read_only_reason" if read_only else None,
     }

@@ -134,7 +134,7 @@ class ClientTest(unittest.TestCase):
         self.assertEqual(
             self.events,
             [(client.READY, {"core_version": "0.1.0", "protocol_version": 2,
-                             "commands": catalogue, "history": []})],
+                             "commands": catalogue, "history": [], "read_only": False})],
         )
 
     def test_hello_history_reaches_ready_filtered(self):
@@ -149,7 +149,7 @@ class ClientTest(unittest.TestCase):
         self.assertEqual(
             self.events,
             [(client.READY, {"core_version": None, "protocol_version": None, "commands": [],
-                             "history": []})],
+                             "history": [], "read_only": False})],
         )
         self.assertEqual(len(self.p.written), 1)
         self.assertFalse(self.p.closed)
@@ -161,14 +161,60 @@ class ClientTest(unittest.TestCase):
         self.assertEqual([k for k, _ in self.events], [client.READY])
         self.assertFalse(self.p.closed)
 
-    def test_read_only_session_fails_at_hello_with_the_core_message(self):
+    def read_only_session(self):
         self.c.start("cassini", "/p.qgz")
         message = "Le journal de ce projet est tenu par une autre session : lecture seule."
+        past = [{"step": 1, "command": "system.about"}]
         self.p.feed(reply(1, {"protocol_version": 2, "core_version": "0.1.0",
-                              "read_only": True, "message": message, "commands": []}))
-        self.assertEqual(self.events, [(client.FAILED, message)])
-        self.assertTrue(self.p.closed)  # noyau arrêté
+                              "read_only": True, "message": message,
+                              "commands": [{"id": "system.about"}], "history": past}))
+        return past
+
+    def test_read_only_session_stays_open_and_ready(self):
+        # Seconde fenêtre QGIS : le noyau reste vivant, la session dit qu'elle est en
+        # lecture seule (AD-11) ; rien n'est écrit au journal.
+        past = self.read_only_session()
+        self.assertEqual(
+            self.events,
+            [(client.READY, {"core_version": "0.1.0", "protocol_version": 2,
+                             "commands": [{"id": "system.about"}], "history": past,
+                             "read_only": True})],
+        )
+        self.assertFalse(self.p.closed)
+        self.assertTrue(self.c.read_only())
         self.assertEqual(len(self.p.written), 1)
+
+    def test_read_only_session_sends_only_the_replay(self):
+        self.read_only_session()
+        self.assertFalse(self.c.run_command("system.about"))
+        self.assertFalse(self.c.propose("Tampon"))
+        self.assertFalse(self.c.execute_plan("plan-1"))
+        self.assertFalse(self.c.reject_plan("plan-1"))
+        self.assertFalse(self.c.list_models())
+        self.assertFalse(self.c.set_external(True))
+        self.assertEqual(len(self.p.written), 1)  # seule la poignée de main est partie
+        self.assertTrue(self.c.replay())
+        self.assertEqual(self.sent()[-1]["method"], "journal.replay")
+        self.p.feed(reply(2, {"steps": 1, "identical": True}))
+        self.assertEqual(self.events[-1], (client.REPLAY_DONE, {"steps": 1, "identical": True}))
+
+    def test_read_only_replay_error_carries_the_core_message(self):
+        self.read_only_session()
+        self.assertTrue(self.c.replay())
+        err = {"code": -32000, "message": "x",
+               "data": {"code": "replay.no_journal", "message": "Aucun journal."}}
+        self.p.feed(reply(2, error=err))
+        self.assertEqual(
+            self.events[-1],
+            (client.REPLAY_FAILED, {"code": "replay.no_journal", "message": "Aucun journal.",
+                                    "step": None}),
+        )
+
+    def test_writing_session_is_not_read_only(self):
+        self.c.start("cassini", "/p.qgz")
+        self.p.feed(reply(1, {"read_only": False, "commands": []}))
+        self.assertFalse(self.c.read_only())
+        self.assertTrue(self.c.run_command("system.about"))
 
     def test_mismatch_shown_as_is_and_core_stopped(self):
         self.c.start("cassini", "/p.qgz")
@@ -541,9 +587,10 @@ class FakePanel:
         self.banners.append(kind)
         self.messages.append(message)
 
-    def set_ready(self, catalogue, history=()):
+    def set_ready(self, catalogue, history=(), read_only=False):
         self.ready = catalogue
         self.history = list(history)
+        self.read_only = read_only
 
     def on_event(self, kind, payload):
         self.events.append((kind, payload))
@@ -736,6 +783,7 @@ class PanelBannerTest(unittest.TestCase):
         for name in ("_render_models", "_render_external", "_render_agent", "_render_result",
                      "_render_thread", "_render_log", "_render_commands", "_render_buttons"):
             setattr(panel, name, lambda: None)
+        panel._controls = lambda: {"expert_enabled": False}  # activations : hors de ce test
         panel._focus_inside = lambda: False  # guidage du focus [12.2] : hors de ce test
         panel._move_focus = lambda inside: None
         panel.log = types.SimpleNamespace(entries=[])
@@ -764,6 +812,33 @@ class PanelBannerTest(unittest.TestCase):
             self.assertIsNone(self.panel.banner_message)
             self.assertEqual(self.panel._banner_text(self.panel.t), refused)
             self.assertEqual(self.announced, [refused])
+
+    def test_read_only_session_is_ready_with_the_spine_banner(self):
+        # Seconde fenêtre QGIS (AD-11) : prêt, bandeau de lecture seule, journal affiché.
+        catalogue = [{"id": "system.about", "description_fr": "Version du noyau."}]
+        past = [{"step": 1, "command": "system.about", "params": {}, "result": {}}]
+        panel = self.panel
+        panel.project_file = "C:/a/ro.qgz"
+        panel.set_ready(catalogue, past, read_only=True)
+        self.assertTrue(panel.ready)
+        self.assertEqual(panel.banner, "read_only")
+        self.assertTrue(panel.read_only)
+        self.assertEqual(len(panel.log.entries), 1)  # l'historique comme d'habitude
+        text = texts.tr("fr", "read_only")
+        self.assertEqual(panel._banner_text(panel.t), text)
+        self.assertEqual(self.announced, [text])
+        # Relancer : reprendre l'écriture une fois la première fenêtre fermée.
+        self.assertEqual(self.mod.BANNERS["read_only"][1], "relaunch")
+        # Session normale : inchangée.
+        self.announced.clear()
+        panel.set_ready(catalogue, past)
+        self.assertIsNone(panel.banner)
+        self.assertFalse(panel.read_only)
+        self.assertEqual(self.announced, [texts.tr("fr", "live_ready")])
+        # Le noyau meurt ensuite : plus de lecture seule, bandeau « died ».
+        panel.set_ready(catalogue, past, read_only=True)
+        panel.set_banner("died")
+        self.assertFalse(panel.read_only)
 
     def test_set_ready_fills_the_log_from_history_once_per_project(self):
         catalogue = [{"id": "system.about", "description_fr": "Version du noyau."}]
@@ -868,17 +943,25 @@ class PluginBehaviourTest(unittest.TestCase):
         self.assertEqual(self.p.panel.banners[-1], "refused")
         self.assertEqual(self.p.panel.messages[-1], "versions")
 
-    def test_read_only_refusal_shows_the_core_message(self):
+    def test_read_only_session_keeps_the_core_and_asks_no_models(self):
         StubProject.name = "/a/p.qgz"
         self.mod.locator.locate = lambda s: ("/x/cassini", "PATH")
         self.fake_client()
         self.p._refresh()
-        message = "Le journal de ce projet est tenu par une autre session : lecture seule."
-        self.p._on_event(self.mod.client.FAILED, message)
-        self.assertEqual(self.p.panel.banners[-1], "refused")
-        self.assertEqual(self.p.panel.messages[-1], message)
-        self.assertIsNone(self.p.client)
-        self.assertIsNone(self.p.panel.ready)  # jamais dit prêt
+        kept = self.p.client
+        asked = []
+        self.p.list_models = lambda: asked.append(True)
+        past = [{"step": 1, "command": "a"}]
+        self.p._on_event(self.mod.client.READY,
+                         {"commands": [{"id": "a"}], "history": past, "read_only": True})
+        self.assertIs(self.p.client, kept)  # noyau gardé : on peut rejouer
+        self.assertEqual(self.p.panel.ready, [{"id": "a"}])
+        self.assertEqual(self.p.panel.history, past)
+        self.assertTrue(self.p.panel.read_only)
+        self.assertNotIn("refused", self.p.panel.banners)
+        self.assertEqual(asked, [])  # le modèle est grisé : pas de liste demandée
+        self.p._on_event(self.mod.client.REPLAY_DONE, {"steps": 1, "identical": True})
+        self.assertEqual(self.p.panel.events[-1][0], self.mod.client.REPLAY_DONE)
 
     def test_death_keeps_its_own_banner_text(self):
         self.p._on_event(self.mod.client.DIED, "mort")
