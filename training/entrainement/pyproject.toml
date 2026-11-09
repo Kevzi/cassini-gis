@@ -3,8 +3,20 @@
 # Versions épinglées à l'identique, verrouillées par `uv.lock` (reproductible).
 # Licences : torch BSD-3, transformers, peft, accelerate, huggingface-hub Apache-2.0, bitsandbytes MIT,
 # numpy BSD-3, safetensors Apache-2.0, pyyaml MIT, sentencepiece Apache-2.0,
-# protobuf BSD-3. Les scripts de conversion viennent de llama.cpp (MIT), cloné à un
-# commit fixe par `pipeline.py`, avec son paquet `gguf-py`.
+# protobuf BSD-3, flash-linear-attention et fla-core MIT, einops MIT (noyaux Triton de
+# l'attention linéaire de Qwen3.5, sans compilation). nvidia-cuda-nvcc, nvidia-nvvm,
+# nvidia-cuda-crt, nvidia-cuda-cccl : licence NVIDIA (CUDA EULA), comme les bibliothèques
+# nvidia-* que torch tire déjà ; ils ne servent qu'à compiler llama.cpp sur CUDA pour la
+# validation (rien n'est installé au niveau du système, rien n'est redistribué).
+# unsloth Apache-2.0 ; unsloth-zoo LGPL-3.0-or-later, accepté par le propriétaire le
+# 2026-11-09 pour l'outillage d'entraînement seulement : jamais dans le noyau, jamais lié à
+# Cassini, rien n'en est redistribué. Unsloth borne transformers à 5.17.x, d'où transformers
+# 5.17.0 et huggingface-hub 1.33.0 (transformers 5.17 exige < 2.0). Ses dépendances (trl,
+# datasets, diffusers, torchao, xformers, cut-cross-entropy…) sont pour la plupart sous
+# Apache-2.0, MIT ou BSD ; exceptions relevées : certifi MPL-2.0, aiohappyeyeballs PSF-2.0,
+# cut-cross-entropy licence d'Apple (voir sa métadonnée). Les
+# scripts de conversion viennent de llama.cpp (MIT), cloné à un commit fixe par
+# `pipeline.py`, avec son paquet `gguf-py`.
 [project]
 name = "cassini-entrainement"
 version = "0.1.0"
@@ -13,9 +25,9 @@ requires-python = "==3.12.*"
 license = "Apache-2.0"
 dependencies = [
     "torch==2.14.1",
-    "transformers==5.20.2",
+    "transformers==5.17.0",
     "peft==0.21.2",
-    "huggingface-hub==2.2.0",
+    "huggingface-hub==1.33.0",
     "accelerate==1.15.0",
     "bitsandbytes==0.50.2",
     "numpy==2.5.4",
@@ -23,6 +35,13 @@ dependencies = [
     "pyyaml==6.0.3",
     "sentencepiece==0.2.2",
     "protobuf==7.36.2",
+    "flash-linear-attention==0.6.0",
+    "nvidia-cuda-nvcc==13.0.88",
+    "nvidia-nvvm==13.0.88",
+    "nvidia-cuda-crt==13.0.88",
+    "nvidia-cuda-cccl==13.0.85",
+    "unsloth==2026.11.3",
+    "unsloth-zoo==2026.11.3",
 ]
 
 [tool.uv]
