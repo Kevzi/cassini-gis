@@ -71,6 +71,10 @@ context:
   - Vérifié (Windows) : `cargo test -p cassini-training --release` (103 + 3 + 1 + 5 verts, recouvrement compris, graine inchangée), `cargo test -p cassini-ai` vert, `cargo fmt --check` et `cargo clippy -p cassini-ai -p cassini-training --all-targets -- -D warnings` propres.
   - Reste : relecture, commit, second entraînement (non lancés).
 
+- Second essai lancé le 2026-11-09 à 10 h 22 (chaîne accélérée, Unsloth, commit `7b382e3` de `story/acceleration-entrainement`), fini à 13 h 28 (185 min ; la carte de 8 Go s'est remplie au pas ~180 et la vitesse est retombée de 10,5 à 25 s/pas). Sortie `~/cassini-entrainement/regroupe-11-23c/`, modèle copié dans `C:\Users\kevin\cassini-modeles\ajuste-11-23c\`, non installé.
+- Validation (llama-server, jeu tiré du générateur corrigé) : 288/300.
+- Essais GPU (`~/cassini-entrainement/11-23-mesures/essais-gpu-11-23c.log`) : `plan_reel` 23/25 (S15, S18), `question_reel` 12/12, `ecart_reel` 32/40 (plans 21/26, questions 8/8, refus 3/6), `echelle_utm_reel` 8/8, `terrain_reel` 8/8, `epic11_reel` 28/28 et F03 en question, points d'un autre système 3/4 hors barre (Y04), `style_reel` 9/10 (ST07). **Toutes les barres sont tenues** ; installation sur décision du propriétaire.
+
 ## Plan Change Log
 
 ## Review Triage Log
