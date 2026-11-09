@@ -11,7 +11,9 @@
 //! pas. Deux pentes, deux lignes de vue (le système écrit à chaque point, comme le garde-fou des
 //! coordonnées le demande), deux champs de vision, deux exports à une échelle sans « PDF ». Le
 //! titre de l'export n'est pas comparé, seulement non vide. Seuil (ticket 5.41) : au moins 7 plans
-//! conformes sur 8.
+//! conformes sur 8. Depuis 11.23, le plan mesuré est le plan complété par les conversions de
+//! points, comme `plan.propose` le montre (11.22, `common::completed`) ; les points de ces
+//! phrases sont dans le système du MNT, la complétion n'y ajoute rien.
 
 mod common;
 
@@ -111,16 +113,21 @@ fn terrain_reel_at_least_7_of_8_plans_match() {
         return;
     };
     let registry = Registry::standard();
-    let inventory: Value = serde_json::from_str(INVENTORY).unwrap();
-    // Comme dans le produit : identifiants courts montrés, plan retraduit (ticket 5.19).
-    let (inventory, ids) = common::shown_inventory(&inventory);
+    let full: Value = serde_json::from_str(INVENTORY).unwrap();
+    // Comme dans le produit : identifiants courts montrés, plan retraduit (ticket 5.19), puis
+    // complété par les conversions de points (11.22, mesuré depuis 11.23).
+    let (inventory, ids) = common::shown_inventory(&full);
     let mut generator = model_files_generator(files);
     let mut right = 0;
     for (id, text) in SENTENCES {
         let want = expected(id);
-        let got = common::restored(
-            compose_plan_with(style, &registry, &inventory, text, &mut generator),
-            &ids,
+        let got = common::completed(
+            &registry,
+            common::restored(
+                compose_plan_with(style, &registry, &inventory, text, &mut generator),
+                &ids,
+            ),
+            &full,
         );
         let ok = match &got {
             Ok(Plan::Calls { calls }) => {
@@ -211,4 +218,19 @@ fn an_export_without_a_title_does_not_match() {
     let titled =
         json!([{"command": "layout.export_pdf", "params": {"title": "Carte", "scale": 5000}}]);
     assert_eq!(comparable(titled), Some(json!([export(5000)])));
+}
+
+#[test]
+fn every_expected_plan_is_left_unchanged_by_the_completion() {
+    // Les points sont écrits dans le système du MNT : la complétion n'ajoute aucune conversion.
+    let registry = Registry::standard();
+    let inventory: Value = serde_json::from_str(INVENTORY).unwrap();
+    for (id, _) in SENTENCES {
+        let plan = expected_plan(id);
+        assert_eq!(
+            common::complete_with(&registry, plan.clone(), &inventory),
+            plan,
+            "{id}"
+        );
+    }
 }

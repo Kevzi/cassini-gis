@@ -340,7 +340,10 @@ fn the_held_out_set_is_well_formed() {
             count("question"),
             count("refusal")
         ),
-        (40, 26, 8, 6)
+        // H36 (« Reprojette les bâtiments en WGS84 et enregistre-les. ») attend un plan
+        // `data.reproject` depuis 10.7 : attendu périmé corrigé le 2026-11-09, pas une
+        // correction du modèle.
+        (40, 27, 8, 5)
     );
     for s in &sentences {
         let id = s["id"].as_str().expect("id");

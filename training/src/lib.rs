@@ -776,6 +776,122 @@ mod tests {
     }
 
     #[test]
+    fn the_default_set_teaches_styles_points_as_written_and_the_project_utm_zone() {
+        // 11.23 : au jeu par défaut, les deux commandes de style sont planifiées et aucun refus
+        // ne dit qu'aucune commande ne change le style ; aucune question ne demande de
+        // reprojeter une liste de points, et un point de terrain d'un autre système est recopié
+        // tel qu'écrit ; le carroyage UTM au fuseau du projet a au moins 60 exemples, recopies
+        // et questions comprises.
+        let registry = Registry::standard();
+        let (examples, summary) = generate(DEFAULT_SEED, DEFAULT_COUNT);
+        let mut planned = HashSet::new();
+        let mut copied_points = 0;
+        for e in &examples {
+            assert!(!families::styles_no_layer(&e.expected), "{}", e.request);
+            if let Some(q) = e.expected["question"].as_str() {
+                assert!(
+                    !q.contains("reprojet") && !q.contains("pas dans le système"),
+                    "{q}"
+                );
+            }
+            for c in e.expected["calls"].as_array().into_iter().flatten() {
+                planned.insert(c["command"].as_str().unwrap_or_default().to_string());
+            }
+            if e.family == "terrain_autre_systeme"
+                && e.expected["calls"].as_array().is_some_and(|c| c.len() == 1)
+            {
+                let plan: Plan = serde_json::from_value(e.expected.clone()).unwrap();
+                let guarded =
+                    cassini_core::point::guard_coordinates(&registry, plan.clone(), &e.request);
+                assert_eq!(guarded, plan, "{}", e.request);
+                copied_points += 1;
+            }
+        }
+        assert!(planned.contains("map.topographic_style"));
+        assert!(planned.contains("map.graduated_style"));
+        assert!(copied_points > 0);
+        let grid = &summary.families["carroyage_utm_projet"];
+        assert!(grid.kept >= 60 && grid.rejected == 0, "{grid:?}");
+        let grids: Vec<&Example> = examples
+            .iter()
+            .filter(|e| e.family == "carroyage_utm_projet")
+            .collect();
+        assert!(grids.iter().any(|e| e.expected["kind"] == "calls"));
+        assert!(grids.iter().any(|e| e.expected["kind"] == "question"));
+        assert!(grids.iter().all(|e| e.expected["kind"] != "refusal"));
+    }
+
+    #[test]
+    fn the_default_set_never_reprojects_a_metric_layer_unasked_and_asks_for_a_missing_utm_zone() {
+        // Second essai de 11.23 (constats S07 et F03) : au jeu par défaut, un `data.reproject`
+        // ne vise une couche en mètres (ou de système inconnu) que si la phrase écrit le
+        // système d'arrivée (`reprojection_couche`) ; les analyses en mètres sur une couche en
+        // mètres, à côté d'une couche en degrés, sont nombreuses ; un carroyage « UTM » sans
+        // fuseau écrit pose la question quand l'inventaire n'a pas de `utm_epsg`, jamais un
+        // fuseau deviné, et ces questions font au moins la moitié des recopies.
+        let (examples, summary) = generate(DEFAULT_SEED, DEFAULT_COUNT);
+        let contrasts = &summary.families["analyse_couche_metrique"];
+        assert!(contrasts.kept >= 60, "{contrasts:?}");
+        let (mut unasked_degrees, mut copies, mut questions) = (0, 0, 0);
+        for e in &examples {
+            let layers = e.inventory["layers"].as_array().unwrap();
+            let calls = e.expected["calls"].as_array().cloned().unwrap_or_default();
+            for c in calls.iter().filter(|c| c["command"] == "data.reproject") {
+                let id = c["params"]["layer_id"].as_str().unwrap();
+                if id.starts_with("step:") {
+                    continue;
+                }
+                let layer = layers.iter().find(|l| l["layer_id"] == id).unwrap();
+                if layer["epsg"] == 4326 {
+                    unasked_degrees += 1;
+                    continue;
+                }
+                let target = c["params"]["target_epsg"].as_u64().unwrap();
+                let (_, forms) = families::LAYER_TARGETS
+                    .iter()
+                    .find(|(t, _)| u64::from(*t) == target)
+                    .unwrap_or_else(|| panic!("cible {target} : {}", e.request));
+                assert!(
+                    forms.iter().any(|f| e.request.contains(f)),
+                    "couche en mètres reprojetée sans demande : {} ({})",
+                    e.request,
+                    e.family
+                );
+            }
+            let r = e.request.to_lowercase();
+            let zone_written = ["30", "31", "32"].iter().any(|z| {
+                r.contains(&format!("utm {z}"))
+                    || r.contains(&format!("utm{z}"))
+                    || r.contains(&format!("zone {z}"))
+            });
+            if !r.contains("utm") || zone_written {
+                continue;
+            }
+            let asks = e.expected["question"] == families::GRID_SYSTEM_QUESTION;
+            let grid = calls
+                .iter()
+                .find(|c| c["command"] == "layout.export_pdf")
+                .and_then(|c| c["params"].get("grid"));
+            let utm = e.inventory["project"]["utm_epsg"].as_u64();
+            match (utm, grid) {
+                (None, Some(g)) => panic!("fuseau deviné {g} : {}", e.request),
+                (None, None) if asks => questions += 1,
+                (Some(code), Some(g)) if g["kind"] == "projected" => {
+                    assert_eq!(g["epsg"].as_u64(), Some(code), "{}", e.request);
+                    copies += 1;
+                }
+                _ => {}
+            }
+        }
+        assert!(unasked_degrees > 0);
+        assert!(copies > 0, "{copies}");
+        assert!(
+            2 * questions >= copies,
+            "{questions} questions, {copies} recopies"
+        );
+    }
+
+    #[test]
     fn paper_and_orientation_are_plans_never_refusals() {
         // 11.12, lot 3 (inverse le test de 5.40) : au jeu par défaut, aucun refus ne cite
         // « A4 », `export_pdf_format` a des plans pour A3, A0, portrait et chacune des deux

@@ -92,7 +92,8 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `constructible` | vocabulaire d'urbanisme : « parcelles constructibles », avec ou sans distance et PDF |
 | `export_pdf` | « sors-moi la carte en PDF », titre donné par l'utilisateur ou déduit de la demande |
 | `export_pdf_scale` | « exporte la carte en PDF au 1:25 000 » → `scale: 25000`, l'entier écrit ; échelles courantes de 1:1 000 à 1:250 000, écrites « au 1:25 000 », « au 1/25000 », « au 25 000e », « au 1:25k » (multiple de 1 000 seulement) ou « à l'échelle 1/25 000 » ; la carte seule ou au bout d'une recherche (5.38) ; depuis 5.40, aussi sans le mot « PDF » (« imprime la carte au 1/50000 », « sors-moi la carte au 25 000e »), un export et jamais un refus de format |
-| `export_pdf_format` | « exporte la carte en PDF au format A3 » → `page_size: "a3"`, « en portrait » ou « à la française » → `orientation: "portrait"` (« paysage », « à l'italienne » → `landscape`), « avec un carroyage Lambert-93 tous les 1 km » → `grid: {kind: projected, epsg: 2154, interval: {value: 1, unit: km}}`, « avec un graticule tous les 0,01° » → `grid: {kind: degrees, interval: {value: 0.01, unit: deg}}` (grades → `gon`) ; seuls les paramètres écrits, jamais `scale` ; la carte seule ou au bout d'une recherche ; un carroyage « UTM » sans fuseau (« carroyage UTM au kilomètre ») → `epsg` = `project.utm_epsg` de l'inventaire, question quand il n'y en a pas ; un carroyage sans système (« quadrillage tous les 500 m ») → question qui demande le système (11.12, lot 3 ; fuseau de l'inventaire, 2026-11-08) |
+| `export_pdf_format` | « exporte la carte en PDF au format A3 » → `page_size: "a3"`, « en portrait » ou « à la française » → `orientation: "portrait"` (« paysage », « à l'italienne » → `landscape`), « avec un carroyage Lambert-93 tous les 1 km » → `grid: {kind: projected, epsg: 2154, interval: {value: 1, unit: km}}`, « avec un graticule tous les 0,01° » → `grid: {kind: degrees, interval: {value: 0.01, unit: deg}}` (grades → `gon`) ; seuls les paramètres écrits, jamais `scale` ; la carte seule ou au bout d'une recherche ; un carroyage « UTM » sans fuseau (« carroyage UTM au kilomètre ») → `epsg` = `project.utm_epsg` de l'inventaire, question quand il n'y en a pas ; un carroyage sans système (« quadrillage tous les 500 m ») → question qui demande le système (11.12, lot 3 ; fuseau de l'inventaire, 2026-11-08 ; renforcé par `carroyage_utm_projet` en 11.23) |
+| `carroyage_utm_projet` | le carroyage UTM d'un export, le fuseau du projet en main (11.23) : « avec un carroyage UTM tous les 2 km », « avec une grille UTM de 1 km », « avec un quadrillage UTM au kilomètre » → `grid` projeté sur `project.utm_epsg`, recopié ; sans `utm_epsg`, la question du système ; un fuseau écrit l'emporte même quand l'inventaire en porte un autre, dans les deux sens (« UTM 31N » avec 32632, « UTM 32N » avec 32631) ; aucun système → la question, jamais un refus (constat F03 de 11.16) ; depuis le second essai de 11.23, poids 4, trois recopies pour deux questions sans `utm_epsg` (constat F03 du premier essai : fuseau inventé) ; jamais la tête « Fais un PDF de la carte » (celle de F03) |
 | `isochrone` | « zone atteinte en 10 minutes à pied depuis le point ... (Lambert-93) » |
 | `isochrone_utm` | « zone atteinte en 10 minutes à pied depuis le point 412 300 / 5 412 000 (UTM 31N) » → même isochrone, code 32631 ou 32632 ; zone 31N ou 32N, écrite « UTM 31N », « UTM 31 N », « UTM zone 31 Nord » ou « UTM31N » (5.37) |
 | `isochrone_vers_cible` | « les écoles à 10 min à pied du point ... (Lambert-93) » → isochrone, puis intersection de la cible avec l'étape 1 ; la couche du lieu (gares, écoles...) est souvent dans l'inventaire, seules les coordonnées donnent l'origine ; une fois sur trois, le lieu est nommé avec ses coordonnées (« de la gare de X (652 000 / 6 862 000, Lambert-93) ») et reste un plan |
@@ -101,33 +102,36 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `description` | décrire une couche, inventaire du projet, version, modèles installés |
 | `question_couche_absente` | une couche dont rien ne parle dans l'inventaire → question |
 | `question_champ_absent` | un critère qu'aucun champ ne porte → question, jamais un champ voisin deviné |
-| `refus` | courriel, suppression, export d'une couche en tableur (Excel, CSV : le refus nomme les formats de `data.convert`, depuis 10.9), style, itinéraire sur le réseau routier entre deux objets d'une couche (depuis 11.12, lot 2b-1, le refus dit que le chemin de moindre coût demande un raster de coût et deux points en coordonnées), téléchargement, 3D → refus affirmatif |
-| `refus_hors_registre` | cadrage ou zoom de la carte, PDF dans un format hors de la série du catalogue (A5, lettre US), ou envoyé à une imprimante ou avec un nombre d'exemplaires (« envoie la carte à l'imprimante », « en 3 exemplaires ») ; « imprime la carte » seul reste un export, altitude moyenne par zone (statistiques sur un raster ; depuis 5.41 aussi après une pente ou un champ de vision : « la pente puis sa moyenne par commune » est un refus entier), MNT présent pour l'altitude par zone, trajet depuis plusieurs lieux (« de chaque gare », « de toutes les gares », « des gares ») → refus affirmatif, jamais un plan de substitution. Le point de terrain écrit dans un autre système que le MNT, refusé en 5.41, est un plan depuis 11.12 (`terrain_autre_systeme`). Le champ de vision, la ligne de vue et la pente n'y sont plus depuis 4.6 : le registre les a. Le seuil sur la pente (« où la pente dépasse 15 % »), refusé de 4.6 à 11.12, est un plan depuis 11.12, lot 2a (`pente_seuil`). Le PDF en A3, A0 ou portrait, refusé jusqu'au lot 3 de 11.12 (« seulement une page A4 paysage »), est un plan depuis (`export_pdf_format`) |
+| `refus` | courriel, suppression, export d'une couche en tableur (Excel, CSV : le refus nomme les formats de `data.convert`, depuis 10.9), couleur choisie à la main (« mets les gares en rouge » : depuis 11.23, le refus dit que le catalogue ne pose pas de couleur choisie mais sait les couleurs topographiques et le dégradé, jamais qu'aucune commande ne change le style), itinéraire sur le réseau routier entre deux objets d'une couche (depuis 11.12, lot 2b-1, le refus dit que le chemin de moindre coût demande un raster de coût et deux points en coordonnées), téléchargement, 3D → refus affirmatif |
+| `refus_hors_registre` | cadrage ou zoom de la carte, PDF dans un format hors de la série du catalogue (A5, lettre US), ou envoyé à une imprimante ou avec un nombre d'exemplaires (« envoie la carte à l'imprimante », « en 3 exemplaires ») ; « imprime la carte » seul reste un export, PDF qui nomme les couches à montrer (« fais une carte PDF A3 des écoles et des gares », depuis 11.23 : l'export met en page la carte affichée sans choisir ses couches, même avec un format ou une orientation connus), altitude moyenne par zone (statistiques sur un raster ; depuis 5.41 aussi après une pente ou un champ de vision : « la pente puis sa moyenne par commune » est un refus entier), MNT présent pour l'altitude par zone, trajet depuis plusieurs lieux (« de chaque gare », « de toutes les gares », « des gares ») → refus affirmatif, jamais un plan de substitution. Le point de terrain écrit dans un autre système que le MNT, refusé en 5.41, est un plan depuis 11.12 (`terrain_autre_systeme`). Le champ de vision, la ligne de vue et la pente n'y sont plus depuis 4.6 : le registre les a. Le seuil sur la pente (« où la pente dépasse 15 % »), refusé de 4.6 à 11.12, est un plan depuis 11.12, lot 2a (`pente_seuil`). Le PDF en A3, A0 ou portrait, refusé jusqu'au lot 3 de 11.12 (« seulement une page A4 paysage »), est un plan depuis (`export_pdf_format`) |
 | `pente` | « fais la carte des pentes du MNT en pourcentage » → `terrain.slope`, `dem` recopié de la `source` du raster de l'inventaire, `unit` telle qu'écrite (`degrees` : « en degrés », « en ° » ; `percent` : « en pourcentage », « en % », « en pour cent ») (4.6) |
-| `ligne_de_vue` | « y a-t-il une ligne de vue entre le point (... ; ...) en Lambert-93 et le point (... ; ...) en Lambert-93, œil à 2 m » → `terrain.line_of_sight`, deux points écrits en Lambert-93 ou en UTM 31N/32N, le système écrit à chaque point (le garde-fou en demande une occurrence par point), le MNT dans ce même système ; `observer_height` et `target_height` seulement s'ils sont écrits, jamais courbure ni réfraction (4.6) |
-| `champ_de_vision` | « calcule le champ de vision depuis le point ... (UTM 31N) sur 2 km » → `terrain.viewshed`, même règle de points et de MNT ; hauteurs et `radius` seulement s'ils sont écrits (4.6) ; depuis 5.41, le rayon aussi avant le point (« dans un rayon de 800 m autour du point … ») |
+| `ligne_de_vue` | « y a-t-il une ligne de vue entre le point (... ; ...) en Lambert-93 et le point (... ; ...) en Lambert-93, œil à 2 m » → `terrain.line_of_sight`, deux points écrits en Lambert-93 ou en UTM 31N/32N, le système écrit à chaque point (le garde-fou en demande une occurrence par point), le MNT dans ce même système ; `observer_height` et `target_height` seulement s'ils sont écrits, jamais courbure ni réfraction (4.6) ; depuis le second essai de 11.23, une fois sur quatre, une même hauteur pour les deux bouts (« , 2 m de hauteur de chaque côté », « observateur et cible à 5 m du sol », « de part et d'autre ») → les deux hauteurs (constat S21) |
+| `champ_de_vision` | « calcule le champ de vision depuis le point ... (UTM 31N) sur 2 km » → `terrain.viewshed`, même règle de points et de MNT ; hauteurs et `radius` seulement s'ils sont écrits (4.6) ; depuis 5.41, le rayon aussi avant le point (« dans un rayon de 800 m autour du point … ») ; depuis 11.23, une fois sur six, un lieu nommé suivi de ses coordonnées (« depuis le château d'eau de Thiais (652 000 ; 6 862 000, Lambert-93) ») reste un plan, jamais une question (constat S20 de 11.16) |
 | `question_terrain` | demande de terrain sans MNT dans l'inventaire (un raster de coût peut y être depuis 11.12, lot 2b-1) → question qui demande d'ouvrir ou de nommer le MNT ; vue depuis un lieu nommé sans coordonnées (« depuis le clocher de Thiais ») ou ligne de vue avec un seul point écrit → question qui demande le point en X, Y et système ; pente sans unité → question « degrés ou pourcentage » (4.6) |
 | `appartenance_commune` | « qui appartiennent à la commune de X », « sur le territoire de X » → sélection de la commune par son nom, puis intersection ; sans couche de communes, ou sans nom de commune, une question. Une commune citée seule (« à Orly ») reste un contexte sans effet |
 | `question_isochrone` | isochrone ou cible à une durée de trajet d'un lieu nommé (« depuis la mairie de X », « les parcelles à 10 min à pied de la gare de X »), sans coordonnées → question qui demande le point en X et Y avec son système ; « d'une gare » → question qui demande laquelle |
 | `etape_unique` | une seule opération demandée, une autre couche citée pour le contexte (« je m'occuperai des écoles plus tard ») → une étape |
-| `conversion_coordonnees` | « donne la référence MGRS du point 48,8566 N, 2,3522 E (WGS84) », « convertis 31U DQ 52000 12000 en latitude et longitude » → `coord.convert` entre WGS84, UTM et MGRS, une ou deux formes demandées ; `mgrs_precision` (« à 3 chiffres ») et `utm_zone` (« dans le fuseau 32 ») seulement s'ils sont écrits ; un point en Lambert-93 vers l'UTM ou le MGRS → `data.transform_point` vers 4326, puis `coord.convert` sur `step:1.point` (11.12) |
+| `conversion_coordonnees` | « donne la référence MGRS du point 48,8566 N, 2,3522 E (WGS84) », « convertis 31U DQ 52000 12000 en latitude et longitude » → `coord.convert` entre WGS84, UTM et MGRS, une ou deux formes demandées ; `mgrs_precision` (« à 3 chiffres ») et `utm_zone` (« dans le fuseau 32 ») seulement s'ils sont écrits ; un point en Lambert-93 vers l'UTM ou le MGRS → `data.transform_point` vers 4326, puis `coord.convert` sur `step:1.point` (11.12) ; depuis 11.23, un point UTM vers le fuseau voisin (« … (UTM 31N) en UTM dans le fuseau 32 ») → `coord.convert` vers `utm`, `utm_zone` écrit (report de 11.16) |
 | `reprojection_point` | « reprojette le point … (Lambert-93) en WGS84 », « donne les coordonnées du point … (UTM 31N) en Lambert-93 », « … en Web Mercator (EPSG:3857) » → une étape `data.transform_point`, le système d'arrivée écrit (11.12) |
 | `reprojection_couche` | « reprojette la couche « Gares » en Lambert-93 », « convertis les écoles en WGS84 », « passe la couche des parcelles en UTM 32N » → une étape `data.reproject`, le système d'arrivée écrit ; la couche est tirée dans un autre système que la cible. Remplace le refus « aucune commande ne reprojette une couche » (10.7) |
 | `reprojection_avant_analyse` | tampon ou recherche à distance (« les écoles à moins de 500 m des gares ») sur une couche en degrés (`epsg: 4326` dans l'inventaire), sans que la demande parle de reprojection → `data.reproject` de cette couche, puis l'analyse sur `step:1.layer_id` (les étapes suivantes décalées d'un rang) ; cible : le système des autres couches vecteur en mètres de l'inventaire (Lambert-93, UTM 31N ou 32N), EPSG:2154 quand toutes sont en degrés ; l'`epsg` des couches n'est jamais effacé de ces inventaires (10.7) |
+| `analyse_couche_metrique` | la même analyse (tampon ou recherche à distance) sur une couche déjà en mètres (Lambert-93, UTM 31N ou 32N), dans un inventaire qui porte aussi une couche vecteur en degrés qu'aucun plan ne cite → l'analyse seule, jamais un `data.reproject` (second essai de 11.23, constat S07) |
 | `conversion_format` | « exporte les gares en shapefile », « convertis la couche « Écoles » en GeoPackage », « enregistre les parcelles au format GeoJSON » → une étape `data.convert`, `format` tel qu'écrit (`gpkg` : « GeoPackage », « gpkg » ; `shp` : « shapefile », « shp » ; `geojson` : « GeoJSON »), jamais un système de coordonnées dans la demande ; `out` n'est jamais écrit (le noyau le fournit). Remplace le refus « aucune commande n'exporte une couche vers un fichier » ; un tableur (Excel, CSV) reste un refus (10.9) |
 | `distance_azimut` | « quelle distance sépare le point … du point … », « distance et azimut entre les points … et … (UTM 31N) » → `geo.distance_azimuth` ; `unit` seulement si elle est écrite (`gon` : « en grades », `deg` : « en degrés ») ; deux points en Lambert-93 → deux `data.transform_point` vers 4326, puis le calcul sur `step:1.point` et `step:2.point` ; système écrit à chaque point ou une fois pour les deux (11.12) |
 | `point_projete` | « quel point atteint-on à 3 km du point …, azimut 45° » → `geo.destination_point`, l'azimut toujours avec son unité (« 45° », « 45 degrés » → `deg` ; « 50 gr », « 50 grades » → `gon`) et la distance tels qu'écrits ; « résultat en MGRS » → `coord.convert` sur `step:1.point` (11.12) |
 | `recoupement` | « recoupe la visée du point … à l'azimut 40° avec celle du point … à l'azimut 310° » → `geo.bearing_intersection`, chaque station avec son azimut ; même suite MGRS que `point_projete` (11.12) |
-| `terrain_autre_systeme` | champ de vision ou ligne de vue depuis un point écrit dans un autre système que le MNT (WGS84, UTM d'une autre zone, Lambert-93 sur un MNT en UTM, MGRS) → `data.transform_point` vers l'`epsg` du MNT (précédé de `coord.convert` vers le WGS84 pour une référence MGRS), puis la commande de terrain sur `step:k.point` ; MNT à système connu seulement. Remplace le refus `NO_TERRAIN_CRS` de 5.41 (11.12) |
-| `exposition` | « calcule l'exposition des versants du MNT » → `terrain.aspect`, `dem` seul (11.12, lot 2a) |
+| `terrain_autre_systeme` | champ de vision ou ligne de vue depuis un point écrit dans un autre système que le MNT (WGS84, UTM d'une autre zone, Lambert-93 sur un MNT en UTM) → depuis 11.23, la commande de terrain avec le point **recopié tel qu'écrit**, sans `data.transform_point` : le noyau ajoute la conversion au plan avant de le montrer (11.22) ; une ligne de vue peut viser un point du système du MNT ; une référence MGRS (une fois sur quatre, alors pour chaque point), qui n'est pas un `Point`, garde `coord.convert` vers le WGS84 puis `data.transform_point` vers l'`epsg` du MNT, et la commande prend `step:k.point` (MNT à système connu seulement). Remplace le refus `NO_TERRAIN_CRS` de 5.41 (11.12) |
+| `exposition` | « calcule l'exposition des versants du MNT » → `terrain.aspect`, `dem` seul (11.12, lot 2a) ; depuis 11.23, l'orientation des pentes dite sans le mot « exposition » (« dans quelle direction regardent les pentes », « vers où sont orientées les pentes ») aussi, jamais une pente reclassée (constat A01 de 11.16) |
 | `ombrage` | « ombrage du MNT, soleil à l'ouest (azimut 270°), hauteur du soleil 30°, exagération verticale de 2 » → `terrain.hillshade` ; `sun_azimuth`, `sun_altitude` et `z_factor` seulement s'ils sont écrits, les angles en degrés ou en grades (`gon`), tous dans la même unité ; sans réglage écrit, `dem` seul (11.12, lot 2a) |
-| `champ_de_vision_cumule` | « combien de ces points voient chaque endroit : le point …, le point … et le point … » → `terrain.viewshed_cumulative`, deux à quatre points dans le système du MNT, chacun avec son système ; hauteurs et `radius` comme `champ_de_vision` (11.12, lot 2a) |
+| `champ_de_vision_cumule` | « combien de ces points voient chaque endroit : le point …, le point … et le point … » → `terrain.viewshed_cumulative`, deux à quatre points dans le système du MNT, chacun avec son système ; hauteurs et `radius` comme `champ_de_vision` (11.12, lot 2a) ; une fois sur cinq, des points écrits dans un autre système, recopiés tels quels depuis 11.23 (la question du système, de 2026-11-08, est retirée : le noyau convertit chaque point) |
 | `points_hauts` | « les 10 sommets les plus hauts du MNT, proéminence d'au moins 20 m » → `terrain.peaks` ; `max_count` (2 à 100, écrit en chiffres), `min_prominence` et `min_distance` seulement s'ils sont écrits (11.12, lot 2a) |
 | `pente_seuil` | « où la pente dépasse-t-elle 15 % », « classe les pentes en moins de 5 %, de 5 % à 15 % et plus de 15 % » → `terrain.slope` dans l'unité du seuil, puis `raster.reclassify` sur `step:1` ; « dépasse, plus de n » → `{min: n, value: 1}`, « sous, moins de n » → `{max: n, value: 1}`, deux ou trois classes de valeurs 1, 2, 3 à bornes contiguës (11.12, lot 2a) |
-| `cout_cumule` | « calcule le coût de déplacement cumulé depuis le point … (Lambert-93) sur le raster de coût » → `terrain.cost_distance`, `cost` recopié de la `source` du raster de coût de l'inventaire, une à trois `sources` écrites dans son système, dans l'ordre écrit, chacune avec son système ; une fois sur six, un lieu nommé sans coordonnées (« depuis la mairie de X ») → question qui demande le point en X, Y et système (11.12, lot 2b-1) |
-| `chemin_moindre_cout` | « trace le chemin de moindre coût du point … au point … sur la couche « Friction » » → `terrain.least_cost_path`, `start` puis `end` dans l'ordre écrit, dans le système du raster de coût ; un seul point écrit, l'autre nommé → question du point ; aucun raster de coût dans l'inventaire (le MNT seul, ou rien) → question qui demande d'ouvrir ou de nommer le raster de coût, jamais le MNT pris comme coût (11.12, lot 2b-1) |
+| `cout_cumule` | « calcule le coût de déplacement cumulé depuis le point … (Lambert-93) sur le raster de coût » → `terrain.cost_distance`, `cost` recopié de la `source` du raster de coût de l'inventaire, une à trois `sources` écrites dans son système, dans l'ordre écrit, chacune avec son système (une fois sur cinq, dans un autre système, recopiées telles quelles depuis 11.23, plus de question) ; une fois sur six, un lieu nommé sans coordonnées (« depuis la mairie de X ») → question qui demande le point en X, Y et système (11.12, lot 2b-1) |
+| `chemin_moindre_cout` | « trace le chemin de moindre coût du point … au point … sur la couche « Friction » » → `terrain.least_cost_path`, `start` puis `end` dans l'ordre écrit, dans le système du raster de coût (une fois sur trois, le départ, et l'arrivée une fois sur deux, dans un autre système, recopiés tels quels depuis 11.23 ; une référence MGRS garde ses deux conversions) ; un seul point écrit, l'autre nommé → question du point ; aucun raster de coût dans l'inventaire (le MNT seul, ou rien) → question qui demande d'ouvrir ou de nommer le raster de coût, jamais le MNT pris comme coût (11.12, lot 2b-1) |
 | `superposition_ponderee` | « combine l'accessibilité (poids 2) et le calme (poids 1), en excluant les zones inondables » → `raster.weighted_overlay`, deux à quatre `criteria` `{raster, weight}` dans l'ordre écrit, chaque `raster` recopié de la `source` d'un critère noté de l'inventaire ; poids écrits recopiés (« poids 2 », « avec un poids de 2 pour… », « … comptant double »), sinon tous à 1 ; zéro à deux `exclusions`, masques écrits dans l'ordre écrit ; une fois sur huit, un critère nommé absent de l'inventaire → question qui demande d'ouvrir ou de nommer ce raster (11.12, lot 2b-2) |
 | `reclassement_raster` | « classe la distance aux routes en moins de 100 m, de 100 à 500 m et plus de 500 m », « où le bruit dépasse 65 dB » → `raster.reclassify` directement sur la `source` du raster brut, sans `terrain.slope` ; seuil unique (`{min}` ou `{max}`, valeur 1) ou deux à trois classes à bornes contiguës, valeurs 1, 2, 3 sauf si elles sont écrites (« notées 3, 2 et 1 », une fois sur trois) ; une fois sur huit, raster absent → question du raster (11.12, lot 2b-2) |
+| `style_topographique` | « mets les couches aux couleurs topographiques », « donne à la carte les couleurs d'une carte IGN » → `map.topographic_style` sans paramètre ; une fois sur trois, une ou deux couches nommées (« mets les routes et les rivières aux couleurs de l'IGN », « mets la couche des canalisations avec la sémiologie de l'IGN ») → `layers`, leurs identifiants dans l'ordre écrit (11.23) |
+| `style_degrade` | « colore les communes selon leur population », « représente les parcelles par classes de surface » → `map.graduated_style` sur la couche et son champ numérique ; `method` (« en quantiles », « à intervalles égaux », « par seuils naturels » ; depuis le second essai de 11.23, la méthode est écrite une fois sur deux, avec aussi « , à intervalles égaux », « avec des classes d'égale amplitude », « avec des classes de même effectif », « par ruptures naturelles », constat ST08), `class_count` (« en 7 classes », de 2 à 12) et `ramp` (« en bleus », « dans un dégradé de verts », « en niveaux de gris », « du jaune au rouge », « du rouge au bleu ») seulement s'ils sont écrits ; une fois sur six, la couche n'a pas le champ → la question du champ (11.23) |
 | `redemande` | environ 5 % du jeu : un exemple d'une autre famille vu au tour de redemande (voir plus bas) |
 
 Depuis 5.15, `conditions_multiples` porte aussi les plans à **trois conditions** (cible
@@ -177,7 +181,9 @@ de choix, celle du catalogue :
 - un autre système en jeu (Lambert-93, Lambert II étendu, Web Mercator, ou le système d'un
   MNT) → `data.transform_point`, puis `coord.convert` si le MGRS est demandé.
 
-Une conversion ou une reprojection est toujours une étape visible du plan. Tout nombre du plan
+Une conversion ou une reprojection est toujours une étape visible du plan (depuis 11.23, celle
+d'un point de terrain est ajoutée par le noyau, et le modèle recopie le point tel qu'écrit : voir
+« Passe de 11.23 »). Tout nombre du plan
 (azimut, distance, précision, fuseau) est écrit dans la demande ; un `Angle` porte toujours son
 `unit` ; une référence MGRS est valide (tirée par `Mgrs::from_lat_lon` du noyau) et le plan la
 recopie sous sa forme canonique, sans espace. Chaque exemple passe `check_plan` puis
@@ -320,8 +326,8 @@ vaut 1 km. L'inventaire de ces exemples le porte trois fois sur quatre, tiré pa
 fois sur quatre), 32630 et 32632 sur des couches en Lambert-93, pour que le plan le recopie au
 lieu de le deviner ; sans lui, c'est la question du système. Un fuseau écrit (« UTM 31N »)
 l'emporte toujours, même quand l'inventaire en porte un autre. Au jeu par défaut (graine 1,
-8 000 exemples), 5 plans recopient le fuseau et 3 questions le demandent : peu d'exemples, à
-surveiller au ré-entraînement groupé (11.23).
+8 000 exemples), 5 plans recopiaient le fuseau et 3 questions le demandaient : trop peu pour
+l'apprendre. La famille `carroyage_utm_projet` de 11.23 (section suivante) les porte à 65 et 11.
 
 **Refus.** Le cas « papier » de `refus_hors_registre`, qui refusait A3, A0 et portrait (« seulement
 une page A4 paysage »), est remplacé par ce que l'export ne fait pas : un format hors de la
@@ -337,6 +343,90 @@ pour les deux formes de grille.
 fourchette de 4 à 7 % ; 140 exemples `export_pdf_format`, aucune famille écartée.
 
 Les trois lots de 11.12 sont faits ; reste le ré-entraînement groupé (entrée 16).
+
+### Passe de 11.23 (partie A) : points tels qu'écrits, style, constats de 11.16
+
+Le générateur est mis au niveau du noyau avant le ré-entraînement groupé de 11.23. Rien ne
+change de la base, de la méthode, de `DEFAULT_COUNT` ni de `DEFAULT_SEED` ; chaque exemple
+passe `check_plan` puis `guard_coordinates`.
+
+- **Points tels qu'écrits** (changement de cap du 2026-11-08, décision 3). Un point de terrain
+  écrit dans un autre système que son raster est recopié tel que la phrase le donne :
+  `terrain_autre_systeme`, `champ_de_vision_cumule`, `cout_cumule` et `chemin_moindre_cout` ne
+  composent plus `data.transform_point`, et le noyau complète le plan (11.22) avant de le
+  montrer. Les questions sur une liste de points d'un autre système sont retirées. Une ligne de
+  vue ou un chemin peut mêler un point d'un autre système et un point du système du raster. Une
+  référence MGRS, qui n'est pas un `Point` et que la complétion ne voit pas, garde
+  `coord.convert` puis `data.transform_point`. Les familles sans raster (`distance_azimut`,
+  `conversion_coordonnees`, `reprojection_point`) gardent leurs conversions : la complétion ne
+  s'applique qu'aux commandes du noyau qui ont un raster.
+- **Style** (11.20). Deux familles, `style_topographique` (poids 3) et `style_degrade`
+  (poids 4). Le refus « Aucune commande du catalogue ne change le style d'une couche » est
+  retiré : « mets les gares en rouge » rend désormais `NO_CHOSEN_COLOR` (« Le catalogue ne pose
+  pas une couleur choisie sur une couche : il met les couches aux couleurs topographiques, ou
+  colore une couche en dégradé selon un champ numérique. »). Le garde-fou `styles_no_layer`
+  fait échouer `what_is_refused_out_of_registry_is_still_missing_from_the_registry` si une
+  famille, quelle qu'elle soit, rend encore un refus qui parle de style.
+- **Fuseau UTM du projet.** `carroyage_utm_projet` (poids 3, 100 exemples à la graine 1) :
+  recopie de `utm_epsg` quatre fois sur huit, question sans lui une fois sur huit, fuseau écrit
+  différent de celui de l'inventaire deux fois sur huit, aucun système une fois sur huit. Le
+  nom du projet tiré suit son fuseau (`inventories::project_names`) : un projet de l'ouest en
+  30N (Rennes, Brest, Nantes, Quimper), de l'est en 32N (Strasbourg, Colmar, Nice, Mulhouse), du
+  Val-de-Marne sinon.
+- **Constats de 11.16.** F03 (carroyage sans système refusé) : la question, renforcée par
+  `carroyage_utm_projet`. A01 (« dans quelle direction sont tournées les pentes ») : quatre
+  tournures de plus dans `exposition`. S18 (PDF qui nomme ses couches) : un cas de
+  `refus_hors_registre`, `NO_LAYER_CHOICE`. S20 (lieu nommé suivi de ses coordonnées) : une
+  forme de `champ_de_vision`. Les deux ratés de validation « point UTM d'un fuseau à l'autre »
+  étaient des points de terrain, désormais convertis par le noyau ; `conversion_coordonnees`
+  apprend en plus le passage d'un point UTM au fuseau voisin.
+- **Recouvrement.** La tournure « Où la pente du terrain dépasse-t-elle … » de `pente_seuil`
+  rendait Z01 d'`epic11_reel` : elle est retirée (« du MNT » à sa place), la graine ne change
+  pas.
+
+**Redemande.** Les nouveaux plans à une étape se corrompent peu : à poids inchangé, 311
+redemandes (3,9 %). Le poids de `redemande` passe de 44 à 52, pour 380 redemandes sur 8 000 à
+la graine 1 (4,75 %).
+
+**Essais réels.** `plan_reel`, `terrain_reel`, `epic11_reel` et le nouvel essai `style_reel`
+mesurent le **plan complété** : `ai/tests/common/mod.rs` (`completed`, `complete_with`) applique
+la complétion du noyau au plan composé, le système d'un raster pris dans l'inventaire (dans le
+produit, l'en-tête du GeoTIFF). S25 garde son attendu (la conversion puis le champ de vision) ;
+un test sans modèle vérifie que le point recopié tel qu'écrit en est complété. `epic11_reel`
+gagne quatre phrases mesurées à part, hors de sa barre (`FOREIGN_POINTS` : champ de vision
+cumulé depuis deux points WGS84, coût cumulé depuis un point UTM 31N, chemin d'un point WGS84 à
+un point Lambert-93, point UTM 31N vers le fuseau 32). `style_reel` : dix phrases nouvelles,
+quatre mises en forme topographiques, cinq dégradés, une question de champ absent ; barre
+9 / 10.
+
+### Second essai de 11.23 : corrections du générateur
+
+Le premier entraînement de 11.23 (validation 297/300) manque deux barres : `plan_reel` 22/25
+et F03 d'`epic11_reel`. Décision du propriétaire du 2026-11-09 : corriger l'attendu de S05 et
+le générateur, puis un second et dernier entraînement (règle de 11.16), mêmes base, méthode,
+`DEFAULT_COUNT`, `DEFAULT_SEED`, mêmes essais et barres.
+
+- **S05** « Mets les bâtiments en Lambert-93 » : la couche des bâtiments est en 4326 dans
+  l'inventaire de l'épreuve ; l'attendu de `ai/tests/plan_reel.rs` devient `data.reproject`
+  vers 2154 (le refus était périmé depuis 10.7). `tests/epreuve-modele-local/` ne change pas.
+- **S07** (tampon autour de gares déjà en 2154, reprojetées quand même) : nouvelle famille
+  `analyse_couche_metrique` (poids 4, 123 exemples à la graine 1), la même analyse que
+  `reprojection_avant_analyse` (code commun `metric_analysis`) sur une couche en mètres, à
+  côté d'une couche en degrés (`Builder::distract_in_degrees`) : aucun `data.reproject`. Au jeu
+  par défaut, un `data.reproject` ne vise une couche en mètres que si la phrase écrit le
+  système d'arrivée (`reprojection_couche`).
+- **F03** (fuseau UTM inventé sans `utm_epsg`) : `carroyage_utm_projet` passe au poids 4 (116
+  exemples) et à trois recopies pour deux questions ; au jeu par défaut, toutes familles comprises, 57
+  recopies de `utm_epsg` et 32 questions sans lui (au moins la moitié, vérifié par un test).
+- **S21** (« 2 m de hauteur de chaque côté », hauteur de la cible perdue) : `ligne_de_vue`
+  écrit une fois sur quatre une même hauteur pour les deux bouts, qui donne `observer_height`
+  et `target_height`.
+- **ST08** (« à intervalles égaux » perdu) : `style_degrade` écrit la méthode une fois sur deux
+  (une sur trois avant), avec quatorze tournures dont des formes entre virgules ; 45 méthodes
+  au jeu par défaut, dont 10 à intervalles égaux.
+
+`training/tests/recouvrement.rs` reste vert sans changer la graine ; `redemande` garde son poids
+(379 redemandes sur 8 000).
 
 ### Les inventaires de QGIS (5.15)
 

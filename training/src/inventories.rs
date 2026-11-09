@@ -1440,6 +1440,32 @@ const PROJECTS: &[&str] = &[
     "etude-mobilite",
 ];
 
+/// Projets de l'ouest de la France, en UTM 30N (à l'ouest du méridien de Greenwich).
+const PROJECTS_WEST: &[&str] = &[
+    "plu-rennes",
+    "etude-littoral-brest",
+    "atlas-communal-nantes",
+    "zones-humides-quimper",
+];
+
+/// Projets de l'est de la France, en UTM 32N (à l'est du 6e méridien).
+const PROJECTS_EAST: &[&str] = &[
+    "plu-strasbourg",
+    "atlas-communal-colmar",
+    "etude-risques-nice",
+    "trame-verte-mulhouse",
+];
+
+/// Les noms de projet tirés pour le fuseau UTM `utm` du projet (`project.utm_epsg`) : un projet
+/// de l'ouest en 30N, de l'est en 32N, du Val-de-Marne sinon (31N).
+pub fn project_names(utm: u32) -> &'static [&'static str] {
+    match utm {
+        32630 => PROJECTS_WEST,
+        32632 => PROJECTS_EAST,
+        _ => PROJECTS,
+    }
+}
+
 /// Identifiant de couche à la manière de QGIS : préfixe et suffixe aléatoire.
 fn layer_id(rng: &mut Rng, slug: &str) -> String {
     match rng.below(3) {
@@ -1795,6 +1821,22 @@ impl Builder {
         }
     }
 
+    /// Ajoute une couche vecteur de distraction en degrés (EPSG:4326), qu'aucun plan ne cite
+    /// (second essai de 11.23) : une analyse en mètres sur une autre couche, déjà en mètres, ne
+    /// reprojette rien. Rend faux si aucun thème vecteur n'est libre.
+    pub fn distract_in_degrees(&mut self, rng: &mut Rng) -> bool {
+        let before = self.layers.len();
+        self.distract(rng, 1, |t| t.geom != Geom::Raster);
+        match self.layers.get_mut(before) {
+            Some(layer) => {
+                layer.epsg = 4326;
+                self.keep_epsg = true;
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Termine l'inventaire : distractions par défaut, ordre mélangé. Les fichiers non ouverts
     /// sont ceux que la famille a posés (`add_file`), plus le MNT non ouvert qu'`add_dem` pose
     /// parfois : dans QGIS, l'extension ne parcourt pas le disque et `unloaded_files` est vide,
@@ -1812,12 +1854,15 @@ impl Builder {
             self.distract(rng, 1, |t| t.geom == Geom::Raster);
         }
         let mut layers: Vec<Value> = self.layers.iter().map(Layer::to_json).collect();
-        let mut project =
-            json!({"name": rng.pick(PROJECTS), "epsg": self.vector_epsg.unwrap_or(2154)});
         let utm = match self.utm {
             Some(fixed) => fixed,
             None => Some(self.layers_utm()),
         };
+        // Le nom du projet est cohérent avec son fuseau (relecture du fuseau UTM, 2026-11-08) :
+        // un projet de l'ouest en 30N, de l'est en 32N, du Val-de-Marne sinon.
+        let names = utm.map_or(PROJECTS, project_names);
+        let mut project =
+            json!({"name": rng.pick(names), "epsg": self.vector_epsg.unwrap_or(2154)});
         if let Some(code) = utm {
             project["utm_epsg"] = json!(code);
         }

@@ -746,7 +746,16 @@
     "id": "H36",
     "text": "Reprojette les bâtiments en WGS84 et enregistre-les.",
     "expected": {
-      "kind": "refusal"
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "data.reproject",
+          "params": {
+            "layer_id": "batiments_6d1e83b7_2f05_4b9a_8c36_d41a7e902c58",
+            "target_epsg": 4326
+          }
+        }
+      ]
     },
     "family": "reprojection"
   },
