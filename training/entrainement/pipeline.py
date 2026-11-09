@@ -429,6 +429,22 @@ def load_model(base_dir: str):
 FAST_KERNELS = True
 # `--sans-unsloth` : le chargement et l'adaptateur par transformers et peft seuls, comme avant.
 USE_UNSLOTH = True
+# Mémoire de la carte (2026-11-09). Sans segments extensibles, le cache de torch se fragmente
+# sur les exemples longs : son pic passait de 6,4 à 7,5 Gio, la carte de 8 Go débordait en
+# mémoire centrale sous WSL et chaque pas devenait 2,5 fois plus lent. Unsloth les retire sous
+# WSL (une erreur du pilote, d'après lui) : mesurés ici sans erreur, ils sont reposés après son
+# import. `CASSINI_SEGMENTS_EXTENSIBLES=0` les retire, pour comparer.
+EXPANDABLE_SEGMENTS = os.environ.get("CASSINI_SEGMENTS_EXTENSIBLES", "1") == "1"
+
+
+def configure_allocator() -> dict[str, Any]:
+    """Réglages de l'allocateur de torch, posés après l'import d'Unsloth (qui retire
+    `expandable_segments` sous WSL) et avant le chargement du modèle."""
+    import torch
+
+    if EXPANDABLE_SEGMENTS:
+        torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+    return {"segments_extensibles": EXPANDABLE_SEGMENTS}
 
 
 def import_unsloth() -> str:
@@ -510,7 +526,8 @@ def encode(tokenizer, example: data.Example) -> tuple[list[int], int]:
     return prompt + answer, len(answer)
 
 
-def train(base_dir: str, examples: list[data.Example], adapter_dir: Path, max_steps: int | None) -> dict[str, Any]:
+def train(base_dir: str, examples: list[data.Example], adapter_dir: Path, max_steps: int | None,
+          long_first: bool = False) -> dict[str, Any]:
     import torch
     import torch.nn.functional as F
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
@@ -518,6 +535,8 @@ def train(base_dir: str, examples: list[data.Example], adapter_dir: Path, max_st
 
     set_seeds(TORCH_SEED)
     h = HYPERPARAMETERS
+    allocator = configure_allocator()
+    log(f"allocateur : {allocator}")
     tokenizer = AutoTokenizer.from_pretrained(base_dir)
     encoded = [encode(tokenizer, e) for e in examples]
 
@@ -551,6 +570,10 @@ def train(base_dir: str, examples: list[data.Example], adapter_dir: Path, max_st
         indices = list(range(len(encoded)))
         random.Random(TORCH_SEED * 1000 + epoch).shuffle(indices)
         order.extend(indices)
+    if long_first:
+        # Mesure de la mémoire (`--longs-d-abord`) : les exemples les plus longs d'abord, pour
+        # que le pic se voie en quelques pas ; l'ordre d'un vrai entraînement reste tiré au sort.
+        order.sort(key=lambda i: -len(encoded[i][0]))
     total_steps = len(order) // h["accumulation"]
     if max_steps is not None:
         total_steps = min(total_steps, max_steps)
@@ -601,6 +624,7 @@ def train(base_dir: str, examples: list[data.Example], adapter_dir: Path, max_st
         "duree_s": round(time.time() - start),
         "pic_memoire_gpu_octets": torch.cuda.max_memory_reserved(),
         "parametres_entraines": trainable,
+        "allocateur": allocator,
     }
 
 
@@ -968,7 +992,8 @@ def launch(args: argparse.Namespace) -> dict[str, Any]:
                       "llama_cpp_sys_2": LLAMA_CPP_SYS_VERSION},
         "depot_cassini": repository_state(),
         "graines": {"entrainement": TRAINING_SEED, "validation": VALIDATION_SEED, "torch": TORCH_SEED},
-        "hyperparametres": HYPERPARAMETERS | ({"pas_max": args.max_steps} if args.max_steps else {}),
+        "hyperparametres": HYPERPARAMETERS | ({"pas_max": args.max_steps} if args.max_steps else {})
+        | ({"longs_d_abord": True} if args.long_first else {}),
         "gpu": {"nom": gpu_name, "memoire_totale_octets": memory},
         "versions": versions(),
     })
@@ -1054,7 +1079,7 @@ def launch(args: argparse.Namespace) -> dict[str, Any]:
         report["chemin_entrainement"] = training_path()
         report["noyaux"] = install_fast_kernels()
         log(f"noyaux de l'attention linéaire : {report['noyaux']}")
-        result = train(base_dir, training, adapter_dir, args.max_steps)
+        result = train(base_dir, training, adapter_dir, args.max_steps, args.long_first)
         model = result.pop("modele")
         report["entrainement"] = result
         write_report(report_path, report)
@@ -1157,6 +1182,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="borne de pas (essai rapide de la chaîne)")
     parser.add_argument("--validation-pytorch", dest="pytorch_validation", action="store_true",
                         help="score de validation par PyTorch sur l'adaptateur, au lieu de llama.cpp sur le GGUF")
+    parser.add_argument("--longs-d-abord", dest="long_first", action="store_true",
+                        help="mesure de la mémoire : les exemples les plus longs d'abord (avec --pas-max)")
     parser.add_argument("--sans-unsloth", dest="without_unsloth", action="store_true",
                         help="charge et entraîne par transformers et peft seuls, sans Unsloth")
     parser.add_argument("--noyaux-reference", dest="reference_kernels", action="store_true",

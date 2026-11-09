@@ -663,6 +663,27 @@ amorce (chargement, compilation Triton).
   validation, et s'arrête avec la chaîne. Le score porte désormais sur le fichier qui
   s'installe (quantifié), et non plus sur l'adaptateur en nf4.
 
+**Mémoire de la carte (2026-11-09).** L'entraînement complet `regroupe-11-23c` (commit
+`7b382e3`) a tenu 10,5 s par pas jusqu'au pas 180 environ, puis 25 s jusqu'à la fin : le pic
+de torch est passé de 6,37 à 7,49 Gio, la carte affichait 7 999 / 8 192 Mio, et WSL a débordé en
+mémoire centrale. Le cache de torch se fragmentait au fil des exemples longs ; Unsloth retire
+`expandable_segments` sous WSL (il le croit cassé par le pilote). La chaîne le repose après
+l'import d'Unsloth (`configure_allocator`), sans erreur ici ; `CASSINI_SEGMENTS_EXTENSIBLES=0`
+l'enlève, pour comparer, et `rapport.json` le note (`entrainement.allocateur`). Pour voir le
+pic en quelques pas, `--longs-d-abord` (avec `--pas-max`) passe d'abord les exemples les plus
+longs du jeu (jusqu'à 1 768 jetons). Mesures :
+
+| Échantillon | Configuration | s / pas | Perte pas 10 | Perte pas 20 | Pic |
+|---|---|---|---|---|---|
+| longs d'abord, 30 pas | sans segments extensibles (chaîne de `7b382e3`) | 41 | 0,0631 | 0,0365 | 7,58 Gio, carte pleine |
+| longs d'abord, 30 pas | **segments extensibles** | **14,3** | 0,0665 | 0,0351 | **5,85 Gio** |
+| normal, 20 pas | chaîne de `7b382e3` | 10,7 | 0,4818 | 0,2765 | 6,37 Gio |
+| normal, 20 pas | **segments extensibles** | **10,7** | 0,4782 | 0,2747 | **5,67 Gio** |
+
+Les pistes « vider le cache entre les pas » et « borne de longueur » n'ont pas été nécessaires.
+Le lot 2 (accumulation 8) et le coût fixe autour de l'entraînement sont reportés
+(`deferred-work.md`).
+
 Estimation pour un entraînement complet (500 pas), chaîne intégrée : environ 1 h 30
 d'entraînement au lieu de 3 h 30, et 5 min de validation au lieu de 50, soit environ 2 h 40
 pour la commande entière au lieu de 5 h 30 (conversion et quantification inchangées).
