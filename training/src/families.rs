@@ -762,6 +762,26 @@ impl Draft {
 
 fn draft_filter_eq(rng: &mut Rng) -> Option<Draft> {
     let mut b = Builder::new();
+    // Après 11.23 : les zones du PLU d'une catégorie dite en mots (« les zones agricoles du
+    // PLU ») → une sélection sur `typezone`, égal au code ou commençant par lui.
+    if rng.chance(1, 8) {
+        let (_, pl, op, code, values) = *rng.pick(ZONE_CATEGORIES);
+        let forced = *rng.pick(values);
+        let layer = b.add(rng, "zonage", &["zone"], &["libelle"], &[("zone", forced)]);
+        let field = layer.field("zone")?;
+        let t = theme("zonage");
+        let np = match rng.below(3) {
+            0 => format!("les zones {pl} du PLU"),
+            1 => format!("les zones {pl}"),
+            _ => format!("les zones {pl} de {}", t.the_layer),
+        };
+        return Some(Draft {
+            calls: vec![select(&layer.id, &field.name, op, code)],
+            b,
+            noun: &t.noun,
+            np,
+        });
+    }
     let t = pick_theme(rng, &b, |t| ordinary(t) && !text_fields(t).is_empty())?;
     let def = *rng.pick(&text_fields(t));
     let layer = b.add(rng, t.key, &[def.role], &[], &[]);
@@ -1178,7 +1198,8 @@ const ZONE_CATEGORIES: &[(&str, &str, &str, &str, &[&str])] = &[
 fn zone_category(rng: &mut Rng, b: &mut Builder, target: &Noun) -> Option<(String, Value)> {
     let (sg, pl, op, code, values) = *rng.pick(ZONE_CATEGORIES);
     let forced = *rng.pick(values);
-    let layer = b.add(rng, "zonage", &["zone"], &[], &[("zone", forced)]);
+    // Sans `libelle` : sa valeur « Zone agricole » appellerait une sélection sur ce champ.
+    let layer = b.add(rng, "zonage", &["zone"], &["libelle"], &[("zone", forced)]);
     let field = layer.field("zone")?;
     let words = match rng.below(6) {
         0 | 1 => format!("en zone {sg}"),
@@ -1350,8 +1371,8 @@ fn filtered_target(
 fn draft_multi(rng: &mut Rng) -> Option<Draft> {
     let mut b = Builder::new();
     // Essais GPU après 11.23 (étape sautée ou ajoutée) : les plans à deux sélections, puis un
-    // tampon et des intersections (rangs 2 et 4), sont tirés deux fois plus souvent.
-    match rng.below(11) {
+    // tampon et des intersections (rangs 2, 4 et 11), sont tirés deux fois plus souvent.
+    match rng.below(13) {
         // Zone puis distance : select(zone), buffer(réf), intersect(cible, 1), intersect(3, 2).
         0 => {
             let t = pick_theme(rng, &b, |t| {
@@ -1422,6 +1443,26 @@ fn draft_multi(rng: &mut Rng) -> Option<Draft> {
                     buffer(&step(2), &d, false),
                     intersect(&target.id, &step(1)),
                     intersect(&step(4), &step(3)),
+                ],
+                b,
+                noun: &t.noun,
+                np,
+            })
+        }
+        // Cible filtrée près d'une référence filtrée : select(cible), select(réf),
+        // buffer(2), intersect(1, 3) (essais GPU après 11.23).
+        11 | 12 => {
+            let (target, head, sel, sep) = filtered_target(rng, &mut b, ordinary)?;
+            let t = target.theme;
+            let (_, words, sel_ref) = filtered_reference(rng, &mut b)?;
+            let d = dist(rng);
+            let np = format!("{head}{sep}{}", near(rng, &t.noun, &d, &words));
+            Some(Draft {
+                calls: vec![
+                    sel,
+                    sel_ref,
+                    buffer(&step(2), &d, false),
+                    intersect(&step(1), &step(3)),
                 ],
                 b,
                 noun: &t.noun,
@@ -6765,26 +6806,28 @@ mod tests {
                 r.contains("chiffres"),
                 "{r}"
             );
-            // Le fuseau d'arrivée s'écrit « dans le fuseau 32 », « dans la zone 32 », « en UTM
-            // zone 32 » ou « en UTM 32N » (essais GPU après 11.23).
-            if r.contains("fuseau") {
-                assert!(p.get("utm_zone").is_some(), "{r}");
-            }
-            if let Some(z) = p.get("utm_zone").and_then(Value::as_u64) {
-                let low = r.to_lowercase();
-                assert!(
-                    [
-                        format!("fuseau {z}"),
-                        format!("fuseau utm {z}"),
-                        format!("dans la zone {z}"),
-                        format!("en utm zone {z}"),
-                        format!("coordonnées utm zone {z}"),
-                        format!("utm {z}n"),
-                    ]
-                    .iter()
-                    .any(|f| low.contains(f.as_str())),
-                    "{r}"
-                );
+            // Le fuseau d'arrivée s'écrit de six façons (`convert_words`) : « dans le fuseau 32 »,
+            // « dans la zone 32 », « fuseau 32 », « dans le fuseau UTM 32 », « en UTM zone 32 »,
+            // « vers l'UTM 32N » (essais GPU après 11.23). Dans les deux sens : `utm_zone` si et
+            // seulement si une de ces écritures est dans la demande. « UTM zone 31 Nord » est le
+            // système du point de départ, pas un fuseau d'arrivée.
+            let low = r.to_lowercase();
+            let zone_written = |z: u64| {
+                let low = low.replace(&format!("utm zone {z} nord"), "");
+                [
+                    format!("fuseau {z}"),
+                    format!("fuseau utm {z}"),
+                    format!("dans la zone {z}"),
+                    format!("utm zone {z}"),
+                    format!("vers l'utm {z}n"),
+                    format!("coordonnées en utm {z}n"),
+                ]
+                .iter()
+                .any(|f| low.contains(f.as_str()))
+            };
+            match p.get("utm_zone").and_then(Value::as_u64) {
+                Some(z) => assert!(zone_written(z), "{r}"),
+                None => assert!((29..=34).all(|z| !zone_written(z)), "{r}"),
             }
             for key in ["mgrs_precision", "utm_zone"] {
                 if let Some(n) = p.get(key) {
@@ -7432,7 +7475,7 @@ mod tests {
         // Constats H17 à H22 : étapes perdues, mauvais opérateur, mauvaise commande.
         let examples = valid(conditions_multiples, 3000);
         let mut ops = std::collections::BTreeSet::new();
-        let (mut five, mut whole_layer) = (0, 0);
+        let (mut five, mut whole_layer, mut two_filters) = (0, 0, 0);
         for e in &examples {
             let calls = e.expected["calls"].as_array().unwrap();
             let chain: Vec<&Value> = calls
@@ -7480,7 +7523,22 @@ mod tests {
                 five += 1;
                 assert_eq!(chain[3]["params"]["layer_id"], step(1).as_str());
             }
+            // Cible filtrée près d'une référence filtrée (après 11.23) : quatre étapes exactes.
+            if names
+                == [
+                    "analysis.select_by_attribute",
+                    "analysis.select_by_attribute",
+                    "analysis.buffer",
+                    "analysis.intersect",
+                ]
+            {
+                two_filters += 1;
+                assert_eq!(chain[2]["params"]["layer_id"], step(2).as_str());
+                assert_eq!(chain[3]["params"]["layer_id"], step(1).as_str());
+                assert_eq!(chain[3]["params"]["overlay_layer_id"], step(3).as_str());
+            }
         }
+        assert!(two_filters > 0);
         for op in [
             "eq",
             "gt",
@@ -9370,6 +9428,46 @@ mod tests {
             );
             assert_eq!(first["params"]["operator"], *op, "{}", e.request);
             assert_eq!(first["params"]["value"], *code, "{}", e.request);
+            seen.insert(*code);
+        }
+        assert_eq!(seen.len(), ZONE_CATEGORIES.len(), "{seen:?}");
+    }
+
+    #[test]
+    fn the_plu_zones_of_a_category_said_in_words_are_one_selection() {
+        let mut seen = HashSet::new();
+        let zonage = theme("zonage");
+        for e in valid(filtre_egalite, 1500) {
+            let r = e.request.to_lowercase();
+            let id = e.expected["calls"][0]["params"]["layer_id"]
+                .as_str()
+                .unwrap();
+            if !zonage
+                .slugs
+                .iter()
+                .any(|s| id.starts_with(&format!("{s}_")))
+            {
+                continue;
+            }
+            let Some((_, _, op, code, _)) = ZONE_CATEGORIES
+                .iter()
+                .find(|(_, pl, ..)| r.contains(&format!("zones {pl}")))
+            else {
+                continue;
+            };
+            let calls = e.expected["calls"].as_array().unwrap();
+            assert_eq!(calls.len(), 1, "{}", e.request);
+            assert_eq!(calls[0]["params"]["operator"], *op, "{}", e.request);
+            assert_eq!(calls[0]["params"]["value"], *code, "{}", e.request);
+            let layer = layer_of(&e, calls[0]["params"]["layer_id"].as_str().unwrap());
+            let fields = layer["fields"].as_array().unwrap();
+            assert!(
+                fields
+                    .iter()
+                    .all(|f| !["libelle", "libelong"].contains(&f["name"].as_str().unwrap())),
+                "{}",
+                e.request
+            );
             seen.insert(*code);
         }
         assert_eq!(seen.len(), ZONE_CATEGORIES.len(), "{seen:?}");
