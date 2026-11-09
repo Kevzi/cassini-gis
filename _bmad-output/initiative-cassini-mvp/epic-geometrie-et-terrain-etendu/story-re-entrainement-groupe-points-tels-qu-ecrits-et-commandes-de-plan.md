@@ -85,6 +85,15 @@ context:
   - Vérifié (Windows) : `cargo test -p cassini-training --release` (101 + 3 + 1 + 5 verts), `cargo test -p cassini-ai` sans modèle (vert), `cargo clippy -p cassini-ai -p cassini-training --all-targets -- -D warnings` propre, `cargo fmt --check` propre.
   - Restent de la partie A : relecture `quick` et commit sur la branche.
 
+- Partie B (nuit du 8 au 9 novembre 2026) : entraînement lancé à 00 h 23 depuis le worktree `~/cassini-worktrees/11-23` (commit `7599eff`), terminé à 06 h 29 (367 min) ; sortie `~/cassini-entrainement/regroupe-11-23/`, modèle copié dans `C:\Users\kevin\cassini-modeles\ajuste-11-23\`, **non installé**. Validation : 297/300 (terrain-11-18b : 292/300).
+- Essais GPU (`--features cuda`, journal `~/cassini-entrainement/11-23-mesures/essais-gpu.log`) : `plan_reel` 22/25 (barre 23), `question_reel` 12/12, `ecart_reel` 32/40, `echelle_utm_reel` 8/8, `terrain_reel` 8/8, `epic11_reel` 28/28 mais F03 en échec (barre « carroyage sans système → question »), points d'un autre système 4/4 (hors barre), `style_reel` 9/10 (ST08 raté).
+- Lecture des échecs :
+  - S05 « Mets les bâtiments en Lambert-93 » : le modèle répond `data.reproject` ; la couche des bâtiments est en 4326 dans l'inventaire de l'épreuve, la réponse est juste et l'attendu (refus) est périmé depuis 10.7. Corriger l'attendu ferait 23/25.
+  - S07 « zone tampon de 300 m autour des gares » : le modèle ajoute un `data.reproject` vers 2154 alors que les gares sont déjà en 2154 — erreur réelle, la famille `reprojection_avant_analyse` est trop généralisée.
+  - F03 « carroyage UTM au kilomètre » sans `utm_epsg` dans l'inventaire : le modèle invente EPSG:32620 au lieu de poser la question — erreur réelle (65 recopies contre 11 questions dans le jeu).
+  - S21 (ligne de vue en Lambert-93) et ST08 (dégradé à intervalles égaux en bleus) : écarts de paramètres, à lire de près.
+- Barres non tenues (`plan_reel` 22 < 23 tant que l'attendu de S05 n'est pas corrigé ; F03) : le modèle n'est pas proposé à l'installation. Le second essai (au plus un) n'est pas lancé : il prend la carte graphique environ 6 h et attend la décision du propriétaire (règle de 11.16). Pistes : attendu de S05 ; exemples où une couche déjà métrique n'est jamais reprojetée ; plus de questions quand l'inventaire n'a pas de `utm_epsg`.
+
 ## Plan Change Log
 
 ## Review Triage Log
