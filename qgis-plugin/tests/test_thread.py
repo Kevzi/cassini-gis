@@ -903,7 +903,17 @@ class ReplayBusyTest(unittest.TestCase):
         self.assertEqual(button(v)["reason"], "input_reason_running")
 
     def test_not_ready_greys_without_reason(self):
-        # Hors état prêt (lecture seule comprise aujourd'hui), le bandeau dit pourquoi.
+        # Hors état prêt (noyau absent, planté, refusé), le bandeau dit pourquoi.
+        self.assertEqual(button(ready=False), {"enabled": False, "reason": None})
+
+    def test_read_only_session_keeps_the_replay_with_a_ready_core(self):
+        # Seconde fenêtre QGIS : le noyau est prêt (lecture seule comprise), le rejeu, seul
+        # geste sans écriture, reste actif (AD-11) ; sans noyau prêt, jamais.
+        self.assertEqual(button(ready=True), {"enabled": True, "reason": None})
+        self.assertEqual(button(ready=True, has_journal=False)["reason"], "replay_reason_empty")
+        running = thread.replay_started()
+        self.assertEqual(button(ready=True, replay=running),
+                         {"enabled": False, "reason": "replay_reason_running"})
         self.assertEqual(button(ready=False), {"enabled": False, "reason": None})
 
     def test_at_rest_enabled(self):
@@ -922,6 +932,67 @@ class ReplayGuidanceTest(unittest.TestCase):
         shown = thread.shown_guidance(g, False)
         self.assertEqual(shown["cue"], "act_rephrase")
         self.assertTrue(shown["rephrase_enabled"])
+
+
+class ReadOnlyTest(unittest.TestCase):
+    """Session en lecture seule (AD-11) : tout grisé avec sa raison, sauf le rejeu."""
+
+    def test_input_send_and_plan_greyed_with_the_read_only_reason(self):
+        c = av.controls(av.AgentView(), False, False, True, [], read_only=True)
+        self.assertFalse(c["input_enabled"])
+        self.assertFalse(c["send_enabled"])
+        self.assertTrue(c["expert_enabled"])  # le repli s'ouvre, pour lire la raison de Lancer
+        self.assertEqual(c["input_reason"], "read_only_reason")
+        self.assertIsNone(thread.primary(c))  # aucun bouton principal
+        hint = thread.input_hint(av.AgentView(), c["input_reason"], False, None, "fr")
+        self.assertEqual(
+            hint, "Session en lecture seule : seul « Rejouer le journal » est possible ici."
+        )
+        self.assertEqual(thread.input_hint(av.AgentView(), c["input_reason"], False, None, "en"),
+                         "Read-only session: only \u201cReplay the log\u201d is possible here.")
+
+    def test_read_only_wins_even_if_ready_is_passed(self):
+        c = av.controls(av.AgentView(), True, False, True, [], read_only=True)
+        self.assertFalse(c["send_enabled"])
+        self.assertEqual(c["input_reason"], "read_only_reason")
+
+    def test_other_controls_name_the_read_only_reason(self):
+        c = av.controls(av.AgentView(), False, False, True, [], read_only=True)
+        for key in ("run_reason", "model_reason", "external_reason"):
+            self.assertEqual(c[key], "read_only_reason", key)
+        # Lancer grisé : la logique de Lancer n'a pas d'état prêt en lecture seule.
+        self.assertFalse(runlog.controls(False, True, False, False)["run_enabled"])
+        # Pas de noyau prêt, pas de lecture seule : ni repli, ni raison propre.
+        c = av.controls(av.AgentView(), False, False, True, [])
+        self.assertFalse(c["expert_enabled"])
+        for key in ("run_reason", "model_reason", "external_reason"):
+            self.assertIsNone(c[key], key)
+        # Un plan en cours ferme le repli, même en lecture seule.
+        v = av.AgentView()
+        v.generating()
+        self.assertFalse(av.controls(v, False, False, True, [], read_only=True)["expert_enabled"])
+
+    def test_no_cue_and_no_rephrase_in_read_only(self):
+        g = {"card": thread.RESULT, "cue": "act_rephrase", "values": {}, "rephrase": True}
+        shown = thread.shown_guidance(g, False, True)
+        self.assertIsNone(shown["cue"])
+        self.assertFalse(shown["rephrase_enabled"])
+
+    def test_banner_text_of_the_spine(self):
+        self.assertEqual(
+            texts.tr("fr", "read_only"),
+            "Ce projet est ouvert dans une autre fenêtre QGIS. Ici, vous pouvez seulement rejouer.",
+        )
+        self.assertEqual(texts.tr("en", "read_only"),
+                         "This project is open in another QGIS window. Here you can only replay.")
+
+    def test_normal_session_unchanged(self):
+        c = av.controls(av.AgentView(), True, False, True, [])
+        self.assertTrue(c["send_enabled"])
+        self.assertTrue(c["expert_enabled"])
+        self.assertIsNone(c["input_reason"])
+        self.assertIsNone(c["run_reason"])
+        self.assertEqual(button(), {"enabled": True, "reason": None})
 
 
 class ReplayRefusedAndStaleTest(unittest.TestCase):

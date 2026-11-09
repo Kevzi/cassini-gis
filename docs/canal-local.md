@@ -32,8 +32,11 @@ Réponse d'une seconde session, quand le journal du projet est déjà tenu :
 - `read_only` est toujours présent (ticket 5.32). Il vaut `true` quand le journal du projet
   est déjà tenu par une autre session (une seconde fenêtre QGIS sur le même projet). La
   réponse porte alors aussi `message`, le texte même de l'erreur `journal.read_only`.
-  L'extension ne se dit pas prête : elle arrête le noyau et le panneau affiche ce message
-  tel quel. Le champ est un ajout compatible, le protocole reste à la version 2.
+  L'extension garde le noyau lancé : la session est prête en lecture seule, et seul
+  `journal.replay`, qui n'écrit pas au journal, part encore (AD-11) ; le panneau le dit
+  dans son bandeau, grise le reste et propose « Relancer », qui rouvre une session
+  écrivante une fois le journal lâché par l'autre fenêtre. Le champ est un ajout compatible, le protocole reste
+  à la version 2.
 - `history` est toujours présent : les 200 dernières étapes du journal du projet
   (`HISTORY_LIMIT`, `core/src/serve.rs`), dans l'ordre, chacune réduite à `step`, `command`,
   `params`, son issue (`result`, `error` — le code seul — ou `cancelled`) et, s'il y a lieu,

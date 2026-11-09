@@ -127,6 +127,9 @@ BANNERS = {
     "not_found": ("not_found", "choose"),
     "died": ("died", "relaunch"),
     "refused": ("refused", "choose"),  # pas de Relancer : même noyau, même refus
+    # Seconde fenêtre QGIS sur le même projet : noyau vivant, seul le rejeu reste (AD-11).
+    # Relancer : la session reprend l'écriture quand la première fenêtre a lâché le journal.
+    "read_only": ("read_only", "relaunch"),
 }
 
 
@@ -848,8 +851,8 @@ class CassiniPanel(QWidget):
         """`kind` : clé de BANNERS, ou None quand le noyau est prêt.
 
         `message` : texte du noyau affiché tel quel à la place du texte du
-        bandeau (refus de version, session en lecture seule) ; repli sur le
-        texte du bandeau quand il est absent ou vide.
+        bandeau (refus de version) ; repli sur le texte du bandeau quand il est
+        absent ou vide. La lecture seule passe par `set_ready`, avec le texte de la spine.
         """
         self.banner = kind
         self.banner_message = message if isinstance(message, str) and message else None
@@ -882,10 +885,17 @@ class CassiniPanel(QWidget):
         if plan_in_flight and last and last.get("plan") and last["kind"] == runlog.RUNNING:
             self.last = None  # plus d'« En cours… » d'une étape qui n'existe plus
 
-    def set_ready(self, catalogue, history=()):
+    @property
+    def read_only(self):
+        """Session en lecture seule : noyau prêt, bandeau de lecture seule (AD-11)."""
+        return bool(self.ready and self.banner == "read_only")
+
+    def set_ready(self, catalogue, history=(), read_only=False):
+        """Noyau prêt. `read_only` : le journal est tenu par une autre session ; le bandeau
+        le dit et seul « Rejouer le journal » reste actif (EXPERIENCE.md, AD-11)."""
         self._drop_stale_run()
         self.ready = True
-        self.banner = None
+        self.banner = "read_only" if read_only else None
         self.banner_message = None
         self.replay = None  # noyau (re)lancé : l'issue d'un rejeu précédent ne vaut plus
         self.catalogue = list(catalogue)
@@ -911,7 +921,10 @@ class CassiniPanel(QWidget):
             )
         self.selected = None
         self.render()
-        _announce(self.title, self.t("live_ready"))
+        if read_only:
+            _announce(self.banner_text, self._banner_text(self.t))
+        else:
+            _announce(self.title, self.t("live_ready"))
 
     def _close_plan_entry(self, status, step=None):
         """Ferme la ligne de l'étape en cours ; si le verdict nomme une autre étape
@@ -1151,7 +1164,8 @@ class CassiniPanel(QWidget):
 
         self.expert.button.setText(t("expert_title"))
         self.expert.button.setAccessibleName(t("expert_title"))
-        self.expert.setEnabled(usable and self.agent.phase == agentview.IDLE)
+        # En lecture seule, le repli s'ouvre pour dire pourquoi Lancer est grisé.
+        self.expert.setEnabled(self._controls()["expert_enabled"])
         self.footer.setText(t("offline"))
         self._render_commands()
         self._render_buttons()
@@ -1255,7 +1269,9 @@ class CassiniPanel(QWidget):
 
     def _style_primary(self, c):
         """Un seul bouton principal visible (DESIGN.md, `button-primary`)."""
-        shown = thread.shown_guidance(self._guide(), thread.replay_running(self.replay))
+        shown = thread.shown_guidance(
+            self._guide(), thread.replay_running(self.replay), self.read_only
+        )
         which = thread.primary(c, shown["rephrase_enabled"])
         if which == self._primary_shown or self._styles is None:
             return
@@ -1393,7 +1409,9 @@ class CassiniPanel(QWidget):
         """Ligne « À vous », Reformuler et repère d'avancement [12.2] (`thread.guidance`)."""
         t = self.t
         # Pendant un rejeu : pas de « À vous », Reformuler grisé [12.3].
-        guide = thread.shown_guidance(self._guide(), thread.replay_running(self.replay))
+        guide = thread.shown_guidance(
+            self._guide(), thread.replay_running(self.replay), self.read_only
+        )
         text = thread.cue_text(guide, self.lang)
         where = {
             thread.PLAN: (self.plan_cue, None),
@@ -1487,7 +1505,7 @@ class CassiniPanel(QWidget):
     def _replay_controls(self):
         return thread.replay_button(
             self.agent,
-            self.ready and self.banner is None,
+            self.ready,  # noyau prêt, lecture seule comprise : le rejeu y reste (AD-11)
             bool(self.log.entries),
             self.running,
             external.busy(self.external),
@@ -1659,6 +1677,7 @@ class CassiniPanel(QWidget):
             bool(self.input.toPlainText().strip()),
             self.catalogue,
             external.busy(self.external),
+            self.read_only,
         )
 
     def _render_agent(self):
@@ -1794,7 +1813,10 @@ class CassiniPanel(QWidget):
         self.stop_button.setVisible(c["stop_visible"])
         self.stop_button.setEnabled(c["stop_enabled"])
         reason = ""
-        if self.running and c["stop_reason"]:
+        locked = self._controls()["run_reason"]
+        if locked:
+            reason = self.t(locked)
+        elif self.running and c["stop_reason"]:
             reason = self.t(c["stop_reason"])
         elif self.running:
             reason = self.t("busy")
@@ -1895,7 +1917,7 @@ class CassiniPanel(QWidget):
         self._fit_folds()
 
     def _run(self):
-        if self.selected is None or self._busy():
+        if self.selected is None or self._busy() or not (self.ready and self.banner is None):
             return
         try:
             params = form.build_params(self._fields, self._values())
@@ -1936,6 +1958,7 @@ class CassiniPanel(QWidget):
             bool(text),
             self.catalogue,
             external.busy(self.external),
+            self.read_only,
         )
         if not c["send_enabled"]:
             return
@@ -1987,6 +2010,9 @@ class CassiniPanel(QWidget):
             self._fill_models()
             self._models_shown = shown
         reason = models.reason(self.lang, self.models, self.models_error)
+        locked = self._controls()["model_reason"]
+        if locked:
+            reason = self.t(locked)
         usable = self.ready and self.banner is None
         self.model_box.setEnabled(
             usable and reason is None and bool(models.usable(self.models or []))
@@ -2033,7 +2059,10 @@ class CassiniPanel(QWidget):
         self.external_ask.setText(t("external_ask"))
         self.external_ask.setAccessibleName(t("external_ask"))
         self.external_ask.setChecked(c["ask_checked"])
-        if c["switch_reason"]:
+        locked = self._controls()["external_reason"]
+        if locked:
+            reason = t(locked)
+        elif c["switch_reason"]:
             reason = t(c["switch_reason"])
         elif c["switch_error"]:
             code, message = c["switch_error"]

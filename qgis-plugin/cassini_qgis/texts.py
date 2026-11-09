@@ -54,6 +54,9 @@ _FR = {
     "choose_core": "Choisir le noyau",
     "choose_core_title": "Choisir le noyau Cassini",
     "relaunch": "Relancer",
+    # Session en lecture seule : seconde fenêtre QGIS sur le même projet (AD-11).
+    "read_only": "Ce projet est ouvert dans une autre fenêtre QGIS. Ici, vous pouvez seulement rejouer.",
+    "read_only_reason": "Session en lecture seule : seul « Rejouer le journal » est possible ici.",
     "busy": "Une commande est déjà en cours. Attendez sa fin ou arrêtez-la.",
     "unavailable": "Indisponible : {reason}",
     "unavailable_reason": "cette commande a besoin d'un geste QGIS que cette extension n'annonce pas.",
@@ -342,6 +345,8 @@ _EN = {
     "choose_core": "Choose the core",
     "choose_core_title": "Choose the Cassini core",
     "relaunch": "Restart",
+    "read_only": "This project is open in another QGIS window. Here you can only replay.",
+    "read_only_reason": "Read-only session: only “Replay the log” is possible here.",
     "busy": "A command is already running. Wait for it to finish or stop it.",
     "unavailable": "Unavailable: {reason}",
     "unavailable_reason": "this command needs a QGIS gesture that this extension does not announce.",

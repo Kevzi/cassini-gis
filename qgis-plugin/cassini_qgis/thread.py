@@ -499,12 +499,14 @@ def _names_step(message, step):
     return bool(re.search(r"(?i)\b(?:étape|step)\s+%d\b" % step, message or ""))
 
 
-def shown_guidance(guide, replaying):
-    """Guidage tel qu'affiché : pendant un rejeu, pas de ligne « À vous » et Reformuler
-    grisé (la saisie l'est aussi). La cible du focus garde le guidage brut."""
+def shown_guidance(guide, replaying, read_only=False):
+    """Guidage tel qu'affiché : pendant un rejeu, et en session en lecture seule, pas de
+    ligne « À vous » et Reformuler grisé (la saisie l'est aussi). La cible du focus garde
+    le guidage brut."""
     out = dict(guide)
-    out["rephrase_enabled"] = bool(guide.get("rephrase")) and not replaying
-    if replaying:
+    quiet = replaying or read_only
+    out["rephrase_enabled"] = bool(guide.get("rephrase")) and not quiet
+    if quiet:
         out["cue"] = None
     return out
 
@@ -582,7 +584,8 @@ def replay_button(view, ready, has_journal, other_busy=False, external_busy=Fals
 
     Grisé hors état prêt (le bandeau dit pourquoi), pendant le rejeu, pendant une
     composition, un plan proposé ou en exécution, une commande experte, un appel de l'IA
-    externe, et quand le journal est vide, chaque fois avec sa raison.
+    externe, et quand le journal est vide, chaque fois avec sa raison. `ready` : noyau prêt,
+    session en lecture seule comprise ; le rejeu est le seul geste qui y reste (AD-11).
     """
     if replay_running(replay):
         return {"enabled": False, "reason": "replay_reason_running"}
