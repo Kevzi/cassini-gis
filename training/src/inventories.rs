@@ -1486,6 +1486,12 @@ fn extension(rng: &mut Rng, geom: Geom) -> &'static str {
     if geom == Geom::Raster {
         return "tif";
     }
+    // Une couche ponctuelle vient parfois d'un CSV à coordonnées (recette d'Annecy du
+    // 2026-11-09 : gares en `.csv`), en degrés comme en mètres : l'extension ne dit pas le
+    // système.
+    if geom == Geom::Point && rng.chance(1, 8) {
+        return "csv";
+    }
     const EXTENSIONS: [&str; 6] = ["gpkg", "gpkg", "shp", "geojson", "gpkg", "parquet"];
     EXTENSIONS[rng.below(EXTENSIONS.len())]
 }
@@ -1521,6 +1527,11 @@ pub struct Builder {
     /// (le carroyage UTM sans fuseau écrit) : `Some(Some(code))` présent, `Some(None)` absent.
     /// `None` : tiré à la fin, et parfois retiré comme l'`epsg`.
     utm: Option<Option<u32>>,
+    /// Système du projet quand il diffère de celui des couches vecteur : un projet en mètres
+    /// (Lambert-93 ou UTM) dont toutes les couches sont en degrés. `None` : celui des couches.
+    project_epsg: Option<u32>,
+    /// Couches de distraction de plus à la fin (inventaires longs, comme celui d'Annecy).
+    extra_distractors: usize,
 }
 
 impl Builder {
@@ -1556,6 +1567,9 @@ impl Builder {
     /// (Val-de-Marne, `PROJECTS`). Aucun tirage : la suite des autres familles ne bouge pas.
     fn layers_utm(&self) -> u32 {
         let utm = |e: u32| (32601..=32660).contains(&e);
+        if let Some(e) = self.project_epsg.filter(|&e| utm(e)) {
+            return e;
+        }
         if let Some(e) = self.vector_epsg.filter(|&e| utm(e)) {
             return e;
         }
@@ -1583,6 +1597,35 @@ impl Builder {
         });
         self.utm = Some(code);
         code
+    }
+
+    /// Pose le système du projet, distinct de celui des couches vecteur : un projet en mètres
+    /// dont toutes les couches sont en degrés (aucun projet réel n'est en EPSG:4326). L'`epsg`
+    /// du projet reste à l'inventaire rendu.
+    pub fn project_system(&mut self, epsg: u32) {
+        self.project_epsg = Some(epsg);
+        self.keep_epsg = true;
+    }
+
+    /// Ajoute `n` couches de distraction à celles que `finish` tire : un inventaire long, d'une
+    /// dizaine de couches, comme celui d'un vrai projet (Annecy).
+    pub fn long_inventory(&mut self, n: usize) {
+        self.extra_distractors = n;
+    }
+
+    /// Donne à une couche ponctuelle une source `.csv` (CSV à coordonnées). Rend faux, sans rien
+    /// changer, pour une autre géométrie.
+    pub fn as_csv(&mut self, id: &str) -> bool {
+        for layer in &mut self.layers {
+            if layer.id == id && layer.theme.geom == Geom::Point {
+                if let Some(dot) = layer.source.rfind('.') {
+                    layer.source.truncate(dot);
+                }
+                layer.source.push_str(".csv");
+                return true;
+            }
+        }
+        false
     }
 
     /// Change le système d'une couche déjà tirée (une couche en degrés, 10.7).
@@ -1827,14 +1870,17 @@ impl Builder {
     pub fn distract_in_degrees(&mut self, rng: &mut Rng) -> bool {
         let before = self.layers.len();
         self.distract(rng, 1, |t| t.geom != Geom::Raster);
-        match self.layers.get_mut(before) {
-            Some(layer) => {
-                layer.epsg = 4326;
-                self.keep_epsg = true;
-                true
-            }
-            None => false,
+        let Some(layer) = self.layers.get(before) else {
+            return false;
+        };
+        let id = layer.id.clone();
+        self.set_epsg(&id, 4326);
+        self.keep_epsg = true;
+        // Une couche ponctuelle en degrés vient souvent d'un CSV à coordonnées (Annecy).
+        if rng.chance(1, 3) {
+            self.as_csv(&id);
         }
+        true
     }
 
     /// Termine l'inventaire : distractions par défaut, ordre mélangé. Les fichiers non ouverts
@@ -1848,7 +1894,7 @@ impl Builder {
     /// sans géométrie (`geometry: null` sur un vecteur), projet non enregistré (sans `name`),
     /// projet sans fuseau UTM (`utm_epsg`, emprise illisible).
     pub fn finish(mut self, rng: &mut Rng) -> Value {
-        let n = rng.range(1, 4) as usize;
+        let n = rng.range(1, 4) as usize + self.extra_distractors;
         self.distract(rng, n, |t| t.geom != Geom::Raster);
         if rng.chance(1, 4) {
             self.distract(rng, 1, |t| t.geom == Geom::Raster);
@@ -1861,8 +1907,7 @@ impl Builder {
         // Le nom du projet est cohérent avec son fuseau (relecture du fuseau UTM, 2026-11-08) :
         // un projet de l'ouest en 30N, de l'est en 32N, du Val-de-Marne sinon.
         let names = utm.map_or(PROJECTS, project_names);
-        let mut project =
-            json!({"name": rng.pick(names), "epsg": self.vector_epsg.unwrap_or(2154)});
+        let mut project = json!({"name": rng.pick(names), "epsg": self.project_epsg.or(self.vector_epsg).unwrap_or(2154)});
         if let Some(code) = utm {
             project["utm_epsg"] = json!(code);
         }

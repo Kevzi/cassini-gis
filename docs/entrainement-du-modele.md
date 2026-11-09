@@ -77,7 +77,7 @@ standards publics et ne sont tirées d'aucun fichier réel.
 
 | Famille | Ce qu'elle enseigne |
 |---|---|
-| `filtre_egalite` | « les gares de la ligne D », « les routes nationales » → sélection par attribut |
+| `filtre_egalite` | « les gares de la ligne D », « les routes nationales » → sélection par attribut ; depuis après 11.23, une fois sur huit, les zones du PLU d'une catégorie dite en mots (« les zones agricoles du PLU ») → une sélection sur `typezone`, `eq` `A` ou `U`, `begins_with` `N` ou `AU`, la couche sans champ de libellé |
 | `garde_seulement` | « garde seulement », « ne garde que », « conserve uniquement » → une sélection, jamais une suppression |
 | `filtre_numerique` | « bâtiments de plus de 12 m de haut », « communes de moins de 12 500 habitants » → `gt`, `lt`, `gte`, `lte` |
 | `filtre_texte` | « dont le nom contient », « commence par » → `contains`, `begins_with` |
@@ -88,7 +88,7 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `distance_reference_filtree` | distance à une référence filtrée (« des gares de la ligne D ») |
 | `dans_une_zone` | « en zone N », « en zone inondable d'aléa fort » → sélection de la zone, puis intersection |
 | `intersection` | « situés dans une zone humide », « croise la couche A avec la couche B » |
-| `conditions_multiples` | zone et distance, cible filtrée et distance, deux distances, inclusion dans une couche entière : intersections successives |
+| `conditions_multiples` | zone et distance, cible filtrée et distance, deux distances, inclusion dans une couche entière : intersections successives ; depuis après 11.23, la cible filtrée près d'une référence filtrée (`select` de la cible, `select` de la référence, tampon sur `step:2`, intersection de `step:1` avec `step:3`), et les plans à deux sélections tirés deux fois plus souvent |
 | `constructible` | vocabulaire d'urbanisme : « parcelles constructibles », avec ou sans distance et PDF |
 | `export_pdf` | « sors-moi la carte en PDF », titre donné par l'utilisateur ou déduit de la demande |
 | `export_pdf_scale` | « exporte la carte en PDF au 1:25 000 » → `scale: 25000`, l'entier écrit ; échelles courantes de 1:1 000 à 1:250 000, écrites « au 1:25 000 », « au 1/25000 », « au 25 000e », « au 1:25k » (multiple de 1 000 seulement) ou « à l'échelle 1/25 000 » ; la carte seule ou au bout d'une recherche (5.38) ; depuis 5.40, aussi sans le mot « PDF » (« imprime la carte au 1/50000 », « sors-moi la carte au 25 000e »), un export et jamais un refus de format |
@@ -111,11 +111,11 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `appartenance_commune` | « qui appartiennent à la commune de X », « sur le territoire de X » → sélection de la commune par son nom, puis intersection ; sans couche de communes, ou sans nom de commune, une question. Une commune citée seule (« à Orly ») reste un contexte sans effet |
 | `question_isochrone` | isochrone ou cible à une durée de trajet d'un lieu nommé (« depuis la mairie de X », « les parcelles à 10 min à pied de la gare de X »), sans coordonnées → question qui demande le point en X et Y avec son système ; « d'une gare » → question qui demande laquelle |
 | `etape_unique` | une seule opération demandée, une autre couche citée pour le contexte (« je m'occuperai des écoles plus tard ») → une étape |
-| `conversion_coordonnees` | « donne la référence MGRS du point 48,8566 N, 2,3522 E (WGS84) », « convertis 31U DQ 52000 12000 en latitude et longitude » → `coord.convert` entre WGS84, UTM et MGRS, une ou deux formes demandées ; `mgrs_precision` (« à 3 chiffres ») et `utm_zone` (« dans le fuseau 32 ») seulement s'ils sont écrits ; un point en Lambert-93 vers l'UTM ou le MGRS → `data.transform_point` vers 4326, puis `coord.convert` sur `step:1.point` (11.12) ; depuis 11.23, un point UTM vers le fuseau voisin (« … (UTM 31N) en UTM dans le fuseau 32 ») → `coord.convert` vers `utm`, `utm_zone` écrit (report de 11.16) |
+| `conversion_coordonnees` | « donne la référence MGRS du point 48,8566 N, 2,3522 E (WGS84) », « convertis 31U DQ 52000 12000 en latitude et longitude » → `coord.convert` entre WGS84, UTM et MGRS, une ou deux formes demandées ; `mgrs_precision` (« à 3 chiffres ») et `utm_zone` (« dans le fuseau 32 ») seulement s'ils sont écrits ; un point en Lambert-93 vers l'UTM ou le MGRS → `data.transform_point` vers 4326, puis `coord.convert` sur `step:1.point` (11.12) ; depuis 11.23, un point UTM vers le fuseau voisin (« … (UTM 31N) en UTM dans le fuseau 32 ») → `coord.convert` vers `utm`, `utm_zone` écrit (report de 11.16) ; depuis après 11.23, ce passage une fois sur deux pour un point UTM (une sur quatre avant), et le fuseau d'arrivée écrit de six façons : « dans le fuseau 32 », « dans la zone 32 », « fuseau 32 », « dans le fuseau UTM 32 », « en UTM zone 32 », « vers l'UTM 32N » |
 | `reprojection_point` | « reprojette le point … (Lambert-93) en WGS84 », « donne les coordonnées du point … (UTM 31N) en Lambert-93 », « … en Web Mercator (EPSG:3857) » → une étape `data.transform_point`, le système d'arrivée écrit (11.12) |
 | `reprojection_couche` | « reprojette la couche « Gares » en Lambert-93 », « convertis les écoles en WGS84 », « passe la couche des parcelles en UTM 32N » → une étape `data.reproject`, le système d'arrivée écrit ; la couche est tirée dans un autre système que la cible. Remplace le refus « aucune commande ne reprojette une couche » (10.7) |
-| `reprojection_avant_analyse` | tampon ou recherche à distance (« les écoles à moins de 500 m des gares ») sur une couche en degrés (`epsg: 4326` dans l'inventaire), sans que la demande parle de reprojection → `data.reproject` de cette couche, puis l'analyse sur `step:1.layer_id` (les étapes suivantes décalées d'un rang) ; cible : le système des autres couches vecteur en mètres de l'inventaire (Lambert-93, UTM 31N ou 32N), EPSG:2154 quand toutes sont en degrés ; l'`epsg` des couches n'est jamais effacé de ces inventaires (10.7) |
-| `analyse_couche_metrique` | la même analyse (tampon ou recherche à distance) sur une couche déjà en mètres (Lambert-93, UTM 31N ou 32N), dans un inventaire qui porte aussi une couche vecteur en degrés qu'aucun plan ne cite → l'analyse seule, jamais un `data.reproject` (second essai de 11.23, constat S07) |
+| `reprojection_avant_analyse` | tampon ou recherche à distance (« les écoles à moins de 500 m des gares ») sur une couche en degrés (`epsg: 4326` dans l'inventaire), sans que la demande parle de reprojection → `data.reproject` de cette couche, puis l'analyse sur `step:1.layer_id` (les étapes suivantes décalées d'un rang) ; cible : le système des autres couches vecteur en mètres de l'inventaire (Lambert-93, UTM 31N ou 32N), le système du projet, en mètres, quand toutes sont en degrés (depuis le ré-entraînement après 11.23 ; 2154 avant) ; l'`epsg` des couches n'est jamais effacé de ces inventaires (10.7) ; depuis après 11.23 (recette d'Annecy), poids 6 : une seconde couche en degrés, non citée et jamais reprojetée, deux fois sur trois ; la couche analysée en `.csv` une fois sur deux si elle est ponctuelle ; un inventaire long (quatre à six couches de plus) une fois sur deux ; quand toutes les couches sont en degrés, le projet est en 2154, 31N ou 32N et la cible est ce système |
+| `analyse_couche_metrique` | la même analyse (tampon ou recherche à distance) sur une couche déjà en mètres (Lambert-93, UTM 31N ou 32N), dans un inventaire qui porte aussi une couche vecteur en degrés qu'aucun plan ne cite → l'analyse seule, jamais un `data.reproject` (second essai de 11.23, constat S07) ; depuis après 11.23, la couche analysée en `.csv` une fois sur quatre, la couche en degrés en `.csv` une fois sur trois si elle est ponctuelle, un inventaire long (quatre à six couches de plus) une fois sur trois |
 | `conversion_format` | « exporte les gares en shapefile », « convertis la couche « Écoles » en GeoPackage », « enregistre les parcelles au format GeoJSON » → une étape `data.convert`, `format` tel qu'écrit (`gpkg` : « GeoPackage », « gpkg » ; `shp` : « shapefile », « shp » ; `geojson` : « GeoJSON »), jamais un système de coordonnées dans la demande ; `out` n'est jamais écrit (le noyau le fournit). Remplace le refus « aucune commande n'exporte une couche vers un fichier » ; un tableur (Excel, CSV) reste un refus (10.9) |
 | `distance_azimut` | « quelle distance sépare le point … du point … », « distance et azimut entre les points … et … (UTM 31N) » → `geo.distance_azimuth` ; `unit` seulement si elle est écrite (`gon` : « en grades », `deg` : « en degrés ») ; deux points en Lambert-93 → deux `data.transform_point` vers 4326, puis le calcul sur `step:1.point` et `step:2.point` ; système écrit à chaque point ou une fois pour les deux (11.12) |
 | `point_projete` | « quel point atteint-on à 3 km du point …, azimut 45° » → `geo.destination_point`, l'azimut toujours avec son unité (« 45° », « 45 degrés » → `deg` ; « 50 gr », « 50 grades » → `gon`) et la distance tels qu'écrits ; « résultat en MGRS » → `coord.convert` sur `step:1.point` (11.12) |
@@ -427,6 +427,67 @@ le générateur, puis un second et dernier entraînement (règle de 11.16), mêm
 
 `training/tests/recouvrement.rs` reste vert sans changer la graine ; `redemande` garde son poids
 (379 redemandes sur 8 000).
+
+### Ré-entraînement après 11.23 : reprojection avant analyse, conversion, refus manqués
+
+Le modèle `ajuste-11-23c` rate encore des demandes réelles : à la recette QGIS du 2026-11-09 sur
+Annecy (projet en 2154, huit couches en 2154, parcelles en GeoJSON et gares en CSV en 4326), une
+zone tampon autour des gares part sans `data.reproject` ; il ne connaît pas `data.convert` ; aux
+essais GPU, il manque des refus, perd un dégradé nommé, écrit mal une zone UTM d'arrivée, pose une
+question sur une zone du PLU dite en mots, et saute ou ajoute une étape dans les plans à deux
+sélections. Chaque correction est une famille ou un poids, jamais une phrase ; mêmes base,
+méthode, `DEFAULT_COUNT` et `DEFAULT_SEED`.
+
+- **Inventaires** (`inventories.rs`). Une couche ponctuelle a une source `.csv` une fois sur huit,
+  en degrés comme en mètres (`extension`) ; `Builder::as_csv`, `Builder::long_inventory`
+  (couches de distraction de plus, inventaires d'une dizaine de couches) et
+  `Builder::project_system` (projet en mètres dont toutes les couches sont en degrés : aucun
+  projet réel n'est en 4326) ; la couche en degrés de `distract_in_degrees` vient d'un CSV une
+  fois sur trois si elle est ponctuelle.
+- **`reprojection_avant_analyse`** (poids 4 → 6, au-dessus d'`analyse_couche_metrique`) : une
+  seconde couche en degrés, non citée et jamais reprojetée, deux fois sur trois ; la couche
+  analysée en `.csv` une fois sur deux (si ponctuelle) ; un inventaire long une fois sur deux. Le
+  cas « toutes les couches en 4326 » pose le projet en 2154, 31N ou 32N et vise ce système (avant :
+  projet rendu en 4326, cible 2154). `analyse_couche_metrique` reçoit aussi le CSV et les
+  inventaires longs, pour que ni l'un ni l'autre ne commande à eux seuls une reprojection.
+- **`conversion_format`** : poids 4 → 5.
+- **`refus`** (poids 7 → 8, 17 branches) : vue 3D de la carte, d'une couche ou d'une partie d'une
+  couche (deux branches) ; tableur d'un sous-ensemble filtré, avec un but ou un destinataire
+  (« pour l'envoyer à la DDT ») → `NO_SPREADSHEET` ; modification d'attributs et suppression
+  d'entités en plusieurs tournures.
+- **`refus_hors_registre`** (poids 7 → 9) : le PDF qui choisit ses couches passe d'un sur douze à
+  un sur six, avec parfois un titre ; la statistique d'altitude par zone d'un sur quatre à un sur
+  trois.
+- **`style_degrade`** : le dégradé nommé accompagne la méthode une fois sur deux (une sur trois
+  sans elle), six tournures de dégradé de plus, et les précisions (méthode, classes, dégradé) se
+  disent dans tous les ordres.
+- **`conversion_coordonnees`** : le point UTM vers le fuseau voisin une fois sur deux (une sur
+  quatre avant), le fuseau écrit de six façons (« dans le fuseau 32 », « dans la zone 32 »,
+  « fuseau 32 », « dans le fuseau UTM 32 », « en UTM zone 32 », « vers l'UTM 32N ») →
+  `to: ["utm"]`, `utm_zone`.
+- **Zones du PLU en mots** (`area`, `zone_category`) : une fois sur trois, la zone du PLU se dit par
+  sa catégorie, « en zone agricole » → `typezone` `eq` `A`, « urbaine » → `eq` `U`, « naturelle »
+  → `begins_with` `N` (`N`, `Nh`), « à urbaniser » → `begins_with` `AU` (`AUc`, `AUs`) ; la couche
+  du zonage n'a alors pas de champ de libellé (sa valeur « Zone agricole » appellerait une
+  sélection sur ce champ). Les mêmes catégories se demandent aussi seules, une fois sur huit dans
+  `filtre_egalite` (« les zones agricoles du PLU » → une sélection sur la couche du zonage).
+- **Deux sélections** (`draft_multi`) : les plans « zone puis référence filtrée » et « cible
+  filtrée, zone et distance » sont tirés deux fois plus souvent ; un rang nouveau, tiré deux fois
+  plus souvent lui aussi, donne la cible filtrée près d'une référence filtrée en quatre étapes
+  (`select`, `select`, tampon sur `step:2`, intersection de `step:1` avec `step:3`).
+- **Recouvrement.** La tête « Exporte la carte » suivie d'un format et d'une orientation rendait
+  F01 d'`epic11_reel` : elle devient « Exporte-moi la carte » ; la graine ne change pas.
+
+Au jeu par défaut de l'entraînement (commit `84adb16`, graine 1, 8 000 ; les corrections de relecture qui suivent ont changé le tirage, sans nouvel entraînement) : 182 `reprojection_avant_analyse`, 132
+`analyse_couche_metrique`, 113 `conversion_format`, 234 `refus`, 255 `refus_hors_registre`, 401
+redemandes (5,0 %), aucun exemple écarté.
+
+Entraînement (commit `84adb16`, chaîne accélérée) : 116 min, 12 s par pas tenus, pic 5,70 Gio ;
+validation 292/300. Essais GPU : `plan_reel` 24/25, `question_reel` 11/12, `ecart_reel` **31/40**
+(barre de 32 ratée d'une phrase ; refus 5/5, plans 18/27), `echelle_utm_reel` 8/8, `terrain_reel`
+8/8, `epic11_reel` 27/28 et F03 en question, `style_reel` 9/10. Recette QGIS sur Annecy : la
+phrase des gares compose `data.reproject` vers 2154 puis le tampon. Modèle dans
+`cassini-modeles\ajuste-apres-11-23\`, non installé ; décision au propriétaire.
 
 ### Les inventaires de QGIS (5.15)
 

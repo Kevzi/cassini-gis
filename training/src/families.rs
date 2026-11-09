@@ -173,14 +173,18 @@ pub static FAMILIES: &[Family] = &[
         weight: 5,
         make: question_champ_absent,
     },
+    // Essais GPU après 11.23 (refus manqués : 3D partielle, tableur filtré) : 7 → 8, et trois
+    // branches de plus.
     Family {
         name: "refus",
-        weight: 7,
+        weight: 8,
         make: refus,
     },
+    // Essais GPU après 11.23 : 7 → 9, le PDF qui choisit ses couches et la statistique
+    // d'altitude par zone y prenant plus de place.
     Family {
         name: "refus_hors_registre",
-        weight: 7,
+        weight: 9,
         make: refus_hors_registre,
     },
     // Les trois commandes de terrain (4.6) : MNT désigné par sa source, points écrits.
@@ -238,9 +242,11 @@ pub static FAMILIES: &[Family] = &[
         weight: 4,
         make: reprojection_couche,
     },
+    // Recette d'Annecy du 2026-11-09 (reprojection manquée) : poids 4 → 6, au-dessus
+    // d'`analyse_couche_metrique`.
     Family {
         name: "reprojection_avant_analyse",
-        weight: 4,
+        weight: 6,
         make: reprojection_avant_analyse,
     },
     // Second essai de 11.23 (constat S07) : la même analyse sur une couche déjà en mètres,
@@ -252,9 +258,10 @@ pub static FAMILIES: &[Family] = &[
     },
     // Conversion de format d'une couche (10.9) : GeoPackage, Shapefile ou GeoJSON. Remplace le
     // refus « aucune commande n'exporte une couche vers un fichier ».
+    // Après 11.23 (le modèle installé ne connaît pas `data.convert`) : 4 → 5.
     Family {
         name: "conversion_format",
-        weight: 4,
+        weight: 5,
         make: conversion_format,
     },
     Family {
@@ -755,6 +762,26 @@ impl Draft {
 
 fn draft_filter_eq(rng: &mut Rng) -> Option<Draft> {
     let mut b = Builder::new();
+    // Après 11.23 : les zones du PLU d'une catégorie dite en mots (« les zones agricoles du
+    // PLU ») → une sélection sur `typezone`, égal au code ou commençant par lui.
+    if rng.chance(1, 8) {
+        let (_, pl, op, code, values) = *rng.pick(ZONE_CATEGORIES);
+        let forced = *rng.pick(values);
+        let layer = b.add(rng, "zonage", &["zone"], &["libelle"], &[("zone", forced)]);
+        let field = layer.field("zone")?;
+        let t = theme("zonage");
+        let np = match rng.below(3) {
+            0 => format!("les zones {pl} du PLU"),
+            1 => format!("les zones {pl}"),
+            _ => format!("les zones {pl} de {}", t.the_layer),
+        };
+        return Some(Draft {
+            calls: vec![select(&layer.id, &field.name, op, code)],
+            b,
+            noun: &t.noun,
+            np,
+        });
+    }
     let t = pick_theme(rng, &b, |t| ordinary(t) && !text_fields(t).is_empty())?;
     let def = *rng.pick(&text_fields(t));
     let layer = b.add(rng, t.key, &[def.role], &[], &[]);
@@ -1148,6 +1175,42 @@ const AREAS: &[Area] = &[
     },
 ];
 
+/// Catégorie d'une zone du PLU dite en langage courant (standard du CNIG) : mot au singulier,
+/// au pluriel, opérateur et code de `typezone`, valeur forcée dans l'inventaire. « Agricole » et
+/// « urbaine » sont un code seul (`A`, `U`) ; « naturelle » couvre `N` et `Nh`, « à urbaniser »
+/// `AUc` et `AUs` : ce qui commence par le code.
+const ZONE_CATEGORIES: &[(&str, &str, &str, &str, &[&str])] = &[
+    ("agricole", "agricoles", "eq", "A", &["A"]),
+    ("naturelle", "naturelles", "begins_with", "N", &["N", "Nh"]),
+    ("urbaine", "urbaines", "eq", "U", &["U"]),
+    (
+        "à urbaniser",
+        "à urbaniser",
+        "begins_with",
+        "AU",
+        &["AUc", "AUs"],
+    ),
+];
+
+/// Essais GPU après 11.23 (question posée sur un code de zone non écrit) : « en zone
+/// agricole », « dans les zones naturelles du PLU » → `typezone` égal au code, ou commençant
+/// par lui, jamais une question.
+fn zone_category(rng: &mut Rng, b: &mut Builder, target: &Noun) -> Option<(String, Value)> {
+    let (sg, pl, op, code, values) = *rng.pick(ZONE_CATEGORIES);
+    let forced = *rng.pick(values);
+    // Sans `libelle` : sa valeur « Zone agricole » appellerait une sélection sur ce champ.
+    let layer = b.add(rng, "zonage", &["zone"], &["libelle"], &[("zone", forced)]);
+    let field = layer.field("zone")?;
+    let words = match rng.below(6) {
+        0 | 1 => format!("en zone {sg}"),
+        2 => format!("{} en zone {sg} du PLU", target.agree("situé")),
+        3 => format!("{} en zone {sg}", target.agree("classé")),
+        4 => format!("dans les zones {pl} du PLU"),
+        _ => format!("dans la zone {sg} du PLU"),
+    };
+    Some((words, select(&layer.id, &field.name, op, code)))
+}
+
 /// Pose la condition de zone : rend la tournure et le `select` (à placer en tête du plan).
 fn area(rng: &mut Rng, b: &mut Builder, target: &Noun) -> Option<(String, Value)> {
     let candidates: Vec<&Area> = AREAS
@@ -1158,6 +1221,9 @@ fn area(rng: &mut Rng, b: &mut Builder, target: &Noun) -> Option<(String, Value)
         return None;
     }
     let a = *rng.pick(&candidates);
+    if a.key == "zonage" && rng.chance(1, 3) {
+        return zone_category(rng, b, target);
+    }
     let layer = b.add(rng, a.key, &[a.role], &[], &[]);
     let field = layer.field(a.role)?;
     let val = *rng.pick(&field.values);
@@ -1304,7 +1370,9 @@ fn filtered_target(
 
 fn draft_multi(rng: &mut Rng) -> Option<Draft> {
     let mut b = Builder::new();
-    match rng.below(9) {
+    // Essais GPU après 11.23 (étape sautée ou ajoutée) : les plans à deux sélections, puis un
+    // tampon et des intersections (rangs 2, 4 et 11), sont tirés deux fois plus souvent.
+    match rng.below(13) {
         // Zone puis distance : select(zone), buffer(réf), intersect(cible, 1), intersect(3, 2).
         0 => {
             let t = pick_theme(rng, &b, |t| {
@@ -1355,7 +1423,7 @@ fn draft_multi(rng: &mut Rng) -> Option<Draft> {
             })
         }
         // Zone puis distance à une référence filtrée.
-        2 => {
+        2 | 9 => {
             let t = pick_theme(rng, &b, |t| {
                 ordinary(t) && !AREAS.iter().any(|a| a.key == t.key)
             })?;
@@ -1375,6 +1443,26 @@ fn draft_multi(rng: &mut Rng) -> Option<Draft> {
                     buffer(&step(2), &d, false),
                     intersect(&target.id, &step(1)),
                     intersect(&step(4), &step(3)),
+                ],
+                b,
+                noun: &t.noun,
+                np,
+            })
+        }
+        // Cible filtrée près d'une référence filtrée : select(cible), select(réf),
+        // buffer(2), intersect(1, 3) (essais GPU après 11.23).
+        11 | 12 => {
+            let (target, head, sel, sep) = filtered_target(rng, &mut b, ordinary)?;
+            let t = target.theme;
+            let (_, words, sel_ref) = filtered_reference(rng, &mut b)?;
+            let d = dist(rng);
+            let np = format!("{head}{sep}{}", near(rng, &t.noun, &d, &words));
+            Some(Draft {
+                calls: vec![
+                    sel,
+                    sel_ref,
+                    buffer(&step(2), &d, false),
+                    intersect(&step(1), &step(3)),
                 ],
                 b,
                 noun: &t.noun,
@@ -1405,7 +1493,7 @@ fn draft_multi(rng: &mut Rng) -> Option<Draft> {
         }
         // Trois conditions, cible filtrée, zone et distance, dans l'ordre de la phrase :
         // select(cible), select(zone), buffer(réf), intersect(1, 2), intersect(4, 3).
-        4 => {
+        4 | 10 => {
             let (target, head, sel, sep) = filtered_target(rng, &mut b, |t| {
                 ordinary(t) && !AREAS.iter().any(|a| a.key == t.key)
             })?;
@@ -2039,7 +2127,9 @@ fn export_pdf_format(rng: &mut Rng) -> Option<Example> {
             "Produis la carte en PDF",
             "Génère un PDF de la carte",
             "Sors-moi la carte en PDF",
-            "Exporte la carte",
+            // « Exporte la carte » seul suivi du format et de l'orientation rendait F01
+            // d'`epic11_reel` (recouvrement, après 11.23) : la tête prend « -moi ».
+            "Exporte-moi la carte",
         ]);
         let mut body = format!("{head}{pw}{gw}");
         if titled {
@@ -2333,6 +2423,13 @@ const GRADUATED_RAMPS: &[(&str, &str)] = &[
     (" en niveaux de gris", "greys"),
     (" du jaune au rouge", "yellow_red"),
     (" du rouge au bleu", "red_blue"),
+    // Essais GPU après 11.23 (dégradé nommé perdu à côté de la méthode) : plus de tournures.
+    (" avec un dégradé de bleus", "blues"),
+    (" en dégradé de rouges", "reds"),
+    (" dans des tons de gris", "greys"),
+    (" en dégradé du jaune au rouge", "yellow_red"),
+    (" dans un dégradé de violets", "purples"),
+    (", dégradé du rouge au bleu", "red_blue"),
 ];
 
 /// « Colore les communes selon leur population » : `map.graduated_style` sur la couche et son
@@ -2366,20 +2463,30 @@ fn style_degrade(rng: &mut Rng) -> Option<Example> {
     if !missing {
         let field = layer.field(def.role)?;
         params["field"] = json!(field.name);
-        if rng.chance(1, 2) {
+        let mut clauses: Vec<String> = Vec::new();
+        let with_method = rng.chance(1, 2);
+        if with_method {
             let (w, m) = *rng.pick(GRADUATED_METHODS);
-            body.push_str(w);
+            clauses.push(w.to_string());
             params["method"] = json!(m);
         }
         if rng.chance(1, 3) {
             let n = rng.range(2, 12);
-            body.push_str(&format!(" en {n} classes"));
+            clauses.push(format!(" en {n} classes"));
             params["class_count"] = json!(n);
         }
-        if rng.chance(1, 3) {
+        // Essais GPU après 11.23 : le dégradé nommé se perdait à côté de la méthode ; il
+        // l'accompagne une fois sur deux, et les précisions se disent dans tous les ordres.
+        if rng.chance(1, if with_method { 2 } else { 3 }) {
             let (w, r) = *rng.pick(GRADUATED_RAMPS);
-            body.push_str(w);
+            clauses.push(w.to_string());
             params["ramp"] = json!(r);
+        }
+        if clauses.len() > 1 && rng.chance(1, 2) {
+            rng.shuffle(&mut clauses);
+        }
+        for c in &clauses {
+            body.push_str(c);
         }
     }
     let request = finish(rng, &body, false, true);
@@ -3087,8 +3194,43 @@ fn question_champ_absent(rng: &mut Rng) -> Option<Example> {
 /// la conversion écrit, sans dire qu'aucune commande n'écrit de couche dans un fichier.
 const NO_SPREADSHEET: &str = "Aucune commande du catalogue n'écrit de tableur (Excel ou CSV) : la conversion d'une couche écrit un fichier GeoPackage, Shapefile ou GeoJSON.";
 
+/// Un sous-ensemble d'une couche dit par un de ses champs texte (« de type U », « de la ligne
+/// D ») : le groupe qui suit « les {pl} ». `None` si le thème n'a aucun champ texte.
+fn subset_phrase(rng: &mut Rng, t: &Theme) -> Option<String> {
+    let fields = text_fields(t);
+    if fields.is_empty() {
+        return None;
+    }
+    let def = *rng.pick(&fields);
+    let Kind::Text { values, phrases } = &def.kind else {
+        return None;
+    };
+    let val = rng.pick(values);
+    Some(fill(pick_str(rng, phrases), &t.noun, val.v))
+}
+
+const NO_3D: &str = "Aucune commande du catalogue n'affiche de vue en 3D.";
+const NO_EDIT: &str = "Aucune commande du catalogue ne modifie les attributs d'une couche.";
+
+/// But ou destinataire d'un tableur demandé (« pour mon rapport », « pour l'envoyer à la
+/// DDT ») : un tableur reste un refus, quel que soit son usage.
+fn spreadsheet_purpose(rng: &mut Rng, who: &str) -> String {
+    match rng.below(5) {
+        0 => format!(" pour l'envoyer {who}"),
+        1 => " pour mon rapport".to_string(),
+        2 => " pour faire un tableau de suivi".to_string(),
+        3 => format!(", je dois le transmettre {who}"),
+        _ => String::new(),
+    }
+}
+
 /// Opérations qu'aucune commande du catalogue ne fait : le refus est une phrase
 /// affirmative, jamais une question.
+///
+/// Essais GPU après 11.23 : la vue 3D d'une partie d'une couche, et l'export en tableur d'un
+/// sous-ensemble filtré (avec un but ou un destinataire), sont des refus entiers, jamais une
+/// sélection suivie d'un refus ; la modification d'attributs et la suppression d'entités se
+/// disent de plusieurs façons.
 fn refus(rng: &mut Rng) -> Option<Example> {
     let mut b = Builder::new();
     let t = pick_theme(rng, &b, ordinary)?;
@@ -3103,20 +3245,22 @@ fn refus(rng: &mut Rng) -> Option<Example> {
         "à mes collègues",
     ]);
     let commune = *rng.pick(COMMUNES);
-    let (body, reason): (String, &str) = match rng.below(14) {
+    let subset = subset_phrase(rng, t);
+    let (body, reason): (String, &str) = match rng.below(17) {
         0 => (format!("Envoie la couche « {name} » par courriel {who}"), "Aucune commande du catalogue n'envoie de courriel."),
         1 => (format!("Envoie le résultat par mail {who}"), "Aucune commande du catalogue n'envoie de courriel."),
         2 => (format!("Supprime la couche « {name} » du projet"), "Aucune commande du catalogue ne retire de couche du projet."),
         3 => (format!("Retire les {pl} de la carte"), "Aucune commande du catalogue ne retire de couche du projet."),
-        4 => match text_fields(t).first() {
-            Some(def) => {
-                let Kind::Text { values, phrases } = &def.kind else {
-                    return None;
+        4 => match &subset {
+            Some(phrase) => {
+                let body = match rng.below(4) {
+                    0 => format!("Supprime de la couche les {pl} {phrase}"),
+                    1 => format!("Efface les {pl} {phrase} de la couche"),
+                    2 => format!("Enlève de la table attributaire les {pl} {phrase}"),
+                    _ => format!("Supprime définitivement les {pl} {phrase} de la couche « {name} »"),
                 };
-                let val = rng.pick(values);
-                let phrase = fill(pick_str(rng, phrases), &t.noun, val.v);
                 (
-                    format!("Supprime de la couche les {pl} {phrase}"),
+                    body,
                     "Aucune commande du catalogue ne supprime d'entités dans une couche : les analyses créent de nouvelles couches.",
                 )
             }
@@ -3125,9 +3269,28 @@ fn refus(rng: &mut Rng) -> Option<Example> {
         // La reprojection d'une couche n'est plus un refus depuis 10.7 : `data.reproject`
         // (`reprojection_couche`, `reprojection_avant_analyse`). L'export d'une couche en
         // GeoPackage, Shapefile ou GeoJSON non plus depuis 10.9 : `data.convert`
-        // (`conversion_format`) ; un tableur reste un refus.
+        // (`conversion_format`) ; un tableur reste un refus, même d'un sous-ensemble filtré.
         5 => (format!("Exporte les {pl} en CSV"), NO_SPREADSHEET),
         6 => (format!("Enregistre les {pl} dans un fichier Excel"), NO_SPREADSHEET),
+        13 | 14 => {
+            let purpose = spreadsheet_purpose(rng, who);
+            let what = match &subset {
+                Some(phrase) => format!("les {pl} {phrase}"),
+                None => format!("la couche « {name} »"),
+            };
+            let of = match what.strip_prefix("les ") {
+                Some(rest) => format!("des {rest}"),
+                None => format!("de {what}"),
+            };
+            let body = match rng.below(5) {
+                0 => format!("Exporte {what} en CSV{purpose}"),
+                1 => format!("Sors-moi un fichier Excel {of}{purpose}"),
+                2 => format!("Fais un tableur {of}{purpose}"),
+                3 => format!("Enregistre {what} dans un tableau CSV{purpose}"),
+                _ => format!("Mets {what} dans un fichier .xlsx{purpose}"),
+            };
+            (body, NO_SPREADSHEET)
+        }
         7 => (format!("Renomme la couche « {name} » en « {} »", rng.pick(USER_TITLES)), "Aucune commande du catalogue ne renomme une couche."),
         // Le style d'une couche n'est plus un refus depuis 11.20 (`map.topographic_style`,
         // `map.graduated_style`, familles `style_topographique` et `style_degrade`) ; seule une
@@ -3139,8 +3302,37 @@ fn refus(rng: &mut Rng) -> Option<Example> {
         // `refus_hors_registre` ; format, orientation et carroyage sont des plans
         // (`export_pdf_format`, 11.12, lot 3).
         11 => ("Publie la carte sur internet".to_string(), "Aucune commande du catalogue ne publie de carte en ligne."),
-        12 => (format!("Modifie la valeur d'un champ pour toutes les {pl}"), "Aucune commande du catalogue ne modifie les attributs d'une couche."),
-        _ => ("Affiche la carte en 3D".to_string(), "Aucune commande du catalogue n'affiche de vue en 3D."),
+        12 => {
+            let field = layer.fields.first().map(|f| f.name.clone());
+            let new_value = *rng.pick(&["inconnu", "à vérifier", "0", "oui"]);
+            let body = match (rng.below(4), field) {
+                (1, Some(f)) => format!("Change le champ « {f} » de toutes les {pl} en « {new_value} »"),
+                (2, Some(f)) => match &subset {
+                    Some(phrase) => format!("Mets à jour l'attribut « {f} » des {pl} {phrase}"),
+                    None => format!("Mets à jour l'attribut « {f} » des {pl}"),
+                },
+                (3, Some(f)) => format!("Remplace la valeur du champ « {f} » par « {new_value} » dans la table des {pl}"),
+                _ => format!("Modifie la valeur d'un champ pour toutes les {pl}"),
+            };
+            (body, NO_EDIT)
+        }
+        // La vue 3D, de la carte ou d'une partie d'une couche (essais GPU après 11.23).
+        _ => {
+            let body = match rng.below(5) {
+                0 => "Affiche la carte en 3D".to_string(),
+                1 => format!("Affiche les {pl} en 3D"),
+                2 => format!("Montre la couche « {name} » en trois dimensions"),
+                3 => match &subset {
+                    Some(phrase) => format!("Fais une vue 3D des {pl} {phrase}"),
+                    None => format!("Fais une vue en 3D des {pl}"),
+                },
+                _ => match &subset {
+                    Some(phrase) => format!("Montre seulement les {pl} {phrase} en 3D"),
+                    None => format!("Visualise {} en 3D", t.the_layer),
+                },
+            };
+            (body, NO_3D)
+        }
     };
     let request = finish(rng, &body, false, false);
     Some(example("refus", b, rng, request, refusal(reason)))
@@ -3176,7 +3368,13 @@ pub const NO_MULTI_ORIGIN: &str = "L'isochrone du catalogue part d'un seul point
 /// catalogue et l'impression restent refusés.
 fn refus_hors_registre(rng: &mut Rng) -> Option<Example> {
     let mut b = Builder::new();
-    let roll = rng.below(4);
+    // Essais GPU après 11.23 : le PDF qui choisit ses couches (1 sur 12 avant) et la
+    // statistique d'altitude par zone (1 sur 4 avant) ont chacun plus de poids.
+    let roll = match rng.below(6) {
+        4 => 2,
+        5 => 5,
+        r => r,
+    };
     // Les statistiques portent sur un MNT : il est là, ce n'est pas lui qui manque.
     if roll == 2 {
         b.add(rng, "mnt", &[], &[], &[]);
@@ -3199,8 +3397,8 @@ fn refus_hors_registre(rng: &mut Rng) -> Option<Example> {
             (body, false, NO_FRAMING)
         }
         // Constat de 11.16 (S18) : un PDF qui nomme les couches à montrer reste un refus, même
-        // avec un format ou une orientation que l'export connaît.
-        1 if rng.below(3) == 0 => {
+        // avec un format, une orientation ou un titre que l'export connaît.
+        5 => {
             let t1 = pick_theme(rng, &b, ordinary)?;
             b.add(rng, t1.key, &[], &[], &[]);
             let t2 = pick_theme(rng, &b, ordinary)?;
@@ -3222,7 +3420,7 @@ fn refus_hors_registre(rng: &mut Rng) -> Option<Example> {
             } else {
                 "seuls"
             };
-            let body = match rng.below(4) {
+            let mut body = match rng.below(5) {
                 0 => format!(
                     "Fais une carte PDF{page} {} et {}",
                     t1.noun.des(),
@@ -3230,12 +3428,20 @@ fn refus_hors_registre(rng: &mut Rng) -> Option<Example> {
                 ),
                 1 => format!("Exporte en PDF{page} une carte qui ne montre que {l1} et {l2}"),
                 2 => format!("Sors un PDF{page} avec {l1} et {l2} {only}"),
+                3 => format!("Fais un PDF{page} où on ne voit que {l1} et {l2}"),
                 _ => format!(
                     "Produis une carte en PDF{page} {} et {}, sans les autres couches",
                     t1.noun.des(),
                     t2.noun.des()
                 ),
             };
+            if rng.chance(1, 3) {
+                let title = rng.pick(USER_TITLES);
+                body.push_str(&match rng.below(2) {
+                    0 => format!(", titre « {title} »"),
+                    _ => format!(", avec le titre « {title} »"),
+                });
+            }
             (body, false, NO_LAYER_CHOICE)
         }
         1 => {
@@ -5012,10 +5218,26 @@ fn convert_words(
                 ("en coordonnées UTM", "les coordonnées UTM")
             };
             match zone {
-                Some(z) => (
-                    format!("{en} dans le fuseau {z}"),
-                    format!("{noun} dans le fuseau {z}"),
-                ),
+                Some(z) => {
+                    let place = match rng.below(5) {
+                        0 | 1 => format!("dans le fuseau {z}"),
+                        2 => format!("dans la zone {z}"),
+                        3 => format!("fuseau {z}"),
+                        _ => format!("dans le fuseau UTM {z}"),
+                    };
+                    match rng.below(4) {
+                        // « en UTM zone 32 », « vers l'UTM 32N » : le fuseau collé au système.
+                        0 => (
+                            format!("en UTM zone {z}"),
+                            format!("les coordonnées UTM zone {z}"),
+                        ),
+                        1 => (
+                            format!("vers l'UTM {z}N"),
+                            format!("les coordonnées en UTM {z}N"),
+                        ),
+                        _ => (format!("{en} {place}"), format!("{noun} {place}")),
+                    }
+                }
                 None => (en.into(), noun.into()),
             }
         }
@@ -5077,7 +5299,9 @@ fn conversion_coordonnees(rng: &mut Rng) -> Option<Example> {
     };
     // Report de 11.16 : d'un fuseau UTM à l'autre (« … (UTM 31N) en UTM dans le fuseau 32 »),
     // `coord.convert` vers `utm`, le fuseau écrit.
-    let to_other_zone = roll == 1 && rng.chance(1, 4);
+    // Essais GPU après 11.23 (zone d'arrivée mal écrite) : une fois sur deux au lieu d'une
+    // sur quatre.
+    let to_other_zone = roll == 1 && rng.chance(1, 2);
     let mut targets: Vec<&str> = if to_other_zone {
         vec!["utm"]
     } else if rng.chance(1, 3) {
@@ -5381,20 +5605,41 @@ fn shift_steps(value: &mut Value, by: usize) {
 /// (EPSG:4326) : `data.reproject` d'abord, puis l'analyse sur `step:1.layer_id` (10.7). La
 /// demande ne parle pas de reprojection : seul l'`epsg` de l'inventaire la commande. Le
 /// système d'arrivée est celui des autres couches vecteur en mètres de l'inventaire
-/// (Lambert-93, UTM 31N ou 32N), EPSG:2154 quand toutes sont en degrés. Une reprojection est
-/// toujours une étape visible du plan, jamais insérée en silence par le noyau.
+/// (Lambert-93, UTM 31N ou 32N) ; quand toutes sont en degrés, celui du projet, en mètres
+/// (Lambert-93 ou UTM : aucun projet réel n'est en EPSG:4326). Une reprojection est toujours une
+/// étape visible du plan, jamais insérée en silence par le noyau.
+///
+/// Recette d'Annecy du 2026-11-09 (tampon autour de gares en `.csv` et en 4326, sans
+/// `data.reproject`) : l'inventaire porte souvent une seconde couche en degrés qu'aucun plan ne
+/// cite (elle n'est pas reprojetée), la couche analysée vient parfois d'un CSV à coordonnées, et
+/// l'inventaire est parfois long (une dizaine de couches).
 fn reprojection_avant_analyse(rng: &mut Rng) -> Option<Example> {
-    let (others, target) = match rng.below(20) {
-        0..=11 => (2154, 2154),
-        12..=14 => (32632, 32632),
-        15 | 16 => (32631, 32631),
-        _ => (4326, 2154),
+    let (others, target, project) = match rng.below(20) {
+        0..=11 => (2154, 2154, None),
+        12..=14 => (32632, 32632, None),
+        15 | 16 => (32631, 32631, None),
+        _ => {
+            let p = *rng.pick(&[2154, 2154, 32631, 32632]);
+            (4326, p, Some(p))
+        }
     };
     let (mut b, body, q, mut steps) = metric_analysis(rng, others)?;
+    if let Some(p) = project {
+        b.project_system(p);
+    }
     // L'analyse en mètres porte sur la couche de la première étape : c'est elle qui est en
     // degrés, et elle seule est reprojetée.
     let degrees = steps[0]["params"]["layer_id"].as_str()?.to_string();
     b.set_epsg(&degrees, 4326);
+    if rng.chance(1, 2) {
+        b.as_csv(&degrees);
+    }
+    if others != 4326 && rng.chance(2, 3) && !b.distract_in_degrees(rng) {
+        return None;
+    }
+    if rng.chance(1, 2) {
+        b.long_inventory(rng.range(4, 6) as usize);
+    }
     for s in &mut steps {
         shift_steps(s, 1);
     }
@@ -5423,8 +5668,17 @@ fn analyse_couche_metrique(rng: &mut Rng) -> Option<Example> {
         _ => 32631,
     };
     let (mut b, body, q, steps) = metric_analysis(rng, others)?;
+    // Une couche en mètres peut aussi venir d'un CSV à coordonnées : l'extension ne dit pas le
+    // système, seul l'`epsg` compte.
+    if rng.chance(1, 4) {
+        let first = steps[0]["params"]["layer_id"].as_str()?.to_string();
+        b.as_csv(&first);
+    }
     if !b.distract_in_degrees(rng) {
         return None;
+    }
+    if rng.chance(1, 3) {
+        b.long_inventory(rng.range(4, 6) as usize);
     }
     let request = finish(rng, &body, q, true);
     Some(example(
@@ -6552,7 +6806,29 @@ mod tests {
                 r.contains("chiffres"),
                 "{r}"
             );
-            assert_eq!(p.get("utm_zone").is_some(), r.contains("fuseau"), "{r}");
+            // Le fuseau d'arrivée s'écrit de six façons (`convert_words`) : « dans le fuseau 32 »,
+            // « dans la zone 32 », « fuseau 32 », « dans le fuseau UTM 32 », « en UTM zone 32 »,
+            // « vers l'UTM 32N » (essais GPU après 11.23). Dans les deux sens : `utm_zone` si et
+            // seulement si une de ces écritures est dans la demande. « UTM zone 31 Nord » est le
+            // système du point de départ, pas un fuseau d'arrivée.
+            let low = r.to_lowercase();
+            let zone_written = |z: u64| {
+                let low = low.replace(&format!("utm zone {z} nord"), "");
+                [
+                    format!("fuseau {z}"),
+                    format!("fuseau utm {z}"),
+                    format!("dans la zone {z}"),
+                    format!("utm zone {z}"),
+                    format!("vers l'utm {z}n"),
+                    format!("coordonnées en utm {z}n"),
+                ]
+                .iter()
+                .any(|f| low.contains(f.as_str()))
+            };
+            match p.get("utm_zone").and_then(Value::as_u64) {
+                Some(z) => assert!(zone_written(z), "{r}"),
+                None => assert!((29..=34).all(|z| !zone_written(z)), "{r}"),
+            }
             for key in ["mgrs_precision", "utm_zone"] {
                 if let Some(n) = p.get(key) {
                     written(e, n);
@@ -7199,7 +7475,7 @@ mod tests {
         // Constats H17 à H22 : étapes perdues, mauvais opérateur, mauvaise commande.
         let examples = valid(conditions_multiples, 3000);
         let mut ops = std::collections::BTreeSet::new();
-        let (mut five, mut whole_layer) = (0, 0);
+        let (mut five, mut whole_layer, mut two_filters) = (0, 0, 0);
         for e in &examples {
             let calls = e.expected["calls"].as_array().unwrap();
             let chain: Vec<&Value> = calls
@@ -7247,7 +7523,22 @@ mod tests {
                 five += 1;
                 assert_eq!(chain[3]["params"]["layer_id"], step(1).as_str());
             }
+            // Cible filtrée près d'une référence filtrée (après 11.23) : quatre étapes exactes.
+            if names
+                == [
+                    "analysis.select_by_attribute",
+                    "analysis.select_by_attribute",
+                    "analysis.buffer",
+                    "analysis.intersect",
+                ]
+            {
+                two_filters += 1;
+                assert_eq!(chain[2]["params"]["layer_id"], step(2).as_str());
+                assert_eq!(chain[3]["params"]["layer_id"], step(1).as_str());
+                assert_eq!(chain[3]["params"]["overlay_layer_id"], step(3).as_str());
+            }
         }
+        assert!(two_filters > 0);
         for op in [
             "eq",
             "gt",
@@ -7513,7 +7804,9 @@ mod tests {
     fn a_metric_analysis_on_a_layer_in_degrees_reprojects_it_first() {
         let registry = cassini_core::registry::Registry::standard();
         let (mut buffers, mut searches, mut utm, mut fallback) = (0, 0, 0, 0);
-        for e in valid(reprojection_avant_analyse, 400) {
+        // Recette d'Annecy : seconde couche en degrés non citée, source `.csv`, inventaire long.
+        let (mut two_in_degrees, mut csv, mut long, mut annecy) = (0, 0, 0, 0);
+        for e in valid(reprojection_avant_analyse, 600) {
             let plan: cassini_core::plan::Plan =
                 serde_json::from_value(e.expected.clone()).unwrap();
             assert_eq!(registry.check_plan(&plan), Ok(()), "{}", e.request);
@@ -7534,8 +7827,10 @@ mod tests {
                 "{}",
                 e.request
             );
-            // Cible : le système des autres couches vecteur en mètres, 2154 à défaut.
+            // Cible : le système des autres couches vecteur en mètres ; à défaut, celui du
+            // projet, toujours en mètres.
             let target = calls[0]["params"]["target_epsg"].as_u64().unwrap();
+            let project = e.inventory["project"]["epsg"].as_u64();
             let metric: HashSet<u64> = e.inventory["layers"]
                 .as_array()
                 .unwrap()
@@ -7545,10 +7840,35 @@ mod tests {
                 .filter(|&epsg| epsg != 4326)
                 .collect();
             if metric.is_empty() {
-                assert_eq!(target, 2154, "{}", e.request);
+                assert_eq!(project, Some(target), "{}", e.request);
                 fallback += 1;
             } else {
                 assert_eq!(metric, HashSet::from([target]), "{}", e.request);
+                assert_eq!(project, Some(target), "{}", e.request);
+            }
+            assert!(
+                matches!(target, 2154 | 32631 | 32632),
+                "{target} : {}",
+                e.request
+            );
+            let layers = e.inventory["layers"].as_array().unwrap();
+            let in_degrees = layers.iter().filter(|l| l["epsg"] == 4326).count();
+            let from_csv = layer_of(&e, degrees)["source"]
+                .as_str()
+                .is_some_and(|s| s.ends_with(".csv"));
+            if !metric.is_empty() && in_degrees == 2 {
+                two_in_degrees += 1;
+            }
+            csv += usize::from(from_csv);
+            long += usize::from(layers.len() >= 8);
+            if target == 2154
+                && !metric.is_empty()
+                && in_degrees == 2
+                && from_csv
+                && layers.len() >= 8
+                && calls.len() == 2
+            {
+                annecy += 1;
             }
             if target != 2154 {
                 utm += 1;
@@ -7564,6 +7884,40 @@ mod tests {
             }
         }
         assert!(buffers > 0 && searches > 0 && utm > 0 && fallback > 0);
+        assert!(
+            two_in_degrees > 0 && csv > 0 && long > 0,
+            "{two_in_degrees} {csv} {long}"
+        );
+        // Le cas des gares d'Annecy entier : projet en 2154, couche ponctuelle en `.csv` et en
+        // degrés tamponnée, une autre couche en degrés non citée, une dizaine de couches.
+        assert!(annecy > 0);
+    }
+
+    #[test]
+    fn a_project_whose_layers_are_all_in_degrees_is_in_metres_and_is_the_target() {
+        // Après 11.23 : aucun projet réel n'est en EPSG:4326 ; quand toutes les couches vecteur
+        // sont en degrés, la reprojection vise le système du projet (Lambert-93 ou UTM).
+        let mut targets = HashSet::new();
+        for e in valid(reprojection_avant_analyse, 800) {
+            let vectors: Vec<&Value> = e.inventory["layers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|l| l["kind"] == "vector")
+                .collect();
+            if !vectors.iter().all(|l| l["epsg"] == 4326) {
+                continue;
+            }
+            let project = e.inventory["project"]["epsg"].as_u64().unwrap();
+            assert_ne!(project, 4326, "{}", e.request);
+            assert_eq!(
+                e.expected["calls"][0]["params"]["target_epsg"], project,
+                "{}",
+                e.request
+            );
+            targets.insert(project);
+        }
+        assert!(targets.contains(&2154) && targets.len() > 1, "{targets:?}");
     }
 
     #[test]
@@ -9018,6 +9372,133 @@ mod tests {
                 cassini_core::point::guard_coordinates(&registry, plan.clone(), &e.request);
             assert_eq!(guarded, plan, "{}", e.request);
         }
+    }
+
+    // -- après 11.23 : refus, zones du PLU, dégradé --------------------------
+
+    #[test]
+    fn a_partial_3d_view_and_a_filtered_spreadsheet_are_whole_refusals() {
+        let examples = valid(refus, 3000);
+        let (mut partial_3d, mut filtered_sheet, mut purpose) = (0, 0, 0);
+        for e in &examples {
+            let r = e.request.to_lowercase();
+            if r.contains("3d") || r.contains("trois dimensions") {
+                assert_eq!(e.expected, refusal(NO_3D), "{}", e.request);
+                if !r.contains("la carte") {
+                    partial_3d += 1;
+                }
+            }
+            let sheet = ["csv", "excel", "tableur", ".xlsx"]
+                .iter()
+                .any(|w| r.contains(w));
+            if sheet {
+                assert_eq!(e.expected, refusal(NO_SPREADSHEET), "{}", e.request);
+                if r.contains(" de type ") || r.contains(" classé") || r.contains(" dont ") {
+                    filtered_sheet += 1;
+                }
+                if r.contains(" pour ") || r.contains("transmettre") {
+                    purpose += 1;
+                }
+            }
+        }
+        assert!(partial_3d > 0 && filtered_sheet > 0 && purpose > 0);
+        let edits = examples
+            .iter()
+            .filter(|e| e.expected == refusal(NO_EDIT))
+            .map(|e| e.request.split_whitespace().next().unwrap().to_string())
+            .collect::<HashSet<_>>();
+        assert!(edits.len() >= 3, "{edits:?}");
+    }
+
+    #[test]
+    fn a_plu_zone_said_in_plain_words_selects_its_code() {
+        let mut seen = HashSet::new();
+        for e in valid(dans_une_zone, 1500) {
+            let r = e.request.to_lowercase();
+            let Some((_, _, op, code, _)) = ZONE_CATEGORIES.iter().find(|(sg, pl, ..)| {
+                r.contains(&format!("zone {sg}")) || r.contains(&format!("zones {pl}"))
+            }) else {
+                continue;
+            };
+            let first = &e.expected["calls"][0];
+            assert_eq!(
+                first["command"], "analysis.select_by_attribute",
+                "{}",
+                e.request
+            );
+            assert_eq!(first["params"]["operator"], *op, "{}", e.request);
+            assert_eq!(first["params"]["value"], *code, "{}", e.request);
+            seen.insert(*code);
+        }
+        assert_eq!(seen.len(), ZONE_CATEGORIES.len(), "{seen:?}");
+    }
+
+    #[test]
+    fn the_plu_zones_of_a_category_said_in_words_are_one_selection() {
+        let mut seen = HashSet::new();
+        let zonage = theme("zonage");
+        for e in valid(filtre_egalite, 1500) {
+            let r = e.request.to_lowercase();
+            let id = e.expected["calls"][0]["params"]["layer_id"]
+                .as_str()
+                .unwrap();
+            if !zonage
+                .slugs
+                .iter()
+                .any(|s| id.starts_with(&format!("{s}_")))
+            {
+                continue;
+            }
+            let Some((_, _, op, code, _)) = ZONE_CATEGORIES
+                .iter()
+                .find(|(_, pl, ..)| r.contains(&format!("zones {pl}")))
+            else {
+                continue;
+            };
+            let calls = e.expected["calls"].as_array().unwrap();
+            assert_eq!(calls.len(), 1, "{}", e.request);
+            assert_eq!(calls[0]["params"]["operator"], *op, "{}", e.request);
+            assert_eq!(calls[0]["params"]["value"], *code, "{}", e.request);
+            let layer = layer_of(&e, calls[0]["params"]["layer_id"].as_str().unwrap());
+            let fields = layer["fields"].as_array().unwrap();
+            assert!(
+                fields
+                    .iter()
+                    .all(|f| !["libelle", "libelong"].contains(&f["name"].as_str().unwrap())),
+                "{}",
+                e.request
+            );
+            seen.insert(*code);
+        }
+        assert_eq!(seen.len(), ZONE_CATEGORIES.len(), "{seen:?}");
+    }
+
+    #[test]
+    fn a_named_ramp_comes_with_the_method_in_any_order() {
+        let (mut both, mut ramp_first) = (0, 0);
+        for e in valid(style_degrade, 1500) {
+            let Some(p) = e.expected["calls"][0]["params"].as_object() else {
+                continue;
+            };
+            let (Some(m), Some(r)) = (p.get("method"), p.get("ramp")) else {
+                continue;
+            };
+            both += 1;
+            let m_at = GRADUATED_METHODS
+                .iter()
+                .filter(|(_, v)| *v == m)
+                .filter_map(|(w, _)| e.request.find(w))
+                .min();
+            let r_at = GRADUATED_RAMPS
+                .iter()
+                .filter(|(_, v)| *v == r)
+                .filter_map(|(w, _)| e.request.find(w))
+                .min();
+            if let (Some(m_at), Some(r_at)) = (m_at, r_at) {
+                ramp_first += usize::from(r_at < m_at);
+            }
+        }
+        assert!(both > 50 && ramp_first > 0, "{both} {ramp_first}");
     }
 
     #[test]
