@@ -416,12 +416,89 @@ def load_model(base_dir: str):
         bnb_4bit_use_double_quant=True,
         bnb_4bit_compute_dtype=torch.bfloat16,
     )
+    install_fast_kernels()
     return AutoModelForImageTextToText.from_pretrained(
         base_dir,
         quantization_config=quantization,
         dtype=torch.bfloat16,
         device_map={"": 0},
     )
+
+
+# `--noyaux-reference` : les implémentations de référence de transformers, pour comparer.
+FAST_KERNELS = True
+# `--sans-unsloth` : le chargement et l'adaptateur par transformers et peft seuls, comme avant.
+USE_UNSLOTH = True
+
+
+def import_unsloth() -> str:
+    """Importe Unsloth, qui doit passer avant transformers pour le corriger. La boucle calcule
+    sa perte elle-même : Unsloth doit donc rendre les logits (sinon il les fusionne à la perte)."""
+    os.environ.setdefault("UNSLOTH_RETURN_LOGITS", "1")
+    # Unsloth écrit le code qu'il compile dans `unsloth_compiled_cache/` du dossier courant (la
+    # racine du dépôt) : on l'envoie dans le cache hors dépôt.
+    os.environ.setdefault("UNSLOTH_COMPILE_LOCATION", str(cache_dir() / "unsloth_compiled_cache"))
+    if "transformers" in sys.modules:
+        raise PipelineStop("Unsloth doit être importé avant transformers (erreur de la chaîne)")
+    import unsloth
+
+    return unsloth.__version__
+
+
+def training_path() -> dict[str, str]:
+    """Ce que le rapport garde du chemin d'entraînement."""
+    if USE_UNSLOTH:
+        return {"chargement": "Unsloth FastModel (nf4, double quantification, bf16)",
+                "adaptateur": "Unsloth FastModel.get_peft_model", "checkpointing": "unsloth (activations en mémoire centrale)",
+                "unsloth": True}
+    return {"chargement": "transformers + bitsandbytes (nf4, double quantification, bf16)",
+            "adaptateur": "peft get_peft_model", "checkpointing": "gradient checkpointing de transformers",
+            "unsloth": False}
+LINEAR_ATTENTION_FUNCTIONS = ("torch_chunk_gated_delta_rule", "torch_recurrent_gated_delta_rule",
+                              "causal_conv1d_fn", "causal_conv1d_update")
+_ORIGINAL_FUNCTIONS: dict[str, Any] = {}
+
+
+def install_fast_kernels() -> dict[str, str]:
+    """Branche les noyaux rapides des couches à attention linéaire de Qwen3.5, et dit lesquels.
+
+    `flash-linear-attention` (Triton, sans compilation) est pris par transformers de lui-même
+    pour la règle delta. La convolution causale, elle, n'est cherchée que dans le paquet
+    `causal-conv1d`, sans roue pour torch 2.14 : on la remplace par celle, en Triton, de
+    `flash-linear-attention`. Le calcul reste celui de l'implémentation de référence (même
+    dtype, mêmes valeurs aux arrondis près).
+    Avec `FAST_KERNELS` faux, les quatre fonctions reprennent leur implémentation PyTorch.
+    """
+    reference = {"regle_delta": "PyTorch (référence)", "convolution": "PyTorch (référence)"}
+    try:
+        from fla.modules.causal_conv1d import causal_conv1d as fla_causal_conv1d
+    except ImportError:
+        return reference
+    from transformers.models.qwen3_5 import modeling_qwen3_5 as qwen
+
+    if not _ORIGINAL_FUNCTIONS:
+        _ORIGINAL_FUNCTIONS.update({name: getattr(qwen, name) for name in LINEAR_ATTENTION_FUNCTIONS})
+    if not FAST_KERNELS:
+        for name, function in _ORIGINAL_FUNCTIONS.items():
+            # Le décorateur de transformers garde la fonction PyTorch d'origine sous `__wrapped__`.
+            setattr(qwen, name, getattr(function, "__wrapped__", function))
+        return reference
+    for name, function in _ORIGINAL_FUNCTIONS.items():
+        setattr(qwen, name, function)
+
+    def causal_conv1d_fn(hidden_states, weight, bias=None, activation=None, **kwargs):
+        # transformers passe [lot, canaux, temps] ; flash-linear-attention attend [lot, temps, canaux].
+        # Comme la référence, le calcul se fait dans le dtype des poids, puis revient à celui de l'entrée.
+        out, _ = fla_causal_conv1d(
+            x=hidden_states.transpose(1, 2).to(weight.dtype).contiguous(),
+            weight=weight,
+            bias=bias,
+            activation=activation,
+        )
+        return out.transpose(1, 2).to(hidden_states.dtype)
+
+    qwen.causal_conv1d_fn = causal_conv1d_fn
+    return {"regle_delta": "flash-linear-attention", "convolution": "flash-linear-attention (Triton)"}
 
 
 def encode(tokenizer, example: data.Example) -> tuple[list[int], int]:
@@ -444,15 +521,28 @@ def train(base_dir: str, examples: list[data.Example], adapter_dir: Path, max_st
     tokenizer = AutoTokenizer.from_pretrained(base_dir)
     encoded = [encode(tokenizer, e) for e in examples]
 
-    model = load_model(base_dir)
-    model = prepare_model_for_kbit_training(
-        model, use_gradient_checkpointing=True, gradient_checkpointing_kwargs={"use_reentrant": False}
-    )
-    model = get_peft_model(
-        model,
-        LoraConfig(r=h["rang"], lora_alpha=h["alpha"], lora_dropout=h["dropout"],
-                   target_modules=h["modules"], bias="none", task_type="CAUSAL_LM"),
-    )
+    if USE_UNSLOTH:
+        # Même méthode (QLoRA nf4, double quantification, calcul en bf16), mêmes rang, alpha,
+        # dropout et modules ; Unsloth compile chaque couche et décharge les activations.
+        from unsloth import FastModel
+
+        model, _ = FastModel.from_pretrained(model_name=base_dir, max_seq_length=MAX_LENGTH, load_in_4bit=True,
+                                             dtype=torch.bfloat16, full_finetuning=False)
+        install_fast_kernels()
+        model = FastModel.get_peft_model(
+            model, r=h["rang"], lora_alpha=h["alpha"], lora_dropout=h["dropout"], target_modules=h["modules"],
+            bias="none", finetune_vision_layers=False, finetune_language_layers=True,
+            use_gradient_checkpointing="unsloth", random_state=TORCH_SEED)
+    else:
+        model = load_model(base_dir)
+        model = prepare_model_for_kbit_training(
+            model, use_gradient_checkpointing=True, gradient_checkpointing_kwargs={"use_reentrant": False}
+        )
+        model = get_peft_model(
+            model,
+            LoraConfig(r=h["rang"], lora_alpha=h["alpha"], lora_dropout=h["dropout"],
+                       target_modules=h["modules"], bias="none", task_type="CAUSAL_LM"),
+        )
     trainable, total = model.get_nb_trainable_parameters()
     log(f"paramètres entraînés : {trainable:,} sur {total:,}")
 
@@ -479,7 +569,9 @@ def train(base_dir: str, examples: list[data.Example], adapter_dir: Path, max_st
         # Logits sur les seules positions qui prédisent la réponse : la perte ne porte que
         # sur elle, et on évite des logits de 248 000 entrées sur tout le prompt.
         outputs = model(input_ids=inputs, logits_to_keep=answer_length + 1, use_cache=False)
-        logits = outputs.logits[0, :-1].float()
+        # Les positions qui prédisent la réponse, que le modèle rende les seuls logits gardés
+        # ou toute la séquence.
+        logits = outputs.logits[0, -answer_length - 1:-1].float()
         target = inputs[0, -answer_length:]
         loss = F.cross_entropy(logits, target)
         (loss / h["accumulation"]).backward()
@@ -556,6 +648,7 @@ def prepare_llama_cpp() -> Path:
         run(["git", "fetch", "-q", "--depth", "1", "origin", LLAMA_CPP_COMMIT], cwd=folder)
         run(["git", "checkout", "-q", "--detach", LLAMA_CPP_COMMIT], cwd=folder)
         shutil.rmtree(folder / "build", ignore_errors=True)
+        shutil.rmtree(folder / "build-cuda", ignore_errors=True)
     # llama-tokenize sert à `parite_decoupeurs.py` (tâche 4b).
     tools = ["llama-quantize", "llama-export-lora", "llama-completion", "llama-tokenize"]
     if not all((folder / "build" / "bin" / t).exists() for t in tools):
@@ -642,6 +735,159 @@ def try_model(llama: Path, model_args: list[str], example: data.Example, work: P
     return trial
 
 
+# -- validation par llama.cpp sur le GPU ---------------------------------------------------
+
+
+def cuda_toolkit() -> Path:
+    """Le compilateur CUDA des roues `nvidia-cuda-nvcc`, `-nvvm`, `-crt`, `-cccl` épinglées dans
+    `uv.lock`, posé par uv dans l'environnement à côté des bibliothèques de torch : rien n'est
+    installé au niveau du système. nvcc cherche ses bibliothèques sous `lib64` et l'éditeur de
+    liens leurs noms sans numéro : deux liens symboliques, idempotents, les lui donnent."""
+    import nvidia
+
+    root = Path(next(iter(nvidia.__path__))) / "cu13"
+    if not (root / "bin" / "nvcc").exists():
+        raise PipelineStop(f"nvcc introuvable sous {root} : relancez `uv sync --project training/entrainement`")
+    if not (root / "lib64").exists():
+        (root / "lib64").symlink_to("lib")
+    for name in ("cudart", "cublas", "cublasLt"):
+        link = root / "lib" / f"lib{name}.so"
+        if not link.exists():
+            versioned = sorted((root / "lib").glob(f"lib{name}.so.*"))
+            if not versioned:
+                raise PipelineStop(f"lib{name}.so introuvable sous {root / 'lib'}")
+            link.symlink_to(versioned[0].name)
+    return root
+
+
+def cuda_toolkit_libraries() -> Path | None:
+    """Les bibliothèques CUDA des roues de l'environnement, s'il y en a (sinon le serveur prend
+    celles du système, s'il en a)."""
+    try:
+        return cuda_toolkit() / "lib"
+    except (ImportError, PipelineStop):
+        return None
+
+
+def server_environment() -> dict[str, str]:
+    """L'environnement de `llama-server` : les bibliothèques CUDA des roues de l'environnement
+    courant, puis `libcuda.so`, celle du pilote Windows, exposée par WSL."""
+    libraries = cuda_toolkit_libraries()
+    paths = (str(libraries) if libraries else None, "/usr/lib/wsl/lib", os.environ.get("LD_LIBRARY_PATH"))
+    return os.environ | {"LD_LIBRARY_PATH": ":".join(p for p in paths if p)}
+
+
+def prepare_llama_cpp_gpu(folder: Path) -> Path:
+    """Construit `llama-server` sur CUDA, au même commit que les outils sur CPU, dans
+    `build-cuda/` (hors dépôt), pour la seule carte de ce poste, et vérifie qu'il voit le GPU.
+    Rend le dossier des binaires. CMake efface sa configuration quand le chemin de nvcc change
+    (un autre environnement) : la construction est alors refaite de zéro, jamais à moitié."""
+    build = folder / "build-cuda"
+    server = build / "bin" / "llama-server"
+    stamp = build / "cassini-nvcc.txt"
+    toolkit = cuda_toolkit()
+    nvcc = toolkit / "bin" / "nvcc"
+    if not (server.exists() and stamp.exists() and stamp.read_text(encoding="utf-8") == str(nvcc)):
+        shutil.rmtree(build, ignore_errors=True)
+        run(["cmake", "-S", ".", "-B", "build-cuda", "-DGGML_CUDA=ON", "-DLLAMA_CURL=OFF", "-DLLAMA_OPENSSL=OFF",
+             "-DLLAMA_BUILD_TESTS=OFF", "-DCMAKE_BUILD_TYPE=Release", f"-DCUDAToolkit_ROOT={toolkit}",
+             f"-DCMAKE_CUDA_COMPILER={nvcc}", "-DCMAKE_CUDA_ARCHITECTURES=native",
+             # libcuda.so vient du pilote Windows, exposé par WSL ; les bibliothèques CUDA, des roues.
+             # Elles ne sont citées qu'à l'édition de liens (`-rpath-link`) : à l'exécution,
+             # `server_environment` les prend dans l'environnement courant.
+             "-DCMAKE_LIBRARY_PATH=/usr/lib/wsl/lib",
+             f"-DCMAKE_EXE_LINKER_FLAGS=-Wl,-rpath-link,{toolkit / 'lib'}",
+             f"-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-rpath-link,{toolkit / 'lib'}"], cwd=folder)
+        run(["cmake", "--build", "build-cuda", "-j", str(os.cpu_count() or 4), "--target", "llama-server"],
+            cwd=folder)
+        stamp.write_text(str(nvcc), encoding="utf-8")
+    # Sans GPU vu, llama-server se rabattrait en silence sur le CPU, dix fois plus lent.
+    devices = run([str(server), "--list-devices"], capture_output=True, text=True, env=server_environment())
+    if "CUDA" not in devices.stdout + devices.stderr:
+        raise PipelineStop(f"llama-server ne voit aucun GPU CUDA :\n{devices.stdout}{devices.stderr}")
+    return server.parent
+
+
+def stop_with_parent() -> None:
+    """Dans le processus du serveur, avant son lancement : s'il perd son parent (chaîne
+    interrompue), Linux lui envoie SIGTERM, et il ne garde pas le GPU."""
+    import ctypes
+    import signal
+
+    PR_SET_PDEATHSIG = 1
+    ctypes.CDLL("libc.so.6", use_errno=True).prctl(PR_SET_PDEATHSIG, signal.SIGTERM)
+
+
+def free_port() -> int:
+    import socket
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def validate_gguf(binaries: Path, model_args: list[str], label: str, examples: list[data.Example],
+                  outputs_file: Path, log_file: Path) -> dict[str, Any]:
+    """Score de validation du GGUF par `llama-server`, sur le GPU : même prompt brut, décodage
+    glouton, même borne de jetons, même notation (`scoring.py`) que la validation par PyTorch.
+    Le serveur n'écoute que 127.0.0.1, sur un port libre, le temps de la validation."""
+    import urllib.request
+
+    port = free_port()
+    command = [str(binaries / "llama-server"), *model_args, "--host", "127.0.0.1", "--port", str(port),
+               "-ngl", "99", "-c", str(MAX_LENGTH + HYPERPARAMETERS["jetons_max_generes"]), "-np", "1",
+               "--no-webui", "--seed", str(TORCH_SEED)]
+    log("$ " + " ".join(command))
+    with open(log_file, "w", encoding="utf-8") as server_log:
+        server = subprocess.Popen(command, stdout=server_log, stderr=subprocess.STDOUT, env=server_environment(),
+                                  preexec_fn=stop_with_parent)
+    url = f"http://127.0.0.1:{port}"
+
+    def post(body: dict[str, Any]) -> dict[str, Any]:
+        request = urllib.request.Request(f"{url}/completion", data=json.dumps(body).encode("utf-8"),
+                                         headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(request, timeout=600) as response:
+            return json.loads(response.read())
+
+    try:
+        for _ in range(600):
+            if server.poll() is not None:
+                raise PipelineStop(f"llama-server s'est arrêté ({server.returncode}) : voir {log_file}")
+            try:
+                with urllib.request.urlopen(f"{url}/health", timeout=5) as response:
+                    if response.status == 200:
+                        break
+            except OSError:
+                pass
+            time.sleep(1)
+        else:
+            raise PipelineStop(f"llama-server ne répond pas : voir {log_file}")
+        score, start = scoring.Score(), time.time()
+        with open(outputs_file, "w", encoding="utf-8") as outputs:
+            for rank, example in enumerate(examples, start=1):
+                answer = post({"prompt": example.prompt, "n_predict": HYPERPARAMETERS["jetons_max_generes"],
+                               "temperature": 0, "top_k": 1, "seed": TORCH_SEED,
+                               "stop": [data.END_OF_ANSWER], "cache_prompt": True})
+                text = answer["content"]
+                expected = data.expected_answer(example)
+                match = score.record(text, expected)
+                outputs.write(json.dumps({"rang": rank, "juste": match, "attendu": expected, "sortie": text},
+                                         ensure_ascii=False) + "\n")
+                if rank % 25 == 0:
+                    log(f"validation GGUF {rank}/{len(examples)} : {sum(score.correct.values())} justes")
+    finally:
+        server.terminate()
+        try:
+            server.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            server.kill()
+    result = score.to_dict()
+    result["duree_s"] = round(time.time() - start)
+    result["outil"] = "llama-server (CUDA)"
+    result["modele"] = label
+    return result
+
+
 # -- orchestration -------------------------------------------------------------------------
 
 
@@ -670,9 +916,18 @@ def write_report(path: Path, report: dict[str, Any]) -> None:
 def versions() -> dict[str, str]:
     from importlib.metadata import version
 
+    from importlib.metadata import PackageNotFoundError
+
     packages = ["torch", "transformers", "peft", "accelerate", "bitsandbytes", "safetensors", "numpy",
-                "huggingface-hub"]
-    return {p: version(p) for p in packages} | {"python": platform.python_version()}
+                "huggingface-hub", "unsloth", "unsloth-zoo", "flash-linear-attention", "fla-core", "triton",
+                "nvidia-cuda-nvcc"]
+    found = {}
+    for p in packages:
+        try:
+            found[p] = version(p)
+        except PackageNotFoundError:
+            found[p] = None
+    return found | {"python": platform.python_version()}
 
 
 def repository_state() -> dict[str, Any]:
@@ -732,7 +987,9 @@ def launch(args: argparse.Namespace) -> dict[str, Any]:
     mixed = mix(data.read_jsonl(sets["entrainement"]) if civil else [],
                 data.read_jsonl(sets["validation"]) if civil else [], external)
 
-    # 4. base
+    # 4. base (Unsloth avant transformers)
+    if USE_UNSLOTH:
+        log(f"Unsloth {import_unsloth()}")
     from huggingface_hub import snapshot_download
     from transformers import AutoTokenizer
 
@@ -794,6 +1051,9 @@ def launch(args: argparse.Namespace) -> dict[str, Any]:
     # 5 et 6. entraînement et validation
     adapter_dir = work / "adaptateur-hf"
     if not (args.resume and (adapter_dir / "adapter_model.safetensors").exists()):
+        report["chemin_entrainement"] = training_path()
+        report["noyaux"] = install_fast_kernels()
+        log(f"noyaux de l'attention linéaire : {report['noyaux']}")
         result = train(base_dir, training, adapter_dir, args.max_steps)
         model = result.pop("modele")
         report["entrainement"] = result
@@ -805,7 +1065,9 @@ def launch(args: argparse.Namespace) -> dict[str, Any]:
     scores = ([("validation", validation, "validation-sorties.jsonl", "de validation")] if civil else []) + (
         [("validation_externe", external_validation, "validation-externe-sorties.jsonl", "de validation externe")]
         if external is not None else [])
-    for key, examples, outputs_file, label in scores:
+    # Par défaut, le score se mesure plus bas, sur le GGUF, par llama.cpp sur le GPU (10 fois
+    # plus vite) ; `--validation-pytorch` le mesure ici, sur l'adaptateur, comme avant.
+    for key, examples, outputs_file, label in scores if args.pytorch_validation else []:
         if args.resume and key in report:
             continue
         if not examples:
@@ -838,6 +1100,23 @@ def launch(args: argparse.Namespace) -> dict[str, Any]:
     # Les déclarations : le dossier de sortie, copié dans un dossier de modèles, est prêt.
     report["declarations"] = write_declarations(output, outputs.declarations)
     write_report(report_path, report)
+
+    # 6 bis. score de validation sur le GGUF : le modèle fusionné pour le modèle civil (celui qui
+    # est installé), la base et l'adaptateur pour un adaptateur de domaine.
+    if not args.pytorch_validation:
+        model_args = (["-m", str(output / outputs.merged)] if outputs.merged
+                      else ["-m", str(output / BASE_NAME), "--lora", str(output / outputs.adapter)])
+        label_gguf = outputs.merged or f"{BASE_NAME} + {outputs.adapter}"
+        binaries = None
+        for key, examples, outputs_file, label in scores:
+            if args.resume and key in report:
+                continue
+            binaries = binaries or prepare_llama_cpp_gpu(llama)
+            log(f"{label.removeprefix('de ')} sur {len(examples)} exemples, par llama.cpp sur le GPU")
+            report[key] = validate_gguf(binaries, model_args, label_gguf, examples, output / outputs_file,
+                                        work / f"llama-server-{key}.log")
+            write_report(report_path, report)
+            log(f"score {label} : {report[key]['justes']}/{report[key]['total']}")
 
     # 9. essai sur une demande qui attend un plan d'appels : par les deux chemins pour le modèle
     # civil, par la base et l'adaptateur seuls pour un adaptateur de domaine (pas de fusion).
@@ -876,6 +1155,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="exemples de validation engendrés")
     parser.add_argument("--pas-max", dest="max_steps", type=int, default=None,
                         help="borne de pas (essai rapide de la chaîne)")
+    parser.add_argument("--validation-pytorch", dest="pytorch_validation", action="store_true",
+                        help="score de validation par PyTorch sur l'adaptateur, au lieu de llama.cpp sur le GGUF")
+    parser.add_argument("--sans-unsloth", dest="without_unsloth", action="store_true",
+                        help="charge et entraîne par transformers et peft seuls, sans Unsloth")
+    parser.add_argument("--noyaux-reference", dest="reference_kernels", action="store_true",
+                        help="implémentations PyTorch de référence de l'attention linéaire, sans noyaux rapides")
     parser.add_argument("--exemples-externes", dest="external", type=Path, default=None,
                         help="fichier d'exemples {prompt, completion} : entraîne un adaptateur de domaine")
     parser.add_argument("--nom", dest="name", default=None,
@@ -885,6 +1170,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--validation-externe", dest="external_validation", type=Path, default=None,
                         help="second fichier pour le score externe, au lieu d'une part du premier")
     args = parser.parse_args(argv)
+    global FAST_KERNELS, USE_UNSLOTH
+    FAST_KERNELS = not args.reference_kernels
+    USE_UNSLOTH = not args.without_unsloth
     start = time.time()
     try:
         report = launch(args)

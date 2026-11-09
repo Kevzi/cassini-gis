@@ -560,12 +560,19 @@ La commande, sans intervention :
    `851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a`, dans le cache de Hugging Face ;
 5. écarte (et compte) tout exemple de plus de 2 048 jetons, sans jamais le tronquer ;
 6. entraîne un adaptateur QLoRA : base en nf4, gradient checkpointing, graine fixe, perte
-   sur la réponse seule, projections du modèle de langue seulement. La graine fixe rend les
-   **jeux** reproductibles à l'octet, pas les **poids** : bitsandbytes et l'implémentation de
-   référence de l'attention linéaire ne sont pas déterministes sur GPU ;
+   sur la réponse seule, projections du modèle de langue seulement. Depuis le 2026-11-09, la
+   base se charge et l'adaptateur se pose par **Unsloth** (`--sans-unsloth` reprend
+   transformers et peft seuls), même méthode et mêmes hyperparamètres. Les couches à attention
+   linéaire de Qwen3.5 passent par les noyaux Triton de `flash-linear-attention` (depuis le
+   2026-11-09, voir « Accélération » plus bas ; `--noyaux-reference` reprend l'implémentation
+   PyTorch de référence). La graine fixe rend les **jeux** reproductibles à l'octet, pas les
+   **poids** : bitsandbytes et ces noyaux ne sont pas déterministes sur GPU ;
 7. mesure le score exact sur la validation (`scoring.py`), en décodage glouton : règle de
    `ai/tests/ecart_reel.rs`, avec une exigence de plus, une question ou un refus doit avoir
-   un texte non vide ;
+   un texte non vide. Depuis le 2026-11-09, ce score se mesure **après** l'étape 8, sur le
+   GGUF (le modèle fusionné, celui qui s'installe ; la base et l'adaptateur pour un adaptateur
+   de domaine), par `llama-server` construit sur CUDA, en 5 min au lieu de 50 ;
+   `--validation-pytorch` le mesure comme avant, par PyTorch sur l'adaptateur, avant l'étape 8 ;
 8. clone llama.cpp au commit `d81235049384534c167caea52b85a694f6103d14` (celui que lie
    `cassini-ai` par llama-cpp-sys-2 0.1.160) dans `~/.cache/cassini-entrainement/`, construit
    ses outils sur CPU, convertit la base et l'adaptateur en GGUF, fusionne, puis quantifie ;
@@ -580,9 +587,85 @@ La commande, sans intervention :
    non, chemins modifiés) et l'empreinte de `uv.lock`.
 
 Dépendances épinglées par `training/entrainement/uv.lock` (Python 3.12) : torch (BSD-3),
-transformers, peft, accelerate, huggingface-hub (Apache-2.0), bitsandbytes (MIT). Rien de cela n'entre dans
+transformers, peft, accelerate, huggingface-hub (Apache-2.0), bitsandbytes (MIT),
+flash-linear-attention et fla-core (MIT), unsloth (Apache-2.0) et unsloth-zoo (LGPL-3.0,
+outillage d'entraînement seulement, jamais dans le noyau ; voir l'en-tête de
+`pyproject.toml` pour ses autres dépendances), et, pour compiler llama.cpp sur CUDA, les roues
+nvidia-cuda-nvcc, nvidia-nvvm, nvidia-cuda-crt et nvidia-cuda-cccl (licence NVIDIA, comme
+les bibliothèques nvidia-* que torch tire déjà). Rien de cela n'entre dans
 la recette : les tests `python3 -I -m unittest discover -s training/entrainement/tests`
 (lecture du jeu, notation, gardes de la chaîne) n'importent pas torch.
+
+### Accélération (2026-11-09)
+
+Quatre pistes essayées, dans l'ordre du propriétaire, chacune sur un entraînement court
+(`--pas-max 20`, même jeu, graine 1, au commit `4e10efe`), contre une référence mesurée dans
+les mêmes conditions (`--noyaux-reference`). Avec `--pas-max 20`, le planning cosinus tient
+en 20 pas (sans échauffement) : la perte aux pas 10 et 20 ne se compare donc qu'à celle d'un
+entraînement court, pas à celle d'un entraînement de 500 pas (0,74 au pas 10 pour
+`regroupe-11-23b`, dont le taux monte encore). Durée par pas : moyenne des pas 11 à 20, hors
+amorce (chargement, compilation Triton).
+
+| Configuration | s / pas | Perte pas 10 | Perte pas 20 | Pic (réservé par torch) | Retenue |
+|---|---|---|---|---|---|
+| référence PyTorch (`--noyaux-reference`) | 25,5 | 0,4723 | 0,2754 | 6,29 Gio | — |
+| 1a : règle delta de `flash-linear-attention`, convolution PyTorch | 23,1 | 0,4726 | 0,2767 | 6,50 Gio | non (gain faible) |
+| **1b : règle delta et convolution de `flash-linear-attention`** | **17,8** | **0,4740** | **0,2793** | **6,24 Gio** | **oui** |
+| 4 : Unsloth 2026.11.3, environnement à part (transformers 5.17.0) | 10,7 | 0,4778 | 0,2747 | 6,21 Gio | essai, puis intégré |
+| **chaîne intégrée : Unsloth + 1b + validation GGUF, de bout en bout** | **10,7** | **0,4818** | **0,2765** | **6,37 Gio** | **oui (par défaut)** |
+| chaîne intégrée, `--sans-unsloth` (transformers 5.17.0) | 17,9 | 0,4742 | 0,2792 | 6,50 Gio | repli |
+| 2 : 1b + regroupement des exemples, 2 048 jetons par passe | > 33 | — | — | > 8 Go | non (mémoire saturée) |
+| 2 : 1b + regroupement, 1 600 jetons par passe | 17,7 | 0,4735 | 0,2760 | 6,92 Gio | non (aucun gain) |
+
+- **Piste 1.** `flash-linear-attention` 0.6.0 (MIT) est en Triton : aucun compilateur, transformers
+  le prend de lui-même pour la règle delta. `causal-conv1d` (BSD-3) n'a pas de roue pour
+  torch 2.14 : la roue la plus proche (torch 2.10, CUDA 13) ne se charge pas (symbole C++
+  absent). La convolution passe donc par celle, en Triton, de `flash-linear-attention`,
+  branchée par `install_fast_kernels` dans `pipeline.py` : c'est elle qui fait l'essentiel du
+  gain, la convolution de référence calculant en float32. Contrôle sur quatre exemples, même
+  adaptateur : pertes à 0,5 % près de la référence, gradient au cosinus 0,989.
+- **Piste 4.** Unsloth 2026.11.3 exige transformers ≤ 5.17.0 ; la chaîne épingle 5.20.2,
+  et uv refuse de résoudre les deux ensemble. Il tire aussi `unsloth_zoo`, sous **LGPL-3.0**,
+  accepté par le propriétaire pour un essai seulement (outillage d'entraînement, jamais dans le
+  noyau). Essai fait **hors de la chaîne**, dans un projet uv à part
+  (`~/cassini-entrainement/unsloth-essai/`, transformers 5.17.0, huggingface-hub 1.33.0, le
+  reste aux versions de la chaîne), par la même boucle sur le même jeu : même QLoRA nf4 à
+  double quantification, mêmes 26,3 millions de paramètres, mêmes modules, et un adaptateur aux
+  mêmes 352 tenseurs (la conversion GGUF ne change pas). Unsloth compile chaque couche
+  (`torch.compile`, environ 1,5 min de plus au départ) et prend son checkpointing
+  « unsloth », qui décharge les activations en mémoire centrale. Régime tenu sur 30 pas :
+  10,7 s par pas. Décision du propriétaire, le même jour : **tout garder**. Unsloth est
+  intégré à la chaîne, par défaut, au-dessus de `flash-linear-attention` et de la validation
+  GGUF : `uv.lock` épingle désormais transformers 5.17.0, huggingface-hub 1.33.0, unsloth et
+  unsloth-zoo 2026.11.3. L'ancien chemin reste par `--sans-unsloth`, et tourne encore avec
+  transformers 5.17.0 (mesuré ci-dessus). `rapport.json` dit le chemin suivi
+  (`chemin_entrainement`) et les versions (`versions`, Unsloth et fla compris). Mesure de
+  bout en bout (`--pas-max 20`) : entraînement, conversion de l'adaptateur en GGUF, fusion,
+  validation par `llama-server`, essai des deux chemins, tout passe ; les deux sorties de
+  l'essai se lisent comme un plan. Pas encore mesuré : le score d'un modèle entraîné
+  jusqu'au bout par Unsloth.
+- **Piste 2.** Le regroupement gardait chaque exemple seul (positions remises à 0, longueurs
+  cumulées transmises à l'attention linéaire et à la convolution ; contrôlé sur GPU : logits
+  inchangés aux arrondis près, alors qu'un regroupement sans séparation les décale de 10 à 13)
+  et la même perte moyenne par exemple. Mais le GPU est déjà occupé à plein par un exemple de
+  750 jetons : à 1 600 jetons par passe, la durée ne bouge pas et le pic monte de 0,7 Gio ; à
+  2 048, la mémoire déborde. Le code a été retiré.
+- **Piste 3.** Validation de `regroupe-11-23` (300 demandes, modèle fusionné Q4_K_M) par
+  `llama-server` construit sur CUDA : **296 / 300** contre 297 / 300 par PyTorch (3 désaccords
+  sur 300, 277 sorties identiques au caractère près), en **5 min 22 s** contre 52 min. Le
+  compilateur CUDA vient des roues NVIDIA épinglées dans `uv.lock`, posées par uv dans
+  l'environnement : rien au niveau du système, pas de `sudo`. `llama-server` est construit
+  une fois (environ 6 min), au même commit que les outils sur CPU, dans
+  `~/.cache/cassini-entrainement/llama.cpp/build-cuda/`, et reconstruit de zéro si
+  l'environnement Python change (CMake efface sa configuration quand le chemin de nvcc
+  change) ; la chaîne s'arrête s'il ne voit pas le GPU, plutôt que de valider dix fois plus
+  lentement sur le CPU. Il n'écoute que `127.0.0.1`, sur un port libre, le temps de la
+  validation, et s'arrête avec la chaîne. Le score porte désormais sur le fichier qui
+  s'installe (quantifié), et non plus sur l'adaptateur en nf4.
+
+Estimation pour un entraînement complet (500 pas), chaîne intégrée : environ 1 h 30
+d'entraînement au lieu de 3 h 30, et 5 min de validation au lieu de 50, soit environ 2 h 40
+pour la commande entière au lieu de 5 h 30 (conversion et quantification inchangées).
 
 ### Ce qui sort
 
