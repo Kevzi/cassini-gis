@@ -431,9 +431,12 @@ impl<'a> Session<'a> {
             mut exec,
             inputs,
         } = resolver.resolve_call(id, spec, step, params, &prior)?;
-        // L'inventaire est lu auprès de QGIS, hors du journal, juste avant l'exécution.
+        // L'inventaire est lu auprès de QGIS, hors du journal, juste avant l'exécution. Seul
+        // l'ordre de sa légende est gardé, pour le rejeu : le résultat en dépend.
+        let mut legend = None;
         if let Some(name) = &spec.inventory_param {
             let inventory = read_inventory(&self.router)?;
+            legend = Some(legend_of(&inventory));
             if let Value::Object(map) = &mut exec {
                 map.insert(name.clone(), inventory);
             }
@@ -482,10 +485,17 @@ impl<'a> Session<'a> {
                 );
                 // Ce que le rejeu repassera est gardé à part, sous la clé réservée `replay` :
                 // un résultat résumé (plus de 200 octets) n'en garderait que taille et empreinte.
+                let mut replay = Map::new();
                 if let Some((name, field)) = &spec.replay_param {
                     if let Some(kept) = value.get(field) {
-                        line.insert("replay".into(), json!({ name.as_str(): kept }));
+                        replay.insert(name.clone(), kept.clone());
                     }
+                }
+                if let Some(legend) = legend.take() {
+                    replay.insert(LEGEND_KEY.into(), legend);
+                }
+                if !replay.is_empty() {
+                    line.insert("replay".into(), Value::Object(replay));
                 }
             }
             Err(RegistryError::Cancelled(_)) => {
@@ -536,6 +546,22 @@ impl<'a> Session<'a> {
         file.sync_data().map_err(io_error)?;
         Ok(())
     }
+}
+
+/// Clé, sous `replay`, de l'ordre de la légende vu par une commande qui lit l'inventaire.
+const LEGEND_KEY: &str = "legend";
+
+/// Ids des couches de l'inventaire, dans l'ordre de la légende (de haut en bas).
+fn legend_of(inventory: &Value) -> Value {
+    let ids = inventory
+        .get("layers")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|l| l.get("layer_id").and_then(Value::as_str))
+        .map(|id| json!(id))
+        .collect();
+    Value::Array(ids)
 }
 
 /// Lit l'inventaire du projet auprès de QGIS, hors du journal. QGIS absent : `style.unavailable`.
@@ -1086,6 +1112,38 @@ impl<'a> Replay<'a> {
         Err(JournalError::Io(kind.to_string()).into())
     }
 
+    /// Ordre de la légende vu par la ligne `i` à l'origine (ids du journal), gardé sous
+    /// `replay.legend`. Un journal plus ancien ne le garde pas : à défaut, l'ordre des couches
+    /// nommées (`layer_id`) par les ordres dictés qui suivent la ligne, eux-mêmes donnés dans
+    /// l'ordre de l'inventaire ; les couches qu'ils ne nomment pas gardent leur place.
+    fn legend_at(&self, i: usize, spec: &crate::registry::CommandSpec) -> Vec<String> {
+        let ids = |v: &Value| -> Vec<String> {
+            v.as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        };
+        // Une clé mal formée (pas une liste de textes) compte comme absente.
+        let kept = self.lines[i].get("replay").and_then(|r| r.get(LEGEND_KEY));
+        if let Some(kept) =
+            kept.filter(|k| k.as_array().is_some_and(|a| a.iter().all(Value::is_string)))
+        {
+            return ids(kept);
+        }
+        // Seuls les `layer.set_style` dictés avant le rangement : au-delà, ce n'est plus cette
+        // mise en forme.
+        self.lines[i + 1..]
+            .iter()
+            .zip(&self.ids[i + 1..])
+            .take_while(|(_, id)| *id != "layer.arrange" && spec.dictates.iter().any(|d| d == *id))
+            .filter(|(_, id)| *id == "layer.set_style")
+            .filter_map(|(line, _)| line.get("params")?.get("layer_id")?.as_str())
+            .map(str::to_string)
+            .collect()
+    }
+
     /// Réexécute chaque étape par `router`, dans l'ordre ; s'arrête au premier écart.
     ///
     /// `replayed_layers` : ids des couches posées par les rejeux précédents dans la même
@@ -1167,11 +1225,19 @@ impl<'a> Replay<'a> {
             let mut exec = resolved.exec;
             // La ligne d'une mise en forme relit l'inventaire, sans les couches d'une exécution
             // précédente, mais ne dicte rien : ses ordres sont les lignes qui la suivent (11.20).
+            // Ses couches y sont remises dans l'ordre de la légende d'origine : un `layer.arrange`
+            // déjà joué dans la session QGIS a pu la remanier, et le résultat suit cet ordre.
             if let Some(name) = &spec.inventory_param {
                 let inventory =
                     read_inventory(router).map_err(|e| ErrorReport::from(e).at_step(step))?;
+                let legend: Vec<String> = self
+                    .legend_at(i, spec)
+                    .into_iter()
+                    .map(|old| bound.get(&old).cloned().unwrap_or(old))
+                    .collect();
+                let inventory = in_legend_order(without_layers(inventory, &leave_out), &legend);
                 if let Value::Object(map) = &mut exec {
-                    map.insert(name.clone(), without_layers(inventory, &leave_out));
+                    map.insert(name.clone(), inventory);
                 }
             }
             let outcome = router
@@ -1264,6 +1330,32 @@ fn without_layers(mut inventory: Value, leave_out: &Value) -> Value {
                 .and_then(Value::as_str)
                 .is_none_or(|id| !gone.contains(id))
         });
+    }
+    inventory
+}
+
+/// L'inventaire dont les couches nommées par `legend` (ids de ce rejeu) reprennent, entre elles,
+/// l'ordre de `legend`, aux places qu'elles occupent ; les autres ne bougent pas. Seul l'ordre
+/// change : une couche en plus ou en moins reste un écart, que la comparaison du résultat voit.
+fn in_legend_order(mut inventory: Value, legend: &[String]) -> Value {
+    let mut rank: HashMap<&str, usize> = HashMap::new();
+    for (k, id) in legend.iter().enumerate() {
+        rank.entry(id.as_str()).or_insert(k);
+    }
+    if let Some(layers) = inventory.get_mut("layers").and_then(Value::as_array_mut) {
+        let rank_of = |l: &Value| {
+            l.get("layer_id")
+                .and_then(Value::as_str)
+                .and_then(|id| rank.get(id).copied())
+        };
+        let slots: Vec<usize> = (0..layers.len())
+            .filter(|&k| rank_of(&layers[k]).is_some())
+            .collect();
+        let mut ranked: Vec<Value> = slots.iter().map(|&k| layers[k].clone()).collect();
+        ranked.sort_by_key(|l| rank_of(l));
+        for (slot, layer) in slots.into_iter().zip(ranked) {
+            layers[slot] = layer;
+        }
     }
     inventory
 }

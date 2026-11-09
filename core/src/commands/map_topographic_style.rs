@@ -7,7 +7,8 @@
 //! compose son `StyleSpec` (`crate::style::table`) et le rangement (`crate::style::arrange`). Elle
 //! rend `styled`, `unchanged` et `groups`, et, sous le champ caché `orders`, les ordres que la
 //! session dicte juste après sa ligne : un `layer.set_style` par couche mise en forme, puis un seul
-//! `layer.arrange` (amendement d'AD-30). Ni l'inventaire ni les ordres n'entrent dans la ligne.
+//! `layer.arrange` (amendement d'AD-30). Ni l'inventaire ni les ordres n'entrent dans la ligne ;
+//! seul l'ordre de sa légende (ids) y est gardé, sous `replay.legend`, pour le rejeu.
 
 use std::collections::BTreeSet;
 

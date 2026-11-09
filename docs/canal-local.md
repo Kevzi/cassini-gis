@@ -135,11 +135,23 @@ et dont le message nomme la commande.
   sortie fichier.
 - Ce que l'exécution d'origine a décidé et que le rejeu doit reprendre tel quel est gardé
   sous la clé réservée `replay` de la ligne, à part du résultat, qui peut être résumé
-  (taille et empreinte au-delà de 200 octets). Seul cas : le centre d'un
-  `layout.export_pdf` à l'échelle, `"replay": {"center": {"x": …, "y": …, "epsg": …}}`.
-  Le rejeu le repasse en paramètre `center`, et l'export cadre au même endroit même si la
+  (taille et empreinte au-delà de 200 octets). Deux cas. Le centre d'un
+  `layout.export_pdf` à l'échelle, `"replay": {"center": {"x": …, "y": …, "epsg": …}}` :
+  le rejeu le repasse en paramètre `center`, et l'export cadre au même endroit même si la
   vue de QGIS a bougé. Ce paramètre n'est rempli que par le noyau : celui d'un appelant est
   ôté. Une ligne sans la clé (export sans échelle, journal ancien) rejoue sans centre.
+  L'ordre de la légende vu par `map.topographic_style`, `"replay": {"legend": [ids de
+  couche, de haut en bas]}` (seuls les ids : l'inventaire lui-même n'entre pas au journal) :
+  le résultat suit cet ordre, et un `layer.arrange` déjà joué dans la même session QGIS
+  (par l'exécution d'origine ou un rejeu précédent) remanie la légende. Le rejeu remet donc
+  les couches de l'inventaire relu dans cet ordre, ids liés substitués, avant de rejouer la
+  commande ; seul l'ordre change, une couche en plus ou en moins reste un écart. Une ligne
+  plus ancienne, sans la clé, prend l'ordre des couches nommées par les `layer.set_style`
+  dictés qui la suivent, avant le rangement ; les autres couches (non reconnues, ou laissées
+  hors de `layers`) gardent leur place relue, et un tel rejeu peut encore diverger si le
+  rangement les a déplacées. Conséquences : l'ordre des couches dans la légende n'est jamais
+  à lui seul un écart pour cette commande, même remanié à la main ; la clé porte l'id de
+  chaque couche du projet, et un id de QGIS contient le nom de la couche (jamais un chemin).
 - Les octets d'une sortie produite par QGIS (GeoPackage, PDF) portent dates et
   identifiants et ne sont pas comparés : le fichier doit exister et n'être pas vide, et
   le résultat typé doit être le même. Les sorties du noyau restent comparées octet par
