@@ -49,6 +49,9 @@ FAKE_SERVER = textwrap.dedent(f"""\
     """)
 
 
+# Le faux `llama-server` est un script à shebang, qui ne s'exécute que sous un système POSIX ;
+# l'entraînement ne tourne que sous Linux (WSL). La recette Windows de l'extension saute ces cas.
+@unittest.skipUnless(sys.platform.startswith("linux"), "faux llama-server POSIX, entraînement sous Linux seulement")
 class GgufValidation(unittest.TestCase):
     def test_score_par_le_serveur_local_en_decodage_glouton(self):
         with tempfile.TemporaryDirectory() as folder:
