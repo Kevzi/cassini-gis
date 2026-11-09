@@ -863,8 +863,11 @@ def validate_gguf(binaries: Path, model_args: list[str], label: str, examples: l
                "--no-webui", "--seed", str(TORCH_SEED)]
     log("$ " + " ".join(command))
     with open(log_file, "w", encoding="utf-8") as server_log:
+        # `prctl` n'existe que sous Linux, où tourne l'entraînement ; Windows refuse `preexec_fn`
+        # (recette Windows de l'extension, qui lance aussi ces tests).
+        stop = stop_with_parent if sys.platform.startswith("linux") else None
         server = subprocess.Popen(command, stdout=server_log, stderr=subprocess.STDOUT, env=server_environment(),
-                                  preexec_fn=stop_with_parent)
+                                  preexec_fn=stop)
     url = f"http://127.0.0.1:{port}"
 
     def post(body: dict[str, Any]) -> dict[str, Any]:
