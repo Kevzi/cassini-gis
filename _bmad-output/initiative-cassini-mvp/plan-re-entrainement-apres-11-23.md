@@ -3,14 +3,14 @@ title: 'Ré-entraînement après 11.23 : reprojection avant analyse, conversion,
 type: 'feature'
 ticket: ''
 created: '2026-11-09'
-status: 'in-progress'
+status: 'built'
 baseline_revision: '87ab17c52e666ef3938a9553b1d5a538b9bf20fd'
 route: 'full'
 route_source: 'auto'
 risk: 'medium'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: [quick]
 review_loop_iteration: 0
 context:
   - '{project-root}/docs/entrainement-du-modele.md'
@@ -88,3 +88,18 @@ context:
 **Commands:**
 - Rust sous Windows : `powershell.exe -NoProfile -Command '$env:LIBCLANG_PATH="C:\Users\kevin\Downloads\Projet code\outils-cassini\libclang\clang\native"; $env:CARGO_TARGET_DIR="C:\ct"; Set-Location "C:\Users\kevin\Downloads\Projet code\CASSINI"; cargo test --workspace'` -- expected: vert
 - Essais GPU : script `essais-11-23.ps1` adapté, `--features cuda` -- expected: barres lues
+
+## Review Triage Log
+
+| # | Constat | Verdict | Suite | Preuve |
+|---|---|---|---|---|
+| 1 | `draft_multi` ne produit jamais `select(cible)`, `select(réf)`, `buffer(step:2)`, `intersect(step:1, step:3)` | medium | patch | `filtered_reference(` n'est appelé qu'en l. 1076 et 1411, toujours avec une zone ou une cible non filtrée ; les bras doublés sont des plans à cinq étapes |
+| 2 | Catégorie de zone dite en mots seulement en condition d'une autre cible, jamais en sélection de la couche de zonage elle-même | medium | patch | `zone_category` n'est atteint que par `area()` (l. 1203) |
+| 3 | `zone_category` garde `libelle` une fois sur deux, plan sur le code alors que la valeur littérale est présente | medium | patch | `b.add(..., &["zone"], &[], ...)` : `forbid` vide, `Builder::add` l. 1666 tire chaque champ non requis à 1/2 |
+| 4 | `subset_phrase` tire champ et valeur du thème, pas de la couche | false | rejeté | la demande (3D, tableur, suppression, modification) est refusée pour la capacité, quel que soit le champ : un champ absent ne change pas l'attendu |
+| 5 | Barre `ecart_reel` ratée (31/40) | false | rejeté | résultat rendu tel quel comme le veut la matrice ; décision du propriétaire (2026-11-09) : ne pas installer |
+| 6 | Cible d'intersection en 4326 citée, à côté de couches métriques, jamais tirée | low | rejeté | le cas réel est tenu en QGIS ; l'ajouter demanderait une nouvelle branche de famille, pas une correction directe |
+| 7 | Test `conversion_coordonnees` passé d'une égalité à une implication | low | patch | correction directe de l'assertion |
+| 8 | Tableau des familles de `docs/entrainement-du-modele.md` non mis à jour | low | patch | lignes `analyse_couche_metrique`, `conversion_coordonnees` inchangées |
+| 9 | Intention figée : « projet en UTM » contre 2154 partout ailleurs | false | rejeté | correctif = modifier le plan ; signalé au propriétaire, seul à pouvoir changer le bloc figé |
+| 10 | « quatre écritures du fuseau » alors que `convert_words` en a six | low | patch | regroupé avec 8 (même correction de la doc) |
