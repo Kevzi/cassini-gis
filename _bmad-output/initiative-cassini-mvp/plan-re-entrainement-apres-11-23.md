@@ -21,7 +21,7 @@ context:
 
 ## Intent
 
-**Problem:** le modèle installé (`ajuste-11-23c`) rate encore des demandes réelles. En priorité, à la recette QGIS du 2026-11-09 sur Annecy, une zone tampon autour des gares (couche CSV en EPSG:4326, projet en UTM) part sans `data.reproject`. Il ne connaît pas `data.convert` (10.9). Aux essais GPU, il manque des refus (vue 3D d'une partie d'une couche ; export d'un sous-ensemble filtré en tableur ; PDF qui choisit ses couches ; statistique d'altitude par zone), perd une rampe nommée d'un dégradé, écrit mal la zone UTM d'arrivée d'un point, pose une question sur un code de zone du PLU non littéral, et saute ou ajoute une étape dans les enchaînements sélection-sélection-tampon-intersection.
+**Problem:** le modèle installé (`ajuste-11-23c`) rate encore des demandes réelles. En priorité, à la recette QGIS du 2026-11-09 sur Annecy, une zone tampon autour des gares (couche CSV en EPSG:4326, projet en EPSG:2154) part sans `data.reproject`. Il ne connaît pas `data.convert` (10.9). Aux essais GPU, il manque des refus (vue 3D d'une partie d'une couche ; export d'un sous-ensemble filtré en tableur ; PDF qui choisit ses couches ; statistique d'altitude par zone), perd une rampe nommée d'un dégradé, écrit mal la zone UTM d'arrivée d'un point, pose une question sur un code de zone du PLU non littéral, et saute ou ajoute une étape dans les enchaînements sélection-sélection-tampon-intersection.
 
 **Approach:** corriger le générateur d'exemples par familles (jamais par phrase) d'après ces constats, puis lancer l'entraînement accéléré, les essais GPU contre les barres de 11.16 et de 11.23, et rendre les résultats au propriétaire, qui décide seul de l'installation.
 
