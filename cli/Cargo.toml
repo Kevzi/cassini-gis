@@ -18,8 +18,9 @@ serde_json = "1"
 # Serveur MCP (ticket 5.7, decision du proprietaire 2026-10-30) : rmcp (Apache-2.0), sans
 # transport reseau, et tokio (MIT) reduit au runtime a un fil, aux flux standard et, pour le
 # relais (ticket 5.25), a `sync` : canaux `oneshot` et verrou asynchrone, sans `net` (AD-14).
-# rmcp tire deja `sync` : aucune crate nouvelle.
-rmcp = { version = "=3.8.0", default-features = false, features = ["server"] }
+# rmcp tire deja `sync` : aucune crate nouvelle. Passe en 3.9.0 le 2026-11-09 (RUSTSEC-2026-0462,
+# client HTTP que Cassini n'active pas) : tire sha2 et ses briques RustCrypto (MIT OR Apache-2.0).
+rmcp = { version = "=3.9.0", default-features = false, features = ["server"] }
 tokio = { version = "1", default-features = false, features = ["rt", "io-std", "sync"] }
 
 # Paquet livre (ticket 5.21) : moteurs de calcul a part, carte graphique Vulkan prise si elle se
