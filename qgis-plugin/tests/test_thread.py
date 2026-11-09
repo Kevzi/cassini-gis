@@ -777,5 +777,194 @@ class GuideStylesTest(unittest.TestCase):
             self.assertIn(c["accent"], st["title"])
 
 
+# -- rejeu du journal [12.3] : une classe par ligne de la matrice -------------------
+import client  # noqa: E402
+
+
+def button(view=None, ready=True, has_journal=True, busy=False, external=False, replay=None):
+    return thread.replay_button(view or av.AgentView(), ready, has_journal, busy, external, replay)
+
+
+class ReplayIdenticalTest(unittest.TestCase):
+    def test_identical(self):
+        state = thread.replay_outcome(client.REPLAY_DONE, {"steps": 2, "identical": True})
+        self.assertEqual(thread.replay_text(state, "fr"), "Rejeu terminé : résultat identique.")
+        self.assertEqual(thread.replay_text(state, "en"), "Replay done: identical result.")
+        self.assertEqual(thread.replay_line(state, "fr"), "✔ Rejeu terminé : résultat identique.")
+        self.assertEqual(thread.replay_details(state), "")
+        self.assertTrue(button(replay=state)["enabled"])  # on peut rejouer encore
+
+    def test_done_without_identical_is_not_called_identical(self):
+        state = thread.replay_outcome(client.REPLAY_DONE, {"steps": 2})
+        self.assertEqual(state["status"], thread.REPLAY_DIFFERENT)
+        self.assertEqual(thread.replay_text(state, "fr"), "Rejeu terminé : résultat différent.")
+
+
+class ReplayDifferentTest(unittest.TestCase):
+    def test_diverged_names_the_step_and_the_reason(self):
+        message = "Le rejeu diverge du journal à l'étape 2 : le fichier d'entrée a changé."
+        state = thread.replay_outcome(
+            client.REPLAY_FAILED, {"code": "replay.diverged", "message": message, "step": 2})
+        # Le message nomme déjà l'étape : elle n'est pas répétée.
+        self.assertEqual(
+            thread.replay_text(state, "fr"), "Rejeu terminé : résultat différent. " + message)
+        self.assertEqual(
+            thread.replay_text(state, "en"), "Replay done: different result. " + message)
+        other = dict(state, message="Le fichier d'entrée a changé.")
+        self.assertEqual(
+            thread.replay_text(other, "fr"),
+            "Rejeu terminé : résultat différent à l'étape 2. Le fichier d'entrée a changé.")
+        self.assertEqual(
+            thread.replay_text(dict(other, message="Step 2 differs."), "en"),
+            "Replay done: different result. Step 2 differs.")
+        # « étape 12 » ne vaut pas « étape 1 ».
+        self.assertTrue(thread.replay_text(dict(state, step=1, message="à l'étape 12"), "fr")
+                        .startswith("Rejeu terminé : résultat différent à l'étape 1."))
+        self.assertTrue(thread.replay_line(state, "fr").startswith("✖ "))
+        self.assertEqual(thread.replay_details(state), "replay.diverged")
+        self.assertNotIn("replay.diverged", thread.replay_text(state, "fr"))
+
+
+class ReplayImpossibleTest(unittest.TestCase):
+    def test_other_error_shows_the_core_message_and_hides_the_code(self):
+        state = thread.replay_outcome(client.REPLAY_FAILED, {
+            "code": "registry.unavailable", "step": 3,
+            "message": "La commande layer.add n'est pas annoncée par l'extension."})
+        text = thread.replay_text(state, "fr")
+        self.assertEqual(
+            text, "Rejeu arrêté à l'étape 3 : La commande layer.add n'est pas annoncée par l'extension.")
+        self.assertNotIn("registry.unavailable", text)
+        self.assertEqual(thread.replay_details(state), "registry.unavailable")
+
+    def test_without_a_step(self):
+        state = thread.replay_outcome(client.REPLAY_FAILED, {
+            "code": "replay.no_journal", "step": None,
+            "message": "Ce projet n'a pas de journal à rejouer."})
+        self.assertEqual(thread.replay_text(state, "fr"),
+                         "Rejeu impossible : Ce projet n'a pas de journal à rejouer.")
+        self.assertEqual(thread.replay_text(state, "en"),
+                         "Replay not possible: Ce projet n'a pas de journal à rejouer.")
+
+    def test_core_death(self):
+        state = thread.replay_outcome(client.REPLAY_FAILED, {
+            "code": client.CORE_DIED, "step": None, "message": "Le noyau Cassini s'est arrêté."})
+        self.assertEqual(state["status"], thread.REPLAY_STOPPED)
+        self.assertFalse(thread.replay_running(state))
+
+    def test_garbage_payload_never_raises(self):
+        state = thread.replay_outcome(client.REPLAY_FAILED, None)
+        self.assertEqual(state["status"], thread.REPLAY_STOPPED)
+        self.assertEqual(thread.replay_text(state, "fr"), "Le rejeu n'a pas pu se faire.")
+        self.assertEqual(thread.replay_text(state, "en"), "The replay could not be done.")
+        state = thread.replay_outcome(client.REPLAY_FAILED, {"step": 3, "message": " "})
+        self.assertEqual(thread.replay_text(state, "fr"), "Rejeu arrêté à l'étape 3.")
+        state = thread.replay_outcome(client.REPLAY_FAILED, {"step": True, "code": 3})
+        self.assertIsNone(state["step"])
+        self.assertEqual(state["code"], "")
+
+
+class ReplayRunningTest(unittest.TestCase):
+    def test_running_greys_the_button_the_input_and_send(self):
+        state = thread.replay_started()
+        self.assertTrue(thread.replay_running(state))
+        self.assertEqual(thread.replay_text(state, "fr"), "Rejeu en cours…")
+        self.assertEqual(thread.replay_line(state, "fr"), "… Rejeu en cours…")
+        self.assertNotIn("sur", thread.replay_text(state, "fr"))  # pas d'« étape k sur n »
+        self.assertEqual(button(replay=state),
+                         {"enabled": False, "reason": "replay_reason_running"})
+        # Le panneau passe le rejeu comme une occupation : saisie et Envoyer grisés.
+        c = av.controls(av.AgentView(), True, True, True, CATALOGUE)
+        self.assertFalse(c["input_enabled"])
+        self.assertFalse(c["send_enabled"])
+        hint = thread.input_hint(av.AgentView(), c["input_reason"], True, None, "fr")
+        self.assertEqual(hint, "Patientez : une étape est en cours.")
+        self.assertEqual(texts.tr("fr", "replay_reason_running"),
+                         "Patientez : le rejeu est en cours.")
+
+
+class ReplayEmptyJournalTest(unittest.TestCase):
+    def test_empty_journal_greys_with_its_reason(self):
+        self.assertEqual(button(has_journal=False),
+                         {"enabled": False, "reason": "replay_reason_empty"})
+        self.assertEqual(texts.tr("fr", "replay_reason_empty"),
+                         "Le journal est vide : rien à rejouer.")
+
+
+class ReplayBusyTest(unittest.TestCase):
+    def test_greyed_during_a_command_a_plan_or_an_external_call(self):
+        self.assertEqual(button(busy=True)["reason"], "input_reason_running")
+        self.assertEqual(button(external=True)["reason"], "input_reason_external")
+        v = av.AgentView()
+        v.generating()
+        self.assertEqual(button(v)["reason"], "input_reason_composing")
+        v = proposed()
+        self.assertEqual(button(v)["reason"], "input_reason_plan")
+        v.executing()
+        self.assertEqual(button(v)["reason"], "input_reason_running")
+
+    def test_not_ready_greys_without_reason(self):
+        # Hors état prêt (lecture seule comprise aujourd'hui), le bandeau dit pourquoi.
+        self.assertEqual(button(ready=False), {"enabled": False, "reason": None})
+
+    def test_at_rest_enabled(self):
+        self.assertEqual(button(), {"enabled": True, "reason": None})
+
+
+class ReplayGuidanceTest(unittest.TestCase):
+    def test_no_cue_and_greyed_rephrase_during_a_replay(self):
+        g = {"card": thread.RESULT, "cue": "act_rephrase", "values": {}, "rephrase": True}
+        shown = thread.shown_guidance(g, True)
+        self.assertIsNone(shown["cue"])
+        self.assertEqual(thread.cue_text(shown, "fr"), "")
+        self.assertFalse(shown["rephrase_enabled"])
+        self.assertIsNone(thread.primary({"send_enabled": False}, shown["rephrase_enabled"]))
+        self.assertEqual(g["cue"], "act_rephrase")  # le guidage brut (focus) est intact
+        shown = thread.shown_guidance(g, False)
+        self.assertEqual(shown["cue"], "act_rephrase")
+        self.assertTrue(shown["rephrase_enabled"])
+
+
+class ReplayRefusedAndStaleTest(unittest.TestCase):
+    def test_refused_text(self):
+        state = thread.replay_refused()
+        self.assertFalse(thread.replay_running(state))
+        self.assertEqual(thread.replay_line(state, "fr"),
+                         "ⓘ Le noyau est occupé : réessayez dans un instant.")
+        self.assertTrue(button(replay=state)["enabled"])
+
+    def test_current_only_for_the_same_log(self):
+        done = dict(thread.replay_outcome(client.REPLAY_DONE, {"identical": True}), entries=2)
+        self.assertIs(thread.replay_current(done, 2), done)
+        self.assertIsNone(thread.replay_current(done, 3))
+        running = thread.replay_started()
+        self.assertIs(thread.replay_current(running, 5), running)
+        self.assertIsNone(thread.replay_current(None, 1))
+
+
+class ExpertCommandInThreadTest(unittest.TestCase):
+    """Commande experte `system.about` : bulle « Mode expert : … » puis carte de résultat."""
+
+    def test_bubble_then_result_card(self):
+        expert = thread.expert_exchange("Vérification du noyau Cassini", "10:00")
+        v = av.AgentView()
+        running = {"kind": runlog.RUNNING, "command": "system.about"}
+        self.assertEqual(thread.cards(v, expert, running), [thread.BUBBLE, thread.RESULT])
+        self.assertEqual(thread.bubble_text(expert, "fr"),
+                         "Mode expert : Vérification du noyau Cassini")
+        done = {"kind": runlog.DONE, "command": "system.about", "result": {}}
+        self.assertEqual(thread.cards(v, expert, done), [thread.BUBBLE, thread.RESULT])
+        self.assertEqual(thread.result_title(done, "fr"), "✔ Terminée")
+
+    def test_error_card_without_rephrase(self):
+        expert = thread.expert_exchange("Vérification du noyau Cassini", "10:00")
+        failed = {"kind": runlog.ERROR, "command": "system.about", "code": "x.y", "message": "m"}
+        v = av.AgentView()
+        self.assertEqual(thread.cards(v, expert, failed), [thread.BUBBLE, thread.RESULT])
+        g = thread.guidance(v, expert, failed)
+        self.assertFalse(g["rephrase"])
+        self.assertIsNone(g["cue"])
+        self.assertEqual(thread.error_details(failed), "x.y")
+
+
 if __name__ == "__main__":
     unittest.main()

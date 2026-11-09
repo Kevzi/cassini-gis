@@ -1,7 +1,7 @@
 """Le fil de la demande [12.1] : quelles cartes montrer, leurs titres et lignes, les
 comptes des replis et les couleurs propres à Cassini. Son guidage [12.2] : la ligne
 « À vous », le repère d'avancement, « Reformuler la demande », la cible du focus et les
-annonces de chaque état.
+annonces de chaque état. Le rejeu du journal [12.3] : son état et son bouton.
 
 Sans Qt. Le panneau ne fait que poser les widgets que ce module désigne (AD-4) : toute
 décision d'affichage testable sans Qt vit ici. Les couleurs suivent `DESIGN.md` : fonds,
@@ -10,10 +10,13 @@ de style), seules les couleurs de Cassini ont une paire claire et sombre, choisi
 lisant la luminosité de la fenêtre, comme le logo.
 """
 
+import re
+
 try:  # importé à plat par les tests, en paquet par QGIS
-    from . import agentview, runlog, texts
+    from . import agentview, client, runlog, texts
 except ImportError:  # pragma: no cover
     import agentview
+    import client
     import runlog
     import texts
 
@@ -453,6 +456,152 @@ def log_fold_label(n, lang):
     if n == 1:
         return texts.tr(lang, "log_fold_one")
     return texts.tr(lang, "log_fold_many", n=n)
+
+
+# -- rejeu du journal [12.3] -------------------------------------------------------
+# Le noyau rejoue tout (`journal.replay`, AD-4, AD-11) ; le panneau ne garde que l'issue,
+# affichée dans le repli Journal. Le rejeu n'est pas annulable : pas d'Arrêter, et pas de
+# repère « étape k sur n », le noyau n'annonçant pas les étapes d'un rejeu.
+REPLAY_RUNNING = "replay_running"
+REPLAY_IDENTICAL = "replay_identical"
+REPLAY_DIFFERENT = "replay_different"
+REPLAY_STOPPED = "replay_stopped"
+REPLAY_REFUSED = "replay_refused"  # le client n'a rien envoyé (une autre requête en vol)
+DIVERGED = "replay.diverged"
+
+
+def replay_started():
+    """État du rejeu juste parti."""
+    return {"status": REPLAY_RUNNING}
+
+
+def replay_running(state):
+    return bool(state and state.get("status") == REPLAY_RUNNING)
+
+
+def replay_refused():
+    """Le clic n'est pas parti : le client avait déjà une requête en vol (AD-5)."""
+    return {"status": REPLAY_REFUSED}
+
+
+def replay_current(state, entries):
+    """L'issue d'un rejeu fini ne vaut que pour le journal qu'elle a rejoué : dès que le
+    Journal de session n'a plus `entries` lignes, elle est oubliée (None)."""
+    if not state or replay_running(state):
+        return state
+    if state.get("entries") is not None and state.get("entries") != entries:
+        return None
+    return state
+
+
+def _names_step(message, step):
+    """Le message du noyau nomme-t-il déjà l'étape (« à l'étape 2 », « step 2 ») ?"""
+    return bool(re.search(r"(?i)\b(?:étape|step)\s+%d\b" % step, message or ""))
+
+
+def shown_guidance(guide, replaying):
+    """Guidage tel qu'affiché : pendant un rejeu, pas de ligne « À vous » et Reformuler
+    grisé (la saisie l'est aussi). La cible du focus garde le guidage brut."""
+    out = dict(guide)
+    out["rephrase_enabled"] = bool(guide.get("rephrase")) and not replaying
+    if replaying:
+        out["cue"] = None
+    return out
+
+
+def _step_of(value):
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def replay_outcome(kind, payload):
+    """Issue du rejeu d'après REPLAY_DONE ou REPLAY_FAILED du client.
+
+    `replay.diverged` : résultat différent à l'étape `step` ; toute autre erreur : rejeu
+    arrêté (à l'étape `step` s'il y en a une). Le code ne sert qu'aux Détails techniques.
+    """
+    payload = payload if isinstance(payload, dict) else {}
+    if kind == client.REPLAY_DONE:
+        if payload.get("identical") is True:
+            return {"status": REPLAY_IDENTICAL}
+        return {"status": REPLAY_DIFFERENT, "step": None, "message": "", "code": ""}
+    code = payload.get("code")
+    message = payload.get("message")
+    return {
+        "status": REPLAY_DIFFERENT if code == DIVERGED else REPLAY_STOPPED,
+        "step": _step_of(payload.get("step")),
+        "message": message if isinstance(message, str) else "",
+        "code": code if isinstance(code, str) else "",
+    }
+
+
+def replay_text(state, lang):
+    """Phrase de l'état du rejeu (sans icône), ou "" s'il n'y a rien à dire."""
+    if not state:
+        return ""
+    status = state.get("status")
+    if status in (REPLAY_RUNNING, REPLAY_IDENTICAL, REPLAY_REFUSED):
+        return texts.tr(lang, status)
+    step, message = state.get("step"), (state.get("message") or "").strip()
+    if status == REPLAY_DIFFERENT:
+        if step is None or _names_step(message, step):
+            return texts.tr(lang, "replay_different_nostep", message=message).strip()
+        return texts.tr(lang, "replay_different", k=step, message=message).strip()
+    if not message:  # rien du noyau : jamais « Rejeu impossible : » tout court
+        if step is None:
+            return texts.tr(lang, "replay_failed_generic")
+        return texts.tr(lang, "replay_stopped_nomsg", k=step)
+    if step is None:
+        return texts.tr(lang, "replay_impossible", message=message)
+    return texts.tr(lang, "replay_stopped", k=step, message=message)
+
+
+def replay_line(state, lang):
+    """Ligne affichée sous le bouton : icône et phrase (l'état n'est pas porté par la
+    couleur seule), ou ""."""
+    text = replay_text(state, lang)
+    if not text:
+        return ""
+    icon = {
+        REPLAY_RUNNING: runlog.ICONS[runlog.RUNNING],
+        REPLAY_IDENTICAL: runlog.ICONS[runlog.DONE],
+        REPLAY_REFUSED: "ⓘ",
+    }.get(state.get("status"), runlog.ICONS[runlog.ERROR])
+    return "%s %s" % (icon, text)
+
+
+def replay_details(state):
+    """Code `domaine.cause` d'un rejeu en échec, réservé aux Détails techniques."""
+    if state and state.get("status") in (REPLAY_DIFFERENT, REPLAY_STOPPED):
+        return str(state.get("code") or "")
+    return ""
+
+
+def replay_button(view, ready, has_journal, other_busy=False, external_busy=False,
+                  replay=None):
+    """Bouton « Rejouer le journal » : {"enabled", "reason"} (clé de texts ou None).
+
+    Grisé hors état prêt (le bandeau dit pourquoi), pendant le rejeu, pendant une
+    composition, un plan proposé ou en exécution, une commande experte, un appel de l'IA
+    externe, et quand le journal est vide, chaque fois avec sa raison.
+    """
+    if replay_running(replay):
+        return {"enabled": False, "reason": "replay_reason_running"}
+    if not ready:
+        return {"enabled": False, "reason": None}
+    phase = view.phase
+    if phase == agentview.GENERATING:
+        reason = "input_reason_composing"
+    elif phase == agentview.PROPOSED:
+        reason = "input_reason_plan"
+    elif phase == agentview.EXECUTING or other_busy:
+        reason = "input_reason_running"
+    elif external_busy:
+        reason = "input_reason_external"
+    elif not has_journal:
+        reason = "replay_reason_empty"
+    else:
+        return {"enabled": True, "reason": None}
+    return {"enabled": False, "reason": reason}
 
 
 MIN_THREAD = 120  # hauteur que le fil garde toujours, replis ouverts

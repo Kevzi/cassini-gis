@@ -303,7 +303,8 @@ class CassiniPanel(QWidget):
     def __init__(self, actions):
         super().__init__()
         # run(cmd, params), stop(), choose_core(), relaunch(), propose(text), approve(), reject(),
-        # set_external(enabled, ask), stop_external(call_id), answer_approval(request_id, approved)
+        # set_external(enabled, ask), stop_external(call_id), answer_approval(request_id, approved),
+        # replay()
         self._actions = actions
         settings = QSettings()
         # Interrupteur éteint à chaque démarrage ; seule la case est retenue.
@@ -352,6 +353,11 @@ class CassiniPanel(QWidget):
         self._rephrased = False  # la phrase est revenue dans la saisie : bouton retiré
         self._rephrase_note = None  # clé du texte quand rien n'a pu être remis
         self._focus_target = None  # dernière cible du focus appliquée (une fois par état)
+        # Rejeu du journal [12.3] : issue affichée dans le repli Journal (`thread.replay_*`).
+        self.replay = None
+        # Le bouton du rejeu avait le focus au départ : (widget où Qt l'a mis en grisant le
+        # bouton,) ; None sinon. Le verdict ne le rend que s'il n'a pas bougé depuis.
+        self._replay_focus = None
         self._build()
         expert = str(settings.value(EXPERT_KEY, "false")).lower() in ("true", "1")
         self.expert.set_open(expert)
@@ -733,6 +739,26 @@ class CassiniPanel(QWidget):
         self.log_empty = QLabel()
         lfl.addWidget(self.log_empty)
         lfl.addWidget(self.log_list)
+        # « Rejouer le journal » [12.3] : bouton natif, sa raison quand il est grisé, puis
+        # l'issue du rejeu en `body` sous le bouton, et le code sous Détails techniques.
+        self.replay_button = QPushButton()
+        self.replay_button.clicked.connect(self._replay)
+        replay_row = QHBoxLayout()
+        replay_row.addWidget(self.replay_button, 0, Qt.AlignmentFlag.AlignTop)
+        self.replay_reason = self._meta(_wrap(QLabel(), selectable=False))
+        replay_row.addWidget(self.replay_reason, 1)
+        replay_row.addStretch(0)  # sans raison, le bouton garde sa largeur naturelle
+        lfl.addLayout(replay_row)
+        self.replay_status = _wrap(QLabel(), plain=True)  # message du noyau, jamais interprété
+        self.replay_status.setVisible(False)
+        lfl.addWidget(self.replay_status)
+        self.replay_details = _Fold(self._fold_toggled)
+        self.replay_details_view = _mono(_wrap(QLabel(), plain=True))
+        rdl = QVBoxLayout(self.replay_details.body)
+        rdl.setContentsMargins(0, 0, 0, 0)
+        rdl.addWidget(self.replay_details_view)
+        self.replay_details.setVisible(False)
+        lfl.addWidget(self.replay_details)
         col.addWidget(self.log_fold)
 
         # Repli Mode expert : son contenu défile à part s'il dépasse la moitié du panneau.
@@ -808,7 +834,7 @@ class CassiniPanel(QWidget):
             # Résultat : du titre (ou de Reformuler) à la saisie, puis le reste de la carte.
             self.result_rephrase, self.input, self.send_button, self.details.button,
             self.result_stop, self.open_folder_button, self.log_fold.button, self.log_list,
-            self.expert.button, self.command_list, self.run_button, self.stop_button,
+            self.replay_button, self.replay_details.button, self.expert.button, self.command_list, self.run_button, self.stop_button,
         ]
         for a, b in zip(order, order[1:]):
             QWidget.setTabOrder(a, b)
@@ -848,6 +874,8 @@ class CassiniPanel(QWidget):
         plan_in_flight = self.agent.phase != agentview.IDLE
         if self.agent.phase in (agentview.GENERATING, agentview.PROPOSED):
             self._exchange = None  # la demande n'a plus de réponse : le fil repart à l'accueil
+        if thread.replay_running(self.replay):
+            self.replay = None  # le noyau parti, le rejeu n'a plus de verdict à attendre
         self._close_plan_entry(runlog.ERROR)
         self.agent.forget()
         last = self.last
@@ -859,6 +887,7 @@ class CassiniPanel(QWidget):
         self.ready = True
         self.banner = None
         self.banner_message = None
+        self.replay = None  # noyau (re)lancé : l'issue d'un rejeu précédent ne vaut plus
         self.catalogue = list(catalogue)
         # Le journal du panneau reprend celui du projet, que le noyau rend à l'ouverture :
         # les étapes passées restent visibles, et celles d'un autre projet disparaissent.
@@ -1027,18 +1056,20 @@ class CassiniPanel(QWidget):
         if kind in client.PLAN_EVENTS:
             self._on_plan_event(kind, payload or {})
             return
+        if kind in (client.REPLAY_DONE, client.REPLAY_FAILED):
+            self._on_replay_event(kind, payload or {})
+            return
         self.focus = None  # tout nouvel événement efface le détail cliqué
         if kind == client.RUN_STARTED:
             self.running = True
             params, self._run_params = self._run_params, None
-            self.log.start(
-                payload["command"], payload["command"], time.strftime("%H:%M"), params=params
-            )
-            self.last = {"kind": runlog.RUNNING, "command": payload["command"]}
-            # Un Lancer expert remplace l'échange en cours, comme une demande.
+            # Le libellé court de l'étape, au journal comme dans la bulle [12.3].
             label = summary.label(
                 payload["command"], params, self.lang, _layer_name, None, self.catalogue
             )
+            self.log.start(payload["command"], label, time.strftime("%H:%M"), params=params)
+            self.last = {"kind": runlog.RUNNING, "command": payload["command"]}
+            # Un Lancer expert remplace l'échange en cours, comme une demande.
             self._exchange = thread.expert_exchange(label, time.strftime("%H:%M"))
             self._plan_open = False
             self._rephrased = False
@@ -1064,6 +1095,18 @@ class CassiniPanel(QWidget):
             self.last = {"kind": runlog.ERROR, **payload}
             _announce(self.result_text, self.t("live_error"))
         self.render()
+
+    def _on_replay_event(self, kind, payload):
+        """Verdict du rejeu : affiché et annoncé dans le repli Journal ; le fil, le détail
+        cliqué et le focus restent comme ils étaient (EXPERIENCE.md, State Patterns)."""
+        self.replay = thread.replay_outcome(kind, payload)
+        self.replay["entries"] = len(self.log.entries)  # oublié dès que le journal grandit
+        self.render()
+        kept, self._replay_focus = self._replay_focus, None
+        if kept is not None and self._focus_widget() in (None, kept[0]):
+            if self.replay_button.isEnabled():  # l'utilisateur n'a pas déplacé le focus
+                self.replay_button.setFocus(Qt.FocusReason.OtherFocusReason)
+        _announce(self.replay_status, thread.replay_text(self.replay, self.lang))
 
     # -- affichage -----------------------------------------------------
     def render(self):
@@ -1114,9 +1157,12 @@ class CassiniPanel(QWidget):
         self._render_buttons()
         self._move_focus(inside)
 
+    def _focus_widget(self):
+        return QApplication.focusWidget()
+
     def _focus_inside(self):
         """Le focus clavier est-il dans le panneau (hors fenêtre des réglages) ?"""
-        widget = QApplication.focusWidget()
+        widget = self._focus_widget()
         return widget is not None and (widget is self or self.isAncestorOf(widget))
 
     def _move_focus(self, inside):
@@ -1209,7 +1255,8 @@ class CassiniPanel(QWidget):
 
     def _style_primary(self, c):
         """Un seul bouton principal visible (DESIGN.md, `button-primary`)."""
-        which = thread.primary(c, self._guide()["rephrase"])
+        shown = thread.shown_guidance(self._guide(), thread.replay_running(self.replay))
+        which = thread.primary(c, shown["rephrase_enabled"])
         if which == self._primary_shown or self._styles is None:
             return
         self._primary_shown = which
@@ -1345,7 +1392,8 @@ class CassiniPanel(QWidget):
     def _render_guidance(self):
         """Ligne « À vous », Reformuler et repère d'avancement [12.2] (`thread.guidance`)."""
         t = self.t
-        guide = self._guide()
+        # Pendant un rejeu : pas de « À vous », Reformuler grisé [12.3].
+        guide = thread.shown_guidance(self._guide(), thread.replay_running(self.replay))
         text = thread.cue_text(guide, self.lang)
         where = {
             thread.PLAN: (self.plan_cue, None),
@@ -1365,6 +1413,7 @@ class CassiniPanel(QWidget):
             b.setAccessibleName(t("rephrase"))
             b.setAccessibleDescription(detail if shown else "")
             b.setVisible(shown)
+            b.setEnabled(guide["rephrase_enabled"] or not shown)
             d.setText(detail)
             d.setVisible(shown)
         dim = self.palette().color(QPalette.ColorRole.WindowText).name()
@@ -1376,6 +1425,8 @@ class CassiniPanel(QWidget):
     def _rephrase(self):
         """« Reformuler la demande » : la phrase revient dans une saisie vide, jamais
         par-dessus un texte déjà tapé ; le focus va dans la saisie."""
+        if thread.replay_running(self.replay):
+            return  # saisie grisée pendant le rejeu : rien n'y est écrit
         out = thread.rephrase(self._exchange, self._last_request, self.input.toPlainText())
         if out["text"] is not None:
             self.input.setPlainText(out["text"])
@@ -1409,7 +1460,43 @@ class CassiniPanel(QWidget):
             )
         self.log_list.setAccessibleName(label)
         self.log_list.scrollToBottom()
+        self._render_replay()
         self._fit_folds()
+
+    def _render_replay(self):
+        """Bouton « Rejouer le journal », sa raison et l'issue du rejeu (`thread.replay_*`)."""
+        t = self.t
+        self.replay = thread.replay_current(self.replay, len(self.log.entries))
+        b = self._replay_controls()
+        reason = t(b["reason"]) if b["reason"] else ""
+        self.replay_button.setText(t("replay"))
+        self.replay_button.setEnabled(b["enabled"])
+        self.replay_button.setAccessibleName("%s, %s" % (t("replay"), reason) if reason else t("replay"))
+        self.replay_reason.setText(reason)
+        self.replay_reason.setVisible(bool(reason))
+        line = thread.replay_line(self.replay, self.lang)
+        self.replay_status.setText(line)
+        self.replay_status.setAccessibleName(thread.replay_text(self.replay, self.lang))
+        self.replay_status.setVisible(bool(line))
+        details = thread.replay_details(self.replay)
+        self.replay_details.button.setText(t("details"))
+        self.replay_details.button.setAccessibleName(t("details"))
+        self.replay_details_view.setText(details)
+        self.replay_details.setVisible(bool(details))
+
+    def _replay_controls(self):
+        return thread.replay_button(
+            self.agent,
+            self.ready and self.banner is None,
+            bool(self.log.entries),
+            self.running,
+            external.busy(self.external),
+            self.replay,
+        )
+
+    def _busy(self):
+        """Une commande experte ou un rejeu est en vol : la saisie et Lancer sont grisés."""
+        return self.running or thread.replay_running(self.replay)
 
     def _fill_rows(self, layout, rows, on_click=None, current_style=""):
         """Lignes d'étapes d'une carte, séparées par un filet du thème.
@@ -1568,7 +1655,7 @@ class CassiniPanel(QWidget):
         return agentview.controls(
             self.agent,
             self.ready and self.banner is None,
-            self.running,
+            self._busy(),
             bool(self.input.toPlainText().strip()),
             self.catalogue,
             external.busy(self.external),
@@ -1583,7 +1670,7 @@ class CassiniPanel(QWidget):
         self.input.setEnabled(c["input_enabled"])
         self.send_button.setEnabled(c["send_enabled"])
         # Grisée, la saisie dit pourquoi à la place de son texte indicatif.
-        hint = thread.input_hint(agent, c["input_reason"], self.running, self._exchange, lang)
+        hint = thread.input_hint(agent, c["input_reason"], self._busy(), self._exchange, lang)
         self.input.setPlaceholderText(hint)
         reason = hint if c["input_reason"] else ""
         self.input.setAccessibleDescription(reason)
@@ -1692,12 +1779,13 @@ class CassiniPanel(QWidget):
 
     def _render_buttons(self):
         entry = self.selected
+        replaying = thread.replay_running(self.replay)
         c = runlog.controls(
             self.ready and self.banner is None,
             bool(entry and entry.get("available")),
             self.running,
             bool(entry and entry.get("cancellable")),
-            external.busy(self.external),
+            external.busy(self.external) or replaying,  # Lancer grisé, sans Arrêter
         )
         self.run_button.setText(self.t("run"))
         self.stop_button.setText(self.t("stop"))
@@ -1710,6 +1798,8 @@ class CassiniPanel(QWidget):
             reason = self.t(c["stop_reason"])
         elif self.running:
             reason = self.t("busy")
+        elif replaying:
+            reason = self.t("replay_reason_running")
         elif external.busy(self.external):
             reason = self.t("input_reason_external")
         elif entry is not None and not entry.get("available"):
@@ -1805,7 +1895,7 @@ class CassiniPanel(QWidget):
         self._fit_folds()
 
     def _run(self):
-        if self.selected is None or self.running:
+        if self.selected is None or self._busy():
             return
         try:
             params = form.build_params(self._fields, self._values())
@@ -1820,12 +1910,29 @@ class CassiniPanel(QWidget):
     def _stop(self):
         self._actions.stop()
 
+    def _replay(self):
+        """« Rejouer le journal » : le noyau rejoue tout ; le panneau n'enchaîne rien (AD-11)."""
+        if not self._replay_controls()["enabled"]:
+            return
+        if not self._actions.replay():
+            # Le client a déjà une requête en vol (liste des modèles…) : on le dit.
+            self.replay = thread.replay_refused()
+            self.replay["entries"] = len(self.log.entries)
+            self.render()
+            _announce(self.replay_status, self.t("replay_refused"))
+            return
+        had_focus = bool(self.replay_button.hasFocus())
+        self.replay = thread.replay_started()
+        self.render()  # le bouton se grise : Qt déplace le focus
+        self._replay_focus = (self._focus_widget(),) if had_focus else None
+        _announce(self.replay_status, self.t("replay_running"))
+
     def _send(self):
         text = self.input.toPlainText().strip()
         c = agentview.controls(
             self.agent,
             self.ready and self.banner is None,
-            self.running,
+            self._busy(),
             bool(text),
             self.catalogue,
             external.busy(self.external),

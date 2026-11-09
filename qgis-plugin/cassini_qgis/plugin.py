@@ -117,6 +117,11 @@ class CassiniPlugin:
     def reject(self, plan_id):
         return self.client is not None and self.client.reject_plan(plan_id)
 
+    def replay(self):
+        """« Rejouer le journal » -> `journal.replay` : le noyau rejoue tout (AD-11).
+        Rend True si la demande est partie."""
+        return self.client is not None and self.client.replay()
+
     def set_external(self, enabled, ask=False):
         """Interrupteur ou Couper -> `session.external`. Rend True si la demande est partie."""
         return self.client is not None and self.client.set_external(enabled, ask)
@@ -200,6 +205,8 @@ class CassiniPlugin:
             client.RUN_DONE,
             client.RUN_CANCELLED,
             client.RUN_FAILED,
+            client.REPLAY_DONE,
+            client.REPLAY_FAILED,
         ) or kind in client.PLAN_EVENTS or kind in client.MODEL_EVENTS or (
             kind in client.EXTERNAL_EVENTS
         ):

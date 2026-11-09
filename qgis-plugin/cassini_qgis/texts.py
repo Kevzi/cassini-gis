@@ -279,6 +279,19 @@ _FR = {
     "log_fold_empty": "Journal de la session (vide)",
     "log_fold_one": "Journal de la session (1 étape)",
     "log_fold_many": "Journal de la session ({n} étapes)",
+    # Rejeu du journal [12.3] (EXPERIENCE.md, Voice and Tone et State Patterns).
+    "replay": "Rejouer le journal",
+    "replay_running": "Rejeu en cours…",
+    "replay_identical": "Rejeu terminé : résultat identique.",
+    "replay_different": "Rejeu terminé : résultat différent à l'étape {k}. {message}",
+    "replay_different_nostep": "Rejeu terminé : résultat différent. {message}",
+    "replay_stopped": "Rejeu arrêté à l'étape {k} : {message}",
+    "replay_impossible": "Rejeu impossible : {message}",
+    "replay_reason_empty": "Le journal est vide : rien à rejouer.",
+    "replay_reason_running": "Patientez : le rejeu est en cours.",
+    "replay_stopped_nomsg": "Rejeu arrêté à l'étape {k}.",
+    "replay_failed_generic": "Le rejeu n'a pas pu se faire.",
+    "replay_refused": "Le noyau est occupé : réessayez dans un instant.",
 }
 
 _EN = {
@@ -549,6 +562,19 @@ _EN = {
     "log_fold_empty": "Session log (empty)",
     "log_fold_one": "Session log (1 step)",
     "log_fold_many": "Session log ({n} steps)",
+    # Log replay [12.3].
+    "replay": "Replay the log",
+    "replay_running": "Replay running…",
+    "replay_identical": "Replay done: identical result.",
+    "replay_different": "Replay done: different result at step {k}. {message}",
+    "replay_different_nostep": "Replay done: different result. {message}",
+    "replay_stopped": "Replay stopped at step {k}: {message}",
+    "replay_impossible": "Replay not possible: {message}",
+    "replay_reason_empty": "The log is empty: nothing to replay.",
+    "replay_reason_running": "Please wait: the replay is running.",
+    "replay_stopped_nomsg": "Replay stopped at step {k}.",
+    "replay_failed_generic": "The replay could not be done.",
+    "replay_refused": "The core is busy: try again in a moment.",
 }
 
 TEXTS = {"fr": _FR, "en": _EN}

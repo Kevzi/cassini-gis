@@ -941,6 +941,23 @@ class PluginBehaviourTest(unittest.TestCase):
         self.p.stop()
         self.assertEqual(calls, [1])
 
+    def test_replay_action_and_its_verdicts_reach_the_panel(self):
+        """« Rejouer le journal » [12.3] : le greffon passe au client, le verdict au panneau."""
+        client = self.mod.client
+        self.p.client = None
+        self.assertFalse(self.p.replay())
+        calls = []
+        self.p.client = type("C", (), {"replay": lambda s: calls.append(1) or True})()
+        self.assertIs(self.p.replay(), True)
+        self.assertEqual(calls, [1])
+        for kind in (client.REPLAY_DONE, client.REPLAY_FAILED):
+            self.p._on_event(kind, {"k": kind})
+        self.assertEqual(
+            self.p.panel.events,
+            [(client.REPLAY_DONE, {"k": client.REPLAY_DONE}),
+             (client.REPLAY_FAILED, {"k": client.REPLAY_FAILED})],
+        )
+
 
 
 
@@ -1018,6 +1035,189 @@ class ReplayTest(unittest.TestCase):
         self.p.finished.emit(1)
         self.assertIn(client.REPLAY_FAILED, self.kinds())
         self.assertEqual(self.events[-1][0], client.DIED)
+
+
+class FocusButton:
+    """Bouton dont le focus est explicite : `focused["w"]` est le widget qui l'a."""
+
+    def __init__(self, focused):
+        self.focused = focused
+
+    def hasFocus(self):
+        return self.focused["w"] is self
+
+    def isEnabled(self):
+        return True
+
+    def setFocus(self, *_):
+        self.focused["w"] = self
+
+
+class PanelReplayTest(unittest.TestCase):
+    """Le vrai panneau, Qt remplacé : rejeu lancé, verdict gardé et annoncé [12.3]."""
+
+    def setUp(self):
+        import types
+
+        def stubbed(k):
+            return k in ("qgis", "cassini_panel_stub") or k.startswith(
+                ("qgis.", "cassini_panel_stub."))
+
+        saved = {k: v for k, v in sys.modules.items() if stubbed(k)}
+
+        def restore():
+            for k in [k for k in sys.modules if stubbed(k)]:
+                del sys.modules[k]
+            sys.modules.update(saved)
+
+        self.addCleanup(restore)
+        self.mod = load_panel()
+        mod = self.mod
+        cls = mod.CassiniPanel
+        panel = self.panel = cls.__new__(cls)
+        panel.lang = "fr"
+        panel.focus = ("entry", object())  # un détail cliqué, que le rejeu ne touche pas
+        panel.ready = True
+        panel.banner = None
+        panel.running = False
+        panel.replay = None
+        panel._replay_focus = None
+        panel.catalogue = []
+        mod.Qt = types.SimpleNamespace(FocusReason=types.SimpleNamespace(OtherFocusReason=0))
+        panel.agent = mod.agentview.AgentView()
+        panel.log = mod.runlog.RunLog()
+        panel.log.start("system.about", "Vérification du noyau Cassini", "10:00")
+        panel.log.finish(mod.runlog.DONE)
+        panel.external = mod.external.ExternalState()
+        self.focused = {"w": None}
+        panel.replay_button = FocusButton(self.focused)
+        panel.replay_status = Recorder()
+        panel._focus_widget = lambda: self.focused["w"]
+        self.renders = []
+
+        def render():
+            self.renders.append(panel.replay)
+            # Qt : un bouton qui se grise passe le focus au widget suivant.
+            if mod.thread.replay_running(panel.replay) and panel.replay_button.hasFocus():
+                self.focused["w"] = "repli expert"
+
+        panel.render = render
+        self.announced = []
+        real = mod._announce
+        self.addCleanup(setattr, mod, "_announce", real)
+        mod._announce = lambda widget, text: self.announced.append(text)
+        self.asked = []
+        panel._actions = types.SimpleNamespace(replay=lambda: self.asked.append(1) or True)
+
+    def test_click_starts_the_replay_and_greys_the_input(self):
+        self.panel._replay()
+        self.assertEqual(self.asked, [1])
+        self.assertTrue(self.mod.thread.replay_running(self.panel.replay))
+        self.assertEqual(self.announced, ["Rejeu en cours…"])
+        self.assertTrue(self.panel._busy())  # saisie, Envoyer et Lancer grisés
+        b = self.panel._replay_controls()
+        self.assertEqual(b, {"enabled": False, "reason": "replay_reason_running"})
+        self.panel._replay()  # second clic : rien ne repart
+        self.assertEqual(self.asked, [1])
+
+    def test_identical_verdict_is_kept_and_announced(self):
+        self.panel._replay()
+        self.panel.on_event(client.REPLAY_DONE, {"steps": 2, "identical": True})
+        self.assertEqual(self.announced[-1], "Rejeu terminé : résultat identique.")
+        self.assertFalse(self.panel._busy())
+        self.assertIsNotNone(self.panel.focus)  # le détail cliqué reste
+
+    def test_diverged_verdict_names_the_step(self):
+        self.panel._replay()
+        self.panel.on_event(client.REPLAY_FAILED, {
+            "code": "replay.diverged", "step": 2,
+            "message": "Le rejeu diverge du journal à l'étape 2 : le fichier a changé."})
+        self.assertEqual(  # le message nomme déjà l'étape : pas répétée
+            self.announced[-1], "Rejeu terminé : résultat différent. "
+            "Le rejeu diverge du journal à l'étape 2 : le fichier a changé.")
+
+    def test_empty_log_greys_the_button_with_its_reason(self):
+        self.panel.log = self.mod.runlog.RunLog()
+        self.assertEqual(self.panel._replay_controls(),
+                         {"enabled": False, "reason": "replay_reason_empty"})
+        self.panel._replay()
+        self.assertEqual(self.asked, [])
+
+    def test_focus_comes_back_only_if_it_did_not_move(self):
+        self.focused["w"] = self.panel.replay_button
+        self.panel._replay()
+        self.assertEqual(self.focused["w"], "repli expert")
+        self.panel.on_event(client.REPLAY_DONE, {"steps": 1, "identical": True})
+        self.assertIs(self.focused["w"], self.panel.replay_button)
+        # L'utilisateur a déplacé le focus pendant le rejeu : le verdict le laisse là.
+        self.focused["w"] = self.panel.replay_button
+        self.panel._replay()
+        self.focused["w"] = "saisie"
+        self.panel.on_event(client.REPLAY_DONE, {"steps": 1, "identical": True})
+        self.assertEqual(self.focused["w"], "saisie")
+        # Focus nulle part : il revient au bouton.
+        self.panel._replay()
+        self.focused["w"] = None
+        self.panel.on_event(client.REPLAY_DONE, {"steps": 1, "identical": True})
+        self.assertIsNone(self.focused["w"])  # le bouton n'avait pas le focus au départ
+        self.focused["w"] = self.panel.replay_button
+        self.panel._replay()
+        self.focused["w"] = None
+        self.panel.on_event(client.REPLAY_DONE, {"steps": 1, "identical": True})
+        self.assertIs(self.focused["w"], self.panel.replay_button)
+
+    def test_refused_click_says_so(self):
+        self.panel._actions.replay = lambda: False
+        self.panel._replay()
+        self.assertEqual(self.panel.replay["status"], self.mod.thread.REPLAY_REFUSED)
+        self.assertEqual(self.announced, ["Le noyau est occupé : réessayez dans un instant."])
+        self.assertFalse(self.panel._busy())
+        self.assertTrue(self.panel._replay_controls()["enabled"])  # on peut réessayer
+
+    def test_rephrase_writes_nothing_during_a_replay(self):
+        self.panel._replay()
+        self.panel.input = Recorder()
+        self.panel._rephrase()
+        self.assertEqual(self.panel.input.calls, [])
+
+    def test_lancer_send_and_input_are_greyed_during_a_replay(self):
+        panel = self.panel
+        panel._replay()
+        for name in ("run_button", "stop_button", "reason", "form_zone", "input"):
+            setattr(panel, name, Recorder())
+        panel.selected = {"id": "system.about", "available": True, "cancellable": False}
+        panel._render_buttons()
+        self.assertIn(("setText", ("Patientez : le rejeu est en cours.",)), panel.reason.calls)
+        self.assertIn(("setEnabled", (False,)), panel.run_button.calls)
+        self.assertIn(("setVisible", (False,)), panel.stop_button.calls)  # pas d'Arrêter
+        c = panel._controls()
+        self.assertFalse(c["input_enabled"])
+        self.assertFalse(c["send_enabled"])
+        hint = self.mod.thread.input_hint(panel.agent, c["input_reason"], panel._busy(), None, "fr")
+        self.assertEqual(hint, "Patientez : une étape est en cours.")
+
+    def test_verdict_forgotten_when_the_log_grows_or_the_core_restarts(self):
+        thread_ = self.mod.thread
+        self.panel._replay()
+        self.panel.on_event(client.REPLAY_DONE, {"steps": 1, "identical": True})
+        n = len(self.panel.log.entries)
+        self.assertIsNotNone(thread_.replay_current(self.panel.replay, n))
+        self.assertIsNone(thread_.replay_current(self.panel.replay, n + 1))
+        # Relancer : le noyau redit prêt, l'issue s'efface.
+        self.panel._drop_stale_run = lambda: None
+        self.panel.title = None
+        self.panel.project_file = None
+        self.panel._history_project = None
+        self.panel.catalogue = []
+        self.panel.set_ready([])
+        self.assertIsNone(self.panel.replay)
+
+    def test_core_gone_forgets_a_running_replay(self):
+        self.panel._replay()
+        self.panel._close_plan_entry = lambda *a: None
+        self.panel.last = None
+        self.panel._drop_stale_run()
+        self.assertIsNone(self.panel.replay)
 
 
 if __name__ == "__main__":
