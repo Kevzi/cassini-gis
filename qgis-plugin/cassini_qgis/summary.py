@@ -505,6 +505,30 @@ def _reproject(lang, p, r, names):
     return text + (_out_layer(lang, r) if r else "")
 
 
+_FORMAT_NAMES = {"gpkg": "GeoPackage", "shp": "Shapefile", "geojson": "GeoJSON"}
+
+
+def _data_convert(lang, p, r, names):
+    """La couche écrite par QGIS dans un autre format, en fichier ; affichage seul (AD-5)."""
+    shown = _FORMAT_NAMES.get(p.get("format"))
+    if shown is None:
+        raise _Unreadable()
+    key = "sum_data_convert_ask" if names.ahead else "sum_data_convert"
+    text = texts.tr(lang, key, layer=names.layer(p.get("layer_id")), format=shown)
+    if not r:
+        return text
+    try:
+        file = file_name(r.get("file"))
+    except _Unreadable:
+        return text
+    n = r.get("feature_count")
+    if _is_int(n):
+        return text + texts.tr(
+            lang, "sum_data_convert_file", file=file, count=count(lang, "entities", n)
+        )
+    return text + texts.tr(lang, "sum_file", file=file)
+
+
 def _distance_azimuth(lang, p, r, names):
     """Distance et azimuts rendus ; affichage seul (AD-5)."""
     if not r:
@@ -804,6 +828,7 @@ _SENTENCES = {
     "geo.bearing_intersection": _bearing_intersection,
     "data.transform_point": _transform_point,
     "data.reproject": _reproject,
+    "data.convert": _data_convert,
     "analysis.buffer": _buffer,
     "analysis.intersect": _intersect,
     "analysis.select_by_attribute": _select,

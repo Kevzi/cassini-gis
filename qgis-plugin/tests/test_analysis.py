@@ -38,6 +38,7 @@ class FakeBackend:
         self.write, self.loaded_count, self.loadable = write, loaded_count, loadable
         self.pairs, self.counts_call = [], None
         self.near, self.near_call, self.temporary_count = True, None, 1
+        self.encodings, self.driver = [], None
 
     def layer(self, layer_id):
         return self.items.get(layer_id)
@@ -82,8 +83,9 @@ class FakeBackend:
     def temporary_layer(self, handle, reference):
         return FakeLayer(reference, "temporaire", count=self.temporary_count)
 
-    def run_algorithm(self, algorithm_id, parameters, finished, previous=None):
+    def run_algorithm(self, algorithm_id, parameters, finished, previous=None, encoding=None):
         self.calls.append((algorithm_id, dict(parameters)))
+        self.encodings.append(encoding)
         self.finished = finished
         self.handle = FakeHandle()
         out = parameters.get("OUTPUT", parameters.get("OUTPUT_LINES"))
@@ -92,7 +94,16 @@ class FakeBackend:
                 f.write(b"x")
         return self.handle
 
+    _DRIVERS = {".gpkg": "GPKG", ".shp": "ESRI Shapefile", ".geojson": "GeoJSON"}
+
+    def read_written(self, path):
+        self.counted = path
+        if not self.loadable or not os.path.exists(path):
+            return None
+        return self.loaded_count, self.driver or self._DRIVERS.get(os.path.splitext(path)[1])
+
     def load_output(self, path, name):
+        self.loaded = path
         if not self.loadable:
             return None
         return FakeLayer("out_1", name, self.loaded_crs, count=self.loaded_count)
@@ -709,6 +720,137 @@ class ReprojectTest(unittest.TestCase):
         self.assertEqual(calls[0][1].code, "analysis.crs_not_metric")
         self.assertIn("reprojetez", calls[0][1].message)
         self.assertEqual(b.calls, [])
+
+
+class ConvertTest(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.entry = analysis.ALGORITHMS["data.convert"]
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def out(self, ext):
+        return os.path.join(self.dir.name, "2-data.convert" + ext)
+
+    def params(self, fmt="gpkg", ext=None, **extra):
+        p = {"layer_id": "g", "format": fmt, "out": self.out(ext or "." + fmt)}
+        p.update(extra)
+        return p
+
+    def backend(self, **kw):
+        layers = [
+            FakeLayer("g", count=5),
+            FakeLayer("r", name="mnt", vector=False),
+            FakeLayer("t", name="table", geometry="NoGeometry"),
+            FakeLayer("m", name="mixte", geometry="Unknown geometry"),
+        ]
+        return FakeBackend(layers, loaded_count=5, **kw)
+
+    def test_a_shapefile_needs_a_single_geometry_type(self):
+        for lid in ("t", "m"):
+            b = self.backend()
+            _, calls = start(self.entry, b, self.params("shp", layer_id=lid))
+            error = calls[0][1]
+            self.assertEqual(error.code, "analysis.bad_params", lid)
+            self.assertIn("un seul type de géométrie", error.message)
+            self.assertEqual(b.calls, [])
+            # Le GeoPackage et le GeoJSON les prennent.
+            for fmt in ("gpkg", "geojson"):
+                b = self.backend()
+                _, calls = start(self.entry, b, self.params(fmt, layer_id=lid))
+                b.finished(True, {})
+                self.assertIsNone(calls[0][1], (lid, fmt))
+
+    def test_a_file_in_another_format_is_a_named_error_and_is_removed(self):
+        b = self.backend()
+        b.driver = "GeoJSON"
+        _, calls = start(self.entry, b, self.params("shp"))
+        b.finished(True, {})
+        error = calls[0][1]
+        self.assertEqual(error.code, "data.format_mismatch")
+        self.assertIn("shp", error.message)
+        self.assert_no_file_left()
+
+    def test_other_algorithms_keep_the_system_encoding(self):
+        b = self.backend()
+        start(analysis.ALGORITHMS["data.reproject"], b,
+              {"layer_id": "g", "target_epsg": 4326, "out": self.out(".gpkg")})
+        self.assertEqual(b.encodings, [None])
+
+    def test_each_format_writes_the_file_dictated_by_the_core(self):
+        for fmt in ("gpkg", "shp", "geojson"):
+            with self.subTest(fmt=fmt):
+                b = self.backend()
+                _, calls = start(self.entry, b, self.params(fmt))
+                algo, p = b.calls[0]
+                self.assertEqual(algo, "native:extractbyexpression")
+                self.assertEqual(p["INPUT"].lid, "g")  # la couche d'origine n'est que lue
+                self.assertEqual(p["EXPRESSION"], "TRUE")  # toutes les entités, copiées
+                self.assertEqual(b.encodings, ["UTF-8"])  # textes en UTF-8, quel que soit le système
+                self.assertEqual(p["OUTPUT"], self.out("." + fmt))  # exactement le fichier du noyau
+                b.finished(True, {})
+                result, error = calls[0]
+                self.assertIsNone(error)
+                self.assertEqual(
+                    result, {"file": self.out("." + fmt), "format": fmt, "feature_count": 5}
+                )
+                # Le fichier est relu à part, jamais ajouté au projet.
+                self.assertEqual(b.counted, self.out("." + fmt))
+                self.assertFalse(hasattr(b, "loaded"))
+
+    def test_an_extension_that_disagrees_with_the_format_launches_nothing(self):
+        for fmt, ext in (("shp", ".gpkg"), ("gpkg", ".shp"), ("xlsx", ".xlsx"), (None, ".gpkg")):
+            b = self.backend()
+            _, calls = start(self.entry, b, self.params(fmt, ext=ext))
+            self.assertEqual(calls[0][1].code, "analysis.bad_params", fmt)
+            self.assertEqual(b.calls, [])
+
+    def test_unknown_layer_and_raster_refused(self):
+        b = self.backend()
+        _, calls = start(self.entry, b, self.params(layer_id="nope"))
+        self.assertEqual(calls[0][1].code, "layer.not_found")
+        _, calls = start(self.entry, b, self.params(layer_id="r"))
+        self.assertEqual(calls[0][1].code, "layer.not_vector")
+        self.assertEqual(b.calls, [])
+
+    def write_companions(self):
+        for ext in (".shx", ".dbf", ".prj", ".cpg", ".qix"):
+            with open(self.out(ext), "wb") as f:
+                f.write(b"x")
+
+    def assert_no_file_left(self):
+        self.assertEqual([n for n in os.listdir(self.dir.name) if n.startswith("2-data.convert")], [])
+
+    def test_a_failed_shapefile_leaves_no_companion(self):
+        b = self.backend()
+        _, calls = start(self.entry, b, self.params("shp"))
+        self.write_companions()
+        b.finished(False, {})
+        self.assertEqual(calls[0][1].code, "analysis.failed")
+        self.assert_no_file_left()
+
+    def test_a_cancelled_shapefile_leaves_no_companion(self):
+        b = self.backend()
+        g, calls = start(self.entry, b, self.params("shp"))
+        self.write_companions()
+        g.cancel()
+        self.assertTrue(b.handle.cancelled)
+        b.finished(False, {})
+        self.assertEqual(calls[0][1].code, "qgis.cancelled")
+        self.assert_no_file_left()
+
+    def test_an_unreadable_file_is_a_failure_and_is_removed(self):
+        b = self.backend(loadable=False)
+        _, calls = start(self.entry, b, self.params("geojson"))
+        b.finished(True, {})
+        self.assertEqual(calls[0][1].code, "analysis.failed")
+        self.assert_no_file_left()
+
+    def test_default_table_registers_the_conversion(self):
+        registry = gestures.GestureRegistry()
+        analysis.register_all(registry, backend_factory=lambda: self.backend())
+        self.assertIn("data.convert", registry.ids())
 
 
 class FormHidesCoreFilledTest(unittest.TestCase):

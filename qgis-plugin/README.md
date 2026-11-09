@@ -72,6 +72,19 @@ de QGIS est `data.unknown_crs`, qui nomme le code, sans rien lancer ni écrire. 
 `layer.add` puis `data.reproject`, projet fermé et rouvert : le rejeu rend `identical: true`.
 Le fichier d'origine est inchangé (empreinte).
 
+Sonde de `data.convert` [epic 10, entrée 9] sous QGIS 3.44 et le noyau installé, jouée le
+2026-11-09 sur une copie du projet de test d'Annecy (hors dépôt, archivée avec son script à
+côté du jeu de données) : les gares (CSV en EPSG:4326, 39 entités, noms accentués) converties
+en GeoPackage, en Shapefile puis en GeoJSON, `RÉSULTAT : OK` ; chaque fichier est relu par le
+pilote de son format, et le Shapefile, écrit en UTF-8 (`.cpg`), garde les accents. Le geste (`native:extractbyexpression` sur `TRUE`, une ligne
+de la table `ALGORITHMS`) écrit exactement le fichier du noyau (`1-data.convert.gpkg`,
+`2-data.convert.shp` et ses `.shx`, `.dbf`, `.prj`, `.cpg`) sans l'ajouter au projet ; chaque
+fichier se rouvre à part avec 39 entités ; `xlsx` est refusé par le noyau
+(`registry.invalid_params`), une couche absente est `layer.not_found` ; le rejeu rend
+`identical: true` et le CSV d'origine est inchangé (empreinte). `native:savefeatures` n'est pas
+employé : sous QGIS 3.44, il tire le pilote de tout ce qui suit le premier point du nom
+(`convert.gpkg`) et échoue sur les noms que dicte le noyau.
+
 Garde statique (imports réseau et PyQt directs interdits, taille, versions de
 `metadata.txt`) : `python -I qgis-plugin/tests/check_extension.py`.
 

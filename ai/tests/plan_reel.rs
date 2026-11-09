@@ -119,7 +119,11 @@ fn expected(id: &str) -> Want {
                 "observer_height": {"value": 10, "unit": "m"},
                 "radius": {"value": 1, "unit": "km"}}}
         ]),
-        // S04 S05 S09 S10 S15 S18 S23 S24 : refus.
+        // L'export d'une couche en GeoPackage est une conversion de format (10.9).
+        "S09" => {
+            json!([{"command": "data.convert", "params": {"layer_id": PARCELLES, "format": "gpkg"}}])
+        }
+        // S04 S05 S10 S15 S18 S23 S24 : refus.
         _ => return Want::Refusal,
     };
     Want::Plan(plan)

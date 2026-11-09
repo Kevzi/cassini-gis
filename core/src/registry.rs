@@ -59,6 +59,12 @@ pub struct CommandSpec {
     /// sortie est une couche déclare `.gpkg`. Métadonnée interne : jamais sérialisée.
     #[serde(skip)]
     pub output_ext: String,
+    /// Extension tirée d'un paramètre énuméré : (paramètre, [(valeur, extension)]), pour une
+    /// commande dont le format de sortie est un paramètre (`data.convert`, AD-10, AD-24). Une
+    /// valeur absente ou hors de la table rend `output_ext`. Métadonnée interne : jamais
+    /// sérialisée.
+    #[serde(skip)]
+    pub output_ext_by: Option<(String, Vec<(String, String)>)>,
     /// Paramètre qui reçoit, au rejeu seulement, les ids des couches posées par une exécution
     /// précédente du même journal, à laisser hors du résultat (ticket 5.36). Rempli par le
     /// noyau, jamais par l'appelant. Métadonnée interne : jamais sérialisée.
@@ -125,6 +131,7 @@ impl CommandSpec {
             path_params: Vec::new(),
             output_params: Vec::new(),
             output_ext: ".out".to_string(),
+            output_ext_by: None,
             leave_out_param: None,
             replay_param: None,
             dictated_by_core: false,
@@ -175,6 +182,36 @@ impl CommandSpec {
     pub fn output_ext(mut self, ext: &str) -> Self {
         self.output_ext = ext.to_string();
         self
+    }
+
+    /// Déclare l'extension des fichiers de sortie tirée de la valeur du paramètre `param` :
+    /// `table` associe chaque valeur permise à son extension (point compris, ex. `.shp`).
+    /// Limite : un repère `out:<k>.<n>` ne peut pas désigner une telle sortie (il ne porte pas
+    /// les paramètres) ; le journal le refuse au lieu de deviner l'extension.
+    pub fn output_ext_from(mut self, param: &str, table: &[(&str, &str)]) -> Self {
+        self.output_ext_by = Some((
+            param.to_string(),
+            table
+                .iter()
+                .map(|(value, ext)| (value.to_string(), ext.to_string()))
+                .collect(),
+        ));
+        self
+    }
+
+    /// Extension des fichiers de sortie pour les paramètres `params` d'un appel : celle que la
+    /// valeur du paramètre déclaré par `output_ext_from` désigne, sinon `output_ext`.
+    pub fn output_ext_for(&self, params: &Value) -> &str {
+        self.output_ext_by
+            .as_ref()
+            .and_then(|(param, table)| {
+                let value = params.get(param)?.as_str()?;
+                table
+                    .iter()
+                    .find(|(v, _)| v == value)
+                    .map(|(_, ext)| ext.as_str())
+            })
+            .unwrap_or(&self.output_ext)
     }
 
     /// Déclare le paramètre que le rejeu remplit des ids de couche à laisser hors du résultat.

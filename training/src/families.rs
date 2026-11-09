@@ -235,6 +235,13 @@ pub static FAMILIES: &[Family] = &[
         weight: 4,
         make: reprojection_avant_analyse,
     },
+    // Conversion de format d'une couche (10.9) : GeoPackage, Shapefile ou GeoJSON. Remplace le
+    // refus « aucune commande n'exporte une couche vers un fichier ».
+    Family {
+        name: "conversion_format",
+        weight: 4,
+        make: conversion_format,
+    },
     Family {
         name: "distance_azimut",
         weight: 4,
@@ -2747,6 +2754,10 @@ fn question_champ_absent(rng: &mut Rng) -> Option<Example> {
 
 // -- refus -----------------------------------------------------------------
 
+/// Un tableur (Excel, CSV) n'est pas un format de `data.convert` (10.9) : le refus nomme ce que
+/// la conversion écrit, sans dire qu'aucune commande n'écrit de couche dans un fichier.
+const NO_SPREADSHEET: &str = "Aucune commande du catalogue n'écrit de tableur (Excel ou CSV) : la conversion d'une couche écrit un fichier GeoPackage, Shapefile ou GeoJSON.";
+
 /// Opérations qu'aucune commande du catalogue ne fait : le refus est une phrase
 /// affirmative, jamais une question.
 fn refus(rng: &mut Rng) -> Option<Example> {
@@ -2783,9 +2794,11 @@ fn refus(rng: &mut Rng) -> Option<Example> {
             None => (format!("Efface toutes les {pl} de la couche"), "Aucune commande du catalogue ne supprime d'entités dans une couche."),
         },
         // La reprojection d'une couche n'est plus un refus depuis 10.7 : `data.reproject`
-        // (`reprojection_couche`, `reprojection_avant_analyse`).
-        5 => (format!("Exporte la couche « {name} » en shapefile"), "Aucune commande du catalogue n'exporte une couche vers un fichier."),
-        6 => (format!("Enregistre les {pl} dans un fichier Excel"), "Aucune commande du catalogue n'exporte une couche vers un fichier."),
+        // (`reprojection_couche`, `reprojection_avant_analyse`). L'export d'une couche en
+        // GeoPackage, Shapefile ou GeoJSON non plus depuis 10.9 : `data.convert`
+        // (`conversion_format`) ; un tableur reste un refus.
+        5 => (format!("Exporte les {pl} en CSV"), NO_SPREADSHEET),
+        6 => (format!("Enregistre les {pl} dans un fichier Excel"), NO_SPREADSHEET),
         7 => (format!("Renomme la couche « {name} » en « {} »", rng.pick(USER_TITLES)), "Aucune commande du catalogue ne renomme une couche."),
         8 => (format!("Mets les {pl} en rouge sur la carte"), "Aucune commande du catalogue ne change le style d'une couche."),
         9 => (format!("Calcule l'itinéraire le plus court entre deux {pl}"), "Aucune commande du catalogue ne calcule d'itinéraire sur un réseau routier entre deux objets d'une couche : le chemin de moindre coût demande un raster de coût et deux points en coordonnées."),
@@ -3630,7 +3643,16 @@ fn pente_seuil(rng: &mut Rng) -> Option<Example> {
             let n = *rng.pick(values);
             let t = u(n);
             let (body, q) = match rng.below(5) {
-                0 => (format!("Où la pente{of} dépasse-t-elle {t}"), true),
+                // `training/tests/recouvrement.rs` a relevé une collision de ce gabarit avec
+                // une phrase des essais réels : le terrain s'y dit « du MNT ».
+                0 => {
+                    let of = if of == " du terrain" {
+                        " du MNT"
+                    } else {
+                        of.as_str()
+                    };
+                    (format!("Où la pente{of} dépasse-t-elle {t}"), true)
+                }
                 1 => (
                     format!("Montre les zones où la pente{of} est supérieure à {t}"),
                     false,
@@ -4853,6 +4875,82 @@ fn reprojection_couche(rng: &mut Rng) -> Option<Example> {
     ))
 }
 
+fn convert_call(id: &str, format: &str) -> Value {
+    json!({"command": "data.convert", "params": {"layer_id": id, "format": format}})
+}
+
+/// Format d'une conversion de couche et ses formes écrites (10.9).
+const CONVERT_FORMATS: &[(&str, &[&str])] = &[
+    (
+        "gpkg",
+        &[
+            "en GeoPackage",
+            "en gpkg",
+            "au format GeoPackage",
+            "dans un GeoPackage",
+            "en fichier .gpkg",
+        ],
+    ),
+    (
+        "shp",
+        &[
+            "en shapefile",
+            "en Shapefile",
+            "en shp",
+            "au format Shapefile",
+            "en fichier .shp",
+        ],
+    ),
+    (
+        "geojson",
+        &[
+            "en GeoJSON",
+            "en geojson",
+            "au format GeoJSON",
+            "en fichier .geojson",
+        ],
+    ),
+];
+
+/// « Exporte les gares en shapefile », « convertis la couche « Écoles » en GeoPackage » : une
+/// étape `data.convert`, le format écrit (10.9). Le format se dit toujours par son nom ou son
+/// extension, jamais par un système de coordonnées (ça, c'est `reprojection_couche`).
+fn conversion_format(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let t = pick_theme(rng, &b, vector)?;
+    let layer = b.add(rng, t.key, &[], &[], &[]);
+    let (format, forms) = *rng.pick(CONVERT_FORMATS);
+    let words = *rng.pick(forms);
+    let what = match rng.below(4) {
+        0 | 1 => format!("la couche « {} »", layer.name),
+        2 => t.the_layer.to_string(),
+        _ => format!("les {}", t.noun.pl),
+    };
+    let (body, q) = match rng.below(8) {
+        0 | 1 => (format!("Exporte {what} {words}"), false),
+        2 => (format!("Convertis {what} {words}"), false),
+        3 => (format!("Enregistre {what} {words}"), false),
+        4 => (format!("Sors-moi {what} {words}"), false),
+        5 => (format!("Écris {what} {words}"), false),
+        6 => (format!("Peux-tu exporter {what} {words}"), true),
+        _ => {
+            let of = match what.strip_prefix("les ") {
+                Some(rest) => format!("des {rest}"),
+                None => format!("de {what}"),
+            };
+            (format!("Fais une copie {of} {words}"), false)
+        }
+    };
+    let request = finish(rng, &body, q, false);
+    Some(example(
+        "conversion_format",
+        b,
+        rng,
+        request,
+        calls(vec![convert_call(&layer.id, format)]),
+    ))
+}
+
 /// Décale de `by` chaque référence d'étape (`step:k`, `step:k.champ`) d'un plan.
 fn shift_steps(value: &mut Value, by: usize) {
     match value {
@@ -5758,6 +5856,20 @@ pub(crate) fn reprojects_no_layer(expected: &Value) -> bool {
         && expected["reason"].as_str().is_some_and(|r| {
             let r = r.to_lowercase();
             r.contains("reproj") && r.contains("couche")
+        })
+}
+
+/// Un refus qui dit qu'aucune commande n'exporte ou n'écrit une couche dans un fichier : faux
+/// depuis `data.convert` (10.9). Sert de garde-fou aux tests.
+#[cfg(test)]
+pub(crate) fn exports_no_layer(expected: &Value) -> bool {
+    expected["kind"] == "refusal"
+        && expected["reason"].as_str().is_some_and(|r| {
+            let r = r.to_lowercase();
+            (r.contains("export") || r.contains("écri") || r.contains("enregistr"))
+                && r.contains("couche")
+                && r.contains("fichier")
+                && !(r.contains("geopackage") && r.contains("shapefile"))
         })
 }
 
@@ -6804,6 +6916,7 @@ mod tests {
                 };
                 assert!(!reprojects_no_point(&e.expected), "{}", e.request);
                 assert!(!reprojects_no_layer(&e.expected), "{}", e.request);
+                assert!(!exports_no_layer(&e.expected), "{}", e.request);
                 assert!(!selects_no_cell(&e.expected), "{}", e.request);
                 // Format, orientation et carroyage (11.11) : plus aucun refus « A4 paysage »
                 // ni d'un format ou d'une orientation du catalogue (11.12, lot 3).
@@ -6825,15 +6938,70 @@ mod tests {
         assert!(reprojects_no_layer(&refusal(
             "Aucune commande du catalogue ne reprojette une couche."
         )));
-        // Aucune famille, de refus ou non, ne rend ce refus.
+        // Couche convertie (10.9) : `data.convert` est au registre, donc aucun refus ne dit plus
+        // qu'aucune commande n'exporte une couche vers un fichier ; le refus d'un tableur, qui
+        // nomme les formats de la conversion, reste.
+        assert!(registry.spec("data.convert").is_some());
+        assert!(exports_no_layer(&refusal(
+            "Aucune commande du catalogue n'exporte une couche vers un fichier."
+        )));
+        assert!(!exports_no_layer(&refusal(NO_SPREADSHEET)));
+        // Aucune famille, de refus ou non, ne rend ces refus.
         for family in FAMILIES {
             let mut rng = Rng::new(11);
             for _ in 0..300 {
                 if let Some(e) = (family.make)(&mut rng) {
                     assert!(!reprojects_no_layer(&e.expected), "{}", e.request);
+                    assert!(!exports_no_layer(&e.expected), "{}", e.request);
                 }
             }
         }
+    }
+
+    // -- conversion de format (10.9) ------------------------------------------
+
+    #[test]
+    fn a_requested_conversion_is_one_step_to_the_written_format() {
+        let mut formats = HashSet::new();
+        for e in valid(conversion_format, 300) {
+            assert_eq!(commands(&e), ["data.convert"], "{}", e.request);
+            let params = &e.expected["calls"][0]["params"];
+            let format = params["format"].as_str().unwrap();
+            formats.insert(format.to_string());
+            // La couche convertie est une couche de l'inventaire ; `out` n'est jamais écrit.
+            layer_of(&e, params["layer_id"].as_str().unwrap());
+            assert!(params.get("out").is_none(), "{}", e.request);
+            let r = e.request.to_lowercase();
+            let written = match format {
+                "gpkg" => r.contains("geopackage") || r.contains("gpkg"),
+                "shp" => r.contains("shapefile") || r.contains("shp"),
+                _ => r.contains("geojson"),
+            };
+            assert!(written, "{}", e.request);
+            // Jamais un système de coordonnées : ça, c'est une reprojection.
+            for system in ["lambert", "wgs", "utm", "epsg"] {
+                assert!(!r.contains(system), "{}", e.request);
+            }
+        }
+        for f in ["gpkg", "shp", "geojson"] {
+            assert!(formats.contains(f), "format absent : {f}");
+        }
+    }
+
+    #[test]
+    fn a_spreadsheet_is_still_refused_and_names_the_conversion_formats() {
+        let mut rng = Rng::new(5);
+        let mut seen = 0;
+        for _ in 0..2000 {
+            let Some(e) = refus(&mut rng) else { continue };
+            let r = e.request.to_lowercase();
+            assert!(!r.contains("shapefile"), "{}", e.request);
+            if r.contains("excel") || r.contains("csv") {
+                seen += 1;
+                assert_eq!(e.expected, refusal(NO_SPREADSHEET), "{}", e.request);
+            }
+        }
+        assert!(seen > 0);
     }
 
     // -- reprojection de couche (10.7) ----------------------------------------

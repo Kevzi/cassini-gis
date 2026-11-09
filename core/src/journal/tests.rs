@@ -3454,3 +3454,169 @@ fn a_styled_result_raster_replays_identically_on_the_replayed_layer() {
     }
     let _ = fs::remove_dir_all(dir);
 }
+
+// -- data.convert : l'extension suit le format (epic 10, entrée 9) ---------------------------
+
+/// QGIS de test pour `data.convert` : écrit le fichier dicté (et les compagnons d'un
+/// Shapefile), puis rend le résultat de la fiche, ou l'annulation après avoir écrit.
+struct ConvertQgis {
+    cancel: bool,
+}
+
+impl Executor for ConvertQgis {
+    fn execute(&self, id: &str, p: Value) -> Result<Value, RegistryError> {
+        assert_eq!(id, "data.convert");
+        let out = PathBuf::from(p["out"].as_str().unwrap());
+        fs::write(&out, b"donnees").unwrap();
+        if out.extension().and_then(|e| e.to_str()) == Some("shp") {
+            for ext in ["shx", "dbf", "prj", "cpg", "qix"] {
+                fs::write(out.with_extension(ext), b"x").unwrap();
+            }
+        }
+        if self.cancel {
+            return Err(RegistryError::Cancelled(id.to_string()));
+        }
+        Ok(json!({"file": out.to_string_lossy(), "format": p["format"], "feature_count": 3}))
+    }
+}
+
+#[test]
+fn a_conversion_is_named_by_its_format_and_replays_identically() {
+    let (dir, project, token) = temp_project();
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(ConvertQgis { cancel: false });
+    for format in ["gpkg", "shp", "geojson"] {
+        s.call(
+            "data.convert",
+            json!({"layer_id": "gares", "format": format}),
+        )
+        .unwrap();
+    }
+    // Un format hors de la fiche est refusé avant QGIS : rien n'est journalisé ni écrit.
+    let err = s
+        .call(
+            "data.convert",
+            json!({"layer_id": "gares", "format": "xlsx"}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "registry.invalid_params");
+    let l = lines(&s);
+    assert_eq!(l.len(), 3);
+    let names = [
+        "1-data.convert.gpkg",
+        "2-data.convert.shp",
+        "3-data.convert.geojson",
+    ];
+    for (line, name) in l.iter().zip(names) {
+        assert_eq!(line["params"]["out"], name);
+        assert_eq!(line["result"]["file"], name);
+        assert!(line.get("layer_id").is_none(), "aucune couche posée");
+        assert!(s.work_dir().join(name).exists(), "{name}");
+    }
+    assert!(s.work_dir().join("2-data.convert.dbf").exists());
+    let raw = fs::read_to_string(s.journal_path()).unwrap();
+    assert!(
+        !raw.contains(&token),
+        "chemin absolu dans le journal : {raw}"
+    );
+
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(
+            &Router::new(&registry).with_qgis(ConvertQgis { cancel: false }),
+            &mut HashSet::new(),
+        )
+        .unwrap();
+    assert_eq!(
+        report,
+        ReplayReport {
+            steps: 3,
+            identical: true
+        }
+    );
+    // Le rejeu écrit sous `replay/`, compagnons compris, dans un dossier qu'il vide d'abord.
+    let replayed = s.work_dir().join("replay");
+    for name in names {
+        assert!(replayed.join(name).exists(), "{name}");
+    }
+    assert!(replayed.join("2-data.convert.shx").exists());
+    // Une conversion n'est pas une couche : elle ne rend aucune sortie intermédiaire, et le
+    // repère `out:<k>.<n>` ne la désigne pas (son extension dépend de ses paramètres).
+    assert!(intermediate_files(&registry, &s.journal_path()).is_empty());
+    assert_eq!(
+        reference_file(&registry, "out:2.1", &vec!["data.convert".to_string(); 3]),
+        None
+    );
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_cancelled_shapefile_conversion_leaves_no_companion_behind() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(ConvertQgis { cancel: true });
+    let err = s
+        .call(
+            "data.convert",
+            json!({"layer_id": "gares", "format": "shp"}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "registry.cancelled");
+    assert_eq!(lines(&s)[0]["cancelled"], true);
+    let left: Vec<String> = fs::read_dir(s.work_dir())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with("1-data.convert"))
+        .collect();
+    assert!(left.is_empty(), "{left:?}");
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_shapefile_output_names_its_companions() {
+    assert_eq!(
+        output_family("2-data.convert.shp"),
+        [
+            "2-data.convert.shp",
+            "2-data.convert.shx",
+            "2-data.convert.dbf",
+            "2-data.convert.prj",
+            "2-data.convert.cpg",
+            "2-data.convert.qix"
+        ]
+    );
+    assert_eq!(
+        output_family("1-analysis.buffer.gpkg"),
+        ["1-analysis.buffer.gpkg"]
+    );
+}
+
+#[test]
+fn a_conversion_after_a_plan_layer_does_not_hide_it() {
+    // Une conversion consomme la couche d'une étape antérieure du plan sans rendre de couche :
+    // la couche convertie reste visible du modèle (règle de 5.34 : seule une étape qui rend une
+    // couche cache ce qu'elle consomme).
+    let (dir, _, _) = temp_project();
+    let registry = Registry::standard();
+    let journal = dir.join("journal.jsonl");
+    let rows = [
+        json!({"step": 1, "id": "analysis.buffer", "plan_step": 1, "layer_id": "tampon_1",
+               "params": {"layer_id": "gares", "distance": {"value": 500, "unit": "m"},
+                          "out": "1-analysis.buffer.gpkg"},
+               "result": {"layer_id": "tampon_1"}}),
+        json!({"step": 2, "id": "data.convert", "plan_step": 2,
+               "params": {"layer_id": "tampon_1", "format": "shp", "out": "2-data.convert.shp"},
+               "result": {"file": "2-data.convert.shp", "format": "shp", "feature_count": 3}}),
+    ];
+    let text: String = rows.iter().map(|r| format!("{r}\n")).collect();
+    fs::write(&journal, text).unwrap();
+    assert!(intermediate_files(&registry, &journal).is_empty());
+    let _ = fs::remove_dir_all(dir);
+}
