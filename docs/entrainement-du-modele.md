@@ -476,6 +476,13 @@ Au jeu par défaut (graine 1, 8 000) : 182 `reprojection_avant_analyse`, 132
 `analyse_couche_metrique`, 113 `conversion_format`, 234 `refus`, 255 `refus_hors_registre`, 401
 redemandes (5,0 %), aucun exemple écarté.
 
+Entraînement (commit `84adb16`, chaîne accélérée) : 116 min, 12 s par pas tenus, pic 5,70 Gio ;
+validation 292/300. Essais GPU : `plan_reel` 24/25, `question_reel` 11/12, `ecart_reel` **31/40**
+(barre de 32 ratée d'une phrase ; refus 5/5, plans 18/27), `echelle_utm_reel` 8/8, `terrain_reel`
+8/8, `epic11_reel` 27/28 et F03 en question, `style_reel` 9/10. Recette QGIS sur Annecy : la
+phrase des gares compose `data.reproject` vers 2154 puis le tampon. Modèle dans
+`cassini-modeles\ajuste-apres-11-23\`, non installé ; décision au propriétaire.
+
 ### Les inventaires de QGIS (5.15)
 
 Les valeurs d'un champ texte sont triées, comme le produit les rend. `unloaded_files` est

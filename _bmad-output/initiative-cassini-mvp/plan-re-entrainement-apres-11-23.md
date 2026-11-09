@@ -66,9 +66,9 @@ context:
 
 **Execution:**
 - [x] Générateur : corrections ci-dessus, tests du générateur (dont `recouvrement.rs`) verts, `cargo test --workspace` vert ; commit sur `story/re-entrainement-apres-11-23`.
-- [ ] Worktree de ce commit, entraînement accéléré (base Qwen3.5-4B, même commande qu'en 11.23c), GGUF dans un nouveau dossier `ajuste-apres-11-23`.
-- [ ] Essais GPU contre toutes les barres ; phrase des gares rejouée dans QGIS sur Annecy (copie archivée) avec le nouveau modèle chargé à part, sans l'installer.
-- [ ] Rendu au propriétaire : scores par barre, phrases encore ratées (par constat), durée ; la décision d'installer lui revient.
+- [x] Worktree de ce commit, entraînement accéléré (base Qwen3.5-4B, même commande qu'en 11.23c), GGUF dans un nouveau dossier `ajuste-apres-11-23`.
+- [x] Essais GPU contre toutes les barres ; phrase des gares rejouée dans QGIS sur Annecy (copie archivée) avec le nouveau modèle chargé à part, sans l'installer.
+- [x] Rendu au propriétaire : scores par barre, phrases encore ratées (par constat), durée ; la décision d'installer lui revient.
 
 **Acceptance Criteria:**
 - Given le nouveau modèle et le projet Annecy, when on demande une zone tampon autour des gares, then le plan commence par `data.reproject` des gares vers EPSG:2154, suivi du tampon sur `step:1.layer_id`.
@@ -77,6 +77,11 @@ context:
 ## Implementation Notes
 
 - 2026-11-09, générateur : `inventories.rs` (CSV pour une couche ponctuelle une fois sur huit, `as_csv`, `long_inventory`, `project_system`, `distract_in_degrees` en CSV une fois sur trois) ; `families.rs` : `reprojection_avant_analyse` poids 6 (seconde couche en 4326 non citée 2/3, couche analysée en CSV 1/2, inventaire long 1/2, cas « tout en 4326 » vers le système du projet), `analyse_couche_metrique` (CSV, inventaires longs), `conversion_format` 5, `refus` 8 (3D partielle, tableur filtré avec but ou destinataire, modification et suppression variées), `refus_hors_registre` 9 (PDF qui choisit ses couches 1/6 avec titre parfois, altitude par zone 1/3), `style_degrade` (dégradé avec la méthode 1/2, ordre libre), `conversion_coordonnees` (fuseau voisin 1/2, quatre écritures du fuseau), `zone_category` (zones du PLU en mots), `draft_multi` (deux sélections ×2). Recouvrement : tête « Exporte la carte » → « Exporte-moi la carte » (rendait F01). Tests : cinq nouveaux ou étendus (cas d'Annecy entier, projet en mètres, refus 3D et tableur, zones en mots, dégradé). `cargo test --workspace`, fmt, clippy verts (Windows).
+
+- 2026-11-09, entraînement : commit `84adb16`, worktree `~/cassini-worktrees/apres-11-23`, chaîne accélérée (Unsloth, segments extensibles), lancé à 20 h 10, fini à 22 h 06 (116 min, 12 s/pas tenus, pic 5,70 Gio, carte jamais pleine), 0 exemple trop long. Sortie `~/cassini-entrainement/ajuste-apres-11-23/`, modèle copié dans `C:\Users\kevin\cassini-modeles\ajuste-apres-11-23\` (SHA-256 79a80220a6eb6213…), **non installé**. Validation (GGUF) : 292/300 (288 pour 11.23c).
+- Essais GPU (`~/cassini-entrainement/11-23-mesures/essais-gpu-apres-11-23.log`) : `plan_reel` 24/25 (S24) ; `question_reel` 11/12 (Q11) ; **`ecart_reel` 31/40, barre ratée d'une phrase** (plans 18/27, questions 8/8, refus 5/5 ; H36 rescoré, juste ; ratés H08 et H21 question au lieu d'un plan, H10 `dissolve`, H13 `label_field`, H17 H18 H19 une étape en moins, H20 `overlay_layer_id`, H25 `value`) ; `echelle_utm_reel` 8/8 ; `terrain_reel` 8/8 ; `epic11_reel` 27/28 (M02, chemin de moindre coût 1/2, barre tenue), F03 en question, points d'un autre système 3/4 hors barre (Y03) ; `style_reel` 9/10 (ST07). Toutes les barres sont tenues sauf `ecart_reel`. Face à 11.23c : refus 3/6 → 5/5 (H39, H40 corrigés) ; nouveaux ratés de plan H10, H13, H21, H25 ; H17, H18, H19 toujours une étape en moins.
+- Recette QGIS, Annecy (copie `projet-recette-apres-11-23.qgz`, nouveau modèle par `CASSINI_MODELS`, vérifié par `model.list`) : « Trouve les parcelles à moins de 500 m d'une gare » → `data.reproject` des gares vers 2154, tampon sur `step:1.layer_id`, intersection (critère d'acceptation tenu) ; « tampon de 300 m autour des gares » → reprojection puis tampon ; « Exporte les gares en shapefile » → `data.convert` ; 3/3 exécutés, rejeu identique. Journal : `~/cassini-entrainement/11-23-mesures/recette-annecy-apres-11-23.txt`.
+- Décision d'installer au propriétaire : `ajuste-11-23c` reste installé.
 
 ## Verification
 
