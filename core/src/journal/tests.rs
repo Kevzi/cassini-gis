@@ -2559,6 +2559,15 @@ struct StyleQgis {
     seen: std::rc::Rc<std::cell::RefCell<Vec<(String, Value)>>>,
     /// Refuse le n-ième `layer.set_style` (à partir de 1).
     refuse_style: Option<usize>,
+    /// Légende remaniée, comme après un `layer.arrange` déjà joué dans la même session QGIS :
+    /// couches du projet en ordre inverse, couches posées en haut.
+    rearranged: bool,
+    /// Couche du projet absente de l'inventaire : un vrai changement du projet.
+    dropped: Option<&'static str>,
+    /// Couche ajoutée au projet par l'utilisateur, absente de la légende d'origine.
+    extra: bool,
+    /// Couche du projet gardée sous le même id, mais renommée (nom et fichier) : son thème change.
+    renamed: Option<&'static str>,
 }
 
 impl StyleQgis {
@@ -2568,6 +2577,10 @@ impl StyleQgis {
             created: Default::default(),
             seen: Default::default(),
             refuse_style: None,
+            rearranged: false,
+            dropped: None,
+            extra: false,
+            renamed: None,
         }
     }
 
@@ -2584,11 +2597,34 @@ impl Executor for StyleQgis {
                 let mut inv = crate::commands::map_topographic_style::fixtures::villeneuve();
                 // Les couches posées par le journal, de cette session et des précédentes.
                 let layers = inv["layers"].as_array_mut().unwrap();
+                if let Some(gone) = self.dropped {
+                    layers.retain(|l| l["layer_id"] != gone);
+                }
+                if let Some(id) = self.renamed {
+                    for l in layers.iter_mut().filter(|l| l["layer_id"] == id) {
+                        l["name"] = json!("couche sans thème");
+                        l["source"] = json!("couche_sans_theme.gpkg");
+                    }
+                }
+                if self.extra {
+                    layers.push(
+                        json!({"layer_id": "ecoles_9", "name": "ecoles", "kind": "vector",
+                        "geometry": "Point", "crs": "EPSG:2154", "fields": []}),
+                    );
+                }
+                if self.rearranged {
+                    layers.reverse();
+                }
                 for g in 1..=self.generation {
                     let id = format!("ajout_g{g}");
                     if g < self.generation || self.created.borrow().contains(&id) {
-                        layers.push(json!({"layer_id": id, "name": "points", "kind": "vector",
-                            "geometry": "Point", "crs": "EPSG:2154", "fields": []}));
+                        let layer = json!({"layer_id": id, "name": "points", "kind": "vector",
+                            "geometry": "Point", "crs": "EPSG:2154", "fields": []});
+                        if self.rearranged {
+                            layers.insert(0, layer);
+                        } else {
+                            layers.push(layer);
+                        }
                     }
                 }
                 Ok(inv)
@@ -2810,6 +2846,142 @@ fn a_styling_journal_replays_identically_and_applies_each_style_once() {
         .unwrap();
     assert!(report.identical);
     let _ = fs::remove_dir_all(dir);
+}
+
+/// Journal d'une couche posée puis de la mise en forme (entrée « rejeu de la mise en forme
+/// après des couches créées », 2026-11-09). `legacy` : la ligne de la mise en forme perd sa clé
+/// `replay`, comme un journal écrit avant que l'ordre de la légende y soit gardé.
+fn styling_journal(project: &Path, legacy: bool) -> PathBuf {
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, project)
+        .unwrap()
+        .with_qgis(StyleQgis::new(1))
+        .with_gestures(style_gestures());
+    s.call("layer.add", json!({"path": "pts.csv", "crs": "EPSG:2154"}))
+        .unwrap();
+    s.call("map.topographic_style", json!({})).unwrap();
+    let l = lines(&s);
+    // Assez long pour être résumé : seules taille et empreinte sont gardées.
+    assert_eq!(l[1]["result"]["truncated"], true);
+    assert_eq!(
+        l[1]["replay"],
+        json!({"legend": ["mnt_1", "parcelles_2", "plu_3", "gares_4", "routes_5", "ajout_g1"]})
+    );
+    let path = s.journal_path();
+    drop(s);
+    if legacy {
+        let text: Vec<String> = fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .map(|line| {
+                let mut v: Value = serde_json::from_str(line).unwrap();
+                v.as_object_mut().unwrap().remove("replay");
+                v.to_string()
+            })
+            .collect();
+        fs::write(&path, text.join("\n") + "\n").unwrap();
+    }
+    path
+}
+
+fn replay_styling(legacy: bool, qgis: StyleQgis) -> Result<ReplayReport, ErrorReport> {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let _ = styling_journal(&project, legacy);
+    let outcome = Replay::load(&registry, &project)
+        .unwrap()
+        .with_gestures(style_gestures())
+        .run(&Router::new(&registry).with_qgis(qgis), &mut HashSet::new());
+    let _ = fs::remove_dir_all(dir);
+    outcome
+}
+
+#[test]
+fn a_styling_replays_identically_when_the_legend_was_rearranged() {
+    for legacy in [false, true] {
+        let mut qgis = StyleQgis::new(2);
+        qgis.rearranged = true;
+        assert_eq!(
+            replay_styling(legacy, qgis).unwrap(),
+            ReplayReport {
+                steps: 8,
+                identical: true
+            },
+            "journal ancien : {legacy}"
+        );
+    }
+}
+
+#[test]
+fn a_styling_on_a_changed_project_still_diverges_with_a_rearranged_legend() {
+    type Change = fn(&mut StyleQgis);
+    let changes: [(&str, Change); 3] = [
+        ("couche retirée", |q| q.dropped = Some("plu_3")),
+        ("couche ajoutée", |q| q.extra = true),
+        ("couche renommée", |q| q.renamed = Some("gares_4")),
+    ];
+    for (what, change) in changes {
+        for legacy in [false, true] {
+            let mut qgis = StyleQgis::new(2);
+            qgis.rearranged = true;
+            change(&mut qgis);
+            let err = replay_styling(legacy, qgis)
+                .expect_err(&format!("{what}, journal ancien : {legacy}"));
+            assert_eq!(
+                (err.code.as_str(), err.step),
+                ("replay.diverged", Some(2)),
+                "{what}, journal ancien : {legacy}"
+            );
+            assert!(err.message.contains("map.topographic_style"));
+        }
+    }
+}
+
+#[test]
+fn a_legend_reorders_only_the_layers_it_names_at_their_own_places() {
+    let inv = |ids: &[&str]| json!({"layers": ids.iter().map(|id| json!({"layer_id": id})).collect::<Vec<_>>()});
+    let legend = |ids: &[&str]| ids.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    // Les couches nommées reprennent l'ordre de la légende ; « x » (non nommée) reste en 2e.
+    assert_eq!(
+        in_legend_order(inv(&["c", "x", "b", "a"]), &legend(&["a", "b", "c"])),
+        inv(&["a", "x", "b", "c"])
+    );
+    // Légende vide, ids absents, doublons, inventaire sans couches : rien ne casse.
+    assert_eq!(in_legend_order(inv(&["b", "a"]), &[]), inv(&["b", "a"]));
+    assert_eq!(
+        in_legend_order(inv(&["b", "a"]), &legend(&["z", "a", "a", "b"])),
+        inv(&["a", "b"])
+    );
+    assert_eq!(in_legend_order(json!({}), &legend(&["a"])), json!({}));
+}
+
+#[test]
+fn a_malformed_legend_falls_back_to_the_dictated_orders() {
+    for bad in [json!(null), json!({}), json!("x"), json!([1, 2])] {
+        let (dir, project, _) = temp_project();
+        let registry = Registry::standard();
+        let path = styling_journal(&project, false);
+        let text: Vec<String> = fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .map(|line| {
+                let mut v: Value = serde_json::from_str(line).unwrap();
+                if v.get("replay").is_some() {
+                    v["replay"]["legend"] = bad.clone();
+                }
+                v.to_string()
+            })
+            .collect();
+        fs::write(&path, text.join("\n") + "\n").unwrap();
+        let mut qgis = StyleQgis::new(2);
+        qgis.rearranged = true;
+        let report = Replay::load(&registry, &project)
+            .unwrap()
+            .with_gestures(style_gestures())
+            .run(&Router::new(&registry).with_qgis(qgis), &mut HashSet::new());
+        assert!(report.unwrap().identical, "légende {bad}");
+        let _ = fs::remove_dir_all(dir);
+    }
 }
 
 #[test]
