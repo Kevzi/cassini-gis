@@ -32,6 +32,7 @@ FAILED = "analysis.failed"
 CANCELLED = "qgis.cancelled"
 ORIGIN_OFF_NETWORK = "analysis.origin_off_network"
 UNKNOWN_CRS = "data.unknown_crs"
+FORMAT_MISMATCH = "data.format_mismatch"
 
 _UNIT_TO_METERS = {"m": 1.0, "km": 1000.0}
 
@@ -176,6 +177,36 @@ def translate_reproject(params, layer):
     }
 
 
+# Formats de `data.convert` et extension du fichier que le noyau dicte pour chacun (AD-10).
+_FORMAT_EXTENSIONS = {"gpkg": ".gpkg", "shp": ".shp", "geojson": ".geojson"}
+# Pilote OGR (`storageType` du fournisseur) attendu du fichier relu, pour chaque format.
+_FORMAT_DRIVERS = {"gpkg": "GPKG", "shp": "ESRI Shapefile", "geojson": "GeoJSON"}
+# Un Shapefile ne porte qu'un seul type de géométrie.
+_SINGLE_GEOMETRIES = ("Point", "Line", "Polygon")
+
+
+def translate_convert(params, layer):
+    """Paramètres neutres de `data.convert` -> paramètres de `native:extractbyexpression`.
+
+    Une extraction sur l'expression `TRUE` écrit toutes les entités par le puits de sortie
+    du cadre de traitement, qui choisit le pilote d'après l'extension du fichier ; les
+    limites du format s'appliquent (Shapefile : noms de champ coupés à 10 caractères, textes
+    à 254, dates sans heure). `native:savefeatures` ne convient pas : sous
+    QGIS 3.44, il cherche le pilote d'après tout ce qui suit le premier point du nom
+    (`convert.gpkg` pour `2-data.convert.gpkg`, le nom que dicte le noyau) et échoue
+    (« OGR driver for '' not found »). Le format écrit est celui de l'extension du fichier
+    `out`, que le noyau a tirée du `format` : le geste vérifie qu'elles s'accordent, il n'en
+    choisit aucune.
+    """
+    ext = _FORMAT_EXTENSIONS.get(params.get("format"))
+    if ext is None:
+        raise GestureError(BAD_PARAMS, "Le format doit être gpkg, shp ou geojson.")
+    out = params.get("out")
+    if not isinstance(out, str) or not out.lower().endswith(ext):
+        raise GestureError(BAD_PARAMS, "Le fichier de sortie du noyau ne porte pas l'extension du format.")
+    return {"INPUT": layer, "EXPRESSION": "TRUE"}
+
+
 # Champ de décompte écrit par `native:countpointsinpolygon` ; le noyau ne le connaît pas.
 _COUNT_FIELD = "NUMPOINTS"
 _MAX_ZONES = 100  # borne du schéma de sortie du noyau (AD-8)
@@ -217,7 +248,14 @@ def summarize_zonal_statistics(backend, layer, params):
 #   summary   : (facultatif) (fond, couche produite, params) -> dict qui complète le résultat ;
 #   target_crs: (facultatif) paramètre du noyau qui porte un code EPSG d'arrivée ; le fond
 #               doit le connaître (`crs_is_known`), sinon `data.unknown_crs`, avant tout
-#               lancement.
+#               lancement ;
+#   file_result: (facultatif) paramètre du noyau qui nomme le format écrit : la sortie est un
+#               fichier, relu à part pour compter ses entités mais jamais ajouté au projet ;
+#               le résultat est `file`, `format`, `feature_count` ; le fichier relu doit
+#               être du pilote du format (`data.format_mismatch` sinon) ; un Shapefile
+#               demande une couche d'un seul type de géométrie, vérifié avant tout lancement ;
+#   encoding  : (facultatif) encodage des textes écrits, posé sur le contexte de traitement
+#               de cette seule commande.
 ALGORITHMS = {
     "analysis.buffer": {
         "algorithm": "native:buffer",
@@ -276,6 +314,14 @@ ALGORITHMS = {
         "input": "layer_id",
         "target_crs": "target_epsg",
     },
+    "data.convert": {
+        "algorithm": "native:extractbyexpression",
+        "translate": translate_convert,
+        "output": "OUTPUT",
+        "input": "layer_id",
+        "file_result": "format",
+        "encoding": "UTF-8",
+    },
 }
 
 
@@ -293,8 +339,11 @@ class QgisBackend(_ReadBackend):
 
         return QgsCoordinateReferenceSystem("EPSG:%d" % epsg).isValid()
 
-    def run_algorithm(self, algorithm_id, parameters, finished, previous=None):
+    def run_algorithm(self, algorithm_id, parameters, finished, previous=None, encoding=None):
         """Lance l'algorithme en tâche annulable ; `finished(ok, results)` à la fin.
+
+        `encoding` : encodage des textes écrits par le puits de sortie (sinon celui du système,
+        cp1252 sous Windows pour un Shapefile).
 
         Rend un objet à `cancel()`, qui garde la tâche, son contexte et son retour
         référencés tant que le travail dure. `previous` : le retour de l'étape précédente,
@@ -313,6 +362,8 @@ class QgisBackend(_ReadBackend):
             raise GestureError(FAILED, "Le cadre de traitement de QGIS ne fournit pas cet algorithme.")
         context = QgsProcessingContext()
         context.setProject(QgsProject.instance())
+        if encoding:
+            context.setDefaultEncoding(encoding)
         feedback = QgsProcessingFeedback()
         task = QgsProcessingAlgRunnerTask(algorithm, dict(parameters), context, feedback)
         handle = _TaskHandle(task, context, feedback, previous)
@@ -369,6 +420,19 @@ class QgisBackend(_ReadBackend):
             pairs.append((text, int(count) if count is not None else 0))
         return pairs, self.feature_count(layer) > limit
 
+    def read_written(self, path):
+        """(nombre d'entités, pilote) du fichier écrit, ouvert à part sans l'ajouter au
+        projet ; None s'il est illisible."""
+        from qgis.core import QgsVectorLayer
+
+        layer = QgsVectorLayer(path, "lecture", "ogr")
+        try:
+            if not layer.isValid():
+                return None
+            return int(layer.featureCount()), layer.storageType()
+        finally:
+            del layer  # le fournisseur relâche le fichier
+
     def load_output(self, path, name):
         """Ouvre la couche écrite et l'ajoute au projet ; None si illisible."""
         from qgis.core import QgsProject, QgsVectorLayer
@@ -398,11 +462,19 @@ _TEMPORARY = "TEMPORARY_OUTPUT"
 _GEOMETRY_LABELS = {"Polygon": "de polygones", "Line": "de lignes", "Point": "de points"}
 
 
+_SHAPEFILE_COMPANIONS = (".shx", ".dbf", ".prj", ".cpg", ".qix")
+
+
 def _remove(path):
-    """Retire le fichier de sortie et les fichiers annexes d'un GeoPackage."""
-    for suffix in ("", "-wal", "-shm", "-journal"):
+    """Retire le fichier de sortie et ses fichiers annexes : ceux d'un GeoPackage, ou les
+    compagnons d'un Shapefile (même radical)."""
+    paths = [path + suffix for suffix in ("", "-wal", "-shm", "-journal")]
+    stem, ext = os.path.splitext(path)
+    if ext.lower() == ".shp":
+        paths += [stem + companion for companion in _SHAPEFILE_COMPANIONS]
+    for candidate in paths:
         try:
-            os.remove(path + suffix)
+            os.remove(candidate)
         except OSError:
             pass
 
@@ -492,6 +564,17 @@ class ProcessingGesture:
                 "La couche « %s » n'est pas une couche %s : choisissez une couche %s."
                 % (backend.name_of(layer), _GEOMETRY_LABELS[entry["geometry"]], _GEOMETRY_LABELS[entry["geometry"]]),
             )
+        if (
+            entry.get("file_result")
+            and params.get(entry["file_result"]) == "shp"
+            and backend.geometry_of(layer) not in _SINGLE_GEOMETRIES
+        ):
+            raise GestureError(
+                BAD_PARAMS,
+                "La couche « %s » n'a pas un seul type de géométrie (points, lignes ou polygones) : "
+                "un Shapefile en demande un. Choisissez le GeoPackage ou le GeoJSON."
+                % backend.name_of(layer),
+            )
         if entry.get("origin"):
             self._check_origin(params.get(entry["origin"]), layer)
         overlay = None
@@ -505,7 +588,8 @@ class ProcessingGesture:
         # Avec une étape suivante, la première écrit en sortie temporaire : un seul fichier, `out`.
         algorithm_params[entry["output"]] = _TEMPORARY if entry.get("then") else out
         self._out = out
-        return backend.run_algorithm(entry["algorithm"], algorithm_params, self._on_finished)
+        extra = {"encoding": entry["encoding"]} if entry.get("encoding") else {}
+        return backend.run_algorithm(entry["algorithm"], algorithm_params, self._on_finished, **extra)
 
     def _check_origin(self, origin, layer):
         backend = self._backend
@@ -578,6 +662,8 @@ class ProcessingGesture:
 
     def _load(self):
         backend = self._backend
+        if self._entry.get("file_result"):
+            return self._written()
         name = os.path.splitext(os.path.basename(self._out))[0]  # radical donné par le noyau (AD-10)
         layer = backend.load_output(self._out, name)
         if layer is None:
@@ -593,6 +679,20 @@ class ProcessingGesture:
         if summary is not None:
             result.update(summary(backend, layer, self._params or {}))
         return result
+
+    def _written(self):
+        """Résultat d'une sortie fichier : relue à part, jamais ajoutée au projet."""
+        fmt = (self._params or {}).get(self._entry["file_result"])
+        read = self._backend.read_written(self._out)
+        if read is None:
+            raise GestureError(FAILED, "Le fichier écrit est illisible.")
+        count, driver = read
+        if driver != _FORMAT_DRIVERS.get(fmt):
+            raise GestureError(
+                FORMAT_MISMATCH,
+                "Le fichier écrit n'est pas au format demandé (%s) : QGIS l'a lu comme %s." % (fmt, driver),
+            )
+        return {"file": self._out, "format": fmt, "feature_count": count}
 
     def _fail(self, error):
         # Une couche déjà ajoutée au projet garde son fichier.

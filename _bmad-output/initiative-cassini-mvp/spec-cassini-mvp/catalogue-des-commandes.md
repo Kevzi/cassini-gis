@@ -369,7 +369,7 @@ donne l'esquisse.
 | `data.reproject` | faite | qgis | epic 10, entrée 7 |
 | `analysis.difference` | planifiée | qgis | epic 10, entrée 21 |
 | `analysis.area` | planifiée | qgis | epic 10, entrée 22 |
-| `data.convert` | planifiée | qgis | epic 10, entrée 9 |
+| `data.convert` | faite | qgis | epic 10, entrée 9 |
 | `analysis.nearest` | planifiée | qgis | epic 10, entrée 10 |
 | `analysis.distance_matrix` | planifiée | qgis | epic 10, entrée 10 |
 | `analysis.statistics_by_category` | planifiée | qgis | epic 10, entrée 11 |
@@ -1619,8 +1619,26 @@ ligne de table) sur une couche nouvelle (epic 10, entrée 22). Couche en degrés
 | `format` | chaîne | Format écrit. |
 | `feature_count` | entier | Entités écrites. |
 
+L'écriture est celle de QGIS (copie de toutes les entités par `native:extractbyexpression` sur
+`TRUE`, dont le puits de sortie choisit le pilote d'après l'extension ; `native:savefeatures`
+échoue sous QGIS 3.44 sur un nom à deux points comme `2-data.convert.gpkg`), jamais du noyau ; la couche d'origine
+n'est pas modifiée et le fichier écrit n'est pas ajouté au projet. Le noyau nomme le fichier
+dans le dossier de travail et tire son extension du `format` (`.gpkg`, `.shp`, `.geojson`) ; un
+Shapefile y dépose aussi ses compagnons (`.shx`, `.dbf`, `.prj`, `.cpg`, `.qix`), retirés avec lui si
+l'étape est annulée. Les textes sont écrits en UTF-8. Un Shapefile coupe les noms de champ à
+10 caractères et les textes à 254, et garde les dates sans l'heure ; il demande une couche d'un
+seul type de géométrie, vérifié avant tout lancement. Le GeoJSON garde le système de la couche :
+pour du WGS84, `data.reproject` d'abord. Le rejeu exige le fichier, non vide, et le même résultat typé. Livrée par
+l'entrée 9 de l'epic 10 (`core/src/commands/data_convert.rs`, ligne de la table `ALGORITHMS` de
+`qgis-plugin/cassini_qgis/analysis.py`). Erreurs : `layer.not_found`, `layer.not_vector` ;
+`analysis.bad_params` (Shapefile demandé pour une couche sans géométrie ou de géométrie
+mixte) ; `analysis.failed` (échec de l'algorithme dans QGIS, ou fichier écrit illisible) ;
+`data.format_mismatch` (fichier relu dans un autre format que celui demandé) ;
+`qgis.cancelled` ; `registry.invalid_params` (paramètre absent, format hors de la liste, tel
+un tableur Excel ou CSV, champ en trop).
+
 ```json fiche
-{"id": "data.convert", "status": "planifiee", "runs_in": "qgis", "dictated_by_core": false,
+{"id": "data.convert", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
  "params": {"layer_id": {"type": "string", "required": true},
             "format": {"type": "string", "required": true, "enum": ["gpkg", "shp", "geojson"]},
             "out": {"type": "string", "required": false}},

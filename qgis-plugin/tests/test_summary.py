@@ -372,6 +372,57 @@ class ReprojectTest(unittest.TestCase):
             )
 
 
+DATA_CONVERT = {"layer_id": "gares_1", "format": "gpkg"}
+DATA_CONVERT_OUT = {"file": "C:/d/cassini/2-data.convert.gpkg", "format": "gpkg", "feature_count": 5}
+
+
+class DataConvertTest(unittest.TestCase):
+    def test_the_written_file_is_named_without_its_folder(self):
+        self.assertEqual(
+            say("data.convert", DATA_CONVERT, DATA_CONVERT_OUT),
+            "Couche Gares convertie en GeoPackage : fichier 2-data.convert.gpkg, 5 entités.",
+        )
+        self.assertEqual(
+            say("data.convert", DATA_CONVERT, DATA_CONVERT_OUT, lang="en"),
+            "Layer Gares converted to GeoPackage: file 2-data.convert.gpkg, 5 features.",
+        )
+
+    def test_each_format_has_its_name(self):
+        for fmt, shown in (("shp", "Shapefile"), ("geojson", "GeoJSON")):
+            self.assertEqual(
+                say("data.convert", dict(DATA_CONVERT, format=fmt)),
+                "Couche Gares convertie en %s." % shown,
+            )
+
+    def test_label_and_step_reference(self):
+        self.assertEqual(
+            summary.label("data.convert", dict(DATA_CONVERT, format="shp"), "fr", qgis_name),
+            "Conversion de la couche Gares en Shapefile",
+        )
+        self.assertEqual(
+            say("data.convert", dict(DATA_CONVERT, layer_id="step:1"), step_names={1: BUFFER_OUT}),
+            "Couche Tampon convertie en GeoPackage.",
+        )
+
+    def test_one_feature_and_unreadable_count(self):
+        self.assertEqual(
+            say("data.convert", DATA_CONVERT, dict(DATA_CONVERT_OUT, feature_count=1)),
+            "Couche Gares convertie en GeoPackage : fichier 2-data.convert.gpkg, 1 entité.",
+        )
+        self.assertEqual(
+            say("data.convert", DATA_CONVERT, dict(DATA_CONVERT_OUT, feature_count="5")),
+            "Couche Gares convertie en GeoPackage : fichier 2-data.convert.gpkg.",
+        )
+
+    def test_unknown_format_falls_back_to_the_description(self):
+        catalogue = [{"id": "data.convert", "description_fr": "Écrit une couche dans un autre format."}]
+        for bad in ("xlsx", None, 3):
+            self.assertEqual(
+                say("data.convert", dict(DATA_CONVERT, format=bad), catalogue=catalogue),
+                "Écrit une couche dans un autre format. Terminée.",
+            )
+
+
 class TransformPointTest(unittest.TestCase):
     def test_the_reprojected_point_is_shown_with_its_code(self):
         self.assertEqual(
@@ -619,6 +670,8 @@ SAMPLES = {
                              {"point": {"x": 652000.0, "y": 6862000.0, "epsg": 2154}}),
     "data.reproject": ({"layer_id": "gares_1", "target_epsg": 2154},
                        {"layer_id": "gares_2", "name": "Gares 2154", "feature_count": 3}),
+    "data.convert": ({"layer_id": "gares_1", "format": "shp"},
+                     {"file": "C:/d/3-data.convert.shp", "format": "shp", "feature_count": 3}),
     "terrain.aspect": ({"dem": DEM}, {"file": "C:/d/expo.tif", "flat_cells": 12,
                                       "nodata_cells": 0}),
     "terrain.hillshade": ({"dem": DEM}, {"file": "C:/d/ombrage.tif", "nodata_cells": 0}),
@@ -754,6 +807,7 @@ class LabelTest(unittest.TestCase):
         "sum_reproject", "sum_converted", "sum_transformed_point", "sum_geo_measured",
         "sum_geo_reached", "sum_geo_intersected", "sum_topo_styled", "sum_style_set",
         "sum_arranged", "sum_out_layer", "sum_file", "sum_peaks_found", "sum_path_found",
+        "sum_data_convert", "sum_data_convert_file",
     }
 
     def test_no_label_uses_an_after_result_key(self):

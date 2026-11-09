@@ -582,10 +582,14 @@ impl<'a> Session<'a> {
             }),
         );
         if cancelled {
-            // Une étape annulée ne laisse pas de sortie partielle derrière elle (AD-12).
+            // Une étape annulée ne laisse pas de sortie partielle derrière elle (AD-12), ni
+            // les fichiers compagnons d'un Shapefile.
+            let ext = spec.output_ext_for(&logged);
             for name in &spec.output_params {
-                let file = output_file(step, id, &spec.output_params, name, &spec.output_ext);
-                let _ = fs::remove_file(self.work_dir.join(file));
+                let file = output_file(step, id, &spec.output_params, name, ext);
+                for written in output_family(&file) {
+                    let _ = fs::remove_file(self.work_dir.join(written));
+                }
             }
         }
         self.append(&Value::Object(line))?;
@@ -755,6 +759,23 @@ fn journal_ids(path: &Path) -> Vec<String> {
         .collect()
 }
 
+/// Extensions des fichiers compagnons qu'écrit un Shapefile à côté de son `.shp`.
+const SHAPEFILE_COMPANIONS: [&str; 5] = [".shx", ".dbf", ".prj", ".cpg", ".qix"];
+
+/// Le fichier de sortie `file` et, pour un Shapefile, ses fichiers compagnons (même radical) :
+/// tout ce que l'écriture de cette sortie dépose dans le dossier de travail.
+pub(crate) fn output_family(file: &str) -> Vec<String> {
+    let mut family = vec![file.to_string()];
+    if let Some(stem) = file.strip_suffix(".shp") {
+        family.extend(
+            SHAPEFILE_COMPANIONS
+                .iter()
+                .map(|ext| format!("{stem}{ext}")),
+        );
+    }
+    family
+}
+
 /// Nom du fichier de sortie `name` de l'étape `step`.
 fn output_file(step: usize, id: &str, outputs: &[String], name: &str, ext: &str) -> String {
     if outputs.len() == 1 {
@@ -828,9 +849,10 @@ pub fn intermediate_files(registry: &Registry, journal: &Path) -> HashSet<String
         let mut files: Vec<String> = registry
             .spec(id)
             .map(|spec| {
+                let ext = spec.output_ext_for(line.get("params").unwrap_or(&Value::Null));
                 spec.output_params
                     .iter()
-                    .map(|name| output_file(step, id, &spec.output_params, name, &spec.output_ext))
+                    .map(|name| output_file(step, id, &spec.output_params, name, ext))
                     .collect()
             })
             .unwrap_or_default();
@@ -851,7 +873,10 @@ pub fn intermediate_files(registry: &Registry, journal: &Path) -> HashSet<String
 }
 
 /// Nom du fichier de sortie désigné par le repère `out:<k>.<n>`, d'après `prior`, les ids des
-/// étapes du journal (l'étape 1 en premier) ; `None` si le repère ne désigne aucune sortie.
+/// étapes du journal (l'étape 1 en premier) ; `None` si le repère ne désigne aucune sortie. Une
+/// commande dont l'extension dépend de ses paramètres (`output_ext_from`, `data.convert`) n'est
+/// pas désignable ainsi : `prior` n'en porte pas les paramètres, et deviner l'extension
+/// désignerait un fichier qui n'existe pas.
 fn reference_file(registry: &Registry, reference: &str, prior: &[String]) -> Option<String> {
     let (k, n) = reference
         .strip_prefix("out:")
@@ -867,6 +892,9 @@ fn reference_file(registry: &Registry, reference: &str, prior: &[String]) -> Opt
     }
     let id = prior.get(k - 1)?;
     let spec = registry.spec(id)?;
+    if spec.output_ext_by.is_some() {
+        return None;
+    }
     let outputs = &spec.output_params;
     let name = outputs.get(n - 1)?;
     Some(output_file(k, id, outputs, name, &spec.output_ext))
@@ -900,10 +928,13 @@ impl Resolver<'_> {
         prior: &[String],
     ) -> Result<Resolved, ErrorReport> {
         let prior = &prior[..prior.len().min(step.saturating_sub(1))];
+        // L'extension suit le format demandé quand la commande en a un (`data.convert`) : le
+        // noyau nomme le fichier, jamais l'exécutant (AD-10).
+        let ext = spec.output_ext_for(&params).to_string();
         let mut logged = params.clone();
         let mut exec = params;
         for name in &spec.output_params {
-            let file = output_file(step, id, &spec.output_params, name, &spec.output_ext);
+            let file = output_file(step, id, &spec.output_params, name, &ext);
             if let (Some(l), Some(e)) = (logged.as_object_mut(), exec.as_object_mut()) {
                 l.insert(name.clone(), Value::String(file.clone()));
                 e.insert(
@@ -1379,8 +1410,9 @@ impl<'a> Replay<'a> {
             if outcome.is_err() && spec.runs_in == Some(crate::registry::RunsIn::Qgis) {
                 continue;
             }
+            let ext = spec.output_ext_for(line.get("params").unwrap_or(&Value::Null));
             for name in &spec.output_params {
-                let file = output_file(step, id, &spec.output_params, name, &spec.output_ext);
+                let file = output_file(step, id, &spec.output_params, name, ext);
                 let again = fs::read(out_dir.join(&file)).ok();
                 if spec.runs_in == Some(crate::registry::RunsIn::Qgis) {
                     // GeoPackage et PDF portent dates et identifiants : la fidélité d'une
