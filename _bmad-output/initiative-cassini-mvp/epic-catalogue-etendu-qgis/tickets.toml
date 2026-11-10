@@ -20,10 +20,22 @@ risk = "medium"
 # ---- Mise a niveau avant la premiere primitive (deferred-work, gate de revue E1) ----
 
 [[entry]]
+id = 27
+type = "story"
+title = "Retirer une couche du projet (layer.remove)"
+description = "Ajoute layer.remove, deleguee a QGIS (entree project, sortie none, amendement du 2026-11-08 d'AD-24) : retire une couche du projet QGIS ouvert sans jamais effacer ni modifier son fichier (principe 6) ; une couche deja absente n'est pas une erreur ; resultat layer_id. Ajoute au catalogue la ligne du paragraphe 4 et la fiche du paragraphe 7 du changement de cap, puis la passe en faite dans le meme commit, ajoute la famille du generateur et retire le refus « retire une couche » devenu faux, rescore H35 du jeu tenu a l'ecart en plan d'une etape. Construite tout de suite, avant les entrees 1 a 6 (changement de cap du 2026-11-10)."
+verify = "Test de l'extension : la couche quitte le projet, son fichier reste intact, une couche absente rend le meme resultat sans erreur ; test du rejeu dans la meme session et dans une session neuve (identique) ; core/tests/catalogue.rs vert avec la fiche faite ; recette QGIS reelle : « retire la couche ... du projet » retire la couche et le rejeu est identique."
+covers = ["CAP-14"]
+after = []
+hitl = false
+risk = "high"
+references = ["change-commande-layer-remove/change-commande-layer-remove.md", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-24", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-11"]
+
+[[entry]]
 id = 1
 type = "story"
 title = "Resultat valide par le noyau et gabarit unique de resume"
-description = "Definit en Rust le gabarit de resume chiffre (rows, values avec unite, truncated) et fait valider par le noyau tout resultat recu de l'extension contre le schema de sortie de sa commande, rejete en qgis.bad_result ; les marqueurs du journal passent sous une cle reservee (bug latent summary.rs:24), et model.list cesse de rendre son dossier en chemin absolu (AD-9). Couvre aussi data.reproject, construite avant (10.7, 2026-11-08)."
+description = "Definit en Rust le gabarit de resume chiffre (rows, values avec unite, truncated) et fait valider par le noyau tout resultat recu de l'extension contre le schema de sortie de sa commande, rejete en qgis.bad_result ; les marqueurs du journal passent sous une cle reservee (bug latent summary.rs:24), et model.list cesse de rendre son dossier en chemin absolu (AD-9). Couvre aussi data.reproject, construite avant (10.7, 2026-11-08), et layer.remove, construite avant (10.27, 2026-11-10 : resultat layer_id, sortie none)."
 verify = "Tests du noyau sans QGIS : un resultat mal forme est rejete en qgis.bad_result et non journalise, un resultat qui porte lui-meme truncated: true n'est plus confondu avec un resume tronque au rejeu, et aucun resultat de model.list ne porte de chemin absolu."
 covers = ["CAP-6", "CAP-14"]
 after = ["epic-export-et-demo", "epic-publication"]
@@ -46,7 +58,7 @@ risk = "medium"
 id = 3
 type = "story"
 title = "Geste a chaine fixe et invariants de la table fermee"
-description = "Fait de chaque ligne de la table de l'extension une chaine fixe d'algorithmes avec gardes, temporaires non journalises et version de chaine (AD-24), migre les lignes existantes, declare une commande annulable seulement si chaque algorithme l'est, et fait refuser par la recette toute ligne qui cite un algorithme de la liste noire reseau ; le genre vector et les sorties layer et file sont livres ici, les genres raster et layout et la sortie table par la premiere primitive qui en a besoin, apres le reordonnancement de l'entree 8 (aujourd'hui 10 pour table, 12 pour raster, 15 pour layout ; la sortie raster d'une commande, d'abord en 25, est une sortie layer d'AD-24). La ligne data.reproject (native:reprojectlayer, construite en 10.7 avant cette entree) est migree comme les autres."
+description = "Fait de chaque ligne de la table de l'extension une chaine fixe d'algorithmes avec gardes, temporaires non journalises et version de chaine (AD-24), migre les lignes existantes, declare une commande annulable seulement si chaque algorithme l'est, et fait refuser par la recette toute ligne qui cite un algorithme de la liste noire reseau ; le genre vector et les sorties layer et file sont livres ici, les genres raster et layout et la sortie table par la premiere primitive qui en a besoin, apres le reordonnancement de l'entree 8 (aujourd'hui 10 pour table, 12 pour raster, 15 pour layout ; la sortie raster d'une commande, d'abord en 25, est une sortie layer d'AD-24). La ligne data.reproject (native:reprojectlayer, construite en 10.7 avant cette entree) est migree comme les autres, de meme que la ligne layer.remove (geste fixe de projet, entree project et sortie none, construite en 10.27 avant cette entree)."
 verify = "Tests de l'extension sur les deux series de QGIS : une chaine de deux algorithmes ecrit seulement la sortie nommee par le noyau, un test confronte la table au registre sur l'annulabilite, et la recette echoue sur une ligne de test qui nomme native:filedownloader."
 covers = ["CAP-6", "CAP-14"]
 after = [2]
@@ -315,7 +327,7 @@ title = "Refactor sweep"
 description = "Nettoyage seulement, dont la portee se fixe au demarrage a partir des plans et des constats de revue reportes pendant l'epic."
 verify = "Tests du noyau et de l'extension verts, cargo fmt et clippy sans avertissement, recette hors ligne verte."
 covers = ["CAP-6", "CAP-14"]
-after = [1, 2, 3, 4, 5, 6, 7, 8, 21, 22, 9, 10, 11, 23, 24, 20, 12, 25, 26, 13, 14, 15, 16, 17]
+after = [1, 2, 3, 4, 5, 6, 7, 8, 21, 22, 9, 10, 11, 23, 24, 20, 12, 25, 26, 13, 14, 15, 16, 17, 27]
 hitl = false
 risk = "low"
 
