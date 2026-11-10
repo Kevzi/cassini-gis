@@ -151,7 +151,11 @@ code existant reste au dépôt comme fondation.
   fichier avant de l'installer ; et un installeur complet hors ligne, un seul
   fichier qui contient tout, pour les postes isolés du réseau. Windows et Linux
   d'abord, macOS plus tard. Seul l'installeur, programme séparé, télécharge :
-  jamais le noyau ni l'extension (AD-17).
+  jamais le noyau ni l'extension (AD-17). Les mises à jour suivent la même
+  frontière : « Mettre à jour Cassini », lancé à la main, est le même programme
+  que l'installeur en ligne et lit un manifeste des versions publié dans la
+  release GitHub ; un nouveau modèle s'installe à côté des anciens, jamais à leur
+  place.
 - **IA locale** : modèle open source (Mistral ou Qwen, quantifié GGUF) chargé
   **dans le processus du noyau** par llama.cpp lié en bibliothèque — jamais un
   serveur HTTP, qui rouvrirait une interface réseau.

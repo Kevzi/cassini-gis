@@ -38,6 +38,31 @@ des documents ; aucun ticket créé (l'epic publication sera incepté plus tard 
    installeurs non signés, avec une page qui explique l'avertissement de Windows.
 4. **Systèmes : Windows et Linux d'abord** ; macOS plus tard, quand un Mac est disponible.
 
+### Compléments du 2026-11-10 (réponse du propriétaire aux questions ouvertes)
+
+5. **Hébergement de la porte 2** : l'installeur hors ligne, qui dépasse 2 Gio, est hébergé sur
+   Hugging Face, à côté du modèle.
+6. **La porte 2 contient aussi l'extension QGIS** (archive installable à la main), un poste
+   isolé du réseau ne pouvant pas la prendre au dépôt d'extensions.
+7. **Le modèle reste facultatif** dans l'installeur en ligne (utilisateur d'une IA externe
+   seulement).
+8. **Manifeste des versions** : les empreintes de référence viennent d'un manifeste publié dans
+   la release GitHub, à adresse fixe (version et SHA-256 de chaque fichier) ; le même manifeste
+   sert aux mises à jour.
+9. **Mises à jour** :
+   - « Mettre à jour Cassini », lancé à la main par l'utilisateur (entrée du menu Démarrer sous
+     Windows, commande sous Linux), est le même programme que l'installeur en ligne : il lit le
+     manifeste, compare à l'installé, propose, télécharge, vérifie l'empreinte, installe ;
+   - un nouveau modèle se télécharge à côté des autres ; l'ancien est toujours gardé, jamais
+     supprimé ; le sélecteur de modèle du panneau permet de revenir en arrière ;
+   - l'extension se met à jour par le gestionnaire d'extensions de QGIS, rien à faire ;
+   - le panneau affiche la version installée et, passé un délai (par exemple trois mois depuis
+     l'installation ou la dernière mise à jour, calcul de date local, sans réseau), un rappel
+     « pensez à lancer Mettre à jour Cassini » ;
+   - aucune vérification automatique en arrière-plan. Piste, non décidée : une option
+     désactivée par défaut pourra venir plus tard si des clients la demandent.
+10. **Initiative** : la question du chemin de livraison du modèle est marquée tranchée.
+
 ## 3. Analyse d'impact
 
 | Endroit | Effet |
@@ -49,7 +74,8 @@ des documents ; aucun ticket créé (l'epic publication sera incepté plus tard 
 | Architecture, AD-14 | Inchangé : le noyau et l'extension n'ouvrent toujours aucun accès réseau ; la recette « zéro requête réseau » de l'extension tient. L'installeur est hors de ce périmètre. |
 | Architecture, enveloppe d'exploitation | Inchangée. « Une clé USB portant les deux artefacts suffit » reste vrai : la clé porte l'archive de l'extension et l'installeur complet hors ligne. Le schéma cite encore `pkg` (macOS) : macOS est repoussé, pas retiré. |
 | Spec (`spec-cassini-mvp.md`, Constraints) | Inchangée : « le noyau et le modèle dans un paquet Cassini installé à part » et « rien n'est jamais téléchargé pour réparer une installation » restent vrais. |
-| Initiative, Unknown « chemin de livraison du modèle » | Tranché de fait par ce document ; la ligne n'est pas modifiée ici (voir §6). |
+| Initiative, Unknown « chemin de livraison du modèle » | Marquée tranchée par une Decision datée. |
+| Panneau (extension) | Affichera la version installée et le rappel de mise à jour, calcul de date local, sans réseau ; le sélecteur de modèle existant sert à revenir en arrière. À découper à l'inception de l'epic publication. |
 | Epic publication | Done when 2 (Windows et Linux, deux portes) et 6 (Hugging Face, deux chemins) mis en accord ; Description ajustée ; une Decision datée. |
 | Epic 5 (`epic-agent-et-mcp`) | La ligne « Tranché : livré dans le paquet Cassini, jamais téléchargé » est gardée ; une Decision datée la précise. L'en-tête de `tickets.toml`, commentaire historique, n'est pas touché. |
 | Epic de l'épreuve du modèle local | Une Decision datée précise celle du 2026-10-14 sur AD-17, sans l'effacer. |
@@ -135,6 +161,22 @@ Notes, nouvelle Decision datée du 2026-11-10 : deux portes, Hugging Face, signa
 avec page sur l'avertissement de Windows, Windows et Linux d'abord ; elle remplace pour ces
 points la décision du 2026-10-14, qui reste écrite.
 
+Notes, compléments du même jour : une Decision datée (hébergement de la porte 2, extension dans
+la porte 2, modèle facultatif, manifeste des versions, « Mettre à jour Cassini », modèles gardés
+côte à côte, rappel du panneau), une ligne Parked (vérification automatique désactivée par
+défaut, piste) et une Open question (format des installeurs, Vulkan sous Linux).
+
+### Compléments du 2026-11-10
+
+- **AD-17** : un second paragraphe dans l'amendement — porte 2 sur Hugging Face avec
+  l'extension, modèle facultatif, manifeste des versions, « Mettre à jour Cassini » soumis à la
+  même frontière que l'installeur (séparé du noyau et de l'extension, lancé par l'utilisateur,
+  adresses fixes, empreintes vérifiées), rappel du panneau sans réseau.
+- **CLAUDE.md §3** : une phrase sur les mises à jour (même programme, manifeste, modèles côte
+  à côte).
+- **Initiative** (`initiative-cassini-mvp.md`) : une Decision datée sous l'Unknown du chemin
+  de livraison du modèle, qui la marque tranchée.
+
 ### Epic 5 — `epic-agent-et-mcp/epic-agent-et-mcp.md`
 
 Nouvelle Decision datée sous la ligne « Tranché » (gardée) : le modèle n'est jamais téléchargé
@@ -146,26 +188,18 @@ par le noyau ni par l'extension, ni au premier lancement ; il vient de l'install
 Nouvelle Decision datée sous celle du 2026-10-14 sur AD-17 (gardée), qui la précise par les
 deux portes.
 
-## 6. Questions ouvertes (non tranchées par le propriétaire)
+## 6. Questions ouvertes
 
-1. **Où héberger l'installeur complet hors ligne ?** Il contient le modèle (2,65 Go) et dépasse
-   donc la limite de 2 Gio d'un fichier de release GitHub. Hugging Face, autre hébergement, ou
-   découpage : à décider.
-2. **L'installeur complet hors ligne porte-t-il aussi l'archive de l'extension ?** Sur un poste
-   isolé du réseau, le gestionnaire d'extensions de QGIS ne peut pas la télécharger.
-3. **Le modèle reste-t-il optionnel ?** AD-17 disait « en option, un modèle » ; les décisions du
-   2026-11-10 font télécharger ou embarquer le modèle sans dire si l'utilisateur peut s'en
-   passer (par exemple pour n'utiliser qu'une IA externe par MCP).
-4. **D'où l'installeur en ligne tient-il les empreintes de référence ?** Écrites dans
-   l'installeur à sa construction, ou lues ailleurs : à fixer à l'inception.
-5. **Technologie, format et licence des installeurs** (Windows : `.exe` ou `.msi` ; Linux :
-   archive, paquet ou script). L'installeur est hors du noyau : sa licence n'est pas encore
-   dite.
-6. **Mise à jour du modèle** : quand un nouveau modèle ajusté est publié, faut-il un nouvel
-   installeur, et que fait une installation existante ? (Le noyau ne se met jamais à jour seul.)
-7. **Accélération sous Linux** : le noyau Vulkan n'est mesuré que sous Windows.
-8. **Ligne Unknown de l'initiative** (« chemin de livraison du modèle GGUF sur un poste
-   isolé ») : à marquer tranchée par ce document, si le propriétaire le souhaite.
+Tranchées le 2026-11-10 (voir §2, compléments) : hébergement de la porte 2, extension dans la
+porte 2, modèle facultatif, origine des empreintes, mise à jour du modèle, ligne de
+l'initiative. Restent ouvertes, à trancher à l'inception de l'epic publication :
+
+1. **Format des installeurs** (Windows : `.exe` ou `.msi` ; Linux : archive, paquet ou
+   script), et leur licence, l'installeur étant hors du noyau.
+2. **Accélération Vulkan sous Linux** : le noyau Vulkan n'est mesuré que sous Windows.
+
+Piste, non décidée : une vérification automatique des mises à jour, désactivée par défaut, si
+des clients la demandent.
 
 ## 7. Passage à la réalisation
 

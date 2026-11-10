@@ -436,6 +436,21 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   Après l'installation, Cassini ne touche plus au réseau (AD-14 inchangé). Le
   noyau, l'extension et l'ordre de recherche ne changent pas.
 
+  Complément du même jour (2026-11-10) : l'installeur hors ligne, qui dépasse
+  2 Gio, est hébergé sur Hugging Face à côté du modèle, et il contient aussi
+  l'archive de l'extension, installable à la main. Dans l'installeur en ligne,
+  le modèle reste facultatif. Les empreintes de référence viennent d'un
+  **manifeste des versions** publié dans la release GitHub, à adresse fixe
+  (version et SHA-256 de chaque fichier). **« Mettre à jour Cassini »** est le
+  même programme que l'installeur en ligne et obéit à la **même frontière** :
+  séparé du noyau et de l'extension, lancé à la main par l'utilisateur, adresses
+  fixes, empreintes vérifiées ; aucune vérification automatique en arrière-plan.
+  Un nouveau modèle s'installe à côté des autres, l'ancien n'est jamais supprimé.
+  Le panneau affiche la version installée et, passé un délai depuis
+  l'installation ou la dernière mise à jour, rappelle de lancer « Mettre à jour
+  Cassini » : ce rappel est un calcul de date local et **ne touche pas au
+  réseau**.
+
 ### AD-18 — Une seule extension pour les deux séries de QGIS, et aucun import direct de PyQt
 
 - **Binds:** CAP-13
