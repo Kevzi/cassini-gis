@@ -529,6 +529,12 @@ def _data_convert(lang, p, r, names):
     return text + texts.tr(lang, "sum_file", file=file)
 
 
+def _layer_remove(lang, p, r, names):
+    """La couche retirée du projet, aucun fichier effacé ; affichage seul (AD-5)."""
+    key = "sum_layer_remove_ask" if names.ahead else "sum_layer_remove"
+    return texts.tr(lang, key, layer=names.layer(p.get("layer_id")))
+
+
 def _distance_azimuth(lang, p, r, names):
     """Distance et azimuts rendus ; affichage seul (AD-5)."""
     if not r:
@@ -829,6 +835,7 @@ _SENTENCES = {
     "data.transform_point": _transform_point,
     "data.reproject": _reproject,
     "data.convert": _data_convert,
+    "layer.remove": _layer_remove,
     "analysis.buffer": _buffer,
     "analysis.intersect": _intersect,
     "analysis.select_by_attribute": _select,

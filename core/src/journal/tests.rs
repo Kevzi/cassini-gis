@@ -3620,3 +3620,256 @@ fn a_conversion_after_a_plan_layer_does_not_hide_it() {
     assert!(intermediate_files(&registry, &journal).is_empty());
     let _ = fs::remove_dir_all(dir);
 }
+
+// -- layer.remove : retrait du projet, jamais du fichier (epic 10, entrée 27) ----------------
+
+/// Couches d'un projet QGIS de test, partagées entre l'exécutant d'une session et celui d'un
+/// rejeu dans la même session.
+type ProjectLayers = std::rc::Rc<std::cell::RefCell<HashSet<String>>>;
+
+/// Projet ouvert avec la seule couche `routes_1`, comme à la réouverture du fichier de projet.
+fn project_with_roads() -> ProjectLayers {
+    std::rc::Rc::new(std::cell::RefCell::new(HashSet::from([
+        "routes_1".to_string()
+    ])))
+}
+
+/// QGIS de test avec état : `analysis.buffer` pose une couche d'id neuf à chaque appel (préfixé
+/// de la génération, comme une session QGIS neuve), `layer.remove` retire une couche du projet
+/// sans erreur si elle est déjà absente, et le tampon d'une couche absente échoue par
+/// `layer.not_found`, qui la nomme.
+struct RemoveQgis {
+    generation: u32,
+    count: std::cell::Cell<u32>,
+    layers: ProjectLayers,
+    seen: std::rc::Rc<std::cell::RefCell<Vec<(String, Value)>>>,
+}
+
+impl RemoveQgis {
+    fn new(generation: u32, layers: &ProjectLayers) -> Self {
+        RemoveQgis {
+            generation,
+            count: std::cell::Cell::new(0),
+            layers: layers.clone(),
+            seen: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
+        }
+    }
+}
+
+impl Executor for RemoveQgis {
+    fn execute(&self, id: &str, p: Value) -> Result<Value, RegistryError> {
+        self.seen.borrow_mut().push((id.to_string(), p.clone()));
+        let layer = p["layer_id"].as_str().unwrap().to_string();
+        match id {
+            "analysis.buffer" => {
+                if !self.layers.borrow().contains(&layer) {
+                    return Err(RegistryError::Delegated {
+                        code: "layer.not_found".into(),
+                        message: format!("la couche {layer} n'est pas dans le projet"),
+                    });
+                }
+                let n = self.count.get() + 1;
+                self.count.set(n);
+                fs::write(
+                    p["out"].as_str().unwrap(),
+                    format!("gpkg-{}", self.generation),
+                )
+                .unwrap();
+                let new = format!("tampon_g{}_{n}", self.generation);
+                self.layers.borrow_mut().insert(new.clone());
+                Ok(json!({"layer_id": new, "feature_count": 2}))
+            }
+            "layer.remove" => {
+                // Idempotente : une couche absente rend le même résultat, sans erreur.
+                self.layers.borrow_mut().remove(&layer);
+                Ok(json!({"layer_id": layer}))
+            }
+            other => panic!("commande inattendue : {other}"),
+        }
+    }
+}
+
+fn identical(steps: usize) -> ReplayReport {
+    ReplayReport {
+        steps,
+        identical: true,
+    }
+}
+
+#[test]
+fn a_removed_layer_leaves_the_project_and_replays_identically_in_the_same_and_a_new_session() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let layers = project_with_roads();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(RemoveQgis::new(1, &layers));
+    let out = s
+        .call("layer.remove", json!({"layer_id": "routes_1"}))
+        .unwrap();
+    assert_eq!(out, json!({"layer_id": "routes_1"}));
+    assert!(layers.borrow().is_empty());
+    // Une couche absente rend le même résultat, sans erreur.
+    let again = s
+        .call("layer.remove", json!({"layer_id": "routes_1"}))
+        .unwrap();
+    assert_eq!(again, out);
+    // Paramètres hors de la fiche : refus avant QGIS, rien n'est journalisé.
+    for bad in [
+        json!({}),
+        json!({"layer_id": "routes_1", "delete_file": true}),
+    ] {
+        let err = s.call("layer.remove", bad).unwrap_err();
+        assert_eq!(err.code, "registry.invalid_params");
+    }
+    let l = lines(&s);
+    assert_eq!(l.len(), 2);
+    for line in &l {
+        assert_eq!(line["params"], json!({"layer_id": "routes_1"}));
+        assert_eq!(line["result"], json!({"layer_id": "routes_1"}));
+        // Sortie `none` : le `layer_id` du résultat n'est pas une couche posée.
+        assert!(
+            line.get("layer_id").is_none(),
+            "aucune couche posée : {line}"
+        );
+    }
+    assert!(intermediate_files(&registry, &s.journal_path()).is_empty());
+    drop(s);
+
+    // Rejeu dans la même session : la couche est déjà retirée, le rejeu reste identique.
+    let qgis = RemoveQgis::new(1, &layers);
+    let seen = qgis.seen.clone();
+    let mut replayed = HashSet::new();
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(&Router::new(&registry).with_qgis(qgis), &mut replayed)
+        .unwrap();
+    assert_eq!(report, identical(2));
+    // Rejouée, jamais sautée.
+    assert_eq!(seen.borrow().len(), 2);
+    assert!(replayed.is_empty(), "un retrait ne pose aucune couche");
+
+    // Rejeu dans une session neuve : le projet rouvert porte la couche, le rejeu la retire.
+    let reopened = project_with_roads();
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(
+            &Router::new(&registry).with_qgis(RemoveQgis::new(2, &reopened)),
+            &mut HashSet::new(),
+        )
+        .unwrap();
+    assert_eq!(report, identical(2));
+    assert!(reopened.borrow().is_empty());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn removing_an_analysis_result_replays_on_the_layer_the_replay_created() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let layers = project_with_roads();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(RemoveQgis::new(1, &layers));
+    let buffer = s
+        .call(
+            "analysis.buffer",
+            json!({"layer_id": "routes_1", "distance": {"value": 50, "unit": "m"}}),
+        )
+        .unwrap();
+    assert_eq!(buffer["layer_id"], "tampon_g1_1");
+    s.call("layer.remove", json!({"layer_id": "tampon_g1_1"}))
+        .unwrap();
+    assert_eq!(*layers.borrow(), HashSet::from(["routes_1".to_string()]));
+    let l = lines(&s);
+    assert_eq!(l[0]["layer_id"], "tampon_g1_1");
+    assert!(l[1].get("layer_id").is_none());
+    drop(s);
+
+    // Session neuve : le tampon rejoué a un id neuf, que le retrait reçoit par la liaison.
+    let reopened = project_with_roads();
+    let qgis = RemoveQgis::new(2, &reopened);
+    let seen = qgis.seen.clone();
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(&Router::new(&registry).with_qgis(qgis), &mut HashSet::new())
+        .unwrap();
+    assert_eq!(report, identical(2));
+    assert_eq!(seen.borrow()[1].1, json!({"layer_id": "tampon_g2_1"}));
+    assert_eq!(*reopened.borrow(), HashSet::from(["routes_1".to_string()]));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_step_that_cites_a_removed_layer_fails_naming_it_and_replays_identically() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let layers = project_with_roads();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(RemoveQgis::new(1, &layers));
+    s.call("layer.remove", json!({"layer_id": "routes_1"}))
+        .unwrap();
+    let err = s
+        .call(
+            "analysis.buffer",
+            json!({"layer_id": "routes_1", "distance": {"value": 50, "unit": "m"}}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "layer.not_found");
+    assert!(err.message.contains("routes_1"), "{}", err.message);
+    assert_eq!(lines(&s)[1]["error"], "layer.not_found");
+    drop(s);
+
+    // Même erreur au rejeu, en même session comme en session neuve : identique.
+    for state in [layers.clone(), project_with_roads()] {
+        let report = Replay::load(&registry, &project)
+            .unwrap()
+            .run(
+                &Router::new(&registry).with_qgis(RemoveQgis::new(2, &state)),
+                &mut HashSet::new(),
+            )
+            .unwrap();
+        assert_eq!(report, identical(2));
+        assert!(state.borrow().is_empty());
+    }
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn replaying_in_the_same_session_an_analysis_of_a_layer_removed_after_diverges_at_the_analysis() {
+    // Limite connue (AD-11) : la couche analysée puis retirée n'est plus au projet de la même
+    // session, et le rejeu s'arrête à l'analyse, nommée ; il ne saute aucune étape.
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let layers = project_with_roads();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(RemoveQgis::new(1, &layers));
+    s.call(
+        "analysis.buffer",
+        json!({"layer_id": "routes_1", "distance": {"value": 50, "unit": "m"}}),
+    )
+    .unwrap();
+    s.call("layer.remove", json!({"layer_id": "routes_1"}))
+        .unwrap();
+    drop(s);
+    let err = Replay::load(&registry, &project)
+        .unwrap()
+        .run(
+            &Router::new(&registry).with_qgis(RemoveQgis::new(1, &layers)),
+            &mut HashSet::new(),
+        )
+        .unwrap_err();
+    assert_eq!((err.code.as_str(), err.step), ("replay.diverged", Some(1)));
+    // En session neuve, le même journal rejoue à l'identique.
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(
+            &Router::new(&registry).with_qgis(RemoveQgis::new(2, &project_with_roads())),
+            &mut HashSet::new(),
+        )
+        .unwrap();
+    assert_eq!(report, identical(2));
+    let _ = fs::remove_dir_all(dir);
+}

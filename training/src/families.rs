@@ -271,6 +271,13 @@ pub static FAMILIES: &[Family] = &[
         weight: 5,
         make: conversion_format,
     },
+    // Retrait d'une couche du projet (10.27) : jamais de son fichier. Remplace le refus
+    // « aucune commande ne retire de couche du projet ».
+    Family {
+        name: "retrait_couche",
+        weight: 3,
+        make: retrait_couche,
+    },
     Family {
         name: "distance_azimut",
         weight: 4,
@@ -3489,6 +3496,10 @@ fn subset_phrase(rng: &mut Rng, t: &Theme) -> Option<String> {
 const NO_3D: &str = "Aucune commande du catalogue n'affiche de vue en 3D.";
 const NO_EDIT: &str = "Aucune commande du catalogue ne modifie les attributs d'une couche.";
 
+/// Refus d'effacer un fichier de l'utilisateur (principe 6) : `layer.remove` retire la couche du
+/// projet, jamais son fichier (10.27).
+const NO_FILE_DELETION: &str = "Aucune commande du catalogue n'efface de fichier du disque : les fichiers de l'utilisateur ne sont jamais modifiés.";
+
 /// But ou destinataire d'un tableur demandé (« pour mon rapport », « pour l'envoyer à la
 /// DDT ») : un tableur reste un refus, quel que soit son usage.
 fn spreadsheet_purpose(rng: &mut Rng, who: &str) -> String {
@@ -3526,8 +3537,10 @@ fn refus(rng: &mut Rng) -> Option<Example> {
     let (body, reason): (String, &str) = match rng.below(17) {
         0 => (format!("Envoie la couche « {name} » par courriel {who}"), "Aucune commande du catalogue n'envoie de courriel."),
         1 => (format!("Envoie le résultat par mail {who}"), "Aucune commande du catalogue n'envoie de courriel."),
-        2 => (format!("Supprime la couche « {name} » du projet"), "Aucune commande du catalogue ne retire de couche du projet."),
-        3 => (format!("Retire les {pl} de la carte"), "Aucune commande du catalogue ne retire de couche du projet."),
+        // Retirer une couche du projet n'est plus un refus depuis 10.27 : `layer.remove`
+        // (`retrait_couche`). Effacer son fichier du disque en reste un (principe 6).
+        2 => (format!("Supprime le fichier de la couche « {name} » du disque"), NO_FILE_DELETION),
+        3 => (format!("Efface du disque le fichier des {pl}"), NO_FILE_DELETION),
         4 => match &subset {
             Some(phrase) => {
                 let body = match rng.below(4) {
@@ -5864,6 +5877,52 @@ fn conversion_format(rng: &mut Rng) -> Option<Example> {
     ))
 }
 
+fn remove_call(id: &str) -> Value {
+    json!({"command": "layer.remove", "params": {"layer_id": id}})
+}
+
+/// « Retire la couche « Routes » du projet », « enlève les gares de la carte » : une étape
+/// `layer.remove` (10.27). La couche quitte le projet ; son fichier reste. La couche se désigne
+/// par son nom entre guillemets ou par « les <pluriel> », jamais par « la couche des <pluriel> »
+/// suivi de « du projet ».
+fn retrait_couche(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let t = pick_theme(rng, &b, vector)?;
+    let layer = b.add(rng, t.key, &[], &[], &[]);
+    let name = layer.name.clone();
+    let pl = t.noun.pl;
+    let from = *rng.pick(&["du projet", "du projet", "de la carte"]);
+    let what = if rng.chance(1, 4) {
+        format!("les {pl}")
+    } else {
+        format!("la couche « {name} »")
+    };
+    let (body, q) = match rng.below(9) {
+        0 | 1 => (format!("Retire {what} {from}"), false),
+        2 => (format!("Enlève {what} {from}"), false),
+        3 => (format!("Supprime {what} {from}"), false),
+        4 => (format!("Ôte {what} {from}"), false),
+        5 => (format!("Retire {from} {what}"), false),
+        6 => (format!("Peux-tu retirer {what} {from}"), true),
+        7 => (
+            format!("J'ai fini avec la couche « {name} », retire-la {from}"),
+            false,
+        ),
+        _ => (
+            format!("Range le projet : enlève la couche « {name} »"),
+            false,
+        ),
+    };
+    let request = finish(rng, &body, q, false);
+    Some(example(
+        "retrait_couche",
+        b,
+        rng,
+        request,
+        calls(vec![remove_call(&layer.id)]),
+    ))
+}
+
 /// Décale de `by` chaque référence d'étape (`step:k`, `step:k.champ`) d'un plan.
 fn shift_steps(value: &mut Value, by: usize) {
     match value {
@@ -6835,6 +6894,19 @@ pub(crate) fn exports_no_layer(expected: &Value) -> bool {
                 && r.contains("couche")
                 && r.contains("fichier")
                 && !(r.contains("geopackage") && r.contains("shapefile"))
+        })
+}
+
+/// Un refus qui dit qu'aucune commande ne retire une couche du projet ou de la carte : faux
+/// depuis `layer.remove` (10.27). Sert de garde-fou aux tests.
+#[cfg(test)]
+pub(crate) fn removes_no_layer(expected: &Value) -> bool {
+    expected["kind"] == "refusal"
+        && expected["reason"].as_str().is_some_and(|r| {
+            let r = r.to_lowercase();
+            (r.contains("retir") || r.contains("enlève") || r.contains("supprim"))
+                && r.contains("couche")
+                && (r.contains("projet") || r.contains("carte"))
         })
 }
 
@@ -7945,6 +8017,7 @@ mod tests {
                 assert!(!reprojects_no_point(&e.expected), "{}", e.request);
                 assert!(!reprojects_no_layer(&e.expected), "{}", e.request);
                 assert!(!exports_no_layer(&e.expected), "{}", e.request);
+                assert!(!removes_no_layer(&e.expected), "{}", e.request);
                 assert!(!selects_no_cell(&e.expected), "{}", e.request);
                 // Format, orientation et carroyage (11.11) : plus aucun refus « A4 paysage »
                 // ni d'un format ou d'une orientation du catalogue (11.12, lot 3).
@@ -7974,6 +8047,13 @@ mod tests {
             "Aucune commande du catalogue n'exporte une couche vers un fichier."
         )));
         assert!(!exports_no_layer(&refusal(NO_SPREADSHEET)));
+        // Couche retirée du projet (10.27) : `layer.remove` est au registre, donc aucun refus ne
+        // dit plus qu'aucune commande ne retire une couche ; effacer son fichier reste refusé.
+        assert!(registry.spec("layer.remove").is_some());
+        assert!(removes_no_layer(&refusal(
+            "Aucune commande du catalogue ne retire de couche du projet."
+        )));
+        assert!(!removes_no_layer(&refusal(NO_FILE_DELETION)));
         // Style des couches (11.20) : les deux commandes sont au registre, donc aucun refus ne
         // dit plus qu'aucune commande ne change le style d'une couche (11.23).
         assert!(registry.spec("map.topographic_style").is_some());
@@ -7989,10 +8069,54 @@ mod tests {
                 if let Some(e) = (family.make)(&mut rng) {
                     assert!(!reprojects_no_layer(&e.expected), "{}", e.request);
                     assert!(!exports_no_layer(&e.expected), "{}", e.request);
+                    assert!(!removes_no_layer(&e.expected), "{}", e.request);
                     assert!(!styles_no_layer(&e.expected), "{}", e.request);
                 }
             }
         }
+    }
+
+    // -- retrait d'une couche (10.27) -----------------------------------------
+
+    #[test]
+    fn a_requested_removal_is_one_step_on_a_layer_of_the_inventory() {
+        let mut heads = HashSet::new();
+        for e in valid(retrait_couche, 300) {
+            assert_eq!(commands(&e), ["layer.remove"], "{}", e.request);
+            let params = &e.expected["calls"][0]["params"];
+            // Le seul paramètre de la fiche : une couche de l'inventaire.
+            assert_eq!(params.as_object().unwrap().len(), 1, "{}", e.request);
+            layer_of(&e, params["layer_id"].as_str().unwrap());
+            let r = e.request.to_lowercase();
+            // Jamais « la couche des <pluriel> … du projet » (S04 de `plan_reel`), jamais
+            // « ne sert plus » (H35 du jeu tenu à l'écart).
+            assert!(!r.contains("la couche des "), "{}", e.request);
+            assert!(!r.contains("ne sert plus"), "{}", e.request);
+            // Retrait du projet, jamais d'un fichier.
+            assert!(
+                !r.contains("fichier") && !r.contains("disque"),
+                "{}",
+                e.request
+            );
+            heads.insert(r.split_whitespace().next().unwrap().to_string());
+        }
+        assert!(heads.len() >= 5, "{heads:?}");
+    }
+
+    #[test]
+    fn deleting_a_file_from_the_disk_is_still_refused() {
+        let mut rng = Rng::new(7);
+        let mut seen = 0;
+        for _ in 0..2000 {
+            let Some(e) = refus(&mut rng) else { continue };
+            let r = e.request.to_lowercase();
+            if r.contains("disque") {
+                seen += 1;
+                assert_eq!(e.expected, refusal(NO_FILE_DELETION), "{}", e.request);
+            }
+            assert!(!removes_no_layer(&e.expected), "{}", e.request);
+        }
+        assert!(seen > 0);
     }
 
     // -- conversion de format (10.9) ------------------------------------------

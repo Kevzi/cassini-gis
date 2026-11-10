@@ -342,8 +342,9 @@ fn the_held_out_set_is_well_formed() {
         ),
         // H36 (« Reprojette les bâtiments en WGS84 et enregistre-les. ») attend un plan
         // `data.reproject` depuis 10.7 : attendu périmé corrigé le 2026-11-09, pas une
-        // correction du modèle.
-        (40, 27, 8, 5)
+        // correction du modèle. H35 (« Supprime la couche des routes du projet, … ») attend un
+        // plan `layer.remove` depuis 10.27 : attendu périmé corrigé le 2026-11-10, même raison.
+        (40, 28, 8, 4)
     );
     for s in &sentences {
         let id = s["id"].as_str().expect("id");

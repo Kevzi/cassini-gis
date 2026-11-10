@@ -12,6 +12,7 @@ try:  # importés à plat par les tests, en paquet par QGIS
         gestures,
         inventory,
         layer_add,
+        layer_remove,
         layout_export,
         point_transform,
         raster_output,
@@ -23,6 +24,7 @@ except ImportError:  # pragma: no cover
     import gestures
     import inventory
     import layer_add
+    import layer_remove
     import layout_export
     import point_transform
     import raster_output
@@ -37,6 +39,7 @@ def build_registry(probe):
     registry = gestures.GestureRegistry()
     registry.register(PROBE_ID, probe)
     registry.register("layer.add", layer_add.LayerAddGesture)
+    registry.register("layer.remove", layer_remove.LayerRemoveGesture)
     registry.register("layer.open_raster", raster_output.LayerOpenRasterGesture)
     registry.register("layer.open_vector", vector_output.LayerOpenVectorGesture)
     registry.register("project.inventory", inventory.ProjectInventoryGesture)

@@ -5,7 +5,7 @@
 //!
 //! Les 25 phrases de l'épreuve (`sentences.json`) et l'inventaire de l'épreuve sont lus tels quels,
 //! jamais modifiés. Les plans attendus sont réécrits pour le registre réel, chaînes `step:k.champ`
-//! comprises. Là où le registre réel n'a pas la commande (retrait, cadrage,
+//! comprises. Là où le registre réel n'a pas la commande (cadrage,
 //! statistiques sur un raster) ou ne sait pas porter une option demandée (papier A3, couches
 //! nommées du PDF), le refus est la réponse attendue. Depuis 5.41, le terrain a ses commandes
 //! (ticket 4.6) : S20 (champ de vision), S21 (ligne de vue) et S22 (pente) attendent un plan sur
@@ -21,6 +21,8 @@
 //! S05 « Mets les bâtiments en Lambert-93 », refus tant que le registre ne reprojetait pas une
 //! couche, attend depuis le second essai de 11.23 `data.reproject` des bâtiments (en 4326 dans
 //! l'inventaire de l'épreuve) vers 2154 (commande de 10.7).
+//! S04 « Retire la couche des routes du projet. », refus tant que le registre ne retirait pas une
+//! couche, attend depuis 10.27 `layer.remove` sur la couche des routes.
 //! Un refus est un échec.
 //! `tests/epreuve-modele-local/` reste gelé : son `sentences.json` et son banc Python (étape 2)
 //! gardent S25 en refus ; seul cet essai porte l'attendu du registre réel.
@@ -135,7 +137,9 @@ fn expected(id: &str) -> Want {
         "S09" => {
             json!([{"command": "data.convert", "params": {"layer_id": PARCELLES, "format": "gpkg"}}])
         }
-        // S04 S10 S15 S18 S23 S24 : refus.
+        // Le retrait d'une couche du projet, jamais de son fichier (10.27).
+        "S04" => json!([{"command": "layer.remove", "params": {"layer_id": ROUTES}}]),
+        // S10 S15 S18 S23 S24 : refus.
         _ => return Want::Refusal,
     };
     Want::Plan(plan)

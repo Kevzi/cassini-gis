@@ -370,6 +370,7 @@ donne l'esquisse.
 | `analysis.difference` | planifiée | qgis | epic 10, entrée 21 |
 | `analysis.area` | planifiée | qgis | epic 10, entrée 22 |
 | `data.convert` | faite | qgis | epic 10, entrée 9 |
+| `layer.remove` | faite | qgis | epic 10, entrée 27 |
 | `analysis.nearest` | planifiée | qgis | epic 10, entrée 10 |
 | `analysis.distance_matrix` | planifiée | qgis | epic 10, entrée 10 |
 | `analysis.statistics_by_category` | planifiée | qgis | epic 10, entrée 11 |
@@ -1643,6 +1644,36 @@ un tableur Excel ou CSV, champ en trop).
             "format": {"type": "string", "required": true, "enum": ["gpkg", "shp", "geojson"]},
             "out": {"type": "string", "required": false}},
  "result": ["feature_count", "file", "format"]}
+```
+
+### `layer.remove`
+
+Retire une couche du projet QGIS ouvert (changement de cap du 2026-11-10). Le fichier de la
+couche n'est ni effacé ni modifié. Une couche déjà absente n'est pas une erreur : le résultat
+est le même. Entrée `project`, sortie `none` (amendement du 2026-11-08 d'AD-24).
+
+| Paramètre | Type | Oblig. | Unité / valeurs | Sens |
+|---|---|---|---|---|
+| `layer_id` | chaîne | oui | — | Couche à retirer du projet. |
+
+Résultat : `layer_id`. Erreurs : aucune propre ; `registry.invalid_params` (paramètre absent,
+champ en trop). Une étape suivante qui cite la couche retirée échoue en la nommant, par le code
+de son propre geste (`layer.not_found` pour une analyse, `qgis.layer_missing` pour un geste de
+style), au plan comme au rejeu.
+
+Le geste est `QgsProject.removeMapLayer`, dans l'extension ; il ne touche jamais au fichier
+(principe 6). Le résultat ne pose pas de couche (sortie `none`) : son `layer_id` n'est ni lié
+au rejeu ni compté parmi les couches posées. La commande est rejouée comme toute étape (AD-11),
+jamais sautée : dans la même session, la couche déjà retirée rend le même résultat. Rejouer dans la même session une étape qui a lu la couche avant son retrait diverge à cette
+étape, en la nommant (la couche n'est plus au projet) ; en session neuve, le rejeu est identique. Non dictée :
+offerte au modèle, au client MCP et au formulaire. Livrée par l'entrée 27 de l'epic 10
+(`core/src/commands/layer_remove.rs`, `qgis-plugin/cassini_qgis/layer_remove.py`, ligne de la
+table fermée de `qgis-plugin/cassini_qgis/delegated.py`).
+
+```json fiche
+{"id": "layer.remove", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
+ "params": {"layer_id": {"type": "string", "required": true}},
+ "result": ["layer_id"]}
 ```
 
 ### `analysis.nearest`

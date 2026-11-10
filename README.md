@@ -79,6 +79,7 @@ terrain et la géométrie. Concrètement :
   |---|---|
   | `layer.add` | ouvre un GeoPackage, un Shapefile, un GeoJSON, un CSV à coordonnées ou un GeoParquet, sans toucher le fichier |
   | `project.inventory`, `layer.describe` | décrivent le projet et ses couches, pour l'utilisateur et pour l'agent |
+  | `layer.remove` | retire une couche du projet, sans effacer ni modifier son fichier ; une couche déjà absente n'est pas une erreur |
   | `analysis.buffer` | zone tampon |
   | `analysis.intersect` | intersection de deux couches |
   | `analysis.select_by_attribute` | sélection par attribut |

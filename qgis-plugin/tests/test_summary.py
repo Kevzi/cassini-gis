@@ -423,6 +423,41 @@ class DataConvertTest(unittest.TestCase):
             )
 
 
+class LayerRemoveTest(unittest.TestCase):
+    def test_the_removed_layer_is_named_and_no_file_said_deleted(self):
+        result = {"layer_id": "gares_1"}
+        self.assertEqual(
+            say("layer.remove", {"layer_id": "gares_1"}, result),
+            "Couche Gares retirée du projet, aucun fichier effacé.",
+        )
+        self.assertEqual(
+            say("layer.remove", {"layer_id": "gares_1"}, result, lang="en"),
+            "Layer Gares removed from the project, no file deleted.",
+        )
+
+    def test_label_and_step_reference(self):
+        self.assertEqual(
+            summary.label("layer.remove", {"layer_id": "gares_1"}, "fr", qgis_name),
+            "Retrait de la couche Gares du projet",
+        )
+        self.assertEqual(
+            summary.label("layer.remove", {"layer_id": "gares_1"}, "en", qgis_name),
+            "Removal of layer Gares from the project",
+        )
+        self.assertEqual(
+            say("layer.remove", {"layer_id": "step:1"}, {"layer_id": "tampon_3"}, step_names={1: BUFFER_OUT}),
+            "Couche Tampon retirée du projet, aucun fichier effacé.",
+        )
+
+    def test_a_missing_layer_id_falls_back_to_the_description(self):
+        catalogue = [{"id": "layer.remove", "description_fr": "Retire une couche du projet QGIS ouvert, sans effacer son fichier."}]
+        for bad in ({}, {"layer_id": ""}, {"layer_id": 3}):
+            self.assertEqual(
+                say("layer.remove", bad, catalogue=catalogue),
+                "Retire une couche du projet QGIS ouvert, sans effacer son fichier. Terminée.",
+            )
+
+
 class TransformPointTest(unittest.TestCase):
     def test_the_reprojected_point_is_shown_with_its_code(self):
         self.assertEqual(
@@ -672,6 +707,7 @@ SAMPLES = {
                        {"layer_id": "gares_2", "name": "Gares 2154", "feature_count": 3}),
     "data.convert": ({"layer_id": "gares_1", "format": "shp"},
                      {"file": "C:/d/3-data.convert.shp", "format": "shp", "feature_count": 3}),
+    "layer.remove": ({"layer_id": "gares_1"}, {"layer_id": "gares_1"}),
     "terrain.aspect": ({"dem": DEM}, {"file": "C:/d/expo.tif", "flat_cells": 12,
                                       "nodata_cells": 0}),
     "terrain.hillshade": ({"dem": DEM}, {"file": "C:/d/ombrage.tif", "nodata_cells": 0}),
