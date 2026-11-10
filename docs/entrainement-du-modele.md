@@ -598,6 +598,27 @@ fusion avec la base et quantification Q4_K_M, score de validation par llama.cpp 
 le même jeu de validation. Script hors dépôt de la nuit du 2026-11-10 :
 `~/cassini-entrainement/fusion-nuit-11-10.py`, sortie `ajuste-nuit-11-10-fusion`.
 
+Nuit du 2026-11-10 (commit `b53ff4c`, jeu identique pour les trois candidats ; essais GPU
+`--features cuda` ; recette d'Annecy à cinq phrases) :
+
+| Barre | graine a | graine b | fusion a+b | `ajuste-revue-11-23` |
+|---|---|---|---|---|
+| validation | 283/300 | 289/300 | **291/300** | 295/300 |
+| `plan_reel` | 25/25 | 25/25 | 25/25 | 24/25 ¹ |
+| `question_reel` | 12/12 | 12/12 | 12/12 | 12/12 ¹ |
+| `ecart_reel` | 36/40 | 35/40 | **37/40** | 36/40 ¹ |
+| `echelle_utm_reel` | 8/8 | 8/8 | 8/8 | 8/8 ¹ |
+| `terrain_reel` | 8/8 | 8/8 | 8/8 | 8/8 ¹ |
+| `epic11_reel` | 28/28 | 28/28 | 28/28 | 28/28 ¹ |
+| `style_reel` | 9/10 | 10/10 | 10/10 | 10/10 ¹ |
+| Annecy (≥ 4/5) | 4/5 | 4/5 | 4/5 | 4/5 |
+
+¹ Mesures du 2026-11-09, avant que H35 et S04 n'attendent `layer.remove`. Les quatre modèles
+ratent la même phrase d'Annecy, le décompte des gares par commune avec leur nom : `label_field`
+vaut `nom` (`commune` pour la graine b) au lieu de `nom_officiel`, dans une couche de 17 champs
+alors que les inventaires engendrés n'en portent que quelques-uns. Modèles dans
+`cassini-modeles\ajuste-nuit-11-10-a`, `-b` et `-fusion`, non installés ; décision au propriétaire.
+
 ### Les inventaires de QGIS (5.15)
 
 Les valeurs d'un champ texte sont triées, comme le produit les rend. `unloaded_files` est
