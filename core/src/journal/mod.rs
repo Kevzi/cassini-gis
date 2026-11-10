@@ -872,6 +872,70 @@ pub fn intermediate_files(registry: &Registry, journal: &Path) -> HashSet<String
     hidden
 }
 
+/// Le dernier plan exécuté d'après le journal `journal` (ticket 5.48), pour la vue triée : les
+/// fichiers de sortie de ses étapes réussies (`results`, noms de `output_file`, que le rejeu reprend
+/// sous `replay/`) et les couches qu'il cite (`cited` : valeurs texte de premier niveau de ses
+/// `params`, et `layer_id` d'une sortie entière, hors couches qu'il a produites lui-même).
+///
+/// Le dernier plan est la suite de lignes à `plan_step` qui part de la dernière ligne à
+/// `plan_step` 1 ; l'ouverture dictée d'une sortie (`layer.open_raster`, `layer.open_vector`), qui
+/// porte la place de l'étape qu'elle suit, n'en commence pas un. Une ligne hors plan est ignorée.
+/// Journal absent ou illisible : plan vide ; une ligne illisible ne compte pas.
+pub fn last_plan(registry: &Registry, journal: &Path) -> crate::agent_inventory::LastPlan {
+    let mut plan = crate::agent_inventory::LastPlan::default();
+    let Ok(bytes) = fs::read(journal) else {
+        return plan;
+    };
+    let text = String::from_utf8_lossy(&bytes);
+    let mut lines: Vec<(usize, Value)> = Vec::new();
+    for (i, raw) in content_lines(&text).enumerate() {
+        let Some(line) = serde_json::from_str::<Value>(raw).ok() else {
+            continue;
+        };
+        let Some(plan_step) = line.get("plan_step").and_then(Value::as_u64) else {
+            continue;
+        };
+        let id = line.get("id").and_then(Value::as_str).unwrap_or_default();
+        if plan_step <= 1 && !matches!(id, OPEN_RASTER | OPEN_VECTOR) {
+            lines.clear();
+        }
+        lines.push((i + 1, line));
+    }
+    let produced: HashSet<&str> = lines
+        .iter()
+        .filter_map(|(_, l)| l.get("layer_id").and_then(Value::as_str))
+        .collect();
+    for (step, line) in &lines {
+        if let Some(Value::Object(params)) = line.get("params") {
+            for value in params.values() {
+                let cited = match value {
+                    Value::String(s) => Some(s.as_str()),
+                    Value::Object(output) => output.get("layer_id").and_then(Value::as_str),
+                    _ => None,
+                };
+                if let Some(id) = cited.filter(|id| !produced.contains(id)) {
+                    plan.cited.insert(id.to_string());
+                }
+            }
+        }
+        if line.get("error").is_some() || line.get("cancelled").is_some() {
+            continue;
+        }
+        let Some(id) = line.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        if let Some(spec) = registry.spec(id) {
+            let ext = spec.output_ext_for(line.get("params").unwrap_or(&Value::Null));
+            plan.results.extend(
+                spec.output_params
+                    .iter()
+                    .map(|name| output_file(*step, id, &spec.output_params, name, ext)),
+            );
+        }
+    }
+    plan
+}
+
 /// Nom du fichier de sortie désigné par le repère `out:<k>.<n>`, d'après `prior`, les ids des
 /// étapes du journal (l'étape 1 en premier) ; `None` si le repère ne désigne aucune sortie. Une
 /// commande dont l'extension dépend de ses paramètres (`output_ext_from`, `data.convert`) n'est

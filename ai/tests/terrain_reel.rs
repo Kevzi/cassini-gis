@@ -116,7 +116,7 @@ fn terrain_reel_at_least_7_of_8_plans_match() {
     let full: Value = serde_json::from_str(INVENTORY).unwrap();
     // Comme dans le produit : identifiants courts montrés, plan retraduit (ticket 5.19), puis
     // complété par les conversions de points (11.22, mesuré depuis 11.23).
-    let (inventory, ids) = common::shown_inventory(&full);
+    let (_, ids) = common::shown_inventory(&full);
     let mut generator = model_files_generator(files);
     let mut right = 0;
     for (id, text) in SENTENCES {
@@ -124,7 +124,13 @@ fn terrain_reel_at_least_7_of_8_plans_match() {
         let got = common::completed(
             &registry,
             common::restored(
-                compose_plan_with(style, &registry, &inventory, text, &mut generator),
+                compose_plan_with(
+                    style,
+                    &registry,
+                    &common::view(&full, text),
+                    text,
+                    &mut generator,
+                ),
                 &ids,
             ),
             &full,

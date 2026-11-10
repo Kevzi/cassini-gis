@@ -937,15 +937,23 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-vue-triee-de-l-inventaire-d-un-gros-projet-index-reduit-et-c-plan.md`
   summary: Pour 5.48 — sur le vrai projet de 63 couches, des mots communs de la demande (« carte », « parcelle », « pdf », « calcule ») désignent par une valeur des couches sans rapport, qui remplissent le budget des détails avant la couche utile (la phrase de démo ne détaille pas le zonage du PLUi, désigné seulement par la valeur `.pdf`) ; et « PLU » ne trouve pas « PLUi ».
   evidence: mesure du 2026-11-10 hors dépôt (sorted_view sur l'inventaire réel) : phrase de démo → adresse_ban, bassin_versant_topographique, lien_adresse_vers_bdtopo, noeud_hydrographique, surface_hydrographique ; ZONE_URBA reste dans l'index seul. Pistes à mesurer en 48 : compter le nombre de mots trouvés, écarter les valeurs comme désignation de couche quand elles désignent trop de couches, passer à la couche suivante au lieu de s'arrêter, redemande élargie (point 5).
+  status: close, 2026-11-10, entrée 48 (`epic-agent-et-mcp/story-vue-triee-branchee-a-la-composition-cache-place-a-la-fin-de-plan.md`)
+  resolution: Règle générique : un mot compte une fois par couche, priorité au nombre de mots qui désignent par le nom, puis au nombre de mots, puis aux champs ; un sigle en capitales trouve un mot qu'il commence, d'un signe de plus (« PLU » → « PLUi »). Mesuré sur l'inventaire réel pris dans QGIS : la phrase de démo détaille ZONE_URBA ; « bâtiments par commune » détaille batiment et commune. Une couche ratée par le tri relève de la redemande élargie.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-vue-triee-de-l-inventaire-d-un-gros-projet-index-reduit-et-c-plan.md`
   summary: Pour 5.48 — l'arrêt à la première couche qui ne tient pas peut priver les rasters (dernière priorité, petits) et laisser du budget libre ; une demande qui ne désigne rien ne détaille que les rasters.
   evidence: règle « on s'arrête au budget » du changement de cap, appliquée à la lettre par 5.46 et figée par le test the_details_stop_at_the_first_layer_that_does_not_fit ; à trancher sur les mesures de 48 (seuils déjà « à revoir en 48 »).
+  status: close, 2026-11-10, entrée 48
+  resolution: Une couche qui ne tient pas est sautée, la suivante essayée (test `a_layer_that_does_not_fit_is_skipped_and_the_next_one_tried`).
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-vue-triee-de-l-inventaire-d-un-gros-projet-index-reduit-et-c-plan.md`
   summary: Pour 5.48 — `LastPlan.cited` porte des identifiants QGIS complets ; si QGIS renouvelle l'id d'une couche citée à la réouverture du projet, la couche citée n'est plus détaillée (non vérifié, gravité medium).
   evidence: les couches de l'utilisateur gardent leur id dans le .qgz, les résultats sont reconnus par leur fichier ; à vérifier en 48 en construisant LastPlan depuis le journal après une relance.
+  status: close, 2026-11-10, entrée 48 (constat, sans changement)
+  resolution: `last_plan` lit le journal à chaque proposition, donc après une relance ; une couche de l'utilisateur garde l'id écrit dans le .qgz (le rejeu après réouverture de 5.45 et 2.12 en dépend déjà), un résultat est reconnu par son fichier. Seule une couche ajoutée à la main et non enregistrée changerait d'id : elle n'est alors plus détaillée comme citée, sans autre effet.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-vue-triee-de-l-inventaire-d-un-gros-projet-index-reduit-et-c-plan.md`
   summary: Pour 5.48 — au-delà d'environ 150 couches de l'utilisateur, l'index seul dépasse le budget et la vue sort hors budget sans détail ; c'est alors le contrôle exact de cassini-ai qui refuse, avec le nouveau message de 48.
   evidence: kept_by_batches ne retire jamais une couche de l'utilisateur (voulu, matrice du plan) ; 63 couches font 5 700 caractères d'index.
+  status: close, 2026-11-10, entrée 48
+  resolution: Voulu : le contrôle exact de `cassini-ai` refuse, avec le message « Le projet a trop de couches pour le modèle ».
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-recette-qgis-d-annecy-portee-a-20-phrases-barre-16-20-plan.md`
   summary: le rejeu d'un journal qui porte `project.inventory` (ou toute lecture du projet) diverge dès l'étape 1 quand il est lancé en fin de session : l'inventaire voit les couches de résultat ajoutées depuis, son empreinte change (`replay.diverged`).
@@ -960,3 +968,15 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-generateur-gros-projets-de-20-a-60-couches-rendus-par-la-vue-plan.md`
   summary: le test `the_whole_generated_set_is_cut_at_every_layer` (`ai/src/plan.rs`) ne contrôle plus les inventaires à `index` (≈ 25 % du jeu) ; les découpes de la vue triée sont à tester en 5.48.
   evidence: relecture quick de 5.47 ; le filtre du test écarte toute clé `index`, et le placement du cache à la fin de l'index est l'objet de 5.48.
+  status: close, 2026-11-10, entrée 48
+  resolution: Une coupe par entrée de l'index (`layer_cuts`) ; le test vérifie tout le jeu engendré, vues triées comprises.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-vue-triee-branchee-a-la-composition-cache-place-a-la-fin-de-plan.md`
+  summary: Pour 5.49 — sous le seuil du tri (17 000 caractères depuis 48), une vue peut dépasser la borne des prompts de l'entraînement (12 900 caractères) : Annecy, pris dans QGIS, fait 16 597 caractères ; les petits projets du générateur n'en approchent jamais.
+  evidence: mesure du 2026-11-10 (`inventaire-qgis.py`, hors dépôt) ; le modèle installé tient pourtant Annecy à 17/20. À regarder en 5.49 : familles à couches larges (une couche de 86 champs) jusqu'à ≈ 16 000 caractères, ou garder l'écart mesuré.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-vue-triee-branchee-a-la-composition-cache-place-a-la-fin-de-plan.md`
+  summary: le mot « zonage » ne trouve pas la couche ZONE_URBA (« zone ») : la phrase « Mets le zonage du PLUi aux couleurs du CNIG » ne la détaille pas sur le gros projet, la redemande élargie la rattrape si le plan prend un champ.
+  evidence: mesure du 2026-11-10 sur l'inventaire réel ; une racinisation du français (« zonage » → « zon ») toucherait aussi « garage » → « gare » ; laissé à la redemande et à l'apprentissage (5.49, 5.50).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-vue-triee-branchee-a-la-composition-cache-place-a-la-fin-de-plan.md`
+  summary: sur le projet de 63 couches, la première lecture de `project.inventory` par QGIS prend 39 s (Annecy : 30 s) : elle s'ajoute à la première phrase de la session.
+  evidence: `inventaire-qgis.py` du 2026-11-10, hors dépôt ; c'est l'inventaire en tâche de fond à l'ouverture déjà reporté (mémoire du 2026-11-08).

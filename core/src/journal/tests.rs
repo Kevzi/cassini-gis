@@ -4062,3 +4062,51 @@ fn a_removal_refused_for_an_unsaved_layer_keeps_it_and_replays_identically_while
     assert_eq!((err.code.as_str(), err.step), ("replay.diverged", Some(1)));
     let _ = fs::remove_dir_all(dir);
 }
+
+#[test]
+fn the_last_plan_is_read_from_the_last_first_step() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let rows = [
+        // Plan 1 : une sélection ; il n'est plus le dernier.
+        json!({"id": "analysis.select_by_attribute", "plan_step": 1,
+            "params": {"layer_id": "ancien", "field": "f", "operator": "eq", "value": "U"},
+            "layer_id": "r1", "result": {}}),
+        // Plan 2 : pente, ouverture dictée (même place, ne commence pas de plan), statistiques.
+        json!({"id": "terrain.slope", "plan_step": 1,
+            "params": {"dem": "dem/plan.tif", "unit": "degrees", "out": "2-terrain.slope.tif"},
+            "result": {}}),
+        json!({"id": "layer.open_raster", "plan_step": 1, "params": {"path": "out:2.1"},
+            "layer_id": "R", "result": {}}),
+        json!({"id": "analysis.zonal_statistics", "plan_step": 2,
+            "params": {"layer_id": "R", "points_layer_id": {"layer_id": "gares", "n": 3}},
+            "layer_id": "S", "result": {}}),
+        // Une étape en échec : elle cite, mais ne laisse aucun fichier.
+        json!({"id": "analysis.buffer", "plan_step": 3,
+            "params": {"layer_id": "communes"}, "error": {"code": "x"}}),
+        // Hors plan : ignorée.
+        json!({"id": "analysis.buffer", "params": {"layer_id": "hors_plan"}, "result": {}}),
+    ];
+    hand_journal(&project, &rows);
+    let journal = dir.join("p.cassini").join(JOURNAL_FILE);
+    let plan = last_plan(&registry, &journal);
+    let mut results: Vec<&str> = plan.results.iter().map(String::as_str).collect();
+    results.sort_unstable();
+    assert_eq!(
+        results,
+        ["2-terrain.slope.tif", "4-analysis.zonal_statistics.gpkg"]
+    );
+    // Les couches produites par le plan (R, S) n'y sont pas ; la sortie entière cite sa couche.
+    for id in ["gares", "communes", "dem/plan.tif"] {
+        assert!(plan.cited.contains(id), "{id} : {:?}", plan.cited);
+    }
+    for id in ["R", "S", "ancien", "hors_plan"] {
+        assert!(!plan.cited.contains(id), "{id} : {:?}", plan.cited);
+    }
+    // Journal absent : plan vide.
+    assert_eq!(
+        last_plan(&registry, &dir.join("absent.jsonl")),
+        crate::agent_inventory::LastPlan::default()
+    );
+    let _ = fs::remove_dir_all(dir);
+}

@@ -404,7 +404,7 @@ fn epic11_reel_every_command_has_at_least_one_matching_plan() {
     // Comme dans le produit : identifiants courts montrés, plan retraduit (ticket 5.19), puis
     // complété par les conversions de points (11.22, mesuré depuis 11.23).
     let full = inventory();
-    let (inventory, ids) = common::shown_inventory(&full);
+    let (_, ids) = common::shown_inventory(&full);
     let mut generator = model_files_generator(files);
     let mut scores = vec![0usize; COMMANDS.len()];
     let mut right = 0;
@@ -413,7 +413,13 @@ fn epic11_reel_every_command_has_at_least_one_matching_plan() {
         let got = common::completed(
             &registry,
             common::restored(
-                compose_plan_with(style, &registry, &inventory, text, &mut generator),
+                compose_plan_with(
+                    style,
+                    &registry,
+                    &common::view(&full, text),
+                    text,
+                    &mut generator,
+                ),
                 &ids,
             ),
             &full,
@@ -444,7 +450,13 @@ fn epic11_reel_every_command_has_at_least_one_matching_plan() {
         let got = common::completed(
             &registry,
             common::restored(
-                compose_plan_with(style, &registry, &inventory, text, &mut generator),
+                compose_plan_with(
+                    style,
+                    &registry,
+                    &common::view(&full, text),
+                    text,
+                    &mut generator,
+                ),
                 &ids,
             ),
             &full,
@@ -464,7 +476,13 @@ fn epic11_reel_every_command_has_at_least_one_matching_plan() {
         let got = common::completed(
             &registry,
             common::restored(
-                compose_plan_with(style, &registry, &inventory, text, &mut generator),
+                compose_plan_with(
+                    style,
+                    &registry,
+                    &common::view(&full, text),
+                    text,
+                    &mut generator,
+                ),
                 &ids,
             ),
             &full,

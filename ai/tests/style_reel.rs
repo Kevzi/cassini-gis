@@ -120,7 +120,7 @@ fn style_reel_at_least_9_of_10_answers_match() {
     let full: Value = serde_json::from_str(INVENTORY).unwrap();
     // Comme dans le produit : identifiants courts montrés, plan retraduit (ticket 5.19), puis
     // complété (11.22).
-    let (inventory, ids) = common::shown_inventory(&full);
+    let (_, ids) = common::shown_inventory(&full);
     let mut generator = model_files_generator(files);
     let mut right = 0;
     for (id, text) in SENTENCES {
@@ -128,7 +128,13 @@ fn style_reel_at_least_9_of_10_answers_match() {
         let got = common::completed(
             &registry,
             common::restored(
-                compose_plan_with(style, &registry, &inventory, text, &mut generator),
+                compose_plan_with(
+                    style,
+                    &registry,
+                    &common::view(&full, text),
+                    text,
+                    &mut generator,
+                ),
                 &ids,
             ),
             &full,

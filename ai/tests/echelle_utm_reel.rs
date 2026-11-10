@@ -103,13 +103,20 @@ fn echelle_utm_reel_at_least_7_of_8_plans_match() {
     let registry = Registry::standard();
     let inventory: Value = serde_json::from_str(INVENTORY).unwrap();
     // Comme dans le produit : identifiants courts montrés, plan retraduit (ticket 5.19).
-    let (inventory, ids) = common::shown_inventory(&inventory);
+    let full = inventory.clone();
+    let (_, ids) = common::shown_inventory(&full);
     let mut generator = model_files_generator(files);
     let mut right = 0;
     for (id, text) in SENTENCES {
         let want = expected(id);
         let got = common::restored(
-            compose_plan_with(style, &registry, &inventory, text, &mut generator),
+            compose_plan_with(
+                style,
+                &registry,
+                &common::view(&full, text),
+                text,
+                &mut generator,
+            ),
             &ids,
         );
         let ok = match &got {

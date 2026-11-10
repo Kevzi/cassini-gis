@@ -386,7 +386,8 @@ fn ecart_reel_score_on_the_held_out_set() {
     let registry = Registry::standard();
     let inventory: Value = serde_json::from_str(INVENTORY).unwrap();
     // Comme dans le produit : identifiants courts montrés, plan retraduit (ticket 5.19).
-    let (inventory, ids) = common::shown_inventory(&inventory);
+    let full = inventory.clone();
+    let (_, ids) = common::shown_inventory(&full);
     let sentences: Vec<Value> = serde_json::from_str(SENTENCES).unwrap();
     let mut model = model_files_generator(files);
     // Une issue par phrase : (sorte attendue, juste, appels au générateur).
@@ -407,7 +408,13 @@ fn ecart_reel_score_on_the_held_out_set() {
                 model(r)
             };
             common::restored(
-                compose_plan_with(style, &registry, &inventory, text, &mut generator),
+                compose_plan_with(
+                    style,
+                    &registry,
+                    &common::view(&full, text),
+                    text,
+                    &mut generator,
+                ),
                 &ids,
             )
         };

@@ -15,6 +15,7 @@ use serde_json::Value;
 /// déclaration `*.modele.json` (base, adaptateur et prompt qu'elle nomme), résolus par
 /// `resolve_model`, comme dans la CLI. `None` sans la variable. Une déclaration absente ou
 /// illisible fait échouer l'essai en la nommant.
+#[allow(dead_code)]
 pub fn test_model() -> Option<(ModelFiles, PromptStyle)> {
     let path = PathBuf::from(std::env::var_os("CASSINI_TEST_MODEL")?);
     let resolved = resolve_model(&path)
@@ -44,6 +45,48 @@ pub fn shown_inventory(inventory: &serde_json::Value) -> (serde_json::Value, Sho
     let ids = ShortIds::of_inventory(inventory);
     eprintln!("Identifiants : courts");
     (ids.shorten(inventory.clone()), ids)
+}
+
+/// L'inventaire d'un essai dans la forme apprise : un fichier écrit dans cette forme est rendu
+/// tel quel ; la sortie brute de `project.inventory` (reconnue à sa clé `project_crs`, prise dans
+/// QGIS) est traduite comme le noyau la traduit.
+#[allow(dead_code)]
+pub fn learned(inventory: &Value) -> Value {
+    if inventory.get("project_crs").is_some() {
+        cassini_core::agent_inventory::agent_inventory(inventory)
+    } else {
+        inventory.clone()
+    }
+}
+
+/// La vue que le noyau montre au modèle pour `request` (ticket 5.48), depuis `inventory` (forme
+/// apprise ou sortie brute de QGIS, aux identifiants complets) : sous le seuil du tri, l'inventaire
+/// aux identifiants courts de `shown_inventory`, à l'octet près ; au-dessus, la vue triée par la
+/// demande. Rend aussi le nombre de couches de l'utilisateur en tête de la liste coupée (ancrage
+/// du cache) et la table des identifiants. Avec `CASSINI_TEST_FULL_IDS` non vide : l'inventaire tel
+/// quel, comme `shown_inventory`.
+#[allow(dead_code)]
+pub fn shown_view(inventory: &Value, request: &str) -> (Value, Option<usize>, ShortIds) {
+    use cassini_core::agent_inventory::{sorted_view_learned, LastPlan, ViewLimits};
+    if std::env::var_os("CASSINI_TEST_FULL_IDS").is_some_and(|v| !v.is_empty()) {
+        return (learned(inventory), None, ShortIds::default());
+    }
+    let (view, ids) = sorted_view_learned(
+        learned(inventory),
+        &[],
+        &std::collections::HashSet::new(),
+        &LastPlan::default(),
+        request,
+        &[],
+        &ViewLimits::default(),
+    );
+    (view.inventory, Some(view.user_layers), ids)
+}
+
+/// La vue de `shown_view`, seule.
+#[allow(dead_code)]
+pub fn view(inventory: &Value, request: &str) -> Value {
+    shown_view(inventory, request).0
 }
 
 /// Le plan composé, ses identifiants courts retraduits par `ids`, comme le fait le noyau avant de

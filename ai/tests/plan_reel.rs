@@ -156,7 +156,7 @@ fn plan_reel_at_least_80_percent_of_the_plans_match() {
     let full: Value = serde_json::from_str(INVENTORY).unwrap();
     // Comme dans le produit : identifiants courts montrés, plan retraduit (ticket 5.19), puis
     // complété par les conversions de points (11.22).
-    let (inventory, ids) = common::shown_inventory(&full);
+    let (_, ids) = common::shown_inventory(&full);
     let sentences: Vec<Value> = serde_json::from_str(SENTENCES).unwrap();
     let mut generator = model_files_generator(files);
     let (mut right, mut total, mut questions, mut guarded) = (0, 0, 0, 0);
@@ -170,7 +170,13 @@ fn plan_reel_at_least_80_percent_of_the_plans_match() {
         let got = common::completed(
             &registry,
             common::restored(
-                compose_plan_with(style, &registry, &inventory, text, &mut generator),
+                compose_plan_with(
+                    style,
+                    &registry,
+                    &common::view(&full, text),
+                    text,
+                    &mut generator,
+                ),
                 &ids,
             ),
             &full,

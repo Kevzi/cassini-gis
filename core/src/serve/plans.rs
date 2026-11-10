@@ -16,13 +16,12 @@ use serde_json::{json, Value};
 
 use super::{invalid_params, is_available, Channel, RpcError, State};
 use crate::agent_inventory::{
-    model_inventory, ModelInventory, ShortIds, WorkFile, INVENTORY_BUDGET_CHARS,
-    INVENTORY_LOW_CHARS,
+    agent_inventory, sorted_view_learned, LastPlan, ModelInventory, ShortIds, ViewLimits, WorkFile,
 };
 use crate::dem::epsg_of;
 use crate::error::ErrorReport;
 use crate::exec::Executor;
-use crate::journal::intermediate_files;
+use crate::journal::{intermediate_files, last_plan};
 use crate::plan::{raster_markers, resolve_references, Plan};
 use crate::plan_completion::{complete_conversions, TRANSFORM_POINT};
 use crate::registry::{Registry, RegistryError, RunsIn};
@@ -146,16 +145,18 @@ pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<V
     let work_dir = state.session.as_ref().map(|s| s.work_dir().to_path_buf());
     let journal = state.session.as_ref().map(|s| s.journal_path());
     let registry = state.registry;
-    // La table des identifiants courts montrés au modèle, pour retraduire son plan (ticket 5.19).
-    let mut short_ids = ShortIds::default();
-    // Les couches de résultat que le budget a laissées hors de la vue du modèle (ticket 5.33) ;
-    // le dernier inventaire lu fait foi, comme pour la table.
-    let mut left_out: Vec<Value> = Vec::new();
-    let mut plan = {
-        let short_ids = &mut short_ids;
-        let left_out = &mut left_out;
+    // L'inventaire lu pour la première composition, gardé pour la redemande élargie : ni second
+    // ordre à l'extension, ni autre état du projet entre les deux vues.
+    let mut read: Option<Read> = None;
+    // La dernière vue montrée au modèle : sa table d'identifiants courts retraduit le plan
+    // (ticket 5.19), ses couches réduites décident de la redemande (5.48), ses couches de résultat
+    // laissées hors de la vue sont rendues à l'utilisateur (5.33).
+    let mut shown: Option<(ModelInventory, ShortIds)> = None;
+    let first = {
         let link = state.link.clone();
         let announced = &state.announced;
+        let read = &mut read;
+        let shown = &mut shown;
         let mut inventory = || {
             if !announced.contains("project.inventory") {
                 return Err(ErrorReport::from(RegistryError::Unavailable(
@@ -170,29 +171,60 @@ pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<V
             // réponse de l'extension, au plus près de l'inventaire. Les couches intermédiaires des
             // plans exécutés sortent de sa vue, et les résultats y perdent leurs valeurs (5.22) ; elles
             // sont déduites du journal du projet, relu à chaque proposition, et reconnues par leur
-            // fichier : la règle tient après une relance du noyau ou un rejeu (5.34).
+            // fichier : la règle tient après une relance du noyau ou un rejeu (5.34). Au-dessus du
+            // seuil, la vue est triée par la demande et le dernier plan exécuté, lu lui aussi dans
+            // le journal (5.46, 5.48).
             let raw = Channel { link: link.clone() }
                 .execute("project.inventory", json!({}))
                 .map_err(ErrorReport::from)?;
-            let files = work_dir.as_deref().map(work_files).unwrap_or_default();
-            let intermediates = journal
-                .as_deref()
-                .map(|j| intermediate_files(registry, j))
-                .unwrap_or_default();
-            let (view, ids) = model_inventory(
-                &raw,
-                &files,
-                &intermediates,
-                INVENTORY_BUDGET_CHARS,
-                INVENTORY_LOW_CHARS,
-            );
-            *short_ids = ids;
-            left_out.clone_from(&view.left_out);
-            Ok(view)
+            let now = Read {
+                learned: agent_inventory(&raw),
+                files: work_dir.as_deref().map(work_files).unwrap_or_default(),
+                intermediates: journal
+                    .as_deref()
+                    .map(|j| intermediate_files(registry, j))
+                    .unwrap_or_default(),
+                last: journal
+                    .as_deref()
+                    .map(|j| last_plan(registry, j))
+                    .unwrap_or_default(),
+            };
+            let view = now.view(request, &[]);
+            *read = Some(now);
+            let model_view = view.0.clone();
+            *shown = Some(view);
+            Ok(model_view)
         };
         composer
             .compose(state.registry, request, model, &mut inventory)
             .map_err(RpcError::business)?
+    };
+    // Redemande élargie (ticket 5.48, AD-23) : un plan qui fait porter un paramètre de champ sur
+    // une couche montrée réduite est recomposé une fois, la même demande avec ces couches
+    // détaillées. Ce n'est pas une réparation : le plan rendu est jugé comme le premier, et rien
+    // n'est recomposé une seconde fois.
+    let wanted = match (&shown, &first) {
+        (Some((view, ids)), Plan::Calls { calls }) => {
+            reduced_with_fields(&view.inventory, ids, calls)
+        }
+        _ => Vec::new(),
+    };
+    let mut plan = first;
+    if let (false, Some(now)) = (wanted.is_empty(), read.as_ref()) {
+        let shown = &mut shown;
+        let mut inventory = || {
+            let view = now.view(request, &wanted);
+            let model_view = view.0.clone();
+            *shown = Some(view);
+            Ok(model_view)
+        };
+        plan = composer
+            .compose(state.registry, request, model, &mut inventory)
+            .map_err(RpcError::business)?;
+    }
+    let (short_ids, left_out) = match shown {
+        Some((view, ids)) => (ids, view.left_out),
+        None => (ShortIds::default(), Vec::new()),
     };
     // Un refus ou une question qui cite un identifiant court le montre avec celui de QGIS.
     if let Plan::Refusal { reason } = &plan {
@@ -243,6 +275,91 @@ pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<V
     let mut answer = json!({"plan_id": id, "plan": shown});
     with_left_out(&mut answer, left_out);
     Ok(answer)
+}
+
+/// Ce que la vue du modèle lit d'un état du projet : l'inventaire dans la forme apprise, les
+/// fichiers du dossier de travail, les intermédiaires et le dernier plan déduits du journal.
+struct Read {
+    learned: Value,
+    files: Vec<WorkFile>,
+    intermediates: std::collections::HashSet<String>,
+    last: LastPlan,
+}
+
+impl Read {
+    /// La vue de `request`, `wanted` (identifiants QGIS) détaillées en plus.
+    fn view(&self, request: &str, wanted: &[String]) -> (ModelInventory, ShortIds) {
+        sorted_view_learned(
+            self.learned.clone(),
+            &self.files,
+            &self.intermediates,
+            &self.last,
+            request,
+            wanted,
+            &ViewLimits::default(),
+        )
+    }
+}
+
+/// Les couches montrées réduites (dans `index`, pas dans `layers`) sur lesquelles un appel du plan
+/// fait porter un paramètre de champ (`field`, `fields`, ou une clé finie par `_field`), en
+/// identifiants QGIS, dans l'ordre du plan, sans doublon. La couche d'un appel est son `layer_id` ;
+/// `step:k` et `step:k.layer_id` mènent à celle de l'étape k, dont la sortie porte les champs.
+/// Une vue sans `index` n'a aucune couche réduite. Le plan est celui du modèle, aux identifiants
+/// courts.
+fn reduced_with_fields(
+    view: &Value,
+    ids: &ShortIds,
+    calls: &[crate::plan::PlannedCall],
+) -> Vec<String> {
+    let listed = |key: &str| -> std::collections::HashSet<&str> {
+        view.get(key)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|l| l.get("layer_id").and_then(Value::as_str))
+            .collect()
+    };
+    let (index, detailed) = (listed("index"), listed("layers"));
+    // La couche d'entrée de l'étape `step` (à partir de 1), en suivant les `step:k`.
+    let layer_of = |step: usize| -> Option<&str> {
+        let mut at = step;
+        for _ in 0..calls.len() {
+            let id = calls
+                .get(at.checked_sub(1)?)?
+                .params
+                .get("layer_id")?
+                .as_str()?;
+            match id.strip_prefix("step:") {
+                Some(rest) => at = rest.split('.').next()?.parse().ok()?,
+                None => return Some(id),
+            }
+        }
+        None
+    };
+    let mut wanted: Vec<String> = Vec::new();
+    for (i, call) in calls.iter().enumerate() {
+        let has_field = call.params.as_object().is_some_and(|m| {
+            m.iter().any(|(k, v)| {
+                (k == "field" || k == "fields" || k.ends_with("_field"))
+                    && !v.is_null()
+                    && v.as_str() != Some("")
+            })
+        });
+        let Some(short) = layer_of(i + 1).filter(|_| has_field) else {
+            continue;
+        };
+        if index.contains(short) && !detailed.contains(short) {
+            let mut id = Value::String(short.to_string());
+            ids.restore(&mut id);
+            if let Some(real) = id.as_str().map(str::to_string) {
+                if !wanted.contains(&real) {
+                    wanted.push(real);
+                }
+            }
+        }
+    }
+    wanted
 }
 
 /// Ajoute à la réponse de `plan.propose` la clé `left_out` (ticket 5.33), seulement si le budget a
