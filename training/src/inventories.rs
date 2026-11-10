@@ -2257,6 +2257,23 @@ impl Builder {
         dem
     }
 
+    /// MNT ouvert dans le projet depuis un fichier d'un autre format que le GeoTIFF (epic 10,
+    /// entrée 30) : même tirage que [`Builder::add_dem`], extension `ext` (`asc`, `img`, `jp2`,
+    /// `vrt`) au lieu de `tif`. Les commandes de terrain ne le lisent qu'après
+    /// `data.convert_raster`.
+    pub fn add_foreign_dem(&mut self, rng: &mut Rng, epsg: u32, ext: &str) -> Layer {
+        let mut dem = self.add_dem(rng, epsg);
+        let stem = dem.source.strip_suffix(".tif").unwrap_or(&dem.source);
+        let source = format!("{stem}.{ext}");
+        for layer in &mut self.layers {
+            if layer.id == dem.id {
+                layer.source = source.clone();
+            }
+        }
+        dem.source = source;
+        dem
+    }
+
     /// Deux MNT du même système, de résolutions distinctes (Annecy, 2026-11-08 : 25 m et 5 m) :
     /// nom et fichier de chacun portent sa résolution (« MNT 5 m », `mnt_5m.tif`), pour qu'une
     /// phrase les désigne par elle (« sur le MNT à 5 m »). Rend les deux couches et leurs

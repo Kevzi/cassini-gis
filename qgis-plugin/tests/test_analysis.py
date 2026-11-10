@@ -853,6 +853,180 @@ class ConvertTest(unittest.TestCase):
         self.assertIn("data.convert", registry.ids())
 
 
+class RasterSource:
+    """Raster ouvert à part par la doublure : son système (None s'il n'en a pas)."""
+
+    def __init__(self, path, crs):
+        self.path, self.crs = path, crs
+
+
+class RasterBackend(FakeBackend):
+    """Doublure du genre d'entrée `raster` : sources lisibles et leur système, GeoTIFF relu."""
+
+    def __init__(self, sources, written_epsg=2154, written_readable=True, **kw):
+        super().__init__(**kw)
+        self.sources, self.written_epsg, self.written_readable = sources, written_epsg, written_readable
+        self.added = []
+
+    def raster_source(self, path):
+        name = os.path.basename(path)
+        return RasterSource(path, self.sources[name]) if name in self.sources else None
+
+    def raster_crs(self, layer):
+        return layer.crs
+
+    def same_crs(self, layer, epsg):
+        return layer.crs == "EPSG:%d" % epsg
+
+    def read_written_raster(self, path):
+        if not self.written_readable or not os.path.exists(path):
+            return False
+        return self.written_epsg
+
+    def load_output(self, path, name):  # jamais appelé : le noyau dicte l'ouverture
+        self.added.append(path)
+        return None
+
+
+class ConvertRasterTest(unittest.TestCase):
+    """`data.convert_raster` (epic 10, entrée 30) : genre d'entrée `raster`, sortie GeoTIFF."""
+
+    SOURCES = {"dalle.asc": None, "dalle-2154.asc": "EPSG:2154", "mnt.img": "EPSG:32632"}
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.out = os.path.join(self.dir.name, "1-data.convert_raster.tif")
+        self.entry = analysis.ALGORITHMS["data.convert_raster"]
+        for name in list(self.SOURCES) + ["texte.txt"]:
+            with open(os.path.join(self.dir.name, name), "wb") as f:
+                f.write(b"ncols 2")
+        self.originals = {n: self.read(n) for n in self.SOURCES}
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def read(self, name):
+        with open(os.path.join(self.dir.name, name), "rb") as f:
+            return f.read()
+
+    def src(self, name):
+        return os.path.join(self.dir.name, name)
+
+    def params(self, name="dalle.asc", **extra):
+        p = {"raster": self.src(name), "out": self.out}
+        p.update(extra)
+        return p
+
+    def backend(self, **kw):
+        return RasterBackend(self.SOURCES, **kw)
+
+    def assert_no_output(self):
+        self.assertEqual([n for n in os.listdir(self.dir.name) if n.startswith("1-data.convert_raster")], [])
+
+    def test_the_row_is_a_fixed_warp_to_float32_minus_9999_first_band(self):
+        self.assertEqual(self.entry["algorithm"], "gdal:warpreproject")
+        b = self.backend()
+        _, calls = start(self.entry, b, self.params(assign_epsg=2154))
+        algorithm, params = b.calls[0]
+        self.assertEqual(algorithm, "gdal:warpreproject")
+        self.assertEqual(params["INPUT"], self.src("dalle.asc"))
+        self.assertEqual(params["OUTPUT"], self.out)
+        self.assertEqual(params["SOURCE_CRS"], "EPSG:2154")
+        # Jamais de reprojection ni de grille imposée : celle de la source, au plus proche voisin.
+        self.assertIsNone(params["TARGET_CRS"])
+        self.assertIsNone(params["TARGET_RESOLUTION"])
+        self.assertIsNone(params["TARGET_EXTENT"])
+        self.assertEqual(params["RESAMPLING"], 0)
+        self.assertEqual(params["DATA_TYPE"], 6)  # Float32 sous QGIS 3.44
+        self.assertEqual(params["NODATA"], -9999)
+        self.assertEqual(params["EXTRA"], "-srcband 1 -dstband 1")
+        b.finished(True, {"OUTPUT": self.out})
+        self.assertEqual(calls, [({"file": self.out, "epsg": 2154}, None)])
+        # Le GeoTIFF n'entre pas au projet : le noyau dicte `layer.open_raster`.
+        self.assertEqual(b.added, [])
+
+    def test_a_source_with_a_system_keeps_it_and_no_source_crs_is_sent(self):
+        b = self.backend(written_epsg=32632)
+        _, calls = start(self.entry, b, self.params("mnt.img"))
+        self.assertIsNone(b.calls[0][1]["SOURCE_CRS"])
+        b.finished(True, {})
+        self.assertEqual(calls[0][0], {"file": self.out, "epsg": 32632})
+
+    def test_the_same_system_declared_again_is_accepted(self):
+        b = self.backend()
+        _, calls = start(self.entry, b, self.params("dalle-2154.asc", assign_epsg=2154))
+        self.assertEqual(len(b.calls), 1)
+
+    def test_another_system_is_refused_never_reprojected(self):
+        b = self.backend()
+        _, calls = start(self.entry, b, self.params("mnt.img", assign_epsg=2154))
+        error = calls[0][1]
+        self.assertEqual(error.code, "analysis.bad_params")
+        self.assertIn("EPSG:32632", error.message)
+        self.assertIn("mnt.img", error.message)
+        self.assertNotIn(self.dir.name, error.message)
+        self.assertEqual(b.calls, [])
+        self.assert_no_output()
+
+    def test_an_unknown_code_is_refused_before_any_launch(self):
+        b = self.backend()
+        _, calls = start(self.entry, b, self.params(assign_epsg=99999))
+        self.assertEqual(calls[0][1].code, "data.unknown_crs")
+        self.assertIn("EPSG:99999", calls[0][1].message)
+        self.assertEqual(b.calls, [])
+
+    def test_a_source_without_a_system_and_no_code_gives_a_tif_without_epsg(self):
+        b = self.backend(written_epsg=None)
+        _, calls = start(self.entry, b, self.params())
+        b.finished(True, {})
+        self.assertEqual(calls[0][0], {"file": self.out, "epsg": None})
+
+    def test_a_missing_or_unreadable_file_is_named_without_its_folder(self):
+        b = self.backend()
+        _, calls = start(self.entry, b, self.params("absent.asc"))
+        self.assertEqual(calls[0][1].code, "layer.not_found")
+        self.assertIn("absent.asc", calls[0][1].message)
+        self.assertNotIn(self.dir.name, calls[0][1].message)
+        _, calls = start(self.entry, b, self.params("texte.txt"))
+        self.assertEqual(calls[0][1].code, "layer.invalid_source")
+        self.assertIn("texte.txt", calls[0][1].message)
+        self.assertEqual(b.calls, [])
+
+    def test_a_failure_or_a_cancellation_leaves_no_partial_tif(self):
+        b = self.backend()
+        _, calls = start(self.entry, b, self.params())
+        with open(self.out + ".aux.xml", "wb") as f:
+            f.write(b"x")
+        b.finished(False, {})
+        self.assertEqual(calls[0][1].code, "analysis.failed")
+        self.assert_no_output()
+        g, calls = start(self.entry, b, self.params())
+        g.cancel()
+        self.assertTrue(b.handle.cancelled)
+        b.finished(False, {})
+        self.assertEqual(calls[0][1].code, "qgis.cancelled")
+        self.assert_no_output()
+
+    def test_an_unreadable_tif_is_a_failure_and_is_removed(self):
+        b = self.backend(written_readable=False)
+        _, calls = start(self.entry, b, self.params())
+        b.finished(True, {})
+        self.assertEqual(calls[0][1].code, "analysis.failed")
+        self.assert_no_output()
+
+    def test_the_original_is_never_written(self):
+        b = self.backend()
+        _, calls = start(self.entry, b, self.params(assign_epsg=2154))
+        b.finished(True, {})
+        for name, before in self.originals.items():
+            self.assertEqual(self.read(name), before, name)
+
+    def test_default_table_registers_the_conversion(self):
+        registry = gestures.GestureRegistry()
+        analysis.register_all(registry, backend_factory=lambda: self.backend())
+        self.assertIn("data.convert_raster", registry.ids())
+
+
 class FormHidesCoreFilledTest(unittest.TestCase):
     def test_out_is_not_a_form_field(self):
         schema = {

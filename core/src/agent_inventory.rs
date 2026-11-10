@@ -597,7 +597,7 @@ pub fn agent_inventory(raw: &Value) -> Value {
 /// Largeur en longitude au-delà de laquelle l'emprise couvre plus de deux fuseaux UTM.
 const MAX_UTM_SPAN_DEGREES: f64 = 12.0;
 
-fn utm_epsg(extent: &Value) -> Option<u32> {
+pub(crate) fn utm_epsg(extent: &Value) -> Option<u32> {
     use crate::geodesy::{utm_zone, MAX_LATITUDE, MIN_LATITUDE};
     let lonlat = extent.get("lonlat")?;
     if !lonlat

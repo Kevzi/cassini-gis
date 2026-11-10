@@ -111,14 +111,14 @@ Une couche que Cassini ne reconnaît pas garde son style : il ne devine pas.
 | `layer.add` | ouvre un fichier vecteur sans le toucher |
 | `project.inventory`, `layer.describe` | décrivent le projet et ses couches, pour vous et pour l'IA |
 | `layer.remove` | retire une couche du projet, sans effacer ni modifier son fichier |
-| `data.reproject`, `data.convert` | reprojettent une couche, la convertissent dans un autre format |
+| `data.reproject`, `data.convert`, `data.convert_raster` | reprojettent une couche, la convertissent dans un autre format, écrivent un raster (ASCII Grid, IMG, JP2…) en GeoTIFF pour les commandes de terrain |
 | `data.transform_point` | reprojette un seul point vers un code EPSG |
 | `analysis.buffer` | zone tampon |
 | `analysis.intersect` | intersection de deux couches |
 | `analysis.select_by_attribute` | sélection par attribut |
 | `analysis.zonal_statistics` | nombre de points dans chaque zone |
 | `analysis.isochrone` | isochrones à pied et en voiture sur un réseau |
-| `layout.export_pdf` | carte en PDF : titre, légende, échelle, flèche du nord, sources, format, orientation, carroyage |
+| `layout.export_pdf` | carte en PDF : titre, légende, échelle, flèche du nord, sources détaillées (résolution, date), format, orientation, carroyage (dont MGRS étiqueté), en-tête et pied de page |
 
 **Calculées par le noyau**, en Rust, testées sans QGIS :
 

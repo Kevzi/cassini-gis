@@ -33,6 +33,7 @@ CANCELLED = "qgis.cancelled"
 ORIGIN_OFF_NETWORK = "analysis.origin_off_network"
 UNKNOWN_CRS = "data.unknown_crs"
 FORMAT_MISMATCH = "data.format_mismatch"
+INVALID_SOURCE = "layer.invalid_source"
 
 _UNIT_TO_METERS = {"m": 1.0, "km": 1000.0}
 
@@ -207,6 +208,42 @@ def translate_convert(params, layer):
     return {"INPUT": layer, "EXPRESSION": "TRUE"}
 
 
+# Sortie de `data.convert_raster`, fixée par la fiche du catalogue (epic 10, entrée 30) :
+# GeoTIFF Float32, sans-donnée -9999, première bande seulement, compressé sans perte (DEFLATE,
+# que le lecteur du noyau lit, AD-20). Index de l'énumération `DATA_TYPE` de
+# `gdal:warpreproject` sous QGIS 3.44 (vérifié par la sonde) : 6 = Float32.
+_RASTER_NODATA = -9999
+_RASTER_FLOAT32 = 6
+_RASTER_NEAREST = 0
+
+
+def translate_convert_raster(params, raster):
+    """Paramètres neutres de `data.convert_raster` -> paramètres de `gdal:warpreproject`.
+
+    `gdal:warpreproject` et non `gdal:translate` : seul gdalwarp réécrit les cellules
+    sans-donnée de la source (le -99999 d'un ASCII Grid de l'IGN) en -9999 ; gdal_translate
+    changerait l'étiquette sans toucher les valeurs, et les anciennes cellules vides
+    deviendraient des altitudes. Sans `TARGET_CRS`, ni résolution ni emprise imposées, la grille
+    de sortie est celle de la source, au plus proche voisin : aucune reprojection (AD-19).
+    `SOURCE_CRS` n'est posé que pour déclarer le système d'une source qui n'en a pas ; le geste
+    a déjà refusé une source qui en a un autre.
+    """
+    assign = params.get("assign_epsg")
+    return {
+        "INPUT": raster,
+        "SOURCE_CRS": "EPSG:%d" % _epsg_code(assign) if assign is not None else None,
+        "TARGET_CRS": None,
+        "RESAMPLING": _RASTER_NEAREST,
+        "NODATA": _RASTER_NODATA,
+        "TARGET_RESOLUTION": None,
+        "CREATION_OPTIONS": "COMPRESS=DEFLATE",
+        "DATA_TYPE": _RASTER_FLOAT32,
+        "TARGET_EXTENT": None,
+        "MULTITHREADING": False,
+        "EXTRA": "-srcband 1 -dstband 1",
+    }
+
+
 # Champ de décompte écrit par `native:countpointsinpolygon` ; le noyau ne le connaît pas.
 _COUNT_FIELD = "NUMPOINTS"
 _MAX_ZONES = 100  # borne du schéma de sortie du noyau (AD-8)
@@ -255,7 +292,15 @@ def summarize_zonal_statistics(backend, layer, params):
 #               être du pilote du format (`data.format_mismatch` sinon) ; un Shapefile
 #               demande une couche d'un seul type de géométrie, vérifié avant tout lancement ;
 #   encoding  : (facultatif) encodage des textes écrits, posé sur le contexte de traitement
-#               de cette seule commande.
+#               de cette seule commande ;
+#   raster    : (facultatif) genre d'entrée `raster` (AD-24) : `input` nomme un `RasterPath`,
+#               chemin absolu donné par le noyau (AD-9), et non un identifiant de couche ; le
+#               fichier doit exister et se lire en raster, sinon `layer.not_found` ou
+#               `layer.invalid_source` ; la sortie est un GeoTIFF, relu à part, jamais ajouté au
+#               projet (le noyau dicte `layer.open_raster`) ; le résultat est `file` et `epsg` ;
+#   assign_crs: (facultatif, avec `raster`) paramètre du noyau qui déclare le code EPSG d'une
+#               source sans système : connu de QGIS (`data.unknown_crs` sinon), et refusé
+#               (`analysis.bad_params`) si la source a déjà un autre système.
 ALGORITHMS = {
     "analysis.buffer": {
         "algorithm": "native:buffer",
@@ -321,6 +366,14 @@ ALGORITHMS = {
         "input": "layer_id",
         "file_result": "format",
         "encoding": "UTF-8",
+    },
+    "data.convert_raster": {
+        "algorithm": "gdal:warpreproject",
+        "translate": translate_convert_raster,
+        "output": "OUTPUT",
+        "input": "raster",
+        "raster": True,
+        "assign_crs": "assign_epsg",
     },
 }
 
@@ -433,6 +486,49 @@ class QgisBackend(_ReadBackend):
         finally:
             del layer  # le fournisseur relâche le fichier
 
+    def raster_source(self, path):
+        """Le raster `path` ouvert à part, sans l'ajouter au projet ; None s'il est illisible."""
+        from qgis.core import QgsRasterLayer
+
+        layer = QgsRasterLayer(path, "source", "gdal")
+        return layer if layer.isValid() else None
+
+    def raster_crs(self, layer):
+        """Le système du raster : None s'il n'en a pas, sinon son code (`EPSG:2154`, ou un
+        texte descriptif quand QGIS ne lui trouve pas de code)."""
+        crs = layer.crs()
+        if not crs.isValid():
+            return None
+        return crs.authid() or crs.description() or "?"
+
+    def same_crs(self, layer, epsg):
+        """Vrai si le système du raster est EPSG:`epsg` : même code, ou même définition (un
+        `.prj` ESRI du Lambert-93 que QGIS ne rattache pas au code EPSG:2154)."""
+        from qgis.core import QgsCoordinateReferenceSystem
+
+        crs = layer.crs()
+        target = QgsCoordinateReferenceSystem("EPSG:%d" % epsg)
+        if crs.authid().upper() == "EPSG:%d" % epsg or crs == target:
+            return True
+        proj = crs.toProj()
+        return bool(proj) and proj == target.toProj()
+
+    def read_written_raster(self, path):
+        """Code EPSG du GeoTIFF écrit (None s'il n'a pas de système), relu à part sans l'ajouter
+        au projet ; `False` s'il est illisible."""
+        from qgis.core import QgsRasterLayer
+
+        layer = QgsRasterLayer(path, "lecture", "gdal")
+        try:
+            if not layer.isValid():
+                return False
+            authid = layer.crs().authid() if layer.crs().isValid() else ""
+            if authid.upper().startswith("EPSG:") and authid[5:].isdigit():
+                return int(authid[5:])
+            return None
+        finally:
+            del layer  # le fournisseur relâche le fichier
+
     def load_output(self, path, name):
         """Ouvre la couche écrite et l'ajoute au projet ; None si illisible."""
         from qgis.core import QgsProject, QgsVectorLayer
@@ -466,9 +562,10 @@ _SHAPEFILE_COMPANIONS = (".shx", ".dbf", ".prj", ".cpg", ".qix")
 
 
 def _remove(path):
-    """Retire le fichier de sortie et ses fichiers annexes : ceux d'un GeoPackage, ou les
-    compagnons d'un Shapefile (même radical)."""
-    paths = [path + suffix for suffix in ("", "-wal", "-shm", "-journal")]
+    """Retire le fichier de sortie et ses fichiers annexes : ceux d'un GeoPackage, les
+    compagnons d'un Shapefile (même radical), ou le `.aux.xml` que GDAL pose à côté d'un
+    GeoTIFF."""
+    paths = [path + suffix for suffix in ("", "-wal", "-shm", "-journal", ".aux.xml")]
     stem, ext = os.path.splitext(path)
     if ext.lower() == ".shp":
         paths += [stem + companion for companion in _SHAPEFILE_COMPANIONS]
@@ -477,6 +574,13 @@ def _remove(path):
             os.remove(candidate)
         except OSError:
             pass
+
+
+def _file_name(path):
+    """Le seul nom du fichier, jamais son dossier (AD-9, AD-21)."""
+    if not isinstance(path, str):
+        return "?"
+    return os.path.basename(path.replace("\\", "/")) or "?"
 
 
 def _singleshot(fn):
@@ -539,6 +643,8 @@ class ProcessingGesture:
         out = params.get("out")
         if not isinstance(out, str) or not out:
             raise GestureError(BAD_PARAMS, "Le noyau n'a pas donné de fichier de sortie.")
+        if entry.get("raster"):
+            return self._begin_raster(params, out)
         layer_id = params.get(entry["input"])
         layer = backend.layer(layer_id) if isinstance(layer_id, str) and layer_id else None
         if layer is None:
@@ -590,6 +696,39 @@ class ProcessingGesture:
         self._out = out
         extra = {"encoding": entry["encoding"]} if entry.get("encoding") else {}
         return backend.run_algorithm(entry["algorithm"], algorithm_params, self._on_finished, **extra)
+
+    def _begin_raster(self, params, out):
+        """Genre d'entrée `raster` : un fichier désigné par son chemin, jamais une couche."""
+        entry, backend = self._entry, self._backend
+        path = params.get(entry["input"])
+        if not isinstance(path, str) or not path or not os.path.isfile(path):
+            raise GestureError(NOT_FOUND, "Aucun fichier raster « %s »." % _file_name(path))
+        source = backend.raster_source(path)
+        if source is None:
+            raise GestureError(
+                INVALID_SOURCE, "QGIS ne sait pas lire « %s » comme un raster." % _file_name(path)
+            )
+        assign = params.get(entry["assign_crs"]) if entry.get("assign_crs") else None
+        if assign is not None:
+            if isinstance(assign, bool) or not isinstance(assign, int) or assign <= 0:
+                raise GestureError(BAD_PARAMS, "Le système à déclarer doit être un code EPSG entier positif.")
+            code = assign
+            if not backend.crs_is_known(code):
+                raise GestureError(UNKNOWN_CRS, "Système inconnu de QGIS : EPSG:%d." % code)
+            current = backend.raster_crs(source)
+            if current is not None and not backend.same_crs(source, code):
+                raise GestureError(
+                    BAD_PARAMS,
+                    "« %s » a déjà un système (%s) : on ne déclare un système qu'à un raster qui "
+                    "n'en a pas, et Cassini ne reprojette pas un raster." % (_file_name(path), current),
+                )
+        # La source n'est plus tenue ouverte pendant le travail de QGIS (Windows garderait le
+        # fichier d'origine verrouillé).
+        source = None
+        algorithm_params = entry["translate"](params, path)
+        algorithm_params[entry["output"]] = out
+        self._out = out
+        return backend.run_algorithm(entry["algorithm"], algorithm_params, self._on_finished)
 
     def _check_origin(self, origin, layer):
         backend = self._backend
@@ -664,6 +803,11 @@ class ProcessingGesture:
         backend = self._backend
         if self._entry.get("file_result"):
             return self._written()
+        if self._entry.get("raster"):
+            epsg = backend.read_written_raster(self._out)
+            if epsg is False:
+                raise GestureError(FAILED, "Le GeoTIFF écrit est illisible.")
+            return {"file": self._out, "epsg": epsg}
         name = os.path.splitext(os.path.basename(self._out))[0]  # radical donné par le noyau (AD-10)
         layer = backend.load_output(self._out, name)
         if layer is None:

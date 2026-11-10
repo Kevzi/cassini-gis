@@ -83,6 +83,12 @@ pub struct CommandSpec {
     /// vrai : le catalogue des autres commandes reste celui d'avant.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub dictated_by_core: bool,
+    /// Paramètre de carroyage que le noyau complète quand sa forme est `mgrs` (epic 10,
+    /// entrée 31) : `epsg` et `squares`, calculés d'après l'emprise du projet lue auprès de QGIS,
+    /// ôtés des paramètres de l'appelant et journalisés pour le rejeu. Métadonnée interne :
+    /// jamais sérialisée.
+    #[serde(skip)]
+    pub mgrs_grid_param: Option<String>,
     /// Paramètre qui reçoit l'inventaire du projet, lu par le noyau auprès de QGIS juste avant
     /// l'exécution, hors du journal (amendement d'AD-30, entrée 11.20). Ôté des paramètres de
     /// l'appelant, jamais journalisé ; même lecture au rejeu. Métadonnée interne : jamais sérialisée.
@@ -136,6 +142,7 @@ impl CommandSpec {
             replay_param: None,
             dictated_by_core: false,
             inventory_param: None,
+            mgrs_grid_param: None,
             dictates: Vec::new(),
             output_none: false,
             result_style: None,
@@ -229,6 +236,12 @@ impl CommandSpec {
     /// Déclare la commande dictée par le noyau seul (ticket 4.9).
     pub fn dictated_by_core(mut self) -> Self {
         self.dictated_by_core = true;
+        self
+    }
+
+    /// Déclare le paramètre de carroyage que le noyau complète pour la forme `mgrs`.
+    pub fn mgrs_grid_param(mut self, name: &str) -> Self {
+        self.mgrs_grid_param = Some(name.to_string());
         self
     }
 

@@ -495,6 +495,30 @@ impl Mgrs {
         })
     }
 
+    /// Désignation de zone et de carré de 100 km (`31T GL`) d'un point WGS84 rapporté à la
+    /// zone UTM `zone` imposée, celle du carroyage d'une carte (epic 10, entrée 31) : la bande
+    /// de latitude du point, puis les lettres de colonne et de rang de la case de 100 km qui le
+    /// contient dans cette zone. `None` hors de [-80, 84] de latitude ou hors des huit colonnes.
+    pub fn square_in_zone(lat: f64, lon: f64, zone: u8) -> Option<String> {
+        if !(1..=60).contains(&zone) || !lon.is_finite() {
+            return None;
+        }
+        let band = latitude_band(lat)?;
+        let utm = to_utm(lat, lon, zone);
+        let easting = (utm.easting + TRUNCATION_SLACK).floor() as i64;
+        let northing = (utm.northing + TRUNCATION_SLACK).floor() as i64;
+        let column = easting.div_euclid(100_000);
+        if !(1..=8).contains(&column) || northing < 0 {
+            return None;
+        }
+        let row = (northing.div_euclid(100_000) as usize + row_offset(zone)) % ROWS.len();
+        Some(format!(
+            "{zone:02}{band} {}{}",
+            char::from(column_letters(zone)[column as usize - 1]),
+            char::from(ROWS[row])
+        ))
+    }
+
     /// Coin sud-ouest de la case désignée, en UTM dans la zone de la référence (convention de
     /// la NGA). Le cycle de 2 000 km des rangs est levé par la bande : la case doit toucher la
     /// bande annoncée, sinon la bande est incohérente (`MgrsPart::Band`).
@@ -610,6 +634,30 @@ mod tests {
         assert_eq!(latitude_band(84.0), Some('X'));
         assert_eq!(latitude_band(-80.0), Some('C'));
         assert_eq!(latitude_band(84.1), None);
+    }
+
+    #[test]
+    fn a_square_in_a_forced_zone_matches_the_reference_of_its_normal_zone() {
+        // Paris (31U DQ) et Annecy (32T LR en zone normale, 31T GL en zone 31 imposée : le carré
+        // d'un point de 32 lu dans la grille de 31).
+        let paris = Mgrs::from_lat_lon(48.8566, 2.3522, 1).unwrap();
+        assert_eq!(
+            Mgrs::square_in_zone(48.8566, 2.3522, 31).unwrap(),
+            format!("31{} {}{}", paris.band, paris.column, paris.row)
+        );
+        let annecy = Mgrs::from_lat_lon(45.8992, 6.1294, 1).unwrap();
+        assert_eq!(annecy.zone, 32);
+        assert_eq!(
+            Mgrs::square_in_zone(45.8992, 6.1294, 32).unwrap(),
+            format!("32{} {}{}", annecy.band, annecy.column, annecy.row)
+        );
+        assert!(Mgrs::square_in_zone(45.8992, 6.1294, 31)
+            .unwrap()
+            .starts_with("31T "));
+        assert_eq!(Mgrs::square_in_zone(85.0, 6.0, 32), None);
+        assert_eq!(Mgrs::square_in_zone(45.0, 6.0, 0), None);
+        // Loin du méridien central, hors des huit colonnes de la zone imposée.
+        assert_eq!(Mgrs::square_in_zone(45.0, 30.0, 31), None);
     }
 
     #[test]

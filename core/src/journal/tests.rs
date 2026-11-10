@@ -1337,6 +1337,24 @@ impl Executor for ProjectQgis {
                 let name = path.file_stem().unwrap().to_string_lossy().into_owned();
                 Ok(json!({"layer_id": layer, "name": name, "crs": "EPSG:2154"}))
             }
+            // Comme le geste de `data.convert_raster` : QGIS écrit le GeoTIFF à l'emplacement
+            // que le noyau donne (ici, une copie du MNT de test), l'original est intact, et
+            // rien n'entre au projet : l'ouverture est l'étape que le noyau dicte ensuite.
+            "data.convert_raster" => {
+                let source = Path::new(p["raster"].as_str().unwrap());
+                assert!(
+                    source.is_absolute() && source.is_file(),
+                    "{}",
+                    source.display()
+                );
+                let out = p["out"].as_str().unwrap().to_string();
+                assert!(out.ends_with(".tif"), "{out}");
+                let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../fixtures/mnt-plan-incline-2154.tif");
+                fs::copy(fixture, &out).unwrap();
+                Ok(json!({"file": out, "epsg": p.get("assign_epsg").cloned()
+                    .unwrap_or(json!(2154))}))
+            }
             "layout.export_pdf" => {
                 self.seen
                     .borrow_mut()
@@ -4109,4 +4127,299 @@ fn the_last_plan_is_read_from_the_last_first_step() {
         crate::agent_inventory::LastPlan::default()
     );
     let _ = fs::remove_dir_all(dir);
+}
+// ---- Epic 10, entrée 30 : `data.convert_raster`, puis l'ouverture dictée et la pente ----
+
+/// Session d'origine : un ASCII Grid converti par QGIS, ouvert par l'étape dictée, puis la
+/// pente calculée par le noyau sur la sortie de la conversion (`out:1.1`, le repère d'un
+/// `step:1` de plan).
+fn convert_raster_journal(project_file: &Path, project: &std::rc::Rc<OpenProject>) -> String {
+    let dir = project_file.parent().unwrap();
+    fs::create_dir_all(dir.join("mnt")).unwrap();
+    let source = dir.join("mnt/dalle.asc");
+    fs::write(&source, "ncols 2\nnrows 2\n").unwrap();
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, project_file)
+        .unwrap()
+        .with_qgis(ProjectQgis::new(project, 1))
+        .with_raster_opening(true);
+    let converted = s
+        .call(
+            "data.convert_raster",
+            json!({"raster": "mnt/dalle.asc", "assign_epsg": 2154}),
+        )
+        .unwrap();
+    assert!(converted["file"]
+        .as_str()
+        .unwrap()
+        .ends_with("1-data.convert_raster.tif"));
+    s.call(
+        "terrain.slope",
+        json!({"dem": "out:1.1", "unit": "degrees"}),
+    )
+    .unwrap();
+    let l = lines(&s);
+    let ids: Vec<&str> = l.iter().map(|l| l["id"].as_str().unwrap()).collect();
+    assert_eq!(
+        ids,
+        [
+            "data.convert_raster",
+            "layer.open_raster",
+            "terrain.slope",
+            "layer.open_raster"
+        ]
+    );
+    // La source est journalisée relative, avec son empreinte ; la sortie par son repère.
+    assert_eq!(l[0]["params"]["raster"], json!("mnt/dalle.asc"));
+    assert_eq!(l[0]["inputs"].as_array().unwrap().len(), 1);
+    assert_eq!(l[1]["params"], json!({"path": "out:1.1"}));
+    assert_eq!(l[1]["layer_id"], json!("raster_g1_2"));
+    assert_eq!(l[2]["params"]["dem"], json!("out:1.1"));
+    assert_eq!(l[3]["params"], json!({"path": "out:3.1"}));
+    // L'original n'est pas touché.
+    assert_eq!(fs::read_to_string(&source).unwrap(), "ncols 2\nnrows 2\n");
+    fs::read_to_string(s.journal_path()).unwrap()
+}
+
+#[test]
+fn a_converted_raster_is_opened_by_the_core_and_feeds_a_slope() {
+    let (dir, project_file, token) = temp_project();
+    let journal = convert_raster_journal(&project_file, &OpenProject::with_base());
+    assert!(!journal.contains(&token), "aucun chemin absolu au journal");
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_converted_raster_replays_identically_in_a_new_session_and_twice_in_the_same() {
+    let (dir, project_file, _) = temp_project();
+    let project = OpenProject::with_base();
+    let before = convert_raster_journal(&project_file, &project);
+    let identical = ReplayReport {
+        steps: 4,
+        identical: true,
+    };
+    let mut replayed = HashSet::new();
+    let (outcome, _) = replay_in(&project_file, &project, 2, &mut replayed);
+    assert_eq!(outcome.unwrap(), identical);
+    let (outcome, _) = replay_in(&project_file, &project, 3, &mut replayed);
+    assert_eq!(outcome.unwrap(), identical);
+    // Projet rouvert sans les rasters : la conversion est rejouée, puis rouverte, puis la pente.
+    let reopened = OpenProject::with_base();
+    let (outcome, _) = replay_in(&project_file, &reopened, 4, &mut HashSet::new());
+    assert_eq!(outcome.unwrap(), identical);
+    let files: Vec<String> = reopened
+        .layers
+        .borrow()
+        .iter()
+        .map(|(_, f)| f.clone())
+        .collect();
+    assert_eq!(
+        files,
+        [
+            "communes.gpkg",
+            "1-data.convert_raster.tif",
+            "3-terrain.slope.tif"
+        ]
+    );
+    let work = project_file.parent().unwrap().join("p.cassini");
+    assert!(work.join("replay/1-data.convert_raster.tif").is_file());
+    assert_eq!(fs::read_to_string(work.join(JOURNAL_FILE)).unwrap(), before);
+    let _ = fs::remove_dir_all(dir);
+}
+
+// ---- Epic 10, entrée 31 : carroyage MGRS complété par le noyau, sources détaillées ----
+
+/// QGIS de test de la mise en page : un inventaire d'emprise donnée (`None` : aucune), un export
+/// qui note ses paramètres et rend, ou non, `source_details` ; `sources` longues ou courtes.
+struct ExportQgis {
+    extent: Option<Value>,
+    details: bool,
+    many_sources: bool,
+    seen: std::rc::Rc<std::cell::RefCell<Vec<(String, Value)>>>,
+}
+
+impl ExportQgis {
+    fn new(extent: Option<Value>, details: bool, many_sources: bool) -> Self {
+        ExportQgis {
+            extent,
+            details,
+            many_sources,
+            seen: Default::default(),
+        }
+    }
+}
+
+impl Executor for ExportQgis {
+    fn execute(&self, id: &str, p: Value) -> Result<Value, RegistryError> {
+        self.seen.borrow_mut().push((id.to_string(), p.clone()));
+        match id {
+            INVENTORY => Ok(match &self.extent {
+                Some(lonlat) => json!({"layers": [], "extent": {"lonlat": lonlat}}),
+                None => json!({"layers": []}),
+            }),
+            "layout.export_pdf" => {
+                let out = p["out"].as_str().unwrap().to_string();
+                fs::write(&out, "pdf").unwrap();
+                let sources: Vec<String> = if self.many_sources {
+                    (1..=12).map(|n| format!("couche_{n:02}.gpkg")).collect()
+                } else {
+                    vec!["gares.gpkg".into()]
+                };
+                let mut result = json!({"file": out, "page_count": 1, "layer_count": sources.len(),
+                    "sources": sources, "truncated": false});
+                if self.details {
+                    result["source_details"] = json!(sources
+                        .iter()
+                        .map(|s| json!({"source": s, "resolution": null,
+                            "date": "2026-10-15", "date_origin": "file"}))
+                        .collect::<Vec<_>>());
+                }
+                Ok(result)
+            }
+            other => panic!("commande inattendue : {other}"),
+        }
+    }
+}
+
+fn annecy_lonlat() -> Value {
+    json!({"west": 6.05, "south": 45.78, "east": 6.25, "north": 45.95, "crs": "EPSG:4326"})
+}
+
+#[test]
+fn an_mgrs_grid_is_filled_by_the_core_journaled_and_replayed_as_is() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis = ExportQgis::new(Some(annecy_lonlat()), true, false);
+    let seen = qgis.seen.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    // Ce que l'appelant écrit de la zone et des carrés est ôté : le noyau les pose.
+    s.call(
+        "layout.export_pdf",
+        json!({"title": "Secteur", "header": "Document de travail",
+            "grid": {"kind": "mgrs", "interval": {"value": 1, "unit": "km"},
+                     "epsg": 32631, "squares": ["31T ZZ"]}}),
+    )
+    .unwrap();
+    let (expected_epsg, expected_squares) = crate::commands::layout_export_pdf::mgrs_grid_of(
+        &json!({"extent": {"lonlat": annecy_lonlat()}}),
+    )
+    .unwrap();
+    assert_eq!(expected_epsg, 32632);
+    {
+        let seen = seen.borrow();
+        let ids: Vec<&str> = seen.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids, [INVENTORY, "layout.export_pdf"]);
+        let grid = &seen[1].1["grid"];
+        assert_eq!(grid["epsg"], json!(32632));
+        assert_eq!(grid["squares"], json!(expected_squares));
+        assert_eq!(seen[1].1["header"], json!("Document de travail"));
+    }
+    let l = lines(&s);
+    assert_eq!(l.len(), 1, "l'inventaire n'est pas une étape du journal");
+    assert_eq!(l[0]["params"]["grid"]["epsg"], json!(32632));
+    assert_eq!(l[0]["params"]["grid"]["squares"], json!(expected_squares));
+    drop(s);
+    // Au rejeu, l'emprise a changé (ou manque) : la zone et les carrés journalisés sont
+    // repassés tels quels, sans relire l'inventaire.
+    let qgis = ExportQgis::new(None, true, false);
+    let seen = qgis.seen.clone();
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(&Router::new(&registry).with_qgis(qgis), &mut HashSet::new())
+        .unwrap();
+    assert!(report.identical);
+    let seen = seen.borrow();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].1["grid"]["epsg"], json!(32632));
+    assert_eq!(seen[0].1["grid"]["squares"], json!(expected_squares));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_mgrs_grid_without_a_readable_extent_is_refused_before_the_export() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis = ExportQgis::new(None, true, false);
+    let seen = qgis.seen.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    let err = s
+        .call(
+            "layout.export_pdf",
+            json!({"title": "Secteur", "grid": {"kind": "mgrs", "interval": {"value": 10, "unit": "km"}}}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "layout.no_extent");
+    assert!(lines(&s).is_empty());
+    assert_eq!(seen.borrow().len(), 1, "seul l'inventaire est lu");
+    // Un intervalle hors liste est refusé par le noyau avant toute lecture auprès de QGIS.
+    let err = s
+        .call(
+            "layout.export_pdf",
+            json!({"title": "Secteur", "grid": {"kind": "mgrs", "interval": {"value": 5, "unit": "km"}}}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "registry.invalid_params");
+    assert_eq!(seen.borrow().len(), 1, "l'inventaire n'est pas relu");
+    // Les autres carroyages ne lisent pas l'inventaire.
+    s.call(
+        "layout.export_pdf",
+        json!({"title": "Carte", "grid": {"kind": "projected", "epsg": 32631,
+            "interval": {"value": 1, "unit": "km"}}}),
+    )
+    .unwrap();
+    assert_eq!(seen.borrow().last().unwrap().0, "layout.export_pdf");
+    assert_eq!(seen.borrow().len(), 2);
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_export_journaled_before_source_details_replays_identically() {
+    for many in [false, true] {
+        let (dir, project, _) = temp_project();
+        let registry = Registry::standard();
+        // Journal d'avant l'entrée 31 : le résultat ne porte pas `source_details`.
+        let mut s = Session::open(&registry, &project)
+            .unwrap()
+            .with_qgis(ExportQgis::new(None, false, many));
+        s.call("layout.export_pdf", json!({"title": "Carte"}))
+            .unwrap();
+        let kept = lines(&s)[0]["result"].clone();
+        assert_eq!(kept.get("truncated") == Some(&json!(true)), many, "{kept}");
+        drop(s);
+        // Le geste d'aujourd'hui rend `source_details` : la ligne ancienne se rejoue à l'identique.
+        let report = Replay::load(&registry, &project)
+            .unwrap()
+            .run(
+                &Router::new(&registry).with_qgis(ExportQgis::new(None, true, many)),
+                &mut HashSet::new(),
+            )
+            .unwrap();
+        assert!(report.identical, "résumé : {many}");
+        let _ = fs::remove_dir_all(dir);
+    }
+}
+
+#[test]
+fn an_export_journaled_with_source_details_compares_them() {
+    for many in [false, true] {
+        let (dir, project, _) = temp_project();
+        let registry = Registry::standard();
+        let mut s = Session::open(&registry, &project)
+            .unwrap()
+            .with_qgis(ExportQgis::new(None, true, many));
+        s.call("layout.export_pdf", json!({"title": "Carte"}))
+            .unwrap();
+        drop(s);
+        // Un rejeu qui ne les rend plus diverge : le champ, journalisé, est comparé.
+        let err = Replay::load(&registry, &project)
+            .unwrap()
+            .run(
+                &Router::new(&registry).with_qgis(ExportQgis::new(None, false, many)),
+                &mut HashSet::new(),
+            )
+            .unwrap_err();
+        assert_eq!(err.code, "replay.diverged", "résumé : {many}");
+        let _ = fs::remove_dir_all(dir);
+    }
 }

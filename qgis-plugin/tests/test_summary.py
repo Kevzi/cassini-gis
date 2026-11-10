@@ -372,6 +372,38 @@ class ReprojectTest(unittest.TestCase):
             )
 
 
+CONVERT_RASTER = {"raster": "mnt/dalle.asc", "assign_epsg": 2154}
+CONVERT_RASTER_OUT = {"file": "C:/d/cassini/1-data.convert_raster.tif", "epsg": 2154}
+
+
+class ConvertRasterTest(unittest.TestCase):
+    def test_the_file_is_named_without_its_folder(self):
+        self.assertEqual(
+            say("data.convert_raster", CONVERT_RASTER, CONVERT_RASTER_OUT),
+            "Raster dalle.asc converti en GeoTIFF, système déclaré EPSG:2154 : fichier 1-data.convert_raster.tif.",
+        )
+        self.assertEqual(
+            say("data.convert_raster", CONVERT_RASTER, CONVERT_RASTER_OUT, lang="en"),
+            "Raster dalle.asc converted to GeoTIFF, system declared EPSG:2154: file 1-data.convert_raster.tif.",
+        )
+
+    def test_the_kept_system_is_said(self):
+        self.assertEqual(
+            say("data.convert_raster", {"raster": "mnt.img"}, dict(CONVERT_RASTER_OUT, epsg=32632)),
+            "Raster mnt.img converti en GeoTIFF : fichier 1-data.convert_raster.tif, en EPSG:32632.",
+        )
+
+    def test_a_tif_without_system_is_signalled(self):
+        text = say("data.convert_raster", {"raster": "dalle.asc"}, dict(CONVERT_RASTER_OUT, epsg=None))
+        self.assertIn("sans code EPSG : les commandes de terrain le refuseront", text)
+
+    def test_label_before_running(self):
+        self.assertEqual(
+            summary.label("data.convert_raster", CONVERT_RASTER, "fr", qgis_name),
+            "Conversion du raster dalle.asc en GeoTIFF, système déclaré EPSG:2154",
+        )
+
+
 DATA_CONVERT = {"layer_id": "gares_1", "format": "gpkg"}
 DATA_CONVERT_OUT = {"file": "C:/d/cassini/2-data.convert.gpkg", "format": "gpkg", "feature_count": 5}
 
@@ -705,6 +737,8 @@ SAMPLES = {
                              {"point": {"x": 652000.0, "y": 6862000.0, "epsg": 2154}}),
     "data.reproject": ({"layer_id": "gares_1", "target_epsg": 2154},
                        {"layer_id": "gares_2", "name": "Gares 2154", "feature_count": 3}),
+    "data.convert_raster": ({"raster": "C:/d/mnt.asc", "assign_epsg": 2154},
+                            {"file": "C:/d/1-data.convert_raster.tif", "epsg": 2154}),
     "data.convert": ({"layer_id": "gares_1", "format": "shp"},
                      {"file": "C:/d/3-data.convert.shp", "format": "shp", "feature_count": 3}),
     "layer.remove": ({"layer_id": "gares_1"}, {"layer_id": "gares_1"}),
