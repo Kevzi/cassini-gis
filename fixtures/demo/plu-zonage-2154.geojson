@@ -1,0 +1,79 @@
+{
+ "type": "FeatureCollection",
+ "crs": {
+  "type": "name",
+  "properties": {
+   "name": "urn:ogc:def:crs:EPSG::2154"
+  }
+ },
+ "features": [
+  {
+   "type": "Feature",
+   "properties": {
+    "typezone": "U",
+    "libelle": "Zone urbaine"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       652000.0,
+       6850000.0
+      ],
+      [
+       652250.0,
+       6850000.0
+      ],
+      [
+       652250.0,
+       6850500.0
+      ],
+      [
+       652000.0,
+       6850500.0
+      ],
+      [
+       652000.0,
+       6850000.0
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "typezone": "N",
+    "libelle": "Zone naturelle"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       652250.0,
+       6850000.0
+      ],
+      [
+       652500.0,
+       6850000.0
+      ],
+      [
+       652500.0,
+       6850500.0
+      ],
+      [
+       652250.0,
+       6850500.0
+      ],
+      [
+       652250.0,
+       6850000.0
+      ]
+     ]
+    ]
+   }
+  }
+ ]
+}

@@ -1,0 +1,24 @@
+{
+ "type": "FeatureCollection",
+ "crs": {
+  "type": "name",
+  "properties": {
+   "name": "urn:ogc:def:crs:EPSG::2154"
+  }
+ },
+ "features": [
+  {
+   "type": "Feature",
+   "properties": {
+    "nom": "Gare Sud-Est"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     652490.0,
+     6850010.0
+    ]
+   }
+  }
+ ]
+}
