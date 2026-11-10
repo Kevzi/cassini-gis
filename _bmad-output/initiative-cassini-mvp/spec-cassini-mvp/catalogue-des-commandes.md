@@ -938,12 +938,20 @@ Distance géodésique et azimuts entre deux points, sur l'ellipsoïde WGS84 (Kar
 | `from` | `Point` | oui | EPSG 4326, 326NN ou 327NN | Point de départ. |
 | `to` | `Point` | oui | EPSG 4326, 326NN ou 327NN | Point d'arrivée ; peut être dans un autre système de la liste que `from`. |
 | `unit` | chaîne | non | `deg` (défaut), `gon` | Unité des angles rendus. |
+| `north` | chaîne | non | `true` (défaut), `grid`, `magnetic` | Nord des azimuts : vrai, du quadrillage UTM (gisement) ou magnétique (boussole). |
+| `utm_zone` | entier | non | 1 à 60 | Zone du quadrillage, avec `north: "grid"` seulement ; sans lui (`north` absent, `true` ou `magnetic`), refusé par `geo.zone_unused`. |
+| `date` | chaîne | non | AAAA-MM-JJ | Date de la déclinaison, avec `north: "magnetic"` seulement ; absente, la date du jour (UTC), fixée par le noyau. |
 
 | Résultat | Type | Sens |
 |---|---|---|
 | `distance` | `Distance` | Distance géodésique, toujours en `m`. |
-| `azimuth` | `Angle` | Azimut au départ, de `from` vers `to`, nord vrai, sens horaire. |
+| `azimuth` | `Angle` | Azimut au départ, de `from` vers `to`, depuis le nord employé, sens horaire. |
 | `back_azimuth` | `Angle` | Azimut à l'arrivée, de `to` vers `from`. |
+| `north` | chaîne | Nord employé, recopié de `north` ; absent si `north` l'est. |
+| `convergence` | `Angle` | Convergence des méridiens au départ, dans `unit` ; pour `grid` seulement. |
+| `declination` | `Angle` | Déclinaison magnétique au départ, positive à l'est, dans `unit` ; pour `magnetic` seulement. |
+| `date` | chaîne | Date de la déclinaison (AAAA-MM-JJ), recopiée ou fixée par le noyau ; pour `magnetic` seulement. |
+| `warning` | chaîne | Avertissement en français : date hors de la validité du WMM2025, ou point près d'un pôle magnétique ; absent sinon. |
 
 Distance rendue au millimètre, azimuts au milliardième d'unité, dans [0, 360) degrés ou
 [0, 400) grades ; `back_azimuth` est l'azimut de marche à l'arrivée augmenté d'un demi-tour.
@@ -954,32 +962,68 @@ deux points confondus, à moins d'un demi-millimètre : l'azimut n'est pas défi
 `coord.out_of_range` (point d'entrée invalide : WGS84 hors de [-90, 90] ou [-180, 180],
 point UTM hors de sa zone, coordonnées non finies).
 
-**Nord de référence (planifié, changement de cap du 2026-11-10, epic 10, entrées 28 et 29).**
+**Nord de référence (changement de cap du 2026-11-10, epic 10, entrées 28 et 29 ; `true` et `grid` livrés par l'entrée 28, `magnetic` par l'entrée 29).**
 `north` vaut `true` (défaut : nord vrai), `grid` (gisement : nord du quadrillage UTM de `from`,
 ou de la zone `utm_zone` ; convergence des méridiens d'après les formules publiées de Krüger et
 de Karney) ou `magnetic` (azimut magnétique : déclinaison du modèle magnétique mondial WMM2025,
 domaine public, à l'altitude 0 m, à la date `date`, AAAA-MM-JJ ; absente, la date du jour, fixée
 par le noyau et repassée au rejeu). Chaque azimut est corrigé au point où il est mesuré ; le
 gisement est celui de la géodésique, pas celui de la corde sur le plan. Résultats ajoutés :
-`north` (nord employé), `convergence` (`Angle` ou `null`, au départ, pour `grid`), `declination`
-(`Angle` ou `null`, au départ, pour `magnetic`), `date` (ou `null`), `warning` (texte ou `null` :
-date hors de la validité du WMM2025, du 2025-01-01 au 2029-12-31, ou zone que le rapport du WMM
-déclare peu fiable ; le calcul est rendu quand même). Erreurs ajoutées : `geo.invalid_date`,
+`north` (nord employé), `convergence` (`Angle`, au départ, pour `grid`), `declination`
+(`Angle`, au départ, pour `magnetic`), `date` (pour `magnetic`), `warning` (texte : date hors de
+la validité du WMM2025, du 2025-01-01 au 2029-12-31, ou zone que le rapport du WMM déclare peu
+fiable ; le calcul est rendu quand même) ; chacun est absent du résultat quand il ne s'applique
+pas. Erreurs ajoutées : `geo.invalid_date`,
 `geo.date_unused` (`date` sans `north: "magnetic"`), `geo.zone_unused` (`utm_zone` sans
-`north: "grid"`), `coord.out_of_range` hors de la grille UTM pour `grid`. L'entrée 28 livre
-`north` (`true`, `grid`), `utm_zone` et `convergence` ; l'entrée 29 le reste.
+`north: "grid"`, ou avec `north: "magnetic"`), `coord.out_of_range` hors de la grille UTM pour
+`grid`. L'entrée 28 a livré `north` (`true`, `grid`), `utm_zone` et `convergence` ; l'entrée 29
+`magnetic`, `date`, `declination` et `warning`.
+
+**Gisement (livré par l'entrée 28, `core/src/geodesy.rs`, `tm_convergence`).** Le quadrillage
+est celui de la zone `utm_zone` si elle est donnée, à condition d'être la zone normale du point
+de départ ou une voisine (règle de `coord.convert`) ; sinon la zone de `from` s'il est en UTM,
+sinon sa zone normale. Le contre-azimut est corrigé de la convergence au point d'arrivée, dans le même quadrillage : `to` à plus d'une zone de la zone du quadrillage, ou hors de 80° S – 84° N, est refusé (`coord.out_of_range`, message qui renvoie au nord vrai). La convergence γ (Karney 2011, éq. 23 à 27) est l'angle du nord vrai au
+nord du quadrillage, sens horaire : positive à l'est du méridien central dans l'hémisphère nord,
+négative à l'ouest, de signe opposé au sud. Gisement = azimut vrai − γ au point où il est mesuré.
+`north` absent : résultat identique, octet pour octet, à celui d'avant l'entrée 28 ; `north`
+écrit est recopié au résultat ; `convergence` n'est rendue que pour `grid`. Refus :
+`geo.zone_unused` (`utm_zone` sans `north: "grid"`) ; `coord.out_of_range` (départ hors de 80° S
+– 84° N, zone imposée à plus d'une zone du point).
+**Correction de corde.** Le gisement rendu est celui de la géodésique, pas celui de la corde
+(ΔE, ΔN) sur le plan ; l'écart vaut environ ΔN·(2E₁ + E₂) / (6 k0² R²), E comptés depuis le
+méridien central : pour un segment de 1 km à 300 km du méridien central, au plus 0,76″ (plein
+nord, à 45° N), nul plein est ; il croît avec la longueur et l'éloignement du méridien central.
+
+**Azimut magnétique (livré par l'entrée 29, `core/src/wmm.rs`).** Champ du modèle magnétique
+mondial WMM2025 (NOAA et BGS, données du gouvernement des États-Unis, 17 U.S.C. 403), calculé
+d'après le rapport technique (doi:10.25923/prbc-s316, §1.2) ; coefficients compilés dans le
+binaire du noyau (`core/data/wmm2025/`), aucun fichier lu à l'exécution, rien de téléchargé.
+Déclinaison D au point de mesure, à l'altitude 0 m sur l'ellipsoïde WGS84, positive à l'est.
+**M1** : année décimale = année + (jour de l'année − 1) / nombre de jours de l'année, date à
+0 h UTC. **M2** : toute date grégorienne valide AAAA-MM-JJ est acceptée ; hors du 2025-01-01 au
+2029-12-31, le calcul est rendu avec un `warning` ; une date mal formée ou inexistante
+(`2026-13-01`, `2026-02-30`, `10/05/2026`) est refusée (`geo.invalid_date`). **M3** : à chaque
+point où un azimut est mesuré, `warning` de zone d'ombre si la composante horizontale H est
+sous 2 000 nT, de prudence sous 6 000 nT (seuils du rapport, §1.8) ; plusieurs avertissements
+forment un seul texte. **M4** : la date de l'appelant est gardée ; la date rendue est
+journalisée sous la clé `replay` de la ligne et repassée au rejeu (`CommandSpec::filled_param`) :
+le rejeu d'un azimut magnétique à date du jour est identique des années plus tard ; une ligne
+sans clé `replay` se rejoue telle quelle. **Précision mesurée** : sur les 100 valeurs de test
+publiées, Y et Z à 1e-5 nT, X, H et F à 1e-3 nT, D à 1e-5° de atan2(Y, X) publiés et à 0,005° de la valeur publiée de D (arrondie au
+centième) ; table 3b du
+rapport retrouvée au dernier chiffre, table 3d (« TrueN-to-MagN » 67,9316432316°,
+« GridN-to-MagN » en zone UTM 10 70,8861479117°) à 1e-9°. Azimut magnétique = azimut vrai − D au point où il
+est mesuré : `azimuth` en `from`, `back_azimuth` en `to` ; `declination` est D(`from`).
 
 ```json fiche
 {"id": "geo.distance_azimuth", "status": "faite", "runs_in": "core", "dictated_by_core": false,
  "params": {"from": {"type": "Point", "required": true},
             "to": {"type": "Point", "required": true},
-            "unit": {"type": "string", "required": false, "enum": ["deg", "gon"]}},
- "result": ["distance", "azimuth", "back_azimuth"],
- "planned_by": "epic 10, entrée 28 (north true et grid, utm_zone, convergence) ; entrée 29 (north magnetic, date, declination, warning)",
- "planned_params": {"north": {"type": "string", "required": false, "enum": ["true", "grid", "magnetic"]},
-                    "utm_zone": {"type": "integer", "required": false},
-                    "date": {"type": "string", "required": false}},
- "planned_result": ["north", "convergence", "declination", "date", "warning"]}
+            "unit": {"type": "string", "required": false, "enum": ["deg", "gon"]},
+            "north": {"type": "string", "required": false, "enum": ["true", "grid", "magnetic"]},
+            "utm_zone": {"type": "integer", "required": false},
+            "date": {"type": "string", "required": false}},
+ "result": ["distance", "azimuth", "back_azimuth", "north", "convergence", "declination", "date", "warning"]}
 ```
 
 ### `geo.destination_point`
@@ -990,12 +1034,20 @@ de Karney), AD-31.
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
 | `from` | `Point` | oui | EPSG 4326, 326NN ou 327NN | Point de départ. |
-| `azimuth` | `Angle` | oui | nord vrai, sens horaire | Azimut de départ. |
+| `azimuth` | `Angle` | oui | nord choisi (vrai par défaut), sens horaire | Azimut de départ. |
 | `distance` | `Distance` | oui | `m`, `km` | Distance géodésique à parcourir. |
+| `north` | chaîne | non | `true` (défaut), `grid`, `magnetic` | Nord de `azimuth` : vrai, du quadrillage UTM (gisement) ou magnétique (boussole). |
+| `utm_zone` | entier | non | 1 à 60 | Zone du quadrillage, avec `north: "grid"` seulement ; sans lui (`north` absent, `true` ou `magnetic`), refusé par `geo.zone_unused`. |
+| `date` | chaîne | non | AAAA-MM-JJ | Date de la déclinaison, avec `north: "magnetic"` seulement ; absente, la date du jour (UTC), fixée par le noyau. |
 
 | Résultat | Type | Sens |
 |---|---|---|
 | `point` | `Point` | Point d'arrivée, dans la zone UTM de `from` (l'hémisphère suit la latitude), ou en WGS84 si `from` l'est. |
+| `north` | chaîne | Nord employé, recopié de `north` ; absent si `north` l'est. |
+| `convergence` | `Angle` | Convergence des méridiens au départ, dans l'unité de `azimuth` ; pour `grid` seulement. |
+| `declination` | `Angle` | Déclinaison magnétique au départ, positive à l'est, dans l'unité de `azimuth` ; pour `magnetic` seulement. |
+| `date` | chaîne | Date de la déclinaison (AAAA-MM-JJ), recopiée ou fixée par le noyau ; pour `magnetic` seulement. |
+| `warning` | chaîne | Avertissement en français : date hors de la validité du WMM2025, ou départ près d'un pôle magnétique ; absent sinon. |
 
 Un départ UTM donne une arrivée dans la même zone, l'hémisphère suivant la latitude (comme
 `coord.convert`) ; WGS84 au milliardième de degré, UTM au millimètre. Un azimut hors de
@@ -1005,32 +1057,69 @@ Un départ UTM donne une arrivée dans la même zone, l'hémisphère suivant la 
 ou de la grille UTM (80° S à 84° N), ou si `from` est invalide (WGS84 hors de [-90, 90] ou
 [-180, 180], point UTM hors de sa zone, coordonnées non finies).
 
-**Nord de référence (planifié, changement de cap du 2026-11-10, epic 10, entrées 28 et 29).**
+**Nord de référence (changement de cap du 2026-11-10, epic 10, entrées 28 et 29 ; `true` et `grid` livrés par l'entrée 28, `magnetic` par l'entrée 29).**
 `north` vaut `true` (défaut : nord vrai), `grid` (gisement : nord du quadrillage UTM de `from`,
 ou de la zone `utm_zone` ; convergence des méridiens d'après les formules publiées de Krüger et
 de Karney) ou `magnetic` (azimut magnétique : déclinaison du modèle magnétique mondial WMM2025,
 domaine public, à l'altitude 0 m, à la date `date`, AAAA-MM-JJ ; absente, la date du jour, fixée
 par le noyau et repassée au rejeu). `azimuth` en entrée est alors compté depuis le nord choisi. Chaque azimut est corrigé au point où il est mesuré ; le
 gisement est celui de la géodésique, pas celui de la corde sur le plan. Résultats ajoutés :
-`north` (nord employé), `convergence` (`Angle` ou `null`, au départ, pour `grid`), `declination`
-(`Angle` ou `null`, au départ, pour `magnetic`), `date` (ou `null`), `warning` (texte ou `null` :
-date hors de la validité du WMM2025, du 2025-01-01 au 2029-12-31, ou zone que le rapport du WMM
-déclare peu fiable ; le calcul est rendu quand même). Erreurs ajoutées : `geo.invalid_date`,
+`north` (nord employé), `convergence` (`Angle`, au départ, pour `grid`), `declination`
+(`Angle`, au départ, pour `magnetic`), `date` (pour `magnetic`), `warning` (texte : date hors de
+la validité du WMM2025, du 2025-01-01 au 2029-12-31, ou zone que le rapport du WMM déclare peu
+fiable ; le calcul est rendu quand même) ; chacun est absent du résultat quand il ne s'applique
+pas. Erreurs ajoutées : `geo.invalid_date`,
 `geo.date_unused` (`date` sans `north: "magnetic"`), `geo.zone_unused` (`utm_zone` sans
-`north: "grid"`), `coord.out_of_range` hors de la grille UTM pour `grid`. L'entrée 28 livre
-`north` (`true`, `grid`), `utm_zone` et `convergence` ; l'entrée 29 le reste.
+`north: "grid"`, ou avec `north: "magnetic"`), `coord.out_of_range` hors de la grille UTM pour
+`grid`. L'entrée 28 a livré `north` (`true`, `grid`), `utm_zone` et `convergence` ; l'entrée 29
+`magnetic`, `date`, `declination` et `warning`.
+
+**Gisement (livré par l'entrée 28, `core/src/geodesy.rs`, `tm_convergence`).** Le quadrillage
+est celui de la zone `utm_zone` si elle est donnée, à condition d'être la zone normale du point
+de départ ou une voisine (règle de `coord.convert`) ; sinon la zone de `from` s'il est en UTM,
+sinon sa zone normale. La convergence γ (Karney 2011, éq. 23 à 27) est l'angle du nord vrai au
+nord du quadrillage, sens horaire : positive à l'est du méridien central dans l'hémisphère nord,
+négative à l'ouest, de signe opposé au sud. `azimuth` d'entrée est le gisement ; l'azimut vrai de départ vaut gisement + γ(`from`).
+`north` absent : résultat identique, octet pour octet, à celui d'avant l'entrée 28 ; `north`
+écrit est recopié au résultat ; `convergence` n'est rendue que pour `grid`. Refus :
+`geo.zone_unused` (`utm_zone` sans `north: "grid"`) ; `coord.out_of_range` (départ hors de 80° S
+– 84° N, zone imposée à plus d'une zone du point).
+**Correction de corde.** Le gisement rendu est celui de la géodésique, pas celui de la corde
+(ΔE, ΔN) sur le plan ; l'écart vaut environ ΔN·(2E₁ + E₂) / (6 k0² R²), E comptés depuis le
+méridien central : pour un segment de 1 km à 300 km du méridien central, au plus 0,76″ (plein
+nord, à 45° N), nul plein est ; il croît avec la longueur et l'éloignement du méridien central.
+
+**Azimut magnétique (livré par l'entrée 29, `core/src/wmm.rs`).** Champ du modèle magnétique
+mondial WMM2025 (NOAA et BGS, données du gouvernement des États-Unis, 17 U.S.C. 403), calculé
+d'après le rapport technique (doi:10.25923/prbc-s316, §1.2) ; coefficients compilés dans le
+binaire du noyau (`core/data/wmm2025/`), aucun fichier lu à l'exécution, rien de téléchargé.
+Déclinaison D au point de mesure, à l'altitude 0 m sur l'ellipsoïde WGS84, positive à l'est.
+**M1** : année décimale = année + (jour de l'année − 1) / nombre de jours de l'année, date à
+0 h UTC. **M2** : toute date grégorienne valide AAAA-MM-JJ est acceptée ; hors du 2025-01-01 au
+2029-12-31, le calcul est rendu avec un `warning` ; une date mal formée ou inexistante
+(`2026-13-01`, `2026-02-30`, `10/05/2026`) est refusée (`geo.invalid_date`). **M3** : à chaque
+point où un azimut est mesuré, `warning` de zone d'ombre si la composante horizontale H est
+sous 2 000 nT, de prudence sous 6 000 nT (seuils du rapport, §1.8) ; plusieurs avertissements
+forment un seul texte. **M4** : la date de l'appelant est gardée ; la date rendue est
+journalisée sous la clé `replay` de la ligne et repassée au rejeu (`CommandSpec::filled_param`) :
+le rejeu d'un azimut magnétique à date du jour est identique des années plus tard ; une ligne
+sans clé `replay` se rejoue telle quelle. **Précision mesurée** : sur les 100 valeurs de test
+publiées, Y et Z à 1e-5 nT, X, H et F à 1e-3 nT, D à 1e-5° de atan2(Y, X) publiés et à 0,005° de la valeur publiée de D (arrondie au
+centième) ; table 3b du
+rapport retrouvée au dernier chiffre, table 3d (« TrueN-to-MagN » 67,9316432316°,
+« GridN-to-MagN » en zone UTM 10 70,8861479117°) à 1e-9°. `azimuth` d'entrée est l'azimut magnétique ;
+l'azimut vrai de départ vaut azimut + D(`from`), et l'avertissement de zone ne regarde que
+`from`.
 
 ```json fiche
 {"id": "geo.destination_point", "status": "faite", "runs_in": "core", "dictated_by_core": false,
  "params": {"from": {"type": "Point", "required": true},
             "azimuth": {"type": "Angle", "required": true},
-            "distance": {"type": "Distance", "required": true}},
- "result": ["point"],
- "planned_by": "epic 10, entrée 28 (north true et grid, utm_zone, convergence) ; entrée 29 (north magnetic, date, declination, warning)",
- "planned_params": {"north": {"type": "string", "required": false, "enum": ["true", "grid", "magnetic"]},
-                    "utm_zone": {"type": "integer", "required": false},
-                    "date": {"type": "string", "required": false}},
- "planned_result": ["north", "convergence", "declination", "date", "warning"]}
+            "distance": {"type": "Distance", "required": true},
+            "north": {"type": "string", "required": false, "enum": ["true", "grid", "magnetic"]},
+            "utm_zone": {"type": "integer", "required": false},
+            "date": {"type": "string", "required": false}},
+ "result": ["point", "north", "convergence", "declination", "date", "warning"]}
 ```
 
 ### `geo.bearing_intersection`

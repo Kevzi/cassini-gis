@@ -561,31 +561,63 @@ def _layer_remove(lang, p, r, names):
     return texts.tr(lang, key, layer=names.layer(p.get("layer_id")))
 
 
+def _grid(p):
+    """Suffixe des textes du nord employé : `_grid` pour un gisement (`north` vaut `grid`),
+    `_magnetic` pour un azimut magnétique ; affichage seul (AD-5)."""
+    north = p.get("north")
+    if not isinstance(north, str):
+        return ""
+    return {"grid": "_grid", "magnetic": "_magnetic"}.get(north, "")
+
+
+def _magnetic_tail(lang, r):
+    """Déclinaison et date d'un azimut magnétique, puis l'avertissement du noyau s'il y en a
+    un, recopié tel quel (date hors de la validité du WMM2025, pôle magnétique proche) ;
+    affichage seul (AD-5)."""
+    text = ""
+    if isinstance(r.get("date"), str) and isinstance(r.get("declination"), dict):
+        text += texts.tr(
+            lang,
+            "sum_geo_declination",
+            declination=_angle(lang, r.get("declination")),
+            date=r["date"],
+        )
+    warning = r.get("warning")
+    if isinstance(warning, str) and warning.strip():
+        text += texts.tr(lang, "sum_geo_warning", warning=warning.strip().rstrip("."))
+    return text
+
+
 def _distance_azimuth(lang, p, r, names):
-    """Distance et azimuts rendus ; affichage seul (AD-5)."""
+    """Distance et azimuts rendus, « gisement » pour le nord du quadrillage, « azimut
+    magnétique » pour le nord magnétique ; affichage seul (AD-5)."""
+    grid = _grid(p)
     if not r:
-        return texts.tr(lang, "sum_geo_measure")
+        return texts.tr(lang, "sum_geo_measure" + grid)
     return texts.tr(
         lang,
-        "sum_geo_measured",
+        "sum_geo_measured" + grid,
         distance=_length(lang, r.get("distance")),
         azimuth=_angle(lang, r.get("azimuth")),
         back=_angle(lang, r.get("back_azimuth")),
-    )
+    ) + _magnetic_tail(lang, r)
 
 
 def _destination_point(lang, p, r, names):
+    grid = _grid(p)
     distance = _length(lang, p.get("distance"))
     azimuth = _angle(lang, p.get("azimuth"))
     if not r:
-        return texts.tr(lang, "sum_geo_destination", distance=distance, azimuth=azimuth)
+        return texts.tr(
+            lang, "sum_geo_destination" + grid, distance=distance, azimuth=azimuth
+        )
     return texts.tr(
         lang,
-        "sum_geo_reached",
+        "sum_geo_reached" + grid,
         distance=distance,
         azimuth=azimuth,
         point=_point(lang, r.get("point")),
-    )
+    ) + _magnetic_tail(lang, r)
 
 
 def _bearing_intersection(lang, p, r, names):

@@ -125,6 +125,8 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `entete_pied_de_page` | « exporte la carte en PDF avec l'en-tête « Document de travail » », « … avec « Bureau d'études Lac et Monts » en pied de page », les deux, parfois avec un titre → `header`, `footer` recopiés tels qu'écrits entre guillemets, jamais inventés ; le titre reste distinct. Usage : bureaux d'études et collectivités. Poids 4. Epic 10, entrée 31 ; la ligne des sources détaillée est automatique, sans famille |
 | `distance_azimut` | « quelle distance sépare le point … du point … », « distance et azimut entre les points … et … (UTM 31N) » → `geo.distance_azimuth` ; `unit` seulement si elle est écrite (`gon` : « en grades », `deg` : « en degrés ») ; deux points en Lambert-93 → deux `data.transform_point` vers 4326, puis le calcul sur `step:1.point` et `step:2.point` ; système écrit à chaque point ou une fois pour les deux (11.12) |
 | `point_projete` | « quel point atteint-on à 3 km du point …, azimut 45° » → `geo.destination_point`, l'azimut toujours avec son unité (« 45° », « 45 degrés » → `deg` ; « 50 gr », « 50 grades » → `gon`) et la distance tels qu'écrits ; « résultat en MGRS » → `coord.convert` sur `step:1.point` (11.12) |
+| `gisement` | « donne le gisement du point … au point … (en grades) », « implante un point à 800 m du point …, au gisement 250 gr », « azimut … en nord du quadrillage », « par rapport au quadrillage UTM » → `geo.distance_azimuth` ou `geo.destination_point` avec `north: "grid"` ; `utm_zone` seulement si la zone du quadrillage est écrite (« dans le quadrillage de la zone 32 ») ; même suite MGRS que `point_projete` (10.28) |
+| `azimut_magnetique` | « quel est l'azimut magnétique du point … au point … », « donne l'azimut à la boussole … », « calcule le cap magnétique entre … », « depuis le point …, je marche 2 km à 120° à la boussole », « … avec la déclinaison magnétique » → `geo.distance_azimuth` ou `geo.destination_point` avec `north: "magnetic"` ; `date` (AAAA-MM-JJ) seulement si la date est écrite (« le 1er mai 2026 », « à la date du 2027-06-14 »), absente sinon : le noyau prend la date du jour ; même suite MGRS que `point_projete` (10.29) |
 | `recoupement` | « recoupe la visée du point … à l'azimut 40° avec celle du point … à l'azimut 310° » → `geo.bearing_intersection`, chaque station avec son azimut ; même suite MGRS que `point_projete` (11.12) |
 | `terrain_autre_systeme` | champ de vision ou ligne de vue depuis un point écrit dans un autre système que le MNT (WGS84, UTM d'une autre zone, Lambert-93 sur un MNT en UTM) → depuis 11.23, la commande de terrain avec le point **recopié tel qu'écrit**, sans `data.transform_point` : le noyau ajoute la conversion au plan avant de le montrer (11.22) ; une ligne de vue peut viser un point du système du MNT ; une référence MGRS (une fois sur quatre, alors pour chaque point), qui n'est pas un `Point`, garde `coord.convert` vers le WGS84 puis `data.transform_point` vers l'`epsg` du MNT, et la commande prend `step:k.point` (MNT à système connu seulement). Remplace le refus `NO_TERRAIN_CRS` de 5.41 (11.12) |
 | `exposition` | « calcule l'exposition des versants du MNT » → `terrain.aspect`, `dem` seul (11.12, lot 2a) ; depuis 11.23, l'orientation des pentes dite sans le mot « exposition » (« dans quelle direction regardent les pentes », « vers où sont orientées les pentes ») aussi, jamais une pente reclassée (constat A01 de 11.16) |
@@ -710,8 +712,11 @@ d'entraînement passe de 8 000 à **8 600 exemples** (`DEFAULT_COUNT` de `cassin
 (`toutes_zones_confondues`, `retrait_couche`) et quatre poids ont monté (`decompte_par_zone`,
 `reprojection_avant_analyse`, `analyse_couche_metrique`, `tampon_filtre`) : le total des poids
 passe de 324 à 342, et à 8 000 exemples, chaque famille à poids inchangé perdait 5 % de ses
-exemples. À 8 600, elle en garde 102 % (8 000 × 342 / 324 ≈ 8 444, arrondi au-dessus). Le
-jeu de validation reste à 300 exemples.
+exemples. À 8 600, elle en garde 102 % (8 000 × 342 / 324 ≈ 8 444, arrondi au-dessus).
+Avec `gisement` (10.28, poids 3), le total passe à 345 : à 8 600, une famille à poids inchangé
+garde 101 % de ses exemples (8 600 × 324 / 345 ≈ 8 077 pour 8 000). Avec `azimut_magnetique`
+(10.29, poids 3), le total passe à 348 : à 8 600, elle en garde encore 100 % (8 600 × 324 / 348
+≈ 8 007 pour 8 000). Le jeu de validation reste à 300 exemples.
 
 Au jeu par défaut (graine 1), comparé au jeu d'`ajuste-revue-11-23` (commit `47ef2f4`, 8 000)
 et à celui de `b53ff4c` (8 000) :
@@ -892,7 +897,10 @@ deux fichiers le lisent :
   l'écart). Il a fait retirer trois tournures : « Fais une zone tampon de N m autour des
   ... » devient « Fais-moi une zone tampon ... », « Décris la couche des ... » devient
   « Décris-moi la couche des ... », et « de la section AB » sort des tournures des parcelles
-  (« en section AB », « de section AB » restent).
+  (« en section AB », « de section AB » restent). Depuis 10.29, l'ajout de la famille
+  `azimut_magnetique` décale les tirages : dans `filtre_numerique`, « Sélectionne » devient
+  « Sélectionne-moi » devant une hauteur de bâtiment (« … de plus de N m de haut »), sans
+  tirage de plus, pour qu'aucune phrase de la recette d'Annecy ne soit engendrée.
 - `ai/tests/ecart_reel.rs` mesure le vrai modèle sur ce jeu, sans jamais imprimer le texte
   des phrases.
 

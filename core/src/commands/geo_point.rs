@@ -1,12 +1,18 @@
 //! Lecture et rendu d'un point pour `coord.convert` et les commandes `geo.*` (AD-19 amendé,
 //! AD-31, CAP-15) : un [`Point`] en WGS84 (EPSG:4326) ou en UTM sur WGS84 (EPSG:32601 à
 //! 32660, 32701 à 32760) devient une latitude et une longitude WGS84 ; tout autre système est
-//! refusé par `geo.unsupported_crs`, qui nomme l'étape à ajouter. Aucune commande ici.
+//! refusé par `geo.unsupported_crs`, qui nomme l'étape à ajouter. Aussi le choix du quadrillage
+//! UTM d'un gisement (`north: "grid"`, AD-31 amendée) et la date d'un azimut magnétique
+//! (`north: "magnetic"`, entrée 29). Aucune commande ici.
 
+use serde::{Deserialize, Deserializer};
+
+use crate::angle::North;
 use crate::commands::analysis_buffer::{Distance, DistanceUnit};
 use crate::geodesy::{self, Utm};
 use crate::point::Point;
 use crate::registry::CommandFailure;
+use crate::wmm::{self, Date};
 
 /// Code EPSG du WGS84 géographique.
 pub const WGS84: u32 = 4326;
@@ -133,4 +139,109 @@ pub fn metres(value: f64) -> Distance {
         value: rounded(value, 1e3),
         unit: DistanceUnit::M,
     }
+}
+
+/// Lit `utm_zone` : de 1 à 60, ou absent.
+pub fn utm_zone_param<'de, D: Deserializer<'de>>(d: D) -> Result<Option<u8>, D::Error> {
+    use serde::de::Error;
+    let zone = Option::<u8>::deserialize(d)?;
+    if zone.is_some_and(|z| !(1..=60).contains(&z)) {
+        return Err(D::Error::custom("`utm_zone` va de 1 à 60"));
+    }
+    Ok(zone)
+}
+
+/// `utm_zone` ne sert qu'au gisement : sans `north: "grid"`, il est refusé (`geo.zone_unused`)
+/// plutôt qu'ignoré.
+pub fn check_zone_used(north: Option<North>, utm_zone: Option<u8>) -> Result<(), CommandFailure> {
+    match (north, utm_zone) {
+        (Some(North::Grid), _) | (_, None) => Ok(()),
+        (_, Some(zone)) => Err(CommandFailure::new(
+            "geo.zone_unused",
+            format!(
+                "La zone UTM {zone} (`utm_zone`) ne sert qu'à un gisement, compté depuis le nord du quadrillage : ajoutez `north: \"grid\"`, ou retirez `utm_zone` pour un azimut depuis le nord vrai."
+            ),
+        )),
+    }
+}
+
+/// Zone du quadrillage d'un gisement mesuré en `from` (déjà lu par [`read_point`] en `lat`,
+/// `lon`) : `utm_zone` si elle est donnée, à condition d'être la zone normale du point ou une
+/// voisine (règle de `coord.convert`) ; sinon la zone de `from` s'il est en UTM, sinon sa zone
+/// normale. Hors de la grille UTM (80° S à 84° N), `coord.out_of_range`.
+pub fn grid_zone(
+    from: &Point,
+    lat: f64,
+    lon: f64,
+    utm_zone: Option<u8>,
+) -> Result<u8, CommandFailure> {
+    check_grid_latitude(lat)?;
+    let normal = geodesy::utm_zone(lat, lon);
+    match utm_zone {
+        Some(zone) if geodesy::zone_distance(zone, normal) > 1 => Err(out_of_range(format!(
+            "La zone UTM {zone} est à plus d'une zone de celle du point de départ ({normal}) : une zone imposée ne peut être que la sienne ou une voisine."
+        ))),
+        Some(zone) => Ok(zone),
+        None => Ok(Utm::zone_of_epsg(from.epsg).map_or(normal, |(zone, _)| zone)),
+    }
+}
+
+/// Un point où se mesure un azimut dans le quadrillage de la zone `zone` : dans la grille UTM et
+/// à au plus une zone de `zone`, sinon `coord.out_of_range` (un gisement dans une zone
+/// lointaine serait un nombre faux d'apparence juste).
+pub fn check_in_grid(lat: f64, lon: f64, zone: u8) -> Result<(), CommandFailure> {
+    // Zone normale (exceptions 32V et 31X à 37X de la NGA) ou zone numérique simple, sans
+    // exception : de part et d'autre d'une limite d'exception, deux points voisins ont des zones
+    // normales à deux numéros d'écart (75° N : 20,9° E en 33, 21,1° E en 35).
+    let normal = geodesy::utm_zone(lat, lon);
+    let plain = ((geodesy::wrap_longitude(lon) + 180.0) / 6.0).floor() as i32 + 1;
+    let plain = plain.clamp(1, 60) as u8;
+    if (geodesy::MIN_LATITUDE..=geodesy::MAX_LATITUDE).contains(&lat)
+        && (geodesy::zone_distance(zone, normal) <= 1 || geodesy::zone_distance(zone, plain) <= 1)
+    {
+        return Ok(());
+    }
+    Err(out_of_range(format!(
+        "Le point d'arrivée (longitude {}, latitude {}) est hors du quadrillage de la zone UTM {zone} (à plus d'une zone, ou hors de 80° S à 84° N) : son gisement n'y a pas de sens ; demandez l'azimut depuis le nord vrai (sans `north`).",
+        rounded(lon, 1e6),
+        rounded(lat, 1e6)
+    )))
+}
+
+/// `date` ne sert qu'à l'azimut magnétique : sans `north: "magnetic"`, elle est refusée
+/// (`geo.date_unused`) plutôt qu'ignorée.
+pub fn check_date_used(north: Option<North>, date: Option<&str>) -> Result<(), CommandFailure> {
+    match (north, date) {
+        (Some(North::Magnetic), _) | (_, None) => Ok(()),
+        (_, Some(date)) => Err(CommandFailure::new(
+            "geo.date_unused",
+            format!(
+                "La date {date} (`date`) ne sert qu'à un azimut magnétique, compté depuis le nord magnétique : ajoutez `north: \"magnetic\"`, ou retirez `date`."
+            ),
+        )),
+    }
+}
+
+/// Date d'un azimut magnétique : `date` (AAAA-MM-JJ, date grégorienne qui existe), sinon la date
+/// du jour en temps universel, fixée ici puis rendue au résultat et repassée au rejeu (D5, M4).
+/// Une date mal formée ou inexistante : `geo.invalid_date`. Une date hors de la validité du
+/// WMM2025 est acceptée ; l'avertissement vient de [`wmm::warning`].
+pub fn magnetic_date(date: Option<&str>) -> Result<Date, CommandFailure> {
+    let Some(text) = date else {
+        return Ok(Date::today_utc());
+    };
+    Date::parse(text).ok_or_else(|| {
+        CommandFailure::new(
+            "geo.invalid_date",
+            format!(
+                "La date « {text} » n'est pas une date AAAA-MM-JJ qui existe (par exemple 2026-05-01)."
+            ),
+        )
+    })
+}
+
+/// Champ magnétique du WMM2025 au point (`lat`, `lon`), à l'altitude 0 m sur l'ellipsoïde (D4),
+/// à la date `date` ; sa déclinaison `d` est positive à l'est du nord vrai.
+pub fn magnetic_field(lat: f64, lon: f64, date: &Date) -> wmm::Field {
+    wmm::field(date.decimal_year(), 0.0, lat, lon)
 }

@@ -77,6 +77,14 @@ pub struct CommandSpec {
     /// Métadonnée interne : jamais sérialisée.
     #[serde(skip)]
     pub replay_param: Option<(String, String)>,
+    /// Paramètre facultatif que la commande remplit elle-même quand l'appelant le tait, et rend
+    /// au champ `field` de son résultat : (paramètre, champ). À la différence de
+    /// `replay_param`, la valeur de l'appelant est gardée ; la valeur rendue est journalisée
+    /// sous la clé `replay` de la ligne et repassée au rejeu, qui ne redécide pas (décision M4 de
+    /// l'entrée 10.29 : la date d'un azimut magnétique). Une ligne sans clé `replay` se rejoue
+    /// telle quelle. Métadonnée interne : jamais sérialisée.
+    #[serde(skip)]
+    pub filled_param: Option<(String, String)>,
     /// Vrai pour une commande que seul le noyau appelle, de lui-même, après une autre étape
     /// (ticket 4.9 : `layer.open_raster`). Elle n'est offerte ni au modèle, ni au client MCP, ni
     /// au formulaire du panneau, et `command.run` la refuse. Sérialisé seulement quand il est
@@ -140,6 +148,7 @@ impl CommandSpec {
             output_ext_by: None,
             leave_out_param: None,
             replay_param: None,
+            filled_param: None,
             dictated_by_core: false,
             inventory_param: None,
             mgrs_grid_param: None,
@@ -230,6 +239,13 @@ impl CommandSpec {
     /// Déclare le paramètre que le rejeu recopie depuis le champ `field` du résultat journalisé.
     pub fn replay_param(mut self, name: &str, field: &str) -> Self {
         self.replay_param = Some((name.to_string(), field.to_string()));
+        self
+    }
+
+    /// Déclare le paramètre facultatif que la commande remplit elle-même et rend au champ
+    /// `field` de son résultat ; le rejeu le repasse depuis la ligne journalisée (M4, 10.29).
+    pub fn filled_param(mut self, name: &str, field: &str) -> Self {
+        self.filled_param = Some((name.to_string(), field.to_string()));
         self
     }
 

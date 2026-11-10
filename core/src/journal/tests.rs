@@ -336,6 +336,171 @@ fn an_unknown_command_fails_by_name_and_executes_nothing() {
 }
 
 #[test]
+fn a_magnetic_azimuth_replays_with_its_journaled_date() {
+    let registry = Registry::standard();
+    let from = json!({"x": 6.1294, "y": 45.8992, "epsg": 4326});
+    let to = json!({"x": 6.2118, "y": 45.8586, "epsg": 4326});
+
+    // Date absente : le noyau prend celle du jour, la rend, la journalise sous `replay` ; les
+    // paramètres journalisés restent ceux de l'appelant.
+    let (dir, project, _) = temp_project();
+    let mut s = Session::open(&registry, &project).unwrap();
+    // La date du jour lue avant et après l'appel : l'exécution peut franchir minuit UTC.
+    let before = crate::wmm::Date::today_utc().to_string();
+    let out = s
+        .call(
+            "geo.distance_azimuth",
+            json!({"from": from, "to": to, "north": "magnetic"}),
+        )
+        .unwrap();
+    let after = crate::wmm::Date::today_utc().to_string();
+    let today = out["date"].as_str().unwrap().to_string();
+    assert!(today == before || today == after, "{out}");
+    // Date écrite : gardée telle quelle, et journalisée aussi.
+    s.call(
+        "geo.destination_point",
+        json!({"from": from, "azimuth": {"value": 120}, "distance": {"value": 2, "unit": "km"},
+            "north": "magnetic", "date": "2027-06-01"}),
+    )
+    .unwrap();
+    let l = lines(&s);
+    assert!(l[0]["params"].get("date").is_none(), "{}", l[0]);
+    assert_eq!(l[0]["replay"], json!({"date": today}));
+    assert_eq!(l[1]["params"]["date"], "2027-06-01");
+    assert_eq!(l[1]["replay"], json!({"date": "2027-06-01"}));
+    let (report, _) = replay_of(&registry, &project).unwrap();
+    assert_eq!(
+        report,
+        ReplayReport {
+            steps: 2,
+            identical: true
+        }
+    );
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+
+    // Journal écrit à la main, il y a un an : la date journalisée est repassée, et la même
+    // déclinaison est retrouvée ; une ligne à date écrite sans clé `replay`, et une ligne d'avant
+    // l'entrée 28 (sans `north`), se rejouent telles quelles.
+    let old = json!({"from": from, "to": to, "north": "magnetic", "date": "2025-11-10"});
+    let result = registry.call("geo.distance_azimuth", old).unwrap();
+    let written = json!({"from": from, "to": to, "north": "magnetic", "date": "2026-02-01"});
+    let written_result = registry
+        .call("geo.distance_azimuth", written.clone())
+        .unwrap();
+    let plain = json!({"from": from, "to": to});
+    let plain_result = registry
+        .call("geo.distance_azimuth", plain.clone())
+        .unwrap();
+    let now = registry
+        .call(
+            "geo.distance_azimuth",
+            json!({"from": from, "to": to, "north": "magnetic"}),
+        )
+        .unwrap();
+    assert_ne!(
+        result["declination"], now["declination"],
+        "la déclinaison change"
+    );
+    let (dir, project, _) = temp_project();
+    hand_journal(
+        &project,
+        &[
+            json!({"step": 1, "id": "geo.distance_azimuth",
+                "params": {"from": from, "to": to, "north": "magnetic"}, "inputs": [],
+                "result": summarize(&result), "replay": {"date": "2025-11-10"}}),
+            json!({"step": 2, "id": "geo.distance_azimuth", "params": written, "inputs": [],
+                "result": summarize(&written_result)}),
+            json!({"step": 3, "id": "geo.distance_azimuth", "params": plain, "inputs": [],
+                "result": summarize(&plain_result)}),
+        ],
+    );
+    let (report, _) = replay_of(&registry, &project).unwrap();
+    assert_eq!(
+        report,
+        ReplayReport {
+            steps: 3,
+            identical: true
+        }
+    );
+    let _ = fs::remove_dir_all(dir);
+
+    // Sans la clé `replay`, la date du jour serait prise : le rejeu diverge, il ne se tait pas.
+    let (dir, project, _) = temp_project();
+    hand_journal(
+        &project,
+        &[json!({"step": 1, "id": "geo.distance_azimuth",
+            "params": {"from": from, "to": to, "north": "magnetic"}, "inputs": [],
+            "result": summarize(&result)})],
+    );
+    let err = replay_of(&registry, &project).unwrap_err();
+    assert_eq!(err.code, "replay.diverged");
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_old_geometry_journal_and_a_grid_bearing_replay_identically() {
+    // Journal écrit avant le gisement (epic 10, entrée 28) : ni `north` dans les paramètres, ni
+    // `north` ni `convergence` dans les résultats, valeurs rendues par le noyau d'alors.
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    hand_journal(
+        &project,
+        &[
+            json!({"step":1,"id":"geo.distance_azimuth","params":{"from":{"x":448251.0,"y":5411750.0,"epsg":32631},"to":{"x":2.3522,"y":48.8566,"epsg":4326},"unit":"gon"},"inputs":[],"result":{"azimuth":{"unit":"gon","value":99.903482441},"back_azimuth":{"unit":"gon","value":299.951752024},"distance":{"unit":"m","value":4233.225}}}),
+            json!({"step":2,"id":"geo.destination_point","params":{"from":{"x":448251.0,"y":5411750.0,"epsg":32631},"azimuth":{"value":100,"unit":"gon"},"distance":{"value":1500,"unit":"m"}},"inputs":[],"result":{"point":{"epsg":32631,"x":449750.383,"y":5411736.096}}}),
+        ],
+    );
+    let (report, _) = replay_of(&registry, &project).unwrap();
+    assert_eq!(
+        report,
+        ReplayReport {
+            steps: 2,
+            identical: true
+        }
+    );
+    let _ = fs::remove_dir_all(dir);
+
+    // Journal neuf : gisements, zone imposée comprise.
+    let (dir, project, _) = temp_project();
+    let mut s = Session::open(&registry, &project).unwrap();
+    let from = json!({"x": 650000.0, "y": 5400000.0, "epsg": 32631});
+    let out = s
+        .call(
+            "geo.distance_azimuth",
+            json!({"from": from, "to": {"x": 4.9, "y": 48.95, "epsg": 4326}, "north": "grid"}),
+        )
+        .unwrap();
+    assert_eq!(out["north"], "grid");
+    s.call(
+        "geo.destination_point",
+        json!({"from": from, "azimuth": {"value": 250, "unit": "gon"},
+            "distance": {"value": 800, "unit": "m"}, "north": "grid", "utm_zone": 32}),
+    )
+    .unwrap();
+    let l = lines(&s);
+    assert_eq!(l[0]["params"]["north"], "grid");
+    // Un résultat de plus de 200 octets est journalisé par son empreinte : le rejeu la compare.
+    assert!(
+        out["convergence"]["value"]
+            .as_f64()
+            .is_some_and(|c| c > 0.0),
+        "{out}"
+    );
+    assert_eq!(l[1]["params"]["utm_zone"], 32);
+    let (report, _) = replay_of(&registry, &project).unwrap();
+    assert_eq!(
+        report,
+        ReplayReport {
+            steps: 2,
+            identical: true
+        }
+    );
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn a_qgis_command_without_executor_is_unavailable_on_replay() {
     let (dir, project, _) = temp_project();
     let registry = Registry::standard();

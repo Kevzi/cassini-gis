@@ -595,7 +595,9 @@ impl<'a> Session<'a> {
                 // Ce que le rejeu repassera est gardé à part, sous la clé réservée `replay` :
                 // un résultat résumé (plus de 200 octets) n'en garderait que taille et empreinte.
                 let mut replay = Map::new();
-                if let Some((name, field)) = &spec.replay_param {
+                // Le paramètre que la commande a rempli elle-même (la date d'un azimut magnétique,
+                // M4) est gardé de même, que l'appelant l'ait donné ou non.
+                for (name, field) in spec.replay_param.iter().chain(&spec.filled_param) {
                     if let Some(kept) = value.get(field) {
                         replay.insert(name.clone(), kept.clone());
                     }
@@ -1439,6 +1441,14 @@ impl<'a> Replay<'a> {
                 // Lu sous la clé réservée `replay` de la ligne, qui survit au résumé du résultat.
                 if let Some((name, _)) = &spec.replay_param {
                     map.remove(name);
+                    if let Some(kept) = line.get("replay").and_then(|r| r.get(name)) {
+                        map.insert(name.clone(), kept.clone());
+                    }
+                }
+                // Le paramètre rempli par la commande (M4) : la valeur journalisée sous `replay`
+                // remplace celle de la ligne ; sans clé `replay` (journal ancien, ou résultat
+                // sans ce champ), les paramètres de la ligne sont rejoués tels quels.
+                if let Some((name, _)) = &spec.filled_param {
                     if let Some(kept) = line.get("replay").and_then(|r| r.get(name)) {
                         map.insert(name.clone(), kept.clone());
                     }
