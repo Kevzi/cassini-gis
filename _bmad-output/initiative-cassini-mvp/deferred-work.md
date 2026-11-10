@@ -933,3 +933,9 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
   evidence: la famille tire des couches vecteur seulement et toujours avec « du projet » ou « de la carte » ; le modèle n'a aucun exemple de ces formes.
   status: close, 2026-11-10, générateur après les quatre causes (`plan-generateur-apres-quatre-causes.md`)
   resolution: `retrait_couche` gagne le raster, plusieurs couches (une étape par couche) et le verbe seul → question ; poids 3 → 6, décision du propriétaire du 2026-11-10.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-recette-qgis-d-annecy-portee-a-20-phrases-barre-16-20-plan.md`
+  summary: le rejeu d'un journal qui porte `project.inventory` (ou toute lecture du projet) diverge dès l'étape 1 quand il est lancé en fin de session : l'inventaire voit les couches de résultat ajoutées depuis, son empreinte change (`replay.diverged`).
+  evidence: recette d'Annecy à 20 phrases du 2026-11-10, deux passages : `replay.diverged` à l'étape 1, `project.inventory` ; les recettes à 5 et 10 phrases n'avaient pas de lecture du projet. Décision au propriétaire : rejouer sur une copie neuve du projet (fermeture et réouverture), ne pas comparer le résultat des lectures du projet, ou ne pas journaliser ces lectures.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-recette-qgis-d-annecy-portee-a-20-phrases-barre-16-20-plan.md`
+  summary: décision du propriétaire — RA13 (« coordonnées UTM d'un point WGS84 ») : accepter aussi `data.transform_point` vers 32632, qui rend le même point, à côté de `coord.convert` `to: ["utm"]`, ou garder un seul plan attendu.
+  evidence: mesure de référence du 2026-11-10 (17/20) : le modèle installé rend `data.transform_point` vers 32632, compté raté par la règle stricte.
