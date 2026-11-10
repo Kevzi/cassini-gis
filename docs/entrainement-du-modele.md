@@ -12,12 +12,13 @@ document).
 Une seule commande, depuis la racine du dépôt :
 
 ```
-cargo run -p cassini-training --release -- --seed 1 --count 8000 --out exemples.jsonl
+cargo run -p cassini-training --release -- --seed 1 --count 8600 --out exemples.jsonl
 ```
 
 - `--seed` (par défaut 1) : la graine. Même graine, même fichier, à l'octet près, sous
   Windows comme sous Linux.
-- `--count` (par défaut 8000 depuis 5.15, 5000 avant) : le nombre d'exemples.
+- `--count` (par défaut 8600 depuis le 2026-11-10, 8000 depuis 5.15, 5000 avant) : le nombre
+  d'exemples.
 - `--out` : le fichier écrit. Le jeu n'est pas versionné : il se régénère.
 
 Le résumé par famille (exemples gardés, écartés, doublons) s'imprime sur la sortie
@@ -619,6 +620,63 @@ vaut `nom` (`commune` pour la graine b) au lieu de `nom_officiel`, dans une couc
 alors que les inventaires engendrés n'en portent que quelques-uns. Modèles dans
 `cassini-modeles\ajuste-nuit-11-10-a`, `-b` et `-fusion`, non installés ; décision au propriétaire.
 
+### Inventaires larges et jeu de 8 600 exemples (2026-11-10)
+
+Après la nuit du 2026-11-10, deux corrections du générateur décidées par le propriétaire, mêmes
+base, méthode et `DEFAULT_SEED` :
+
+- **Inventaires larges** (`wide_fields`, `widen`, `training/src/inventories.rs`) : les six thèmes
+  qui en ont dans la réalité (communes, routes et bâtiments de la BD TOPO, gares, parcelles du
+  cadastre et des fichiers fonciers, zonage du standard du CNIG) portent, deux couches sur cinq
+  (au plus deux couches par inventaire, et aucune distraction d'un inventaire long d'une dizaine
+  de couches), 15 à 20 champs : les champs de rôle, et des champs de
+  remplissage dans l'ordre de leur producteur (`cleabs`, `code_insee_du_departement`,
+  `date_d_apparition`, `precision_planimetrique`, `nombre_de_logements`, `idurba`, `datappro`…),
+  de types texte, entier et réel. Le champ de nom et ses leurres se placent dans la moitié du
+  milieu de la liste. Aucun champ de remplissage ne double le sens d'un champ de rôle du thème
+  (ni nom, ni hauteur, ni nature de route, ni surface de parcelle, ni type de zone) : les
+  questions « aucun champ de … » restent justes, et un plan ne cite que le champ de rôle. Dans
+  `decompte_par_zone`, quand le nom est demandé, la couche des communes est en plus élargie une
+  fois sur deux (`Builder::wide_next` ; les quartiers n'ont pas de remplissage). Les familles qui prennent un champ par son rôle
+  (filtres, nom contenu, décompte par zone, style) le prennent ainsi, quatre fois sur dix, dans
+  une longue liste.
+- **Taille du jeu** : voir la décision ci-dessous.
+
+**Décision du propriétaire (2026-11-10), remplace celle de 5.15 sur la taille du jeu** : le jeu
+d'entraînement passe de 8 000 à **8 600 exemples** (`DEFAULT_COUNT` de `cassini-training`,
+`TRAINING_COUNT` de `pipeline.py`). Depuis `ajuste-revue-11-23`, deux familles se sont ajoutées
+(`toutes_zones_confondues`, `retrait_couche`) et quatre poids ont monté (`decompte_par_zone`,
+`reprojection_avant_analyse`, `analyse_couche_metrique`, `tampon_filtre`) : le total des poids
+passe de 324 à 342, et à 8 000 exemples, chaque famille à poids inchangé perdait 5 % de ses
+exemples. À 8 600, elle en garde 102 % (8 000 × 342 / 324 ≈ 8 444, arrondi au-dessus). Le
+jeu de validation reste à 300 exemples.
+
+Au jeu par défaut (graine 1), comparé au jeu d'`ajuste-revue-11-23` (commit `47ef2f4`, 8 000)
+et à celui de `b53ff4c` (8 000) :
+
+| Mesure | `47ef2f4` | `b53ff4c` | 8 600, inventaires larges |
+|---|---|---|---|
+| couches des six thèmes à 15 champs ou plus | 0 % | 0 % | 38 % (de 34 % pour le zonage à 40 %) |
+| champs par couche des six thèmes, en moyenne | — | 1,4 à 2,0 | 6,9 à 8,0 (15 à 20 si élargie) |
+| exemples avec `label_field` | 41 | 173 | 194, dont 65 dans une couche de 15 à 20 champs |
+| exemples des 51 familles à poids inchangé | 7 044 | 6 637 | 7 150 |
+| longueur moyenne d'un exemple (jetons de Qwen3.5) | 770 | 773 | 830 |
+| exemple le plus long (jetons) | 1 629 | 1 661 | 1 773 (sous les 2 048 de `MAX_LENGTH`) |
+| jetons du jeu entier | 6,16 M | 6,19 M | 7,14 M |
+
+La part de chaque famille reste dans la fourchette du hasard du tirage (de −25 % à +25 % sur une
+centaine d'exemples) ; les plus basses par rapport à `47ef2f4`, à poids inchangé :
+`export_pdf_format` 134 → 90, `champ_de_vision` 126 → 94, `point_projete` 120 → 101. Une
+autre graine du générateur les redistribuerait autrement : seule la somme est tenue.
+
+**Durée** : 538 pas au lieu de 500 (lot 1, accumulation 16) et 15 % de jetons en plus (7,5 % par
+les inventaires, 7,5 % par la taille du jeu). La nuit du 2026-11-10 entraînait en 1 h 30 environ
+(5 367 à 5 505 s) ; compter environ 1 h 45 par entraînement, soit une demi-heure de plus pour une
+nuit à deux graines. Les séquences les plus longues (1 773 jetons au plus) restent dans la plage
+mesurée avec les segments extensibles (« longs d'abord », jusqu'à 1 768 jetons, pic de 5,85 Gio
+sur la carte de 8 Go) : la carte ne devrait pas se remplir, à vérifier sur les premiers pas
+(`--longs-d-abord --pas-max 30`) avant la nuit.
+
 ### Les inventaires de QGIS (5.15)
 
 Les valeurs d'un champ texte sont triées, comme le produit les rend. `unloaded_files` est
@@ -723,7 +781,7 @@ Ce texte est écrit **à un seul endroit** : `training/src/prompt.rs` (`render_p
 `completion`). La commande l'écrit dans le jeu :
 
 ```
-cargo run -p cassini-training --release -- --format chat --seed 1 --count 8000 --out entrainement.jsonl
+cargo run -p cassini-training --release -- --format chat --seed 1 --count 8600 --out entrainement.jsonl
 ```
 
 Chaque ligne est `{"prompt": "...", "completion": "..."}` : `prompt` est le texte exact vu
@@ -753,7 +811,7 @@ La commande, sans intervention :
 2. refuse un dossier de sortie déjà rempli (rien n'est écrasé ; `--reprendre` finit un
    entraînement commencé en sautant les étapes déjà faites) ou situé dans le dépôt ;
 3. engendre les jeux par `cassini-training --format chat` : graine 1 pour l'entraînement
-   (8 000 exemples depuis 5.15, 5 000 avant), graine 2 pour la validation (300), dont elle retire les prompts déjà
+   (8 600 exemples depuis le 2026-11-10, 8 000 depuis 5.15, 5 000 avant), graine 2 pour la validation (300), dont elle retire les prompts déjà
    vus à l'entraînement ;
 4. prend la base `Qwen/Qwen3.5-4B` (Apache-2.0) à la révision épinglée
    `851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a`, dans le cache de Hugging Face ;
@@ -1015,7 +1073,7 @@ reprise (`--reprendre`) :
 (`SHORT_SYSTEM`) : le produit n'embarque pas la chaîne d'entraînement, qui n'est qu'une
 dépendance de développement de `cassini-ai`. Deux tests tiennent les deux textes ensemble :
 
-- sans modèle, pour chacun des 8 000 exemples engendrés, les tours que `ai` assemble valent
+- sans modèle, pour chacun des exemples du jeu par défaut (8 600 depuis le 2026-11-10), les tours que `ai` assemble valent
   `render_prompt`, octet pour octet, encadrement chatml compris ; et pour chaque exemple de
   redemande, la sortie rejetée jugée par `ai` donne les mêmes écarts, et les tours de
   `retry_turns` valent le prompt de redemande de l'entraînement (`render_retry_prompt`) ;

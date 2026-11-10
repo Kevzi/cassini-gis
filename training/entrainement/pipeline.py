@@ -72,9 +72,10 @@ VALIDATION_SEED = 2
 # 2026-11-10). Les graines du générateur (1 et 2) ne changent pas : le jeu reste celui que
 # `training/tests/recouvrement.rs` contrôle.
 TORCH_SEED = 1
-TRAINING_COUNT = 8000  # décision du propriétaire, 5.15
+TRAINING_COUNT = 8600  # décision du propriétaire, 5.15 ; 8 600 depuis le 2026-11-10
 VALIDATION_COUNT = 300
-# Une séquence mesurée fait moins de 1 400 jetons : 2 048 laisse de la marge sans tronquer.
+# La séquence la plus longue mesurée fait 1 773 jetons (inventaires larges, 2026-11-10) :
+# 2 048 laisse de la marge sans tronquer.
 MAX_LENGTH = 2048
 # Le GPU visé a 8 Go ; on refuse en dessous de 7 Gio de mémoire totale.
 MIN_GPU_MEMORY = 7 * 1024**3

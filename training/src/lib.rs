@@ -25,8 +25,9 @@ use rng::Rng;
 /// Graine par défaut : celle de la commande documentée et du test de recouvrement (le jeu
 /// engendré n'est pas versionné, il se régénère).
 pub const DEFAULT_SEED: u64 = 1;
-/// Nombre d'exemples par défaut : celui de l'entraînement (décision du propriétaire, 5.15).
-pub const DEFAULT_COUNT: usize = 8000;
+/// Nombre d'exemples par défaut : celui de l'entraînement (décision du propriétaire, 5.15 ;
+/// 8 600 depuis le 2026-11-10, pour que les familles ajoutées ne diluent plus les autres).
+pub const DEFAULT_COUNT: usize = 8600;
 /// Plafond d'étapes d'un plan, celui de `cassini-ai` (`MAX_STEPS`).
 const MAX_STEPS: usize = 12;
 

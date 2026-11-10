@@ -1,6 +1,6 @@
 //! `cassini-training` : régénère le jeu d'exemples d'entraînement.
 //!
-//!   cargo run -p cassini-training --release -- --seed 1 --count 8000 --out exemples.jsonl
+//!   cargo run -p cassini-training --release -- --seed 1 --count 8600 --out exemples.jsonl
 //!
 //!   cargo run -p cassini-training --release -- --format chat --seed 1 --out entrainement.jsonl
 //!

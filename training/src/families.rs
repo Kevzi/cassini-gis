@@ -3176,6 +3176,12 @@ fn decompte_par_zone(rng: &mut Rng) -> Option<Example> {
     // (majuscules, code) ; son nom ne se déduit jamais du thème.
     let labelled = rng.below(4) < 3;
     let require: &[&str] = if labelled { &["nom"] } else { &[] };
+    // Une fois sur deux en plus du tirage commun (2026-11-10) : le nom se cherche dans une
+    // couche de 15 à 20 champs, comme celle des communes de la BD TOPO (les quartiers n'ont pas
+    // de remplissage : le forçage est alors sans effet).
+    if labelled && rng.chance(1, 2) {
+        b.wide_next();
+    }
     let zones = b.add(rng, zkey, require, &[], &[]);
     let z = &zones.theme.noun;
     let p = pick_theme(rng, &b, |t| t.geom == Geom::Point)?;
@@ -10116,7 +10122,7 @@ mod tests {
 
     #[test]
     fn a_label_field_is_the_name_field_of_the_zones_as_written_never_a_decoy() {
-        let (mut names, mut with_decoys, mut labelled) = (HashSet::new(), 0, 0);
+        let (mut names, mut with_decoys, mut labelled, mut wide) = (HashSet::new(), 0, 0, 0);
         for e in valid(decompte_par_zone, 1500) {
             let p = &call(&e, 0)["params"];
             let Some(label) = p.get("label_field").and_then(Value::as_str) else {
@@ -10133,15 +10139,26 @@ mod tests {
                 e.request
             );
             names.insert(label.to_string());
-            // Leurres seuls : le code INSEE propre aux communes n'en est pas un.
+            // Leurres seuls : le code INSEE propre aux communes n'en est pas un, et une couche
+            // élargie porte `cleabs` ou `code_postal` en remplissage : elle ne compte pas ici.
             let codes = ["code_postal", "cleabs", "code", "id_source", "identifiant"];
             with_decoys += usize::from(
-                fields
-                    .iter()
-                    .any(|f| *f != label && (f.starts_with(label) || codes.contains(f))),
+                fields.len() < crate::inventories::WIDE_MIN
+                    && fields
+                        .iter()
+                        .any(|f| *f != label && (f.starts_with(label) || codes.contains(f))),
             );
+            // Inventaires larges (2026-11-10) : le nom se prend dans une liste de 15 à 20 champs,
+            // où il n'est ni le premier ni le dernier.
+            if fields.len() >= crate::inventories::WIDE_MIN {
+                wide += 1;
+                let i = fields.iter().position(|f| *f == label).unwrap();
+                assert!(i > 0 && i + 1 < fields.len(), "{}", e.request);
+            }
         }
         assert!(labelled > 1000, "{labelled}");
+        // Communes une fois sur deux, élargies une fois sur deux en plus du tirage commun.
+        assert!(wide > 300, "{wide} sur {labelled}");
         assert!(
             names.len() == crate::inventories::NAME_FIELDS.len(),
             "{names:?}"

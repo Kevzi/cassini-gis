@@ -1648,6 +1648,251 @@ fn decoys(rng: &mut Rng, t: &Theme, name: &str) -> Vec<String> {
     out
 }
 
+/// Champs de remplissage des inventaires larges (2026-11-10), par type rendu. Rôle à part
+/// (`remplissage`), distinct des leurres du nom : aucune famille ne les demande, un plan ne
+/// les cite jamais.
+static FILL_TEXT: FieldDef = FieldDef {
+    role: "remplissage",
+    names: &[],
+    label: "",
+    kind: Kind::Name { fragments: &[] },
+};
+static FILL_INT: FieldDef = FieldDef {
+    role: "remplissage",
+    names: &[],
+    label: "",
+    kind: Kind::Number {
+        int: true,
+        min: 0,
+        max: 0,
+        step: 1,
+        gt: &[],
+        lt: &[],
+        gte: &[],
+        lte: &[],
+    },
+};
+static FILL_NUM: FieldDef = FieldDef {
+    role: "remplissage",
+    names: &[],
+    label: "",
+    kind: Kind::Number {
+        int: false,
+        min: 0,
+        max: 0,
+        step: 1,
+        gt: &[],
+        lt: &[],
+        gte: &[],
+        lte: &[],
+    },
+};
+
+type Fill = (&'static str, &'static FieldDef);
+
+/// Champs de remplissage par thème, dans l'ordre de leur producteur (BD TOPO, cadastre et
+/// fichiers fonciers, standard du CNIG) : à Annecy, la couche des communes portait 17 champs
+/// et le modèle, qui n'en avait vu que quelques-uns par couche, rendait `nom` au lieu de
+/// `nom_officiel` (nuit du 2026-11-10). Aucun ne double le sens d'un champ de rôle du thème
+/// (ni nom, ni hauteur, ni nature de route, ni surface de parcelle, ni type de zone) : une
+/// question « aucun champ de … » reste juste, et le plan ne cite que le champ de rôle.
+const WIDE_COMMUNES: &[Fill] = &[
+    ("cleabs", &FILL_TEXT),
+    ("code_insee_du_departement", &FILL_TEXT),
+    ("code_insee_de_la_region", &FILL_TEXT),
+    ("code_postal", &FILL_TEXT),
+    ("surface_en_ha", &FILL_INT),
+    ("date_creation", &FILL_TEXT),
+    ("date_modification", &FILL_TEXT),
+    ("date_d_apparition", &FILL_TEXT),
+    ("date_de_confirmation", &FILL_TEXT),
+    ("codes_siren_des_epci", &FILL_TEXT),
+    ("code_siren", &FILL_TEXT),
+    ("chef_lieu_d_arrondissement", &FILL_TEXT),
+    ("chef_lieu_de_collectivite_terr", &FILL_TEXT),
+    ("chef_lieu_de_departement", &FILL_TEXT),
+    ("chef_lieu_de_region", &FILL_TEXT),
+    ("capitale_d_etat", &FILL_TEXT),
+    ("date_du_recensement", &FILL_TEXT),
+    ("organisme_recenseur", &FILL_TEXT),
+    ("liens_vers_autorite_administrative", &FILL_TEXT),
+];
+
+const WIDE_ROUTES: &[Fill] = &[
+    ("cleabs", &FILL_TEXT),
+    ("fictif", &FILL_TEXT),
+    ("position_par_rapport_au_sol", &FILL_TEXT),
+    ("etat_de_l_objet", &FILL_TEXT),
+    ("date_creation", &FILL_TEXT),
+    ("date_modification", &FILL_TEXT),
+    ("date_d_apparition", &FILL_TEXT),
+    ("date_de_confirmation", &FILL_TEXT),
+    ("sources", &FILL_TEXT),
+    ("identifiants_sources", &FILL_TEXT),
+    ("methode_d_acquisition_planimetrique", &FILL_TEXT),
+    ("precision_planimetrique", &FILL_NUM),
+    ("methode_d_acquisition_altimetrique", &FILL_TEXT),
+    ("precision_altimetrique", &FILL_NUM),
+    ("nombre_de_voies", &FILL_INT),
+    ("largeur_de_chaussee", &FILL_NUM),
+    ("itineraire_vert", &FILL_TEXT),
+    ("prive", &FILL_TEXT),
+    ("sens_de_circulation", &FILL_TEXT),
+    ("acces_pieton", &FILL_TEXT),
+    ("restriction_de_poids_total", &FILL_NUM),
+    ("insee_commune_gauche", &FILL_TEXT),
+    ("insee_commune_droite", &FILL_TEXT),
+];
+
+const WIDE_BATIMENTS: &[Fill] = &[
+    ("cleabs", &FILL_TEXT),
+    ("construction_legere", &FILL_TEXT),
+    ("etat_de_l_objet", &FILL_TEXT),
+    ("date_creation", &FILL_TEXT),
+    ("date_modification", &FILL_TEXT),
+    ("date_d_apparition", &FILL_TEXT),
+    ("date_de_confirmation", &FILL_TEXT),
+    ("sources", &FILL_TEXT),
+    ("identifiants_sources", &FILL_TEXT),
+    ("methode_d_acquisition_planimetrique", &FILL_TEXT),
+    ("methode_d_acquisition_altimetrique", &FILL_TEXT),
+    ("precision_planimetrique", &FILL_NUM),
+    ("precision_altimetrique", &FILL_NUM),
+    ("nombre_de_logements", &FILL_INT),
+    ("materiaux_des_murs", &FILL_TEXT),
+    ("materiaux_de_la_toiture", &FILL_TEXT),
+    ("origine_du_batiment", &FILL_TEXT),
+    ("appariement_fichiers_fonciers", &FILL_TEXT),
+];
+
+const WIDE_GARES: &[Fill] = &[
+    ("cleabs", &FILL_TEXT),
+    ("nature", &FILL_TEXT),
+    ("nature_detaillee", &FILL_TEXT),
+    ("fictif", &FILL_TEXT),
+    ("etat_de_l_objet", &FILL_TEXT),
+    ("date_creation", &FILL_TEXT),
+    ("date_modification", &FILL_TEXT),
+    ("date_d_apparition", &FILL_TEXT),
+    ("date_de_confirmation", &FILL_TEXT),
+    ("sources", &FILL_TEXT),
+    ("identifiants_sources", &FILL_TEXT),
+    ("methode_d_acquisition_planimetrique", &FILL_TEXT),
+    ("precision_planimetrique", &FILL_NUM),
+    ("code_uic", &FILL_TEXT),
+    ("exploitant", &FILL_TEXT),
+    ("gestionnaire", &FILL_TEXT),
+    ("nombre_de_quais", &FILL_INT),
+    ("frequentation_annuelle", &FILL_INT),
+    ("insee_commune", &FILL_TEXT),
+];
+
+const WIDE_PARCELLES: &[Fill] = &[
+    ("gid", &FILL_INT),
+    ("commune", &FILL_TEXT),
+    ("prefixe", &FILL_TEXT),
+    ("numero", &FILL_TEXT),
+    ("arpente", &FILL_TEXT),
+    ("created", &FILL_TEXT),
+    ("updated", &FILL_TEXT),
+    ("ccodep", &FILL_TEXT),
+    ("ccocom", &FILL_TEXT),
+    ("ccopre", &FILL_TEXT),
+    ("dnupla", &FILL_TEXT),
+    ("jdatat", &FILL_TEXT),
+    ("code_insee", &FILL_TEXT),
+    ("idcom", &FILL_TEXT),
+    ("cgrnum", &FILL_TEXT),
+    ("typprop", &FILL_TEXT),
+    ("nlocal", &FILL_INT),
+    ("nlogh", &FILL_INT),
+];
+
+const WIDE_ZONAGE: &[Fill] = &[
+    ("gid", &FILL_INT),
+    ("partition", &FILL_TEXT),
+    ("idurba", &FILL_TEXT),
+    ("idzone", &FILL_TEXT),
+    ("nomfic", &FILL_TEXT),
+    ("urlfic", &FILL_TEXT),
+    ("insee", &FILL_TEXT),
+    ("datappro", &FILL_TEXT),
+    ("datvalid", &FILL_TEXT),
+    ("ident", &FILL_TEXT),
+    ("date_de_mise_a_jour", &FILL_TEXT),
+    ("gpu_doc_id", &FILL_TEXT),
+    ("gpu_status", &FILL_TEXT),
+    ("gpu_timestamp", &FILL_TEXT),
+];
+
+/// Les champs de remplissage d'un thème qui en a dans la réalité, `None` sinon.
+pub fn wide_fields(key: &str) -> Option<&'static [Fill]> {
+    Some(match key {
+        "communes" => WIDE_COMMUNES,
+        "routes" => WIDE_ROUTES,
+        "batiments" => WIDE_BATIMENTS,
+        "gares" => WIDE_GARES,
+        "parcelles" => WIDE_PARCELLES,
+        "zonage" => WIDE_ZONAGE,
+        _ => return None,
+    })
+}
+
+/// Part des couches élargies parmi celles des thèmes qui en ont (`WIDE_CHANCE` sur
+/// `WIDE_OUT_OF`), et leur nombre au plus par inventaire : la longueur des exemples reste
+/// loin des 2 048 jetons de l'entraînement.
+const WIDE_CHANCE: u64 = 2;
+const WIDE_OUT_OF: u64 = 5;
+pub const MAX_WIDE_LAYERS: usize = 2;
+/// Nombre de champs d'une couche élargie (bornes comprises), quand le thème en a assez.
+pub const WIDE_MIN: usize = 15;
+pub const WIDE_MAX: usize = 20;
+
+/// Élargit les champs d'une couche à 15 à 20 champs : le remplissage garde l'ordre de son
+/// producteur, chaque champ de rôle (suivi de ses leurres) s'y insère à une place tirée, et le
+/// champ de nom dans la moitié du milieu, noyé parmi les autres. Aucun nom en double, casse
+/// comprise (un GeoPackage ne distingue pas `INSEE` d'`insee`).
+fn widen(rng: &mut Rng, fields: Vec<FieldInst>, fill: &'static [Fill]) -> Vec<FieldInst> {
+    let mut groups: Vec<Vec<FieldInst>> = Vec::new();
+    for f in fields {
+        match groups.last_mut() {
+            Some(g) if f.def.role == "leurre" => g.push(f),
+            _ => groups.push(vec![f]),
+        }
+    }
+    let have: usize = groups.iter().map(Vec::len).sum();
+    let target = rng.range(WIDE_MIN as u64, WIDE_MAX as u64) as usize;
+    let taken: Vec<String> = groups
+        .iter()
+        .flatten()
+        .map(|f| f.name.to_lowercase())
+        .collect();
+    let mut pool: Vec<usize> = (0..fill.len())
+        .filter(|&i| !taken.contains(&fill[i].0.to_lowercase()))
+        .collect();
+    rng.shuffle(&mut pool);
+    pool.truncate(target.saturating_sub(have));
+    pool.sort_unstable();
+    let mut out: Vec<FieldInst> = pool
+        .into_iter()
+        .map(|i| FieldInst {
+            def: fill[i].1,
+            name: fill[i].0.to_string(),
+            values: Vec::new(),
+        })
+        .collect();
+    for g in groups {
+        let n = out.len() as u64;
+        let at = if g[0].def.role == "nom" {
+            rng.range(n / 4, n - n / 4)
+        } else {
+            rng.range(0, n)
+        } as usize;
+        out.splice(at..at, g);
+    }
+    out
+}
+
 /// Un fichier non encore ouvert, présent dans `unloaded_files`.
 #[derive(Debug, Clone)]
 pub struct File {
@@ -1762,6 +2007,10 @@ pub struct Builder {
     project_epsg: Option<u32>,
     /// Couches de distraction de plus à la fin (inventaires longs, comme celui d'Annecy).
     extra_distractors: usize,
+    /// Couches élargies à 15 à 20 champs (`widen`), au plus `MAX_WIDE_LAYERS`.
+    wide_layers: usize,
+    /// La prochaine couche d'un thème qui en a est élargie (`wide_next`).
+    force_wide: bool,
 }
 
 impl Builder {
@@ -1835,6 +2084,13 @@ impl Builder {
     pub fn project_system(&mut self, epsg: u32) {
         self.project_epsg = Some(epsg);
         self.keep_epsg = true;
+    }
+
+    /// Élargit la prochaine couche ajoutée par `add` (MNT et rasters compris, qui passent par
+    /// lui), si son thème a des champs de remplissage (`wide_fields`), même au-delà de
+    /// `MAX_WIDE_LAYERS` ; sans effet, et oublié, si ce thème n'en a pas.
+    pub fn wide_next(&mut self) {
+        self.force_wide = true;
     }
 
     /// Ajoute `n` couches de distraction à celles que `finish` tire : un inventaire long, d'une
@@ -1946,6 +2202,17 @@ impl Builder {
                 name,
                 values: Vec::new(),
             }));
+        }
+        // Inventaires larges (2026-11-10) : une part des couches des thèmes qui en ont dans la
+        // réalité porte 15 à 20 champs, le champ de nom noyé au milieu.
+        let forced_wide = std::mem::take(&mut self.force_wide);
+        if let Some(fill) = wide_fields(t.key) {
+            if forced_wide
+                || (self.wide_layers < MAX_WIDE_LAYERS && rng.chance(WIDE_CHANCE, WIDE_OUT_OF))
+            {
+                self.wide_layers += 1;
+                fields = widen(rng, fields, fill);
+            }
         }
         let layer = Layer {
             theme: t,
@@ -2146,6 +2413,11 @@ impl Builder {
     /// projet sans fuseau UTM (`utm_epsg`, emprise illisible).
     pub fn finish(mut self, rng: &mut Rng) -> Value {
         let n = rng.range(1, 4) as usize + self.extra_distractors;
+        // Inventaire long (une dizaine de couches) : ses distractions ne s'élargissent pas, pour
+        // que l'exemple reste loin des 2 048 jetons de l'entraînement.
+        if self.extra_distractors > 0 {
+            self.wide_layers = self.wide_layers.max(MAX_WIDE_LAYERS);
+        }
         self.distract(rng, n, |t| t.geom != Geom::Raster);
         if rng.chance(1, 4) {
             self.distract(rng, 1, |t| t.geom == Geom::Raster);
@@ -2487,5 +2759,139 @@ mod tests {
             b.distract(&mut rng, 10, |_| true);
             assert!(b.layers.iter().all(|l| l.theme.key != "reseau"));
         }
+    }
+
+    #[test]
+    fn no_filler_doubles_a_role_field_or_a_name() {
+        // Un champ de remplissage ne prend ni le nom d'un champ de rôle du thème, ni un nom du
+        // pool de noms, ni un nom de leurre du nom (casse comprise) : le plan ne cite que le
+        // champ de rôle, et une question « aucun champ de … » reste juste.
+        for t in THEMES {
+            let Some(fill) = wide_fields(t.key) else {
+                continue;
+            };
+            let mut seen = std::collections::HashSet::new();
+            for (name, _) in fill {
+                let low = name.to_lowercase();
+                assert!(seen.insert(low.clone()), "{} : {name} en double", t.key);
+                assert!(
+                    !t.fields
+                        .iter()
+                        .any(|f| f.names.iter().any(|n| n.eq_ignore_ascii_case(name))),
+                    "{} : {name}",
+                    t.key
+                );
+                assert!(
+                    !NAME_FIELDS.iter().any(|n| n.eq_ignore_ascii_case(name))
+                        && !low.ends_with("_maj")
+                        && !low.contains("majuscules")
+                        && !low.starts_with("nom_")
+                        && !low.contains("toponyme")
+                        && !low.contains("libel"),
+                    "{} : {name}",
+                    t.key
+                );
+            }
+            assert!(fill.len() + 1 >= WIDE_MIN, "{} : trop peu de champs", t.key);
+        }
+    }
+
+    #[test]
+    fn wide_layers_hold_15_to_20_fields_with_the_name_in_the_middle() {
+        let mut rng = Rng::new(11);
+        for key in [
+            "communes",
+            "routes",
+            "batiments",
+            "gares",
+            "parcelles",
+            "zonage",
+        ] {
+            let t = theme(key);
+            let require: Vec<&str> = t.fields.iter().map(|f| f.role).collect();
+            let (mut wide, n) = (0, 400);
+            for _ in 0..n {
+                let mut b = Builder::new();
+                let layer = b.add(&mut rng, key, &require, &[], &[]);
+                let count = layer.fields.len();
+                if count < WIDE_MIN {
+                    assert!(count <= 6, "{key} : {count} champs");
+                    continue;
+                }
+                wide += 1;
+                assert!(count <= WIDE_MAX, "{key} : {count} champs");
+                let mut seen = std::collections::HashSet::new();
+                for f in &layer.fields {
+                    assert!(seen.insert(f.name.to_lowercase()), "{key} : {}", f.name);
+                }
+                // Chaque champ de rôle reste, une fois.
+                for r in &require {
+                    assert_eq!(
+                        layer.fields.iter().filter(|f| f.def.role == *r).count(),
+                        1,
+                        "{key} : {r}"
+                    );
+                }
+                if let Some(i) = layer.fields.iter().position(|f| f.def.role == "nom") {
+                    // Dans la moitié du milieu, jamais en tête ni en fin de liste.
+                    assert!(
+                        i >= 2 && i + 2 < count,
+                        "{key} : nom au rang {i} sur {count}"
+                    );
+                }
+            }
+            // Environ deux couches sur cinq (`WIDE_CHANCE` sur `WIDE_OUT_OF`).
+            assert!((120..=200).contains(&wide), "{key} : {wide} sur {n}");
+        }
+        let json = {
+            let mut b = Builder::new();
+            b.wide_next();
+            Layer::to_json(&b.add(&mut rng, "batiments", &[], &[], &[]))
+        };
+        let tys: std::collections::HashSet<&str> = json["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["type"].as_str().unwrap())
+            .collect();
+        assert!(tys.contains("string") && (tys.contains("integer") || tys.contains("number")));
+    }
+
+    #[test]
+    fn at_most_two_layers_are_widened_unless_forced() {
+        let mut rng = Rng::new(13);
+        for _ in 0..300 {
+            let mut b = Builder::new();
+            for key in [
+                "communes",
+                "routes",
+                "batiments",
+                "gares",
+                "parcelles",
+                "zonage",
+            ] {
+                b.add(&mut rng, key, &[], &[], &[]);
+            }
+            let wide = b
+                .layers
+                .iter()
+                .filter(|l| l.fields.len() >= WIDE_MIN)
+                .count();
+            assert!(wide <= MAX_WIDE_LAYERS, "{wide}");
+        }
+        let mut b = Builder::new();
+        b.wide_next();
+        let first = b.add(&mut rng, "communes", &[], &[], &[]);
+        assert!(first.fields.len() >= WIDE_MIN);
+        // L'élargissement forcé ne vaut que pour la couche suivante.
+        let mut plain = 0;
+        for _ in 0..50 {
+            let mut b = Builder::new();
+            b.wide_next();
+            b.add(&mut rng, "quartiers", &[], &[], &[]);
+            plain +=
+                usize::from(b.add(&mut rng, "communes", &[], &[], &[]).fields.len() < WIDE_MIN);
+        }
+        assert!(plain > 15, "{plain}");
     }
 }
