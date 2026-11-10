@@ -126,3 +126,24 @@ Limite connue, à dire au propriétaire sans la corriger ici : un rejeu dans la 
 ## Recette QGIS réelle
 
 2026-11-10, QGIS 3.44.15, noyau `--features gpu` installé (ancien gardé sous `cassini.exe.avant-10-27`), extension copiée dans le profil. Sonde directe, sans modèle, sur `annecy/projet-recette-10-27.qgz` (copie du projet d'Annecy), couche `plu_zones` (Shapefile) : retrait, second retrait sans erreur, tampon de la couche retirée (`layer.not_found`), rejeu en même session puis projet relu et session neuve : 22/22 contrôles, rejeu `identical: true` deux fois, fichiers du Shapefile inchangés (empreintes et date). Rejouée après les corrections de relecture : 22/22. Archivée dans `donnees-test-cassini/_archives/sondes/recette-10-27-layer-remove/`.
+
+## Décisions du propriétaire (2026-11-10)
+
+Le propriétaire a tranché le 2026-11-10 (« on suit toutes les recommandations ») les points
+signalés par la relecture :
+
+- **Couche en mémoire ou en édition modifiée : refusée.** Changement de cap
+  `change-refus-retrait-couche-non-enregistree` (approuvé) : le geste refuse ces deux cas par
+  le nouveau code `layer.unsaved`, la couche reste au projet, intacte. Cette décision lève, pour
+  ce seul code, la règle « Never : nouveau code d'erreur » du plan ci-dessus. Plan :
+  `plan-10-27-refus-retrait-couche-non-enregistree.md`.
+- **Acceptés tels quels :**
+  - la limite du rejeu en même session (analyse d'une couche puis son retrait : le rejeu dans
+    la même session diverge à l'analyse, en la nommant ; identique en session neuve) ;
+  - le code `layer.not_found` d'une analyse qui cite une couche retirée, au lieu du
+    `qgis.layer_missing` écrit dans le changement de cap (code d'analyse décidé le 2026-11-09 ;
+    `qgis.layer_missing` reste celui des gestes de style) ;
+  - le refus neuf « effacer le fichier d'une couche » (`NO_FILE_DELETION`) qui remplace, dans
+    la famille `refus` du générateur, les deux branches devenues des plans ;
+  - la « version de chaîne 1 » du changement de cap, reportée à l'entrée 10.3, qui crée les
+    versions de chaîne et migrera cette ligne de la table fermée.
