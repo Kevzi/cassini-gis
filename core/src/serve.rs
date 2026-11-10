@@ -3067,6 +3067,23 @@ mod tests {
     }
 
     #[test]
+    fn the_plan_of_the_recomposition_is_kept_and_shown_like_a_first_one() {
+        let field_plan = json!({"kind":"calls","calls":[
+            {"command":"analysis.select_by_attribute",
+             "params":{"layer_id":"zonage","field":"typezone","operator":"eq","value":"U"}}]});
+        let valid = json!({"kind":"calls","calls":[
+            {"command":"test.fixed","params":{"layer":"zonage"}}]});
+        let (answer, seen, journal) = propose_big(vec![field_plan], valid);
+        assert_eq!(seen.len(), 2);
+        assert_eq!(answer["result"]["plan_id"], "plan-1", "{answer}");
+        assert_eq!(
+            answer["result"]["plan"]["calls"][0]["command"],
+            "test.fixed"
+        );
+        assert!(journal.is_empty());
+    }
+
+    #[test]
     fn a_field_reached_through_a_step_reference_recomposes_too() {
         let plan = json!({"kind":"calls","calls":[
             {"command":"analysis.buffer","params":{"layer_id":"zonage",

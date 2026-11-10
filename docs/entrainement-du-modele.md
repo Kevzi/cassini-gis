@@ -787,7 +787,11 @@ propriétaire) :
    inchangé), une vue peut encore dépasser cette borne : Annecy fait 16 597 caractères dans QGIS.
 
 Les écarts sont comptés au résumé (`gros_projet`, colonne « écartés ») : 295 écartés pour 2 139
-gardés au jeu par défaut, par l'une ou l'autre des deux dernières gardes. Exemples d'écart : une couche de
+gardés au jeu par défaut, par l'une ou l'autre des deux dernières gardes. Après 5.48 (désignation
+revue, seuil du tri à 17 000, budget de la vue triée à 11 000), le même jeu garde 2 033 gros projets
+(23,6 %) et en écarte 443 : les gros projets dont les couches de l'utilisateur tiennent sous
+17 000 caractères sont vus en entier, et ceux de plus de 12 900 caractères de prompt sont écartés
+par la borne. Les longueurs ci-dessous sont celles de 5.47, à remesurer au tokeniseur en 5.49. Exemples d'écart : une couche de
 zonage non désignée par « les parcelles constructibles », le réseau routier d'une isochrone, un
 MNT accompagné de nombreuses couches détaillées par une valeur. Le premier cas est celui de la
 redemande élargie du noyau (5.48) : le modèle ne l'apprend pas ici.

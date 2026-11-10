@@ -100,6 +100,30 @@ Worktree `/home/kevin/cassini-worktrees/vue-branchee` (branche `story/5-48-vue-b
 
 ## Implementation Notes
 
+- Implémenté directement par l'orchestrateur : le lancement d'un sous-agent est refusé par le contrôle automatique (un hook réécrit l'appel), deux fois.
+- `sorted_view_learned(learned, …, wanted, limits)` est le cœur, `sorted_view(raw, …)` l'appelle sans couche réclamée ; `model_inventory_learned` pour le chemin sous le seuil (sortie de `model_inventory` inchangée). `user_layers` d'une vue triée = couches de l'utilisateur en tête de l'index.
+- **Décision 2 précisée** (orchestrateur, à confirmer par le propriétaire) : un sigle trouve un mot plus long d'**un** signe au plus, pas deux : à deux, « PLU » trouvait « pluie » et « plume » (test `a_sigle_finds_a_longer_word_it_begins`).
+- **Décision 3 revue sur la mesure, tranchée en party le 2026-11-10** (architecte, ingénieur performance, géomaticien ; à confirmer par le propriétaire) : l'inventaire réel d'Annecy pris dans QGIS fait 16 597 caractères (12 couches, `routes` 6 396), au-dessus de 9 000 ; **seuil porté à 17 000** pour qu'Annecy (démo filmée, recette 16/20) reste inchangé à l'octet et que son cache ne relise pas de détails à chaque phrase ; 17 000 est le plus haut seuil sûr pour 8 192 jetons (≈ 6 200 d'inventaire + consignes + 1 024 de réponse). Plafonds 30 / 3 000 et index 7 000 / 3 500 gardés (la couche de 86 champs tient à 2 943 ; index de 63 couches 5 692).
+- `last_plan` : l'ouverture dictée (`layer.open_raster`, `layer.open_vector`) ne commence pas de plan ; une ligne hors plan est ignorée.
+- `cassini plan --inventory` passe par la vue (ids courts montrés, plan retraduit) ; `duree_reel` compose phrase par phrase par la vue, ancrée, imprime la taille de la vue, lit un inventaire brut de QGIS et `CASSINI_TEST_SENTENCES`.
+- Mesures hors dépôt (`../donnees-test-cassini/annecy/essais-5-48/`) : inventaire réel du gros projet (63 couches) lu par QGIS en 39,1 s, vues de 8 386 à 10 995 caractères ; phrase de démo : ZONE_URBA détaillée.
+- Régénération (graine 1, 8 600) : `gros_projet` 2 033 gardés (23,6 %), 443 écartés (prompt trop long surtout, projets sous le seuil vus en entier) ; `forme_inventaire.rs`, `recouvrement.rs` et les tests de familles verts, graines inchangées. Parité au jeton avec le vrai tokeniseur : 300 prompts (3 756 coupes) et 429 redemandes identiques.
+
 ## Plan Change Log
 
 ## Review Triage Log
+
+Passe 1 (thorough demandé). Les quatre lentilles n'ont pas pu être lancées en sous-agents (contrôle automatique : un hook réécrit chaque appel `Agent`) ; relecture faite par l'orchestrateur, lentille par lentille, donc non indépendante : à refaire en sessions séparées si le propriétaire le souhaite. Verdicts : high 0, medium 1, low 8, false 1, maybe-false 0.
+
+| Constat | Verdict | Sort | Preuve / action |
+|---|---|---|---|
+| Aucun test ne gardait le plan de la recomposition quand il est valide (seuls question et erreur testés) | low | patch | test `the_plan_of_the_recomposition_is_kept_and_shown_like_a_first_one` |
+| Le branchement journal → vue (`last_plan` lu par `propose`) n'était testé qu'en unités séparées | low | patch | test `the_layer_cited_by_the_last_plan_of_the_journal_is_detailed` |
+| `struct Read` dans `plans.rs` se lit comme le trait `std::io::Read` | low | patch | renommée `Snapshot` |
+| Doc de l'entraînement : chiffres de 5.47 (2 139 gros projets, 24,9 %) périmés après régénération | low | patch | chiffres de 48 ajoutés, longueurs à remesurer en 5.49 |
+| La décision 2 gelée dit « 2 signes », le code en admet 1 | low | patch | écart voulu et mesuré, consigné ci-dessus pour le propriétaire |
+| Gros projets du générateur sous 17 000 caractères vus en entier, souvent écartés par la borne de 12 900 : le modèle ne voit pas de projet moyen entre ≈ 11 500 et 17 000 caractères, alors qu'Annecy en fait 16 597 | medium | defer | deferred-work (pour 5.49) ; le modèle installé tient pourtant Annecy à 17/20 |
+| Une redemande dont la couche réclamée ne tient pas au budget recompose pour rien | low | reject | index ≤ 7 000, couche plafonnée à 3 000, budget 11 000 : ne se produit qu'au-delà d'environ 150 couches |
+| Un plan qui commence par un `layer.open_raster` explicite se fond dans le plan précédent pour `last_plan` | low | reject | seulement plus de couches détaillées, sans autre effet ; règle simple gardée |
+| `cassini plan --inventory` ne reconnaît pas un inventaire brut de QGIS (seuls les essais le font) | low | reject | l'usage documenté est la forme apprise, comme avant 48 |
+| Recomposition sur un plan qui cite `step:9` (étape absente) | false | reject | `layer_of` rend `None`, pas de recomposition (test `a_reduced_layer_taken_as_geometry_only_does_not_recompose`) |

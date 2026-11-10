@@ -980,3 +980,6 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-vue-triee-branchee-a-la-composition-cache-place-a-la-fin-de-plan.md`
   summary: sur le projet de 63 couches, la première lecture de `project.inventory` par QGIS prend 39 s (Annecy : 30 s) : elle s'ajoute à la première phrase de la session.
   evidence: `inventaire-qgis.py` du 2026-11-10, hors dépôt ; c'est l'inventaire en tâche de fond à l'ouverture déjà reporté (mémoire du 2026-11-08).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-vue-triee-branchee-a-la-composition-cache-place-a-la-fin-de-plan.md`
+  summary: Pour 5.49 — depuis le seuil de 17 000, les gros projets du générateur dont les couches de l'utilisateur tiennent sous ce seuil sont vus en entier et, au-delà de 12 900 caractères de prompt, écartés (443 au jeu par défaut) : le modèle ne voit aucun projet moyen entre ≈ 11 500 et 17 000 caractères, la taille d'Annecy.
+  evidence: régénération du 2026-11-10 (graine 1, 8 600) : `gros_projet` 2 033 gardés (23,6 %, la barre de 23 % tient de peu), 443 écartés ; à trancher avant l'entraînement : borne de prompt plus haute pour ces exemples (`MAX_LENGTH`), ou remplissages plus légers.
