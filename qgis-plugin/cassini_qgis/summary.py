@@ -535,13 +535,20 @@ def _layer_remove(lang, p, r, names):
     return texts.tr(lang, key, layer=names.layer(p.get("layer_id")))
 
 
+def _grid(p):
+    """Suffixe des textes d'un gisement (`north` vaut `grid`) ; affichage seul (AD-5)."""
+    return "_grid" if p.get("north") == "grid" else ""
+
+
 def _distance_azimuth(lang, p, r, names):
-    """Distance et azimuts rendus ; affichage seul (AD-5)."""
+    """Distance et azimuts rendus, « gisement » pour le nord du quadrillage ; affichage seul
+    (AD-5)."""
+    grid = _grid(p)
     if not r:
-        return texts.tr(lang, "sum_geo_measure")
+        return texts.tr(lang, "sum_geo_measure" + grid)
     return texts.tr(
         lang,
-        "sum_geo_measured",
+        "sum_geo_measured" + grid,
         distance=_length(lang, r.get("distance")),
         azimuth=_angle(lang, r.get("azimuth")),
         back=_angle(lang, r.get("back_azimuth")),
@@ -549,13 +556,16 @@ def _distance_azimuth(lang, p, r, names):
 
 
 def _destination_point(lang, p, r, names):
+    grid = _grid(p)
     distance = _length(lang, p.get("distance"))
     azimuth = _angle(lang, p.get("azimuth"))
     if not r:
-        return texts.tr(lang, "sum_geo_destination", distance=distance, azimuth=azimuth)
+        return texts.tr(
+            lang, "sum_geo_destination" + grid, distance=distance, azimuth=azimuth
+        )
     return texts.tr(
         lang,
-        "sum_geo_reached",
+        "sum_geo_reached" + grid,
         distance=distance,
         azimuth=azimuth,
         point=_point(lang, r.get("point")),

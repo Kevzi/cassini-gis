@@ -300,6 +300,13 @@ pub static FAMILIES: &[Family] = &[
         weight: 4,
         make: point_projete,
     },
+    // Gisement (10.28) : azimut compté depuis le nord du quadrillage UTM, `north: "grid"`, sur
+    // les deux commandes ; `utm_zone` seulement si la zone du quadrillage est écrite.
+    Family {
+        name: "gisement",
+        weight: 3,
+        make: gisement,
+    },
     Family {
         name: "recoupement",
         weight: 3,
@@ -6347,6 +6354,139 @@ fn point_projete(rng: &mut Rng) -> Option<Example> {
     Some(example("point_projete", b, rng, request, calls(list)))
 }
 
+/// La zone du quadrillage écrite dans la demande, une fois sur quatre : la zone normale de la
+/// région ou une voisine (31 à l'ouest, 32 à l'est). Rend la tournure et la zone.
+fn grid_zone_words(rng: &mut Rng, east: bool) -> Option<(String, u64)> {
+    if !rng.chance(1, 4) {
+        return None;
+    }
+    let zone = if east {
+        *rng.pick(&[32u64, 32, 31, 33])
+    } else {
+        *rng.pick(&[31u64, 31, 30, 32])
+    };
+    let text = match rng.below(3) {
+        0 => format!(" dans le quadrillage de la zone {zone}"),
+        1 => format!(" (quadrillage UTM zone {zone})"),
+        _ => format!(", quadrillage du fuseau {zone}"),
+    };
+    Some((text, zone))
+}
+
+/// « Donne le gisement du point … au point … », « Implante un point à 800 m du point …, au
+/// gisement 250 gr » : tournures de géomètre (gisement, nord du quadrillage, quadrillage UTM),
+/// grades fréquents → `geo.distance_azimuth` ou `geo.destination_point` avec `north: "grid"` ;
+/// `utm_zone` seulement si la zone du quadrillage est écrite (10.28).
+fn gisement(rng: &mut Rng) -> Option<Example> {
+    let b = Builder::new();
+    let east = rng.chance(1, 3);
+    let gon = rng.chance(1, 2);
+    let zone = grid_zone_words(rng, east);
+    let zone_text = zone.as_ref().map(|(t, _)| t.as_str()).unwrap_or("");
+    let mut list = Vec::new();
+    let (body, q) = if rng.chance(1, 2) {
+        let a = wgs84_or_utm(rng, east);
+        let c = wgs84_or_utm(rng, east);
+        if a.point == c.point {
+            return None;
+        }
+        let (pa, pc) = (&a.place, &c.place);
+        let (mut body, q) = match rng.below(5) {
+            0 => (
+                format!(
+                    "Donne le gisement et la distance {} {}",
+                    de_np(pa),
+                    a_np(pc)
+                ),
+                false,
+            ),
+            1 => (
+                format!("Quel est le gisement {} vers {pc}", de_np(pa)),
+                true,
+            ),
+            2 => (format!("Calcule le gisement entre {pa} et {pc}"), false),
+            3 => (
+                format!(
+                    "Calcule l'azimut {} {} en nord du quadrillage",
+                    de_np(pa),
+                    a_np(pc)
+                ),
+                false,
+            ),
+            _ => (
+                format!(
+                    "Mesure distance et azimut par rapport au quadrillage UTM entre {pa} et {pc}"
+                ),
+                false,
+            ),
+        };
+        body.push_str(zone_text);
+        let mut params = json!({"from": a.point, "to": c.point, "north": "grid"});
+        if gon {
+            body.push_str(pick_str(
+                rng,
+                &[", en grades", " (en grades)", ", résultat en gon"],
+            ));
+            params["unit"] = json!("gon");
+        } else if rng.chance(1, 4) {
+            body.push_str(pick_str(rng, &[", en degrés", " (en degrés)"]));
+            params["unit"] = json!("deg");
+        }
+        if let Some((_, z)) = zone {
+            params["utm_zone"] = json!(z);
+        }
+        list.push(json!({"command": "geo.distance_azimuth", "params": params}));
+        (body, q)
+    } else {
+        let from = wgs84_or_utm(rng, east);
+        let (az, az_text) = azimuth_words(rng, gon, 10, 350);
+        let (d, d_text) = geo_distance(rng);
+        let p = &from.place;
+        let de_p = de_np(p);
+        let (mut body, q) = match rng.below(5) {
+            0 => (
+                format!("Quel point atteint-on à {d_text} {de_p}, gisement {az_text}"),
+                true,
+            ),
+            1 => (
+                format!("Implante un point à {d_text} {de_p}, au gisement {az_text}"),
+                false,
+            ),
+            2 => (
+                format!("Depuis {p}, avance de {d_text} au gisement de {az_text}"),
+                false,
+            ),
+            3 => (
+                format!(
+                    "Calcule le point situé à {d_text} {de_p}, azimut {az_text} en nord du quadrillage"
+                ),
+                false,
+            ),
+            _ => (
+                format!(
+                    "Projette un point à {d_text} {de_p} à {az_text} par rapport au quadrillage UTM"
+                ),
+                false,
+            ),
+        };
+        body.push_str(zone_text);
+        let mut params = json!({"from": from.point, "azimuth": az, "distance": d,
+            "north": "grid"});
+        if let Some((_, z)) = zone {
+            params["utm_zone"] = json!(z);
+        }
+        list.push(json!({"command": "geo.destination_point", "params": params}));
+        if rng.chance(1, 4) {
+            let (text, call) = mgrs_result(rng, 1);
+            body.push_str(&text);
+            list.push(call);
+        }
+        (body, q)
+    };
+    let request = finish(rng, &body, q, false);
+    Some(example("gisement", b, rng, request, calls(list)))
+}
+
 /// « Recoupe la visée du point … à l'azimut 40° avec celle du point … à l'azimut 310° » :
 /// `geo.bearing_intersection`, chaque station avec son azimut écrit (unité comprise) ;
 /// résultat demandé en MGRS → `coord.convert` sur `step:1.point`.
@@ -7660,6 +7800,57 @@ mod tests {
     }
 
     #[test]
+    fn a_grid_bearing_says_grid_and_names_its_zone_only_when_written() {
+        let examples = geometry_examples(gisement);
+        let (mut both, mut zones, mut grads) = (HashSet::new(), 0, 0);
+        for e in &examples {
+            let step = call(e, 0);
+            let p = &step["params"];
+            assert_eq!(p["north"], "grid", "{}", e.request);
+            both.insert(step["command"].as_str().unwrap().to_string());
+            let r = e.request.to_lowercase();
+            assert!(
+                r.contains("gisement") || r.contains("quadrillage"),
+                "{}",
+                e.request
+            );
+            match p.get("utm_zone") {
+                Some(z) => {
+                    zones += 1;
+                    let z = z.as_u64().unwrap();
+                    assert!(
+                        r.contains(&format!("quadrillage de la zone {z}"))
+                            || r.contains(&format!("quadrillage utm zone {z}"))
+                            || r.contains(&format!("fuseau {z}")),
+                        "{}",
+                        e.request
+                    );
+                }
+                None => assert!(
+                    !r.contains("quadrillage de la zone") && !r.contains("fuseau"),
+                    "{}",
+                    e.request
+                ),
+            }
+            if step["command"] == "geo.destination_point" {
+                written_angle(e, &p["azimuth"]);
+                written(e, &p["distance"]["value"]);
+                grads += usize::from(p["azimuth"]["unit"] == "gon");
+            } else {
+                grads += usize::from(p["unit"] == "gon");
+            }
+        }
+        assert_eq!(both.len(), 2, "{both:?}");
+        assert!(zones > 0 && grads > examples.len() / 4, "{zones} {grads}");
+        let points: Vec<Example> = examples
+            .iter()
+            .filter(|e| commands(e)[0] == "geo.destination_point")
+            .cloned()
+            .collect();
+        mgrs_tail(&points, "geo.destination_point");
+    }
+
+    #[test]
     fn the_geometry_steps_of_the_core_run_without_error() {
         // Les commandes de géométrie du noyau, exécutées sur chaque exemple : un recoupement
         // dont les visées ne se coupent pas en avant, ou un point projeté hors de la grille UTM,
@@ -7667,6 +7858,7 @@ mod tests {
         let registry = cassini_core::registry::Registry::standard();
         for make in [
             point_projete as fn(&mut Rng) -> Option<Example>,
+            gisement,
             recoupement,
             distance_azimut,
             conversion_coordonnees,

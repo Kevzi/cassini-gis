@@ -336,6 +336,68 @@ fn an_unknown_command_fails_by_name_and_executes_nothing() {
 }
 
 #[test]
+fn an_old_geometry_journal_and_a_grid_bearing_replay_identically() {
+    // Journal écrit avant le gisement (epic 10, entrée 28) : ni `north` dans les paramètres, ni
+    // `north` ni `convergence` dans les résultats, valeurs rendues par le noyau d'alors.
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    hand_journal(
+        &project,
+        &[
+            json!({"step":1,"id":"geo.distance_azimuth","params":{"from":{"x":448251.0,"y":5411750.0,"epsg":32631},"to":{"x":2.3522,"y":48.8566,"epsg":4326},"unit":"gon"},"inputs":[],"result":{"azimuth":{"unit":"gon","value":99.903482441},"back_azimuth":{"unit":"gon","value":299.951752024},"distance":{"unit":"m","value":4233.225}}}),
+            json!({"step":2,"id":"geo.destination_point","params":{"from":{"x":448251.0,"y":5411750.0,"epsg":32631},"azimuth":{"value":100,"unit":"gon"},"distance":{"value":1500,"unit":"m"}},"inputs":[],"result":{"point":{"epsg":32631,"x":449750.383,"y":5411736.096}}}),
+        ],
+    );
+    let (report, _) = replay_of(&registry, &project).unwrap();
+    assert_eq!(
+        report,
+        ReplayReport {
+            steps: 2,
+            identical: true
+        }
+    );
+    let _ = fs::remove_dir_all(dir);
+
+    // Journal neuf : gisements, zone imposée comprise.
+    let (dir, project, _) = temp_project();
+    let mut s = Session::open(&registry, &project).unwrap();
+    let from = json!({"x": 650000.0, "y": 5400000.0, "epsg": 32631});
+    let out = s
+        .call(
+            "geo.distance_azimuth",
+            json!({"from": from, "to": {"x": 4.9, "y": 48.95, "epsg": 4326}, "north": "grid"}),
+        )
+        .unwrap();
+    assert_eq!(out["north"], "grid");
+    s.call(
+        "geo.destination_point",
+        json!({"from": from, "azimuth": {"value": 250, "unit": "gon"},
+            "distance": {"value": 800, "unit": "m"}, "north": "grid", "utm_zone": 32}),
+    )
+    .unwrap();
+    let l = lines(&s);
+    assert_eq!(l[0]["params"]["north"], "grid");
+    // Un résultat de plus de 200 octets est journalisé par son empreinte : le rejeu la compare.
+    assert!(
+        out["convergence"]["value"]
+            .as_f64()
+            .is_some_and(|c| c > 0.0),
+        "{out}"
+    );
+    assert_eq!(l[1]["params"]["utm_zone"], 32);
+    let (report, _) = replay_of(&registry, &project).unwrap();
+    assert_eq!(
+        report,
+        ReplayReport {
+            steps: 2,
+            identical: true
+        }
+    );
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn a_qgis_command_without_executor_is_unavailable_on_replay() {
     let (dir, project, _) = temp_project();
     let registry = Registry::standard();

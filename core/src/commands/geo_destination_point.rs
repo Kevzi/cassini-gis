@@ -4,14 +4,19 @@
 //! Le point d'arrivée est rendu dans le système du départ : WGS84, ou la même zone UTM
 //! (l'hémisphère suit la latitude) ; à plus d'une zone de celle du départ, il est refusé
 //! (`coord.out_of_range`) au lieu d'être rendu dans une zone que la demande n'a pas choisie.
+//!
+//! Avec `north: "grid"` (AD-31 amendée), l'azimut d'entrée est un gisement : l'azimut vrai de
+//! départ est ce gisement augmenté de la convergence des méridiens en `from`, dans le
+//! quadrillage UTM choisi (`geodesy::grid_convergence`, Karney 2011).
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::analysis_buffer::Distance;
-use super::geo_point::{read_point, render_point};
-use crate::angle::Angle;
+use super::geo_point::{check_zone_used, grid_zone, read_point, render_point, utm_zone_param};
+use crate::angle::{Angle, North};
 use crate::geodesic;
+use crate::geodesy;
 use crate::point::Point;
 use crate::registry::{Command, CommandFailure, CommandSpec, Registration, RunsIn};
 
@@ -23,10 +28,17 @@ const ID: &str = "geo.destination_point";
 pub struct GeoDestinationPointParams {
     /// Point de départ, écrit dans la demande (EPSG 4326, 326NN ou 327NN).
     pub from: Point,
-    /// Azimut de départ, nord vrai, sens horaire.
+    /// Azimut de départ, depuis le nord choisi (nord vrai par défaut), sens horaire.
     pub azimuth: Angle,
     /// Distance géodésique à parcourir.
     pub distance: Distance,
+    /// Nord de l'azimut : true (nord vrai) ou grid (gisement, nord du quadrillage UTM), seulement si la demande le nomme.
+    #[serde(default)]
+    pub north: Option<North>,
+    /// Zone UTM du quadrillage, avec north grid et seulement si la demande la nomme.
+    #[serde(default, deserialize_with = "utm_zone_param")]
+    #[schemars(range(min = 1, max = 60))]
+    pub utm_zone: Option<u8>,
 }
 
 /// Résultat de `geo.destination_point`.
@@ -35,6 +47,12 @@ pub struct GeoDestinationPointOutput {
     /// Point d'arrivée, dans la zone UTM de `from` (l'hémisphère suit la latitude), ou en
     /// WGS84 si `from` l'est.
     pub point: Point,
+    /// Nord employé, présent si la demande l'a nommé.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub north: Option<North>,
+    /// Convergence des méridiens au départ, dans l'unité de l'azimut, présente pour north grid.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub convergence: Option<Angle>,
 }
 
 /// `geo.destination_point` : commande du noyau.
@@ -47,8 +65,8 @@ impl Command for GeoDestinationPoint {
     fn spec() -> CommandSpec {
         CommandSpec::new::<GeoDestinationPointParams, GeoDestinationPointOutput>(
             ID,
-            "Point atteint depuis un point de départ en WGS84 (EPSG:4326, x longitude, y latitude) ou UTM (EPSG:326NN, 327NN), à un azimut (nord vrai, sens horaire) et une distance géodésiques, sur l'ellipsoïde WGS84 ; rendu dans la zone UTM du départ (l'hémisphère suit la latitude) ou en WGS84 si le départ l'est.",
-            "Point reached from a start point in WGS84 (EPSG:4326, x longitude, y latitude) or UTM on WGS84 (EPSG:326NN, 327NN), along a geodesic at an azimuth (true north, clockwise) and a distance, on the WGS84 ellipsoid (Karney); returned in the UTM zone of the start point (hemisphere following the latitude), or in WGS84 if the start point is. A point in another system goes through data.transform_point first, an MGRS reference through coord.convert.",
+            "Point atteint depuis un point de départ en WGS84 (EPSG:4326, x longitude, y latitude) ou UTM (EPSG:326NN, 327NN), à un azimut (nord vrai, sens horaire) et une distance géodésiques, sur l'ellipsoïde WGS84 ; rendu dans la zone UTM du départ (l'hémisphère suit la latitude) ou en WGS84 si le départ l'est. Avec north grid, l'azimut est un gisement, compté depuis le nord du quadrillage UTM de from (ou de utm_zone).",
+            "Point reached from a start point in WGS84 (EPSG:4326, x longitude, y latitude) or UTM on WGS84 (EPSG:326NN, 327NN), along a geodesic at an azimuth (true north, clockwise) and a distance, on the WGS84 ellipsoid (Karney); returned in the UTM zone of the start point (hemisphere following the latitude), or in WGS84 if the start point is. With north grid, the azimuth is a grid bearing, from the grid north of the UTM zone of from (or of utm_zone). A point in another system goes through data.transform_point first, an MGRS reference through coord.convert.",
         )
         .runs_in(RunsIn::Core)
         .cancellable(false)
@@ -56,6 +74,9 @@ impl Command for GeoDestinationPoint {
             "azimuth": {"value": 45}, "distance": {"value": 10, "unit": "km"}}))
         .example(serde_json::json!({"from": {"x": 448251.0, "y": 5411750.0, "epsg": 32631},
             "azimuth": {"value": 100, "unit": "gon"}, "distance": {"value": 1500, "unit": "m"}}))
+        .example(serde_json::json!({"from": {"x": 448251.0, "y": 5411750.0, "epsg": 32631},
+            "azimuth": {"value": 250, "unit": "gon"}, "distance": {"value": 800, "unit": "m"},
+            "north": "grid"}))
         .tests(&[
             "geographiclib_direct_references_are_found",
             "a_utm_start_gives_a_point_in_its_zone",
@@ -64,14 +85,31 @@ impl Command for GeoDestinationPoint {
             "invalid_angles_and_distances_are_refused",
             "lambert_93_start_names_data_transform_point",
             "geo_destination_point_runs_in_the_core_and_its_point_is_reusable",
+            "a_grid_bearing_is_turned_into_a_true_azimuth_at_the_start",
+            "a_grid_bearing_and_its_inverse_agree",
+            "the_grid_zone_rules_hold_for_a_destination",
         ])
     }
 
     fn run(&self, params: GeoDestinationPointParams) -> Result<GeoDestinationPointOutput, CommandFailure> {
+        check_zone_used(params.north, params.utm_zone)?;
         let (lat, lon) = read_point(&params.from, ID)?;
-        let end = geodesic::direct(lat, lon, params.azimuth.degrees(), params.distance.metres());
+        let gamma = match params.north {
+            Some(North::Grid) => {
+                let zone = grid_zone(&params.from, lat, lon, params.utm_zone)?;
+                Some(geodesy::grid_convergence(lat, lon, zone))
+            }
+            _ => None,
+        };
+        let azimuth = match gamma {
+            Some(g) => params.azimuth.degrees() + g,
+            None => params.azimuth.degrees(),
+        };
+        let end = geodesic::direct(lat, lon, azimuth, params.distance.metres());
         Ok(GeoDestinationPointOutput {
             point: render_point(end.lat, end.lon, params.from.epsg)?,
+            north: params.north,
+            convergence: gamma.map(|g| Angle::signed(g, params.azimuth.unit)),
         })
     }
 }
@@ -248,5 +286,83 @@ mod tests {
         .unwrap();
         let checked = registry.check_plan(&plan);
         assert!(checked.is_ok(), "{checked:?}");
+    }
+
+    // -- gisement (epic 10, entrée 28) ---------------------------------------------------------
+
+    #[test]
+    fn a_grid_bearing_is_turned_into_a_true_azimuth_at_the_start() {
+        let start = json!({"x": 650000.0, "y": 5400000.0, "epsg": 32631});
+        let (lat, lon) = crate::geodesy::from_utm(&crate::geodesy::Utm { zone: 31,
+            north: true, easting: 650000.0, northing: 5400000.0 });
+        let gamma = crate::geodesy::grid_convergence(lat, lon, 31);
+        // Absent : le point seul, comme aujourd'hui ; `true` écrit : même point, plus `north`.
+        let plain = reach(json!({"from": start, "azimuth": {"value": 40},
+            "distance": {"value": 2, "unit": "km"}})).unwrap();
+        let keys: Vec<&String> = plain.as_object().unwrap().keys().collect();
+        assert_eq!(keys, ["point"]);
+        let written = reach(json!({"from": start, "azimuth": {"value": 40},
+            "distance": {"value": 2, "unit": "km"}, "north": "true"})).unwrap();
+        assert_eq!(written["point"], plain["point"]);
+        assert_eq!(written["north"], "true");
+        assert!(written.get("convergence").is_none());
+        // Gisement 40° : azimut vrai 40° + γ ; en grades, la convergence est rendue en grades.
+        for (azimuth, factor) in [(json!({"value": 40}), 1.0),
+            (json!({"value": 40.0 / 0.9, "unit": "gon"}), 10.0 / 9.0)] {
+            let grid = reach(json!({"from": start, "azimuth": azimuth,
+                "distance": {"value": 2, "unit": "km"}, "north": "grid"})).unwrap();
+            let truth = reach(json!({"from": start, "azimuth": {"value": 40.0 + gamma},
+                "distance": {"value": 2, "unit": "km"}})).unwrap();
+            assert_eq!(grid["north"], "grid");
+            let c = grid["convergence"]["value"].as_f64().unwrap();
+            assert!((c - gamma * factor).abs() <= 1e-9, "{grid}");
+            let (x, y) = (grid["point"]["x"].as_f64().unwrap(), grid["point"]["y"].as_f64().unwrap());
+            let (tx, ty) = (truth["point"]["x"].as_f64().unwrap(),
+                truth["point"]["y"].as_f64().unwrap());
+            assert!((x - tx).abs() <= 1e-3 && (y - ty).abs() <= 1e-3, "{grid} / {truth}");
+        }
+        // Le gisement de 0 suit le quadrillage : le point garde son abscisse à quelques
+        // centimètres près, alors que le nord vrai la déplace.
+        let north = reach(json!({"from": start, "azimuth": {"value": 0},
+            "distance": {"value": 2, "unit": "km"}, "north": "grid"})).unwrap();
+        assert!((north["point"]["x"].as_f64().unwrap() - 650000.0).abs() < 0.1, "{north}");
+        let truth = reach(json!({"from": start, "azimuth": {"value": 0},
+            "distance": {"value": 2, "unit": "km"}})).unwrap();
+        assert!((truth["point"]["x"].as_f64().unwrap() - 650000.0).abs() > 10.0, "{truth}");
+    }
+
+    #[test]
+    fn a_grid_bearing_and_its_inverse_agree() {
+        let from = wgs84(6.9, 48.3);
+        let out = reach(json!({"from": from, "azimuth": {"value": 130, "unit": "gon"},
+            "distance": {"value": 7.5, "unit": "km"}, "north": "grid"})).unwrap();
+        let back = Registry::standard()
+            .call("geo.distance_azimuth", json!({"from": from, "to": out["point"],
+                "north": "grid", "unit": "gon"}))
+            .unwrap();
+        let azimuth = back["azimuth"]["value"].as_f64().unwrap();
+        assert!((azimuth - 130.0).abs() <= 1e-6, "{back}");
+        assert_eq!(back["convergence"], out["convergence"]);
+        assert_eq!(serde_json::from_str::<Value>(&out.to_string()).unwrap(), out);
+    }
+
+    #[test]
+    fn the_grid_zone_rules_hold_for_a_destination() {
+        let from = wgs84(6.5, 48.0);
+        let base = json!({"from": from, "azimuth": {"value": 10},
+            "distance": {"value": 1, "unit": "km"}});
+        let with = |extra: Value| {
+            let mut p = base.clone();
+            p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            reach(p)
+        };
+        let normal = with(json!({"north": "grid"})).unwrap();
+        let imposed = with(json!({"north": "grid", "utm_zone": 31})).unwrap();
+        assert_ne!(normal["convergence"], imposed["convergence"]);
+        assert_eq!(with(json!({"north": "grid", "utm_zone": 34})).unwrap_err().code(),
+            "coord.out_of_range");
+        assert_eq!(with(json!({"utm_zone": 32})).unwrap_err().code(), "geo.zone_unused");
+        assert_eq!(with(json!({"north": "magnetic"})).unwrap_err().code(),
+            "registry.invalid_params");
     }
 }

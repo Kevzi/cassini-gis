@@ -3,14 +3,14 @@ title: 'Gisement : azimut compté depuis le nord du quadrillage'
 type: 'feature'
 ticket: '28'
 created: '2026-11-10'
-status: 'in-progress'
+status: 'built'
 baseline_revision: '624835c56a8e277651a0ab35e3f21b660c8cb50b'
 route: 'full'
 route_source: 'auto'
 risk: 'medium'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: [quick]
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-cassini-mvp/change-complements-geometrie-et-mise-en-page/change-complements-geometrie-et-mise-en-page.md'
@@ -75,13 +75,13 @@ générateur ; réordonner `FAMILIES`.
 ## Tasks & Acceptance
 
 **Execution :**
-- [ ] `core/src/geodesy.rs` -- convergence d'après Karney 2011 + tests contre TMcoords.dat (Karney, Zenodo 10.5281/zenodo.32470, CC0), aux deux hémisphères et des deux côtés du méridien central (symétries).
-- [ ] `core/src/angle.rs`, `geo_point.rs` -- angle signé, `North`, choix du quadrillage.
-- [ ] `geo_distance_azimuth.rs`, `geo_destination_point.rs` -- paramètres, sorties, descriptions, tests de la matrice (deg et gon).
-- [ ] `core/src/journal/tests.rs` -- rejeu d'un journal ancien et d'un journal `grid`.
-- [ ] catalogue -- fiches passées au livré de 28, `core/tests/catalogue.rs` vert.
-- [ ] `training/` -- famille `gisement`, `check_plan` et garde-fou des coordonnées verts, `recouvrement` vert.
-- [ ] extension -- résumé du gisement et son test.
+- [x] `core/src/geodesy.rs` -- convergence d'après Karney 2011 + tests contre TMcoords.dat (Karney, Zenodo 10.5281/zenodo.32470, CC0), aux deux hémisphères et des deux côtés du méridien central (symétries).
+- [x] `core/src/angle.rs`, `geo_point.rs` -- angle signé, `North`, choix du quadrillage.
+- [x] `geo_distance_azimuth.rs`, `geo_destination_point.rs` -- paramètres, sorties, descriptions, tests de la matrice (deg et gon).
+- [x] `core/src/journal/tests.rs` -- rejeu d'un journal ancien et d'un journal `grid`.
+- [x] catalogue -- fiches passées au livré de 28, `core/tests/catalogue.rs` vert.
+- [x] `training/` -- famille `gisement`, `check_plan` et garde-fou des coordonnées verts, `recouvrement` vert.
+- [x] extension -- résumé du gisement et son test.
 
 **Acceptance Criteria :**
 - Given un point de TMcoords.dat, when la convergence est calculée, then elle égale la valeur publiée à 1e-12° près.
@@ -116,9 +116,32 @@ commandes, `utm_zone` seulement si la zone est écrite ; aucune phrase recopiée
 
 ## Implementation Notes
 
+- Convergence : `geodesy::tm_convergence` / `grid_convergence` ; quinze lignes de TMcoords.dat
+  (n° 19 à 784) vertes à 1e-12°, symétries comprises ; ajout demandé en cours de route : la
+  table 3d du rapport technique du WMM2025 (80° S, 120° O, zones 10 et 11, ±2,9545046801°),
+  verte à 1e-10°.
+- `utm_zone` : le lecteur de `coord.convert` déplacé dans `geo_point::utm_zone_param` (même
+  message), partagé par les trois commandes.
+- Correction de corde mesurée par le test : au plus ≈ 0,76″ pour 1 km à 300 km du méridien
+  central (seize directions), chiffrée à la fiche.
+- Journal : un résultat de plus de 200 octets est journalisé par son empreinte ; le test du
+  journal `grid` vérifie la convergence sur le résultat rendu, et le rejeu compare l'empreinte.
+- Générateur : famille `gisement`, poids 3, après `point_projete` ; jeu à 8 600, graines
+  inchangées.
+
 ## Plan Change Log
 
 ## Review Triage Log
+
+Passe 1 (lentille `quick`, 2026-11-10) — high 0, medium 1, low 4, false 0, maybe-false 0.
+
+| Constat | Verdict | Route | Preuve / action |
+|---|---|---|---|
+| `check_in_grid` : dans la bande X (31X/33X/35X/37X) et en 32V, deux points voisins de part et d'autre d'une limite ont des zones normales à deux numéros d'écart ; `north: grid` refuse à tort l'arrivée | medium | patch | vérifié : `utm_zone(75, 20.9)` = 33, `utm_zone(75, 21.1)` = 35, `zone_distance` = 2. Correctif : accepter aussi à une zone de la zone numérique simple ; test ajouté. |
+| `grid_zone` : `utm_zone` 32 ou 34 acceptée en 33X, 33 en 32V | low | rejeté | règle P3 (celle de `coord.convert`), voulue par la party ; la convergence calculée est juste pour la zone demandée. |
+| test de la famille `gisement` : `zone {z}` satisfait par le système du point (« UTM zone 31 Nord ») | low | patch | test resserré sur les tournures de la zone du quadrillage. |
+| `training/src/lib.rs` : commentaire « six familles » pour sept | low | patch | commentaire corrigé. |
+| `docs/entrainement-du-modele.md` : poids total « 324 à 342 » périmé (345 avec `gisement`) | low | patch | nombres mis à jour, 8 600 inchangé. |
 
 ## Décisions de party (2026-11-10)
 

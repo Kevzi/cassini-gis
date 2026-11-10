@@ -699,14 +699,15 @@ mod tests {
 
     #[test]
     fn the_geometry_families_of_the_default_set_cover_every_command_and_pass_the_guard() {
-        // 11.12, lot 1 : au jeu par défaut, chacune des six familles est là, chacune des cinq
+        // 11.12, lot 1 : au jeu par défaut, chacune des sept familles (dont `gisement`, 10.28) est là, chacune des cinq
         // commandes de géométrie figure dans un plan, chaque plan passe `check_plan` puis le
         // garde-fou inchangé, et aucun refus ne dit qu'aucune commande ne reprojette un point.
-        const GEOMETRY: [&str; 6] = [
+        const GEOMETRY: [&str; 7] = [
             "conversion_coordonnees",
             "reprojection_point",
             "distance_azimut",
             "point_projete",
+            "gisement",
             "recoupement",
             "terrain_autre_systeme",
         ];

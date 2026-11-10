@@ -289,6 +289,37 @@ class GeoTest(unittest.TestCase):
             "Mesure de la distance et de l'azimut entre deux points.",
         )
 
+    def test_a_grid_bearing_says_gisement(self):
+        grid = dict(MEASURE, north="grid")
+        out = dict(MEASURE_OUT, north="grid",
+                   convergence={"value": 1.2, "unit": "deg"})
+        self.assertEqual(
+            say("geo.distance_azimuth", grid, out),
+            "Distance géodésique : 660,504 km, gisement 157,9574°, contre-gisement 340,1°.",
+        )
+        self.assertEqual(
+            say("geo.distance_azimuth", grid, out, lang="en"),
+            "Geodesic distance: 660.504 km, grid bearing 157.9574°, back grid bearing 340.1°.",
+        )
+        self.assertEqual(
+            say("geo.distance_azimuth", grid),
+            "Mesure de la distance et du gisement entre deux points.",
+        )
+        # `north: "true"` écrit reste un azimut.
+        self.assertEqual(
+            say("geo.distance_azimuth", dict(MEASURE, north="true"), MEASURE_OUT),
+            "Distance géodésique : 660,504 km, azimut 157,9574°, contre-azimut 340,1°.",
+        )
+        point = dict(DESTINATION, north="grid", utm_zone=31)
+        self.assertEqual(
+            say("geo.destination_point", point, DESTINATION_OUT),
+            "Point atteint à 1,5 km, gisement 100 gon : UTM 31N 449750 E, 5411751 N.",
+        )
+        self.assertEqual(
+            say("geo.destination_point", point, {}, lang="en"),
+            "Point at 1.5 km, grid bearing 100 gon.",
+        )
+
     def test_the_reached_point_is_shown(self):
         self.assertEqual(
             say("geo.destination_point", DESTINATION, DESTINATION_OUT),
