@@ -675,8 +675,9 @@ Depuis (entrée 2.12), la lecture reste journalisée, rejouée et comparée, mai
 le motif de l'écart nomme la couche posée par une exécution précédente et dit de rouvrir le projet
 sans l'enregistrer avant de rejouer. La sonde rejoue donc deux fois : dans la session, à titre
 indicatif (ce motif nommé y est attendu), puis après avoir rouvert la copie du projet sans
-l'enregistrer ; seul ce second rejeu compte, et il doit être identique. La mesure de référence est
-à rejouer ainsi avec un noyau de la branche.
+l'enregistrer ; seul ce second rejeu compte, et il doit être identique. Rejouée ainsi le 2026-11-10
+(même modèle, noyau de l'entrée 2.12 non installé) : **17/20**, mêmes ratés (RA07, RA09, RA13) ;
+rejeu en session : motif nommé à l'étape 1 ; **rejeu après réouverture : identique, 29 étapes**.
 
 ### Inventaires larges et jeu de 8 600 exemples (2026-11-10)
 

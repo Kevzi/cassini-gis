@@ -3,7 +3,7 @@ title: 'Rejeu en même session : une lecture du projet diverge sans dire pourquo
 type: 'bugfix'
 ticket: '12'
 created: '2026-11-10'
-status: 'in-review'
+status: 'built'
 baseline_revision: '962a1d4cabdfbd0147c2608c5c364883dbdfcf30'
 route: 'full'
 route_source: 'pinned'
@@ -60,6 +60,8 @@ context: []
 - Given la recette d'Annecy rejouée avec un noyau de la branche, when la sonde finit, then le rejeu après réouverture est `identical: true` et le score égale la mesure de référence à la variance du modèle près ; le rejeu en session imprime le motif nommé.
 
 ## Implementation Notes
+
+- Recette réelle du 2026-11-10, QGIS 3.44.15, modèle installé (`cassini-composition-4b-Q4_K_M.gguf`, par le dossier de 5.45), noyau construit sous Windows depuis la branche (`C:\ct-rejeu\release\cassini.exe`, `--features gpu`, non installé ; première construction en échec dans cmake à 16 tâches, passée avec `NUM_JOBS=4`) : **17/20**, ratés RA07, RA09, RA13 comme la mesure de référence. Rejeu en session : `replay.diverged` à l'étape 1, motif nommé (`8_data_reproject_…`, « Rouvrez le projet… »). Rejeu après réouverture : `{"steps": 29, "identical": true}`, code de sortie 0. Sortie hors dépôt : `%TEMP%\recette-2-12\sortie.txt`.
 
 ## Plan Change Log
 
