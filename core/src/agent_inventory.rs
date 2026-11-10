@@ -49,14 +49,17 @@
 //! geometry}`) de toutes les couches, stable d'une demande à l'autre pour un même état du
 //! projet, et dans `layers` le détail
 //! des couches que la demande désigne, puis des résultats et des couches cités par le dernier
-//! plan exécuté, puis des rasters, jusqu'au budget. Elle n'est pas encore branchée à la
-//! composition (ticket 5.48).
+//! plan exécuté, puis des rasters, jusqu'au budget de la vue triée. Elle est le seul chemin de
+//! composition (ticket 5.48) : `plan.propose`, `cassini plan` et les mesures de `ai/tests` lui
+//! passent la demande ; le noyau y ajoute le dernier plan lu dans le journal, et, pour une
+//! redemande élargie, les couches à détailler en plus. L'IA externe, elle, lit `project.inventory`
+//! brut (AD-29).
 
 mod sorted_view;
 
 pub use sorted_view::{
-    sorted_view, LastPlan, ViewLimits, DETAIL_MAX_CHARS, DETAIL_MAX_FIELDS, INDEX_BUDGET_CHARS,
-    INDEX_LOW_CHARS, SORT_THRESHOLD_CHARS,
+    sorted_view, sorted_view_learned, LastPlan, ViewLimits, DETAIL_MAX_CHARS, DETAIL_MAX_FIELDS,
+    INDEX_BUDGET_CHARS, INDEX_LOW_CHARS, SORTED_BUDGET_CHARS, SORT_THRESHOLD_CHARS,
 };
 
 use std::cmp::Ordering;
@@ -430,7 +433,20 @@ pub fn model_inventory(
     budget: usize,
     low: usize,
 ) -> (ModelInventory, ShortIds) {
-    let (ordered, user_layers) = stable_order(agent_inventory(raw), work_files);
+    model_inventory_learned(agent_inventory(raw), work_files, intermediates, budget, low)
+}
+
+/// `model_inventory` depuis un inventaire déjà dans la forme apprise (`learned`, sortie
+/// d'`agent_inventory`) : ordre stable, identifiants courts, intermédiaires retirés, résultats sans
+/// valeurs, budget par paquets.
+pub fn model_inventory_learned(
+    learned: Value,
+    work_files: &[WorkFile],
+    intermediates: &HashSet<String>,
+    budget: usize,
+    low: usize,
+) -> (ModelInventory, ShortIds) {
+    let (ordered, user_layers) = stable_order(learned, work_files);
     let ids = ShortIds::of_inventory(&ordered);
     let lighter = results_without_values(
         without_intermediates(ordered, work_files, intermediates),

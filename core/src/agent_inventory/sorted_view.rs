@@ -13,20 +13,30 @@
 //! le texte parce que `serde_json`, sans sa fonction `preserve_order`, range les clés par ordre
 //! alphabétique : activer cette fonction changerait cet ordre.
 
-use std::collections::{BTreeSet, HashSet};
+use std::cmp::Reverse;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use serde_json::{json, Map, Value};
 
 use super::{
-    agent_inventory, json_chars, kept_by_batches, left_out_by_budget, model_inventory,
+    agent_inventory, json_chars, kept_by_batches, left_out_by_budget, model_inventory_learned,
     qgis_uuid_id, result_date, results_oldest_first, results_without_values, stable_order,
     without_intermediates, ModelInventory, ShortIds, WorkFile, INVENTORY_BUDGET_CHARS,
     INVENTORY_LOW_CHARS,
 };
 
-/// Seuil du tri (décision du propriétaire du 2026-11-10, à revoir en 5.48) : tant que la vue des
-/// couches de l'utilisateur tient en ce nombre de caractères, la vue reste celle d'aujourd'hui.
-pub const SORT_THRESHOLD_CHARS: usize = 9_000;
+/// Seuil du tri : tant que la vue des couches de l'utilisateur tient en ce nombre de caractères,
+/// la vue reste celle d'aujourd'hui. Décision du propriétaire du 2026-11-10 (≈ 9 000, à revoir en
+/// 5.48), revue sur la mesure (tranchée en party le 2026-11-10, à confirmer par le propriétaire) :
+/// le projet d'Annecy (démo filmée, 12 couches) fait 16 597 caractères dans QGIS ; 17 000 le laisse
+/// inchangé à l'octet, et reste le plus haut seuil sûr pour le contexte de 8 192 jetons (≈ 6 200
+/// jetons d'inventaire, consignes et réponse de 1 024 jetons comprises).
+pub const SORT_THRESHOLD_CHARS: usize = 17_000;
+
+/// Budget de toute la vue triée (ticket 5.48) : sous la borne des prompts de l'entraînement
+/// (`MAX_PROMPT_CHARS` de `training/`, 12 900 caractères avec consignes et demande), pour que le
+/// modèle ne voie jamais une vue plus longue que celles qu'il a apprises.
+pub const SORTED_BUDGET_CHARS: usize = 11_000;
 
 /// Budget de l'index réduit, en caractères de sa liste JSON. Au dépassement, les résultats les
 /// plus anciens en sortent par paquets jusqu'à `INDEX_LOW_CHARS`. Réglage, non une décision du
@@ -56,8 +66,10 @@ pub struct LastPlan {
 pub struct ViewLimits {
     /// Seuil du tri, en caractères de la vue des seules couches de l'utilisateur.
     pub threshold: usize,
-    /// Budget de toute la vue (celui de `model_inventory`).
+    /// Budget de la vue sous le seuil (celui de `model_inventory`).
     pub budget: usize,
+    /// Budget de toute la vue triée, au-dessus du seuil.
+    pub sorted_budget: usize,
     /// Seuil bas du budget, passé à `model_inventory` sous le seuil du tri.
     pub low: usize,
     /// Budget de l'index et son seuil bas.
@@ -73,6 +85,7 @@ impl Default for ViewLimits {
         ViewLimits {
             threshold: SORT_THRESHOLD_CHARS,
             budget: INVENTORY_BUDGET_CHARS,
+            sorted_budget: SORTED_BUDGET_CHARS,
             low: INVENTORY_LOW_CHARS,
             index_budget: INDEX_BUDGET_CHARS,
             index_low: INDEX_LOW_CHARS,
@@ -83,17 +96,8 @@ impl Default for ViewLimits {
 }
 
 /// La vue du modèle pour `request`, et la table des identifiants courts (faite sur toutes les
-/// couches, comme `model_inventory`).
-///
-/// Sous `limits.threshold` (taille de l'inventaire réduit aux couches de l'utilisateur, forme
-/// apprise, identifiants courts), c'est `model_inventory` tel quel. Au-dessus : `index` réduit de
-/// toutes les couches (intermédiaires retirés), dont les résultats les plus anciens sortent par
-/// paquets au-delà de `limits.index_budget` (rendus dans `left_out`) ; puis `layers`, les couches
-/// détaillées par priorité tant que toute la vue tient sous `limits.budget`, la première qui ne
-/// tient pas arrêtant l'ajout, rangées dans l'ordre stable. `user_layers` compte les couches de
-/// l'utilisateur en tête de `layers`. Pour un même état du projet, l'index ne dépend pas de la
-/// demande ; il vient avant `layers` dans le texte par l'ordre alphabétique des clés de
-/// `serde_json` (sans `preserve_order`).
+/// couches, comme `model_inventory`), depuis `raw`, la sortie de `project.inventory`. Voir
+/// `sorted_view_learned`, ici sans couche réclamée.
 pub fn sorted_view(
     raw: &Value,
     work_files: &[WorkFile],
@@ -102,7 +106,42 @@ pub fn sorted_view(
     request: &str,
     limits: &ViewLimits,
 ) -> (ModelInventory, ShortIds) {
-    let (ordered, users) = stable_order(agent_inventory(raw), work_files);
+    sorted_view_learned(
+        agent_inventory(raw),
+        work_files,
+        intermediates,
+        last_plan,
+        request,
+        &[],
+        limits,
+    )
+}
+
+/// La vue du modèle pour `request`, depuis un inventaire déjà dans la forme apprise (`learned`,
+/// sortie d'`agent_inventory`, ou fichier d'essai écrit dans cette forme).
+///
+/// Sous `limits.threshold` (taille de l'inventaire réduit aux couches de l'utilisateur, forme
+/// apprise, identifiants courts), c'est `model_inventory` tel quel. Au-dessus : `index` réduit de
+/// toutes les couches (intermédiaires retirés), dont les résultats les plus anciens sortent par
+/// paquets au-delà de `limits.index_budget` (rendus dans `left_out`) ; puis `layers`, les couches
+/// détaillées par priorité tant que toute la vue tient sous `limits.sorted_budget` (une couche qui
+/// ne tient pas est sautée, la suivante essayée), rangées dans l'ordre stable. `wanted` : les
+/// identifiants QGIS des couches que la redemande élargie réclame (ticket 5.48), détaillées avant
+/// toute autre. `user_layers` compte les couches de l'utilisateur en tête de l'**index**, c'est-à-dire
+/// toutes (l'index n'en retire jamais) : c'est là que le moteur pose son ancrage. Pour un même état
+/// du projet, l'index ne dépend pas de la demande ; il vient avant `layers` dans le texte par
+/// l'ordre alphabétique des clés de `serde_json` (sans `preserve_order`).
+pub fn sorted_view_learned(
+    learned: Value,
+    work_files: &[WorkFile],
+    intermediates: &HashSet<String>,
+    last_plan: &LastPlan,
+    request: &str,
+    wanted: &[String],
+    limits: &ViewLimits,
+) -> (ModelInventory, ShortIds) {
+    let original = learned.clone();
+    let (ordered, users) = stable_order(learned, work_files);
     let ids = ShortIds::of_inventory(&ordered);
     let lighter = results_without_values(
         without_intermediates(ordered, work_files, intermediates),
@@ -122,7 +161,13 @@ pub fn sorted_view(
     let mut users_only = shown.clone();
     users_only["layers"] = Value::Array(short[..users.min(short.len())].to_vec());
     if real.is_empty() || json_chars(&users_only) <= limits.threshold {
-        return model_inventory(raw, work_files, intermediates, limits.budget, limits.low);
+        return model_inventory_learned(
+            original,
+            work_files,
+            intermediates,
+            limits.budget,
+            limits.low,
+        );
     }
 
     // L'index : forme réduite de chaque couche, résultats les plus anciens sortis par paquets.
@@ -150,17 +195,20 @@ pub fn sorted_view(
     view["layers"] = json!([]);
     let mut size = json_chars(&view);
     let mut chosen: Vec<(usize, Value)> = Vec::new();
-    for i in detail_order(real, &in_index, work_files, last_plan, &request) {
+    for i in detail_order(real, &in_index, work_files, last_plan, wanted, &request) {
         let layer = capped(&short[i], &request, limits);
         let more = json_chars(&layer) + usize::from(!chosen.is_empty());
-        if size + more > limits.budget {
-            break;
+        if size + more > limits.sorted_budget {
+            continue;
         }
         size += more;
         chosen.push((i, layer));
     }
     chosen.sort_by_key(|(i, _)| *i);
-    let user_layers = chosen.iter().filter(|(i, _)| *i < users).count();
+    let user_layers = in_index[..users.min(in_index.len())]
+        .iter()
+        .filter(|&&k| k)
+        .count();
     view["layers"] = Value::Array(chosen.into_iter().map(|(_, l)| l).collect());
     (
         ModelInventory {
@@ -183,19 +231,24 @@ fn reduce(layer: &Value) -> Value {
     Value::Object(out)
 }
 
-/// Les rangs des couches à détailler, dans l'ordre de priorité, sans doublon : désignées par la
-/// demande (nom, puis champ, puis valeur ; à égalité, l'ordre stable), résultats du dernier plan,
-/// couches qu'il cite, rasters. Seules les couches de l'index sont candidates.
+/// Les rangs des couches à détailler, dans l'ordre de priorité, sans doublon : réclamées par la
+/// redemande (`wanted`), désignées par la demande (`layer_score` décroissant ; à égalité, l'ordre
+/// stable), résultats du dernier plan, couches qu'il cite, rasters. Seules les couches de l'index
+/// sont candidates.
 fn detail_order(
     layers: &[Value],
     in_index: &[bool],
     work_files: &[WorkFile],
     last_plan: &LastPlan,
+    wanted: &[String],
     request: &Request,
 ) -> Vec<usize> {
     let candidates = || (0..layers.len()).filter(|&i| in_index[i]);
-    let mut designated: Vec<(u8, usize)> = candidates()
-        .filter_map(|i| layer_rank(&layers[i], request).map(|rank| (rank, i)))
+    let id_of = |i: usize| layers[i].get("layer_id").and_then(Value::as_str);
+    let claimed =
+        candidates().filter(|&i| id_of(i).is_some_and(|id| wanted.iter().any(|w| w == id)));
+    let mut designated: Vec<(Reverse<Score>, usize)> = candidates()
+        .filter_map(|i| layer_score(&layers[i], request).map(|score| (Reverse(score), i)))
         .collect();
     designated.sort_unstable();
     let of_plan = candidates().filter(|&i| {
@@ -212,9 +265,8 @@ fn detail_order(
         candidates().filter(|&i| layers[i].get("kind").and_then(Value::as_str) == Some("raster"));
     let mut seen = vec![false; layers.len()];
     let mut order = Vec::new();
-    for i in designated
-        .into_iter()
-        .map(|(_, i)| i)
+    for i in claimed
+        .chain(designated.into_iter().map(|(_, i)| i))
         .chain(of_plan)
         .chain(cited)
         .chain(rasters)
@@ -227,27 +279,52 @@ fn detail_order(
     order
 }
 
-/// Rang de désignation d'une couche par la demande : 0 par son nom (nom affiché, radical de
-/// l'identifiant, radical du fichier), 1 par un nom de champ, 2 par une valeur ; `None` sinon.
-fn layer_rank(layer: &Value, request: &Request) -> Option<u8> {
+/// Score de désignation d'une couche par la demande, comparé dans cet ordre : le nombre de mots
+/// distincts de la demande qui la désignent par son nom (nom affiché, radical de l'identifiant,
+/// radical du fichier), puis le nombre de mots distincts qui la désignent de quelque façon (nom,
+/// nom de champ ou valeur), puis le nombre de ceux qui la désignent par un nom de champ au moins.
+/// Chaque mot compte une fois, à sa meilleure place. `None` si aucun mot ne la désigne.
+fn layer_score(layer: &Value, request: &Request) -> Option<Score> {
     let text = |key: &str| layer.get(key).and_then(Value::as_str).unwrap_or_default();
     let id = text("layer_id");
     let id_stem = qgis_uuid_id(id).map_or(id, |(name, _)| name);
-    if [text("name"), id_stem, file_stem(text("source"))]
-        .iter()
-        .any(|t| request.names(t))
+    // Meilleure place de chaque mot : 0 nom, 1 champ, 2 valeur.
+    let mut best: BTreeMap<String, u8> = BTreeMap::new();
+    let mut note = |words: BTreeSet<String>, place: u8| {
+        for w in words {
+            let slot = best.entry(w).or_insert(place);
+            *slot = (*slot).min(place);
+        }
+    };
+    for t in [text("name"), id_stem, file_stem(text("source"))] {
+        note(request.matched(t), 0);
+    }
+    for f in layer
+        .get("fields")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
     {
-        return Some(0);
+        note(request.matched(field_name(f)), 1);
+        note(request.value_words(f), 2);
     }
-    let fields = layer.get("fields").and_then(Value::as_array);
-    let fields = fields.into_iter().flatten();
-    if fields.clone().any(|f| request.names(field_name(f))) {
-        return Some(1);
+    if best.is_empty() {
+        return None;
     }
-    if fields.clone().any(|f| request.has_value(f)) {
-        return Some(2);
-    }
-    None
+    let count = |max: u8| best.values().filter(|&&p| p <= max).count();
+    Some(Score {
+        by_name: count(0),
+        all: best.len(),
+        by_field: count(1),
+    })
+}
+
+/// Score de désignation (`layer_score`) : l'ordre des champs est l'ordre de comparaison.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct Score {
+    by_name: usize,
+    all: usize,
+    by_field: usize,
 }
 
 /// Radical du fichier d'une source : la table `layername=<t>` quand la source en nomme une (un
@@ -322,48 +399,89 @@ fn capped(layer: &Value, request: &Request, limits: &ViewLimits) -> Value {
     out
 }
 
-/// La demande, prête à la correspondance : ses mots normalisés d'au moins 3 lettres, et ses mots
-/// bruts (pour les valeurs de 1 ou 2 signes, égales casse comprise).
+/// La demande, prête à la correspondance : ses mots normalisés d'au moins 3 lettres, ses mots
+/// bruts (pour les valeurs de 1 ou 2 signes, égales casse comprise), et ses sigles (mots écrits
+/// en capitales, d'au moins 3 signes dont 2 lettres), qui désignent aussi un mot qu'ils
+/// commencent, plus long d'au plus `SIGLE_SLACK` signe (« PLU » trouve « PLUi »).
 struct Request {
     words: BTreeSet<String>,
     raw: BTreeSet<String>,
+    sigles: BTreeSet<String>,
 }
+
+/// Signes de plus admis derrière un sigle de la demande (« PLU » → « PLUi », « PPR » → « PPRI ») ;
+/// deux laisseraient passer des mots courants (« plu » → « pluie », « plume »).
+const SIGLE_SLACK: usize = 1;
 
 impl Request {
     fn new(text: &str) -> Request {
+        let words: BTreeSet<String> = words(text)
+            .into_iter()
+            .filter(|w| w.chars().count() >= 3 && w.chars().any(char::is_alphabetic))
+            .collect();
+        let sigles = text
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| {
+                w.chars().count() >= 3
+                    && w.chars().filter(|c| c.is_alphabetic()).count() >= 2
+                    && w.chars().all(|c| !c.is_alphabetic() || c.is_uppercase())
+            })
+            .map(fold)
+            .filter(|w| words.contains(w))
+            .collect();
         Request {
-            words: words(text)
-                .into_iter()
-                .filter(|w| w.chars().count() >= 3 && w.chars().any(char::is_alphabetic))
-                .collect(),
+            words,
             raw: text
                 .split(|c: char| !c.is_alphanumeric())
                 .filter(|w| !w.is_empty() && !STOP_WORDS.contains(w))
                 .map(str::to_string)
                 .collect(),
+            sigles,
         }
     }
 
-    /// Un mot de la demande égale un mot de `text`.
-    fn names(&self, text: &str) -> bool {
-        words(text).iter().any(|w| self.words.contains(w))
+    /// Les mots de la demande qui désignent un mot de `text` : égaux, ou sigle qui le commence.
+    fn matched(&self, text: &str) -> BTreeSet<String> {
+        let mut out = BTreeSet::new();
+        for w in words(text) {
+            if self.words.contains(&w) {
+                out.insert(w);
+                continue;
+            }
+            for s in &self.sigles {
+                if w.starts_with(s.as_str()) && w.len() <= s.len() + SIGLE_SLACK {
+                    out.insert(s.clone());
+                }
+            }
+        }
+        out
     }
 
-    /// Une valeur du champ est désignée : de 1 ou 2 signes, égale à un mot brut de la demande ;
-    /// plus longue, l'un de ses mots égale un mot de la demande.
-    fn has_value(&self, field: &Value) -> bool {
+    /// Un mot de la demande égale ou commence (sigle) un mot de `text`.
+    fn names(&self, text: &str) -> bool {
+        !self.matched(text).is_empty()
+    }
+
+    /// Les mots de la demande qui désignent une valeur du champ : une valeur de 1 ou 2 signes
+    /// égale à un mot brut de la demande (ce mot compte) ; plus longue, ses mots désignés.
+    fn value_words(&self, field: &Value) -> BTreeSet<String> {
+        let mut out = BTreeSet::new();
         let values = field.get("values").and_then(Value::as_array);
-        values
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .any(|v| {
-                if v.chars().count() <= 2 {
-                    self.raw.contains(v)
-                } else {
-                    self.names(v)
+        for v in values.into_iter().flatten().filter_map(Value::as_str) {
+            if v.chars().count() <= 2 {
+                if self.raw.contains(v) {
+                    out.insert(v.to_string());
                 }
-            })
+            } else {
+                out.extend(self.matched(v));
+            }
+        }
+        out
+    }
+
+    /// Une valeur du champ est désignée.
+    fn has_value(&self, field: &Value) -> bool {
+        !self.value_words(field).is_empty()
     }
 }
 
@@ -417,6 +535,7 @@ fn fold(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent_inventory::model_inventory;
     use std::time::{Duration, UNIX_EPOCH};
 
     /// Une couche brute de QGIS, d'identifiant QGIS `<name>_<uuid>` (uuid tiré de `seed`).
@@ -528,7 +647,8 @@ mod tests {
         layers.push(qgis_layer("gare_sncf", 1, "fer.gpkg", vec![]));
         let out = view(&project(layers), "Trouve les gares", &always());
         assert_eq!(names(&out.inventory["layers"]), ["gare_sncf"]);
-        assert_eq!(out.user_layers, 1);
+        // Les quatre couches de l'utilisateur en tête de l'index : l'ancrage du cache.
+        assert_eq!(out.user_layers, 4);
         assert_eq!(out.inventory["index"].as_array().map(Vec::len), Some(4));
     }
 
@@ -686,7 +806,7 @@ mod tests {
         let request = Request::new("la gare");
         let real = stable_order(agent_inventory(&raw), &[]).0;
         let real = real["layers"].as_array().unwrap().clone();
-        let order = detail_order(&real, &[true; 4], &[], &LastPlan::default(), &request);
+        let order = detail_order(&real, &[true; 4], &[], &LastPlan::default(), &[], &request);
         assert_eq!(order, [2, 3, 1, 0]);
         // Rendues dans l'ordre stable, quelle que soit la priorité.
         let out = view(&raw, "la gare", &always());
@@ -873,8 +993,29 @@ mod tests {
                 .map(|i| real[i]["name"].as_str().unwrap().to_string())
                 .collect()
         };
-        let order = detail_order(&real, &[true; 7], &files, &plan, &Request::new("gares"));
+        let order = detail_order(
+            &real,
+            &[true; 7],
+            &files,
+            &plan,
+            &[],
+            &Request::new("gares"),
+        );
         assert_eq!(names_of(order), ["gare_sncf", "tampon_4", "plu", "mnt"]);
+        // Une couche réclamée par la redemande passe avant toute autre.
+        let wanted = [qgis_id("tampon_1", 11)];
+        let order = detail_order(
+            &real,
+            &[true; 7],
+            &files,
+            &plan,
+            &wanted,
+            &Request::new("gares"),
+        );
+        assert_eq!(
+            names_of(order),
+            ["tampon_1", "gare_sncf", "tampon_4", "plu", "mnt"]
+        );
 
         let (out, ids) = sorted_view(&raw, &files, &HashSet::new(), &plan, "gares", &always());
         // Ordre stable : l'utilisateur d'abord, puis les résultats du plus ancien au plus récent.
@@ -914,24 +1055,193 @@ mod tests {
     }
 
     #[test]
-    fn the_details_stop_at_the_first_layer_that_does_not_fit() {
+    fn a_layer_that_does_not_fit_is_skipped_and_the_next_one_tried() {
         let (raw, files) = with_results();
         let plan = LastPlan {
             results: ["4-analysis.buffer.gpkg".to_string()].into_iter().collect(),
             cited: [qgis_id("plu", 1)].into_iter().collect(),
         };
         let full = sorted_view(&raw, &files, &HashSet::new(), &plan, "gares", &always()).0;
-        // Budget qui tient la vue sans `plu` : le PLU (3e) ne tient pas, le MNT (4e) non plus,
-        // même s'il tiendrait seul.
+        // Budget qui tient la vue sans `plu` : le PLU (3e) ne tient pas, il est sauté ; le MNT
+        // (4e), plus court, tient encore.
         let plu = json_chars(&full.inventory["layers"][0]) + 1;
         let limits = ViewLimits {
-            budget: json_chars(&full.inventory) - plu,
+            sorted_budget: json_chars(&full.inventory) - plu,
             ..always()
         };
         let out = sorted_view(&raw, &files, &HashSet::new(), &plan, "gares", &limits).0;
-        assert_eq!(names(&out.inventory["layers"]), ["gare_sncf", "tampon_4"]);
-        assert!(json_chars(&out.inventory) <= limits.budget);
-        assert_eq!(out.user_layers, 1);
+        assert_eq!(
+            names(&out.inventory["layers"]),
+            ["gare_sncf", "mnt", "tampon_4"]
+        );
+        assert!(json_chars(&out.inventory) <= limits.sorted_budget);
+        assert_eq!(out.user_layers, 3);
+    }
+
+    #[test]
+    fn the_sorted_budget_bounds_the_view_and_the_under_threshold_budget_does_not() {
+        let (raw, files) = with_results();
+        let wide = sorted_view(
+            &raw,
+            &files,
+            &HashSet::new(),
+            &LastPlan::default(),
+            "gares plu",
+            &always(),
+        )
+        .0;
+        let limits = ViewLimits {
+            sorted_budget: json_chars(&wide.inventory) - 1,
+            budget: 1_000_000,
+            ..always()
+        };
+        let out = sorted_view(
+            &raw,
+            &files,
+            &HashSet::new(),
+            &LastPlan::default(),
+            "gares plu",
+            &limits,
+        )
+        .0;
+        assert!(json_chars(&out.inventory) <= limits.sorted_budget);
+        assert!(names(&out.inventory["layers"]).len() < names(&wide.inventory["layers"]).len());
+    }
+
+    #[test]
+    fn a_word_counts_once_and_name_words_come_first() {
+        // « bâtiments par commune » : la couche des bâtiments (un mot par son nom) passe avant une
+        // couche désignée par deux noms de champ.
+        let layers = vec![
+            qgis_layer(
+                "erp",
+                1,
+                "a.gpkg",
+                vec![
+                    real_field("insee_commune"),
+                    real_field("liens_vers_batiment"),
+                ],
+            ),
+            qgis_layer("batiment", 2, "b.gpkg", vec![real_field("hauteur")]),
+            qgis_layer("commune", 3, "c.gpkg", vec![real_field("population")]),
+            qgis_layer(
+                "valeurs",
+                4,
+                "d.gpkg",
+                vec![text_field("t", &["Bâtiment", "Commune"])],
+            ),
+        ];
+        let raw = project(layers);
+        let real = stable_order(agent_inventory(&raw), &[]).0;
+        let real = real["layers"].as_array().unwrap().clone();
+        let request = Request::new("Combien de bâtiments par commune ?");
+        let order = detail_order(&real, &[true; 4], &[], &LastPlan::default(), &[], &request);
+        // Deux couches à un mot par leur nom ; puis deux mots par champ, puis deux par valeur.
+        assert_eq!(order, [1, 2, 0, 3]);
+        // Un même mot trouvé par trois champs d'une couche ne compte qu'une fois.
+        let one = Request::new("la commune");
+        let thrice = qgis_layer(
+            "x",
+            5,
+            "x.gpkg",
+            vec![
+                real_field("insee_commune"),
+                real_field("nom_commune"),
+                real_field("code_commune"),
+            ],
+        );
+        let layer = &agent_inventory(&project(vec![thrice]))["layers"][0];
+        assert_eq!(
+            layer_score(layer, &one),
+            Some(Score {
+                by_name: 0,
+                all: 1,
+                by_field: 1
+            })
+        );
+    }
+
+    #[test]
+    fn a_sigle_finds_a_longer_word_it_begins() {
+        let layers = vec![
+            qgis_layer(
+                "zone_urba",
+                1,
+                "z.shp",
+                vec![text_field("idurba", &["200066793_PLUI_20260326"])],
+            ),
+            qgis_layer("pluviometre", 2, "p.shp", vec![text_field("t", &["Pluie"])]),
+            qgis_layer("autre", 3, "a.shp", vec![text_field("t", &["plume"])]),
+        ];
+        let raw = project(layers);
+        // « PLU » en capitales trouve « PLUI » (un signe de plus) ; ni « pluviometre » ni
+        // « pluie » ni « plume » (deux signes de plus ou davantage).
+        let out = view(&raw, "le zonage du PLU", &always());
+        assert_eq!(names(&out.inventory["layers"]), ["zone_urba"]);
+        // En minuscules, « plu » n'est pas un sigle : rien.
+        let out = view(&raw, "le zonage du plu", &always());
+        assert!(names(&out.inventory["layers"]).is_empty());
+        // Un sigle trouve aussi un mot égal (et, d'un signe de plus, « pluie »), jamais « plume ».
+        let out = view(&raw, "les zones du PLUI", &always());
+        assert_eq!(
+            names(&out.inventory["layers"]),
+            ["zone_urba", "pluviometre"]
+        );
+        // Un mot à moins de deux lettres n'est pas un sigle (« A3 », « 500 »).
+        assert!(Request::new("format A3, 500 m, MNT").sigles.contains("mnt"));
+        assert_eq!(Request::new("format A3, 500 m, MNT").sigles.len(), 1);
+    }
+
+    #[test]
+    fn a_wanted_layer_is_detailed_first_even_if_nothing_designates_it() {
+        let mut layers = neutral(3);
+        layers.push(qgis_layer(
+            "zonage",
+            7,
+            "z.gpkg",
+            vec![text_field("typezone", &["U", "N"])],
+        ));
+        let raw = project(layers);
+        let wanted = [qgis_id("zonage", 7)];
+        let (out, _) = sorted_view_learned(
+            agent_inventory(&raw),
+            &[],
+            &HashSet::new(),
+            &LastPlan::default(),
+            "rien ici",
+            &wanted,
+            &always(),
+        );
+        assert_eq!(names(&out.inventory["layers"]), ["zonage"]);
+        // Sans réclamation, rien n'est détaillé.
+        assert!(names(&view(&raw, "rien ici", &always()).inventory["layers"]).is_empty());
+    }
+
+    #[test]
+    fn the_learned_entry_is_the_raw_entry_after_translation() {
+        let (raw, files) = with_results();
+        for request in ["gares", "", "le plu"] {
+            for limits in [always(), ViewLimits::default()] {
+                let a = sorted_view(
+                    &raw,
+                    &files,
+                    &HashSet::new(),
+                    &LastPlan::default(),
+                    request,
+                    &limits,
+                );
+                let b = sorted_view_learned(
+                    agent_inventory(&raw),
+                    &files,
+                    &HashSet::new(),
+                    &LastPlan::default(),
+                    request,
+                    &[],
+                    &limits,
+                );
+                assert_eq!(a, b, "{request:?}");
+            }
+        }
     }
 
     #[test]
@@ -1171,7 +1481,7 @@ mod tests {
                 &ViewLimits::default(),
             );
             let size = json_chars(&out.inventory);
-            assert!(size <= INVENTORY_BUDGET_CHARS, "{request:?} : {size}");
+            assert!(size <= SORTED_BUDGET_CHARS, "{request:?} : {size}");
             assert_eq!(out.inventory["index"].as_array().map(Vec::len), Some(63));
             assert!(out.left_out.is_empty());
             // Chaque couche détaillée tient sous les deux plafonds.

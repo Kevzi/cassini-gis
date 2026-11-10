@@ -354,19 +354,26 @@ fn last_key_cut(layer: &Value, text: &str) -> Option<usize> {
     (matches!(opener, ',' | '{') && first.is_ascii_alphabetic()).then_some(start + 1)
 }
 
-/// Coupes du texte JSON compact de `inventory` : une par couche, juste avant sa dernière clé, en
-/// octets depuis le début du texte. Toutes ou aucune : une seule couche qui ne se coupe pas, ou un
-/// texte d'une autre forme que `{"layers":[…],…}`, et l'inventaire se lit d'un tenant.
+/// Coupes du texte JSON compact de `inventory` : une par couche de la liste qui ouvre le texte,
+/// juste avant sa dernière clé, en octets depuis le début du texte. Cette liste est `layers`
+/// (`{"layers":[…],…}`), ou `index` pour la vue triée d'un gros projet (`{"index":[…],"layers":
+/// …}`, ticket 5.48) : l'index est le préfixe stable d'une phrase à l'autre, les couches détaillées
+/// qui le suivent changent avec la demande et ne sont pas coupées. Toutes ou aucune : une seule
+/// entrée qui ne se coupe pas, ou un texte d'une autre forme, et l'inventaire se lit d'un tenant.
 fn layer_cuts(inventory: &Value) -> Vec<usize> {
-    let Some(layers) = inventory.get("layers").and_then(Value::as_array) else {
+    let text = inventory.to_string();
+    let (key, open) = if text.starts_with("{\"index\":[") {
+        ("index", "{\"index\":[")
+    } else {
+        ("layers", "{\"layers\":[")
+    };
+    let Some(layers) = inventory.get(key).and_then(Value::as_array) else {
         return Vec::new();
     };
-    let text = inventory.to_string();
-    const OPEN: &str = "{\"layers\":[";
-    if !text.starts_with(OPEN) {
+    if !text.starts_with(open) {
         return Vec::new();
     }
-    let mut pos = OPEN.len();
+    let mut pos = open.len();
     let mut cuts = Vec::with_capacity(layers.len());
     for (i, layer) in layers.iter().enumerate() {
         if i > 0 {
@@ -1492,20 +1499,46 @@ mod tests {
     }
 
     #[test]
+    fn a_sorted_view_is_cut_at_every_index_entry_and_anchored_on_its_users() {
+        let entry = |id: &str| json!({"geometry": "MultiPolygon", "layer_id": id, "name": id});
+        let inv = json!({
+            "index": [entry("a_0001"), entry("b_0002"), entry("r_0003")],
+            "layers": [{"layer_id": "b_0002", "name": "b", "fields": []}],
+            "project": {"epsg": 2154},
+        });
+        let cuts = layer_cuts(&inv);
+        assert_eq!(cuts.len(), 3);
+        let text = inv.to_string();
+        // Chaque coupe tombe juste avant `name` de son entrée ; rien n'est coupé dans `layers`.
+        for cut in &cuts {
+            assert!(text[*cut..].starts_with("name\""), "{}", &text[*cut..]);
+        }
+        assert!(*cuts.last().unwrap() < text.find("\"layers\"").unwrap());
+        let (parts, anchor, rest) = inventory_parts(FULL_INVENTORY_LEAD, &inv, Some(2));
+        assert_eq!(parts.len(), 3);
+        assert_eq!(anchor, Some(1));
+        assert_eq!(parts.concat() + &rest, inventory_text(&inv));
+        // Une liste d'index qui ne se coupe pas : tout l'inventaire d'un tenant.
+        let odd = json!({"index": [{"layer_id": "a", "~x": 1}], "layers": []});
+        assert!(layer_cuts(&odd).is_empty());
+    }
+
+    #[test]
     fn the_whole_generated_set_is_cut_at_every_layer() {
         let (examples, _) = cassini_training::generate(
             cassini_training::DEFAULT_SEED,
             cassini_training::DEFAULT_COUNT,
         );
-        // La vue triée d'un gros projet (5.47) commence par `index` : ses découpes, à la fin de
-        // l'index, sont l'affaire de 5.48 ; ici, les inventaires de la forme d'avant.
-        for e in examples
-            .iter()
-            .filter(|e| e.inventory.get("index").is_none())
-        {
-            let layers = e.inventory["layers"].as_array().map_or(0, Vec::len);
-            assert_eq!(layer_cuts(&e.inventory).len(), layers, "{}", e.inventory);
+        // La vue triée d'un gros projet (5.47) est coupée à chaque entrée de son index (5.48), les
+        // autres inventaires à chaque couche.
+        let mut sorted = 0;
+        for e in &examples {
+            let cut = e.inventory.get("index").unwrap_or(&e.inventory["layers"]);
+            sorted += usize::from(e.inventory.get("index").is_some());
+            let entries = cut.as_array().map_or(0, Vec::len);
+            assert_eq!(layer_cuts(&e.inventory).len(), entries, "{}", e.inventory);
         }
+        assert!(sorted * 5 >= examples.len(), "{sorted} vues triées");
     }
 
     #[test]
@@ -1653,7 +1686,8 @@ mod tests {
             assert_eq!(points[0].at, head_end, "{}", e.request);
             // Ticket 5.19 : une coupe par couche, entre la tête et la fin du tour système ; les
             // jetons lus par parties sont ceux du prompt lu d'un tenant (ci-dessus).
-            let layers = e.inventory["layers"].as_array().map_or(0, Vec::len);
+            let cut = e.inventory.get("index").unwrap_or(&e.inventory["layers"]);
+            let layers = cut.as_array().map_or(0, Vec::len);
             assert_eq!(points.len(), layers + 2, "{}", e.request);
             cut_layers += layers;
             checked += 1;

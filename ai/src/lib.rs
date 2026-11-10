@@ -79,7 +79,7 @@ impl fmt::Display for AiError {
             AiError::Context(e) => write!(f, "Le contexte du modèle n'a pas pu être créé : {e}"),
             AiError::PromptTooLong => write!(
                 f,
-                "La demande et l'inventaire du projet ne tiennent pas dans le contexte du modèle ; le plus souvent, l'inventaire est trop long : retirez des couches du projet, puis refaites la demande."
+                "Le projet a trop de couches pour le modèle : la demande et l'inventaire du projet ne tiennent pas dans son contexte. Retirez des couches du projet, puis refaites la demande."
             ),
             AiError::Decode(e) => write!(f, "Le modèle n'a pas pu répondre : {e}"),
             AiError::Grammar(e) => {
@@ -808,12 +808,17 @@ fn generate_on(
 mod tests {
     use super::*;
 
-    /// Ticket 5.18 : le message nomme l'inventaire du projet comme cause habituelle, et dit quoi faire.
+    /// Tickets 5.18 et 5.48 : le message dit que le projet a trop de couches pour le modèle, et quoi
+    /// faire.
     #[test]
     fn a_prompt_too_long_names_the_project_inventory() {
         let message = AiError::PromptTooLong.to_string();
+        assert!(
+            message.starts_with("Le projet a trop de couches pour le modèle"),
+            "{message}"
+        );
         assert!(message.contains("inventaire du projet"), "{message}");
-        assert!(message.contains("retirez des couches"), "{message}");
+        assert!(message.contains("Retirez des couches"), "{message}");
         assert_eq!(AiError::PromptTooLong.code(), "ai.prompt_too_long");
     }
 

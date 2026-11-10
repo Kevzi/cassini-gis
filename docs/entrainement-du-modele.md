@@ -739,7 +739,7 @@ sur la carte de 8 Go) : la carte ne devrait pas se remplir, à vérifier sur les
 ### Gros projets et couches proches (5.47)
 
 Changement de cap du 2026-11-10 (`change-inventaire-des-gros-projets`) : au-delà d'environ
-9 000 caractères de couches de l'utilisateur, le noyau montre au modèle une **vue triée**
+9 000 caractères de couches de l'utilisateur (17 000 depuis 5.48, mesure d'Annecy), le noyau montre au modèle une **vue triée**
 (`cassini_core::agent_inventory::sorted_view`, ticket 5.46) : un `index` réduit
 `{layer_id, name, geometry}` de toutes les couches, et dans `layers` le détail de celles que la
 demande désigne, puis des rasters. Le modèle n'avait jamais vu ni cette forme ni plus d'une
@@ -781,13 +781,17 @@ propriétaire) :
    (`training/src/lib.rs`) : au pire rapport mesuré (0,333 jeton par caractère de prompt, réponse
    de 300 jetons au plus), il reste sous 4 596 jetons, donc sous les 4 608 de `MAX_LENGTH` ; la
    chaîne d'entraînement n'en écarte aucun. Sur les prompts longs, le rapport est de 0,306.
-   Conséquence à connaître pour 5.48 : la vue du noyau peut aller jusqu'à 14 000 caractères
-   d'inventaire, mais l'entraînement ne montre aucun prompt au-delà de 12 900 caractères
-   (environ 11 800 d'inventaire). Les vues les plus pleines restent donc hors de ce que le modèle
-   a vu.
+   Depuis 5.48, la vue triée est bornée à 11 000 caractères (`SORTED_BUDGET_CHARS`) : avec les
+   consignes courtes et la demande, elle tient sous ces 12 900 caractères, et `MAX_LENGTH` reste
+   à 4 608. Sous le seuil du tri (17 000 caractères depuis 5.48, pour garder le projet d'Annecy
+   inchangé), une vue peut encore dépasser cette borne : Annecy fait 16 597 caractères dans QGIS.
 
 Les écarts sont comptés au résumé (`gros_projet`, colonne « écartés ») : 295 écartés pour 2 139
-gardés au jeu par défaut, par l'une ou l'autre des deux dernières gardes. Exemples d'écart : une couche de
+gardés au jeu par défaut, par l'une ou l'autre des deux dernières gardes. Après 5.48 (désignation
+revue, seuil du tri à 17 000, budget de la vue triée à 11 000), le même jeu garde 2 033 gros projets
+(23,6 %) et en écarte 443 : les gros projets dont les couches de l'utilisateur tiennent sous
+17 000 caractères sont vus en entier, et ceux de plus de 12 900 caractères de prompt sont écartés
+par la borne. Les longueurs ci-dessous sont celles de 5.47, à remesurer au tokeniseur en 5.49. Exemples d'écart : une couche de
 zonage non désignée par « les parcelles constructibles », le réseau routier d'une isochrone, un
 MNT accompagné de nombreuses couches détaillées par une valeur. Le premier cas est celui de la
 redemande élargie du noyau (5.48) : le modèle ne l'apprend pas ici.

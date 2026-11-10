@@ -59,12 +59,19 @@ fn question_reel_at_least_9_of_12_ambiguous_requests_get_a_question() {
     let registry = Registry::standard();
     let inventory: Value = serde_json::from_str(INVENTORY).unwrap();
     // Comme dans le produit : identifiants courts montrés, plan retraduit (ticket 5.19).
-    let (inventory, ids) = common::shown_inventory(&inventory);
+    let full = inventory.clone();
+    let (_, ids) = common::shown_inventory(&full);
     let mut generator = model_files_generator(files);
     let (mut questions, mut guarded) = (0, 0);
     for (id, text) in AMBIGUOUS {
         let got = common::restored(
-            compose_plan_with(style, &registry, &inventory, text, &mut generator),
+            compose_plan_with(
+                style,
+                &registry,
+                &common::view(&full, text),
+                text,
+                &mut generator,
+            ),
             &ids,
         );
         let ok = matches!(&got, Ok(Plan::Question { .. }));

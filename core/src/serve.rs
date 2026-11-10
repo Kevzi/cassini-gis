@@ -1747,7 +1747,13 @@ mod tests {
             if self.inventory {
                 let view = inventory()?;
                 assert!(view.inventory["layers"].is_array());
-                let users = view.inventory["layers"].as_array().unwrap().len();
+                // Les couches de l'utilisateur sont en tête de l'index d'une vue triée (5.48),
+                // sinon en tête de `layers`.
+                let cut = view
+                    .inventory
+                    .get("index")
+                    .unwrap_or(&view.inventory["layers"]);
+                let users = cut.as_array().unwrap().len();
                 assert!(view.user_layers <= users);
                 self.seen.lock().unwrap().push(view.inventory);
             }
@@ -2957,6 +2963,190 @@ mod tests {
         // Le modèle ne voit rien du constat : l'inventaire n'a pas de clé `left_out`.
         assert!(inventory.get("left_out").is_none());
         drop(seen);
+        c.close().1.unwrap();
+    }
+
+    /// Ticket 5.48 : un gros projet (couches de l'utilisateur au-delà du seuil du tri), dont aucune
+    /// couche n'est désignée par la demande « Fais-le. » : `zonage` n'est montrée que dans l'index.
+    fn big_project_inventory() -> Value {
+        let fields: Vec<Value> = (0..12)
+            .map(|i| {
+                json!({"name": format!("attribut_{i:02}"), "type": "String",
+                "values": ["valeur_a", "valeur_b", "valeur_c"]})
+            })
+            .collect();
+        let mut layers: Vec<Value> = (0..30)
+            .map(|k| {
+                json!({"layer_id": format!("objet_{k:02}"), "name": format!("objet_{k:02}"),
+                    "source": "fond.gpkg", "crs": "EPSG:2154", "kind": "vector",
+                    "geometry": "MultiPolygon", "feature_count": 3, "fields": fields})
+            })
+            .collect();
+        layers.push(
+            json!({"layer_id": "zonage", "name": "zonage", "source": "plu.shp",
+            "crs": "EPSG:2154", "kind": "vector", "geometry": "MultiPolygon",
+            "feature_count": 3,
+            "fields": [{"name": "typezone", "type": "String", "values": ["U", "N"]}]}),
+        );
+        json!({"project_name": "p", "project_crs": "EPSG:2154", "extent": null, "layers": layers})
+    }
+
+    /// `plan.propose` sur le gros projet ; le compositeur rend d'abord les plans de `first`.
+    fn propose_big(first: Vec<Value>, then: Value) -> (Value, Vec<Value>, Vec<Value>) {
+        let composer = composer(then).unwrap();
+        composer.first.borrow_mut().extend(first);
+        let seen = composer.seen.clone();
+        let mut c = Client::start_with(CANCEL_GRACE, Some(composer));
+        c.hello_with(&ALL);
+        c.send(json!({"jsonrpc":"2.0","id":2,"method":"plan.propose",
+            "params":{"request":"Fais-le."}}));
+        let order = c.recv();
+        assert_eq!(order["params"]["command"], "project.inventory");
+        c.send(reply(&order["id"], big_project_inventory()));
+        let answer = c.recv();
+        // La redemande ne redemande pas l'inventaire à l'extension.
+        c.assert_silent();
+        let journal = c.journal();
+        c.close().1.unwrap();
+        let seen = seen.lock().unwrap().clone();
+        (answer, seen, journal)
+    }
+
+    fn detailed(view: &Value) -> Vec<&str> {
+        view["layers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|l| l["layer_id"].as_str().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn a_field_on_a_reduced_layer_recomposes_once_with_that_layer_detailed() {
+        let field_plan = json!({"kind":"calls","calls":[
+            {"command":"analysis.select_by_attribute",
+             "params":{"layer_id":"zonage","field":"typezone","operator":"eq","value":"U"}}]});
+        let question = json!({"kind":"question","question":"Laquelle ?"});
+        // Le second plan prend encore un champ : il est gardé tel quel, sans troisième composition.
+        let (answer, seen, journal) = propose_big(vec![field_plan.clone(), field_plan], question);
+        assert_eq!(seen.len(), 2, "une seule redemande");
+        assert!(seen[0].get("index").is_some());
+        assert!(!detailed(&seen[0]).contains(&"zonage"));
+        assert!(detailed(&seen[1]).contains(&"zonage"));
+        // Même index, même table : seule la partie détaillée change.
+        assert_eq!(seen[0]["index"], seen[1]["index"]);
+        // Le second plan, jugé comme un premier : ici il ne vérifie pas (commande non annoncée),
+        // et c'est son erreur qui sort, jamais une troisième composition.
+        assert_eq!(code_of(&answer), "agent.plan_invalid", "{answer}");
+        // Ni l'inventaire ni la redemande ne sont journalisés.
+        assert!(journal.is_empty());
+    }
+
+    /// Ticket 5.48 : le dernier plan exécuté est lu dans le journal du projet à chaque proposition ;
+    /// la couche qu'il cite est détaillée, même si la demande ne la désigne pas.
+    #[test]
+    fn the_layer_cited_by_the_last_plan_of_the_journal_is_detailed() {
+        let composer = composer(json!({"kind":"question","question":"?"})).unwrap();
+        let seen = composer.seen.clone();
+        let mut c = Client::start_with(CANCEL_GRACE, Some(composer));
+        c.hello_with(&ALL);
+        let line = json!({"id": "analysis.select_by_attribute", "plan_step": 1,
+            "params": {"layer_id": "zonage", "field": "typezone", "operator": "eq", "value": "U"},
+            "layer_id": "r1", "result": {}});
+        std::fs::write(c.dir.join("p.cassini/journal.jsonl"), format!("{line}\n")).unwrap();
+        c.send(json!({"jsonrpc":"2.0","id":2,"method":"plan.propose",
+            "params":{"request":"Fais-le."}}));
+        let order = c.recv();
+        c.send(reply(&order["id"], big_project_inventory()));
+        let answer = c.recv();
+        assert_eq!(answer["result"]["question"], "?", "{answer}");
+        c.close().1.unwrap();
+        let seen = seen.lock().unwrap();
+        assert!(seen[0].get("index").is_some());
+        assert_eq!(detailed(&seen[0]), ["zonage"]);
+    }
+
+    #[test]
+    fn the_plan_of_the_recomposition_is_kept_and_shown_like_a_first_one() {
+        let field_plan = json!({"kind":"calls","calls":[
+            {"command":"analysis.select_by_attribute",
+             "params":{"layer_id":"zonage","field":"typezone","operator":"eq","value":"U"}}]});
+        let valid = json!({"kind":"calls","calls":[
+            {"command":"test.fixed","params":{"layer":"zonage"}}]});
+        let (answer, seen, journal) = propose_big(vec![field_plan], valid);
+        assert_eq!(seen.len(), 2);
+        assert_eq!(answer["result"]["plan_id"], "plan-1", "{answer}");
+        assert_eq!(
+            answer["result"]["plan"]["calls"][0]["command"],
+            "test.fixed"
+        );
+        assert!(journal.is_empty());
+    }
+
+    #[test]
+    fn a_field_reached_through_a_step_reference_recomposes_too() {
+        let plan = json!({"kind":"calls","calls":[
+            {"command":"analysis.buffer","params":{"layer_id":"zonage",
+                "distance":{"value":10,"unit":"m"}}},
+            {"command":"analysis.select_by_attribute",
+             "params":{"layer_id":"step:1.layer_id","field":"typezone","operator":"eq","value":"U"}}]});
+        let question = json!({"kind":"question","question":"Laquelle ?"});
+        let (answer, seen, _) = propose_big(vec![plan], question);
+        assert_eq!(seen.len(), 2);
+        assert!(detailed(&seen[1]).contains(&"zonage"));
+        assert_eq!(answer["result"]["question"], "Laquelle ?", "{answer}");
+    }
+
+    #[test]
+    fn a_reduced_layer_taken_as_geometry_only_does_not_recompose() {
+        let question = json!({"kind":"question","question":"Laquelle ?"});
+        let plan = json!({"kind":"calls","calls":[
+            {"command":"test.fixed","params":{"layer_id":"zonage"}}]});
+        let (_, seen, _) = propose_big(vec![plan], question.clone());
+        assert_eq!(seen.len(), 1);
+        // Une question ou un champ sur une couche détaillée ne recomposent pas non plus.
+        let (_, seen, _) = propose_big(vec![], question);
+        assert_eq!(seen.len(), 1);
+        let on_detailed = json!({"kind":"calls","calls":[
+            {"command":"analysis.select_by_attribute",
+             "params":{"layer_id":"step:9.layer_id","field":"typezone","operator":"eq","value":"U"}}]});
+        let (_, seen, _) =
+            propose_big(vec![on_detailed], json!({"kind":"question","question":"?"}));
+        assert_eq!(seen.len(), 1, "référence sans étape : aucune couche");
+    }
+
+    #[test]
+    fn under_the_threshold_a_field_never_recomposes() {
+        let plan = json!({"kind":"calls","calls":[
+            {"command":"analysis.select_by_attribute",
+             "params":{"layer_id":"plu","field":"typezone","operator":"eq","value":"U"}}]});
+        let composer = composer(json!({"kind":"question","question":"?"})).unwrap();
+        composer.first.borrow_mut().push_back(plan);
+        let seen = composer.seen.clone();
+        let mut c = Client::start_with(CANCEL_GRACE, Some(composer));
+        c.hello_with(&ALL);
+        propose_over_the_budget(&mut c, 2);
+        c.close().1.unwrap();
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert!(seen[0].get("index").is_none());
+    }
+
+    /// Ticket 5.48 (AD-29) : l'IA externe et `command.run` lisent `project.inventory` brut, même
+    /// pour un gros projet ; la vue triée ne sert qu'à `plan.propose`.
+    #[test]
+    fn command_run_returns_the_raw_inventory_of_a_big_project() {
+        let mut c = Client::start_with(CANCEL_GRACE, composer(three_steps()));
+        c.hello_with(&ALL);
+        c.send(json!({"jsonrpc":"2.0","id":2,"method":"command.run",
+            "params":{"command":"project.inventory","params":{}}}));
+        let order = c.recv();
+        assert_eq!(order["params"]["command"], "project.inventory");
+        let raw = big_project_inventory();
+        c.send(reply(&order["id"], raw.clone()));
+        let answer = c.recv();
+        assert_eq!(answer["result"], raw, "{answer}");
+        assert!(answer["result"].get("index").is_none());
         c.close().1.unwrap();
     }
 
