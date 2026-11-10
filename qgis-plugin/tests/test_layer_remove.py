@@ -14,8 +14,10 @@ import summary  # noqa: E402
 
 
 class FakeBackend:
-    """Un projet en mémoire : id -> (nom, fichier). Le fond ne sait que lire une couche, lire
-    son nom et la retirer du projet : aucun accès au fichier n'est offert au geste."""
+    """Un projet en mémoire : id -> (nom, fichier[, état]). L'état, absent pour une couche
+    enregistrée, est ce que le retrait détruirait ("memory" ou "edits"). Le fond ne sait que
+    lire une couche, son nom et son état, et la retirer du projet : aucun accès au fichier
+    n'est offert au geste."""
 
     def __init__(self, layers):
         self.layers = dict(layers)
@@ -26,6 +28,9 @@ class FakeBackend:
 
     def name_of(self, layer):
         return layer[0]
+
+    def unsaved(self, layer):
+        return layer[2] if len(layer) > 2 else None
 
     def remove(self, layer_id):
         self.removed.append(layer_id)
@@ -144,6 +149,55 @@ class LayerRemoveTest(unittest.TestCase):
         gesture.cancel()
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0].code, "qgis.gesture_failed")
+
+    def test_a_memory_layer_is_refused_and_stays_in_the_project(self):
+        backend = FakeBackend({"brouillon_1": ("Brouillon", None, "memory")})
+        result, error = run(self.gesture(backend), {"layer_id": "brouillon_1"})
+        self.assertIsNone(result)
+        self.assertEqual(error.code, "layer.unsaved")
+        self.assertIn("« Brouillon »", error.message)
+        self.assertIn("sans fichier", error.message)
+        self.assertEqual(backend.removed, [])
+        self.assertIn("brouillon_1", backend.layers)
+        self.assertIsNone(layer_remove.removed_name("brouillon_1"))
+
+    def test_a_layer_with_unsaved_edits_is_refused_and_keeps_them(self):
+        backend = FakeBackend({"routes_1": ("Routes", self.file, "edits")})
+        result, error = run(self.gesture(backend), {"layer_id": "routes_1"})
+        self.assertIsNone(result)
+        self.assertEqual(error.code, "layer.unsaved")
+        self.assertIn("modifications non enregistrées", error.message)
+        self.assertIn("Enregistrez ou annulez", error.message)
+        self.assertEqual(backend.removed, [])
+        self.assertEqual(backend.layers["routes_1"][2], "edits")
+
+    def test_the_real_backend_tells_what_a_removal_would_destroy(self):
+        class Layer:
+            def __init__(self, provider, editable=False, modified=False, raster=False):
+                self._provider = provider
+                if not raster:
+                    self.isEditable = lambda: editable
+                    self.isModified = lambda: modified
+
+            def providerType(self):
+                return self._provider
+
+        unsaved = layer_remove.QgisBackend().unsaved
+        self.assertEqual(unsaved(Layer("memory")), "memory")
+        self.assertEqual(unsaved(Layer("memory", True, True)), "memory")
+        self.assertEqual(unsaved(Layer("ogr", True, True)), "edits")
+        self.assertIsNone(unsaved(Layer("ogr", True, False)))  # en édition, rien de modifié
+        self.assertIsNone(unsaved(Layer("ogr", False, True)))
+        self.assertIsNone(unsaved(Layer("ogr")))
+        self.assertIsNone(unsaved(Layer("gdal", raster=True)))  # raster sans isModified
+
+    def test_a_layer_without_unsaved_content_is_removed(self):
+        # « En édition sans modification » : prédicat du vrai fond, test ci-dessus.
+        backend = FakeBackend({"routes_1": ("Routes", self.file, None)})
+        result, error = run(self.gesture(backend), {"layer_id": "routes_1"})
+        self.assertIsNone(error)
+        self.assertEqual(result, {"layer_id": "routes_1"})
+        self.assertEqual(backend.removed, ["routes_1"])
 
     def test_the_gesture_is_in_the_closed_table(self):
         registry = delegated.build_registry(object)

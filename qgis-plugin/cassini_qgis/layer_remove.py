@@ -6,6 +6,11 @@ modifié (principe 6). Une couche déjà absente du projet n'est pas une erreur 
 le même, `{"layer_id"}`, ce qui garde identique le rejeu dans la même session (AD-11). Aucune
 décision ici : la couche est celle que le noyau dicte (AD-9).
 
+Une couche que le retrait détruirait sans recours est refusée par `layer.unsaved`, avant tout
+retrait (changement de cap du 2026-11-10, `change-refus-retrait-couche-non-enregistree`) : une
+couche en mémoire, sans fichier, et une couche en édition avec des modifications non
+enregistrées. La couche reste alors au projet, intacte ; le message dit quoi faire.
+
 Le nom de la couche retirée est gardé dans une mémoire d'affichage (`removed_name`), remplie
 avant `removeMapLayer` : le panneau la lit pour montrer « Routes » plutôt que l'identifiant,
 la couche n'étant plus au projet. Elle ne sert qu'à l'affichage ; le résultat ne porte que
@@ -22,8 +27,24 @@ except ImportError:  # pragma: no cover
     from gestures import GestureError
     from open_output import FAILED, OpenOutputGesture
 
+UNSAVED = "layer.unsaved"
+
 # Noms des couches retirées par ce geste, par identifiant : affichage seul.
 _REMOVED_NAMES = {}
+
+_UNSAVED_MESSAGES = {
+    "memory": (
+        "La couche « %s » est une couche temporaire, sans fichier : la retirer du projet "
+        "perdrait tout son contenu. Rendez-la d'abord permanente en l'enregistrant dans un fichier "
+        "(icône à côté de son nom, dans le panneau des couches), puis demandez de nouveau son "
+        "retrait."
+    ),
+    "edits": (
+        "La couche « %s » a des modifications non enregistrées : la retirer du projet les "
+        "perdrait. Enregistrez ou annulez d'abord ses modifications, puis demandez de nouveau "
+        "son retrait."
+    ),
+}
 
 
 def removed_name(layer_id):
@@ -52,6 +73,17 @@ class QgisBackend:
     def name_of(self, layer):
         return layer.name()
 
+    def unsaved(self, layer):
+        """Ce que le retrait détruirait : "memory" (couche en mémoire, sans fichier), "edits"
+        (modifications non enregistrées), ou None. Un raster n'a pas toujours `isModified`."""
+        if layer.providerType() == "memory":
+            return "memory"
+        editable = getattr(layer, "isEditable", None)
+        modified = getattr(layer, "isModified", None)
+        if editable is not None and modified is not None and editable() and modified():
+            return "edits"
+        return None
+
     def remove(self, layer_id):
         """Retire la couche du projet ; le fichier de données n'est pas touché."""
         from qgis.core import QgsProject
@@ -76,7 +108,12 @@ class LayerRemoveGesture(OpenOutputGesture):
         backend = self._backend
         layer = backend.layer(layer_id) if layer_id else None
         if layer is not None:
-            _REMOVED_NAMES[layer_id] = backend.name_of(layer)
+            name = backend.name_of(layer)
+            lost = backend.unsaved(layer)
+            if lost is not None:
+                # Refus avant tout retrait : la couche reste au projet, intacte.
+                raise GestureError(UNSAVED, _UNSAVED_MESSAGES[lost] % name)
+            _REMOVED_NAMES[layer_id] = name
             backend.remove(layer_id)
         # Déjà absente : même résultat, sans erreur.
         return {"layer_id": layer_id}

@@ -1656,17 +1656,23 @@ est le même. Entrée `project`, sortie `none` (amendement du 2026-11-08 d'AD-24
 |---|---|---|---|---|
 | `layer_id` | chaîne | oui | — | Couche à retirer du projet. |
 
-Résultat : `layer_id`. Erreurs : aucune propre ; `registry.invalid_params` (paramètre absent,
-champ en trop). Une étape suivante qui cite la couche retirée échoue en la nommant, par le code
-de son propre geste (`layer.not_found` pour une analyse, `qgis.layer_missing` pour un geste de
-style), au plan comme au rejeu.
+Résultat : `layer_id`. Erreurs : `layer.unsaved` — la couche est en mémoire (sans fichier) ou a
+des modifications non enregistrées : le retrait est refusé, la couche reste au projet, intacte
+(changement de cap du 2026-11-10, `change-refus-retrait-couche-non-enregistree`) ;
+`registry.invalid_params` (paramètre absent, champ en trop). Rejoué, un retrait refusé redonne
+le même refus tant que la couche n'est pas enregistrée ; retiré au rejeu (couche enregistrée
+entre-temps, ou couche en mémoire absente d'une session neuve), il diverge à cette étape. Une
+étape suivante qui cite la couche retirée échoue en la nommant, par le code de son propre geste
+(`layer.not_found` pour une analyse, `qgis.layer_missing` pour un geste de style), au plan
+comme au rejeu.
 
 Le geste est `QgsProject.removeMapLayer`, dans l'extension ; il ne touche jamais au fichier
 (principe 6). Le résultat ne pose pas de couche (sortie `none`) : son `layer_id` n'est ni lié
 au rejeu ni compté parmi les couches posées. La commande est rejouée comme toute étape (AD-11),
-jamais sautée : dans la même session, la couche déjà retirée rend le même résultat. Rejouer dans la même session une étape qui a lu la couche avant son retrait diverge à cette
-étape, en la nommant (la couche n'est plus au projet) ; en session neuve, le rejeu est identique. Non dictée :
-offerte au modèle, au client MCP et au formulaire. Livrée par l'entrée 27 de l'epic 10
+jamais sautée : dans la même session, la couche déjà retirée rend le même résultat. Rejouer
+dans la même session une étape qui a lu la couche avant son retrait diverge à cette étape, en
+la nommant (la couche n'est plus au projet) ; en session neuve, le rejeu est identique. Non
+dictée : offerte au modèle, au client MCP et au formulaire. Livrée par l'entrée 27 de l'epic 10
 (`core/src/commands/layer_remove.rs`, `qgis-plugin/cassini_qgis/layer_remove.py`, ligne de la
 table fermée de `qgis-plugin/cassini_qgis/delegated.py`).
 

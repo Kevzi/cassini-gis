@@ -3637,11 +3637,13 @@ fn project_with_roads() -> ProjectLayers {
 /// QGIS de test avec état : `analysis.buffer` pose une couche d'id neuf à chaque appel (préfixé
 /// de la génération, comme une session QGIS neuve), `layer.remove` retire une couche du projet
 /// sans erreur si elle est déjà absente, et le tampon d'une couche absente échoue par
-/// `layer.not_found`, qui la nomme.
+/// `layer.not_found`, qui la nomme. Les couches de `unsaved` (en mémoire ou en édition
+/// modifiée) sont refusées par `layer.unsaved` et restent au projet.
 struct RemoveQgis {
     generation: u32,
     count: std::cell::Cell<u32>,
     layers: ProjectLayers,
+    unsaved: HashSet<String>,
     seen: std::rc::Rc<std::cell::RefCell<Vec<(String, Value)>>>,
 }
 
@@ -3651,8 +3653,14 @@ impl RemoveQgis {
             generation,
             count: std::cell::Cell::new(0),
             layers: layers.clone(),
+            unsaved: HashSet::new(),
             seen: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
         }
+    }
+
+    fn with_unsaved(mut self, layer_id: &str) -> Self {
+        self.unsaved.insert(layer_id.to_string());
+        self
     }
 }
 
@@ -3680,6 +3688,12 @@ impl Executor for RemoveQgis {
                 Ok(json!({"layer_id": new, "feature_count": 2}))
             }
             "layer.remove" => {
+                if self.layers.borrow().contains(&layer) && self.unsaved.contains(&layer) {
+                    return Err(RegistryError::Delegated {
+                        code: "layer.unsaved".into(),
+                        message: format!("la couche {layer} n'est pas enregistrée"),
+                    });
+                }
                 // Idempotente : une couche absente rend le même résultat, sans erreur.
                 self.layers.borrow_mut().remove(&layer);
                 Ok(json!({"layer_id": layer}))
@@ -3871,5 +3885,64 @@ fn replaying_in_the_same_session_an_analysis_of_a_layer_removed_after_diverges_a
         )
         .unwrap();
     assert_eq!(report, identical(2));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_removal_refused_for_an_unsaved_layer_keeps_it_and_replays_identically_while_unsaved() {
+    // Changement de cap du 2026-11-10 : une couche en mémoire ou en édition modifiée n'est pas
+    // retirée (`layer.unsaved`). Le rejeu passe par le chemin générique d'une étape QGIS
+    // refusée : refusée de nouveau, identique ; retirée au rejeu, divergente, rien de sauté.
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let layers = project_with_roads();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(RemoveQgis::new(1, &layers).with_unsaved("routes_1"));
+    let err = s
+        .call("layer.remove", json!({"layer_id": "routes_1"}))
+        .unwrap_err();
+    assert_eq!(err.code, "layer.unsaved");
+    assert!(
+        layers.borrow().contains("routes_1"),
+        "la couche reste au projet"
+    );
+    let l = lines(&s);
+    assert_eq!(l.len(), 1);
+    assert_eq!(l[0]["error"], "layer.unsaved");
+    assert!(l[0].get("result").is_none(), "{}", l[0]);
+    drop(s);
+
+    // Même session, couche toujours non enregistrée : même refus, rejeu identique.
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(
+            &Router::new(&registry).with_qgis(RemoveQgis::new(1, &layers).with_unsaved("routes_1")),
+            &mut HashSet::new(),
+        )
+        .unwrap();
+    assert_eq!(report, identical(1));
+    assert!(layers.borrow().contains("routes_1"));
+
+    // Couche enregistrée entre-temps : le retrait réussit au rejeu, qui diverge à l'étape.
+    let err = Replay::load(&registry, &project)
+        .unwrap()
+        .run(
+            &Router::new(&registry).with_qgis(RemoveQgis::new(1, &layers)),
+            &mut HashSet::new(),
+        )
+        .unwrap_err();
+    assert_eq!((err.code.as_str(), err.step), ("replay.diverged", Some(1)));
+
+    // Session neuve sans la couche (une couche en mémoire ne survit pas) : même divergence.
+    let empty: ProjectLayers = std::rc::Rc::new(std::cell::RefCell::new(HashSet::new()));
+    let err = Replay::load(&registry, &project)
+        .unwrap()
+        .run(
+            &Router::new(&registry).with_qgis(RemoveQgis::new(2, &empty)),
+            &mut HashSet::new(),
+        )
+        .unwrap_err();
+    assert_eq!((err.code.as_str(), err.step), ("replay.diverged", Some(1)));
     let _ = fs::remove_dir_all(dir);
 }
