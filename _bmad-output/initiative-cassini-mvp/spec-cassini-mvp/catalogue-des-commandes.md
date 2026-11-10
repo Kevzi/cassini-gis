@@ -370,6 +370,7 @@ donne l'esquisse.
 | `analysis.difference` | planifiée | qgis | epic 10, entrée 21 |
 | `analysis.area` | planifiée | qgis | epic 10, entrée 22 |
 | `data.convert` | faite | qgis | epic 10, entrée 9 |
+| `data.convert_raster` | planifiée | qgis | epic 10, entrée 30 |
 | `layer.remove` | faite | qgis | epic 10, entrée 27 |
 | `analysis.nearest` | planifiée | qgis | epic 10, entrée 10 |
 | `analysis.distance_matrix` | planifiée | qgis | epic 10, entrée 10 |
@@ -727,6 +728,19 @@ l'impression reste hors du produit.
 | `scale` | entier ou `null` | Échelle tenue, si demandée. |
 | `center` | `Point` ou `null` | Centre employé, si `scale` demandée ; journalisé pour le rejeu. |
 | `skipped_layers` | liste de chaînes | **Epic 10, entrée 15** : couches distantes (WMS, WMTS, XYZ, tuiles vectorielles distantes) écartées de la carte et nommées. |
+| `source_details` | liste d'objets, 50 au plus | **Epic 10, entrée 31** : résolution et date de chaque source (voir ci-dessous). |
+
+**Planifié (changement de cap du 2026-11-10, epic 10, entrée 31).** `header` et `footer` : une
+ligne libre chacun (120 caractères au plus, sans saut de ligne), imprimée en haut et en bas de
+page. `grid` gagne la forme `{"kind": "mgrs", "interval": Distance}` (1 km, 10 km ou 100 km) :
+quadrillage UTM étiqueté par les deux chiffres principaux de chaque ligne, et cadre de légende
+des désignations de zone et de carré de 100 km couverts ; `epsg` et `squares` sont **fournis par
+le noyau** d'après `extent.lonlat` de l'inventaire, jamais écrits par le modèle ni par
+l'utilisateur, et journalisés pour le rejeu ; sans emprise lisible, `layout.no_extent`.
+`source_details`, tronquée comme `sources` : pour chaque source `source` (nom du fichier),
+`resolution` (`Distance` ou `null`), `date` (AAAA-MM-JJ ou `null`) et `date_origin`
+(`metadata`, `file` ou `null`) ; la ligne des sources imprimée les reprend (« mnt_5m.tif, 5 m,
+fichier du 2025-03-14 »). `sources` ne change pas.
 
 ```json fiche
 {"id": "layout.export_pdf", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
@@ -742,8 +756,17 @@ l'impression reste hors du produit.
                                   "projected": {"epsg": {"type": "integer", "required": true},
                                                 "interval": {"type": "Distance", "required": true}}}}},
  "result": ["center", "file", "layer_count", "page_count", "scale", "sources", "truncated"],
- "planned_by": "epic 10, entrée 15 (skipped_layers)",
- "planned_result": ["skipped_layers"]}
+ "planned_by": "epic 10, entrée 15 (skipped_layers) ; entrée 31 (header, footer, grid mgrs, source_details)",
+ "planned_params": {"header": {"type": "string", "required": false},
+                    "footer": {"type": "string", "required": false},
+                    "grid": {"type": "union", "required": false, "tag": "kind",
+                             "variants": {"degrees": {"interval": {"type": "Angle", "required": true}},
+                                          "projected": {"epsg": {"type": "integer", "required": true},
+                                                        "interval": {"type": "Distance", "required": true}},
+                                          "mgrs": {"interval": {"type": "Distance", "required": true},
+                                                   "epsg": {"type": "integer", "required": false},
+                                                   "squares": {"type": "array", "required": false, "items": "string"}}}}},
+ "planned_result": ["skipped_layers", "source_details"]}
 ```
 
 ### `terrain.slope`
@@ -918,12 +941,32 @@ deux points confondus, à moins d'un demi-millimètre : l'azimut n'est pas défi
 `coord.out_of_range` (point d'entrée invalide : WGS84 hors de [-90, 90] ou [-180, 180],
 point UTM hors de sa zone, coordonnées non finies).
 
+**Nord de référence (planifié, changement de cap du 2026-11-10, epic 10, entrées 28 et 29).**
+`north` vaut `true` (défaut : nord vrai), `grid` (gisement : nord du quadrillage UTM de `from`,
+ou de la zone `utm_zone` ; convergence des méridiens d'après les formules publiées de Krüger et
+de Karney) ou `magnetic` (azimut magnétique : déclinaison du modèle magnétique mondial WMM2025,
+domaine public, à l'altitude 0 m, à la date `date`, AAAA-MM-JJ ; absente, la date du jour, fixée
+par le noyau et repassée au rejeu). Chaque azimut est corrigé au point où il est mesuré ; le
+gisement est celui de la géodésique, pas celui de la corde sur le plan. Résultats ajoutés :
+`north` (nord employé), `convergence` (`Angle` ou `null`, au départ, pour `grid`), `declination`
+(`Angle` ou `null`, au départ, pour `magnetic`), `date` (ou `null`), `warning` (texte ou `null` :
+date hors de la validité du WMM2025, du 2025-01-01 au 2029-12-31, ou zone que le rapport du WMM
+déclare peu fiable ; le calcul est rendu quand même). Erreurs ajoutées : `geo.invalid_date`,
+`geo.date_unused` (`date` sans `north: "magnetic"`), `geo.zone_unused` (`utm_zone` sans
+`north: "grid"`), `coord.out_of_range` hors de la grille UTM pour `grid`. L'entrée 28 livre
+`north` (`true`, `grid`), `utm_zone` et `convergence` ; l'entrée 29 le reste.
+
 ```json fiche
 {"id": "geo.distance_azimuth", "status": "faite", "runs_in": "core", "dictated_by_core": false,
  "params": {"from": {"type": "Point", "required": true},
             "to": {"type": "Point", "required": true},
             "unit": {"type": "string", "required": false, "enum": ["deg", "gon"]}},
- "result": ["distance", "azimuth", "back_azimuth"]}
+ "result": ["distance", "azimuth", "back_azimuth"],
+ "planned_by": "epic 10, entrée 28 (north true et grid, utm_zone, convergence) ; entrée 29 (north magnetic, date, declination, warning)",
+ "planned_params": {"north": {"type": "string", "required": false, "enum": ["true", "grid", "magnetic"]},
+                    "utm_zone": {"type": "integer", "required": false},
+                    "date": {"type": "string", "required": false}},
+ "planned_result": ["north", "convergence", "declination", "date", "warning"]}
 ```
 
 ### `geo.destination_point`
@@ -949,12 +992,32 @@ Un départ UTM donne une arrivée dans la même zone, l'hémisphère suivant la 
 ou de la grille UTM (80° S à 84° N), ou si `from` est invalide (WGS84 hors de [-90, 90] ou
 [-180, 180], point UTM hors de sa zone, coordonnées non finies).
 
+**Nord de référence (planifié, changement de cap du 2026-11-10, epic 10, entrées 28 et 29).**
+`north` vaut `true` (défaut : nord vrai), `grid` (gisement : nord du quadrillage UTM de `from`,
+ou de la zone `utm_zone` ; convergence des méridiens d'après les formules publiées de Krüger et
+de Karney) ou `magnetic` (azimut magnétique : déclinaison du modèle magnétique mondial WMM2025,
+domaine public, à l'altitude 0 m, à la date `date`, AAAA-MM-JJ ; absente, la date du jour, fixée
+par le noyau et repassée au rejeu). `azimuth` en entrée est alors compté depuis le nord choisi. Chaque azimut est corrigé au point où il est mesuré ; le
+gisement est celui de la géodésique, pas celui de la corde sur le plan. Résultats ajoutés :
+`north` (nord employé), `convergence` (`Angle` ou `null`, au départ, pour `grid`), `declination`
+(`Angle` ou `null`, au départ, pour `magnetic`), `date` (ou `null`), `warning` (texte ou `null` :
+date hors de la validité du WMM2025, du 2025-01-01 au 2029-12-31, ou zone que le rapport du WMM
+déclare peu fiable ; le calcul est rendu quand même). Erreurs ajoutées : `geo.invalid_date`,
+`geo.date_unused` (`date` sans `north: "magnetic"`), `geo.zone_unused` (`utm_zone` sans
+`north: "grid"`), `coord.out_of_range` hors de la grille UTM pour `grid`. L'entrée 28 livre
+`north` (`true`, `grid`), `utm_zone` et `convergence` ; l'entrée 29 le reste.
+
 ```json fiche
 {"id": "geo.destination_point", "status": "faite", "runs_in": "core", "dictated_by_core": false,
  "params": {"from": {"type": "Point", "required": true},
             "azimuth": {"type": "Angle", "required": true},
             "distance": {"type": "Distance", "required": true}},
- "result": ["point"]}
+ "result": ["point"],
+ "planned_by": "epic 10, entrée 28 (north true et grid, utm_zone, convergence) ; entrée 29 (north magnetic, date, declination, warning)",
+ "planned_params": {"north": {"type": "string", "required": false, "enum": ["true", "grid", "magnetic"]},
+                    "utm_zone": {"type": "integer", "required": false},
+                    "date": {"type": "string", "required": false}},
+ "planned_result": ["north", "convergence", "declination", "date", "warning"]}
 ```
 
 ### `geo.bearing_intersection`
@@ -1644,6 +1707,40 @@ un tableur Excel ou CSV, champ en trop).
             "format": {"type": "string", "required": true, "enum": ["gpkg", "shp", "geojson"]},
             "out": {"type": "string", "required": false}},
  "result": ["feature_count", "file", "format"]}
+```
+
+### `data.convert_raster`
+
+Écrit un raster lisible par QGIS (ASCII Grid `.asc`, ERDAS `.img`, JPEG 2000 `.jp2`, GeoTIFF,
+VRT…) en GeoTIFF Float32, sans-donnée -9999, première bande, pour que les commandes du noyau le
+lisent (AD-20) ; l'original est intact (changement de cap du 2026-11-10, epic 10, entrée 30).
+Algorithme visé `gdal:translate`, repli `gdal:warpreproject` sans changement de système si le
+sans-donnée doit être réécrit, à vérifier dans la documentation de QGIS 3.44 au ticket. Le noyau
+dicte ensuite `layer.open_raster`. Jamais de reprojection (AD-19).
+
+| Paramètre | Type | Oblig. | Unité / valeurs | Sens |
+|---|---|---|---|---|
+| `raster` | `RasterPath` | oui | — | Raster à convertir. |
+| `assign_epsg` | entier | non | — | Système à déclarer, seulement pour une source qui n'en a pas (ASCII Grid sans `.prj`). |
+| `out` | chaîne | non | — | Fourni par le noyau. |
+
+| Résultat | Type | Sens |
+|---|---|---|
+| `file` | chaîne | GeoTIFF écrit. |
+| `epsg` | entier ou `null` | Système du GeoTIFF écrit, s'il en a un. |
+
+Erreurs : fichier absent ou illisible par QGIS (erreur alignée au ticket sur celle de
+`raster.align`) ; `analysis.bad_params` (`assign_epsg` pour une source qui a déjà un autre
+système) ; `data.unknown_crs` ; `analysis.failed` ; `qgis.cancelled`. Un GeoTIFF sans système
+reste lisible par QGIS mais est refusé ensuite par les commandes du noyau (`dem.no_epsg`) : le
+résumé le dit.
+
+```json fiche
+{"id": "data.convert_raster", "status": "planifiee", "runs_in": "qgis", "dictated_by_core": false,
+ "params": {"raster": {"type": "RasterPath", "required": true},
+            "assign_epsg": {"type": "integer", "required": false},
+            "out": {"type": "string", "required": false}},
+ "result": ["epsg", "file"]}
 ```
 
 ### `layer.remove`
