@@ -1497,7 +1497,12 @@ mod tests {
             cassini_training::DEFAULT_SEED,
             cassini_training::DEFAULT_COUNT,
         );
-        for e in &examples {
+        // La vue triée d'un gros projet (5.47) commence par `index` : ses découpes, à la fin de
+        // l'index, sont l'affaire de 5.48 ; ici, les inventaires de la forme d'avant.
+        for e in examples
+            .iter()
+            .filter(|e| e.inventory.get("index").is_none())
+        {
             let layers = e.inventory["layers"].as_array().map_or(0, Vec::len);
             assert_eq!(layer_cuts(&e.inventory).len(), layers, "{}", e.inventory);
         }

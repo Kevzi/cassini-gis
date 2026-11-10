@@ -946,3 +946,6 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-vue-triee-de-l-inventaire-d-un-gros-projet-index-reduit-et-c-plan.md`
   summary: Pour 5.48 — au-delà d'environ 150 couches de l'utilisateur, l'index seul dépasse le budget et la vue sort hors budget sans détail ; c'est alors le contrôle exact de cassini-ai qui refuse, avec le nouveau message de 48.
   evidence: kept_by_batches ne retire jamais une couche de l'utilisateur (voulu, matrice du plan) ; 63 couches font 5 700 caractères d'index.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-generateur-gros-projets-de-20-a-60-couches-rendus-par-la-vue-plan.md`
+  summary: le test `the_whole_generated_set_is_cut_at_every_layer` (`ai/src/plan.rs`) ne contrôle plus les inventaires à `index` (≈ 25 % du jeu) ; les découpes de la vue triée sont à tester en 5.48.
+  evidence: relecture quick de 5.47 ; le filtre du test écarte toute clé `index`, et le placement du cache à la fin de l'index est l'objet de 5.48.

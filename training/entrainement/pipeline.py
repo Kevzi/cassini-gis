@@ -74,9 +74,11 @@ VALIDATION_SEED = 2
 TORCH_SEED = 1
 TRAINING_COUNT = 8600  # décision du propriétaire, 5.15 ; 8 600 depuis le 2026-11-10
 VALIDATION_COUNT = 300
-# La séquence la plus longue mesurée fait 1 773 jetons (inventaires larges, 2026-11-10) :
-# 2 048 laisse de la marge sans tronquer.
-MAX_LENGTH = 2048
+# Gros projets de 20 à 60 couches (5.47, décision du propriétaire du 2026-11-10) : 4 608, tenu
+# par l'essai du 2026-11-10 sur la carte de 8 Go (`--longs-d-abord --pas-max 100` : pic 5,72 Gio).
+# Le générateur écarte déjà tout prompt au-delà de `MAX_PROMPT_CHARS` (`training/src/lib.rs`), pour
+# qu'aucune séquence n'atteigne cette borne : la plus longue mesurée fait 3 708 jetons (graine 1).
+MAX_LENGTH = 4608
 # Le GPU visé a 8 Go ; on refuse en dessous de 7 Gio de mémoire totale.
 MIN_GPU_MEMORY = 7 * 1024**3
 

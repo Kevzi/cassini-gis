@@ -677,6 +677,104 @@ mesurée avec les segments extensibles (« longs d'abord », jusqu'à 1 768 jeto
 sur la carte de 8 Go) : la carte ne devrait pas se remplir, à vérifier sur les premiers pas
 (`--longs-d-abord --pas-max 30`) avant la nuit.
 
+### Gros projets et couches proches (5.47)
+
+Changement de cap du 2026-11-10 (`change-inventaire-des-gros-projets`) : au-delà d'environ
+9 000 caractères de couches de l'utilisateur, le noyau montre au modèle une **vue triée**
+(`cassini_core::agent_inventory::sorted_view`, ticket 5.46) : un `index` réduit
+`{layer_id, name, geometry}` de toutes les couches, et dans `layers` le détail de celles que la
+demande désigne, puis des rasters. Le modèle n'avait jamais vu ni cette forme ni plus d'une
+dizaine de couches. Deux familles nouvelles :
+
+- **`gros_projet`** (poids 128) tire une autre famille selon les poids (redemandes et couches
+  proches comprises, elle-même exclue), pose son exemple dans un projet de 20 à 60 couches et le
+  fait rendre **par la fonction du noyau**, sans en copier la logique : l'inventaire appris est
+  retraduit en sortie brute de `project.inventory` (`inventories::raw_layer`, clé apprise absente
+  → clé brute absente, emprise en degrés au centre du fuseau UTM appris), complété de couches de
+  remplissage (`BIG_FILLERS`, 56 couches publiques façon BD TOPO 3, standard CNIG, servitudes et
+  autres producteurs, 10 à 25 champs, dont deux rasters : orthophotographie et SCAN 25 ; aucune ne
+  recouvre un thème), puis passé à `sorted_view` avec la demande et `ViewLimits::default()`. Les
+  identifiants appris `slug_<4 ou 8 hex>` deviennent des identifiants QGIS `slug_<uuid>` dont
+  l'uuid commence par ces chiffres ; le plan, la sortie rejetée d'une redemande et ses écarts sont
+  réécrits en identifiants courts montrés. `unloaded_files` reste celui de l'exemple de base.
+  Chaque famille garde ainsi son compte, petits et gros projets ensemble.
+- **`couches_proches`** (poids 7) pose deux couches d'un même thème qui ne diffèrent que par un
+  qualificatif : millésimes (« Gares 2019 », « Gares 2024 »), producteurs (« BD TOPO », « OSM »)
+  ou copie (« Gares », « Gares copie », même source). Sans le qualificatif, la réponse est une
+  question qui nomme les deux couches et finit par « ? » ; avec (un tiers des exemples), le plan
+  porte sur la bonne couche. Le mot de la demande désigne les deux noms, pour que la vue triée
+  les détaille toutes deux. Cette question est apprise, jamais écrite dans le noyau.
+
+**Gardes du générateur** (décisions du 2026-11-10, tranchées en party, à confirmer par le
+propriétaire) :
+
+1. une couche de remplissage dont un mot du nom, de la table ou du fichier égale un mot de la
+   demande n'est pas posée : aucune ambiguïté non voulue ;
+2. un gros projet trié n'est gardé que si chaque couche « utile » (`Example::focus` : celles que la
+   famille pose, ses distractions exclues) est détaillée, sauf une couche qu'un plan d'appels ne
+   cite que comme géométrie (aucun paramètre de champ dans les appels qui la citent). Précision
+   de réalisation : une couche reprojetée (`data.reproject`) doit être détaillée, le plan
+   dépendant de son système, que l'index ne montre pas ; un raster utile non détaillé est écarté
+   et compté (l'index ne montre pas sa source) ; un champ cité par le plan (`field`,
+   `label_field`, `x_field`, `y_field`) doit rester dans la couche détaillée, que la vue plafonne
+   à 30 champs ou 3 000 caractères ;
+3. un exemple dont le prompt dépasse `MAX_PROMPT_CHARS` = 12 900 caractères est écarté
+   (`training/src/lib.rs`) : au pire rapport mesuré (0,333 jeton par caractère de prompt, réponse
+   de 300 jetons au plus), il reste sous 4 596 jetons, donc sous les 4 608 de `MAX_LENGTH` ; la
+   chaîne d'entraînement n'en écarte aucun. Sur les prompts longs, le rapport est de 0,306.
+   Conséquence à connaître pour 5.48 : la vue du noyau peut aller jusqu'à 14 000 caractères
+   d'inventaire, mais l'entraînement ne montre aucun prompt au-delà de 12 900 caractères
+   (environ 11 800 d'inventaire). Les vues les plus pleines restent donc hors de ce que le modèle
+   a vu.
+
+Les écarts sont comptés au résumé (`gros_projet`, colonne « écartés ») : 295 écartés pour 2 139
+gardés au jeu par défaut, par l'une ou l'autre des deux dernières gardes. Exemples d'écart : une couche de
+zonage non désignée par « les parcelles constructibles », le réseau routier d'une isochrone, un
+MNT accompagné de nombreuses couches détaillées par une valeur. Le premier cas est celui de la
+redemande élargie du noyau (5.48) : le modèle ne l'apprend pas ici.
+
+**Mesures** (graine 1, 8 600 exemples, jetons du tokeniseur de `Qwen/Qwen3.5-4B`, prompt et
+réponse) :
+
+| Mesure | Valeur |
+|---|---|
+| exemples `gros_projet` | 2 139 (24,9 %) |
+| couches par gros projet | 20 à 60, moyenne 39,8, médiane 40 |
+| gros projets vus triés (clé `index`) | 2 139 (100 % : les remplissages dépassent toujours le seuil) |
+| exemples `couches_proches` (petits projets) | 162, un tiers environ en plan ; d'autres dans les gros projets |
+| longueur, tous les exemples | moyenne 1 062, médiane 901, maximum 3 708 |
+| longueur, gros projets | moyenne 1 733, médiane 1 688, maximum 3 708 |
+| longueur, petits projets | moyenne 840, médiane 810, maximum 1 824 |
+| 95e et 99e centiles | 2 038 et 2 761 |
+| exemples au-delà de 4 608 jetons | 0 (414 au-delà de 2 048) |
+| prompt le plus long | 12 883 caractères |
+| jetons du jeu entier | 9,13 M (7,14 M au jeu des inventaires larges) |
+
+Le poids de `redemande` passe de 52 à 58 : les gros projets diluent les petits et écartent
+davantage de redemandes (prompt plus long), qui retombaient à 3,9 %. `MAX_LENGTH` passe de 2 048
+à 4 608 (`training/entrainement/pipeline.py`, décision du propriétaire), et le repli (gros
+projets plafonnés à 40 couches, `BIG_MAX_LAYERS`) n'a pas servi.
+
+**Essai d'une heure sur la carte de 8 Go (2026-11-10).** `pipeline.py --longs-d-abord --pas-max
+100` (RTX 3070 Ti, segments extensibles), sur le jeu de cette branche avant la relecture (2 055
+gros projets, séquence la plus longue 3 731 jetons ; le jeu final n'en diffère que par le tirage
+des remplissages). Les 1 600 exemples les plus longs passent d'abord, de 3 731 à environ
+2 000 jetons. Aucun écarté pour longueur.
+
+| Pas | s / pas | Pic (torch) | Perte |
+|---|---|---|---|
+| 1 à 10 (amorce et compilation comprises) | 38 | 5,28 Gio | 0,450 |
+| 11 à 20 (les plus longs, ≈ 3 500 jetons) | 27 | 5,29 Gio | 0,204 |
+| 21 à 100 | 21 à 25 | 5,40 puis 5,72 Gio | 0,064 au pas 100 |
+
+La carte ne se remplit pas : le pic, 5,72 Gio, reste sous celui des longs d'abord à 1 768
+jetons sans segments extensibles (7,58 Gio), et la vitesse ne s'effondre pas. 100 pas ont pris
+39 min. **`MAX_LENGTH` = 4 608 retenu.** Durée attendue d'un entraînement complet (538 pas) :
+le jeu porte 9,13 M de jetons au lieu de 7,14 M (+28 %), et le coût par pas est à peu près
+proportionnel aux jetons (14,3 s à 1 768 jetons, 27 s à 3 500). On attend donc environ
+2 h 15 d'entraînement au lieu de 1 h 45, et environ 3 h 10 pour la commande entière ; une nuit
+à deux graines fait environ 6 h 30.
+
 ### Les inventaires de QGIS (5.15)
 
 Les valeurs d'un champ texte sont triées, comme le produit les rend. `unloaded_files` est
@@ -815,7 +913,8 @@ La commande, sans intervention :
    vus à l'entraînement ;
 4. prend la base `Qwen/Qwen3.5-4B` (Apache-2.0) à la révision épinglée
    `851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a`, dans le cache de Hugging Face ;
-5. écarte (et compte) tout exemple de plus de 2 048 jetons, sans jamais le tronquer ;
+5. écarte (et compte) tout exemple de plus de `MAX_LENGTH` jetons (2 048, puis 4 608 depuis 5.47),
+   sans jamais le tronquer ;
 6. entraîne un adaptateur QLoRA : base en nf4, gradient checkpointing, graine fixe, perte
    sur la réponse seule, projections du modèle de langue seulement. Depuis le 2026-11-09, la
    base se charge et l'adaptateur se pose par **Unsloth** (`--sans-unsloth` reprend
