@@ -648,7 +648,8 @@ déclaration `*.modele.json`) :
         ..\donnees-test-cassini\annecy\projet-test-annecy.qgz qgis-plugin\tests\recette\annecy.json
 
 La sonde pose une copie du projet à côté de l'original et ne touche jamais à celui-ci ; elle
-imprime `SCORE : N/20 (barre 16)`, les ratés avec leur raison et leur plan attendu, puis le rejeu.
+imprime `SCORE : N/20 (barre 16)`, les ratés avec leur raison et leur plan attendu, puis les
+deux rejeux (en session, indicatif ; après réouverture, compté).
 Le projet et le fichier de phrases sont des arguments : le projet de 60 couches de 5.50 aura son
 propre fichier.
 
@@ -662,13 +663,20 @@ phrase (28 s pour la première, chargement compris). Ratés :
 | RA09 « Fais un tampon autour des routes. » | tampon de 1 m | une question (distance absente) |
 | RA13 coordonnées UTM d'un point WGS84 | `data.transform_point` vers 32632 | `coord.convert` `to: ["utm"]` |
 
-RA13 rend un résultat juste par une autre commande : il reste compté raté (règle stricte) ; au
-propriétaire de dire si les deux plans doivent être acceptés. Un premier passage avait donné
-14/20 : quatre phrases écrivaient un point en degrés sans nommer le système, et le garde-fou des
+RA13 rend un résultat juste par une autre commande : il reste compté raté. La règle stricte est
+gardée (décision de party du 2026-11-10, à confirmer par le propriétaire) : seul le plan attendu,
+`coord.convert`, est juste. Un premier passage avait donné 14/20 : quatre phrases écrivaient un point en degrés sans nommer le système, et le garde-fou des
 coordonnées (4.10) posait sa question ; le système (WGS84) y est maintenant écrit, avant toute
-mesure retenue. **Rejeu : non identique**, à l'étape 1 : `project.inventory` est journalisé, et
-rejoué en fin de session, il voit les couches de résultat ajoutées depuis (consigné dans
-`deferred-work.md`). Cette mesure ne décide d'aucune installation.
+mesure retenue. **Rejeu : non identique** lors de cette mesure, à l'étape 1 : `project.inventory`
+était journalisé et, rejoué en fin de session, avait vu les couches de résultat ajoutées depuis
+(entrée 2.12, « rejeu en même session »). Cette mesure ne décide d'aucune installation.
+
+Depuis (entrée 2.12), la lecture reste journalisée, rejouée et comparée, mais
+le motif de l'écart nomme la couche posée par une exécution précédente et dit de rouvrir le projet
+sans l'enregistrer avant de rejouer. La sonde rejoue donc deux fois : dans la session, à titre
+indicatif (ce motif nommé y est attendu), puis après avoir rouvert la copie du projet sans
+l'enregistrer ; seul ce second rejeu compte, et il doit être identique. La mesure de référence est
+à rejouer ainsi avec un noyau de la branche.
 
 ### Inventaires larges et jeu de 8 600 exemples (2026-11-10)
 

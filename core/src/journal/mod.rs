@@ -1392,9 +1392,23 @@ impl<'a> Replay<'a> {
                 _ => false,
             };
             if !same {
-                return Err(diverged(format!(
-                    "la commande {id} ne redonne pas le même résultat ou la même erreur"
-                )));
+                // Une lecture qui voit une couche d'une exécution précédente : le projet n'est
+                // plus dans l'état de son ouverture. On en dit la cause et le remède.
+                let stale = outcome
+                    .as_ref()
+                    .ok()
+                    .and_then(|value| earlier_layer(value, &leave_out));
+                return Err(diverged(match stale {
+                    Some(layer) => format!(
+                        "la commande {id} voit la couche « {layer} », posée par une exécution \
+                         précédente : le projet n'est plus dans l'état où le journal l'a \
+                         trouvé. Rouvrez le projet tel qu'il était avant ces étapes, sans \
+                         l'enregistrer, puis rejouez"
+                    ),
+                    None => format!(
+                        "la commande {id} ne redonne pas le même résultat ou la même erreur"
+                    ),
+                }));
             }
             if let (Ok(value), Some(old), false) = (
                 &outcome,
@@ -1434,6 +1448,31 @@ impl<'a> Replay<'a> {
             identical: true,
         })
     }
+}
+
+/// Premier id de `leave_out` (couches d'une exécution précédente) que nomme le résultat brut
+/// `value` d'une étape : la lecture voit une couche qu'aucune étape de ce rejeu n'a posée (les
+/// ids de ce rejeu sont neufs). `None` pour une vraie divergence.
+fn earlier_layer(value: &Value, leave_out: &Value) -> Option<String> {
+    fn strings<'a>(value: &'a Value, out: &mut Vec<&'a str>) {
+        match value {
+            Value::String(s) => out.push(s),
+            Value::Array(items) => items.iter().for_each(|v| strings(v, out)),
+            Value::Object(map) => map.values().for_each(|v| strings(v, out)),
+            _ => {}
+        }
+    }
+    let earlier: HashSet<&str> = leave_out
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    let mut seen = Vec::new();
+    strings(value, &mut seen);
+    seen.into_iter()
+        .find(|s| earlier.contains(s))
+        .map(str::to_string)
 }
 
 /// L'inventaire sans les couches dont l'id est dans `leave_out` (un tableau d'ids) : au rejeu, la

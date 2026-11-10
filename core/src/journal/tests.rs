@@ -732,6 +732,122 @@ fn an_inventory_with_another_feature_count_diverges() {
     }
 }
 
+/// Une vraie divergence garde le motif ordinaire, sans le remède de la même session.
+#[test]
+fn a_true_divergence_keeps_the_plain_reason() {
+    for short in [false, true] {
+        for tweak in [
+            (|q: &mut SessionQgis| q.stranger = true) as fn(&mut SessionQgis),
+            |q| q.inventory_feature_count = 5,
+        ] {
+            let err = replay_inventory(short, tweak).unwrap_err();
+            let context = format!("inventaire court : {short} ; {}", err.message);
+            assert_eq!(err.code, "replay.diverged", "{context}");
+            assert_eq!(err.step, Some(4), "{context}");
+            assert!(
+                err.message.contains("ne redonne pas le même résultat"),
+                "{context}"
+            );
+            assert!(!err.message.contains("Rouvrez"), "{context}");
+            assert!(!err.message.contains("exécution précédente"), "{context}");
+        }
+    }
+}
+
+/// Rejeu dans la session d'origine : le projet porte encore les couches de la génération 1,
+/// que l'inventaire de l'étape 1 voit. Le motif nomme la couche et dit le remède.
+#[test]
+fn a_replay_in_the_same_session_names_the_earlier_layer() {
+    for short in [false, true] {
+        let err = replay_inventory(short, |q| {
+            q.created.borrow_mut().extend([
+                ("couche_g1_2".to_string(), "pts.csv".to_string()),
+                ("couche_g1_3".to_string(), "tampon.gpkg".to_string()),
+            ]);
+        })
+        .unwrap_err();
+        assert_eq!(err.code, "replay.diverged");
+        assert_eq!(err.step, Some(1));
+        assert!(err.message.contains("project.inventory"), "{}", err.message);
+        assert!(err.message.contains("« couche_g1_2 »"), "{}", err.message);
+        assert!(
+            err.message.contains("exécution précédente"),
+            "{}",
+            err.message
+        );
+        assert!(err.message.contains("Rouvrez"), "{}", err.message);
+    }
+}
+
+/// Même session, lecture après les créations : le résultat gardé nomme déjà les couches g1,
+/// mais le rejeu en pose de neuves (g2) à côté ; l'inventaire voit les g1, motif nommé.
+#[test]
+fn a_read_after_the_creations_in_the_same_session_names_the_earlier_layer() {
+    for short in [false, true] {
+        let (dir, project, _) = temp_project();
+        let registry = Registry::standard();
+        let mut kept = SessionQgis::new(1);
+        kept.short_inventory = short;
+        let mut s = Session::open(&registry, &project).unwrap().with_qgis(kept);
+        let added = s
+            .call("layer.add", json!({"path": "pts.csv", "crs": "EPSG:2154"}))
+            .unwrap();
+        let first = added["layer_id"].as_str().unwrap().to_string();
+        s.call(
+            "analysis.buffer",
+            json!({"layer_id": first, "distance": {"value": 500, "unit": "m"}}),
+        )
+        .unwrap();
+        s.call("project.inventory", json!({})).unwrap();
+        drop(s);
+        let mut qgis = SessionQgis::new(2);
+        qgis.short_inventory = short;
+        qgis.created.borrow_mut().extend([
+            ("couche_g1_1".to_string(), "pts.csv".to_string()),
+            ("couche_g1_2".to_string(), "tampon.gpkg".to_string()),
+        ]);
+        let err = Replay::load(&registry, &project)
+            .unwrap()
+            .run(&Router::new(&registry).with_qgis(qgis), &mut HashSet::new())
+            .unwrap_err();
+        let _ = fs::remove_dir_all(dir);
+        let context = format!("inventaire court : {short} ; {}", err.message);
+        assert_eq!(err.code, "replay.diverged", "{context}");
+        assert_eq!(err.step, Some(3), "{context}");
+        assert!(err.message.contains("« couche_g1_"), "{context}");
+        assert!(err.message.contains("exécution précédente"), "{context}");
+        assert!(err.message.contains("Rouvrez"), "{context}");
+    }
+}
+
+/// Une couche posée par un rejeu antérieur (`replayed_layers`), vue par la lecture : même motif.
+#[test]
+fn a_layer_of_an_earlier_replay_is_named_too() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    inventory_journal(&project, true);
+    let mut qgis = SessionQgis::new(3);
+    qgis.short_inventory = true;
+    qgis.created
+        .borrow_mut()
+        .push(("couche_g2_2".to_string(), "pts.csv".to_string()));
+    let mut earlier: HashSet<String> = ["couche_g2_2".to_string()].into();
+    let err = Replay::load(&registry, &project)
+        .unwrap()
+        .run(&Router::new(&registry).with_qgis(qgis), &mut earlier)
+        .unwrap_err();
+    let _ = fs::remove_dir_all(dir);
+    assert_eq!(err.code, "replay.diverged");
+    assert_eq!(err.step, Some(1));
+    assert!(err.message.contains("« couche_g2_2 »"), "{}", err.message);
+    assert!(
+        err.message.contains("exécution précédente"),
+        "{}",
+        err.message
+    );
+    assert!(err.message.contains("Rouvrez"), "{}", err.message);
+}
+
 #[test]
 fn a_replay_binds_new_layer_ids_and_accepts_other_qgis_bytes() {
     let (dir, project, _) = temp_project();

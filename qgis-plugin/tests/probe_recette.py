@@ -17,7 +17,11 @@ La sonde ne touche jamais au projet donné : elle en pose une copie à côté de
 (`<projet>-recette-<date>.qgz`, à côté pour garder ses chemins relatifs), et le noyau écrit
 ses sorties et son journal dans `<copie>.cassini/`. Les phrases s'enchaînent dans une seule
 session, comme un utilisateur : un plan conforme est exécuté, un plan non conforme est rejeté
-(`plan.reject`), comme l'utilisateur le refuserait. Puis le journal est rejoué.
+(`plan.reject`), comme l'utilisateur le refuserait. Puis le journal est rejoué deux fois :
+d'abord dans la même session (indicatif, imprimé seul : le projet porte encore les couches posées
+par les phrases, et une lecture du projet diverge en nommant l'une d'elles), puis après avoir
+rouvert la copie du projet sans l'enregistrer, comme l'utilisateur le ferait (compté : c'est l'état
+d'ouverture du projet que le rejeu identique promet). La copie n'est jamais enregistrée.
 
 Le noyau est cherché dans `CASSINI_CORE`, sinon `target/release/cassini.exe`. `CASSINI_MODELS`
 est transmis tel quel au noyau, qui prend la première entrée de la liste ; la sonde refuse de
@@ -26,8 +30,10 @@ partir sans lui, pour ne jamais prendre en silence le dossier des modèles du po
 `CASSINI_RECETTE_MODEL`, nom du modèle à demander (sinon le premier de la liste).
 
 Sortie : par phrase, la durée de composition, le plan, `JUSTE` ou `RATE — <raison>` (avec le plan
-attendu) ; puis `SCORE : N/total (barre B) : …`, la liste des ratés et le verdict du rejeu.
-Code 0 si la barre est tenue et le rejeu identique, 1 sinon, 2 si la sonde n'a pas pu partir.
+attendu) ; puis `SCORE : N/total (barre B) : …`, la liste des ratés, le verdict indicatif du rejeu
+en session et celui, compté, du rejeu après réouverture.
+Code 0 si la barre est tenue et le rejeu après réouverture identique, 1 sinon, 2 si la sonde n'a
+pas pu partir.
 """
 
 import json
@@ -102,7 +108,7 @@ print("phrases : %s (%d) ; noyau : %s ; modèles : %s" % (
 
 t0 = time.monotonic()
 state = {"i": 0, "phase": None, "since": 0.0, "right": 0, "missed": [], "done": False,
-         "replay": None}
+         "replay": None, "in_session": None}
 
 
 def now():
@@ -137,8 +143,8 @@ def next_phrase():
         total = len(PHRASES)
         print("\n%s" % rv.score_line(state["right"], total), flush=True)
         print("ratés : %s" % (", ".join("%s (%s)" % m for m in state["missed"]) or "aucun"), flush=True)
-        print("\n[%s] rejeu du journal" % now(), flush=True)
-        state["phase"] = "replay"
+        print("\n[%s] rejeu du journal dans la session (indicatif)" % now(), flush=True)
+        state["phase"], state["in_session"] = "replay_in_session", "interrompu"
         if not core.replay():
             finish("rejeu non parti")
         return
@@ -156,6 +162,22 @@ def finish(reason):
         state["replay"] = state["replay"] or reason
         print("\n[%s] FIN : %s" % (now(), reason), flush=True)
         QTimer.singleShot(0, app.quit)
+
+
+def replay_reopened(in_session):
+    """Consigne le rejeu en session (indicatif), rouvre la copie sans l'enregistrer, rejoue."""
+    state["in_session"] = in_session
+    print("rejeu en session (indicatif) : %s" % in_session, flush=True)
+    if in_session != "identique" and "exécution précédente" not in in_session:
+        print("ANOMALIE : motif en session non nommé (indicatif)", flush=True)
+    print("\n[%s] réouverture de la copie sans l'enregistrer, puis rejeu (compté)" % now(), flush=True)
+    project.clear()
+    if not project.read(PROJECT):
+        finish("copie du projet illisible à la réouverture")
+        return
+    state["phase"] = "replay"
+    if not core.replay():
+        finish("rejeu non parti")
 
 
 def on_event(kind, payload):
@@ -192,6 +214,17 @@ def on_event(kind, payload):
     elif kind in (client.PLAN_EXEC_FAILED, client.PLAN_CANCELLED) and phase == "execute":
         print("  %s : %s" % (kind, dumps(payload)), flush=True)
         verdict(rv.on_exec_failed(payload))
+    elif kind == client.REPLAY_DONE and phase == "replay_in_session":
+        print("rejeu en session : %s" % dumps(payload), flush=True)
+        verdict_in_session = "identique" if payload.get("identical") else "NON identique"
+        state["phase"] = "reopen"
+        # Hors du rappel du client : la réouverture et le second rejeu attendent la boucle de Qt.
+        QTimer.singleShot(0, lambda: shielded(replay_reopened, verdict_in_session))
+    elif kind == client.REPLAY_FAILED and phase == "replay_in_session":
+        print("rejeu en session : %s" % dumps(payload), flush=True)
+        state["phase"] = "reopen"
+        verdict_in_session = "en échec : %s — %s" % (payload.get("code"), payload.get("message"))
+        QTimer.singleShot(0, lambda: shielded(replay_reopened, verdict_in_session))
     elif kind == client.REPLAY_DONE:
         print("rejeu : %s" % dumps(payload), flush=True)
         finish("rejeu identique" if payload.get("identical") else "rejeu NON identique")
@@ -207,6 +240,15 @@ def guarded(kind, payload):
     """Une exception dans un rappel de Qt abattrait QGIS sans message : on la montre."""
     try:
         on_event(kind, payload)
+    except Exception as error:
+        traceback.print_exc()
+        finish("exception dans la sonde : %s" % error)
+
+
+def shielded(action, *args):
+    """Même garde pour une action différée par `QTimer` (réouverture puis rejeu)."""
+    try:
+        action(*args)
     except Exception as error:
         traceback.print_exc()
         finish("exception dans la sonde : %s" % error)
@@ -228,4 +270,6 @@ app.exec_() if hasattr(app, "exec_") else app.exec()
 core.stop()
 QgsApplication.exitQgis()
 held = state["right"] >= rv.bar(len(PHRASES))
+print("rejeu en session (indicatif) : %s ; rejeu après réouverture (compté) : %s" % (
+    state["in_session"] or "non joué", state["replay"]), flush=True)
 sys.exit(0 if held and state["replay"] == "rejeu identique" else 1)
