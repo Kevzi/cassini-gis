@@ -68,8 +68,9 @@ AD-17 ne change pas : la déclaration remplie par l'installeur est une conséque
 
 - Même besoin de SHA-256 que le journal chaîné (`change-journal-chaine-par-empreinte`) : crate
   `sha2` (**MIT OR Apache-2.0**), déjà au `Cargo.lock` par `/cli`, à ajouter à la crate qui lit la
-  déclaration avec l'accord du propriétaire (CLAUDE.md §8). Une seule décision pour les deux
-  amendements.
+  déclaration. **Décision du propriétaire du 2026-11-10 : « ok pour sha2 »** — la crate est
+  acceptée dans le noyau pour les deux amendements. Le reste de l'amendement attend toujours son
+  accord.
 - **Risque : high** (chargement du modèle, comportement visible au lancement, installeur et
   chaîne d'entraînement à aligner).
 
@@ -101,4 +102,4 @@ Epic 5 (`epic-agent-et-mcp`), après 5.50 :
   empreintes charge et le signale ; durée du lancement mesurée sur l'i5 et consignée ;
   l'installeur et la chaîne d'entraînement écrivent les empreintes du manifeste.
 
-À créer par `bmad-ticket` seulement après l'accord du propriétaire, avec la dépendance SHA-256.
+À créer par `bmad-ticket` seulement après l'accord du propriétaire sur l'amendement (la crate `sha2` est déjà acceptée le 2026-11-10).

@@ -854,7 +854,7 @@ title = "Re-entrainement groupe : grands inventaires, gros projets, couches proc
 description = "Un seul re-entrainement, apres la branche generateur-grands-inventaires et la famille « gros projet » de 47 : MAX_LENGTH de l'entrainement porte a 4 608, apres une mesure de memoire d'une heure sur la carte de 8 Go ; puis deux graines la meme nuit, par la commande unique (meme base, meme methode, sur GPU). Le modele n'est installe que si les barres tiennent. Le proprietaire lance l'entrainement, qui occupe sa carte graphique."
 verify = "D'abord une mesure de memoire a la nouvelle MAX_LENGTH sur la carte de 8 Go (essai d'une heure). Puis deux graines la meme nuit. Barres : Annecy >= 16/20, plan_reel, question_reel et ecart_reel pas en baisse. Installe seulement si les barres tiennent."
 covers = ["CAP-4"]
-after = [47, 48]
+after = [47, 48, "10.28", "10.29", "10.30", "10.31"]
 hitl = true
 risk = "high"
 references = [

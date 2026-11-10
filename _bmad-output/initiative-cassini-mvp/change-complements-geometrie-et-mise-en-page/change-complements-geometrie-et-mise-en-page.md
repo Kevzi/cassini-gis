@@ -5,10 +5,16 @@ party, à confirmer.** Mode batch (`bmad-correct-course`). Toutes les décisions
 marquées « tranchée en party le 2026-11-10, à confirmer par le propriétaire » sont réversibles
 jusqu'à la construction de leur entrée.
 
+**Correction du propriétaire du 2026-11-10 : « on les fait ».** Les besoins ne sont pas
+repoussés après la démo : les quatre entrées se construisent **tout de suite**, par dérogation à
+l'ordre de l'epic 10 (comme `layer.remove`, 10.27), **avant le ré-entraînement groupé 5.49**, pour
+que leurs familles du générateur entrent dans ce seul entraînement. Le texte ci-dessous est à
+jour de cette correction.
+
 ## 1. Le problème
 
 - **Déclencheur :** demande du propriétaire du 2026-11-10 : six besoins d'usagers civils que le
-  catalogue figé ne couvre pas, à ranger après la démo.
+  catalogue figé ne couvre pas, à construire tout de suite (correction du même jour).
 - **Nature :** nouvelles exigences, sans retour sur ce qui est construit.
 - **Pourquoi un changement de cap :** le catalogue est figé (`catalogue-des-commandes.md` §1,
   changement de cap du 2026-11-05) ; un paramètre ou un champ de résultat ne s'ajoute à une
@@ -38,9 +44,9 @@ coefficients et rapport technique publiés par la NOAA, œuvre du gouvernement f
 | Journal | Rien de nouveau dans la forme ; les paramètres fournis par le noyau sont journalisés comme les autres. |
 | Extension | Ligne de table de `data.convert_raster` ; pour l'export : en-tête, pied de page, étiquettes du carroyage MGRS (format de grille fixe, voir §4.3), ligne des sources détaillée. Aucune logique MGRS dans l'extension : les désignations de zone et de carré de 100 km sont calculées par le noyau et reçues comme du texte. |
 | Panneau, MCP | Paramètres offerts au modèle, au client MCP et au formulaire, sauf ceux « fournis par le noyau ». Le résultat dit toujours quel nord a servi. |
-| Générateur d'entraînement | Familles nouvelles, une par entrée (§4.6), apprises au ré-entraînement groupé suivant (entrée 17 de l'epic 10). |
-| Jeu tenu à l'écart | Aucune phrase rescorée : aucune ne porte sur ces besoins. Des phrases nouvelles s'ajoutent à l'entrée 17. |
-| Epics | Epic 10 (`epic-catalogue-etendu-qgis`) seul : quatre entrées (28 à 31), après la dernière primitive (16), avant la ré-épreuve (17) et le nettoyage (18). Tout l'epic 10 attend l'epic de démo (6) et la publication (7) : ces entrées ne passent devant ni 5.48 à 5.50 ni l'epic de démo. |
+| Générateur d'entraînement | Familles nouvelles, une par entrée (§4.6), apprises au ré-entraînement groupé 5.49 (un seul entraînement). |
+| Jeu tenu à l'écart | Aucune phrase rescorée : aucune ne porte sur ces besoins. Des phrases nouvelles peuvent s'ajouter à la recette de 5.49 ou de 5.50. |
+| Epics | Epic 10 (`epic-catalogue-etendu-qgis`) : quatre entrées (28 à 31) construites tout de suite, placées en tête après 27, sans prérequis (dérogation à l'ordre de l'epic, qui attend sinon la démo et la publication) ; 17 et 18 les gardent dans leur `after`. Epic 5 (`epic-agent-et-mcp`) : l'entrée 49 (ré-entraînement groupé) les attend (`after` 10.28 à 10.31), et l'epic 5 déclare l'epic 10 dans l'initiative (écart d'ordre assumé, ligne Decision dans l'epic 5). |
 | PRD, spec, UX | Spec inchangée : CAP-14 (catalogue étendu) et CAP-15 (géométrie) couvrent ces ajouts. UX : aucun écran nouveau. |
 
 ## 3. Voie recommandée
@@ -49,8 +55,9 @@ coefficients et rapport technique publiés par la NOAA, œuvre du gouvernement f
 périmètre. Effort : deux entrées du noyau (gisement ; azimut magnétique, la plus lourde), une
 primitive déléguée (conversion du raster), une entrée de mise en page (extension et noyau).
 Risques : gisement `medium`, azimut magnétique `high` (calcul nouveau, rejeu d'une date,
-donnée embarquée à tenir à jour), conversion du raster `low`, mise en page `medium`. Aucun
-effet sur le calendrier de la démo.
+donnée embarquée à tenir à jour), conversion du raster `low`, mise en page `medium`. Effet sur
+le calendrier : le ré-entraînement 5.49, et donc la recette 5.50 et la démo filmée, attendent
+ces quatre entrées.
 
 ## 4. Changements proposés
 
@@ -143,8 +150,8 @@ Décisions, chacune **tranchée en party le 2026-11-10, à confirmer par le prop
   système et un `assign_epsg` différent est refusée : jamais de reprojection (AD-19). Le noyau
   dicte ensuite `layer.open_raster`.
 - **D11 (ordre)** — Ordre de construction : gisement (28), azimut magnétique (29, qui réutilise
-  le paramètre `north`), conversion du raster (30), mise en page (31). Les quatre après
-  l'entrée 16, la ré-épreuve (17) et le nettoyage (18) les attendent.
+  le paramètre `north`), conversion du raster (30), mise en page (31). Les quatre tout de
+  suite, avant le ré-entraînement groupé 5.49 (correction du propriétaire du 2026-11-10).
 
 ### 4.2 Catalogue — `geo.distance_azimuth` et `geo.destination_point`
 
@@ -308,7 +315,7 @@ l'entrée 28 ; aucune autre AD ne change.
 
 ### 4.6 Epic 10 — `epic-catalogue-etendu-qgis/tickets.toml`
 
-Quatre entrées, dans l'ordre de construction, après l'entrée 16 :
+Quatre entrées, dans l'ordre de construction, en tête de l'epic après l'entrée 27, sans prérequis :
 
 | Id | Titre | Risque | Famille du générateur |
 |---|---|---|---|
@@ -317,7 +324,7 @@ Quatre entrées, dans l'ordre de construction, après l'entrée 16 :
 | 30 | Conversion d'un raster en GeoTIFF (`data.convert_raster`) | low | `conversion_raster` |
 | 31 | Mise en page : carroyage MGRS étiqueté, en-tête et pied de page, sources détaillées | medium | `carroyage_mgrs`, `entete_pied_de_page` (le besoin 6 est automatique : pas de famille) |
 
-L'entrée 17 (ré-épreuve) et l'entrée 18 (nettoyage) gagnent 28 à 31 dans leur `after`.
+L'entrée 17 (ré-épreuve) et l'entrée 18 (nettoyage) gagnent 28 à 31 dans leur `after`. Dans l'epic 5, l'entrée 49 gagne `"10.28"`, `"10.29"`, `"10.30"`, `"10.31"` dans son `after`, sans autre changement.
 
 ### 4.7 Décision dans l'epic 10 — `epic-catalogue-etendu-qgis.md`
 
@@ -325,7 +332,9 @@ L'entrée 17 (ré-épreuve) et l'entrée 18 (nettoyage) gagnent 28 à 31 dans le
 >   (rangement approuvé par le propriétaire, détail tranché en party, à confirmer) : gisement
 >   (28), azimut magnétique par le WMM2025 du domaine public (29), `data.convert_raster` (30),
 >   mise en page — carroyage MGRS étiqueté, en-tête et pied de page, sources détaillées (31) ;
->   après l'entrée 16, avant 17 et 18 ; amendement d'AD-31 à confirmer avant 28.
+>   construites tout de suite, par dérogation à l'ordre de l'epic, avant le ré-entraînement
+>   groupé 5.49 (correction du propriétaire du 2026-11-10, « on les fait ») ; amendement
+>   d'AD-31 à confirmer avant 28.
 
 ## 5. Passage à la réalisation
 
@@ -333,7 +342,8 @@ L'entrée 17 (ré-épreuve) et l'entrée 18 (nettoyage) gagnent 28 à 31 dans le
 - **Appliqué avec `bmad-ticket` le 2026-11-10 :** entrées 28 à 31 de l'epic 10, ligne Decision,
   fiches du catalogue (`planned_*` et fiche `planifiee`) ; recette `core/tests/catalogue.rs`
   verte.
-- **Attend le propriétaire :** confirmation des décisions D1 à D11 ; amendement d'AD-31 (§4.5) ;
+- **Attend le propriétaire :** confirmation des décisions D1 à D11 ; amendement d'AD-31 (§4.5),
+  qui bloque l'entrée 28 et donc, par la chaîne 28 → 29 → 30 → 31, le ré-entraînement 5.49 ;
   question D3 (gisement en Lambert-93, AD-19).
 - **Au moment de construire l'entrée 29 :** télécharger à la main, depuis la page officielle du
   WMM de la NOAA (NCEI), le fichier de coefficients du WMM2025 et le rapport technique ;
@@ -341,4 +351,4 @@ L'entrée 17 (ré-épreuve) et l'entrée 18 (nettoyage) gagnent 28 à 31 dans le
   dans le dépôt, et confirmer la mention de domaine public sur la page. Les valeurs de contrôle
   du rapport technique servent de tests.
 - **Réussite :** chaque entrée verte sur ses tests et sa recette QGIS ; le modèle compose ces
-  demandes après le ré-entraînement groupé de l'entrée 17.
+  demandes après le ré-entraînement groupé 5.49.

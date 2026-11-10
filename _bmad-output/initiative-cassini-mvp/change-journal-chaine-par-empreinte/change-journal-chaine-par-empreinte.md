@@ -63,9 +63,9 @@ clés, hors de ce périmètre.
 ## 5. Dépendance et risques
 
 - **SHA-256 dans le noyau :** la crate `sha2` (RustCrypto, **MIT OR Apache-2.0**) est déjà au
-  `Cargo.lock`, tirée par une dépendance de `/cli` ; l'ajouter directement à `cassini-core`
-  demande l'accord du propriétaire (CLAUDE.md §8). Repli : une implémentation d'après la norme
-  FIPS 180-4, testée sur ses vecteurs publiés. La party préfère la crate, éprouvée.
+  `Cargo.lock`, tirée par une dépendance de `/cli`. **Décision du propriétaire du 2026-11-10 :
+  « ok pour sha2 »** — la crate est acceptée dans le noyau pour cet amendement et pour
+  `change-empreinte-du-modele-verifiee`. Le reste de l'amendement attend toujours son accord.
 - **Risque : high** (AD-11, rejeu) : relecture à plusieurs lentilles (`thorough`, CLAUDE.md §8).
 - Coût : une empreinte par ligne écrite, négligeable ; la vérification relit le journal à
   l'ouverture, linéaire en sa taille.
@@ -98,4 +98,4 @@ Epic 2 (`epic-registre-projet-import`), après 2.12 :
   un ancien journal prolongé est chaîné à partir de sa première ligne neuve ; une session en
   lecture seule vérifie sans écrire ; recette QGIS : rejeu identique après réouverture.
 
-À créer par `bmad-ticket` seulement après l'accord du propriétaire, avec la dépendance SHA-256.
+À créer par `bmad-ticket` seulement après l'accord du propriétaire sur l'amendement (la crate `sha2` est déjà acceptée le 2026-11-10).
