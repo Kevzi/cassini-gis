@@ -163,3 +163,21 @@ covers = ["CAP-13"]
 after = [13]
 hitl = false
 risk = "medium"
+
+[[entry]]
+id = 15
+type = "story"
+title = "Programme noyau choisi dans les reglages, annonce et confirme"
+description = "Le reglage cassini/core_path, qui existe deja (AD-17), devient visible dans les reglages du panneau avec son explication ; l'ordre de recherche ne change pas. Le panneau affiche en permanence le nom et la version du programme branche, annonces par session.hello, et la mention « programme derive de Cassini » quand ce n'est pas le programme officiel ; pour un programme derive, il dit que la preuve hors ligne d'AD-14 ne porte que sur le programme officiel. Au premier branchement d'un programme non officiel, l'extension demande confirmation, retient l'empreinte SHA-256 du programme accepte (calcul en Python) et redemande si elle change. L'extension ne connait aucune commande particuliere."
+verify = "Tests de l'extension : le reglage visible ecrit cassini/core_path ; un programme derive affiche son nom, sa version et la mention ; un premier branchement demande confirmation, un second avec la meme empreinte non, une empreinte changee redemande ; un refus ne lance pas le programme. Recette QGIS avec le programme d'exemple de 2.14 et le programme officiel."
+covers = ["CAP-13"]
+after = ["2.14"]
+hitl = false
+risk = "medium"
+references = [
+  "change — _bmad-output/initiative-cassini-mvp/change-commandes-d-un-module-exterieur/change-commandes-d-un-module-exterieur.md, §2.6, §3 et §5",
+  "architecture — _bmad-output/initiative-cassini-mvp/architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md, AD-6 (amendement du 2026-11-10) et AD-17",
+]
+notes = [
+  "Decision: 2026-11-10 — proprietaire : « ok pour 7, 8 et 9 » ; le panneau affiche le programme branche et demande confirmation au premier branchement ; reglage cassini/core_path rendu visible. Attend la publication et l'epic 10 a travers 2.14.",
+]

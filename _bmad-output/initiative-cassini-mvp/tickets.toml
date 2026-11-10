@@ -24,6 +24,9 @@ covers = ["CAP-6", "CAP-7"]
 after = [
   { epic = 1, needs = "le workspace, le verrou hors ligne dans le moteur et la recette automatique" },
   { epic = 8, needs = "le verdict sur la capacite d'un modele local a composer des commandes, qui dicte la forme des descriptions et des schemas de parametres" },
+  { epic = 6, needs = "la demo faite, avant le journal chaine par empreinte (2.13, changement de cap change-journal-chaine-par-empreinte du 2026-11-10)" },
+  { epic = 7, needs = "la publication faite, avant l'API publique du registre (2.14, changement de cap change-commandes-d-un-module-exterieur du 2026-11-10)" },
+  { epic = 10, needs = "le catalogue etendu stabilise, avant l'API publique du registre (2.14, meme changement de cap)" },
 ]
 
 [[epic]]

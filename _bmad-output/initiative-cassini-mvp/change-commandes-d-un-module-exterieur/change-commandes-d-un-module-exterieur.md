@@ -1,7 +1,23 @@
 # Amendement d'architecture : commandes d'un module extérieur (2026-11-10)
 
-Statut : **proposé, en attente du propriétaire.** Décision structurante : rien n'est appliqué
-au contrat d'architecture ni aux tickets. La party du 2026-11-10 donne son avis au §8.
+Statut : **approuvé par le propriétaire le 2026-11-10** (« ok pour 7, 8 et 9 »), avec les
+recommandations de la party du §8. Décision structurante. Conditions de l'approbation :
+
+- **le principe est approuvé ; rien n'est construit avant la publication** (epic 7,
+  `epic-publication`) **et la stabilisation du catalogue étendu** (epic 10,
+  `epic-catalogue-etendu-qgis`) ; le travail commence par figer l'API publique du registre ;
+- **pas de chargement dynamique** : un programme composé à la compilation, ni bibliothèque
+  partagée découverte dans un dossier, ni script (§2.1) ;
+- les commandes ajoutées **calculent dans le noyau seulement** (`runs_in: core`, §2.2) ;
+- **aucune collision** avec les familles du catalogue : le registre refuse au démarrage un
+  identifiant en collision (§2.3) ;
+- le **modèle local ne voit une commande ajoutée que si sa déclaration la nomme** (§4) ;
+- le panneau **affiche en permanence le programme branché** et **demande confirmation au premier
+  branchement** d'un programme non officiel (§5) ;
+- le réglage **`cassini/core_path` est rendu visible** dans les réglages du panneau (§2.6).
+
+Le texte du §7 est porté à AD-6 du contrat d'architecture le 2026-11-10, et les précisions du
+§6 à AD-13 et AD-23 ; les entrées du §9 sont créées (2.14, 9.15, 5.52).
 
 ## 1. Le problème
 
@@ -100,9 +116,10 @@ Un modèle ajusté n'a appris que le catalogue de son entraînement. Proposition
 | AD-24 | Inchangée : aucune commande déléguée ajoutée sans modifier l'extension. |
 | AD-11 | Inchangée : la version du registre journalisée distingue déjà deux programmes. |
 
-## 7. Texte proposé pour AD-6 (non appliqué)
+## 7. Texte porté à AD-6 (appliqué le 2026-11-10)
 
-> - **Amendement (proposé le 2026-11-10, changement de cap `change-commandes-d-un-module-exterieur`) —
+> - **Amendement (2026-11-10, changement de cap `change-commandes-d-un-module-exterieur`, approuvé
+>   par le propriétaire le 2026-11-10) —
 >   commandes ajoutées.** Un programme construit sur la bibliothèque du noyau peut enregistrer
 >   des commandes `runs_in: core` hors des familles du catalogue ; le registre refuse toute
 >   collision au démarrage. Ces commandes sont annoncées, offertes, journalisées et rejouées
@@ -133,7 +150,7 @@ publication (epic 7) et la stabilisation du catalogue étendu (epic 10), et comm
 figer l'API publique du registre ; les trois garde-fous du §5 et la règle de grammaire du §4
 font partie de l'approbation.
 
-## 9. Entrées prévues (non créées)
+## 9. Entrées créées le 2026-11-10 : 2.14, 9.15, 5.52
 
 Epic à choisir par le propriétaire (proposition : une entrée par epic concerné, toutes après
 la publication) :
@@ -149,4 +166,17 @@ la publication) :
   la déclaration nomme les commandes connues ; les autres sont exclues de la grammaire et
   restent offertes au formulaire et au MCP ; `risk` high ; `covers` CAP-4, CAP-8.
 
-À créer par `bmad-ticket` seulement après l'accord du propriétaire.
+Créées par `bmad-ticket` le 2026-11-10, une par epic proposé, aux places proposées :
+
+- **2.14** « API publique du registre et programme noyau composé » (`epic-registre-projet-import`,
+  après 2.13), `after` = 2.13 (toutes deux touchent `session.hello`), `epic-publication` et
+  `epic-catalogue-etendu-qgis`, `risk` high. Elle
+  porte aussi l'annonce du §2.5 (`system.about`, `session.hello`), que les deux autres attendent.
+- **9.15** « Programme noyau choisi dans les réglages, annoncé et confirmé » (`epic-facade-qgis`,
+  après 9.14), `after` = 2.14, `risk` medium. L'epic nommé « Epic 3 » ci-dessus est
+  `epic-facade-qgis`, dont l'identifiant est 9 (l'identifiant 3 est l'epic retiré
+  `epic-analyses-et-historique`).
+- **5.52** « Grammaire limitée aux commandes connues du modèle » (`epic-agent-et-mcp`, après
+  5.51), `after` = 5.51 et 2.14, `risk` high.
+
+9.15 et 5.52 attendent la publication et l'epic 10 à travers 2.14.

@@ -7,13 +7,16 @@ paradigm: 'hexagonal (ports et adaptateurs), avec un adaptateur sortant distant'
 scope: "Invariants du MVP Cassini : frontière entre le noyau Rust Apache-2.0 et l'extension QGIS GPL, contrat du registre de commandes, journal rejouable, agent local et serveur MCP, moteur de terrain, distribution et recette ; géométrie et terrain étendu dans le noyau (CAP-15) ; après le MVP, extension du catalogue par le cadre de traitement de QGIS (CAP-14)"
 status: final
 created: '2026-10-14'
-updated: '2026-11-05'
+updated: '2026-11-10'
 binds: [CAP-1, CAP-3, CAP-4, CAP-5, CAP-6, CAP-7, CAP-8, CAP-9, CAP-10, CAP-11, CAP-13, CAP-14, CAP-15]
 sources:
   - ../spec-cassini-mvp/spec-cassini-mvp.md
   - ../change-facade-qgis-avant-app-autonome/change-facade-qgis-avant-app-autonome.md
   - ../change-ia-externe-pilote-la-session-qgis-ouverte/change-ia-externe-pilote-la-session-qgis-ouverte.md
   - ../change-geometrie-et-terrain-avant-la-demo/change-geometrie-et-terrain-avant-la-demo.md
+  - ../change-journal-chaine-par-empreinte/change-journal-chaine-par-empreinte.md
+  - ../change-empreinte-du-modele-verifiee/change-empreinte-du-modele-verifiee.md
+  - ../change-commandes-d-un-module-exterieur/change-commandes-d-un-module-exterieur.md
   - ../initiative-cassini-mvp.md
 companions:
   - ../../../CLAUDE.md
@@ -153,6 +156,18 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   figure avec les mêmes identifiant, paramètres et résultat ; une entrée du
   catalogue absente du registre y est marquée planifiée ou réservée. Un écart
   fait échouer la recette ; le catalogue ne change que par un changement de cap.
+
+- **Amendement (2026-11-10, changement de cap `change-commandes-d-un-module-exterieur`, approuvé
+  par le propriétaire le 2026-11-10) —
+  commandes ajoutées.** Un programme construit sur la bibliothèque du noyau peut enregistrer
+  des commandes `runs_in: core` hors des familles du catalogue ; le registre refuse toute
+  collision au démarrage. Ces commandes sont annoncées, offertes, journalisées et rejouées
+  comme les autres ; le catalogue public fait foi sur le registre officiel seul. Le modèle
+  local ne les voit que si sa déclaration les nomme. L'extension n'en connaît aucune.
+  Conditions de l'approbation (changement de cap, Statut) : rien n'est construit avant la
+  publication et l'epic 10 ; pas de chargement dynamique ; le panneau affiche le programme
+  branché et demande confirmation au premier branchement ; `cassini/core_path` est rendu
+  visible (entrées 2.14, 9.15, 5.52).
 
 ### AD-7 — Annonce au branchement : refus net sur le protocole, dégradation sur les commandes
 
@@ -299,6 +314,16 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   intermédiaires cachées au modèle, reconnues par leur fichier de sortie ; le
   rejeu ne la lit pas. Une ligne sans la clé (journal ancien, appel hors plan)
   ne cache rien.
+- **Amendement (2026-11-10, changement de cap `change-journal-chaine-par-empreinte`, approuvé
+  par le propriétaire le 2026-11-10) —
+  journal chaîné.** Chaque ligne écrite porte `prev`, l'empreinte SHA-256 des octets de la
+  ligne précédente (`null` pour la première), et `chain`, la version du chaînage. Le noyau
+  vérifie la chaîne à l'ouverture de la session et en rend l'état ; une chaîne rompue est
+  signalée avant le rejeu, sans refuser. Le rejeu ne lit pas ces clés ; une ligne qui ne les
+  porte pas (journal ancien) est non chaînée et se rejoue à l'identique. Le chaînage prouve
+  l'intégrité du journal, pas son auteur.
+  Conditions de l'approbation (changement de cap, Statut) : construit après la démo ;
+  l'empreinte de tête au pied du PDF est une décision séparée, non prise (entrée 2.13).
 
 ### AD-12 — Toute étape est annulable par message, jamais en tuant le processus
 
@@ -333,6 +358,10 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   Un appel commencé en relais ne finit jamais en autonome. En mode autonome, le
   verrou du projet n'est pris que le temps d'un appel, comme `cassini run` :
   `mcp` n'empêche jamais une session QGIS de s'ouvrir en écriture.
+- **Précision (2026-11-10, changement de cap `change-commandes-d-un-module-exterieur`, approuvé
+  par le propriétaire le 2026-11-10) :** un programme dérivé garde un binaire, un registre et
+  les quatre points d'entrée ; aucune commande propre à un point d'entrée. Rien n'y est chargé
+  dynamiquement : le programme est composé à la compilation (entrée 2.14).
 
 ### AD-14 — Le réseau est absent par construction, et prouvé des deux côtés
 
@@ -386,6 +415,15 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   commande, et ne rend aucun chemin absolu (AD-9). Passer par `command.run`
   journaliserait la liste, et le rejeu divergerait dès qu'un fichier de modèle
   change.
+- **Amendement (2026-11-10, changement de cap `change-empreinte-du-modele-verifiee`, approuvé
+  par le propriétaire le 2026-11-10) —
+  modèle vérifié.** Une déclaration `*.modele.json` porte l'empreinte SHA-256 de chaque
+  fichier qu'elle nomme. Le noyau la vérifie au premier chargement dans la session et refuse
+  un fichier qui ne correspond pas (`models.tampered`), sans jamais rien télécharger. Les
+  empreintes viennent du manifeste des versions des deux portes d'AD-17. Une déclaration
+  sans empreintes ou un GGUF seul sont acceptés et signalés.
+  Conditions de l'approbation (changement de cap, Statut) : temps de lancement mesuré sur
+  l'i5 ; empreinte facultative pendant une version (entrée 5.51).
 
 ### AD-16 — Licences : le noyau reste propre, l'extension est en GPL, et la frontière se tient par ce qui circule
 
@@ -450,6 +488,9 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   l'installation ou la dernière mise à jour, rappelle de lancer « Mettre à jour
   Cassini » : ce rappel est un calcul de date local et **ne touche pas au
   réseau**.
+- **Renvoi (2026-11-10, changement de cap `change-empreinte-du-modele-verifiee`) :** AD-17 ne
+  change pas : la déclaration remplie par l'installeur est une conséquence de sa règle
+  « empreintes vérifiées ». La vérification au lancement est portée par AD-15.
 
 ### AD-18 — Une seule extension pour les deux séries de QGIS, et aucun import direct de PyQt
 
@@ -632,6 +673,12 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
     porter un paramètre de champ sur une couche montrée réduite, le noyau recompose une fois
     avec cette couche détaillée : c'est une redemande, pas une réparation. Le plan rendu passe
     par les mêmes schémas et le même garde-fou, et le rejeu (AD-11) n'en dépend pas.
+  - **Précision (2026-11-10, changement de cap `change-commandes-d-un-module-exterieur`,
+    approuvé par le propriétaire le 2026-11-10) :** la grammaire du modèle ne contient que les
+    commandes que sa déclaration connaît. La grammaire du modèle local n'inclut une commande
+    ajoutée que si la déclaration du modèle (`*.modele.json`) la nomme parmi les commandes qu'il
+    connaît ; sinon elle est exclue de la grammaire et le modèle ne peut pas l'inventer. Elle
+    reste offerte par le formulaire du panneau et par le MCP (entrée 5.52).
 
 ### AD-24 — Une primitive de QGIS est une commande écrite à la main, exécutée par une ligne d'une table fermée
 

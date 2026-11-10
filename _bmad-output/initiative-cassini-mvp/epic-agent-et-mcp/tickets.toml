@@ -887,3 +887,44 @@ notes = [
   "hitl : le proprietaire relit les 20 phrases avant la premiere mesure.",
   "Les phrases ne sont jamais copiees dans le generateur ; elles rejoignent les phrases tenues a l'ecart du garde de recouvrement.",
 ]
+
+[[entry]]
+id = 51
+type = "story"
+title = "Empreinte du modele verifiee au lancement"
+description = "La declaration *.modele.json gagne model_sha256 et, s'il y a un adaptateur, adapter_sha256. Au premier chargement d'un modele dans la session, le noyau calcule les empreintes et refuse un fichier qui ne correspond pas par l'erreur models.tampered, qui nomme le fichier par son seul nom et dit de reinstaller par l'installeur ou de recopier depuis la porte hors ligne ; jamais de telechargement de reparation. Le resultat est garde en memoire pour la session, sans cache sur disque. Une declaration sans empreintes ou un GGUF seul sont acceptes et le panneau dit « empreinte du modele non declaree ». L'installeur en ligne et la chaine d'entrainement reproductible ecrivent les empreintes du manifeste des versions."
+verify = "Tests du noyau : une declaration juste charge ; un octet change dans le GGUF ou l'adaptateur rend models.tampered sans charger ; une declaration sans empreintes charge et le signale. Duree du lancement mesuree sur le poste i5 et consignee. L'installeur et la chaine d'entrainement ecrivent les empreintes du manifeste."
+covers = ["CAP-4", "CAP-13"]
+after = [50]
+hitl = false
+risk = "high"
+references = [
+  "change — _bmad-output/initiative-cassini-mvp/change-empreinte-du-modele-verifiee/change-empreinte-du-modele-verifiee.md, §2 a §5",
+  "architecture — _bmad-output/initiative-cassini-mvp/architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md, AD-15 (amendement du 2026-11-10) et AD-17",
+]
+notes = [
+  "Decision: 2026-11-10 — proprietaire : « ok pour 7, 8 et 9 » ; amendement approuve sous reserve de mesurer le temps de lancement sur l'i5 ; empreintes venues du seul manifeste des versions ; empreinte facultative pendant une version, obligatoire ensuite seulement si le proprietaire le confirme.",
+  "Decision: 2026-11-10 — proprietaire : « ok pour sha2 » ; crate sha2 (MIT OR Apache-2.0) acceptee dans le noyau.",
+  "Open question: si la mesure sur l'i5 gene, calcul de l'empreinte en parallele du chargement en memoire, la premiere phrase attendant la fin de la verification (change, §3).",
+  "Open question: la trace au journal (nom de la declaration et empreinte abregee sur chaque ligne de plan, non lue par le rejeu) est une option du change, §2.5.",
+  "Controle hors des criteres : relecture a plusieurs lentilles (thorough), risque high sur le chargement du modele.",
+]
+
+[[entry]]
+id = 52
+type = "story"
+title = "Grammaire limitee aux commandes connues du modele"
+description = "La declaration du modele (*.modele.json) nomme les commandes ajoutees qu'il connait. La grammaire du modele local n'inclut une commande ajoutee que si sa declaration la nomme ; sinon elle en est exclue et le modele ne peut pas l'inventer. Une commande ajoutee non connue reste offerte par le formulaire du panneau et par le MCP. Le mode long prompt (GGUF seul) reste possible pour des essais, sans promesse de justesse ni de duree."
+verify = "Tests du noyau avec le programme d'exemple de 2.14 : sans declaration qui la nomme, la commande ajoutee est absente de la grammaire et un plan qui la nomme est rejete ; avec une declaration qui la nomme, elle y figure ; dans les deux cas elle reste au catalogue de la session et aux outils MCP."
+covers = ["CAP-4", "CAP-8"]
+after = [51, "2.14"]
+hitl = false
+risk = "high"
+references = [
+  "change — _bmad-output/initiative-cassini-mvp/change-commandes-d-un-module-exterieur/change-commandes-d-un-module-exterieur.md, §4",
+  "architecture — _bmad-output/initiative-cassini-mvp/architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md, AD-23 (precision du 2026-11-10)",
+]
+notes = [
+  "Decision: 2026-11-10 — proprietaire : « ok pour 7, 8 et 9 » ; le modele local ne voit une commande ajoutee que si sa declaration la nomme. Attend la publication et l'epic 10 a travers 2.14.",
+  "Controle hors des criteres : relecture a plusieurs lentilles (thorough), risque high sur la composition des plans.",
+]

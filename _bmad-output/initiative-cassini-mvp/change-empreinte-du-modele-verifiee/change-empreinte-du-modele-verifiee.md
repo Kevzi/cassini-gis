@@ -1,7 +1,16 @@
 # Amendement d'architecture : empreinte du modèle vérifiée au lancement (2026-11-10)
 
-Statut : **proposé, en attente du propriétaire.** Rien n'est appliqué au contrat
-d'architecture ni aux tickets. La party du 2026-11-10 donne son avis au §6.
+Statut : **approuvé par le propriétaire le 2026-11-10** (« ok pour 7, 8 et 9 »), avec les
+recommandations de la party du §6. Conditions de l'approbation :
+
+- **sous réserve de mesurer le temps de lancement sur l'i5** de référence (§3), mesure consignée
+  avant de trancher le calcul en parallèle du chargement ;
+- les empreintes viennent du **seul manifeste des versions** de la release (§2.4) ;
+- l'empreinte est **facultative pendant une version** : une déclaration sans empreintes ou un GGUF
+  seul sont acceptés et signalés ; elle ne devient obligatoire que si le propriétaire le confirme.
+
+Le texte du §4 est porté à AD-15 du contrat d'architecture le 2026-11-10, avec un renvoi sous
+AD-17 ; l'entrée du §7 est créée (5.51).
 
 ## 1. Le problème
 
@@ -52,9 +61,10 @@ référence** avant de trancher ; si le coût gêne, le calcul se fait en parall
 en mémoire (le fichier est lu de toute façon), et la première phrase attend la fin de la
 vérification.
 
-## 4. Texte proposé pour AD-15 (non appliqué), avec renvoi à AD-17
+## 4. Texte porté à AD-15 (appliqué le 2026-11-10), avec renvoi à AD-17
 
-> - **Amendement (proposé le 2026-11-10, changement de cap `change-empreinte-du-modele-verifiee`) —
+> - **Amendement (2026-11-10, changement de cap `change-empreinte-du-modele-verifiee`, approuvé
+>   par le propriétaire le 2026-11-10) —
 >   modèle vérifié.** Une déclaration `*.modele.json` porte l'empreinte SHA-256 de chaque
 >   fichier qu'elle nomme. Le noyau la vérifie au premier chargement dans la session et refuse
 >   un fichier qui ne correspond pas (`models.tampered`), sans jamais rien télécharger. Les
@@ -69,8 +79,8 @@ AD-17 ne change pas : la déclaration remplie par l'installeur est une conséque
 - Même besoin de SHA-256 que le journal chaîné (`change-journal-chaine-par-empreinte`) : crate
   `sha2` (**MIT OR Apache-2.0**), déjà au `Cargo.lock` par `/cli`, à ajouter à la crate qui lit la
   déclaration. **Décision du propriétaire du 2026-11-10 : « ok pour sha2 »** — la crate est
-  acceptée dans le noyau pour les deux amendements. Le reste de l'amendement attend toujours son
-  accord.
+  acceptée dans le noyau pour les deux amendements. Le reste de l'amendement est approuvé
+  le 2026-11-10 (« ok pour 7, 8 et 9 »).
 - **Risque : high** (chargement du modèle, comportement visible au lancement, installeur et
   chaîne d'entraînement à aligner).
 
@@ -92,7 +102,7 @@ AD-17 ne change pas : la déclaration remplie par l'installeur est une conséque
 sur l'i5 ; empreinte facultative pendant une version, puis obligatoire si le propriétaire le
 confirme.
 
-## 7. Entrée prévue (non créée)
+## 7. Entrée créée le 2026-11-10 : 5.51
 
 Epic 5 (`epic-agent-et-mcp`), après 5.50 :
 
@@ -102,4 +112,5 @@ Epic 5 (`epic-agent-et-mcp`), après 5.50 :
   empreintes charge et le signale ; durée du lancement mesurée sur l'i5 et consignée ;
   l'installeur et la chaîne d'entraînement écrivent les empreintes du manifeste.
 
-À créer par `bmad-ticket` seulement après l'accord du propriétaire sur l'amendement (la crate `sha2` est déjà acceptée le 2026-11-10).
+Créée par `bmad-ticket` le 2026-11-10 : entrée **5.51** de `epic-agent-et-mcp`, placée après
+5.50, `after` = 5.50, `risk` high.

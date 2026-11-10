@@ -1,7 +1,16 @@
 # Amendement d'architecture : journal chaîné par empreinte (2026-11-10)
 
-Statut : **proposé, en attente du propriétaire.** Rien n'est appliqué au contrat
-d'architecture ni aux tickets. La party du 2026-11-10 donne son avis au §6.
+Statut : **approuvé par le propriétaire le 2026-11-10** (« ok pour 7, 8 et 9 »), avec les
+recommandations de la party du §6. Conditions de l'approbation :
+
+- construit **après la démo** (epic 6, `epic-export-et-demo`) ;
+- un journal ancien, sans `prev` ni `chain`, est lu « non chaîné » et se **rejoue à l'identique** ;
+- une chaîne rompue est **signalée sans refuser le rejeu** ;
+- l'empreinte de tête au pied du PDF est une **décision séparée, non prise** (elle toucherait
+  `layout.export_pdf`, donc le catalogue, et demanderait son propre changement de cap).
+
+Le texte du §4 est porté à AD-11 du contrat d'architecture le 2026-11-10 ; l'entrée du §7 est
+créée (2.13).
 
 ## 1. Le problème
 
@@ -50,9 +59,10 @@ clés, hors de ce périmètre.
   incomplète).
 - Le verrou exclusif d'AD-11 garantit un seul écrivain : le chaînage n'ajoute pas de course.
 
-## 4. Texte proposé pour AD-11 (non appliqué)
+## 4. Texte porté à AD-11 (appliqué le 2026-11-10)
 
-> - **Amendement (proposé le 2026-11-10, changement de cap `change-journal-chaine-par-empreinte`) —
+> - **Amendement (2026-11-10, changement de cap `change-journal-chaine-par-empreinte`, approuvé
+>   par le propriétaire le 2026-11-10) —
 >   journal chaîné.** Chaque ligne écrite porte `prev`, l'empreinte SHA-256 des octets de la
 >   ligne précédente (`null` pour la première), et `chain`, la version du chaînage. Le noyau
 >   vérifie la chaîne à l'ouverture de la session et en rend l'état ; une chaîne rompue est
@@ -65,7 +75,7 @@ clés, hors de ce périmètre.
 - **SHA-256 dans le noyau :** la crate `sha2` (RustCrypto, **MIT OR Apache-2.0**) est déjà au
   `Cargo.lock`, tirée par une dépendance de `/cli`. **Décision du propriétaire du 2026-11-10 :
   « ok pour sha2 »** — la crate est acceptée dans le noyau pour cet amendement et pour
-  `change-empreinte-du-modele-verifiee`. Le reste de l'amendement attend toujours son accord.
+  `change-empreinte-du-modele-verifiee`. Le reste de l'amendement est approuvé le 2026-11-10 (« ok pour 7, 8 et 9 »).
 - **Risque : high** (AD-11, rejeu) : relecture à plusieurs lentilles (`thorough`, CLAUDE.md §8).
 - Coût : une empreinte par ligne écrite, négligeable ; la vérification relit le journal à
   l'ouverture, linéaire en sa taille.
@@ -88,7 +98,7 @@ clés, hors de ce périmètre.
 **Recommandation de la party :** **approuver**, après la démo ; l'empreinte de tête dans le PDF
 en décision séparée (changement de cap du catalogue si retenue).
 
-## 7. Entrée prévue (non créée)
+## 7. Entrée créée le 2026-11-10 : 2.13
 
 Epic 2 (`epic-registre-projet-import`), après 2.12 :
 
@@ -98,4 +108,7 @@ Epic 2 (`epic-registre-projet-import`), après 2.12 :
   un ancien journal prolongé est chaîné à partir de sa première ligne neuve ; une session en
   lecture seule vérifie sans écrire ; recette QGIS : rejeu identique après réouverture.
 
-À créer par `bmad-ticket` seulement après l'accord du propriétaire sur l'amendement (la crate `sha2` est déjà acceptée le 2026-11-10).
+Créée par `bmad-ticket` le 2026-11-10 : entrée **2.13** de `epic-registre-projet-import`, placée
+après 2.12, `after` = 2.12 et `epic-export-et-demo` (après la démo), `risk` high. `covers` y cite
+les identifiants locaux de l'epic 2 R4 et R5, qui portent CAP-7 ; l'affichage de l'état du
+chaînage dans le panneau (CAP-10) est le geste générique existant de l'extension.

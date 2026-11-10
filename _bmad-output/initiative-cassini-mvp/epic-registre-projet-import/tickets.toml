@@ -144,3 +144,46 @@ covers = ["R5"]
 after = []
 hitl = false
 risk = "high"
+
+[[entry]]
+id = 13
+type = "story"
+title = "Journal chaine par empreinte"
+description = "Chaque ligne ecrite au journal porte prev, l'empreinte SHA-256 des octets exacts de la ligne precedente (null pour la premiere), et chain, la version du chainage. Le noyau verifie la chaine a l'ouverture de la session, lecture seule comprise, et rend son etat dans session.hello : intact, unchained (non chaine jusqu'a la ligne k) ou broken (rompu a la ligne k) ; le panneau l'affiche en clair. Le rejeu ne lit pas ces cles ; une chaine rompue est signalee avant le rejeu, sans le refuser. Les lignes anciennes ne sont jamais reecrites."
+verify = "Tests du noyau sans QGIS : une ligne modifiee, retiree ou inseree est signalee a la bonne ligne ; un journal ancien est unchained et se rejoue a l'identique ; un ancien journal prolonge est chaine a partir de sa premiere ligne neuve ; une session en lecture seule verifie sans ecrire. Recette QGIS : rejeu identique apres reouverture."
+covers = ["R4", "R5"]
+after = [12, "epic-export-et-demo"]
+hitl = false
+risk = "high"
+references = [
+  "change — _bmad-output/initiative-cassini-mvp/change-journal-chaine-par-empreinte/change-journal-chaine-par-empreinte.md, §2 a §5",
+  "architecture — _bmad-output/initiative-cassini-mvp/architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md, AD-11 (amendement du 2026-11-10)",
+]
+notes = [
+  "Decision: 2026-11-10 — proprietaire : « ok pour 7, 8 et 9 » ; amendement approuve avec les recommandations de la party : construit apres la demo.",
+  "Decision: 2026-11-10 — proprietaire : « ok pour sha2 » ; crate sha2 (MIT OR Apache-2.0) acceptee dans le noyau.",
+  "Decision: 2026-11-10 — un journal ancien, sans prev ni chain, est unchained et se rejoue a l'identique ; une chaine rompue est signalee sans refuser le rejeu.",
+  "Decision: 2026-11-10 — l'empreinte de tete au pied du PDF est une decision separee, non prise : hors de cette entree (elle toucherait layout.export_pdf et le catalogue).",
+  "Open question: comportement d'une derniere ligne tronquee par un arret brutal, a fixer au ticket sans rien reecrire (change, §3).",
+  "Controle hors des criteres : relecture a plusieurs lentilles (thorough), risque high sur le rejeu (CLAUDE.md §8).",
+]
+
+[[entry]]
+id = 14
+type = "story"
+title = "API publique du registre et programme noyau compose"
+description = "cassini-core et la crate du binaire exposent une API de bibliotheque publique et versionnee (Apache-2.0) : un integrateur ecrit son propre programme, qui reprend les quatre points d'entree et le registre officiel et y enregistre ses commandes metier, runs_in: core seulement. Rien n'est charge dynamiquement. Le registre refuse au demarrage un identifiant dont le domaine est une famille du catalogue, avec un message qui le nomme. system.about et session.hello annoncent le nom et la version du programme, la version du noyau dont il derive et la liste des commandes ajoutees. La recette du catalogue est fournie parametree ; le catalogue public ne change pas."
+verify = "Tests du noyau sans QGIS : un programme d'exemple dans /tests enregistre une commande ajoutee fictive, la sert par run, serve, mcp et replay, la journalise et la rejoue ; un identifiant en collision avec une famille du catalogue est refuse au demarrage avec son nom ; un rejeu par le programme officiel nomme la commande manquante au lieu de la sauter ; la recette du catalogue officiel reste verte et sa version parametree passe sur le programme d'exemple."
+covers = ["R1", "R2"]
+after = [13, "epic-publication", "epic-catalogue-etendu-qgis"]
+hitl = false
+risk = "high"
+references = [
+  "change — _bmad-output/initiative-cassini-mvp/change-commandes-d-un-module-exterieur/change-commandes-d-un-module-exterieur.md, §2, §3, §6 et §8",
+  "architecture — _bmad-output/initiative-cassini-mvp/architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md, AD-6 et AD-13 (amendements du 2026-11-10)",
+]
+notes = [
+  "Decision: 2026-11-10 — proprietaire : « ok pour 7, 8 et 9 » ; principe approuve, rien construit avant la publication (epic 7) et la stabilisation du catalogue etendu (epic 10) ; commencer par figer l'API publique du registre.",
+  "Decision: 2026-11-10 — garde-fous de l'approbation : pas de chargement dynamique ; commandes ajoutees runs_in: core seulement ; aucune collision avec les familles du catalogue.",
+  "Controle hors des criteres : relecture a plusieurs lentilles (thorough), risque high sur le registre et le rejeu (CLAUDE.md §8).",
+]
