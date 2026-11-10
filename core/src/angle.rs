@@ -37,14 +37,16 @@ impl AngleUnit {
     }
 }
 
-// Nord de référence d'un azimut (AD-31 amendée) : nord vrai (défaut) ou nord du quadrillage
-// UTM (gisement). Sans commentaire de documentation sur les valeurs, comme `AngleUnit`.
+// Nord de référence d'un azimut (AD-31 amendée) : nord vrai (défaut), nord du quadrillage UTM
+// (gisement) ou nord magnétique (WMM2025, entrée 29). Sans commentaire de documentation sur les
+// valeurs, comme `AngleUnit`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum North {
     #[default]
     True,
     Grid,
+    Magnetic,
 }
 
 /// Angle avec son unité ; azimut depuis le nord vrai, sens horaire.
@@ -99,7 +101,7 @@ impl Angle {
         }
     }
 
-    /// Un angle signé en degrés (une convergence), rendu dans `unit` sans le ramener dans un
+    /// Un angle signé en degrés (une convergence, une déclinaison), rendu dans `unit` sans le ramener dans un
     /// tour, arrondi au milliardième d'unité.
     pub fn signed(degrees: f64, unit: AngleUnit) -> Angle {
         let value = match unit {
@@ -148,7 +150,15 @@ mod tests {
             serde_json::from_value::<North>(json!("true")).unwrap(),
             North::True
         );
-        assert!(serde_json::from_value::<North>(json!("magnetic")).is_err());
+        assert_eq!(
+            serde_json::from_value::<North>(json!("magnetic")).unwrap(),
+            North::Magnetic
+        );
+        assert_eq!(
+            serde_json::to_value(North::Magnetic).unwrap(),
+            json!("magnetic")
+        );
+        assert!(serde_json::from_value::<North>(json!("magnétique")).is_err());
     }
 
     #[test]

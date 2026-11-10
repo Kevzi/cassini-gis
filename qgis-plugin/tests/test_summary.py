@@ -320,6 +320,52 @@ class GeoTest(unittest.TestCase):
             "Point at 1.5 km, grid bearing 100 gon.",
         )
 
+    def test_a_magnetic_azimuth_says_so_with_its_declination_and_warning(self):
+        magnetic = dict(MEASURE, north="magnetic")
+        out = dict(MEASURE_OUT, north="magnetic", date="2026-05-01",
+                   declination={"value": 2.95, "unit": "deg"})
+        self.assertEqual(
+            say("geo.distance_azimuth", magnetic, out),
+            "Distance géodésique : 660,504 km, azimut magnétique 157,9574°, "
+            "contre-azimut magnétique 340,1° (déclinaison 2,95° au 2026-05-01).",
+        )
+        self.assertEqual(
+            say("geo.distance_azimuth", magnetic, out, lang="en"),
+            "Geodesic distance: 660.504 km, magnetic azimuth 157.9574°, "
+            "back magnetic azimuth 340.1° (declination 2.95° on 2026-05-01).",
+        )
+        self.assertEqual(
+            say("geo.distance_azimuth", magnetic),
+            "Mesure de la distance et de l'azimut magnétique entre deux points.",
+        )
+        # L'avertissement du noyau est affiché tel quel, sans double point final.
+        late = dict(out, date="2031-03-01",
+                    warning="La date du 2031-03-01 est hors de la période de validité.")
+        self.assertEqual(
+            say("geo.distance_azimuth", magnetic, late),
+            "Distance géodésique : 660,504 km, azimut magnétique 157,9574°, "
+            "contre-azimut magnétique 340,1° (déclinaison 2,95° au 2031-03-01). "
+            "Attention : La date du 2031-03-01 est hors de la période de validité.",
+        )
+        # Un `north` illisible (plan pas encore validé) : l'azimut ordinaire, sans exception.
+        for odd in (["magnetic"], {"x": 1}, 3):
+            self.assertEqual(
+                say("geo.distance_azimuth", dict(MEASURE, north=odd), MEASURE_OUT),
+                "Distance géodésique : 660,504 km, azimut 157,9574°, contre-azimut 340,1°.",
+            )
+        point = dict(DESTINATION, north="magnetic", date="2026-05-01")
+        reached = dict(DESTINATION_OUT, north="magnetic", date="2026-05-01",
+                       declination={"value": 1.5, "unit": "gon"})
+        self.assertEqual(
+            say("geo.destination_point", point, reached),
+            "Point atteint à 1,5 km, azimut magnétique 100 gon : UTM 31N 449750 E, "
+            "5411751 N (déclinaison 1,5 gon au 2026-05-01).",
+        )
+        self.assertEqual(
+            say("geo.destination_point", point, {}, lang="en"),
+            "Point at 1.5 km, magnetic azimuth 100 gon.",
+        )
+
     def test_the_reached_point_is_shown(self):
         self.assertEqual(
             say("geo.destination_point", DESTINATION, DESTINATION_OUT),

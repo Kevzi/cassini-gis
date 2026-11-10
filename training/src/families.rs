@@ -307,6 +307,13 @@ pub static FAMILIES: &[Family] = &[
         weight: 3,
         make: gisement,
     },
+    // Azimut magnétique (10.29) : azimut lu à la boussole, `north: "magnetic"`, sur les deux
+    // commandes ; `date` seulement si la date est écrite.
+    Family {
+        name: "azimut_magnetique",
+        weight: 3,
+        make: azimut_magnetique,
+    },
     Family {
         name: "recoupement",
         weight: 3,
@@ -914,7 +921,15 @@ fn garde_seulement(rng: &mut Rng) -> Option<Example> {
 
 fn filtre_numerique(rng: &mut Rng) -> Option<Example> {
     let d = draft_filter_numeric(rng)?;
-    let (head, q) = open_find(rng, d.noun, &d.np, true);
+    let (mut head, q) = open_find(rng, d.noun, &d.np, true);
+    // « Sélectionne les bâtiments de plus de N m de haut » nu est la tournure d'une phrase des
+    // essais réels (RA04 de la recette d'Annecy, `training/tests/recouvrement.rs`) : « Sélectionne-moi »,
+    // sans tirage de plus, que le reste du jeu ne bouge pas.
+    if d.np.contains(" m de haut") {
+        if let Some(rest) = head.strip_prefix("Sélectionne ") {
+            head = format!("Sélectionne-moi {rest}");
+        }
+    }
     let request = finish(rng, &head, q, true);
     Some(example(
         "filtre_numerique",
@@ -6487,6 +6502,173 @@ fn gisement(rng: &mut Rng) -> Option<Example> {
     Some(example("gisement", b, rng, request, calls(list)))
 }
 
+const MONTHS: [&str; 12] = [
+    "janvier",
+    "février",
+    "mars",
+    "avril",
+    "mai",
+    "juin",
+    "juillet",
+    "août",
+    "septembre",
+    "octobre",
+    "novembre",
+    "décembre",
+];
+
+/// La date de la déclinaison écrite dans la demande, une fois sur trois : en toutes lettres
+/// (« le 1er mai 2026 », « le 14 juillet 2027 »), en JJ/MM/AAAA (« le 10/05/2026 », que le
+/// noyau refuse : le plan la récrit) ou en AAAA-MM-JJ ; jusqu'au dernier jour du mois, et
+/// parfois en 2030 ou 2031, hors de la validité du WMM2025 (le noyau avertit). Rend la tournure
+/// et la date AAAA-MM-JJ du plan.
+fn magnetic_date_words(rng: &mut Rng) -> Option<(String, String)> {
+    if !rng.chance(1, 3) {
+        return None;
+    }
+    let year = if rng.chance(1, 8) {
+        rng.range(2030, 2031)
+    } else {
+        rng.range(2025, 2029)
+    };
+    let month = rng.range(1, 12);
+    let last = match month {
+        2 if year % 4 == 0 => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    };
+    let day = rng.range(1, last);
+    let iso = format!("{year}-{month:02}-{day:02}");
+    let name = MONTHS[(month - 1) as usize];
+    let day_words = if day == 1 {
+        "1er".to_string()
+    } else {
+        day.to_string()
+    };
+    let written = match rng.below(5) {
+        0 => format!(", le {day_words} {name} {year}"),
+        1 => format!(", à la date du {day_words} {name} {year}"),
+        2 => format!(", déclinaison du {day_words} {name} {year}"),
+        3 => format!(", le {day:02}/{month:02}/{year}"),
+        _ => format!(", à la date du {iso}"),
+    };
+    Some((written, iso))
+}
+
+/// « Quel est l'azimut magnétique du point … au point … », « Depuis le point …, je marche 2 km
+/// à 120° à la boussole » : tournures de randonnée et d'orientation (azimut magnétique, à la
+/// boussole, cap magnétique, avec la déclinaison) → `geo.distance_azimuth` ou
+/// `geo.destination_point` avec `north: "magnetic"` ; `date` seulement si la date est écrite
+/// (10.29).
+fn azimut_magnetique(rng: &mut Rng) -> Option<Example> {
+    let b = Builder::new();
+    let east = rng.chance(1, 3);
+    let gon = rng.chance(1, 5);
+    let date = magnetic_date_words(rng);
+    let date_text = date.as_ref().map(|(t, _)| t.as_str()).unwrap_or("");
+    let mut list = Vec::new();
+    let (body, q) = if rng.chance(1, 2) {
+        let a = wgs84_or_utm(rng, east);
+        let c = wgs84_or_utm(rng, east);
+        if a.point == c.point {
+            return None;
+        }
+        let (pa, pc) = (&a.place, &c.place);
+        let (mut body, q) = match rng.below(5) {
+            0 => (
+                format!("Quel est l'azimut magnétique {} {}", de_np(pa), a_np(pc)),
+                true,
+            ),
+            1 => (
+                format!("Donne l'azimut à la boussole {} vers {pc}", de_np(pa)),
+                false,
+            ),
+            2 => (
+                format!("Calcule le cap magnétique entre {pa} et {pc}"),
+                false,
+            ),
+            3 => (
+                format!(
+                    "Donne la distance et l'azimut magnétique {} {}",
+                    de_np(pa),
+                    a_np(pc)
+                ),
+                false,
+            ),
+            _ => (
+                format!(
+                    "Mesure l'azimut {} {} avec la déclinaison magnétique",
+                    de_np(pa),
+                    a_np(pc)
+                ),
+                false,
+            ),
+        };
+        body.push_str(date_text);
+        let mut params = json!({"from": a.point, "to": c.point, "north": "magnetic"});
+        if gon {
+            body.push_str(pick_str(rng, &[", en grades", " (en grades)"]));
+            params["unit"] = json!("gon");
+        } else if rng.chance(1, 5) {
+            body.push_str(pick_str(rng, &[", en degrés", " (en degrés)"]));
+            params["unit"] = json!("deg");
+        }
+        if let Some((_, iso)) = &date {
+            params["date"] = json!(iso);
+        }
+        list.push(json!({"command": "geo.distance_azimuth", "params": params}));
+        (body, q)
+    } else {
+        let from = wgs84_or_utm(rng, east);
+        let (az, az_text) = azimuth_words(rng, gon, 10, 350);
+        let (d, d_text) = geo_distance(rng);
+        let p = &from.place;
+        let de_p = de_np(p);
+        let (mut body, q) = match rng.below(5) {
+            0 => (
+                format!("Quel point atteint-on à {d_text} {de_p}, azimut magnétique {az_text}"),
+                true,
+            ),
+            1 => (
+                format!("Depuis {p}, je marche {d_text} à {az_text} à la boussole"),
+                false,
+            ),
+            2 => (
+                format!("Projette un point à {d_text} {de_p}, cap magnétique {az_text}"),
+                false,
+            ),
+            3 => (
+                format!(
+                    "Où arrive-t-on en suivant l'azimut boussole {az_text} sur {d_text} {de_p}"
+                ),
+                true,
+            ),
+            _ => (
+                format!(
+                    "Calcule le point à {d_text} {de_p}, azimut {az_text} lu à la boussole, avec la déclinaison"
+                ),
+                false,
+            ),
+        };
+        body.push_str(date_text);
+        let mut params = json!({"from": from.point, "azimuth": az, "distance": d,
+            "north": "magnetic"});
+        if let Some((_, iso)) = &date {
+            params["date"] = json!(iso);
+        }
+        list.push(json!({"command": "geo.destination_point", "params": params}));
+        if rng.chance(1, 5) {
+            let (text, call) = mgrs_result(rng, 1);
+            body.push_str(&text);
+            list.push(call);
+        }
+        (body, q)
+    };
+    let request = finish(rng, &body, q, false);
+    Some(example("azimut_magnetique", b, rng, request, calls(list)))
+}
+
 /// « Recoupe la visée du point … à l'azimut 40° avec celle du point … à l'azimut 310° » :
 /// `geo.bearing_intersection`, chaque station avec son azimut écrit (unité comprise) ;
 /// résultat demandé en MGRS → `coord.convert` sur `step:1.point`.
@@ -7851,6 +8033,86 @@ mod tests {
     }
 
     #[test]
+    fn a_magnetic_azimuth_says_compass_and_writes_its_date_only_when_written() {
+        let examples = geometry_examples(azimut_magnetique);
+        let (mut both, mut dates, mut grads) = (HashSet::new(), 0, 0);
+        for e in &examples {
+            let step = call(e, 0);
+            let p = &step["params"];
+            assert_eq!(p["north"], "magnetic", "{}", e.request);
+            assert!(p.get("utm_zone").is_none(), "{}", e.request);
+            both.insert(step["command"].as_str().unwrap().to_string());
+            let r = e.request.to_lowercase();
+            assert!(
+                r.contains("magnétique") || r.contains("boussole"),
+                "{}",
+                e.request
+            );
+            assert!(
+                !r.contains("gisement") && !r.contains("quadrillage"),
+                "{}",
+                e.request
+            );
+            match p.get("date") {
+                Some(date) => {
+                    dates += 1;
+                    let date = cassini_core::wmm::Date::parse(date.as_str().unwrap()).unwrap();
+                    let day = if date.day == 1 {
+                        "1er".to_string()
+                    } else {
+                        date.day.to_string()
+                    };
+                    let words = format!("{day} {} {}", MONTHS[date.month as usize - 1], date.year);
+                    let numeric = format!("{:02}/{:02}/{}", date.day, date.month, date.year);
+                    assert!(
+                        r.contains(&words) || r.contains(&numeric) || r.contains(&date.to_string()),
+                        "{}",
+                        e.request
+                    );
+                }
+                None => assert!(
+                    !r.contains("date") && !r.contains("déclinaison du"),
+                    "{}",
+                    e.request
+                ),
+            }
+            if step["command"] == "geo.destination_point" {
+                written_angle(e, &p["azimuth"]);
+                written(e, &p["distance"]["value"]);
+                grads += usize::from(p["azimuth"]["unit"] == "gon");
+            } else {
+                grads += usize::from(p["unit"] == "gon");
+            }
+        }
+        assert_eq!(both.len(), 2, "{both:?}");
+        assert!(dates > examples.len() / 5 && grads > 0, "{dates} {grads}");
+        // Des dates en JJ/MM/AAAA, des fins de mois et des dates hors de la validité du WMM2025.
+        let all: Vec<&str> = examples
+            .iter()
+            .filter_map(|e| call(e, 0)["params"]["date"].as_str())
+            .collect();
+        assert!(
+            all.iter().any(|d| d.ends_with("-31") || d.ends_with("-30")),
+            "{all:?}"
+        );
+        assert!(
+            all.iter()
+                .any(|d| d.starts_with("2030") || d.starts_with("2031")),
+            "{all:?}"
+        );
+        assert!(
+            examples.iter().any(|e| e.request.contains("/20")),
+            "aucune date JJ/MM/AAAA"
+        );
+        let points: Vec<Example> = examples
+            .iter()
+            .filter(|e| commands(e)[0] == "geo.destination_point")
+            .cloned()
+            .collect();
+        mgrs_tail(&points, "geo.destination_point");
+    }
+
+    #[test]
     fn the_geometry_steps_of_the_core_run_without_error() {
         // Les commandes de géométrie du noyau, exécutées sur chaque exemple : un recoupement
         // dont les visées ne se coupent pas en avant, ou un point projeté hors de la grille UTM,
@@ -7859,6 +8121,7 @@ mod tests {
         for make in [
             point_projete as fn(&mut Rng) -> Option<Example>,
             gisement,
+            azimut_magnetique,
             recoupement,
             distance_azimut,
             conversion_coordonnees,

@@ -2,7 +2,8 @@
 //! AD-31, CAP-15) : un [`Point`] en WGS84 (EPSG:4326) ou en UTM sur WGS84 (EPSG:32601 à
 //! 32660, 32701 à 32760) devient une latitude et une longitude WGS84 ; tout autre système est
 //! refusé par `geo.unsupported_crs`, qui nomme l'étape à ajouter. Aussi le choix du quadrillage
-//! UTM d'un gisement (`north: "grid"`, AD-31 amendée). Aucune commande ici.
+//! UTM d'un gisement (`north: "grid"`, AD-31 amendée) et la date d'un azimut magnétique
+//! (`north: "magnetic"`, entrée 29). Aucune commande ici.
 
 use serde::{Deserialize, Deserializer};
 
@@ -11,6 +12,7 @@ use crate::commands::analysis_buffer::{Distance, DistanceUnit};
 use crate::geodesy::{self, Utm};
 use crate::point::Point;
 use crate::registry::CommandFailure;
+use crate::wmm::{self, Date};
 
 /// Code EPSG du WGS84 géographique.
 pub const WGS84: u32 = 4326;
@@ -204,4 +206,42 @@ pub fn check_in_grid(lat: f64, lon: f64, zone: u8) -> Result<(), CommandFailure>
         rounded(lon, 1e6),
         rounded(lat, 1e6)
     )))
+}
+
+/// `date` ne sert qu'à l'azimut magnétique : sans `north: "magnetic"`, elle est refusée
+/// (`geo.date_unused`) plutôt qu'ignorée.
+pub fn check_date_used(north: Option<North>, date: Option<&str>) -> Result<(), CommandFailure> {
+    match (north, date) {
+        (Some(North::Magnetic), _) | (_, None) => Ok(()),
+        (_, Some(date)) => Err(CommandFailure::new(
+            "geo.date_unused",
+            format!(
+                "La date {date} (`date`) ne sert qu'à un azimut magnétique, compté depuis le nord magnétique : ajoutez `north: \"magnetic\"`, ou retirez `date`."
+            ),
+        )),
+    }
+}
+
+/// Date d'un azimut magnétique : `date` (AAAA-MM-JJ, date grégorienne qui existe), sinon la date
+/// du jour en temps universel, fixée ici puis rendue au résultat et repassée au rejeu (D5, M4).
+/// Une date mal formée ou inexistante : `geo.invalid_date`. Une date hors de la validité du
+/// WMM2025 est acceptée ; l'avertissement vient de [`wmm::warning`].
+pub fn magnetic_date(date: Option<&str>) -> Result<Date, CommandFailure> {
+    let Some(text) = date else {
+        return Ok(Date::today_utc());
+    };
+    Date::parse(text).ok_or_else(|| {
+        CommandFailure::new(
+            "geo.invalid_date",
+            format!(
+                "La date « {text} » n'est pas une date AAAA-MM-JJ qui existe (par exemple 2026-05-01)."
+            ),
+        )
+    })
+}
+
+/// Champ magnétique du WMM2025 au point (`lat`, `lon`), à l'altitude 0 m sur l'ellipsoïde (D4),
+/// à la date `date` ; sa déclinaison `d` est positive à l'est du nord vrai.
+pub fn magnetic_field(lat: f64, lon: f64, date: &Date) -> wmm::Field {
+    wmm::field(date.decimal_year(), 0.0, lat, lon)
 }

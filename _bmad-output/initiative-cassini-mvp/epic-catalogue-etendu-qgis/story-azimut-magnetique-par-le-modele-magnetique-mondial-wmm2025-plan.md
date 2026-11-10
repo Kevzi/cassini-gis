@@ -3,14 +3,14 @@ title: 'Azimut magnétique par le modèle magnétique mondial (WMM2025)'
 type: 'feature'
 ticket: '29'
 created: '2026-11-10'
-status: 'in-progress'
+status: 'built'
 baseline_revision: 'ccbc57919a92f3523dd21909c0e7527d49ba1b4e'
 route: 'full'
 route_source: 'auto'
 risk: 'high'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'thorough'
+review_source: 'pinned'
+lenses_ran: [blind-hunter, edge-case-hunter, verification-gap, intent-alignment]
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-cassini-mvp/change-complements-geometrie-et-mise-en-page/change-complements-geometrie-et-mise-en-page.md'
@@ -74,13 +74,13 @@ l'écart dans le générateur ; réordonner `FAMILIES`.
 ## Tasks & Acceptance
 
 **Execution :**
-- [ ] `core/data/wmm2025/`, `NOTICE` -- coefficients, valeurs de test, LISEZMOI.
-- [ ] `core/src/wmm.rs` -- modèle et tests : table 3b du rapport (point −80°, 240°, 100 km, 2027,5 : φ′, r, X′, Y′, Z′, X, Y, Z, H, F, D, I à 1e-6 de leur unité) ; toutes les lignes de `WMM2025_TestValues.txt` (avec leur altitude) ; dates, année décimale, date du jour.
-- [ ] `registry.rs`, `journal/mod.rs` -- `filled_param`.
-- [ ] `angle.rs`, `geo_point.rs`, deux commandes -- paramètres, sorties, refus, tests de la matrice (deg et gon).
-- [ ] `journal/tests.rs` -- rejeu.
-- [ ] catalogue -- fiches complètes, `core/tests/catalogue.rs` vert.
-- [ ] `training/`, docs, extension.
+- [x] `core/data/wmm2025/`, `NOTICE` -- coefficients, valeurs de test, LISEZMOI.
+- [x] `core/src/wmm.rs` -- modèle et tests : table 3b du rapport (point −80°, 240°, 100 km, 2027,5 : φ′, r, X′, Y′, Z′, X, Y, Z, H, F, D, I à 1e-6 de leur unité) ; toutes les lignes de `WMM2025_TestValues.txt` (avec leur altitude) ; dates, année décimale, date du jour.
+- [x] `registry.rs`, `journal/mod.rs` -- `filled_param`.
+- [x] `angle.rs`, `geo_point.rs`, deux commandes -- paramètres, sorties, refus, tests de la matrice (deg et gon).
+- [x] `journal/tests.rs` -- rejeu.
+- [x] catalogue -- fiches complètes, `core/tests/catalogue.rs` vert.
+- [x] `training/`, docs, extension.
 
 **Acceptance Criteria :**
 - Given chaque ligne de `WMM2025_TestValues.txt`, when le champ est calculé à sa date, son altitude et sa position, then Y et Z égalent les valeurs publiées à 1e-5 nT, X, H et F à 1e-3 nT, la déclinaison égale atan2(Y, X) des valeurs publiées à 1e-5° et la valeur publiée de D à 0,005° (arrondie au centième).
@@ -121,9 +121,55 @@ commandes ; aucune phrase recopiée de `ai/tests/`, `tests/epreuve-modele-local/
 
 ## Implementation Notes
 
+- Modèle : `core/src/wmm.rs` (`field`, `Date::parse`, `Date::decimal_year`, `Date::from_days`,
+  `Date::today_utc`, `warning`) ; coefficients par `include_str!` et `OnceLock`. Table 3b
+  retrouvée (φ′ et D, I à 1e-10 rad, r, X′, Y′, Z′, X, Y, Z, H, F à 1e-6), table 3d à 1e-9°
+  (D et D − γ zone 10), les 100 valeurs de test aux tolérances de l'AC. `core/data/wmm2025/*`
+  marqué `-text` dans `.gitattributes` (empreintes gardées sous Windows).
+- `geo_point` : `check_date_used`, `magnetic_date`, `magnetic_field`. `utm_zone` avec
+  `magnetic` : `geo.zone_unused` (règle existante de `check_zone_used`). Un `date` qui n'est pas
+  une chaîne : `registry.invalid_params`.
+- `CommandSpec::filled_param` (M4) : la valeur rendue est journalisée sous `replay` même quand
+  l'appelant a écrit la date (elle vaut alors la sienne) ; au rejeu, elle remplace celle des
+  paramètres ; une ligne sans `replay` se rejoue telle quelle. Non caché au modèle (`ai/src/plan.rs`
+  ne masque que `replay_param` et `leave_out_param`).
+- `destination_point` : l'avertissement de zone ne regarde que `from` (seul point où l'azimut
+  est mesuré).
+- Générateur : famille `azimut_magnetique`, poids 3, après `gisement` ; total 348, jeu à 8 600,
+  graines inchangées. Le décalage du tirage faisait engendrer à `filtre_numerique`
+  « Sélectionne les bâtiments de plus de 35 m de haut ! », masquée égale à RA04 (recette
+  d'Annecy) : « Sélectionne » devient « Sélectionne-moi » devant une hauteur, sans tirage de
+  plus (même précédent que `tampon_head`).
+- Extension : « azimut magnétique », « (déclinaison … au …) », « Attention : » suivi de
+  l'avertissement du noyau.
+
 ## Plan Change Log
 
 ## Review Triage Log
+
+Passe 1 (lentilles `blind-hunter`, `edge-case-hunter`, `verification-gap`, `intent-alignment`,
+2026-11-10) — high 0, medium 1, low 7, false 4, rejetés par décision ou hors du périmètre 6.
+`intent-alignment` : lecture R1 (contrat des commandes) mise en œuvre en entier, R2 (phrase de
+l'utilisateur dans QGIS) fournie par le générateur et le résumé, vérifiable seulement après le
+ré-entraînement 5.49 (aucune installation ni recette dans ce ticket, consigne du délégant).
+
+| Constat | Verdict | Route | Preuve / action |
+|---|---|---|---|
+| Tests qui comparent la date rendue à `today_utc()` lue à part (trois tests) : échec si minuit UTC passe entre les deux | low | patch | vrai sur trois tests (blind, verification-gap) ; date lue avant et après, l'une ou l'autre acceptée. |
+| `summary._grid` : `north` liste ou objet → TypeError (non haché) là où `== 'grid'` ne levait rien | low | patch | vérifié dans le diff ; recherche seulement sur une chaîne, test ajouté. |
+| Générateur : jours 1–28 seulement, jamais la forme JJ/MM/AAAA ni une date hors validité | medium | patch | une demande « le 10/05/2026 » est courante et le noyau la refuse : le modèle doit apprendre à la convertir ; tirages élargis. |
+| Liste des mois recopiée dans un test | low | patch | constante du module réutilisée. |
+| Retouche de `filtre_numerique` (« Sélectionne-moi ») hors sujet et non signalée | low | patch | méthode du garde-fou (« on retire la tournure fautive et on le signale ») ; signalée dans `docs/entrainement-du-modele.md`. |
+| Fiches : précision à 0,005° de D publiée omise ; ligne `utm_zone` sans le refus hors `grid` | low | patch | fiches complétées. |
+| Fichier `WMM2025_TestValues.txt` absent du diff relu | false | rejeté | exclu exprès du diff de relecture (données) ; présent et indexé dans l'arbre. |
+| Triage vide alors que `lenses_ran` est rempli | false | rejeté | la relecture était en cours ; ce tableau la trace. |
+| Catalogue qui écrit des décisions « à confirmer » | false | rejeté | pratique du changement de cap (détails tranchés en party, réversibles, confirmés plus tard) et consigne du délégant. |
+| Plan versionné avec des chemins de session (`LIBCLANG_PATH`, worktree) | false | rejeté | même pratique dans les plans déjà au dépôt (5.47, 5.48, bogue du rejeu) ; sans effet sur le code. |
+| Date absurde (ex. 0850) acceptée avec un simple avertissement | low | rejeté | décision M2 et D5 (jamais de refus) ; l'avertissement dit que la déclinaison est extrapolée. |
+| Panneau anglais : avertissement du noyau en français | low | rejeté | comme tous les messages du noyau (erreurs comprises) ; traduire demanderait un code d'avertissement, hors du contrat. |
+| Seule D(from) est rendue, `back_azimuth` corrigé de D(to) | low | rejeté | fiche du catalogue (« au point de départ ») et D2 ; corrigé au point de mesure. |
+| `params.date` et `replay.date` différents dans un journal retouché à la main | low | rejeté | journal falsifié à la main, hors usage ; le rejeu repasse ce que le noyau a journalisé (AD-11). |
+| Aucune démo réelle ni recette | low | rejeté | hors périmètre de ce ticket : ni installation ni entraînement (consigne) ; la famille est apprise au ré-entraînement 5.49, la recette vient en 5.50. |
 
 ## Décisions de party (2026-11-10)
 
