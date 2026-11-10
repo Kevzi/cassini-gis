@@ -46,6 +46,7 @@ Frontière par capacité : la couche IA et le pont MCP, dans le noyau. Aucune lo
 ## Notes
 
 - Unknown: le modèle GGUF pèse plusieurs Go — installeur ou téléchargement au premier lancement ? La seconde option casse le hors ligne sur poste isolé. Question ouverte de la spec. Tranché : livré dans le paquet Cassini, jamais téléchargé (en-tête de `tickets.toml`, AD-17).
+- Decision: le 2026-11-10, la ligne « Tranché » ci-dessus est précisée par le changement de cap `change-distribution-deux-portes` (AD-17 amendé) : le modèle n'est jamais téléchargé par le noyau ni par l'extension, ni au premier lancement ; il est soit téléchargé une fois par l'installeur léger en ligne, programme séparé, pendant l'installation, depuis un dépôt public Hugging Face, empreinte SHA-256 vérifiée, soit porté par l'installeur complet hors ligne pour les postes isolés du réseau (propriétaire, 2026-11-10).
 - Unknown: quel modèle exactement, quelle quantification, et quelle configuration minimale de RAM et de CPU. Question ouverte de la spec. Tranché pour le modèle : Qwen3.5-9B Q4_K_M (épreuve 8.6) ; la configuration minimale reste à mesurer (entrées 11, 12 et 10).
 - Assumption: l'agent reçoit le catalogue des commandes et un inventaire du projet, jamais les données elles-mêmes ; c'est l'epic 8 qui valide ou casse cette hypothèse.
 - Decision: l'epic 8 passe avant celui-ci et lui livre le modèle, la quantification et la forme de sollicitation retenus ; les deux questions ouvertes ci-dessus y seront tranchées (2026-10-14).

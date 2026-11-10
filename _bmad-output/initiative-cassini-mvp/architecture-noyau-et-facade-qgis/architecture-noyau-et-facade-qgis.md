@@ -417,6 +417,24 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   d'environnement `CASSINI_CORE`, emplacement d'installation du paquet, `PATH`.
   Introuvable, elle explique quoi installer et propose de désigner le fichier à
   la main. Elle ne télécharge jamais rien.
+- **Amendement (2026-11-10, changement de cap `change-distribution-deux-portes`) —
+  deux portes d'installation.** La règle ci-dessus ne change pas : l'extension ne
+  télécharge jamais rien, le noyau non plus. Le paquet Cassini existe sous deux
+  formes, l'une et l'autre **programmes séparés du noyau et de l'extension** :
+  - **porte 1, installeur léger en ligne** (quelques Mo) : il télécharge le noyau
+    depuis une release GitHub et le modèle depuis un dépôt public Hugging Face,
+    à des **adresses fixes**, et vérifie l'**empreinte SHA-256** de chaque fichier
+    avant de l'installer ;
+  - **porte 2, installeur complet hors ligne** : un seul fichier qui contient le
+    noyau et le modèle, pour les postes isolés du réseau.
+
+  Frontière : seul un installeur peut télécharger, **une fois, pendant
+  l'installation**, à des adresses fixes, empreintes vérifiées. Jamais le noyau
+  ni l'extension, jamais à l'exécution, et jamais pour « réparer » une
+  installation : un noyau ou un modèle introuvable se signale comme avant
+  (l'extension explique quoi installer), il ne déclenche aucun téléchargement.
+  Après l'installation, Cassini ne touche plus au réseau (AD-14 inchangé). Le
+  noyau, l'extension et l'ordre de recherche ne changent pas.
 
 ### AD-18 — Une seule extension pour les deux séries de QGIS, et aucun import direct de PyQt
 

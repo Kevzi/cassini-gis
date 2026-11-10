@@ -70,7 +70,10 @@ code existant reste au dépôt comme fondation.
    ce qui fonde l'argument juridique du principe 3 et ce qui rend la V2
    autonome possible. Toute dépendance du noyau envers QGIS est un bug.
 5. **Hors ligne total.** Aucune fonction du MVP n'utilise le réseau. Le réseau ne
-   sert qu'à brancher une IA externe, en option.
+   sert qu'à brancher une IA externe, en option. L'installeur en ligne (§3,
+   « Distribution ») n'est pas une fonction du produit : programme séparé, il
+   télécharge une seule fois, pendant l'installation, puis le noyau et
+   l'extension ne touchent plus jamais au réseau.
 6. **L'utilisateur apporte ses données.** Cassini ne télécharge rien et ne
    modifie jamais les fichiers d'origine.
 7. **Agent-first.** Toute action utilisateur passe par une commande du registre
@@ -141,7 +144,14 @@ code existant reste au dépôt comme fondation.
 - **Distribution** : l'extension au dépôt d'extensions de QGIS, sans binaire et
   sous 25 Mo — le dépôt l'exige ; le binaire du noyau et le modèle dans un paquet
   Cassini installé à part, que l'extension localise dans un ordre fixé, sans
-  jamais rien télécharger.
+  jamais rien télécharger. Ce paquet passe par **deux portes** (2026-11-10) :
+  un installeur léger en ligne, qui télécharge une seule fois, pendant
+  l'installation, le noyau depuis une release GitHub et le modèle depuis
+  Hugging Face, à des adresses fixes, en vérifiant l'empreinte SHA-256 de chaque
+  fichier avant de l'installer ; et un installeur complet hors ligne, un seul
+  fichier qui contient tout, pour les postes isolés du réseau. Windows et Linux
+  d'abord, macOS plus tard. Seul l'installeur, programme séparé, télécharge :
+  jamais le noyau ni l'extension (AD-17).
 - **IA locale** : modèle open source (Mistral ou Qwen, quantifié GGUF) chargé
   **dans le processus du noyau** par llama.cpp lié en bibliothèque — jamais un
   serveur HTTP, qui rouvrirait une interface réseau.
