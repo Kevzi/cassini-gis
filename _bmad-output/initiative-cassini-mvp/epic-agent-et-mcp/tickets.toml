@@ -770,7 +770,7 @@ id = 45
 type = "story"
 title = "Recette QGIS d'Annecy portee a 20 phrases (barre 16/20)"
 description = "La recette QGIS reelle d'Annecy passe de 5 a 20 phrases, ecrites a la main et variees : donnees et projet, analyses vectorielles, terrain, coordonnees, mise en forme aux couleurs IGN et CNIG, export PDF, et au moins une demande ambigue qui doit donner une question. Les 20 phrases s'enchainent dans une seule session QGIS sur le projet d'Annecy, avec le modele charge a part (CASSINI_MODELS), comme les essais GPU ; la recette compte les plans executes et rejoue le journal. La recette et ses phrases sont versionnees dans le depot (sonde sous le Python de QGIS, comme les autres sondes), les donnees d'Annecy restant hors du depot. La barre officielle devient au moins 16 plans executes sur 20 (80 %) et remplace la barre de 4 sur 5 dans la doc d'entrainement."
-verify = "Avec le modele installe, la sonde joue les 20 phrases dans une session QGIS, ecrit un score « N/20 » et la liste des rates, et le rejeu du journal est identique ; une phrase ambigue comptee juste seulement si le modele pose une question ; le garde de recouvrement echoue si l'une des 20 phrases entre dans le generateur ; la doc d'entrainement porte la barre 16/20."
+verify = "Avec le modele installe, la sonde joue les 20 phrases dans une session QGIS, ecrit un score « N/20 » (plan execute et conforme au plan attendu) et la liste des rates, et le rejeu du journal est identique ; une phrase ambigue comptee juste seulement si le modele pose une question ; le garde de recouvrement echoue si l'une des 20 phrases entre dans le generateur ; la doc d'entrainement porte la barre 16/20."
 covers = ["CAP-4"]
 after = []
 hitl = true
@@ -780,5 +780,5 @@ notes = [
   "hitl : le proprietaire relit les 20 phrases avant la premiere mesure (formulations d'un vrai utilisateur).",
   "Les phrases ne sont jamais copiees dans le generateur d'entrainement ; elles rejoignent les phrases tenues a l'ecart du garde de recouvrement.",
   "Origine : la recette actuelle a 5 phrases vit hors du depot (script de nuit sous %TEMP%) ; ses 5 phrases peuvent etre reprises parmi les 20.",
-  "Open question: compter une phrase juste quand le plan s'execute, ou exiger aussi le bon resultat (couche attendue, nombre d'objets) ; defaut propose : plan execute et conforme a un plan attendu ecrit a la main.",
+  "Decision: 2026-11-10 — proprietaire : une phrase compte juste seulement si le plan s'execute ET est conforme au plan attendu, ecrit a la main pour chaque phrase (comme plan_reel) ; un plan qui s'execute mais fait autre chose compte rate.",
 ]
