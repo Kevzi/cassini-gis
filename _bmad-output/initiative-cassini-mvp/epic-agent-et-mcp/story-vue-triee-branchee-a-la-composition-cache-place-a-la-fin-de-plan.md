@@ -3,14 +3,14 @@ title: "Vue triée branchée à la composition, cache placé à la fin de l'inde
 type: 'feature'
 ticket: '48'
 created: '2026-11-10'
-status: 'in-progress'
+status: 'in-review'
 baseline_revision: '12333c56b72b30fbd7275ea020f2c11736777163'
 route: 'full'
 route_source: 'auto'
 risk: 'high'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'thorough'
+review_source: 'pinned'
+lenses_ran: [blind-hunter, edge-case-hunter, verification-gap, intent-alignment]
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-cassini-mvp/change-inventaire-des-gros-projets/change-inventaire-des-gros-projets.md'

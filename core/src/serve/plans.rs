@@ -147,7 +147,7 @@ pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<V
     let registry = state.registry;
     // L'inventaire lu pour la première composition, gardé pour la redemande élargie : ni second
     // ordre à l'extension, ni autre état du projet entre les deux vues.
-    let mut read: Option<Read> = None;
+    let mut read: Option<Snapshot> = None;
     // La dernière vue montrée au modèle : sa table d'identifiants courts retraduit le plan
     // (ticket 5.19), ses couches réduites décident de la redemande (5.48), ses couches de résultat
     // laissées hors de la vue sont rendues à l'utilisateur (5.33).
@@ -177,7 +177,7 @@ pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<V
             let raw = Channel { link: link.clone() }
                 .execute("project.inventory", json!({}))
                 .map_err(ErrorReport::from)?;
-            let now = Read {
+            let now = Snapshot {
                 learned: agent_inventory(&raw),
                 files: work_dir.as_deref().map(work_files).unwrap_or_default(),
                 intermediates: journal
@@ -279,14 +279,14 @@ pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<V
 
 /// Ce que la vue du modèle lit d'un état du projet : l'inventaire dans la forme apprise, les
 /// fichiers du dossier de travail, les intermédiaires et le dernier plan déduits du journal.
-struct Read {
+struct Snapshot {
     learned: Value,
     files: Vec<WorkFile>,
     intermediates: std::collections::HashSet<String>,
     last: LastPlan,
 }
 
-impl Read {
+impl Snapshot {
     /// La vue de `request`, `wanted` (identifiants QGIS) détaillées en plus.
     fn view(&self, request: &str, wanted: &[String]) -> (ModelInventory, ShortIds) {
         sorted_view_learned(

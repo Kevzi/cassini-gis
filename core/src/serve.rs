@@ -3042,6 +3042,30 @@ mod tests {
         assert!(journal.is_empty());
     }
 
+    /// Ticket 5.48 : le dernier plan exécuté est lu dans le journal du projet à chaque proposition ;
+    /// la couche qu'il cite est détaillée, même si la demande ne la désigne pas.
+    #[test]
+    fn the_layer_cited_by_the_last_plan_of_the_journal_is_detailed() {
+        let composer = composer(json!({"kind":"question","question":"?"})).unwrap();
+        let seen = composer.seen.clone();
+        let mut c = Client::start_with(CANCEL_GRACE, Some(composer));
+        c.hello_with(&ALL);
+        let line = json!({"id": "analysis.select_by_attribute", "plan_step": 1,
+            "params": {"layer_id": "zonage", "field": "typezone", "operator": "eq", "value": "U"},
+            "layer_id": "r1", "result": {}});
+        std::fs::write(c.dir.join("p.cassini/journal.jsonl"), format!("{line}\n")).unwrap();
+        c.send(json!({"jsonrpc":"2.0","id":2,"method":"plan.propose",
+            "params":{"request":"Fais-le."}}));
+        let order = c.recv();
+        c.send(reply(&order["id"], big_project_inventory()));
+        let answer = c.recv();
+        assert_eq!(answer["result"]["question"], "?", "{answer}");
+        c.close().1.unwrap();
+        let seen = seen.lock().unwrap();
+        assert!(seen[0].get("index").is_some());
+        assert_eq!(detailed(&seen[0]), ["zonage"]);
+    }
+
     #[test]
     fn a_field_reached_through_a_step_reference_recomposes_too() {
         let plan = json!({"kind":"calls","calls":[
