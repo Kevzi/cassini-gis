@@ -8370,6 +8370,19 @@ mod tests {
             assert_eq!(p["north"], "grid", "{}", e.request);
             both.insert(step["command"].as_str().unwrap().to_string());
             let r = e.request.to_lowercase();
+            // 5.49 : « quadrillage UTM » est aussi la tournure du carroyage du PDF ; un gisement
+            // ne parle ni de carte ni d'export, et son plan n'a aucun appel `layout.*` : les deux
+            // familles ne s'enseignent pas deux plans pour une même demande.
+            for w in ["carte", "pdf", "export", "carroyage", "grille", "tous les"] {
+                assert!(!r.contains(w), "{w} : {}", e.request);
+            }
+            for c in e.expected["calls"].as_array().unwrap() {
+                assert!(
+                    !c["command"].as_str().unwrap().starts_with("layout."),
+                    "{}",
+                    e.request
+                );
+            }
             assert!(
                 r.contains("gisement") || r.contains("quadrillage"),
                 "{}",

@@ -34,8 +34,8 @@ use super::{
 pub const SORT_THRESHOLD_CHARS: usize = 17_000;
 
 /// Budget de toute la vue triée (ticket 5.48) : sous la borne des prompts de l'entraînement
-/// (`MAX_PROMPT_CHARS` de `training/`, 12 900 caractères avec consignes et demande), pour que le
-/// modèle ne voie jamais une vue plus longue que celles qu'il a apprises.
+/// (`MAX_PROMPT_CHARS` de `training/`, 12 900 caractères avec consignes et demande en 5.48, 19 000
+/// depuis 5.49), pour que le modèle ne voie jamais une vue plus longue que celles qu'il a apprises.
 pub const SORTED_BUDGET_CHARS: usize = 11_000;
 
 /// Budget de l'index réduit, en caractères de sa liste JSON. Au dépassement, les résultats les

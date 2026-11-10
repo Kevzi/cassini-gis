@@ -32,9 +32,12 @@ pub const DEFAULT_COUNT: usize = 8600;
 const MAX_STEPS: usize = 12;
 /// Borne du texte vu par le modèle, en caractères de `prompt_text` (5.47, décision 5 du
 /// 2026-11-10) : un exemple plus long est écarté ici, pour que la chaîne d'entraînement, qui
-/// écarte toute séquence de plus de `MAX_LENGTH` = 4 608 jetons (prompt et réponse), n'en écarte
-/// aucun. Réglée sur la mesure au tokeniseur de Qwen3.5 (`docs/entrainement-du-modele.md`).
-pub const MAX_PROMPT_CHARS: usize = 12_900;
+/// écarte toute séquence de plus de `MAX_LENGTH` = 5 632 jetons (prompt et réponse), n'en écarte
+/// aucun. 19 000 depuis 5.49 (tranchée en party le 2026-11-10, à confirmer par le propriétaire) :
+/// les gros projets vus en entier, sous le seuil du tri du noyau (17 000 caractères, la taille
+/// d'Annecy), ne sont plus écartés. Réglée sur la mesure au tokeniseur de Qwen3.5
+/// (`docs/entrainement-du-modele.md`).
+pub const MAX_PROMPT_CHARS: usize = 19_000;
 
 /// Décompte d'une famille : exemples gardés, écartés par la validation, doublons.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]

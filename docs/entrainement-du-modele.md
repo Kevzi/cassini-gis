@@ -793,6 +793,8 @@ propriétaire) :
    consignes courtes et la demande, elle tient sous ces 12 900 caractères, et `MAX_LENGTH` reste
    à 4 608. Sous le seuil du tri (17 000 caractères depuis 5.48, pour garder le projet d'Annecy
    inchangé), une vue peut encore dépasser cette borne : Annecy fait 16 597 caractères dans QGIS.
+   **Depuis 5.49**, la borne passe à 19 000 caractères et `MAX_LENGTH` à 5 632 (voir
+   « Ré-entraînement groupé (5.49) » ci-dessous) : ces projets moyens entrent au jeu.
 
 Les écarts sont comptés au résumé (`gros_projet`, colonne « écartés ») : 295 écartés pour 2 139
 gardés au jeu par défaut, par l'une ou l'autre des deux dernières gardes. Après 5.48 (désignation
@@ -845,6 +847,74 @@ le jeu porte 9,13 M de jetons au lieu de 7,14 M (+28 %), et le coût par pas est
 proportionnel aux jetons (14,3 s à 1 768 jetons, 27 s à 3 500). On attend donc environ
 2 h 15 d'entraînement au lieu de 1 h 45, et environ 3 h 10 pour la commande entière ; une nuit
 à deux graines fait environ 6 h 30.
+
+### Ré-entraînement groupé (5.49)
+
+Un seul entraînement pour tout ce qui s'est ajouté depuis la nuit du 2026-11-10 : inventaires
+larges, gros projets et couches proches (5.47), vue triée branchée (5.48), gisement (10.28),
+azimut magnétique (10.29), conversion raster (10.30), mise en page MGRS, en-tête et sources
+(10.31). Mêmes base, méthode, graines du générateur (1 et 2) et `DEFAULT_COUNT` (8 600).
+
+**Borne des prompts relevée** (tranchée en party le 2026-11-10, ingénieur ML, architecte,
+géomaticien ; à confirmer par le propriétaire). Après les fusions, le jeu ne gardait que 1 962 gros
+projets (22,8 %, sous la barre de 23 %) : 402 écartés, dont environ 270 parce que leur prompt
+dépassait 12 900 caractères. Ce sont les gros projets **vus en entier**, dont les couches de
+l'utilisateur tiennent sous le seuil du tri (17 000 caractères) : exactement la taille d'Annecy,
+qu'aucun exemple ne montrait. Sans borne, aucun prompt ne dépasse 19 000 caractères (18 506 au
+plus) et aucune séquence 5 176 jetons. Décision : `MAX_PROMPT_CHARS` 12 900 → **19 000**,
+`MAX_LENGTH` 4 608 → **5 632**, après un essai mémoire ; repli prévu si la carte se remplissait
+(bornes gardées, poids de `gros_projet` relevé). Écartés : relever le seul poids (le trou des
+projets moyens reste), alléger les couches de remplissage (le trou se déplace sans se fermer).
+Sur les prompts de plus de 12 900 caractères, le pire rapport mesuré est de 0,290 jeton par
+caractère de prompt, réponse comprise : 19 000 caractères font au plus 5 518 jetons, sous 5 632.
+
+**Essai mémoire** (`pipeline.py --longs-d-abord --pas-max 30`, RTX 3070 Ti 8 Go, segments
+extensibles, 2026-11-10) : les 480 exemples les plus longs d'abord (de 5 176 jetons à environ
+3 000). Aucun écarté pour longueur.
+
+| Pas | s / pas | Pic (torch) | Perte |
+|---|---|---|---|
+| 1 à 10 (amorce et compilation comprises) | 65 | 5,64 Gio | 0,483 |
+| 11 à 20 (≈ 4 500 jetons) | 54 | 5,64 Gio | 0,193 |
+| 21 à 30 | 44 | 5,64 Gio | 0,189 |
+
+Le pic reste sous celui de 5.47 (5,72 Gio) : **`MAX_LENGTH` = 5 632 retenu**, repli inutile.
+
+**« Quadrillage UTM » dans deux familles.** `gisement` (« par rapport au quadrillage UTM »,
+« quadrillage UTM zone 32 ») et le carroyage du PDF (« avec un quadrillage UTM tous les 2 km »)
+partagent la tournure. Vérifié sur le jeu par défaut : aucun exemple ne mêle un appel `geo.*` et
+un appel `layout.*` ; un gisement ne parle jamais de carte, d'export, de carroyage, de grille ni
+d'intervalle (« tous les ») et rend toujours un plan (le noyau tire le fuseau du point) ; un
+carroyage UTM sans fuseau ni `utm_epsg` rend la question (aucun point d'où tirer le fuseau) ; une
+zone écrite donne la même zone dans les deux (`utm_zone` N, `epsg` 326NN). Les deux familles
+n'enseignent donc pas deux plans pour une même demande ; le test
+`a_grid_bearing_says_grid_and_names_its_zone_only_when_written` le garde désormais.
+
+**Mesures du jeu** (graine 1, 8 600 exemples, tokeniseur de `Qwen/Qwen3.5-4B`, prompt et
+réponse) :
+
+| Mesure | 5.47 | 5.48 | 5.49 |
+|---|---|---|---|
+| exemples `gros_projet` | 2 139 (24,9 %) | 2 033 (23,6 %) | **2 165 (25,2 %)** |
+| gros projets écartés | 295 | 443 | 132 (couche utile montrée réduite) |
+| gros projets vus triés (clé `index`) | 100 % | — | 1 906 (88 %) |
+| couches par gros projet | 20 à 60, moyenne 39,8 | — | 20 à 60, moyenne 39,8 |
+| longueur, tous les exemples | moy. 1 062, méd. 901, max 3 708 | — | moy. 1 168, méd. 890, max 5 176 |
+| longueur, gros projets | moy. 1 733, max 3 708 | — | moy. 2 176, méd. 1 839, max 5 176 |
+| longueur, petits projets | moy. 840, max 1 824 | — | moy. 828, max 1 826 |
+| 95e et 99e centiles | 2 038 et 2 761 | — | 2 740 et 4 729 |
+| au-delà de `MAX_LENGTH` | 0 | — | 0 (116 au-delà de 4 608) |
+| prompt le plus long | 12 883 car. | — | 18 506 car. |
+| jetons du jeu entier | 9,13 M | — | 10,04 M |
+
+Familles nouvelles, en petits projets (les gros projets en tirent aussi, selon les poids) :
+`gisement` 54, `azimut_magnetique` 60, `conversion_raster` 75, `carroyage_mgrs` 91,
+`entete_pied_de_page` 90, `couches_proches` 132, `retrait_couche` 103, `redemande` 290.
+
+**Durée attendue** : 10,04 M de jetons au lieu de 9,13 M (+10 %), et les pas des séquences les
+plus longues coûtent plus que leur part de jetons (54 s à 4 500 jetons contre 27 s à 3 500) :
+environ 2 h 30 à 2 h 45 par entraînement, plus la chaîne GGUF et la validation, soit environ 7 h
+pour la nuit à deux graines.
 
 ### Les inventaires de QGIS (5.15)
 
