@@ -584,6 +584,20 @@ famille, sur une centaine d'exemples).
    les graines du générateur, 1 et 2, ne changent pas). On garde celui des deux qui tient le
    mieux les barres et la recette d'Annecy ; l'autre reste à côté, non installé.
 
+**Troisième candidat : la fusion des deux graines** (ajout du propriétaire, 2026-11-10). Après les
+deux entraînements, leurs adaptateurs se fusionnent en un troisième modèle, passé aux mêmes essais
+GPU et à la même recette d'Annecy. La fusion fait la moyenne des corrections complètes
+ΔW = B·A de chaque adaptateur, et non des matrices A et B une à une : les deux entraînements partent
+de points différents, et la moyenne de leurs A et de leurs B ne serait la moyenne d'aucune
+correction. Avec PEFT (déjà dans `training/entrainement`) : la base est chargée sur le
+processeur, en bf16, les deux adaptateurs HF (`travail/adaptateur-hf` de chaque sortie) s'y
+chargent, puis `add_weighted_adapter([a, b], [0.5, 0.5], combination_type="cat")` les concatène
+(rang doublé, 32), ce qui donne exactement ΔW = 0,5·ΔW_a + 0,5·ΔW_b. L'adaptateur fusionné suit
+ensuite la chaîne de `pipeline.py` : `convert_lora_to_gguf.py` du même commit de llama.cpp,
+fusion avec la base et quantification Q4_K_M, score de validation par llama.cpp sur le GPU, sur
+le même jeu de validation. Script hors dépôt de la nuit du 2026-11-10 :
+`~/cassini-entrainement/fusion-nuit-11-10.py`, sortie `ajuste-nuit-11-10-fusion`.
+
 ### Les inventaires de QGIS (5.15)
 
 Les valeurs d'un champ texte sont triées, comme le produit les rend. `unloaded_files` est
