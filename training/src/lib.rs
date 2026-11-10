@@ -30,6 +30,11 @@ pub const DEFAULT_SEED: u64 = 1;
 pub const DEFAULT_COUNT: usize = 8600;
 /// Plafond d'étapes d'un plan, celui de `cassini-ai` (`MAX_STEPS`).
 const MAX_STEPS: usize = 12;
+/// Borne du texte vu par le modèle, en caractères de `prompt_text` (5.47, décision 5 du
+/// 2026-11-10) : un exemple plus long est écarté ici, pour que la chaîne d'entraînement, qui
+/// écarte toute séquence de plus de `MAX_LENGTH` = 4 608 jetons (prompt et réponse), n'en écarte
+/// aucun. Réglée sur la mesure au tokeniseur de Qwen3.5 (`docs/entrainement-du-modele.md`).
+pub const MAX_PROMPT_CHARS: usize = 12_900;
 
 /// Décompte d'une famille : exemples gardés, écartés par la validation, doublons.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -77,10 +82,12 @@ pub fn validate(registry: &Registry, example: &Example) -> Result<(), String> {
             if calls.is_empty() || calls.len() > MAX_STEPS {
                 return Err(format!("{} étapes", calls.len()));
             }
+            // Une couche de l'index d'un gros projet (5.47) existe, même montrée réduite.
             let ids: HashSet<&str> = example.inventory["layers"]
                 .as_array()
                 .into_iter()
                 .flatten()
+                .chain(example.inventory["index"].as_array().into_iter().flatten())
                 .filter_map(|l| l["layer_id"].as_str())
                 .collect();
             // Le MNT d'une commande de terrain est un chemin recopié de l'inventaire : la
@@ -145,8 +152,87 @@ pub fn validate(registry: &Registry, example: &Example) -> Result<(), String> {
     if example.request.trim().is_empty() {
         return Err("demande vide".into());
     }
+    reduced_focus(example, &plan)?;
+    let chars = prompt_text(example).chars().count();
+    if chars > MAX_PROMPT_CHARS {
+        return Err(format!("prompt trop long : {chars} caractères"));
+    }
     if let Some(retry) = &example.retry {
         validate_retry(registry, &plan, retry)?;
+    }
+    Ok(())
+}
+
+/// Dans un gros projet montré trié (clé `index`, 5.47), chaque couche utile de l'exemple est
+/// détaillée dans `layers`, sauf une couche qu'un plan d'appels ne cite que comme géométrie : citée
+/// par un paramètre de couche, et sans paramètre de champ (`field`, `fields`, `label_field`...)
+/// dans aucun des appels qui la citent. Un raster cité par sa source n'a pas d'identifiant dans le
+/// plan : sa source manquerait, ce que `validate` écarte déjà.
+fn reduced_focus(example: &Example, plan: &Plan) -> Result<(), String> {
+    if example.inventory.get("index").is_none() {
+        return Ok(());
+    }
+    let detailed: HashSet<&str> = example.inventory["layers"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|l| l["layer_id"].as_str())
+        .collect();
+    let geometry_only = |id: &str| -> bool {
+        let Plan::Calls { calls } = plan else {
+            return false;
+        };
+        let citing: Vec<_> = calls
+            .iter()
+            .filter(|c| {
+                LAYER_PARAMS
+                    .iter()
+                    .any(|k| c.params[*k].as_str() == Some(id))
+            })
+            .collect();
+        // Une reprojection dépend du système de la couche, que l'index ne montre pas.
+        !citing.is_empty()
+            && citing.iter().all(|c| {
+                c.command != "data.reproject"
+                    && c.params
+                        .as_object()
+                        .is_none_or(|m| m.keys().all(|k| !k.contains("field")))
+            })
+    };
+    for id in &example.focus {
+        if !detailed.contains(id.as_str()) && !geometry_only(id) {
+            return Err(format!("couche utile « {id} » montrée réduite"));
+        }
+    }
+    // Une couche détaillée plafonnée (30 champs ou 3 000 caractères, `sorted_view`) peut perdre
+    // un champ : le champ que cite le plan doit rester visible.
+    if let Plan::Calls { calls } = plan {
+        for call in calls {
+            let Some(id) = call.params["layer_id"].as_str() else {
+                continue;
+            };
+            let Some(layer) = example.inventory["layers"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|l| l["layer_id"].as_str() == Some(id))
+            else {
+                continue;
+            };
+            let shown: HashSet<&str> = layer["fields"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|f| f["name"].as_str())
+                .collect();
+            for key in ["field", "label_field", "x_field", "y_field"] {
+                if let Some(field) = call.params[key].as_str() {
+                    if !shown.contains(field) {
+                        return Err(format!("couche utile « {id} » : champ « {field} » coupé"));
+                    }
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -350,6 +436,7 @@ mod tests {
             request: "Tampon de 300 m autour des gares.".into(),
             expected,
             retry: None,
+            focus: Vec::new(),
         };
         // Référence vers une étape qui n'existe pas : refusée par `check_plan`.
         let bad = make(json!({"kind": "calls", "calls": [
@@ -391,6 +478,7 @@ mod tests {
             expected: json!({"kind": "calls", "calls": [
                 {"command": "terrain.slope", "params": {"dem": dem, "unit": "degrees"}}]}),
             retry: None,
+            focus: Vec::new(),
         };
         assert_eq!(
             validate(&registry, &slope(json!("donnees/mnt_5m.tif"))),
@@ -421,6 +509,7 @@ mod tests {
                 {"command": "raster.reclassify",
                     "params": {"raster": raster, "classes": [{"min": 15, "value": 1}]}}]}),
             retry: None,
+            focus: Vec::new(),
         };
         assert_eq!(validate(&registry, &threshold(json!("step:1"))), Ok(()));
         assert_eq!(
@@ -451,6 +540,7 @@ mod tests {
                     "start": {"x": 652300, "y": 6862100, "epsg": 2154},
                     "end": {"x": 653100, "y": 6861500, "epsg": 2154}}}]}),
             retry: None,
+            focus: Vec::new(),
         };
         assert_eq!(
             validate(&registry, &path(json!("donnees/friction.tif"))),
@@ -485,6 +575,7 @@ mod tests {
                         {"raster": second, "weight": 1}],
                     "exclusions": [mask]}}]}),
             retry: None,
+            focus: Vec::new(),
         };
         let good = (json!("rasters/accessibilite.tif"), json!("zi_masque.tif"));
         assert_eq!(
@@ -519,11 +610,72 @@ mod tests {
     }
 
     #[test]
+    fn the_default_set_holds_a_quarter_of_big_projects_and_close_layers() {
+        // 5.47 : 23 à 27 % de gros projets de 20 à 60 couches, dont au moins 70 % vus triés ;
+        // aucun prompt au-delà de la borne ; au moins 100 couches proches, un tiers environ en plan.
+        let (examples, _) = generate(DEFAULT_SEED, DEFAULT_COUNT);
+        let big: Vec<&Example> = examples
+            .iter()
+            .filter(|e| e.family == "gros_projet")
+            .collect();
+        assert!(
+            big.len() * 100 >= examples.len() * 23 && big.len() * 100 <= examples.len() * 27,
+            "{} gros projets",
+            big.len()
+        );
+        let mut sorted = 0;
+        for e in &big {
+            let layers = match e.inventory.get("index") {
+                Some(index) => {
+                    sorted += 1;
+                    index.as_array().unwrap().len()
+                }
+                None => e.inventory["layers"].as_array().unwrap().len(),
+            };
+            assert!((20..=60).contains(&layers), "{layers} couches");
+        }
+        assert!(sorted * 10 >= big.len() * 7, "{sorted} / {}", big.len());
+        assert!(examples
+            .iter()
+            .all(|e| prompt_text(e).chars().count() <= MAX_PROMPT_CHARS));
+        let close: Vec<&Example> = examples
+            .iter()
+            .filter(|e| e.family == "couches_proches")
+            .collect();
+        let planned = close
+            .iter()
+            .filter(|e| e.expected["kind"] == "calls")
+            .count();
+        assert!(close.len() >= 100, "{}", close.len());
+        assert!(
+            planned * 5 >= close.len() && planned * 2 <= close.len(),
+            "{planned} / {}",
+            close.len()
+        );
+    }
+
+    #[test]
     fn no_family_produces_rejected_examples() {
         // Un écart signale une famille mal écrite : le filtre est un garde-fou, pas un tamis.
+        // Seul `gros_projet` écarte, par construction (5.47) : une couche utile que la vue triée
+        // ne détaille pas, ou un prompt au-delà de la borne.
         let (_, summary) = generate(DEFAULT_SEED, DEFAULT_COUNT);
-        let rejected: usize = summary.families.values().map(|t| t.rejected).sum();
+        let rejected: usize = summary
+            .families
+            .iter()
+            .filter(|(name, _)| **name != "gros_projet")
+            .map(|(_, t)| t.rejected)
+            .sum();
         assert_eq!(rejected, 0, "{:#?}", summary.reasons);
+        for reason in &summary.reasons {
+            assert!(
+                reason.starts_with("gros_projet : couche utile")
+                    || reason.starts_with("gros_projet : prompt trop long")
+                    || (reason.starts_with("gros_projet : étape")
+                        && reason.contains("raster absent")),
+                "{reason}"
+            );
+        }
     }
 
     #[test]
@@ -1075,9 +1227,10 @@ mod tests {
             // Depuis 4.6, une vue depuis un lieu nommé demande aussi son point (`question_terrain`),
             // et depuis 11.12, lot 2b-1, un coût de déplacement depuis un lieu nommé.
             if asks_point {
+                // Un gros projet (5.47) emballe aussi ces familles-là.
                 let terrain = matches!(
                     e.family,
-                    "question_terrain" | "cout_cumule" | "chemin_moindre_cout"
+                    "question_terrain" | "cout_cumule" | "chemin_moindre_cout" | "gros_projet"
                 );
                 assert!(
                     (travel || terrain) && !has_distance(&e.request),

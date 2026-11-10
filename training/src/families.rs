@@ -7,11 +7,14 @@
 //! Vocabulaire civil seulement (CLAUDE.md §2.9). Une phrase mal comprise par le modèle devient
 //! une famille ou une tournure ici, jamais une règle de prompt.
 
+use std::collections::{HashMap, HashSet};
+
+use cassini_core::agent_inventory::{sorted_view, LastPlan, ViewLimits};
 use serde_json::{json, Value};
 
 use crate::inventories::{
-    theme, Builder, FieldDef, Geom, Kind, Layer, Noun, Theme, Val, CATEGORIES, CRITERIA, MASKS,
-    NAMED_PLACES, RAW_RASTERS, THEMES,
+    big_project, theme, Builder, FieldDef, Geom, Kind, Layer, Noun, Theme, Val, BIG_MAX_LAYERS,
+    BIG_MIN_LAYERS, CATEGORIES, CRITERIA, MASKS, NAMED_PLACES, RAW_RASTERS, THEMES,
 };
 use crate::rng::Rng;
 
@@ -25,6 +28,10 @@ pub struct Example {
     /// Exemple de redemande : la sortie rejetée et ses écarts, que le prompt montre avant la
     /// réponse attendue. `None` pour un premier essai.
     pub retry: Option<Retry>,
+    /// Identifiants des couches « utiles » de l'inventaire, celles que la famille a posées (ses
+    /// distractions exclues) : dans un gros projet, chacune doit être montrée en détail, sauf
+    /// une couche qu'un plan d'appels ne cite que comme géométrie (5.47).
+    pub focus: Vec<String>,
 }
 
 /// Le tour de redemande d'un exemple : la sortie rejetée par `check_plan`, telle que le
@@ -373,11 +380,27 @@ pub static FAMILIES: &[Family] = &[
     // 11.12 : les plans de géométrie à une étape ne se corrompent pas non plus. Relevé de 36 à
     // 44 en 11.12, lot 2b-1 : les plans de coût, à une étape, pas davantage (3,9 % sinon).
     // Relevé de 44 à 52 en 11.23 : les familles de style et de carroyage, et les points recopiés
-    // sans conversion, ne laissaient que 3,9 %.
+    // sans conversion, ne laissaient que 3,9 %. Relevé de 52 à 58 en 5.47 : les gros projets
+    // diluent les petits et écartent davantage de redemandes (prompt plus long), 3,9 % sinon.
     Family {
         name: "redemande",
-        weight: 52,
+        weight: 58,
         make: redemande,
+    },
+    // Deux couches d'un même thème qui ne diffèrent que par un qualificatif (5.47) : environ 2 %
+    // du jeu, deux questions pour un plan.
+    Family {
+        name: "couches_proches",
+        weight: 7,
+        make: couches_proches,
+    },
+    // Environ 25 % du jeu (décision du propriétaire du 2026-11-10) : un exemple d'une autre
+    // famille, tirée selon les poids, posé dans un projet de 20 à 60 couches et rendu par la vue
+    // triée du noyau. Chaque famille garde ainsi son compte, petits et gros projets ensemble.
+    Family {
+        name: "gros_projet",
+        weight: 128,
+        make: gros_projet,
     },
 ];
 
@@ -751,6 +774,7 @@ fn example(
     request: String,
     expected: Value,
 ) -> Example {
+    let focus = b.focus_ids();
     let inventory = b.finish(rng);
     Example {
         family,
@@ -758,6 +782,7 @@ fn example(
         request,
         expected,
         retry: None,
+        focus,
     }
 }
 
@@ -6894,6 +6919,235 @@ fn etape_unique(rng: &mut Rng) -> Option<Example> {
     ))
 }
 
+// -- gros projets et couches proches (5.47) ----------------------------------------------------
+
+/// Un exemple d'une autre famille, tirée selon les poids, posé dans un projet de 20 à 60 couches
+/// (`big`).
+fn gros_projet(rng: &mut Rng) -> Option<Example> {
+    let family = draw(rng, |f| f.name != "gros_projet")?;
+    let base = (family.make)(rng)?;
+    let total = rng.range(BIG_MIN_LAYERS as u64, BIG_MAX_LAYERS as u64) as usize;
+    big(rng, base, total)
+}
+
+/// L'exemple `base` dans un gros projet de `total` couches : son inventaire traduit en sortie
+/// brute de QGIS, complété de couches de remplissage (`big_project`), puis rendu **par la vue
+/// triée du noyau** (`sorted_view`, réglages par défaut, sans fichier de travail ni dernier plan)
+/// avec la demande. Les identifiants du plan, de la sortie rejetée d'une redemande, de ses écarts
+/// et des couches utiles sont réécrits en identifiants courts montrés. `unloaded_files` reste
+/// celui de l'exemple : le noyau n'en connaît pas, la famille peut en avoir posé un. `None` si une
+/// couche raster utile n'est pas détaillée (l'index n'en montre pas la source).
+pub(crate) fn big(rng: &mut Rng, base: Example, total: usize) -> Option<Example> {
+    let (raw, qgis) = big_project(rng, &base.inventory, &base.request, total)?;
+    let (view, ids) = sorted_view(
+        &raw,
+        &[],
+        &HashSet::new(),
+        &LastPlan::default(),
+        &base.request,
+        &ViewLimits::default(),
+    );
+    let shown: HashMap<String, String> = qgis
+        .into_iter()
+        .map(|(id, full)| {
+            let one = ids.shorten(json!({"layers": [{"layer_id": full}]}));
+            let short = one["layers"][0]["layer_id"].as_str().unwrap_or(&full);
+            (id, short.to_string())
+        })
+        .collect();
+    let mut inventory = view.inventory;
+    inventory["unloaded_files"] = base
+        .inventory
+        .get("unloaded_files")
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    let focus: Vec<String> = base
+        .focus
+        .iter()
+        .map(|id| shown.get(id).cloned().unwrap_or_else(|| id.clone()))
+        .collect();
+    // Un raster utile resté dans l'index n'a pas de source à recopier : `validate` l'écarte, et
+    // le compte (« raster absent » ou « couche utile montrée réduite »).
+    let mut expected = base.expected;
+    rename_ids(&mut expected, &shown);
+    let retry = base.retry.map(|r| Retry {
+        rejected: renamed(&r.rejected, &shown),
+        errors: r.errors.iter().map(|e| renamed(e, &shown)).collect(),
+    });
+    Some(Example {
+        family: "gros_projet",
+        inventory,
+        request: base.request,
+        expected,
+        retry,
+        focus,
+    })
+}
+
+/// `text` où chaque identifiant de `ids`, écrit comme un mot entier (suite de lettres, chiffres
+/// et soulignés), est remplacé par son identifiant montré. Un seul passage : un identifiant
+/// montré n'est jamais retraduit.
+fn renamed(text: &str, ids: &HashMap<String, String>) -> String {
+    let is_id = |c: char| c.is_alphanumeric() || c == '_';
+    let mut out = String::with_capacity(text.len());
+    let mut word = String::new();
+    for c in text.chars().chain(std::iter::once('\0')) {
+        if is_id(c) {
+            word.push(c);
+            continue;
+        }
+        out.push_str(ids.get(&word).map_or(&word, |s| s));
+        word.clear();
+        if c != '\0' {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Réécrit, à toute profondeur, les identifiants de `ids` dans les textes de `value`.
+fn rename_ids(value: &mut Value, ids: &HashMap<String, String>) {
+    match value {
+        Value::String(text) => *text = renamed(text, ids),
+        Value::Array(items) => items.iter_mut().for_each(|v| rename_ids(v, ids)),
+        Value::Object(map) => map.values_mut().for_each(|v| rename_ids(v, ids)),
+        _ => {}
+    }
+}
+
+/// Qualificatifs de deux couches proches : millésimes, producteurs, ou une copie.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Twins {
+    Years,
+    Sources,
+    Copy,
+}
+
+/// La forme écrite d'un qualificatif après le groupe nominal (« des gares 2024 »).
+fn qualifier_words(rng: &mut Rng, kind: Twins, q: &str) -> String {
+    match (kind, q) {
+        (Twins::Years, y) => match rng.below(3) {
+            0 => y.to_string(),
+            1 => format!("de {y}"),
+            _ => format!("du millésime {y}"),
+        },
+        (Twins::Sources, "OSM") => (*rng.pick(&["d'OSM", "OSM", "issues d'OSM"])).to_string(),
+        (Twins::Sources, s) => {
+            (*rng.pick(&["de la BD TOPO", "BD TOPO", "issues de la BD TOPO"])).replace("BD TOPO", s)
+        }
+        (Twins::Copy, _) => String::new(),
+    }
+}
+
+/// Deux couches d'un même thème qui ne diffèrent que par un qualificatif (« Gares 2019 » et
+/// « Gares 2024 », « Gares BD TOPO » et « Gares OSM », « Gares » et « Gares copie ») : une
+/// demande qui ne le dit pas donne une question qui nomme les deux ; une demande qui le dit (un
+/// tiers) donne le plan sur la bonne couche. Le mot de la demande désigne les deux noms, pour
+/// que la vue triée d'un gros projet les détaille toutes deux.
+fn couches_proches(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let t = pick_theme(rng, &b, ordinary)?;
+    let label = cap(t.noun.pl);
+    let kind = *rng.pick(&[Twins::Years, Twins::Years, Twins::Sources, Twins::Copy]);
+    let (first, second) = match kind {
+        Twins::Years => {
+            let a = rng.range(2012, 2023);
+            let c = rng.range(a + 1, 2025);
+            (a.to_string(), c.to_string())
+        }
+        Twins::Sources => {
+            if rng.chance(1, 2) {
+                ("BD TOPO".to_string(), "OSM".to_string())
+            } else {
+                ("OSM".to_string(), "BD TOPO".to_string())
+            }
+        }
+        Twins::Copy => (String::new(), "copie".to_string()),
+    };
+    let (a, c) = b.add_twins(rng, t.key, &label, &first, &second, kind == Twins::Copy);
+    let qualified = rng.chance(1, 3);
+    // La couche dite : l'une ou l'autre, la copie quand c'en est une.
+    let (chosen, q) = if kind == Twins::Copy || rng.chance(1, 2) {
+        (&c, second.as_str())
+    } else {
+        (&a, first.as_str())
+    };
+    // Les deux couches dites ensemble, ou celle que le qualificatif désigne.
+    let reference = |rng: &mut Rng, singular: bool| -> String {
+        if !qualified {
+            return match rng.below(3) {
+                0 if singular => t.noun.dun(),
+                0 | 1 => t.noun.des(),
+                _ => format!("de {}", t.the_layer),
+            };
+        }
+        match kind {
+            Twins::Copy => match rng.below(2) {
+                0 => format!("de la copie {}", t.noun.des()),
+                _ => format!("de la couche « {} »", chosen.name),
+            },
+            _ => match rng.below(4) {
+                0 => format!("de la couche « {} »", chosen.name),
+                _ => format!("{} {}", t.noun.des(), qualifier_words(rng, kind, q)),
+            },
+        }
+    };
+    let d = dist(rng);
+    let (body, plan) = if rng.chance(1, 2) {
+        let around = reference(rng, false);
+        let body = tampon_head(rng, &d, &around);
+        (body, vec![buffer(&chosen.id, &d, false)])
+    } else {
+        let s = pick_theme(rng, &b, ordinary)?;
+        let target = b.add(rng, s.key, &[], &[], &[]);
+        let r = reference(rng, true);
+        let np = format!(
+            "les {} {}",
+            s.noun.pl,
+            near(rng, &target.theme.noun, &d, &r)
+        );
+        let (head, _) = open_find(rng, &s.noun, &np, false);
+        (
+            head,
+            vec![
+                buffer(&chosen.id, &d, false),
+                intersect(&target.id, &step(1)),
+            ],
+        )
+    };
+    let request = finish(rng, &body, false, false);
+    let expected = if qualified {
+        calls(plan)
+    } else {
+        let (x, y) = if rng.chance(1, 2) {
+            (&a.name, &c.name)
+        } else {
+            (&c.name, &a.name)
+        };
+        question(match rng.below(4) {
+            0 => format!(
+                "Deux couches peuvent correspondre aux {} : « {x} » et « {y} ». Laquelle faut-il \
+                 utiliser ?",
+                t.noun.pl
+            ),
+            1 => format!(
+                "Le projet contient deux couches {} : « {x} » et « {y} ». Laquelle veux-tu \
+                 utiliser ?",
+                t.of_none
+            ),
+            2 => format!(
+                "Quelle couche {} faut-il prendre : « {x} » ou « {y} » ?",
+                t.of_none
+            ),
+            _ => format!(
+                "« {x} » et « {y} » peuvent toutes deux convenir. Sur laquelle faut-il \
+                 travailler ?"
+            ),
+        })
+    };
+    Some(example("couches_proches", b, rng, request, expected))
+}
+
 // -- redemande -------------------------------------------------------------
 
 thread_local! {
@@ -6909,17 +7163,8 @@ const LAYER_KEYS: [&str; 3] = ["layer_id", "overlay_layer_id", "points_layer_id"
 /// Une corruption que `check_plan` accepte (un identifiant de couche inconnu, que le
 /// registre ne peut pas voir) n'apprend rien : l'exemple est laissé, pas écrit.
 fn redemande(rng: &mut Rng) -> Option<Example> {
-    let bases: Vec<&Family> = FAMILIES.iter().filter(|f| f.name != "redemande").collect();
-    let total: u64 = bases.iter().map(|f| f.weight).sum();
-    let mut roll = rng.below(total as usize) as u64;
-    let family = bases.iter().find(|f| {
-        if roll < f.weight {
-            true
-        } else {
-            roll -= f.weight;
-            false
-        }
-    })?;
+    // Ni elle-même, ni un gros projet : `gros_projet` emballe déjà des redemandes.
+    let family = draw(rng, |f| !matches!(f.name, "redemande" | "gros_projet"))?;
     let base = (family.make)(rng)?;
     let calls = base.expected["calls"].as_array()?.clone();
     let corrupted = corrupt(rng, &calls)?;
@@ -6934,6 +7179,21 @@ fn redemande(rng: &mut Rng) -> Option<Example> {
             errors: vec![format!("étape {} : {}", error.step, error.message)],
         }),
         ..base
+    })
+}
+
+/// Une famille tirée selon les poids parmi celles qui vérifient `keep`.
+fn draw(rng: &mut Rng, keep: impl Fn(&Family) -> bool) -> Option<&'static Family> {
+    let bases: Vec<&'static Family> = FAMILIES.iter().filter(|f| keep(f)).collect();
+    let total: u64 = bases.iter().map(|f| f.weight).sum();
+    let mut roll = rng.below(total as usize) as u64;
+    bases.into_iter().find(|f| {
+        if roll < f.weight {
+            true
+        } else {
+            roll -= f.weight;
+            false
+        }
     })
 }
 
@@ -10482,5 +10742,232 @@ mod tests {
         let n = names.len();
         names.dedup();
         assert_eq!(names.len(), n);
+    }
+
+    // -- gros projets et couches proches (5.47) ------------------------------------------------
+
+    /// Un exemple de `make` posé dans un gros projet de `total` couches, et la sortie brute que
+    /// `big` a rendue par la vue triée, retirée avec le même tirage.
+    fn big_with_raw(
+        make: fn(&mut Rng) -> Option<Example>,
+        seed: u64,
+        total: usize,
+    ) -> Option<(Example, Example, Value)> {
+        let mut rng = Rng::new(seed);
+        let base = make(&mut rng)?;
+        let mut again = rng.clone();
+        let (raw, _) = big_project(&mut again, &base.inventory, &base.request, total)?;
+        let wrapped = big(&mut rng, base.clone(), total)?;
+        Some((base, wrapped, raw))
+    }
+
+    #[test]
+    fn a_big_project_is_the_sorted_view_of_its_raw_inventory() {
+        let mut sorted = 0;
+        for seed in 0..40 {
+            let Some((base, e, raw)) = big_with_raw(tampon, seed, 45) else {
+                continue;
+            };
+            let (view, _) = sorted_view(
+                &raw,
+                &[],
+                &HashSet::new(),
+                &LastPlan::default(),
+                &base.request,
+                &ViewLimits::default(),
+            );
+            let mut expected = view.inventory;
+            expected["unloaded_files"] = base.inventory["unloaded_files"].clone();
+            assert_eq!(e.inventory, expected, "{}", e.request);
+            assert_eq!(e.family, "gros_projet");
+            assert_eq!(e.request, base.request);
+            let total = raw["layers"].as_array().unwrap().len();
+            assert!((BIG_MIN_LAYERS..=BIG_MAX_LAYERS).contains(&total));
+            if e.inventory.get("index").is_some() {
+                sorted += 1;
+                let keys: Vec<&String> = e.inventory.as_object().unwrap().keys().collect();
+                assert_eq!(keys, ["index", "layers", "project", "unloaded_files"]);
+                // Le tampon cite la couche par l'identifiant court qu'en montre l'index.
+                let id = e.expected["calls"][0]["params"]["layer_id"]
+                    .as_str()
+                    .unwrap();
+                let index = e.inventory["index"].as_array().unwrap();
+                assert!(index.iter().any(|l| l["layer_id"] == id), "{id}");
+                assert_eq!(index.len(), total);
+            }
+        }
+        assert!(sorted > 20, "{sorted}");
+    }
+
+    #[test]
+    fn a_light_project_below_the_threshold_keeps_the_plain_view() {
+        let mut rng = Rng::new(3);
+        let base = tampon(&mut rng).unwrap();
+        let (mut raw, _) = big_project(&mut rng, &base.inventory, &base.request, 20).unwrap();
+        for layer in raw["layers"].as_array_mut().unwrap() {
+            layer["fields"] = json!([]);
+        }
+        let (view, _) = sorted_view(
+            &raw,
+            &[],
+            &HashSet::new(),
+            &LastPlan::default(),
+            &base.request,
+            &ViewLimits::default(),
+        );
+        assert!(view.inventory.get("index").is_none());
+        assert_eq!(view.inventory["layers"].as_array().unwrap().len(), 20);
+    }
+
+    #[test]
+    fn ids_of_the_plan_and_of_a_retry_become_the_shown_short_ids() {
+        let mut checked = 0;
+        for seed in 0..60 {
+            let Some((base, e, _)) = big_with_raw(redemande, seed, 30) else {
+                continue;
+            };
+            let shown: HashSet<&str> = e.inventory["index"]
+                .as_array()
+                .or(e.inventory["layers"].as_array())
+                .unwrap()
+                .iter()
+                .filter_map(|l| l["layer_id"].as_str())
+                .collect();
+            for call in e.expected["calls"].as_array().unwrap() {
+                if let Some(id) = call["params"]["layer_id"].as_str() {
+                    assert!(id.starts_with("step:") || shown.contains(id), "{id}");
+                }
+            }
+            let (Some(r), Some(r0)) = (&e.retry, &base.retry) else {
+                panic!("redemande sans tour rejeté");
+            };
+            let reg = cassini_core::registry::Registry::standard();
+            let plan: cassini_core::plan::Plan = serde_json::from_str(&r.rejected).unwrap();
+            let err = reg.check_plan(&plan).unwrap_err();
+            assert_eq!(r.errors, [format!("étape {} : {}", err.step, err.message)]);
+            assert_eq!(r.errors.len(), r0.errors.len());
+            checked += 1;
+        }
+        assert!(checked > 5, "{checked}");
+        // La forme courte : `slug_<4 hex>` garde ses chiffres, `slug_<8 hex>` est montré sur 4.
+        let ids: HashMap<String, String> =
+            [("gares_ab12cd34".to_string(), "gares_ab12".to_string())].into();
+        assert_eq!(
+            renamed(
+                r#"{"layer_id":"gares_ab12cd34","x":"gares_ab12cd345"}"#,
+                &ids
+            ),
+            r#"{"layer_id":"gares_ab12","x":"gares_ab12cd345"}"#
+        );
+    }
+
+    /// Un inventaire trié où `gares_1` n'est que dans l'index, pour juger un plan.
+    fn reduced_gares(expected: Value) -> Example {
+        Example {
+            family: "essai",
+            inventory: json!({
+                "index": [{"layer_id": "gares_1", "name": "Gares", "geometry": "Point"},
+                    {"layer_id": "parcelles_1", "name": "Parcelles", "geometry": "Polygon"}],
+                "layers": [{"layer_id": "parcelles_1", "name": "Parcelles", "kind": "vector"}],
+                "project": {}, "unloaded_files": []}),
+            request: "Les parcelles à moins de 500 m des gares.".into(),
+            expected,
+            retry: None,
+            focus: vec!["gares_1".into(), "parcelles_1".into()],
+        }
+    }
+
+    #[test]
+    fn a_useful_layer_left_in_the_index_is_kept_only_as_a_geometry() {
+        let registry = cassini_core::registry::Registry::standard();
+        let d = json!({"value": 500, "unit": "m"});
+        let geometry = reduced_gares(json!({"kind": "calls", "calls": [
+            {"command": "analysis.buffer", "params": {"layer_id": "gares_1", "distance": d}},
+            {"command": "analysis.intersect",
+                "params": {"layer_id": "parcelles_1", "overlay_layer_id": "step:1.layer_id"}}]}));
+        assert_eq!(crate::validate(&registry, &geometry), Ok(()));
+        let field = reduced_gares(json!({"kind": "calls", "calls": [
+            {"command": "analysis.select_by_attribute", "params": {"layer_id": "gares_1",
+                "field": "nom", "operator": "eq", "value": "Orly"}}]}));
+        let err = crate::validate(&registry, &field).unwrap_err();
+        assert!(err.contains("montrée réduite"), "{err}");
+        let asked = reduced_gares(question("Quelle gare ?".into()));
+        assert!(crate::validate(&registry, &asked).is_err());
+    }
+
+    #[test]
+    fn a_prompt_beyond_the_bound_is_rejected() {
+        let registry = cassini_core::registry::Registry::standard();
+        let mut e = reduced_gares(question("Quelle gare ?".into()));
+        e.inventory = json!({"layers": [], "project": {}, "unloaded_files": []});
+        e.focus.clear();
+        assert_eq!(crate::validate(&registry, &e), Ok(()));
+        e.request = "gares ".repeat(crate::MAX_PROMPT_CHARS / 6);
+        let err = crate::validate(&registry, &e).unwrap_err();
+        assert!(err.contains("prompt trop long"), "{err}");
+    }
+
+    #[test]
+    fn two_close_layers_ask_which_one_unless_the_qualifier_is_said() {
+        let examples = valid(couches_proches, 600);
+        let (mut asked, mut planned) = (0, 0);
+        for e in &examples {
+            let layers = e.inventory["layers"].as_array().unwrap();
+            let name = |id: &str| {
+                layers
+                    .iter()
+                    .find(|l| l["layer_id"] == id)
+                    .and_then(|l| l["name"].as_str())
+                    .unwrap()
+                    .to_string()
+            };
+            if let Some(q) = e.expected["question"].as_str() {
+                asked += 1;
+                assert!(q.ends_with('?'), "{q}");
+                let cited: Vec<&str> = q
+                    .split('«')
+                    .skip(1)
+                    .filter_map(|p| p.split('»').next())
+                    .collect();
+                assert_eq!(cited.len(), 2, "{q}");
+                for c in cited {
+                    assert!(layers.iter().any(|l| l["name"] == c.trim()), "{q}");
+                }
+                continue;
+            }
+            planned += 1;
+            let id = e.expected["calls"][0]["params"]["layer_id"]
+                .as_str()
+                .unwrap();
+            let chosen = name(id);
+            let qualifier = chosen.rsplit(' ').next().unwrap();
+            let said = crate::normalize(&e.request);
+            assert!(
+                said.contains(&crate::normalize(qualifier)),
+                "{} → {chosen}",
+                e.request
+            );
+        }
+        assert!(
+            asked > planned && planned * 5 > examples.len(),
+            "{asked} / {planned}"
+        );
+    }
+
+    #[test]
+    fn no_big_filler_shares_the_head_noun_of_a_theme() {
+        let heads: BTreeSet<String> = THEMES
+            .iter()
+            .filter_map(|t| {
+                crate::inventories::plain_words(t.noun.sg.split(' ').next()?).pop_first()
+            })
+            .collect();
+        for f in crate::inventories::BIG_FILLERS {
+            for name in f.names {
+                let head = name.split([' ', '\'', '-']).next().unwrap();
+                let head = crate::inventories::plain_words(head);
+                assert!(head.is_disjoint(&heads), "{name} : {head:?}");
+            }
+        }
     }
 }

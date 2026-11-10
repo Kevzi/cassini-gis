@@ -957,3 +957,6 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
   evidence: mesure de référence du 2026-11-10 (17/20) : le modèle installé rend `data.transform_point` vers 32632, compté raté par la règle stricte.
   status: close, 2026-11-10, tranchée en party le 2026-11-10, à confirmer par le propriétaire
   resolution: Règle stricte gardée : RA13 attend `coord.convert` `to: ["utm"]` seul. La recette est la barre d'installation et doit mesurer ce que le générateur enseigne (règle du catalogue : entre WGS84, UTM et MGRS, `coord.convert`) ; `coord.convert` choisit le fuseau dans le noyau d'après le point, alors que `data.transform_point` vers 326NN laisse le modèle deviner le fuseau, juste ici, faux près d'une limite de fuseau ; accepter le raté serait un pansement côté mesure. `annecy.json` et la doc inchangés.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-generateur-gros-projets-de-20-a-60-couches-rendus-par-la-vue-plan.md`
+  summary: le test `the_whole_generated_set_is_cut_at_every_layer` (`ai/src/plan.rs`) ne contrôle plus les inventaires à `index` (≈ 25 % du jeu) ; les découpes de la vue triée sont à tester en 5.48.
+  evidence: relecture quick de 5.47 ; le filtre du test écarte toute clé `index`, et le placement du cache à la fin de l'index est l'objet de 5.48.
