@@ -1,0 +1,79 @@
+[
+  {"id": "RA01", "text": "Qu'est-ce qu'il y a comme couches dans mon projet ?",
+   "expect": {"plan": [{"command": "project.inventory", "params": {}}]}},
+  {"id": "RA02", "text": "Quels champs a la couche des bâtiments ?",
+   "expect": {"plan": [{"command": "layer.describe", "params": {"layer_id": "@batiments"}}]}},
+  {"id": "RA03", "text": "Isole les zones urbaines du PLUi.",
+   "expect": {"plan": [{"command": "analysis.select_by_attribute", "params": {
+     "layer_id": "@plu_zones", "field": "TYPEZONE", "operator": "eq", "value": "U"}}]}},
+  {"id": "RA04", "text": "Sélectionne les bâtiments de plus de 15 m de haut.",
+   "expect": {"plan": [{"command": "analysis.select_by_attribute", "params": {
+     "layer_id": "@batiments", "field": "hauteur", "operator": "gt", "value": "15"}}]}},
+  {"id": "RA05", "text": "Quelles parcelles sont en zone naturelle du PLUi ?",
+   "expect": {"plan": [
+     {"command": "analysis.select_by_attribute", "params": {
+       "layer_id": "@plu_zones", "field": "TYPEZONE", "operator": "eq", "value": "N"}},
+     {"command": "analysis.intersect", "params": {
+       "layer_id": "@parcelles", "overlay_layer_id": "step:1.layer_id"}}]}},
+  {"id": "RA06", "text": "Trace une bande de 10 m de part et d'autre des cours d'eau.",
+   "expect": {"plan": [{"command": "analysis.buffer", "params": {
+     "layer_id": "@cours_d_eau", "distance": {"value": 10, "unit": "m"}}}]}},
+  {"id": "RA07", "text": "Combien de gares dans chaque commune ? Donne-moi le nom des communes.",
+   "note": "le nom est dans nom_officiel, parmi 17 champs : le raté connu des nuits du 2026-11-10",
+   "expect": {"plan": [{"command": "analysis.zonal_statistics", "params": {
+     "layer_id": "@communes", "points_layer_id": "@gares", "label_field": "nom_officiel"}}]}},
+  {"id": "RA08", "text": "Trouve les parcelles à moins de 500 m d'une gare",
+   "note": "reprise de la recette à cinq phrases ; les gares sont en EPSG:4326",
+   "expect": {"plan": [
+     {"command": "data.reproject", "params": {"layer_id": "@gares", "target_epsg": 2154}},
+     {"command": "analysis.buffer", "params": {
+       "layer_id": "step:1.layer_id", "distance": {"value": 500, "unit": "m"}}},
+     {"command": "analysis.intersect", "params": {
+       "layer_id": "@parcelles", "overlay_layer_id": "step:2.layer_id"}}]}},
+  {"id": "RA09", "text": "Fais un tampon autour des routes.",
+   "note": "ambiguë : aucune distance",
+   "expect": {"question": true}},
+  {"id": "RA10", "text": "Calcule les pentes en degrés à partir du MNT à 5 m.",
+   "expect": {"plan": [{"command": "terrain.slope", "params": {
+     "dem": "mnt/mnt-annecy-5m.tif", "unit": "degrees"}}]}},
+  {"id": "RA11", "text": "Qu'est-ce qu'on voit depuis le Crêt de Châtillon (45,7860 N, 6,1046 E, WGS84), yeux à 1,70 m, dans un rayon de 5 km ? Prends le MNT à 25 m.",
+   "note": "point WGS84 sur un MNT en Lambert-93 : plan complété par le noyau (11.22) ; le système est écrit, comme le garde-fou des coordonnées l'exige (4.10)",
+   "expect": {"plan": [
+     {"command": "data.transform_point", "params": {
+       "point": {"x": 6.1046, "y": 45.786, "epsg": 4326}, "target_epsg": 2154}},
+     {"command": "terrain.viewshed", "params": {
+       "dem": "mnt/mnt-74-25m.tif", "observer": "step:1.point",
+       "observer_height": {"value": 1.7, "unit": "m"},
+       "radius": {"value": 5, "unit": "km"}}}]}},
+  {"id": "RA12", "text": "Depuis le sommet du Mont Veyrier (45,9136 N, 6,1797 E, WGS84), est-ce qu'on voit le château d'Annecy (45,8985 N, 6,1260 E, WGS84) ? MNT à 5 m.",
+   "note": "conversions ajoutées par le noyau dans l'ordre des noms de paramètres : observer, puis target",
+   "expect": {"plan": [
+     {"command": "data.transform_point", "params": {
+       "point": {"x": 6.1797, "y": 45.9136, "epsg": 4326}, "target_epsg": 2154}},
+     {"command": "data.transform_point", "params": {
+       "point": {"x": 6.126, "y": 45.8985, "epsg": 4326}, "target_epsg": 2154}},
+     {"command": "terrain.line_of_sight", "params": {
+       "dem": "mnt/mnt-annecy-5m.tif", "observer": "step:1.point", "target": "step:2.point"}}]}},
+  {"id": "RA13", "text": "Donne-moi les coordonnées UTM du point 45,8992 N, 6,1294 E (WGS84).",
+   "expect": {"plan": [{"command": "coord.convert", "params": {
+     "point": {"x": 6.1294, "y": 45.8992, "epsg": 4326}, "to": ["utm"]}}]}},
+  {"id": "RA14", "text": "Quelle distance à vol d'oiseau entre la gare d'Annecy (45,9020 N, 6,1218 E, WGS84) et celle d'Annemasse (46,1992 N, 6,2365 E, WGS84) ?",
+   "expect": {"plan": [{"command": "geo.distance_azimuth", "params": {
+     "from": {"x": 6.1218, "y": 45.902, "epsg": 4326},
+     "to": {"x": 6.2365, "y": 46.1992, "epsg": 4326}}}]}},
+  {"id": "RA15", "text": "Mets le zonage du PLUi aux couleurs du CNIG.",
+   "expect": {"plan": [{"command": "map.topographic_style", "params": {"layers": ["@plu_zones"]}}]}},
+  {"id": "RA16", "text": "Fais une carte de la population des communes en 5 classes.",
+   "expect": {"plan": [{"command": "map.graduated_style", "params": {
+     "layer_id": "@communes", "field": "population", "class_count": 5}}]}},
+  {"id": "RA17", "text": "Sors-moi la carte en PDF, format A3 portrait, avec le titre « Zonage du PLUi du Grand Annecy ».",
+   "expect": {"plan": [{"command": "layout.export_pdf", "params": {
+     "title": "Zonage du PLUi du Grand Annecy", "page_size": "a3", "orientation": "portrait"}}]}},
+  {"id": "RA18", "text": "Exporte les parcelles en GeoPackage, je dois les transmettre au bureau d'études.",
+   "expect": {"plan": [{"command": "data.convert", "params": {"layer_id": "@parcelles", "format": "gpkg"}}]}},
+  {"id": "RA19", "text": "Garde seulement les grandes parcelles.",
+   "note": "ambiguë : aucun seuil de surface (ajout de la relecture en party du 2026-11-10)",
+   "expect": {"question": true}},
+  {"id": "RA20", "text": "Retire les voies ferrées du projet, on n'en a pas besoin.",
+   "expect": {"plan": [{"command": "layer.remove", "params": {"layer_id": "@voies_ferrees"}}]}}
+]

@@ -946,3 +946,10 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-vue-triee-de-l-inventaire-d-un-gros-projet-index-reduit-et-c-plan.md`
   summary: Pour 5.48 — au-delà d'environ 150 couches de l'utilisateur, l'index seul dépasse le budget et la vue sort hors budget sans détail ; c'est alors le contrôle exact de cassini-ai qui refuse, avec le nouveau message de 48.
   evidence: kept_by_batches ne retire jamais une couche de l'utilisateur (voulu, matrice du plan) ; 63 couches font 5 700 caractères d'index.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-recette-qgis-d-annecy-portee-a-20-phrases-barre-16-20-plan.md`
+  summary: le rejeu d'un journal qui porte `project.inventory` (ou toute lecture du projet) diverge dès l'étape 1 quand il est lancé en fin de session : l'inventaire voit les couches de résultat ajoutées depuis, son empreinte change (`replay.diverged`).
+  evidence: recette d'Annecy à 20 phrases du 2026-11-10, deux passages : `replay.diverged` à l'étape 1, `project.inventory` ; les recettes à 5 et 10 phrases n'avaient pas de lecture du projet. Décision au propriétaire : rejouer sur une copie neuve du projet (fermeture et réouverture), ne pas comparer le résultat des lectures du projet, ou ne pas journaliser ces lectures.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-recette-qgis-d-annecy-portee-a-20-phrases-barre-16-20-plan.md`
+  summary: décision du propriétaire — RA13 (« coordonnées UTM d'un point WGS84 ») : accepter aussi `data.transform_point` vers 32632, qui rend le même point, à côté de `coord.convert` `to: ["utm"]`, ou garder un seul plan attendu.
+  evidence: mesure de référence du 2026-11-10 (17/20) : le modèle installé rend `data.transform_point` vers 32632, compté raté par la règle stricte.

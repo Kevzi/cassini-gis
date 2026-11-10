@@ -579,7 +579,9 @@ famille, sur une centaine d'exemples).
 1. **La recette QGIS d'Annecy est une barre officielle** : au moins 4 plans exécutés sur 5, dans
    une seule session QGIS, sur le projet d'Annecy (`donnees-test-cassini/annecy/`), avec le modèle
    chargé à part (`CASSINI_MODELS`), comme les essais GPU. Un modèle qui la manque n'est pas
-   installé, même s'il tient toutes les autres barres.
+   installé, même s'il tient toutes les autres barres. **Depuis 5.45, la barre est d'au moins
+   16 phrases justes sur 20**, à partir de la prochaine nuit ; elle remplace celle de 4 sur 5
+   (voir « Recette d'Annecy à 20 phrases » ci-dessous).
 2. **Deux graines par entraînement** : chaque entraînement se fait deux fois la même nuit, sur le
    même jeu engendré, avec deux graines d'entraînement (`pipeline.py --graine-torch 1` puis `2` ;
    les graines du générateur, 1 et 2, ne changent pas). On garde celui des deux qui tient le
@@ -619,6 +621,54 @@ ratent la même phrase d'Annecy, le décompte des gares par commune avec leur no
 vaut `nom` (`commune` pour la graine b) au lieu de `nom_officiel`, dans une couche de 17 champs
 alors que les inventaires engendrés n'en portent que quelques-uns. Modèles dans
 `cassini-modeles\ajuste-nuit-11-10-a`, `-b` et `-fusion`, non installés ; décision au propriétaire.
+
+### Recette d'Annecy à 20 phrases (5.45, 2026-11-10)
+
+La recette d'Annecy passe de 5 à 20 phrases, écrites à la main comme un urbaniste ou un bureau
+d'études les dirait : données et projet, analyses vectorielles, terrain, coordonnées, mise en
+forme IGN et CNIG, PDF, et deux demandes ambiguës qui doivent donner une question. Chaque phrase
+porte son plan attendu (`qgis-plugin/tests/recette/annecy.json`, couches écrites `@nom`) ; les
+20 phrases sont tenues à l'écart du générateur par le garde de recouvrement. Relues en party le
+2026-11-10 (géomaticien de bureau d'études, urbaniste de collectivité, relecteur des plans
+attendus), **à confirmer par le propriétaire**.
+
+**Règle (décision du propriétaire, 2026-11-10)** : une phrase compte juste si son plan est
+conforme au plan attendu, avec la règle de `plan_reel` (égalité exacte des appels du plan montré,
+plan complété compris) **et** s'exécute ; une phrase ambiguë, si le modèle pose une question. Un
+plan non conforme est rejeté, pas exécuté. **Barre : au moins 16/20, à partir de la prochaine
+nuit** ; elle remplace 4/5.
+
+Commande (Windows ; `CASSINI_MODELS` : un dossier qui ne contient que le modèle mesuré et sa
+déclaration `*.modele.json`) :
+
+    set CASSINI_CORE=%LOCALAPPDATA%\Cassini\bin\cassini.exe
+    set CASSINI_MODELS=<dossier du seul modèle mesuré>
+    set QT_QPA_PLATFORM=windows
+    "C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat" qgis-plugin\tests\probe_recette.py ^
+        ..\donnees-test-cassini\annecy\projet-test-annecy.qgz qgis-plugin\tests\recette\annecy.json
+
+La sonde pose une copie du projet à côté de l'original et ne touche jamais à celui-ci ; elle
+imprime `SCORE : N/20 (barre 16)`, les ratés avec leur raison et leur plan attendu, puis le rejeu.
+Le projet et le fichier de phrases sont des arguments : le projet de 60 couches de 5.50 aura son
+propre fichier.
+
+**Mesure de référence** (2026-11-10, modèle installé `cassini-composition-4b-Q4_K_M.gguf`, la
+fusion a+b ; noyau installé ; QGIS 3.44.15) : **17/20**, barre tenue. Composition de 2 à 8 s par
+phrase (28 s pour la première, chargement compris). Ratés :
+
+| Phrase | Obtenu | Attendu |
+|---|---|---|
+| RA07 gares par commune avec le nom | `label_field` `nom` | `nom_officiel` (raté connu des nuits) |
+| RA09 « Fais un tampon autour des routes. » | tampon de 1 m | une question (distance absente) |
+| RA13 coordonnées UTM d'un point WGS84 | `data.transform_point` vers 32632 | `coord.convert` `to: ["utm"]` |
+
+RA13 rend un résultat juste par une autre commande : il reste compté raté (règle stricte) ; au
+propriétaire de dire si les deux plans doivent être acceptés. Un premier passage avait donné
+14/20 : quatre phrases écrivaient un point en degrés sans nommer le système, et le garde-fou des
+coordonnées (4.10) posait sa question ; le système (WGS84) y est maintenant écrit, avant toute
+mesure retenue. **Rejeu : non identique**, à l'étape 1 : `project.inventory` est journalisé, et
+rejoué en fin de session, il voit les couches de résultat ajoutées depuis (consigné dans
+`deferred-work.md`). Cette mesure ne décide d'aucune installation.
 
 ### Inventaires larges et jeu de 8 600 exemples (2026-11-10)
 
