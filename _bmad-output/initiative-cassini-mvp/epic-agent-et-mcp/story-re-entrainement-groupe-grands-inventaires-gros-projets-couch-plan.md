@@ -3,14 +3,14 @@ title: 'Ré-entraînement groupé : grands inventaires, gros projets, couches pr
 type: 'feature'
 ticket: '49'
 created: '2026-11-10'
-status: 'in-progress'
+status: 'built'
 baseline_revision: 'd0d2f522d7737ba1bc2502b5e4c22caa0249c6c4'
 route: 'oneshot'
 route_source: 'auto'
 risk: 'high'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: [quick]
 review_loop_iteration: 0
 context:
   - '{project-root}/docs/entrainement-du-modele.md'
@@ -59,8 +59,8 @@ dans le dépôt principal ; nouvelle dépendance ; baisser une borne de test.
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `training/src/lib.rs`, `training/entrainement/pipeline.py` -- bornes relevées, commentaires
-- [ ] `training/src/families.rs` -- garde : une demande de gisement ne parle jamais de carte ni de PDF
+- [x] `training/src/lib.rs`, `training/entrainement/pipeline.py` -- bornes relevées, commentaires
+- [x] `training/src/families.rs` -- garde : une demande de gisement ne parle jamais de carte ni de PDF
 - [ ] `docs/entrainement-du-modele.md` -- décision, mesures, essai mémoire, résultats de la nuit
 
 **Acceptance Criteria:**
@@ -72,6 +72,37 @@ dans le dépôt principal ; nouvelle dépendance ; baisser une borne de test.
 
 Route oneshot : quelques lignes de code ; l'essentiel du ticket est la nuit d'entraînement et ses
 mesures.
+
+- Mesure sans borne (graine 1) : 254 prompts au-delà de 12 900 caractères, aucun au-delà de 19 000
+  (18 506), séquence la plus longue 5 176 jetons. Avec les nouvelles bornes : 2 165 gros projets
+  (25,2 %), 132 écartés (couche utile réduite seulement), 10,04 M de jetons.
+- Essai mémoire `--longs-d-abord --pas-max 30` : pic 5,64 Gio, 65 / 54 / 44 s par pas ; arrêté
+  avant la chaîne GGUF. Repli inutile.
+- « Quadrillage UTM » : aucun exemple ne mêle `geo.*` et `layout.*` ; garde ajoutée au test du
+  gisement (ni carte, ni export, ni carroyage, ni grille, ni « tous les », aucun `layout.*`).
+  Première version de la garde trop stricte (`geo.*` seul) : la queue MGRS d'un gisement ajoute
+  `coord.convert`, d'où « aucun `layout.*` ».
+- `core/src/agent_inventory/sorted_view.rs` : commentaire seul (borne citée), budget inchangé.
+- Recette locale verte : fmt, clippy (4 crates), tests Rust (4 crates), tests Python du pipeline
+  (43) et de l'extension (717), garde de l'extension.
+- Nuit : `~/cassini-entrainement/nuit-5-49.sh` et `fusion-5-49.sh`, essais Windows depuis
+  `CASSINI-nuit` remis sur le commit, noyau construit dans `C:\ct-5-48` (`--features gpu`, non
+  installé). Résultats : `docs/entrainement-du-modele.md`.
+
+## Review Triage Log
+
+Passe 1 (quick). Verdicts : high 0, medium 1, low 4, false 3, maybe-false 0. Corrigés 5, rejetés 3.
+
+| Constat | Verdict | Sort | Preuve / action |
+|---|---|---|---|
+| Critère de la nuit non tenu | false | reject | la nuit suit la relecture ; ses résultats sont ajoutés ensuite |
+| `risk: high` relu en `quick` (CLAUDE.md §8) | false | reject | relecture `quick` épinglée par la demande du ticket |
+| Bornes changées sans accord du propriétaire | false | reject | délégation : question tranchée en party, notée « à confirmer » |
+| Essai de 30 pas ne voit pas la montée tardive du pic (5.47 : après le pas 20) | medium | patch | doc nuancée ; le pic de la nuit est relevé dans ses journaux, repli si > 7,2 Gio |
+| Borne en jetons mesurée, pas construite ; graine 2 non couverte | low | patch | doc : la garantie tient au compte de la chaîne, 0 écarté sur les deux graines à l'essai |
+| La doc prête au test une garde plus large qu'il ne l'est | low | patch | doc : le test garde le côté du gisement, le reste est mesuré |
+| Doc périmée l. 802 et l. 1060 | low | patch | corrigées |
+| Phrase sans verbe | low | patch | corrigée |
 
 ## Verification
 

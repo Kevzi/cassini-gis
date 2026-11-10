@@ -801,7 +801,7 @@ gardés au jeu par défaut, par l'une ou l'autre des deux dernières gardes. Apr
 revue, seuil du tri à 17 000, budget de la vue triée à 11 000), le même jeu garde 2 033 gros projets
 (23,6 %) et en écarte 443 : les gros projets dont les couches de l'utilisateur tiennent sous
 17 000 caractères sont vus en entier, et ceux de plus de 12 900 caractères de prompt sont écartés
-par la borne. Les longueurs ci-dessous sont celles de 5.47, à remesurer au tokeniseur en 5.49. Exemples d'écart : une couche de
+par la borne. Les longueurs ci-dessous sont celles de 5.47 ; celles de 5.49 sont dans « Ré-entraînement groupé (5.49) ». Exemples d'écart : une couche de
 zonage non désignée par « les parcelles constructibles », le réseau routier d'une isochrone, un
 MNT accompagné de nombreuses couches détaillées par une valeur. Le premier cas est celui de la
 redemande élargie du noyau (5.48) : le modèle ne l'apprend pas ici.
@@ -861,12 +861,15 @@ projets (22,8 %, sous la barre de 23 %) : 402 écartés, dont environ 270 parce 
 dépassait 12 900 caractères. Ce sont les gros projets **vus en entier**, dont les couches de
 l'utilisateur tiennent sous le seuil du tri (17 000 caractères) : exactement la taille d'Annecy,
 qu'aucun exemple ne montrait. Sans borne, aucun prompt ne dépasse 19 000 caractères (18 506 au
-plus) et aucune séquence 5 176 jetons. Décision : `MAX_PROMPT_CHARS` 12 900 → **19 000**,
+plus), et aucune séquence ne dépasse 5 176 jetons. Décision : `MAX_PROMPT_CHARS` 12 900 → **19 000**,
 `MAX_LENGTH` 4 608 → **5 632**, après un essai mémoire ; repli prévu si la carte se remplissait
 (bornes gardées, poids de `gros_projet` relevé). Écartés : relever le seul poids (le trou des
 projets moyens reste), alléger les couches de remplissage (le trou se déplace sans se fermer).
 Sur les prompts de plus de 12 900 caractères, le pire rapport mesuré est de 0,290 jeton par
-caractère de prompt, réponse comprise : 19 000 caractères font au plus 5 518 jetons, sous 5 632.
+caractère de prompt, réponse comprise : 19 000 caractères feraient environ 5 518 jetons, sous
+5 632. Cette borne est mesurée, non construite : la garantie tient au compte de la chaîne, qui
+écarte et compte toute séquence au-delà de `MAX_LENGTH` (`pipeline.py`) ; à l'essai, 0 écarté sur
+les 8 600 exemples d'entraînement (graine 1) et les 300 de validation (graine 2).
 
 **Essai mémoire** (`pipeline.py --longs-d-abord --pas-max 30`, RTX 3070 Ti 8 Go, segments
 extensibles, 2026-11-10) : les 480 exemples les plus longs d'abord (de 5 176 jetons à environ
@@ -878,7 +881,12 @@ extensibles, 2026-11-10) : les 480 exemples les plus longs d'abord (de 5 176 jet
 | 11 à 20 (≈ 4 500 jetons) | 54 | 5,64 Gio | 0,193 |
 | 21 à 30 | 44 | 5,64 Gio | 0,189 |
 
-Le pic reste sous celui de 5.47 (5,72 Gio) : **`MAX_LENGTH` = 5 632 retenu**, repli inutile.
+Sur ces 30 pas, le pic reste sous celui de 5.47 (5,72 Gio, atteint après le pas 20 sur 100 pas) :
+**`MAX_LENGTH` = 5 632 retenu**. L'essai couvre la séquence la plus longue du jeu (5 176 jetons),
+mais pas la montée tardive du pic observée en 5.47 : elle se lit sur les journaux de la nuit
+(pic imprimé tous les 10 pas), et le repli vaut si le pic passe 7,2 Gio ou si la vitesse
+s'effondre. La vitesse des pas les plus longs (54 s à 4 500 jetons) est attendue : elle compte
+dans la durée ci-dessous.
 
 **« Quadrillage UTM » dans deux familles.** `gisement` (« par rapport au quadrillage UTM »,
 « quadrillage UTM zone 32 ») et le carroyage du PDF (« avec un quadrillage UTM tous les 2 km »)
@@ -887,8 +895,10 @@ un appel `layout.*` ; un gisement ne parle jamais de carte, d'export, de carroya
 d'intervalle (« tous les ») et rend toujours un plan (le noyau tire le fuseau du point) ; un
 carroyage UTM sans fuseau ni `utm_epsg` rend la question (aucun point d'où tirer le fuseau) ; une
 zone écrite donne la même zone dans les deux (`utm_zone` N, `epsg` 326NN). Les deux familles
-n'enseignent donc pas deux plans pour une même demande ; le test
-`a_grid_bearing_says_grid_and_names_its_zone_only_when_written` le garde désormais.
+n'enseignent donc pas deux plans pour une même demande. Le test
+`a_grid_bearing_says_grid_and_names_its_zone_only_when_written` garde le côté du gisement (ni
+carte, ni export, ni carroyage, ni grille, ni intervalle, aucun appel `layout.*`) ; le reste est
+mesuré sur le jeu par défaut, et le carroyage garde ses propres tests (question sans fuseau).
 
 **Mesures du jeu** (graine 1, 8 600 exemples, tokeniseur de `Qwen/Qwen3.5-4B`, prompt et
 réponse) :
@@ -1057,7 +1067,7 @@ La commande, sans intervention :
    vus à l'entraînement ;
 4. prend la base `Qwen/Qwen3.5-4B` (Apache-2.0) à la révision épinglée
    `851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a`, dans le cache de Hugging Face ;
-5. écarte (et compte) tout exemple de plus de `MAX_LENGTH` jetons (2 048, puis 4 608 depuis 5.47),
+5. écarte (et compte) tout exemple de plus de `MAX_LENGTH` jetons (2 048, puis 4 608 depuis 5.47, 5 632 depuis 5.49),
    sans jamais le tronquer ;
 6. entraîne un adaptateur QLoRA : base en nf4, gradient checkpointing, graine fixe, perte
    sur la réponse seule, projections du modèle de langue seulement. Depuis le 2026-11-09, la
