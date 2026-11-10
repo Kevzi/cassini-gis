@@ -58,7 +58,7 @@ risk = "medium"
 [[entry]]
 id = 6
 type = "story"
-title = "Repetition de la demo sur les donnees reelles de Villeneuve-le-Roi"
+title = "Repetition de la demo sur les donnees reelles d'Annecy"
 description = "Fait la copie du MNT de test en EPSG:2154 dans QGIS, lance la sonde sur le projet reel hors depot, passe en argument comme le prevoit l'entree 1, avec la phrase de demo, la pente et les phrases de repetition A a E, consigne verdicts et durees par phrase, puis le proprietaire refait la demo a la main dans le panneau, machine debranchee du reseau (cable et Wi-Fi coupes)."
 verify = "La sonde rend OK sur le projet reel pour la phrase de demo et la pente, les phrases A a E donnent le comportement attendu (plan ou question), les durees sont consignees, et le proprietaire confirme la demo faite dans le panneau, machine debranchee."
 covers = ["D1", "D2", "D3", "D4"]

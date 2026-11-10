@@ -140,6 +140,7 @@ Sur une machine débranchée du réseau, l'utilisateur ouvre QGIS sur un projet 
 - Le dérisquage précède l'engagement : qu'un modèle local quantifié sache composer une suite de commandes typées correcte est vérifié sur un registre factice avant que le registre réel ne soit écrit.
 - « Compléter QGIS pour les usages courants » signifie couvrir par le registre CAP-3, CAP-5, CAP-9 à CAP-11 et CAP-15 au MVP, puis CAP-14 après le MVP, sans objectif de parité. Le signal de succès ci-dessus reste celui du MVP ; CAP-14 porte son propre seuil de couverture.
 - Villeneuve-le-Roi reste le territoire de référence de la démo, avec des données apportées par l'utilisateur et non livrées.
+- 2026-11-10, décision du propriétaire : la démo filmée se fait sur Annecy (PLUi, cadastre, gares et relief, données apportées et non livrées), qui permet d'enchaîner une analyse de terrain ; Villeneuve-le-Roi devient le jeu de réserve. Les tests automatiques restent sur des fixtures synthétiques.
 
 ## Open Questions
 

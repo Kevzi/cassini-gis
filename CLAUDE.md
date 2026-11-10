@@ -22,8 +22,10 @@ les rejouer. **L'utilisateur apporte ses propres données** : Cassini n'en
 télécharge, n'en catalogue et n'en redistribue aucune.
 
 Phrase de démo : « Trouve les parcelles constructibles du PLU à moins de 500 m
-d'une gare à Villeneuve-le-Roi et sors-moi la carte en PDF. » — sur un projet où
-l'utilisateur a déjà ouvert ses fichiers.
+d'une gare à Annecy et sors-moi la carte en PDF. » — sur un projet où
+l'utilisateur a déjà ouvert ses fichiers. Territoire de la démo filmée : Annecy
+(décision du propriétaire, 2026-11-10 : relief pour enchaîner une analyse de terrain) ;
+Villeneuve-le-Roi reste le jeu de réserve.
 
 Public cible : bureaux d'études (urbanisme, environnement), collectivités,
 étudiants — en particulier l'utilisateur occasionnel, qui sait ce qu'il veut mais
