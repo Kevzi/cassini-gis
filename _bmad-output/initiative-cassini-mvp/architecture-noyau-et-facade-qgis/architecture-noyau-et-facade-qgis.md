@@ -626,6 +626,12 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
     - **Hors règle.** Le serveur MCP : le noyau n'y compose aucun plan, l'IA
       externe appelle les commandes une à une ; le risque d'un point inventé par
       elle est accepté.
+  - **Vue triée d'un gros projet (2026-11-10).** Au-delà d'un seuil, le modèle voit un index
+    réduit de toutes les couches et le détail de celles que la demande désigne. La vue est une
+    fonction pure du noyau (inventaire, demande, journal), jamais journalisée. Si un plan fait
+    porter un paramètre de champ sur une couche montrée réduite, le noyau recompose une fois
+    avec cette couche détaillée : c'est une redemande, pas une réparation. Le plan rendu passe
+    par les mêmes schémas et le même garde-fou, et le rejeu (AD-11) n'en dépend pas.
 
 ### AD-24 — Une primitive de QGIS est une commande écrite à la main, exécutée par une ligne d'une table fermée
 

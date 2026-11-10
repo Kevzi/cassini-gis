@@ -36,7 +36,7 @@ CAP-2 a été retirée (préparation des données d'une commune par code INSEE) 
 
 - **CAP-4** — Agent en langage naturel
   - **intent:** l'utilisateur formule sa demande en français et obtient le travail fait, sans connaître les commandes.
-  - **success:** sur un projet où les couches nécessaires sont déjà ouvertes, la phrase de démo de CLAUDE.md §1 produit une suite de commandes affichée étape par étape dans le panneau Cassini de QGIS, que l'utilisateur valide avant exécution et peut rejouer ensuite à l'identique.
+  - **success:** sur un projet où les couches nécessaires sont déjà ouvertes, la phrase de démo de CLAUDE.md §1 produit une suite de commandes affichée étape par étape dans le panneau Cassini de QGIS, que l'utilisateur valide avant exécution et peut rejouer ensuite à l'identique ; sur un projet réel d'environ 60 couches (une BD TOPO départementale et un PLU), au moins 80 % des phrases de la recette réaliste donnent le plan attendu, sans `ai.prompt_too_long` (changement de cap du 2026-11-10).
 
 - **CAP-5** — Export PDF
   - **intent:** l'utilisateur sort une carte présentable à un tiers depuis ce qu'il voit à l'écran.

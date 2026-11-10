@@ -782,3 +782,108 @@ notes = [
   "Origine : la recette actuelle a 5 phrases vit hors du depot (script de nuit sous %TEMP%) ; ses 5 phrases peuvent etre reprises parmi les 20.",
   "Decision: 2026-11-10 — proprietaire : une phrase compte juste seulement si le plan s'execute ET est conforme au plan attendu, ecrit a la main pour chaque phrase (comme plan_reel) ; un plan qui s'execute mais fait autre chose compte rate.",
 ]
+
+[[entry]]
+id = 46
+type = "story"
+title = "Vue triee de l'inventaire d'un gros projet : index reduit et couches detaillees par la demande"
+description = "Ajoute au noyau une fonction pure de (inventaire, demande, journal) qui rend la vue de l'inventaire montree au modele. Sous un seuil d'environ 9 000 caracteres pour la vue complete des couches de l'utilisateur, la vue reste exactement celle d'aujourd'hui. Au-dessus, elle a deux parties : `index`, toutes les couches dans l'ordre stable de 5.19, en forme reduite {layer_id, name, geometry}, identique d'une demande a l'autre ; et `layers`, les couches en detail dans la forme apprise, rangees dans l'ordre stable : par priorite les couches que la demande designe, les resultats du dernier plan execute (sans valeurs, 5.22), les couches citees par ce plan (lues dans le journal), puis les rasters, jusqu'au budget des details (14 000 caracteres moins l'index). La correspondance demande-couche normalise (minuscules, accents otes par une table ecrite a la main, decoupe sur tout ce qui n'est ni lettre ni chiffre, petite liste de mots vides, pluriel simple : `s` et `x` finals otes au-dela de 3 lettres, `eaux` donne `eau`) ; un mot de la demande d'au moins 3 lettres cherche dans le nom, le radical de l'identifiant et du fichier, puis les noms de champs, puis les valeurs ; une valeur de 1 ou 2 signes doit etre egale exactement, casse comprise. Priorite : nom, puis champ, puis valeur ; a egalite, l'ordre stable. Une couche detaillee garde au plus 30 champs ou 3 000 caracteres, choisis dans cet ordre : champs designes par la demande, champs texte a valeurs, champs numeriques, autres, dans l'ordre de QGIS a chaque rang. Quand deux couches se disputent un mot, les deux sont detaillees. La fonction n'est pas encore branchee a plan.propose."
+verify = "Tests du noyau sans modele : sous le seuil, vue identique a aujourd'hui, octet pour octet ; au-dessus, `gares` detaille `gare_sncf` ; une valeur `U` ne trouve que `U` ; une couche de 88 champs garde au plus 30 champs ou 3 000 caracteres ; l'index est identique pour deux phrases differentes ; l'inventaire du projet BD TOPO, fige en fixture synthetique de meme forme, tient au budget ; la vue est deterministe. La fonction n'est pas encore branchee a plan.propose."
+covers = ["CAP-4"]
+after = []
+hitl = false
+risk = "high"
+references = [
+  "change — _bmad-output/initiative-cassini-mvp/change-inventaire-des-gros-projets/change-inventaire-des-gros-projets.md, §3 points 1 a 6",
+  "architecture — _bmad-output/initiative-cassini-mvp/architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md, AD-23 (vue triee d'un gros projet)",
+]
+notes = [
+  "Decision: 2026-11-10 — proprietaire : forme reduite {layer_id, name, geometry}.",
+  "Decision: 2026-11-10 — proprietaire : seuil du tri environ 9 000 caracteres, couche detaillee plafonnee a 30 champs ou 3 000 caracteres, a revoir en 48 sur les mesures.",
+  "Decision: 2026-11-10 — proprietaire : la question entre couches proches est apprise par le modele (47), jamais ecrite dans le noyau ; le tri garantit seulement que les deux couches sont detaillees.",
+  "Mesure (2026-11-10, projet BD TOPO 74 + PLUi + MNT, 63 couches) : inventaire complet 84 463 caracteres ; forme reduite 5 699 caracteres ; troncon_de_route 6 411 caracteres, 2 947 pour ses 30 premiers champs. Les donnees restent hors du depot ; les tests n'utilisent qu'une fixture synthetique de meme forme.",
+  "Sans dependance nouvelle ; la regle est generique et ne sait rien de la BD TOPO.",
+  "Risque high : composition et cache (CLAUDE.md, relecture thorough) ; controle hors du ticket : la recette realiste de 50 et la non-regression d'Annecy 16/20.",
+]
+
+[[entry]]
+id = 47
+type = "story"
+title = "Generateur : gros projets de 20 a 60 couches rendus par la vue du noyau, et deux couches proches donnent une question"
+description = "Ajoute au generateur d'entrainement une famille « gros projet » de 20 a 60 couches, dont l'inventaire est rendu par la fonction de vue du noyau (46), ce qui garantit la forme, et une famille « deux couches proches », ou deux couches se disputent un mot de la demande et ou le plan attendu est une question. Les gros projets font environ 25 % du jeu. Construit sur la branche generateur-grands-inventaires une fois fusionnee : ses couches a 15-20 champs sont la matiere de la partie detaillee."
+verify = "training/tests/forme_inventaire.rs voit la cle `index` et la forme reduite ; training/tests/recouvrement.rs vert ; part des gros projets et longueurs de sequence consignees (mediane, maximum) ; aucune phrase des recettes ne vient au generateur."
+covers = ["CAP-4"]
+after = [46]
+hitl = false
+risk = "medium"
+references = [
+  "change — _bmad-output/initiative-cassini-mvp/change-inventaire-des-gros-projets/change-inventaire-des-gros-projets.md, §3 points 6 et 7",
+  "doc — docs/entrainement-du-modele.md",
+]
+notes = [
+  "Decision: 2026-11-10 — proprietaire : gros projets a environ 25 % du jeu ; repli si la memoire ne tient pas a la nouvelle MAX_LENGTH : gros projets plafonnes a 40 couches.",
+  "Decision: 2026-11-10 — proprietaire : la question entre couches proches est apprise par une famille du generateur, jamais un pansement dans le noyau (decision du 2026-10-22).",
+  "Attend la fusion de la branche story/generateur-grands-inventaires, qui n'a pas d'entree dans cet epic (plan : plan-generateur-grands-inventaires.md).",
+]
+
+[[entry]]
+id = 48
+type = "story"
+title = "Vue triee branchee a la composition, cache place a la fin de l'index, redemande elargie"
+description = "Fait passer tous les chemins de composition par la vue triee de 46 (canal, cli dont cli/src/main.rs, mesures). Les decoupes du cache du prompt et l'instantane d'ancrage se placent a la fin de l'index, qui reste un prefixe stable. Si le plan rendu fait porter un parametre de champ (champ, valeur, label_field) sur une couche montree reduite, le noyau recompose une seule fois, cette couche detaillee en plus ; un plan qui ne prend la couche reduite que comme geometrie est accepte tel quel. C'est une redemande, pas une reparation (AD-23) : le plan rendu passe par les memes schemas et le meme garde-fou. Le message de ai.prompt_too_long devient « le projet a trop de couches pour le modele ». Le seuil et les plafonds de 46 sont revus sur les mesures."
+verify = "Tests sans modele : un plan qui prend un champ d'une couche reduite declenche une seule redemande, avec la couche detaillee ; un plan qui ne prend que sa geometrie n'en declenche pas ; project.inventory du MCP reste inchange ; le rejeu est identique. Tous les chemins de composition passent par la vue (canal, cli dont cli/src/main.rs, mesures). Durees CPU et GPU consignees sur le gros projet ; ai.prompt_too_long rend son nouveau message."
+covers = ["CAP-4"]
+after = [46, 47]
+hitl = false
+risk = "high"
+references = [
+  "change — _bmad-output/initiative-cassini-mvp/change-inventaire-des-gros-projets/change-inventaire-des-gros-projets.md, §2 (5.18, 5.19) et §3 point 5",
+  "architecture — _bmad-output/initiative-cassini-mvp/architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md, AD-23 (vue triee d'un gros projet)",
+  "doc — docs/mesure-duree-par-phrase.md",
+]
+notes = [
+  "Decision: 2026-11-10 — proprietaire : duree par phrase < 30 s sous le seuil (inchange) ; gros projets < 60 s sur CPU et < 30 s sur GPU.",
+  "Decision: 2026-11-10 — proprietaire : seuil du tri et plafonds d'une couche detaillee revus ici sur les mesures.",
+  "Risque high : composition, cache et canal (CLAUDE.md, relecture thorough) ; controle hors du ticket : la recette realiste de 50 et la non-regression d'Annecy 16/20 et des jeux GPU.",
+]
+
+[[entry]]
+id = 49
+type = "story"
+title = "Re-entrainement groupe : grands inventaires, gros projets, couches proches"
+description = "Un seul re-entrainement, apres la branche generateur-grands-inventaires et la famille « gros projet » de 47 : MAX_LENGTH de l'entrainement porte a 4 608, apres une mesure de memoire d'une heure sur la carte de 8 Go ; puis deux graines la meme nuit, par la commande unique (meme base, meme methode, sur GPU). Le modele n'est installe que si les barres tiennent. Le proprietaire lance l'entrainement, qui occupe sa carte graphique."
+verify = "D'abord une mesure de memoire a la nouvelle MAX_LENGTH sur la carte de 8 Go (essai d'une heure). Puis deux graines la meme nuit. Barres : Annecy >= 16/20, plan_reel, question_reel et ecart_reel pas en baisse. Installe seulement si les barres tiennent."
+covers = ["CAP-4"]
+after = [47, 48]
+hitl = true
+risk = "high"
+references = [
+  "doc — docs/entrainement-du-modele.md",
+]
+notes = [
+  "Decision: 2026-11-10 — proprietaire : MAX_LENGTH porte a 4 608 apres un essai d'une heure sur la carte de 8 Go, gros projets a environ 25 % du jeu ; repli : gros projets plafonnes a 40 couches.",
+  "Decision: 2026-11-10 — proprietaire : la branche generateur-grands-inventaires est fusionnee sans entrainement propre ; ses exemples (aucun au-dela de 1 773 jetons) rejoignent cet entrainement groupe.",
+  "Attend aussi la fusion de la branche story/generateur-grands-inventaires, qui n'a pas d'entree dans cet epic.",
+  "hitl : l'entrainement occupe la carte graphique du proprietaire ; il se lance quand le proprietaire le dit.",
+  "Risque high : le modele livre remplace celui du panneau ; controle hors du ticket : recette QGIS par le proprietaire (50, et Annecy 16/20).",
+]
+
+[[entry]]
+id = 50
+type = "story"
+title = "Recette realiste : projet BD TOPO 74 + PLUi + MNT, 20 phrases a plan attendu (barre 16/20)"
+description = "Recette QGIS reelle sur le projet d'environ 60 couches (BD TOPO 74 tous themes, PLUi d'Annecy, MNT), comme 5.45 : 20 phrases ecrites a la main, a plan attendu, enchainees dans une seule session QGIS avec le modele charge a part. La sonde est versionnee dans le depot, les donnees restent hors du depot. La demo filmee (epic de demo, entree 6) attend cette recette."
+verify = "Sonde versionnee comme 5.45 ; donnees hors depot ; 20 phrases enchainees dans une seule session QGIS, dont au moins deux avec couches proches (question attendue) et deux dont la couche n'est trouvee que par une valeur ou un synonyme ; score N/20 ; rejeu identique ; aucune ai.prompt_too_long ; durees par phrase (CPU et GPU) et duree du premier inventaire QGIS consignees."
+covers = ["CAP-4"]
+after = [49]
+hitl = true
+risk = "medium"
+references = [
+  "change — _bmad-output/initiative-cassini-mvp/change-inventaire-des-gros-projets/change-inventaire-des-gros-projets.md, §3 point 8 et §5",
+]
+notes = [
+  "Decision: 2026-11-10 — proprietaire : barre >= 16/20 (80 %), comme 5.45 ; une phrase compte juste seulement si son plan est le plan attendu.",
+  "Decision: 2026-11-10 — proprietaire : durees cibles des gros projets < 60 s sur CPU et < 30 s sur GPU.",
+  "hitl : le proprietaire relit les 20 phrases avant la premiere mesure.",
+  "Les phrases ne sont jamais copiees dans le generateur ; elles rejoignent les phrases tenues a l'ecart du garde de recouvrement.",
+]
