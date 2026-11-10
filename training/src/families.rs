@@ -10,8 +10,8 @@
 use serde_json::{json, Value};
 
 use crate::inventories::{
-    theme, Builder, FieldDef, Geom, Kind, Layer, Noun, Theme, Val, CRITERIA, MASKS, RAW_RASTERS,
-    THEMES,
+    theme, Builder, FieldDef, Geom, Kind, Layer, Noun, Theme, Val, CATEGORIES, CRITERIA, MASKS,
+    NAMED_PLACES, RAW_RASTERS, THEMES,
 };
 use crate::rng::Rng;
 
@@ -76,7 +76,8 @@ pub static FAMILIES: &[Family] = &[
     },
     Family {
         name: "tampon_filtre",
-        weight: 5,
+        // 5 → 6 après 11.23 : valeur au pluriel parmi des valeurs voisines du même champ.
+        weight: 6,
         make: tampon_filtre,
     },
     Family {
@@ -98,6 +99,12 @@ pub static FAMILIES: &[Family] = &[
         name: "intersection",
         weight: 4,
         make: intersection,
+    },
+    Family {
+        name: "toutes_zones_confondues",
+        // Analyse après 11.23 : couche de zones entière, « toutes catégories confondues ».
+        weight: 4,
+        make: toutes_zones_confondues,
     },
     Family {
         name: "conditions_multiples",
@@ -973,6 +980,26 @@ const DISSOLVE: &[&str] = &[
     " et fusionne les zones qui se touchent",
 ];
 
+/// Analyse après 11.23 : la fusion dite dans une proposition à part, après la tête du tampon,
+/// était perdue (`DISSOLVE` n'avait que des compléments collés à la tête).
+const DISSOLVE_APART: &[&str] = &[
+    ", puis fusionne le résultat",
+    " et fusionne le résultat",
+    ", et regroupe le résultat en une seule zone",
+    ". Fusionne ensuite les zones obtenues",
+    " ; regroupe ensuite l'ensemble en une seule entité",
+    ", puis fusionne l'ensemble",
+];
+
+/// Complément de fusion d'un tampon : collé à la tête, ou dans une proposition à part.
+fn dissolve_words(rng: &mut Rng) -> &'static str {
+    if rng.chance(1, 2) {
+        pick_str(rng, DISSOLVE_APART)
+    } else {
+        pick_str(rng, DISSOLVE)
+    }
+}
+
 fn tampon_head(rng: &mut Rng, d: &Dist, around: &str) -> String {
     match rng.below(6) {
         // « Fais-moi », pas « Fais une zone tampon ... autour des ... » : cette tournure nue est
@@ -999,15 +1026,71 @@ fn tampon(rng: &mut Rng) -> Option<Example> {
     let dissolve = rng.chance(1, 5);
     let mut body = tampon_head(rng, &d, &around);
     if dissolve {
-        body.push_str(pick_str(rng, DISSOLVE));
+        body.push_str(dissolve_words(rng));
     }
     let request = finish(rng, &body, false, false);
     let expected = calls(vec![buffer(&layer.id, &d, dissolve)]);
     Some(example("tampon", b, rng, request, expected))
 }
 
+/// Champs texte d'un thème dont au moins deux valeurs ont un adjectif (classes de routes).
+fn adjective_fields(t: &Theme) -> Vec<&'static FieldDef> {
+    text_fields(t)
+        .into_iter()
+        .filter(|f| match &f.kind {
+            Kind::Text { values, .. } => values.iter().filter(|v| v.adj.is_some()).count() >= 2,
+            _ => false,
+        })
+        .collect()
+}
+
+/// Analyse après 11.23 : une valeur dite par son adjectif au pluriel (« des routes
+/// départementales ») parmi des valeurs voisines du même champ, elles aussi à adjectif, était
+/// confondue avec une voisine. La couche porte la valeur dite et au moins une voisine ; rend la
+/// couche, le champ, la valeur et le groupe « des routes départementales ».
+fn adjective_plural(
+    rng: &mut Rng,
+    b: &mut Builder,
+    pred: impl Fn(&Theme) -> bool,
+) -> Option<(Layer, &'static FieldDef, &'static Val, String)> {
+    let t = pick_theme(rng, b, |t| pred(t) && !adjective_fields(t).is_empty())?;
+    let def = *rng.pick(&adjective_fields(t));
+    let Kind::Text { values, .. } = &def.kind else {
+        return None;
+    };
+    let adj: Vec<&'static Val> = values.iter().filter(|v| v.adj.is_some()).collect();
+    let val = *rng.pick(&adj);
+    let others: Vec<&'static Val> = adj.iter().copied().filter(|v| v.v != val.v).collect();
+    let other = *rng.pick(&others);
+    let layer = b.add(
+        rng,
+        t.key,
+        &[def.role],
+        &[],
+        &[(def.role, val.v), (def.role, other.v)],
+    );
+    let (_, pl) = val.adj?;
+    Some((layer, def, val, format!("des {} {pl}", t.noun.pl)))
+}
+
 fn tampon_filtre(rng: &mut Rng) -> Option<Example> {
     let mut b = Builder::new();
+    if rng.chance(1, 3) {
+        let (layer, def, val, around) = adjective_plural(rng, &mut b, ordinary)?;
+        let field = layer.field(def.role)?;
+        let d = dist(rng);
+        let mut body = tampon_head(rng, &d, &around);
+        let dissolve = rng.chance(1, 8);
+        if dissolve {
+            body.push_str(dissolve_words(rng));
+        }
+        let request = finish(rng, &body, false, false);
+        let expected = calls(vec![
+            select(&layer.id, &field.name, "eq", val.v),
+            buffer(&step(1), &d, dissolve),
+        ]);
+        return Some(example("tampon_filtre", b, rng, request, expected));
+    }
     let t = pick_theme(rng, &b, |t| ordinary(t) && !text_fields(t).is_empty())?;
     let def = *rng.pick(&text_fields(t));
     let layer = b.add(rng, t.key, &[def.role], &[], &[]);
@@ -1018,7 +1101,7 @@ fn tampon_filtre(rng: &mut Rng) -> Option<Example> {
     let dissolve = rng.chance(1, 8);
     let mut body = tampon_head(rng, &d, &around);
     if dissolve {
-        body.push_str(pick_str(rng, DISSOLVE));
+        body.push_str(dissolve_words(rng));
     }
     let request = finish(rng, &body, false, false);
     let expected = calls(vec![
@@ -1078,6 +1161,11 @@ fn distance(rng: &mut Rng) -> Option<Example> {
 /// Référence filtrée par un champ texte : rend la couche, le groupe « des gares de la ligne D »
 /// et le `select` à placer avant le tampon.
 fn filtered_reference(rng: &mut Rng, b: &mut Builder) -> Option<(Layer, String, Value)> {
+    if rng.chance(1, 4) {
+        if let Some(named) = named_reference(rng, b) {
+            return Some(named);
+        }
+    }
     let r = pick_theme(rng, b, |t| ordinary(t) && !text_fields(t).is_empty())?;
     let def = *rng.pick(&text_fields(r));
     let layer = b.add(rng, r.key, &[def.role], &[], &[]);
@@ -1087,6 +1175,29 @@ fn filtered_reference(rng: &mut Rng, b: &mut Builder) -> Option<(Layer, String, 
     let words = qualified(rng, &r.noun, def, val, det);
     let sel = select(&layer.id, &field.name, "eq", val.v);
     Some((layer, words, sel))
+}
+
+/// Constat durable après 11.23 : une référence désignée par son nom propre (« de la gare des
+/// Ardoines ») perdait sa sélection. La couche liste ce nom et d'autres dans son champ de nom ;
+/// rend la couche, « de la gare Les Ardoines » et la sélection sur ce champ.
+fn named_reference(rng: &mut Rng, b: &mut Builder) -> Option<(Layer, String, Value)> {
+    let free: Vec<&(&str, &str, &[Val])> = NAMED_PLACES
+        .iter()
+        .filter(|(key, ..)| !b.free(|t| t.key == *key).is_empty())
+        .collect();
+    if free.is_empty() {
+        return None;
+    }
+    let (key, de, names) = **rng.pick(&free);
+    let layer = b.add(rng, key, &["nom"], &[], &[]);
+    let mut idx: Vec<usize> = (0..names.len()).collect();
+    rng.shuffle(&mut idx);
+    let k = rng.range(2, names.len().min(4) as u64) as usize;
+    let listed: Vec<&'static Val> = idx[..k].iter().map(|&i| &names[i]).collect();
+    let name = listed[0].v;
+    let field = b.set_values(&layer.id, "nom", &listed)?;
+    let sel = select(&layer.id, &field, "eq", name);
+    Some((layer, format!("{de} {name}"), sel))
 }
 
 fn draft_distance_ref(rng: &mut Rng) -> Option<Draft> {
@@ -1172,6 +1283,15 @@ const AREAS: &[Area] = &[
         key: "forets",
         role: "essence",
         phrases: &["dans une forêt à dominante de {v}"],
+    },
+    Area {
+        key: "zones_bruit",
+        role: "zone",
+        phrases: &[
+            "en zone {v} du plan d'exposition au bruit",
+            "{situé} en zone {v} du PEB",
+            "dans la zone {v} d'exposition au bruit",
+        ],
     },
 ];
 
@@ -1260,7 +1380,82 @@ const PERIMETERS: &[&str] = &[
     "zones_humides",
     "forets",
     "espaces_verts",
+    "zones_bruit",
 ];
+
+/// Couches de zones prises entières malgré leur champ de catégorie : thème, rôle du champ,
+/// tournures d'inclusion, tournures « confondues ».
+const WHOLE_ZONES: &[(&str, &str, &[&str], &[&str])] = &[
+    (
+        "zones_bruit",
+        "zone",
+        &[
+            "dans une zone d'exposition au bruit",
+            "{situé} dans le plan d'exposition au bruit",
+            "{situé} en zone de bruit",
+        ],
+        &[
+            "toutes zones confondues",
+            "toutes catégories confondues",
+            "quelle que soit la zone",
+        ],
+    ),
+    (
+        "inondables",
+        "alea",
+        &["en zone inondable", "{situé} dans une zone inondable"],
+        &[
+            "tous aléas confondus",
+            "toutes catégories confondues",
+            "quel que soit l'aléa",
+        ],
+    ),
+    (
+        "znieff",
+        "type",
+        &["dans une ZNIEFF", "{situé} en ZNIEFF"],
+        &["tous types confondus", "types 1 et 2 confondus"],
+    ),
+    (
+        "zones_humides",
+        "type",
+        &["dans une zone humide", "{localisé} en zone humide"],
+        &["tous types confondus", "toutes catégories confondues"],
+    ),
+];
+
+/// Analyse après 11.23 : une intersection avec une couche de zones entière, « toutes
+/// catégories confondues », devenait une question hors de propos. La couche porte son champ de
+/// catégorie et ses valeurs ; la demande n'en retient aucune : une intersection avec la couche
+/// entière, sans sélection.
+fn toutes_zones_confondues(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let t = pick_theme(rng, &b, |t| {
+        ordinary(t) && !PERIMETERS.contains(&t.key) && !AREAS.iter().any(|a| a.key == t.key)
+    })?;
+    let target = b.add(rng, t.key, &[], &[], &[]);
+    let (key, role, inside, merged) = *rng.pick(WHOLE_ZONES);
+    if b.free(|z| z.key == key).is_empty() {
+        return None;
+    }
+    let zones = b.add(rng, key, &[role], &[], &[]);
+    let inside = fill(pick_str(rng, inside), &t.noun, "");
+    let merged = pick_str(rng, merged);
+    let np = match rng.below(3) {
+        0 | 1 => format!("les {} {inside}, {merged}", t.noun.pl),
+        _ => format!("les {} {inside} ({merged})", t.noun.pl),
+    };
+    let (head, q) = open_find(rng, &t.noun, &np, true);
+    let request = finish(rng, &head, q, true);
+    let expected = calls(vec![intersect(&target.id, &zones.id)]);
+    Some(example(
+        "toutes_zones_confondues",
+        b,
+        rng,
+        request,
+        expected,
+    ))
+}
 
 fn intersection(rng: &mut Rng) -> Option<Example> {
     let mut b = Builder::new();
@@ -1304,6 +1499,26 @@ fn intersection(rng: &mut Rng) -> Option<Example> {
 
 // -- conditions multiples --------------------------------------------------
 
+/// Constat durable après 11.23 : une cible dite par une catégorie d'une couche plus large
+/// (« les écoles » parmi les équipements publics) perdait sa sélection. Rend la couche des
+/// équipements, « les écoles », la sélection sur la catégorie, le lien et le nom de la
+/// catégorie (pour l'accord : « situées »).
+fn category_target(
+    rng: &mut Rng,
+    b: &mut Builder,
+    pred: impl Fn(&Theme) -> bool,
+) -> Option<(Layer, String, Value, &'static str, &'static Noun)> {
+    let t = theme("equipements_publics");
+    if !pred(t) || b.free(|f| f.key == t.key).is_empty() {
+        return None;
+    }
+    let (value, noun) = rng.pick(CATEGORIES);
+    let target = b.add(rng, t.key, &["categorie"], &[], &[("categorie", value)]);
+    let field = target.field("categorie")?;
+    let sel = select(&target.id, &field.name, "eq", value);
+    Some((target, noun.les(), sel, " ", noun))
+}
+
 /// La cible filtrée d'un plan à conditions, par égalité, nombre (`gt`, `lt`, `gte`, `lte`),
 /// différence (`ne`) ou nom (`contains`, `begins_with`). Rend la couche, le groupe nominal
 /// (« les bâtiments de plus de 12 m de haut »), la sélection, et le lien vers la condition
@@ -1312,8 +1527,8 @@ fn filtered_target(
     rng: &mut Rng,
     b: &mut Builder,
     pred: impl Fn(&Theme) -> bool,
-) -> Option<(Layer, String, Value, &'static str)> {
-    match rng.below(6) {
+) -> Option<(Layer, String, Value, &'static str, &'static Noun)> {
+    match rng.below(7) {
         0 | 1 => {
             let t = pick_theme(rng, b, |t| pred(t) && !text_fields(t).is_empty())?;
             let def = *rng.pick(&text_fields(t));
@@ -1322,7 +1537,7 @@ fn filtered_target(
             let val = *rng.pick(&field.values);
             let sel = select(&target.id, &field.name, "eq", val.v);
             let head = qualified(rng, &t.noun, def, val, Det::Les);
-            Some((target, head, sel, " "))
+            Some((target, head, sel, " ", &t.noun))
         }
         2 | 3 => {
             let t = pick_theme(rng, b, |t| pred(t) && !number_fields(t).is_empty())?;
@@ -1331,7 +1546,13 @@ fn filtered_target(
             let field = target.field(def.role)?;
             let (op, value, phrase) = numeric(rng, def);
             let sel = select(&target.id, &field.name, op, &value);
-            Some((target, format!("les {} {phrase}", t.noun.pl), sel, " "))
+            Some((
+                target,
+                format!("les {} {phrase}", t.noun.pl),
+                sel,
+                " ",
+                &t.noun,
+            ))
         }
         4 => {
             let t = pick_theme(rng, b, |t| pred(t) && !text_fields(t).is_empty())?;
@@ -1345,8 +1566,9 @@ fn filtered_target(
             let phrase = fill(pick_str(rng, phrases), &t.noun, val.v);
             let head = different_np(rng, &t.noun, &field.name, val.v, &phrase, true);
             let sel = select(&target.id, &field.name, "ne", val.v);
-            Some((target, head, sel, ", "))
+            Some((target, head, sel, ", ", &t.noun))
         }
+        6 => category_target(rng, b, pred),
         _ => {
             let t = pick_theme(rng, b, |t| {
                 pred(t) && t.fields.iter().any(|f| matches!(f.kind, Kind::Name { .. }))
@@ -1363,7 +1585,13 @@ fn filtered_target(
             let field = target.field(def.role)?;
             let (op, phrase) = name_phrase(rng, fragment);
             let sel = select(&target.id, &field.name, op, fragment);
-            Some((target, format!("les {} {phrase}", t.noun.pl), sel, ", "))
+            Some((
+                target,
+                format!("les {} {phrase}", t.noun.pl),
+                sel,
+                ", ",
+                &t.noun,
+            ))
         }
     }
 }
@@ -1371,8 +1599,9 @@ fn filtered_target(
 fn draft_multi(rng: &mut Rng) -> Option<Draft> {
     let mut b = Builder::new();
     // Essais GPU après 11.23 (étape sautée ou ajoutée) : les plans à deux sélections, puis un
-    // tampon et des intersections (rangs 2, 4 et 11), sont tirés deux fois plus souvent.
-    match rng.below(13) {
+    // tampon et des intersections (rangs 2, 4 et 11), sont tirés deux fois plus souvent ; après
+    // 11.23, deux appartenances sur une même cible (rang 13), deux fois plus souvent aussi.
+    match rng.below(15) {
         // Zone puis distance : select(zone), buffer(réf), intersect(cible, 1), intersect(3, 2).
         0 => {
             let t = pick_theme(rng, &b, |t| {
@@ -1404,13 +1633,12 @@ fn draft_multi(rng: &mut Rng) -> Option<Draft> {
         }
         // Cible filtrée puis distance : select(cible), buffer(réf), intersect(1, 2).
         1 => {
-            let (target, head, sel, sep) = filtered_target(rng, &mut b, ordinary)?;
-            let t = target.theme;
+            let (_, head, sel, sep, noun) = filtered_target(rng, &mut b, ordinary)?;
             let r = pick_theme(rng, &b, ordinary)?;
             let reference = b.add(rng, r.key, &[], &[], &[]);
             let d = dist(rng);
             let rr = de_ref(rng, &r.noun);
-            let np = format!("{head}{sep}{}", near(rng, &t.noun, &d, &rr));
+            let np = format!("{head}{sep}{}", near(rng, noun, &d, &rr));
             Some(Draft {
                 calls: vec![
                     sel,
@@ -1418,7 +1646,7 @@ fn draft_multi(rng: &mut Rng) -> Option<Draft> {
                     intersect(&step(1), &step(2)),
                 ],
                 b,
-                noun: &t.noun,
+                noun,
                 np,
             })
         }
@@ -1452,11 +1680,16 @@ fn draft_multi(rng: &mut Rng) -> Option<Draft> {
         // Cible filtrée près d'une référence filtrée : select(cible), select(réf),
         // buffer(2), intersect(1, 3) (essais GPU après 11.23).
         11 | 12 => {
-            let (target, head, sel, sep) = filtered_target(rng, &mut b, ordinary)?;
-            let t = target.theme;
+            // Constat durable : la cible dite par une catégorie d'une couche plus large (une
+            // fois sur trois ici, en plus du rang de `filtered_target`).
+            let (_, head, sel, sep, noun) = if rng.chance(1, 3) {
+                category_target(rng, &mut b, ordinary)?
+            } else {
+                filtered_target(rng, &mut b, ordinary)?
+            };
             let (_, words, sel_ref) = filtered_reference(rng, &mut b)?;
             let d = dist(rng);
-            let np = format!("{head}{sep}{}", near(rng, &t.noun, &d, &words));
+            let np = format!("{head}{sep}{}", near(rng, noun, &d, &words));
             Some(Draft {
                 calls: vec![
                     sel,
@@ -1464,6 +1697,50 @@ fn draft_multi(rng: &mut Rng) -> Option<Draft> {
                     buffer(&step(2), &d, false),
                     intersect(&step(1), &step(3)),
                 ],
+                b,
+                noun,
+                np,
+            })
+        }
+        // Constat durable après 11.23 : deux conditions d'appartenance sur la même cible, une
+        // zone filtrée et une autre couche de zones entière. La cible reste la première couche
+        // de la chaîne : select(zone), puis intersect(cible, …) et l'autre intersection, dans
+        // l'ordre de la phrase.
+        13 | 14 => {
+            let t = pick_theme(rng, &b, |t| {
+                ordinary(t) && !AREAS.iter().any(|a| a.key == t.key) && !PERIMETERS.contains(&t.key)
+            })?;
+            let target = b.add(rng, t.key, &[], &[], &[]);
+            let (zone, sel) = area(rng, &mut b, &t.noun)?;
+            let p = pick_theme(rng, &b, |t| PERIMETERS.contains(&t.key))?;
+            let perimeter = b.add(rng, p.key, &[], &[], &[]);
+            let inside = match rng.below(3) {
+                0 => format!("dans {}", p.noun.un()),
+                1 => format!("{} dans {}", t.noun.agree("situé"), p.noun.un()),
+                _ => format!("{} dans {}", t.noun.agree("localisé"), p.noun.les()),
+            };
+            let link = *rng.pick(&[" et ", ", et ", " et qui sont "]);
+            let (np, calls) = if rng.chance(2, 3) {
+                (
+                    format!("les {} {zone}{link}{inside}", t.noun.pl),
+                    vec![
+                        sel,
+                        intersect(&target.id, &step(1)),
+                        intersect(&step(2), &perimeter.id),
+                    ],
+                )
+            } else {
+                (
+                    format!("les {} {inside}{link}{zone}", t.noun.pl),
+                    vec![
+                        sel,
+                        intersect(&target.id, &perimeter.id),
+                        intersect(&step(2), &step(1)),
+                    ],
+                )
+            };
+            Some(Draft {
+                calls,
                 b,
                 noun: &t.noun,
                 np,
@@ -1494,17 +1771,16 @@ fn draft_multi(rng: &mut Rng) -> Option<Draft> {
         // Trois conditions, cible filtrée, zone et distance, dans l'ordre de la phrase :
         // select(cible), select(zone), buffer(réf), intersect(1, 2), intersect(4, 3).
         4 | 10 => {
-            let (target, head, sel, sep) = filtered_target(rng, &mut b, |t| {
+            let (_, head, sel, sep, noun) = filtered_target(rng, &mut b, |t| {
                 ordinary(t) && !AREAS.iter().any(|a| a.key == t.key)
             })?;
-            let t = target.theme;
-            let (zone, sel_zone) = area(rng, &mut b, &t.noun)?;
+            let (zone, sel_zone) = area(rng, &mut b, noun)?;
             let r = pick_theme(rng, &b, ordinary)?;
             let reference = b.add(rng, r.key, &[], &[], &[]);
             let d = dist(rng);
             let rr = de_ref(rng, &r.noun);
             let link = *rng.pick(&[" ", ", ", " et "]);
-            let np = format!("{head}{sep}{zone}{link}{}", near(rng, &t.noun, &d, &rr));
+            let np = format!("{head}{sep}{zone}{link}{}", near(rng, noun, &d, &rr));
             Some(Draft {
                 calls: vec![
                     sel,
@@ -1514,7 +1790,7 @@ fn draft_multi(rng: &mut Rng) -> Option<Draft> {
                     intersect(&step(4), &step(3)),
                 ],
                 b,
-                noun: &t.noun,
+                noun,
                 np,
             })
         }
@@ -1551,15 +1827,14 @@ fn draft_multi(rng: &mut Rng) -> Option<Draft> {
         // Cible filtrée et deux distances : select(cible), buffer(r1), buffer(r2),
         // intersect(1, 2), intersect(4, 3).
         6 => {
-            let (target, head, sel, sep) = filtered_target(rng, &mut b, ordinary)?;
-            let t = target.theme;
+            let (_, head, sel, sep, noun) = filtered_target(rng, &mut b, ordinary)?;
             let r = pick_theme(rng, &b, ordinary)?;
             let r1 = b.add(rng, r.key, &[], &[], &[]);
             let r = pick_theme(rng, &b, ordinary)?;
             let r2 = b.add(rng, r.key, &[], &[], &[]);
             let (d1, d2) = (dist(rng), dist(rng));
             let rr1 = de_ref(rng, &r1.theme.noun);
-            let first = near(rng, &t.noun, &d1, &rr1);
+            let first = near(rng, noun, &d1, &rr1);
             let second = format!("à moins {} {}", d2.de(), de_ref(rng, &r2.theme.noun));
             let np = format!("{head}{sep}{first} et {second}");
             Some(Draft {
@@ -1571,7 +1846,7 @@ fn draft_multi(rng: &mut Rng) -> Option<Draft> {
                     intersect(&step(4), &step(3)),
                 ],
                 b,
-                noun: &t.noun,
+                noun,
                 np,
             })
         }
@@ -1587,8 +1862,8 @@ fn draft_multi(rng: &mut Rng) -> Option<Draft> {
                 &str,
                 &'static Noun,
             ) = if rng.chance(1, 2) {
-                let (target, head, sel, sep) = filtered_target(rng, &mut b, pred)?;
-                (step(1), head, vec![sel], sep, &target.theme.noun)
+                let (_, head, sel, sep, noun) = filtered_target(rng, &mut b, pred)?;
+                (step(1), head, vec![sel], sep, noun)
             } else {
                 let t = pick_theme(rng, &b, pred)?;
                 let target = b.add(rng, t.key, &[], &[], &[]);
@@ -2877,7 +3152,9 @@ fn isochrone_vers_cible(rng: &mut Rng) -> Option<Example> {
 fn decompte_par_zone(rng: &mut Rng) -> Option<Example> {
     let mut b = Builder::new();
     let zkey = *rng.pick(&["communes", "quartiers"]);
-    let labelled = rng.chance(1, 3);
+    // Une fois sur deux (une sur trois avant l'analyse après 11.23) : le champ de nom, parfois
+    // suffixé du thème (`nom_quartier`), se recopie tel quel.
+    let labelled = rng.chance(1, 2);
     let require: &[&str] = if labelled { &["nom"] } else { &[] };
     let zones = b.add(rng, zkey, require, &[], &[]);
     let z = &zones.theme.noun;
@@ -5560,6 +5837,9 @@ fn conversion_format(rng: &mut Rng) -> Option<Example> {
         _ => format!("les {}", t.noun.pl),
     };
     let (body, q) = match rng.below(8) {
+        // « Exporte les … en GeoPackage » rendait S09 de `plan_reel` (recouvrement, 2026-11-10) :
+        // devant « les … », la tête devient « Exporte-moi ».
+        0 | 1 if what.starts_with("les ") => (format!("Exporte-moi {what} {words}"), false),
         0 | 1 => (format!("Exporte {what} {words}"), false),
         2 => (format!("Convertis {what} {words}"), false),
         3 => (format!("Enregistre {what} {words}"), false),
@@ -5707,7 +5987,7 @@ fn metric_analysis(rng: &mut Rng, others: u32) -> Option<(Builder, String, bool,
         let dissolve = rng.chance(1, 5);
         let mut body = tampon_head(rng, &d, &around);
         if dissolve {
-            body.push_str(pick_str(rng, DISSOLVE));
+            body.push_str(dissolve_words(rng));
         }
         (b, body, false, vec![buffer(&layer.id, &d, dissolve)])
     } else {
@@ -9499,6 +9779,327 @@ mod tests {
             }
         }
         assert!(both > 50 && ramp_first > 0, "{both} {ramp_first}");
+    }
+
+    /// Le thème d'une couche de l'inventaire, par le préfixe de son identifiant.
+    fn theme_of(id: &str) -> &'static Theme {
+        THEMES
+            .iter()
+            .find(|t| {
+                t.slugs.iter().any(|s| {
+                    id.strip_prefix(&format!("{s}_"))
+                        .is_some_and(|rest| rest.chars().all(|c| c == '_' || c.is_ascii_hexdigit()))
+                })
+            })
+            .unwrap_or_else(|| panic!("{id} sans thème"))
+    }
+
+    fn field_names(layer: &Value) -> Vec<&str> {
+        layer["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["name"].as_str().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn a_label_field_is_the_name_field_of_the_zones_as_written_suffixed_or_not() {
+        let (mut suffixed, mut plain) = (0, 0);
+        for e in valid(decompte_par_zone, 1500) {
+            let p = &call(&e, 0)["params"];
+            let Some(label) = p.get("label_field").and_then(Value::as_str) else {
+                continue;
+            };
+            let zones = layer_of(&e, p["layer_id"].as_str().unwrap());
+            assert!(field_names(zones).contains(&label), "{}", e.request);
+            suffixed += usize::from(label.starts_with("nom_"));
+            plain += usize::from(label == "nom");
+        }
+        assert!(suffixed > 20 && plain > 20, "{suffixed} {plain}");
+    }
+
+    #[test]
+    fn a_dissolve_said_in_a_clause_of_its_own_is_kept() {
+        let mut apart = 0;
+        for make in [tampon as fn(&mut Rng) -> Option<Example>, tampon_filtre] {
+            for e in valid(make, 1500) {
+                if !DISSOLVE_APART.iter().any(|w| e.request.contains(w)) {
+                    continue;
+                }
+                let buffer = e.expected["calls"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|c| c["command"] == "analysis.buffer")
+                    .unwrap();
+                assert_eq!(buffer["params"]["dissolve"], true, "{}", e.request);
+                apart += 1;
+            }
+        }
+        assert!(apart > 20, "{apart}");
+    }
+
+    #[test]
+    fn a_plural_adjective_among_neighbour_values_selects_its_own_value() {
+        let mut seen = 0;
+        for e in valid(tampon_filtre, 1500) {
+            let p = &call(&e, 0)["params"];
+            let layer = layer_of(&e, p["layer_id"].as_str().unwrap());
+            let t = theme_of(p["layer_id"].as_str().unwrap());
+            let field = layer["fields"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|f| f["name"] == p["field"])
+                .unwrap();
+            let listed: Vec<&str> = field["values"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_str().unwrap())
+                .collect();
+            let plural_of = |value: &str| {
+                t.fields.iter().find_map(|f| match &f.kind {
+                    Kind::Text { values, .. } => values
+                        .iter()
+                        .find(|v| v.v == value)
+                        .and_then(|v| v.adj.map(|(_, pl)| pl)),
+                    _ => None,
+                })
+            };
+            let Some(pl) = plural_of(p["value"].as_str().unwrap()) else {
+                continue;
+            };
+            if !e.request.contains(&format!("{} {pl}", t.noun.pl)) {
+                continue;
+            }
+            let neighbours: Vec<&&str> = listed
+                .iter()
+                .filter(|v| **v != p["value"] && plural_of(v).is_some())
+                .collect();
+            if neighbours.is_empty() {
+                continue;
+            }
+            for n in neighbours {
+                let other = plural_of(n).unwrap();
+                assert!(
+                    !e.request.contains(&format!("{} {other}", t.noun.pl)),
+                    "{}",
+                    e.request
+                );
+            }
+            seen += 1;
+        }
+        assert!(seen > 50, "{seen}");
+    }
+
+    #[test]
+    fn zones_taken_whole_whatever_their_category_are_one_intersection_without_selection() {
+        for e in valid(toutes_zones_confondues, 600) {
+            assert_eq!(commands(&e), ["analysis.intersect"], "{}", e.request);
+            let r = e.request.as_str();
+            assert!(
+                r.contains("confondu") || r.contains("quel"),
+                "{}",
+                e.request
+            );
+            let overlay = layer_of(
+                &e,
+                call(&e, 0)["params"]["overlay_layer_id"].as_str().unwrap(),
+            );
+            assert!(
+                overlay["fields"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|f| f.get("values").is_some()),
+                "{}",
+                e.request
+            );
+        }
+        // Une zone de bruit précise reste une sélection, puis l'intersection.
+        let precise = valid(dans_une_zone, 1500)
+            .into_iter()
+            .filter(|e| {
+                theme_of(call(e, 0)["params"]["layer_id"].as_str().unwrap()).key == "zones_bruit"
+            })
+            .inspect(|e| {
+                assert_eq!(
+                    commands(e),
+                    ["analysis.select_by_attribute", "analysis.intersect"],
+                    "{}",
+                    e.request
+                );
+            })
+            .count();
+        assert!(precise > 10, "{precise}");
+    }
+
+    #[test]
+    fn a_category_of_a_wider_layer_near_a_filtered_reference_keeps_both_selections() {
+        let mut seen = 0;
+        for e in valid(conditions_multiples, 4000) {
+            let first = &call(&e, 0)["params"];
+            let Some(id) = first.get("layer_id").and_then(Value::as_str) else {
+                continue;
+            };
+            if call(&e, 0)["command"] != "analysis.select_by_attribute"
+                || theme_of(id).key != "equipements_publics"
+            {
+                continue;
+            }
+            let value = first["value"].as_str().unwrap();
+            let Some((_, noun)) = CATEGORIES.iter().find(|(v, _)| *v == value) else {
+                continue;
+            };
+            if !e.request.contains(noun.pl) {
+                continue;
+            }
+            let c = commands(&e);
+            if c.len() >= 4
+                && c[..4]
+                    == [
+                        "analysis.select_by_attribute",
+                        "analysis.select_by_attribute",
+                        "analysis.buffer",
+                        "analysis.intersect",
+                    ]
+                // Le tampon sur la référence filtrée : les rangs à zone tamponnent une couche.
+                && call(&e, 2)["params"]["layer_id"] == step(2)
+            {
+                assert_eq!(call(&e, 3)["params"]["layer_id"], step(1), "{}", e.request);
+                assert_eq!(
+                    call(&e, 3)["params"]["overlay_layer_id"],
+                    step(3),
+                    "{}",
+                    e.request
+                );
+                seen += 1;
+            }
+        }
+        assert!(seen > 10, "{seen}");
+    }
+
+    #[test]
+    fn a_reference_named_by_its_proper_name_is_selected_on_its_name_field() {
+        let mut seen = 0;
+        for e in valid(distance_reference_filtree, 1500) {
+            let Some((_, de, name)) = NAMED_PLACES.iter().find_map(|(k, de, names)| {
+                names
+                    .iter()
+                    .find(|n| e.request.contains(&format!("{de} {}", n.v)))
+                    .map(|n| (k, de, n.v))
+            }) else {
+                continue;
+            };
+            let sel = &call(&e, 0)["params"];
+            assert_eq!(
+                call(&e, 0)["command"],
+                "analysis.select_by_attribute",
+                "{de}"
+            );
+            assert_eq!(sel["operator"], "eq", "{}", e.request);
+            assert_eq!(sel["value"], name, "{}", e.request);
+            let layer = layer_of(&e, sel["layer_id"].as_str().unwrap());
+            let field = layer["fields"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|f| f["name"] == sel["field"])
+                .unwrap_or_else(|| panic!("{}", e.request));
+            assert!(
+                field["values"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|v| v == name),
+                "{}",
+                e.request
+            );
+            assert_eq!(call(&e, 1)["command"], "analysis.buffer", "{}", e.request);
+            assert_eq!(call(&e, 1)["params"]["layer_id"], step(1), "{}", e.request);
+            seen += 1;
+        }
+        assert!(seen > 30, "{seen}");
+    }
+
+    #[test]
+    fn two_belongings_of_one_target_keep_the_target_first_in_the_chain() {
+        let mut seen = 0;
+        for e in valid(conditions_multiples, 4000) {
+            let c = commands(&e);
+            if c.len() < 3
+                || c[..3]
+                    != [
+                        "analysis.select_by_attribute",
+                        "analysis.intersect",
+                        "analysis.intersect",
+                    ]
+            {
+                continue;
+            }
+            // La première intersection porte la cible elle-même, jamais une étape ni la zone.
+            let first = call(&e, 1)["params"]["layer_id"].as_str().unwrap();
+            assert!(!first.starts_with("step:"), "{}", e.request);
+            assert_ne!(first, call(&e, 0)["params"]["layer_id"], "{}", e.request);
+            assert_eq!(call(&e, 2)["params"]["layer_id"], step(2), "{}", e.request);
+            seen += 1;
+        }
+        assert!(seen > 30, "{seen}");
+    }
+
+    #[test]
+    fn every_cause_after_11_23_is_in_the_default_set() {
+        let (examples, _) = crate::generate(crate::DEFAULT_SEED, crate::DEFAULT_COUNT);
+        let has = |pred: &dyn Fn(&Example) -> bool| examples.iter().filter(|e| pred(e)).count();
+        let label = has(&|e| {
+            e.expected["calls"][0]["params"]["label_field"]
+                .as_str()
+                .is_some_and(|l| l.starts_with("nom_"))
+        });
+        let apart = has(&|e| DISSOLVE_APART.iter().any(|w| e.request.contains(w)));
+        let whole = has(&|e| e.family == "toutes_zones_confondues");
+        let category = has(&|e| {
+            e.family == "conditions_multiples"
+                && e.expected["calls"][0]["params"]["layer_id"]
+                    .as_str()
+                    .is_some_and(|id| theme_of(id).key == "equipements_publics")
+                && e.expected["calls"][1]["command"] == "analysis.select_by_attribute"
+        });
+        let named = has(&|e| {
+            NAMED_PLACES.iter().any(|(_, de, names)| {
+                names
+                    .iter()
+                    .any(|n| e.request.contains(&format!("{de} {}", n.v)))
+            }) && e.expected["calls"][0]["command"] == "analysis.select_by_attribute"
+        });
+        let belongings = has(&|e| {
+            let c = commands(e);
+            e.family == "conditions_multiples"
+                && c.len() >= 3
+                && c[..3]
+                    == [
+                        "analysis.select_by_attribute",
+                        "analysis.intersect",
+                        "analysis.intersect",
+                    ]
+        });
+        let plural = has(&|e| {
+            e.family == "tampon_filtre"
+                && THEMES.iter().any(|t| {
+                    adjective_fields(t).iter().any(|f| match &f.kind {
+                        Kind::Text { values, .. } => values.iter().any(|v| {
+                            v.adj.is_some_and(|(_, pl)| {
+                                e.request.contains(&format!("{} {pl}", t.noun.pl))
+                            })
+                        }),
+                        _ => false,
+                    })
+                })
+        });
+        let counts = [label, apart, whole, category, named, belongings, plural];
+        assert!(counts.iter().all(|&n| n > 0), "{counts:?}");
     }
 
     #[test]

@@ -82,12 +82,13 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `filtre_numerique` | « bâtiments de plus de 12 m de haut », « communes de moins de 12 500 habitants » → `gt`, `lt`, `gte`, `lte` |
 | `filtre_texte` | « dont le nom contient », « commence par » → `contains`, `begins_with` |
 | `filtre_different` | « sauf celles de la section AB », « qui ne sont pas » → `ne` |
-| `tampon` | zone tampon en m ou en km, fusionnée sur demande seulement |
-| `tampon_filtre` | tampon autour d'une couche filtrée |
+| `tampon` | zone tampon en m ou en km, fusionnée sur demande seulement ; depuis l'analyse après 11.23, la fusion se dit aussi dans une proposition à part (« …, puis fusionne le résultat ») → `dissolve: true` |
+| `tampon_filtre` | tampon autour d'une couche filtrée ; depuis l'analyse après 11.23 (poids 6), une fois sur trois, une valeur dite par son adjectif au pluriel (« des routes départementales ») à côté d'une valeur voisine du même champ, elle aussi à adjectif → `select` sur la valeur dite |
 | `distance` | « à moins de 500 m d'une gare » → tampon sur la référence, puis intersection |
-| `distance_reference_filtree` | distance à une référence filtrée (« des gares de la ligne D ») |
+| `distance_reference_filtree` | distance à une référence filtrée (« des gares de la ligne D ») ; depuis l'analyse après 11.23, une fois sur quatre, une référence dite par son nom propre (« de la gare Les Saules ») → `select` `eq` sur son champ de nom, qui liste ce nom |
 | `dans_une_zone` | « en zone N », « en zone inondable d'aléa fort » → sélection de la zone, puis intersection |
 | `intersection` | « situés dans une zone humide », « croise la couche A avec la couche B » |
+| `toutes_zones_confondues` | « situées en zone inondable, tous aléas confondus », « dans une zone d'exposition au bruit (toutes zones confondues) » → une intersection avec la couche de zones entière, sans `select`, bien que la couche porte son champ de catégorie |
 | `conditions_multiples` | zone et distance, cible filtrée et distance, deux distances, inclusion dans une couche entière : intersections successives ; depuis après 11.23, la cible filtrée près d'une référence filtrée (`select` de la cible, `select` de la référence, tampon sur `step:2`, intersection de `step:1` avec `step:3`), et les plans à deux sélections tirés deux fois plus souvent |
 | `constructible` | vocabulaire d'urbanisme : « parcelles constructibles », avec ou sans distance et PDF |
 | `export_pdf` | « sors-moi la carte en PDF », titre donné par l'utilisateur ou déduit de la demande |
@@ -97,7 +98,7 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `isochrone` | « zone atteinte en 10 minutes à pied depuis le point ... (Lambert-93) » |
 | `isochrone_utm` | « zone atteinte en 10 minutes à pied depuis le point 412 300 / 5 412 000 (UTM 31N) » → même isochrone, code 32631 ou 32632 ; zone 31N ou 32N, écrite « UTM 31N », « UTM 31 N », « UTM zone 31 Nord » ou « UTM31N » (5.37) |
 | `isochrone_vers_cible` | « les écoles à 10 min à pied du point ... (Lambert-93) » → isochrone, puis intersection de la cible avec l'étape 1 ; la couche du lieu (gares, écoles...) est souvent dans l'inventaire, seules les coordonnées donnent l'origine ; une fois sur trois, le lieu est nommé avec ses coordonnées (« de la gare de X (652 000 / 6 862 000, Lambert-93) ») et reste un plan |
-| `decompte_par_zone` | « nombre d'écoles par commune », nom des zones sur demande seulement |
+| `decompte_par_zone` | « nombre d'écoles par commune », nom des zones sur demande seulement (une fois sur deux), `label_field` recopié de l'inventaire, `nom` ou suffixé du thème (`nom_quartier`) |
 | `ouverture` | ouvrir un fichier non chargé, CSV à coordonnées compris |
 | `description` | décrire une couche, inventaire du projet, version, modèles installés |
 | `question_couche_absente` | une couche dont rien ne parle dans l'inventaire → question |
@@ -488,6 +489,46 @@ validation 292/300. Essais GPU : `plan_reel` 24/25, `question_reel` 11/12, `ecar
 8/8, `epic11_reel` 27/28 et F03 en question, `style_reel` 9/10. Recette QGIS sur Annecy : la
 phrase des gares compose `data.reproject` vers 2154 puis le tampon. Modèle dans
 `cassini-modeles\ajuste-apres-11-23\`, non installé ; décision au propriétaire.
+
+### Quatre causes après 11.23 : nom suffixé, fusion, pluriel, « confondues »
+
+L'analyse du recul des plans après 11.23 trouve quatre trous du générateur, et trois constats
+durables restent ratés par `ajuste-revue-11-23`. Chaque correction est une famille, une tournure
+ou un poids ; mêmes base, méthode, `DEFAULT_COUNT` et `DEFAULT_SEED`.
+
+- **Nom suffixé** (`Builder::add`) : un champ de rôle `nom` s'appelle `nom_<premier mot du thème>`
+  une fois sur quatre (`nom_quartier`, `nom_gare`) ; `decompte_par_zone` demande le nom une fois sur
+  deux (une sur trois avant). Le plan recopie le nom du champ de l'inventaire.
+- **Fusion à part** (`DISSOLVE_APART`, `dissolve_words`) : la moitié des fusions se dit dans une
+  proposition à part après la tête du tampon (« …, puis fusionne le résultat », « ; regroupe ensuite
+  l'ensemble en une seule entité ») → `dissolve: true`. Vaut pour `tampon`, `tampon_filtre` et le
+  tampon de la reprojection avant analyse.
+- **Pluriel parmi voisines** (`adjective_plural`) : dans `tampon_filtre` (poids 5 → 6), une fois sur
+  trois, la couche porte la valeur dite par son adjectif au pluriel et au moins une valeur voisine du
+  même champ, elle aussi à adjectif (classes de routes, cours d'eau permanents ou intermittents…).
+- **« Confondues »** : thème vecteur `zones_bruit` (zones d'exposition au bruit, champ de zone A à
+  D, groupe du zonage du PLU pour que « en zone A » ne désigne qu'une couche), ajouté aux périmètres
+  et aux zones (`AREAS`) ; famille `toutes_zones_confondues` (poids 4) : « tous aléas confondus »,
+  « toutes zones confondues », « quel que soit l'aléa » → une intersection avec la couche entière.
+  Une zone nommée de la même couche reste une sélection puis l'intersection (`dans_une_zone`).
+- **Cible par catégorie** (constat durable) : thème `equipements_publics` (groupe des écoles), champ
+  `categorie` (crèche, médiathèque, mairie, poste, école, salle polyvalente) ; `category_target`
+  dit la cible par sa catégorie (« les écoles », « les bureaux de poste »), un rang sur sept de
+  `filtered_target` et un tiers du rang « cible filtrée près d'une référence filtrée ».
+- **Référence par nom propre** (constat durable, `named_reference`, `NAMED_PLACES`) : une fois sur
+  quatre, `filtered_reference` désigne une gare, un arrêt, une école ou un quartier par son nom ; le
+  champ de nom de la couche liste ce nom et d'autres ; `select` `eq` sur ce champ, puis le tampon.
+- **Deux appartenances** (constat durable, rangs 13 et 14 de `draft_multi`) : une zone filtrée et
+  une autre couche de zones entière sur la même cible → `select(zone)`, `intersect(cible, step:1)`,
+  `intersect(step:2, couche)` ; dite dans l'autre ordre, `intersect(cible, couche)` puis
+  `intersect(step:2, step:1)`. La cible reste toujours la première couche de la chaîne.
+- **Recouvrement.** La tête « Exporte les … en GeoPackage » de `conversion_format` rendait S09 de
+  `plan_reel` : devant « les … », elle devient « Exporte-moi » ; la graine ne change pas.
+
+Au jeu par défaut (graine 1, 8 000) : 101 `toutes_zones_confondues`, 188 `tampon_filtre`, 48
+fusions dites à part, 24 `label_field` suffixés, 37 cibles par catégorie près d'une référence
+filtrée ou d'une zone, 84 références par nom propre, 49 plans à deux appartenances ; aucun exemple
+écarté.
 
 ### Les inventaires de QGIS (5.15)
 

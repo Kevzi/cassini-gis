@@ -1124,6 +1124,81 @@ pub static THEMES: &[Theme] = &[
             },
         ],
     },
+    // Analyse après 11.23 : une intersection avec une couche de zones entière (« toutes zones
+    // confondues ») n'avait aucun thème de zones d'exposition au bruit en vecteur ; le thème
+    // `bruit` est un raster, d'un autre groupe. Groupe du zonage du PLU : leurs zones A se
+    // confondraient (« en zone A »).
+    Theme {
+        key: "zones_bruit",
+        group: "zonage",
+        domain: "environnement",
+        noun: Noun {
+            sg: "zone d'exposition au bruit",
+            pl: "zones d'exposition au bruit",
+            fem: true,
+        },
+        of_none: "de zones d'exposition au bruit",
+        the_layer: "la couche des zones d'exposition au bruit",
+        names: &[
+            "Zones d'exposition au bruit",
+            "Plan d'exposition au bruit",
+            "PEB - zones de bruit",
+        ],
+        slugs: &["zones_bruit", "peb_zonage", "exposition_bruit"],
+        files: &["zones_bruit", "peb", "plan_exposition_bruit"],
+        geom: Geom::Polygon,
+        fields: &[FieldDef {
+            role: "zone",
+            names: &["zone", "zone_peb", "classe"],
+            label: "de zone",
+            kind: Kind::Text {
+                values: &[v("A"), v("B"), v("C"), v("D")],
+                phrases: &["de zone {v}", "classées en zone {v}"],
+            },
+        }],
+    },
+    // Constat durable après 11.23 : une cible dite par une catégorie d'une couche plus large
+    // (des écoles parmi des équipements). Même groupe que `ecoles` : « les écoles » ne doit
+    // désigner qu'une couche.
+    Theme {
+        key: "equipements_publics",
+        group: "ecoles",
+        domain: "équipements",
+        noun: Noun {
+            sg: "équipement public",
+            pl: "équipements publics",
+            fem: false,
+        },
+        of_none: "d'équipements publics",
+        the_layer: "la couche des équipements publics",
+        names: &[
+            "Équipements publics",
+            "Base des équipements",
+            "Équipements de la commune",
+        ],
+        slugs: &["equipements_publics", "equip_publics", "bpe_equipements"],
+        files: &["equipements_publics", "bpe", "equipements_commune"],
+        geom: Geom::Point,
+        fields: &[
+            FieldDef {
+                role: "categorie",
+                names: &["categorie", "type_equip", "nature"],
+                label: "de catégorie",
+                kind: Kind::Text {
+                    values: &[
+                        v("crèche"),
+                        v("médiathèque"),
+                        v("mairie"),
+                        v("poste"),
+                        v("école"),
+                        v("salle polyvalente"),
+                    ],
+                    phrases: &["de catégorie {v}", "dont la catégorie est « {v} »"],
+                },
+            },
+            NOM,
+        ],
+    },
     Theme {
         key: "mnt",
         group: "mnt",
@@ -1336,6 +1411,108 @@ pub static THEMES: &[Theme] = &[
     },
 ];
 
+/// Catégories du champ `categorie` d'`equipements_publics`, chacune dite comme un nom commun
+/// (« les écoles », « les bureaux de poste ») : valeur du champ, nom.
+pub static CATEGORIES: &[(&str, Noun)] = &[
+    (
+        "crèche",
+        Noun {
+            sg: "crèche",
+            pl: "crèches",
+            fem: true,
+        },
+    ),
+    (
+        "médiathèque",
+        Noun {
+            sg: "médiathèque",
+            pl: "médiathèques",
+            fem: true,
+        },
+    ),
+    (
+        "mairie",
+        Noun {
+            sg: "mairie",
+            pl: "mairies",
+            fem: true,
+        },
+    ),
+    (
+        "poste",
+        Noun {
+            sg: "bureau de poste",
+            pl: "bureaux de poste",
+            fem: false,
+        },
+    ),
+    (
+        "école",
+        Noun {
+            sg: "école",
+            pl: "écoles",
+            fem: true,
+        },
+    ),
+    (
+        "salle polyvalente",
+        Noun {
+            sg: "salle polyvalente",
+            pl: "salles polyvalentes",
+            fem: true,
+        },
+    ),
+];
+
+/// Objets désignés par leur nom propre (constat durable après 11.23 : une référence dite par
+/// son nom perdait sa sélection) : thème, tournure « de ... » qui précède le nom, et noms
+/// possibles, rendus comme valeurs du champ de nom de la couche.
+pub static NAMED_PLACES: &[(&str, &str, &[Val])] = &[
+    (
+        "gares",
+        "de la gare",
+        &[
+            v("Les Ardoines"),
+            v("Pont de Rungis"),
+            v("Vert de Maisons"),
+            v("Les Saules"),
+            v("Val de Fontenay"),
+        ],
+    ),
+    (
+        "arrets",
+        "de l'arrêt",
+        &[
+            v("Les Tilleuls"),
+            v("Marché"),
+            v("Place de l'Église"),
+            v("Collège"),
+            v("Les Peupliers"),
+        ],
+    ),
+    (
+        "ecoles",
+        "de l'école",
+        &[
+            v("Jules Ferry"),
+            v("Paul Bert"),
+            v("Louise Michel"),
+            v("Jean Macé"),
+            v("Anatole France"),
+        ],
+    ),
+    (
+        "quartiers",
+        "du quartier",
+        &[
+            v("Les Navigateurs"),
+            v("Centre-Ville"),
+            v("Les Hautes Bornes"),
+            v("La Pierre-au-Prêtre"),
+        ],
+    ),
+];
+
 /// Critères notés de `raster.weighted_overlay` (11.12, lot 2b-2).
 pub const CRITERIA: [&str; 4] = [
     "accessibilite",
@@ -1480,6 +1657,25 @@ fn layer_id(rng: &mut Rng, slug: &str) -> String {
             rng.hex(12)
         ),
     }
+}
+
+/// Premier mot d'un nom, en minuscules ASCII : « arrêt de bus » donne `arret`, pour un champ
+/// `nom_arret`.
+fn name_slug(sg: &str) -> String {
+    sg.split([' ', '\''])
+        .next()
+        .unwrap_or(sg)
+        .chars()
+        .map(|c| match c {
+            'à' | 'â' => 'a',
+            'é' | 'è' | 'ê' | 'ë' => 'e',
+            'î' | 'ï' => 'i',
+            'ô' => 'o',
+            'ù' | 'û' => 'u',
+            'ç' => 'c',
+            c => c.to_ascii_lowercase(),
+        })
+        .collect()
 }
 
 fn extension(rng: &mut Rng, geom: Geom) -> &'static str {
@@ -1628,6 +1824,17 @@ impl Builder {
         false
     }
 
+    /// Pose les valeurs listées du champ `role` d'une couche déjà tirée (les noms propres d'une
+    /// couche de gares), triées comme le produit les rend. Rend le nom du champ, s'il existe.
+    pub fn set_values(&mut self, id: &str, role: &str, values: &[&'static Val]) -> Option<String> {
+        let layer = self.layers.iter_mut().find(|l| l.id == id)?;
+        let field = layer.fields.iter_mut().find(|f| f.def.role == role)?;
+        let mut values = values.to_vec();
+        values.sort_unstable_by(|a, b| a.v.cmp(b.v));
+        field.values = values;
+        Some(field.name.clone())
+    }
+
     /// Change le système d'une couche déjà tirée (une couche en degrés, 10.7).
     pub fn set_epsg(&mut self, id: &str, epsg: u32) {
         for layer in &mut self.layers {
@@ -1666,7 +1873,12 @@ impl Builder {
             if forbid.contains(&def.role) || !(wanted || rng.chance(1, 2)) {
                 continue;
             }
-            let name = (*rng.pick(def.names)).to_string();
+            let mut name = (*rng.pick(def.names)).to_string();
+            // Analyse après 11.23 : un champ de nom suffixé du thème (`nom_quartier`) était
+            // remplacé par `nom` ; le nom du champ se recopie de l'inventaire.
+            if def.role == "nom" && rng.chance(1, 4) {
+                name = format!("nom_{}", name_slug(t.noun.sg));
+            }
             let values = match &def.kind {
                 Kind::Text { values, .. } => {
                     let forced: Vec<&str> = force
