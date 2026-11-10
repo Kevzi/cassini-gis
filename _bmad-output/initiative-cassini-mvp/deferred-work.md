@@ -933,3 +933,16 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
   evidence: la famille tire des couches vecteur seulement et toujours avec « du projet » ou « de la carte » ; le modèle n'a aucun exemple de ces formes.
   status: close, 2026-11-10, générateur après les quatre causes (`plan-generateur-apres-quatre-causes.md`)
   resolution: `retrait_couche` gagne le raster, plusieurs couches (une étape par couche) et le verbe seul → question ; poids 3 → 6, décision du propriétaire du 2026-11-10.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-vue-triee-de-l-inventaire-d-un-gros-projet-index-reduit-et-c-plan.md`
+  summary: Pour 5.48 — sur le vrai projet de 63 couches, des mots communs de la demande (« carte », « parcelle », « pdf », « calcule ») désignent par une valeur des couches sans rapport, qui remplissent le budget des détails avant la couche utile (la phrase de démo ne détaille pas le zonage du PLUi, désigné seulement par la valeur `.pdf`) ; et « PLU » ne trouve pas « PLUi ».
+  evidence: mesure du 2026-11-10 hors dépôt (sorted_view sur l'inventaire réel) : phrase de démo → adresse_ban, bassin_versant_topographique, lien_adresse_vers_bdtopo, noeud_hydrographique, surface_hydrographique ; ZONE_URBA reste dans l'index seul. Pistes à mesurer en 48 : compter le nombre de mots trouvés, écarter les valeurs comme désignation de couche quand elles désignent trop de couches, passer à la couche suivante au lieu de s'arrêter, redemande élargie (point 5).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-vue-triee-de-l-inventaire-d-un-gros-projet-index-reduit-et-c-plan.md`
+  summary: Pour 5.48 — l'arrêt à la première couche qui ne tient pas peut priver les rasters (dernière priorité, petits) et laisser du budget libre ; une demande qui ne désigne rien ne détaille que les rasters.
+  evidence: règle « on s'arrête au budget » du changement de cap, appliquée à la lettre par 5.46 et figée par le test the_details_stop_at_the_first_layer_that_does_not_fit ; à trancher sur les mesures de 48 (seuils déjà « à revoir en 48 »).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-vue-triee-de-l-inventaire-d-un-gros-projet-index-reduit-et-c-plan.md`
+  summary: Pour 5.48 — `LastPlan.cited` porte des identifiants QGIS complets ; si QGIS renouvelle l'id d'une couche citée à la réouverture du projet, la couche citée n'est plus détaillée (non vérifié, gravité medium).
+  evidence: les couches de l'utilisateur gardent leur id dans le .qgz, les résultats sont reconnus par leur fichier ; à vérifier en 48 en construisant LastPlan depuis le journal après une relance.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-vue-triee-de-l-inventaire-d-un-gros-projet-index-reduit-et-c-plan.md`
+  summary: Pour 5.48 — au-delà d'environ 150 couches de l'utilisateur, l'index seul dépasse le budget et la vue sort hors budget sans détail ; c'est alors le contrôle exact de cassini-ai qui refuse, avec le nouveau message de 48.
+  evidence: kept_by_batches ne retire jamais une couche de l'utilisateur (voulu, matrice du plan) ; 63 couches font 5 700 caractères d'index.
