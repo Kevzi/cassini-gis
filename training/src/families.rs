@@ -373,6 +373,14 @@ pub static FAMILIES: &[Family] = &[
         weight: 4,
         make: style_degrade,
     },
+    // Conversion d'un raster en GeoTIFF (epic 10, entrée 30, apprise au ré-entraînement groupé
+    // 5.49) : un MNT livré en ASCII Grid, ERDAS, JPEG 2000 ou VRT, converti seul ou avant une
+    // commande de terrain (`step:k`).
+    Family {
+        name: "conversion_raster",
+        weight: 4,
+        make: conversion_raster,
+    },
     // Environ 5 % du jeu : un exemple d'une autre famille, vu au tour de redemande. Le poids
     // compte les tirages laissés (corruption acceptée par `check_plan`, premier essai qui
     // n'est pas un plan d'appels) : un sur deux environ. Relevé de 20 à 24 en 4.6 : les plans
@@ -6664,6 +6672,191 @@ fn question_terrain(rng: &mut Rng) -> Option<Example> {
     };
     let request = finish(rng, &body, q, false);
     Some(example("question_terrain", b, rng, request, question(text)))
+}
+
+// -- conversion d'un raster (epic 10, entrée 30) ----------------------------
+//
+// `data.convert_raster` écrit en GeoTIFF un raster d'un autre format, que les commandes de
+// terrain ne lisent pas sinon (AD-20). `assign_epsg` n'est posé que si la demande écrit le
+// système (un ASCII Grid livré sans `.prj`) ; jamais une reprojection. Un MNT ouvert dans un
+// autre format est converti avant la commande de terrain demandée, qui lit `step:1`.
+
+/// Formats d'un raster que la conversion lit : extension et forme écrite dans la demande.
+/// L'ASCII Grid compte deux fois : c'est le format de livraison des MNT de l'IGN.
+const FOREIGN_RASTERS: &[(&str, &[&str])] = &[
+    ("asc", &["ASCII Grid", "ASC", "ASCII"]),
+    ("asc", &["ASCII Grid", "ASC", "ASCII"]),
+    ("img", &["ERDAS Imagine", "IMG"]),
+    ("jp2", &["JPEG 2000", "JP2"]),
+    ("vrt", &["VRT", "raster virtuel"]),
+];
+
+/// Système déclaré d'une source qui n'en a pas, et ses formes écrites (celles de la
+/// reprojection d'une couche, `LAYER_TARGETS`, pour le Lambert-93 et l'UTM).
+const ASSIGNED_SYSTEMS: &[(u32, &[&str])] = &[
+    (
+        2154,
+        &[
+            "il est en Lambert-93",
+            "son système est le Lambert-93 (EPSG:2154)",
+            "il n'a pas de .prj, c'est du Lambert-93",
+            "en EPSG:2154",
+        ],
+    ),
+    (
+        32631,
+        &["il est en UTM 31N", "son système est l'EPSG:32631"],
+    ),
+    (
+        32632,
+        &["il est en UTM 32N", "son système est l'EPSG:32632"],
+    ),
+];
+
+fn convert_raster_call(raster: &str, assign: Option<u32>) -> Value {
+    let mut params = json!({"raster": raster});
+    if let Some(code) = assign {
+        params["assign_epsg"] = json!(code);
+    }
+    json!({"command": "data.convert_raster", "params": params})
+}
+
+fn conversion_raster(rng: &mut Rng) -> Option<Example> {
+    match rng.below(10) {
+        0..=3 => conversion_fichier_raster(rng),
+        4 | 5 => conversion_couche_raster(rng),
+        6 | 7 => conversion_puis_terrain(rng, true),
+        _ => conversion_puis_terrain(rng, false),
+    }
+}
+
+/// « Convertis donnees/mnt.asc en GeoTIFF, il est en Lambert-93 » : un fichier non ouvert du
+/// dossier, cité par son chemin ; le système déclaré seulement s'il est écrit.
+fn conversion_fichier_raster(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let (ext, names) = *rng.pick(FOREIGN_RASTERS);
+    let path = b.add_file(rng, "mnt", Some(ext));
+    let format = *rng.pick(names);
+    let (assign, said) = if rng.chance(1, 2) {
+        let (code, forms) = *rng.pick(ASSIGNED_SYSTEMS);
+        (Some(code), format!(", {}", rng.pick(forms)))
+    } else {
+        (None, String::new())
+    };
+    let tif = *rng.pick(&["en GeoTIFF", "en GeoTIFF", "en TIFF", "au format GeoTIFF"]);
+    let (body, q) = match rng.below(7) {
+        0 | 1 => (format!("Convertis le fichier {path} {tif}{said}"), false),
+        2 => (format!("Transforme {path} {tif}{said}"), false),
+        3 => (format!("Mets le MNT {path} {tif}{said}"), false),
+        4 => (
+            format!("J'ai reçu le MNT {path} en {format} : convertis-le {tif}{said}"),
+            false,
+        ),
+        5 => (format!("Écris le raster {path} {tif}{said}"), false),
+        _ => (format!("Peux-tu convertir {path} {tif}{said}"), true),
+    };
+    let request = finish(rng, &body, q, false);
+    Some(example(
+        "conversion_raster",
+        b,
+        rng,
+        request,
+        calls(vec![convert_raster_call(&path, assign)]),
+    ))
+}
+
+/// « Convertis le MNT en GeoTIFF » : le MNT ouvert dans le projet depuis un `.asc`, un `.img`,
+/// un `.jp2` ou un `.vrt`, cité par sa `source`. Le système que l'inventaire lui donne est
+/// déclaré (`assign_epsg`) : un `.asc` de l'IGN sans `.prj` en a besoin pour que le GeoTIFF se
+/// lise ensuite par les commandes de terrain, et le geste accepte le même système redéclaré.
+fn conversion_couche_raster(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let epsg = terrain_epsg(rng);
+    let (ext, names) = *rng.pick(FOREIGN_RASTERS);
+    let dem = b.add_foreign_dem(rng, epsg, ext);
+    let format = *rng.pick(names);
+    let what = match rng.below(4) {
+        0 => "le MNT".to_string(),
+        1 => "le modèle numérique de terrain".to_string(),
+        2 => format!("la couche « {} »", dem.name),
+        _ => format!("le MNT en {format}"),
+    };
+    let (body, q) = match rng.below(5) {
+        0 | 1 => (format!("Convertis {what} en GeoTIFF"), false),
+        2 => (format!("Passe {what} en GeoTIFF"), false),
+        3 => (format!("Fais une copie en GeoTIFF de {what}"), false),
+        _ => (format!("Peux-tu écrire {what} en GeoTIFF"), true),
+    };
+    let body = body.replace("de le ", "du ");
+    let request = finish(rng, &body, q, false);
+    Some(example(
+        "conversion_raster",
+        b,
+        rng,
+        request,
+        calls(vec![convert_raster_call(&dem.source, Some(dem.epsg))]),
+    ))
+}
+
+/// Pente, exposition ou ombrage d'un MNT livré dans un autre format : la conversion d'abord,
+/// puis la commande de terrain sur `step:1`. `asked` : la demande dit la conversion (« convertis
+/// puis calcule ») ; sinon elle ne demande que le terrain, et le plan convertit quand même.
+fn conversion_puis_terrain(rng: &mut Rng, asked: bool) -> Option<Example> {
+    let mut b = Builder::new();
+    let epsg = terrain_epsg(rng);
+    let (ext, names) = *rng.pick(FOREIGN_RASTERS);
+    let dem = b.add_foreign_dem(rng, epsg, ext);
+    let format = *rng.pick(names);
+    let of = dem_words(rng, &dem);
+    let (unit, unit_text) = slope_unit(rng);
+    let (terrain, wish) = match rng.below(4) {
+        0 | 1 => (
+            json!({"command": "terrain.slope", "params": {"dem": "step:1", "unit": unit}}),
+            format!("calcule la pente {unit_text}"),
+        ),
+        2 => (
+            json!({"command": "terrain.aspect", "params": {"dem": "step:1"}}),
+            "calcule l'exposition des versants".to_string(),
+        ),
+        _ => (
+            json!({"command": "terrain.hillshade", "params": {"dem": "step:1"}}),
+            "fais un ombrage du relief".to_string(),
+        ),
+    };
+    let (body, q) = if asked {
+        match rng.below(3) {
+            0 => (format!("Convertis le MNT en GeoTIFF puis {wish}"), false),
+            1 => (
+                format!("Le MNT est en {format} : passe-le en GeoTIFF et {wish}"),
+                false,
+            ),
+            _ => {
+                let what = match rng.below(3) {
+                    0 => "le MNT".to_string(),
+                    1 => "le modèle numérique de terrain".to_string(),
+                    _ => format!("la couche « {} »", dem.name),
+                };
+                (format!("Mets {what} en GeoTIFF, ensuite {wish}"), false)
+            }
+        }
+    } else {
+        let wish = cap(&wish);
+        match rng.below(2) {
+            0 => (wish, false),
+            _ => (format!("{wish} à partir {of}"), false),
+        }
+    };
+    let request = finish(rng, &body, q, false);
+    Some(example(
+        "conversion_raster",
+        b,
+        rng,
+        request,
+        calls(vec![
+            convert_raster_call(&dem.source, Some(dem.epsg)),
+            terrain,
+        ]),
+    ))
 }
 
 // -- appartenance à une commune --------------------------------------------

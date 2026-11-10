@@ -370,7 +370,7 @@ donne l'esquisse.
 | `analysis.difference` | planifiée | qgis | epic 10, entrée 21 |
 | `analysis.area` | planifiée | qgis | epic 10, entrée 22 |
 | `data.convert` | faite | qgis | epic 10, entrée 9 |
-| `data.convert_raster` | planifiée | qgis | epic 10, entrée 30 |
+| `data.convert_raster` | faite | qgis | epic 10, entrée 30 |
 | `layer.remove` | faite | qgis | epic 10, entrée 27 |
 | `analysis.nearest` | planifiée | qgis | epic 10, entrée 10 |
 | `analysis.distance_matrix` | planifiée | qgis | epic 10, entrée 10 |
@@ -1714,9 +1714,13 @@ un tableur Excel ou CSV, champ en trop).
 Écrit un raster lisible par QGIS (ASCII Grid `.asc`, ERDAS `.img`, JPEG 2000 `.jp2`, GeoTIFF,
 VRT…) en GeoTIFF Float32, sans-donnée -9999, première bande, pour que les commandes du noyau le
 lisent (AD-20) ; l'original est intact (changement de cap du 2026-11-10, epic 10, entrée 30).
-Algorithme visé `gdal:translate`, repli `gdal:warpreproject` sans changement de système si le
-sans-donnée doit être réécrit, à vérifier dans la documentation de QGIS 3.44 au ticket. Le noyau
-dicte ensuite `layer.open_raster`. Jamais de reprojection (AD-19).
+Algorithme retenu au ticket (QGIS 3.44, paramètres vérifiés par la sonde) : `gdal:warpreproject`
+seul, sans système d'arrivée, sans résolution ni emprise imposées, au plus proche voisin, type
+Float32, sans-donnée -9999, bande 1 (`-srcband 1 -dstband 1`), compression DEFLATE. Pas
+`gdal:translate` : il change l'étiquette du sans-donnée sans réécrire les cellules (le -99999
+d'un ASCII Grid de l'IGN deviendrait une altitude), et une chaîne fixe ne choisit pas entre deux
+algorithmes (AD-24). La grille écrite est celle de la source. Le noyau dicte ensuite
+`layer.open_raster` (amendement du 2026-11-05 d'AD-24). Jamais de reprojection (AD-19).
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
@@ -1729,14 +1733,14 @@ dicte ensuite `layer.open_raster`. Jamais de reprojection (AD-19).
 | `file` | chaîne | GeoTIFF écrit. |
 | `epsg` | entier ou `null` | Système du GeoTIFF écrit, s'il en a un. |
 
-Erreurs : fichier absent ou illisible par QGIS (erreur alignée au ticket sur celle de
-`raster.align`) ; `analysis.bad_params` (`assign_epsg` pour une source qui a déjà un autre
+Erreurs : `layer.not_found` (fichier absent) ; `layer.invalid_source` (fichier que QGIS ne lit
+pas comme un raster, comme `layer.open_raster`) ; `analysis.bad_params` (`assign_epsg` pour une source qui a déjà un autre
 système) ; `data.unknown_crs` ; `analysis.failed` ; `qgis.cancelled`. Un GeoTIFF sans système
 reste lisible par QGIS mais est refusé ensuite par les commandes du noyau (`dem.no_epsg`) : le
 résumé le dit.
 
 ```json fiche
-{"id": "data.convert_raster", "status": "planifiee", "runs_in": "qgis", "dictated_by_core": false,
+{"id": "data.convert_raster", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
  "params": {"raster": {"type": "RasterPath", "required": true},
             "assign_epsg": {"type": "integer", "required": false},
             "out": {"type": "string", "required": false}},

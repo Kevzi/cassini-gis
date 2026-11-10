@@ -105,6 +105,15 @@ pub fn validate(registry: &Registry, example: &Example) -> Result<(), String> {
                 .flatten()
                 .filter_map(|f| f["path"].as_str())
                 .collect();
+            // Un raster d'un autre format, non ouvert, que `data.convert_raster` cite par son
+            // chemin (epic 10, entrée 30).
+            let raster_files: HashSet<&str> = example.inventory["unloaded_files"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|f| f["kind"] == "raster")
+                .filter_map(|f| f["path"].as_str())
+                .collect();
             for (index, call) in calls.iter().enumerate() {
                 for name in LAYER_PARAMS {
                     if let Some(id) = call.params[name].as_str() {
@@ -118,9 +127,12 @@ pub fn validate(registry: &Registry, example: &Example) -> Result<(), String> {
                 // la référence et son type raster.
                 for name in RASTER_PARAMS {
                     if let Some(raster) = call.params.get(name) {
-                        let known = raster
-                            .as_str()
-                            .is_some_and(|r| dems.contains(r) || r.starts_with("step:"));
+                        let known = raster.as_str().is_some_and(|r| {
+                            dems.contains(r)
+                                || r.starts_with("step:")
+                                || (call.command == "data.convert_raster"
+                                    && raster_files.contains(r))
+                        });
                         if !known {
                             return Err(format!(
                                 "étape {} : raster absent « {raster} »",

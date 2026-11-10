@@ -960,3 +960,9 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-generateur-gros-projets-de-20-a-60-couches-rendus-par-la-vue-plan.md`
   summary: le test `the_whole_generated_set_is_cut_at_every_layer` (`ai/src/plan.rs`) ne contrôle plus les inventaires à `index` (≈ 25 % du jeu) ; les découpes de la vue triée sont à tester en 5.48.
   evidence: relecture quick de 5.47 ; le filtre du test écarte toute clé `index`, et le placement du cache à la fin de l'index est l'objet de 5.48.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-conversion-d-un-raster-en-geotiff-data-convert-raster-plan.md`
+  summary: `data.convert_raster` fixe `DATA_TYPE` à l'index 6 (Float32) de `gdal:warpreproject`, relu sous QGIS 3.44 seulement ; à vérifier sous QGIS 4.x.
+  evidence: non vérifié (medium s'il change) ; la sonde `probe_convert_raster.py` sous un QGIS 4.x le tranche (type du GeoTIFF écrit).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-conversion-d-un-raster-en-geotiff-data-convert-raster-plan.md`
+  summary: l'annulation d'un gdalwarp en cours par `data.convert_raster` n'est jouée que par la doublure, pas sous le vrai QGIS.
+  evidence: la sonde annule avant le lancement ; une conversion d'un gros MNT annulée en cours sous QGIS 3.44 le tranche (aucun .tif ni .aux.xml laissé).

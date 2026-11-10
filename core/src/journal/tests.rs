@@ -1337,6 +1337,24 @@ impl Executor for ProjectQgis {
                 let name = path.file_stem().unwrap().to_string_lossy().into_owned();
                 Ok(json!({"layer_id": layer, "name": name, "crs": "EPSG:2154"}))
             }
+            // Comme le geste de `data.convert_raster` : QGIS écrit le GeoTIFF à l'emplacement
+            // que le noyau donne (ici, une copie du MNT de test), l'original est intact, et
+            // rien n'entre au projet : l'ouverture est l'étape que le noyau dicte ensuite.
+            "data.convert_raster" => {
+                let source = Path::new(p["raster"].as_str().unwrap());
+                assert!(
+                    source.is_absolute() && source.is_file(),
+                    "{}",
+                    source.display()
+                );
+                let out = p["out"].as_str().unwrap().to_string();
+                assert!(out.ends_with(".tif"), "{out}");
+                let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../fixtures/mnt-plan-incline-2154.tif");
+                fs::copy(fixture, &out).unwrap();
+                Ok(json!({"file": out, "epsg": p.get("assign_epsg").cloned()
+                    .unwrap_or(json!(2154))}))
+            }
             "layout.export_pdf" => {
                 self.seen
                     .borrow_mut()
@@ -4060,5 +4078,104 @@ fn a_removal_refused_for_an_unsaved_layer_keeps_it_and_replays_identically_while
         )
         .unwrap_err();
     assert_eq!((err.code.as_str(), err.step), ("replay.diverged", Some(1)));
+    let _ = fs::remove_dir_all(dir);
+}
+
+// ---- Epic 10, entrée 30 : `data.convert_raster`, puis l'ouverture dictée et la pente ----
+
+/// Session d'origine : un ASCII Grid converti par QGIS, ouvert par l'étape dictée, puis la
+/// pente calculée par le noyau sur la sortie de la conversion (`out:1.1`, le repère d'un
+/// `step:1` de plan).
+fn convert_raster_journal(project_file: &Path, project: &std::rc::Rc<OpenProject>) -> String {
+    let dir = project_file.parent().unwrap();
+    fs::create_dir_all(dir.join("mnt")).unwrap();
+    let source = dir.join("mnt/dalle.asc");
+    fs::write(&source, "ncols 2\nnrows 2\n").unwrap();
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, project_file)
+        .unwrap()
+        .with_qgis(ProjectQgis::new(project, 1))
+        .with_raster_opening(true);
+    let converted = s
+        .call(
+            "data.convert_raster",
+            json!({"raster": "mnt/dalle.asc", "assign_epsg": 2154}),
+        )
+        .unwrap();
+    assert!(converted["file"]
+        .as_str()
+        .unwrap()
+        .ends_with("1-data.convert_raster.tif"));
+    s.call(
+        "terrain.slope",
+        json!({"dem": "out:1.1", "unit": "degrees"}),
+    )
+    .unwrap();
+    let l = lines(&s);
+    let ids: Vec<&str> = l.iter().map(|l| l["id"].as_str().unwrap()).collect();
+    assert_eq!(
+        ids,
+        [
+            "data.convert_raster",
+            "layer.open_raster",
+            "terrain.slope",
+            "layer.open_raster"
+        ]
+    );
+    // La source est journalisée relative, avec son empreinte ; la sortie par son repère.
+    assert_eq!(l[0]["params"]["raster"], json!("mnt/dalle.asc"));
+    assert_eq!(l[0]["inputs"].as_array().unwrap().len(), 1);
+    assert_eq!(l[1]["params"], json!({"path": "out:1.1"}));
+    assert_eq!(l[1]["layer_id"], json!("raster_g1_2"));
+    assert_eq!(l[2]["params"]["dem"], json!("out:1.1"));
+    assert_eq!(l[3]["params"], json!({"path": "out:3.1"}));
+    // L'original n'est pas touché.
+    assert_eq!(fs::read_to_string(&source).unwrap(), "ncols 2\nnrows 2\n");
+    fs::read_to_string(s.journal_path()).unwrap()
+}
+
+#[test]
+fn a_converted_raster_is_opened_by_the_core_and_feeds_a_slope() {
+    let (dir, project_file, token) = temp_project();
+    let journal = convert_raster_journal(&project_file, &OpenProject::with_base());
+    assert!(!journal.contains(&token), "aucun chemin absolu au journal");
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_converted_raster_replays_identically_in_a_new_session_and_twice_in_the_same() {
+    let (dir, project_file, _) = temp_project();
+    let project = OpenProject::with_base();
+    let before = convert_raster_journal(&project_file, &project);
+    let identical = ReplayReport {
+        steps: 4,
+        identical: true,
+    };
+    let mut replayed = HashSet::new();
+    let (outcome, _) = replay_in(&project_file, &project, 2, &mut replayed);
+    assert_eq!(outcome.unwrap(), identical);
+    let (outcome, _) = replay_in(&project_file, &project, 3, &mut replayed);
+    assert_eq!(outcome.unwrap(), identical);
+    // Projet rouvert sans les rasters : la conversion est rejouée, puis rouverte, puis la pente.
+    let reopened = OpenProject::with_base();
+    let (outcome, _) = replay_in(&project_file, &reopened, 4, &mut HashSet::new());
+    assert_eq!(outcome.unwrap(), identical);
+    let files: Vec<String> = reopened
+        .layers
+        .borrow()
+        .iter()
+        .map(|(_, f)| f.clone())
+        .collect();
+    assert_eq!(
+        files,
+        [
+            "communes.gpkg",
+            "1-data.convert_raster.tif",
+            "3-terrain.slope.tif"
+        ]
+    );
+    let work = project_file.parent().unwrap().join("p.cassini");
+    assert!(work.join("replay/1-data.convert_raster.tif").is_file());
+    assert_eq!(fs::read_to_string(work.join(JOURNAL_FILE)).unwrap(), before);
     let _ = fs::remove_dir_all(dir);
 }

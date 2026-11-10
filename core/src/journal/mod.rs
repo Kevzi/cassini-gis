@@ -377,17 +377,21 @@ impl<'a> Session<'a> {
     }
 
     /// Commande d'ouverture que la session dicte après une étape de `id` : `layer.open_raster`
-    /// pour une sortie GeoTIFF, `layer.open_vector` pour une sortie GeoJSON, d'une commande du
-    /// noyau seulement, et si l'extension annonce le geste ; `None` sinon.
+    /// pour une sortie GeoTIFF, d'une commande du noyau ou d'une commande déléguée qui écrit un
+    /// raster (amendement du 2026-11-05 d'AD-24, `data.convert_raster`) ; `layer.open_vector`
+    /// pour une sortie GeoJSON d'une commande du noyau seulement (une couche vecteur déléguée
+    /// est posée au projet par son geste) ; et si l'extension annonce le geste ; `None` sinon.
     fn opener_of(&self, id: &str) -> Option<&'static str> {
         let spec = self.registry.spec(id)?;
-        if spec.runs_in != Some(crate::registry::RunsIn::Core) {
-            return None;
-        }
+        let core = match spec.runs_in {
+            Some(crate::registry::RunsIn::Core) => true,
+            Some(crate::registry::RunsIn::Qgis) => false,
+            None => return None,
+        };
         let ext = spec.output_ext.as_str();
         let opener = if RASTER_EXTENSIONS.contains(&ext) && self.opens_rasters {
             OPEN_RASTER
-        } else if VECTOR_EXTENSIONS.contains(&ext) && self.opens_vectors {
+        } else if core && VECTOR_EXTENSIONS.contains(&ext) && self.opens_vectors {
             OPEN_VECTOR
         } else {
             return None;

@@ -529,6 +529,32 @@ def _data_convert(lang, p, r, names):
     return text + texts.tr(lang, "sum_file", file=file)
 
 
+def _convert_raster(lang, p, r, names):
+    """Le raster écrit en GeoTIFF par QGIS ; affichage seul (AD-5). Un GeoTIFF sans système est
+    signalé : les commandes de terrain le refuseront (`dem.no_epsg`)."""
+    value = p.get("raster")
+    if isinstance(value, str) and _STEP_REF.match(value):
+        raster = names.layer(value)
+    else:
+        raster = file_name(value)
+    key = "sum_convert_raster_ask" if names.ahead else "sum_convert_raster"
+    text = texts.tr(lang, key, raster=raster)
+    assign = p.get("assign_epsg")
+    if assign is not None:
+        if not _is_int(assign):
+            raise _Unreadable()
+        text += texts.tr(lang, "sum_convert_raster_assign", epsg=assign)
+    if not r:
+        return text
+    text += _file_part(lang, r)
+    epsg = r.get("epsg")
+    if epsg is None and "epsg" in r:
+        text += texts.tr(lang, "sum_convert_raster_no_crs")
+    elif _is_int(epsg) and assign is None:
+        text += texts.tr(lang, "sum_convert_raster_epsg", epsg=epsg)
+    return text
+
+
 def _layer_remove(lang, p, r, names):
     """La couche retirée du projet, aucun fichier effacé ; affichage seul (AD-5)."""
     key = "sum_layer_remove_ask" if names.ahead else "sum_layer_remove"
@@ -835,6 +861,7 @@ _SENTENCES = {
     "data.transform_point": _transform_point,
     "data.reproject": _reproject,
     "data.convert": _data_convert,
+    "data.convert_raster": _convert_raster,
     "layer.remove": _layer_remove,
     "analysis.buffer": _buffer,
     "analysis.intersect": _intersect,

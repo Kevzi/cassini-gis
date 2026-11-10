@@ -111,7 +111,7 @@ Une couche que Cassini ne reconnaît pas garde son style : il ne devine pas.
 | `layer.add` | ouvre un fichier vecteur sans le toucher |
 | `project.inventory`, `layer.describe` | décrivent le projet et ses couches, pour vous et pour l'IA |
 | `layer.remove` | retire une couche du projet, sans effacer ni modifier son fichier |
-| `data.reproject`, `data.convert` | reprojettent une couche, la convertissent dans un autre format |
+| `data.reproject`, `data.convert`, `data.convert_raster` | reprojettent une couche, la convertissent dans un autre format, écrivent un raster (ASCII Grid, IMG, JP2…) en GeoTIFF pour les commandes de terrain |
 | `data.transform_point` | reprojette un seul point vers un code EPSG |
 | `analysis.buffer` | zone tampon |
 | `analysis.intersect` | intersection de deux couches |
