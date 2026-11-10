@@ -939,6 +939,17 @@ flowchart LR
   se rapportent au nord du quadrillage du MNT, en degrés ; une cellule plate a
   l'exposition NoData. Une même commande ne change jamais d'unité selon la
   demande sans le paramètre `unit`.
+- **Amendement (2026-11-10, changement de cap
+  `change-complements-geometrie-et-mise-en-page`, approuvé par le propriétaire le
+  2026-11-10) — nord choisi.** Un azimut se compte depuis le nord vrai, sauf quand la
+  commande reçoit `north` : `grid` (nord du quadrillage UTM, par la convergence des
+  méridiens calculée d'après la publication, ce qui n'est pas une conversion de
+  coordonnées au sens d'AD-19) ou `magnetic` (déclinaison du modèle magnétique mondial
+  embarqué, à une date journalisée). Le nord employé est toujours rendu dans le résultat ;
+  une commande ne change jamais de nord sans ce paramètre. Les coefficients du modèle
+  magnétique sont une donnée compilée dans le noyau, mise à jour par une nouvelle version
+  du noyau (AD-17), jamais lue par le réseau. Le gisement ne se calcule qu'en UTM
+  (décision du propriétaire du 2026-11-10 : pas de Lambert-93, AD-19 inchangé).
 
 ## Consistency Conventions
 
