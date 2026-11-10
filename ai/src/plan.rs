@@ -257,6 +257,11 @@ fn catalog_entry(spec: &CommandSpec) -> Value {
         // prompt reste celui d'avant le type (ticket 11.5) ; la définition devenue inutile est
         // ôtée ci-dessous.
         map.values_mut().for_each(inline_raster_paths);
+        // La zone et les carrés d'un carroyage MGRS sont fournis par le noyau (epic 10, entrée
+        // 31) : la forme `mgrs` est montrée sans eux.
+        if spec.mgrs_grid_param.is_some() {
+            map.values_mut().for_each(hide_mgrs_core_fields);
+        }
         // Une définition que seul un paramètre caché employait (le `Point` du centre d'un
         // export) n'a rien à faire dans le long prompt.
         if let Some(Value::Object(defs)) = map.remove("$defs") {
@@ -279,6 +284,37 @@ fn catalog_entry(spec: &CommandSpec) -> Value {
     }
     strip_marks(&mut params);
     json!({"id": spec.id, "description": spec.description_fr, "params": params})
+}
+
+/// Champs d'un carroyage `mgrs` que le noyau remplit, ôtés du schéma montré au modèle.
+const MGRS_CORE_FIELDS: [&str; 2] = ["epsg", "squares"];
+
+/// Ôte `epsg` et `squares` de toute variante dont l'étiquette `kind` vaut `mgrs`.
+fn hide_mgrs_core_fields(node: &mut Value) {
+    match node {
+        Value::Object(map) => {
+            let is_mgrs = map
+                .get("properties")
+                .and_then(|p| p.get("kind"))
+                .is_some_and(|k| {
+                    k.get("const").and_then(Value::as_str) == Some("mgrs")
+                        || k.get("enum") == Some(&json!(["mgrs"]))
+                });
+            if is_mgrs {
+                if let Some(Value::Object(props)) = map.get_mut("properties") {
+                    for field in MGRS_CORE_FIELDS {
+                        props.remove(field);
+                    }
+                }
+                if let Some(Value::Array(required)) = map.get_mut("required") {
+                    required.retain(|r| r.as_str().is_none_or(|n| !MGRS_CORE_FIELDS.contains(&n)));
+                }
+            }
+            map.values_mut().for_each(hide_mgrs_core_fields);
+        }
+        Value::Array(items) => items.iter_mut().for_each(hide_mgrs_core_fields),
+        _ => {}
+    }
 }
 
 /// Remplace toute référence à la définition `RasterPath` par `"type": "string"`, en gardant
@@ -1019,6 +1055,12 @@ mod tests {
         assert!(export["params"]["properties"].get("center").is_none());
         assert!(export["params"]["properties"].get("scale").is_some());
         assert!(!export.to_string().contains("\"center\""), "{export}");
+        // La forme `mgrs` du carroyage est montrée, sans la zone ni les carrés que le noyau
+        // remplit (epic 10, entrée 31).
+        let export_text = export.to_string();
+        assert!(export_text.contains("\"mgrs\""), "{export}");
+        assert!(!export_text.contains("\"squares\""), "{export}");
+        assert!(export["params"]["properties"].get("header").is_some());
         // Le `Point` du centre, caché, quitte les définitions ; celles du carroyage restent
         // (epic 11, entrée 11).
         let defs = &export["params"]["$defs"];

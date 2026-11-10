@@ -381,6 +381,19 @@ pub static FAMILIES: &[Family] = &[
         weight: 4,
         make: conversion_raster,
     },
+    // Mise en page de l'entrée 31 de l'epic 10 (apprises au ré-entraînement groupé 5.49) : le
+    // carroyage MGRS étiqueté des cartes de secours (grille USNG), et l'en-tête et le pied de page
+    // libres des bureaux d'études. La ligne des sources détaillée est automatique : pas de famille.
+    Family {
+        name: "carroyage_mgrs",
+        weight: 4,
+        make: carroyage_mgrs,
+    },
+    Family {
+        name: "entete_pied_de_page",
+        weight: 4,
+        make: entete_pied_de_page,
+    },
     // Environ 5 % du jeu : un exemple d'une autre famille, vu au tour de redemande. Le poids
     // compte les tirages laissés (corruption acceptée par `check_plan`, premier essai qui
     // n'est pas un plan d'appels) : un sur deux environ. Relevé de 20 à 24 en 4.6 : les plans
@@ -6859,6 +6872,179 @@ fn conversion_puis_terrain(rng: &mut Rng, asked: bool) -> Option<Example> {
     ))
 }
 
+// -- mise en page : carroyage MGRS, en-tête et pied de page (epic 10, entrée 31) --
+//
+// Le carroyage MGRS (`{"kind": "mgrs", "interval": ...}`) ne porte jamais `epsg` ni `squares` :
+// le noyau les fournit d'après l'emprise. L'intervalle est toujours écrit (1, 10 ou 100 km).
+// L'en-tête et le pied de page sont recopiés de la demande, entre guillemets, jamais inventés.
+
+/// Intervalles d'un carroyage MGRS, et leurs formes écrites.
+const MGRS_STEPS: &[(u64, &[&str])] = &[
+    (
+        1,
+        &[
+            "au kilomètre",
+            "de 1 km",
+            "tous les 1 km",
+            "kilométrique",
+            "tous les kilomètres",
+        ],
+    ),
+    (1, &["de 1 km", "au kilomètre"]),
+    (10, &["de 10 km", "tous les 10 km", "de 10 kilomètres"]),
+    (100, &["de 100 km", "tous les 100 km"]),
+];
+
+/// « Exporte la carte en PDF avec le carroyage MGRS au kilomètre » : `layout.export_pdf` avec
+/// `grid` `mgrs` et l'intervalle écrit ; un format de page seulement s'il est écrit.
+fn carroyage_mgrs(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    b.distract(rng, 2, vector);
+    // Le fuseau de l'inventaire n'importe pas : le noyau tire la zone de l'emprise.
+    let present = rng.chance(1, 2);
+    b.project_utm(rng, present);
+    let (km, forms) = *rng.pick(MGRS_STEPS);
+    let step = *rng.pick(forms);
+    let grid_words = match rng.below(6) {
+        0 => format!(" avec un carroyage MGRS {step}"),
+        1 => format!(" avec la grille MGRS {step}"),
+        2 => format!(" avec un quadrillage MGRS étiqueté {step}"),
+        3 => format!(" avec la grille USNG {step}"),
+        4 => format!(" carroyée en MGRS {step}"),
+        _ => format!(" avec un carroyage MGRS (USNG) {step}"),
+    };
+    let size = if rng.chance(1, 3) {
+        Some(*rng.pick(&PAGE_SIZES[..3]))
+    } else {
+        None
+    };
+    let pw = page_words(rng, size.map(|s| s.1), None);
+    let head = *rng.pick(&[
+        "Exporte la carte en PDF",
+        "Sors la carte en PDF",
+        "Imprime la carte du secteur de recherche",
+        "Prépare la carte pour l'équipe de recherche",
+        "Fais la carte de recherche en PDF",
+        "Produis la carte d'intervention en PDF",
+        "Génère un PDF de la carte",
+    ]);
+    let titled = rng.chance(1, 3);
+    let title = if titled {
+        (*rng.pick(&[
+            "Secteur de recherche",
+            "Zone de battue",
+            "Recherche de personne",
+            "Carte d'intervention",
+            "Secteur nord",
+        ]))
+        .to_string()
+    } else {
+        "Carte du projet".to_string()
+    };
+    let mut body = format!("{head}{pw}{grid_words}");
+    if titled {
+        body.push_str(&format!(", avec le titre « {title} »"));
+    }
+    let request = finish(rng, &body, false, false);
+    let mut params = json!({"title": title,
+        "grid": {"kind": "mgrs", "interval": {"value": km, "unit": "km"}}});
+    if let Some((v, _)) = size {
+        params["page_size"] = json!(v);
+    }
+    Some(example(
+        "carroyage_mgrs",
+        b,
+        rng,
+        request,
+        calls(vec![
+            json!({"command": "layout.export_pdf", "params": params}),
+        ]),
+    ))
+}
+
+/// Textes d'en-tête et de pied de page d'un bureau d'études ou d'une collectivité.
+const MARGIN_TEXTS: &[&str] = &[
+    "Document de travail",
+    "Version provisoire",
+    "Ne pas diffuser",
+    "Confidentiel — usage du client",
+    "Bureau d'études Lac et Monts",
+    "Cabinet Géo-Conseil, 12 rue des Alpes",
+    "Commune de Seynod — service urbanisme",
+    "Dossier PLU, phase 2",
+    "Étude d'impact, annexe 3",
+    "Brouillon soumis à validation",
+    "Réunion de concertation du 14 mars",
+    "Pièce n° 4 du dossier",
+];
+
+/// « Exporte la carte en PDF avec l'en-tête « Document de travail » » : `header`, `footer` ou les
+/// deux, recopiés tels qu'écrits entre guillemets ; le titre seulement s'il est donné.
+fn entete_pied_de_page(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    b.distract(rng, 2, vector);
+    let which = rng.below(3); // 0 : en-tête, 1 : pied, 2 : les deux
+    let header = (which != 1).then(|| *rng.pick(MARGIN_TEXTS));
+    let footer = (which != 0).then(|| loop {
+        let t = *rng.pick(MARGIN_TEXTS);
+        if Some(t) != header {
+            break t;
+        }
+    });
+    let head = *rng.pick(&[
+        "Exporte la carte en PDF",
+        "Sors la carte en PDF",
+        "Génère un PDF de la carte",
+        "Produis la carte en PDF",
+        "Exporte la carte",
+    ]);
+    let mut parts = Vec::new();
+    if let Some(h) = header {
+        parts.push(match rng.below(4) {
+            0 => format!("avec l'en-tête « {h} »"),
+            1 => format!("avec « {h} » en en-tête"),
+            2 => format!("avec la mention « {h} » en haut de page"),
+            _ => format!("en-tête : « {h} »"),
+        });
+    }
+    if let Some(f) = footer {
+        parts.push(match rng.below(4) {
+            0 => format!("avec le pied de page « {f} »"),
+            1 => format!("avec « {f} » en pied de page"),
+            2 => format!("avec la mention « {f} » en bas de page"),
+            _ => format!("pied de page : « {f} »"),
+        });
+    }
+    let titled = rng.chance(1, 3);
+    let title = if titled {
+        (*rng.pick(USER_TITLES)).to_string()
+    } else {
+        "Carte du projet".to_string()
+    };
+    if titled {
+        parts.push(format!("avec le titre « {title} »"));
+        rng.shuffle(&mut parts);
+    }
+    let body = format!("{head}, {}", parts.join(", "));
+    let request = finish(rng, &body, false, false);
+    let mut params = json!({"title": title});
+    if let Some(h) = header {
+        params["header"] = json!(h);
+    }
+    if let Some(f) = footer {
+        params["footer"] = json!(f);
+    }
+    Some(example(
+        "entete_pied_de_page",
+        b,
+        rng,
+        request,
+        calls(vec![
+            json!({"command": "layout.export_pdf", "params": params}),
+        ]),
+    ))
+}
+
 // -- appartenance à une commune --------------------------------------------
 
 /// Tournure explicite d'appartenance à une commune nommée : seule elle crée une étape. Une
@@ -11162,5 +11348,58 @@ mod tests {
                 assert!(head.is_disjoint(&heads), "{name} : {head:?}");
             }
         }
+    }
+
+    #[test]
+    fn the_mgrs_grid_family_writes_its_interval_and_never_the_core_fields() {
+        // Epic 10, entrée 31 : chaque exemple passe `check_plan` ; l'intervalle est écrit, la
+        // zone et les carrés jamais (le noyau les fournit).
+        for e in valid(carroyage_mgrs, 600) {
+            let grid = &e.expected["calls"][0]["params"]["grid"];
+            assert_eq!(grid["kind"], "mgrs", "{}", e.request);
+            assert!(
+                grid.get("epsg").is_none() && grid.get("squares").is_none(),
+                "{}",
+                e.request
+            );
+            let km = grid["interval"]["value"].as_u64().unwrap();
+            assert!([1, 10, 100].contains(&km), "{}", e.request);
+            let r = e.request.to_lowercase();
+            assert!(r.contains("mgrs") || r.contains("usng"), "{}", e.request);
+            let written = if km == 1 {
+                r.contains("1 km") || r.contains("kilom")
+            } else {
+                r.contains(&format!("{km} km")) || r.contains(&format!("{km} kilom"))
+            };
+            assert!(written, "intervalle non écrit : {}", e.request);
+        }
+    }
+
+    #[test]
+    fn the_margin_family_copies_header_and_footer_verbatim() {
+        let mut both = 0;
+        for e in valid(entete_pied_de_page, 600) {
+            let params = &e.expected["calls"][0]["params"];
+            let header = params["header"].as_str();
+            let footer = params["footer"].as_str();
+            assert!(header.is_some() || footer.is_some(), "{}", e.request);
+            for text in [header, footer].into_iter().flatten() {
+                assert!(
+                    e.request.contains(&format!("« {text} »")),
+                    "{} : {text}",
+                    e.request
+                );
+                assert!(text.chars().count() <= 120);
+            }
+            if let (Some(h), Some(f)) = (header, footer) {
+                assert_ne!(h, f, "{}", e.request);
+            }
+            both += usize::from(header.is_some() && footer.is_some());
+            if params["title"] != "Carte du projet" {
+                let title = params["title"].as_str().unwrap();
+                assert!(e.request.contains(&format!("« {title} »")), "{}", e.request);
+            }
+        }
+        assert!(both > 50, "{both}");
     }
 }

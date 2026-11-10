@@ -376,6 +376,37 @@ impl<'a> Session<'a> {
         Ok(value)
     }
 
+    /// Complète un carroyage `mgrs` du paramètre `name` : ôte `epsg` et `squares` de
+    /// l'appelant, lit l'inventaire auprès de QGIS et y pose la zone UTM et les carrés de
+    /// 100 km de l'emprise du projet. Sans emprise lisible, `layout.no_extent`, avant tout ordre
+    /// d'export et sans ligne au journal. Les autres formes de carroyage ne lisent rien.
+    fn fill_mgrs_grid(&self, id: &str, params: &mut Value, name: &str) -> Result<(), ErrorReport> {
+        let Some(grid) = params.get_mut(name).and_then(Value::as_object_mut) else {
+            return Ok(());
+        };
+        if grid.get("kind").and_then(Value::as_str) != Some("mgrs") {
+            return Ok(());
+        }
+        grid.remove("epsg");
+        grid.remove("squares");
+        // Des paramètres invalides (intervalle hors liste, champ en trop) sont refusés tels quels,
+        // avant toute lecture auprès de QGIS.
+        self.registry.validate_params(id, params)?;
+        let inventory = self.router.call(INVENTORY, json!({}))?;
+        let (epsg, squares) = crate::commands::layout_export_pdf::mgrs_grid_of(&inventory)
+            .ok_or_else(|| RegistryError::Delegated {
+                code: "layout.no_extent".into(),
+                message: "Le projet n'a pas d'emprise lisible en degrés (couches vides, ou plus \
+                          de deux fuseaux UTM) : aucun carroyage MGRS ne peut être posé."
+                    .into(),
+            })?;
+        if let Some(grid) = params.get_mut(name).and_then(Value::as_object_mut) {
+            grid.insert("epsg".into(), json!(epsg));
+            grid.insert("squares".into(), json!(squares));
+        }
+        Ok(())
+    }
+
     /// Commande d'ouverture que la session dicte après une étape de `id` : `layer.open_raster`
     /// pour une sortie GeoTIFF, d'une commande du noyau ou d'une commande déléguée qui écrit un
     /// raster (amendement du 2026-11-05 d'AD-24, `data.convert_raster`) ; `layer.open_vector`
@@ -491,6 +522,12 @@ impl<'a> Session<'a> {
             if let Some(name) = &spec.inventory_param {
                 map.remove(name);
             }
+        }
+        // Un carroyage MGRS : sa zone et ses carrés de 100 km sont ceux du noyau, d'après
+        // l'emprise du projet lue auprès de QGIS, jamais ceux de l'appelant ; ils sont
+        // journalisés avec les paramètres, et le rejeu les repasse tels quels (epic 10, entrée 31).
+        if let Some(name) = &spec.mgrs_grid_param {
+            self.fill_mgrs_grid(id, &mut params, name)?;
         }
         // Une mise en forme sans les gestes qu'elle demande n'est pas exécutée, et rien n'est
         // écrit (AD-25, entrée 11.20).

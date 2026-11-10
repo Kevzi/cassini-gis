@@ -222,7 +222,7 @@ Recette manuelle de `analysis.isochrone` [ticket 11] (réseau apporté par l'uti
 Recette manuelle de `layout.export_pdf` [ticket 12] (jeu `../donnees-test-cassini/`) :
 
 1. Ouvrez `projet-test-villeneuve.qgz`. Choisissez `layout.export_pdf` : les champs sont
-   `title` et, facultatifs, `scale`, `page_size`, `orientation` et `grid` (le fichier `out`
+   `title` et, facultatifs, `scale`, `page_size`, `orientation`, `grid`, `header` et `footer` (le fichier `out`
    est nommé par le noyau, le panneau ne l'affiche pas).
 2. Lancez avec un titre : un PDF A4 paysage apparaît dans le dossier de travail ; ouvert
    dans un lecteur, il montre le titre, la carte des couches visibles, la légende, la barre
@@ -245,13 +245,24 @@ Recette manuelle de `layout.export_pdf` [ticket 12] (jeu `../donnees-test-cassin
    `a3`, `a2`, `a1` ou `a0`, `orientation` vaut `landscape` (défaut) ou `portrait` ; les
    éléments gardent leur place en proportion de la page. `grid` pose une grille sur la
    carte, à saisir en JSON : `{"kind": "projected", "epsg": 32631, "interval": {"value": 1,
-   "unit": "km"}}` trace un carroyage UTM 31 N au kilomètre (les lignes MGRS, sans leurs
-   étiquettes), `{"kind": "degrees", "interval": {"value": 0.01, "unit": "deg"}}` un
+   "unit": "km"}}` trace un carroyage UTM 31 N au kilomètre (étiquettes en décimal),
+   `{"kind": "degrees", "interval": {"value": 0.01, "unit": "deg"}}` un
    graticule WGS84 de 0,01° (`gon` accepté, 1 gon = 0,9°). Les étiquettes sont en décimal,
    à gauche et en bas de la carte. Un `epsg` inconnu de QGIS donne `data.unknown_crs`, un
    système géographique en `projected` ou plus de 200 lignes par axe sur la carte
    `layout.bad_params`, sans fichier. Sans ces paramètres, le PDF reste une A4 paysage sans
    grille, et un journal d'avant rejoue à l'identique.
+6 bis. Carroyage MGRS, en-tête, pied de page et sources détaillées [epic 10, entrée 31] : `grid`
+   `{"kind": "mgrs", "interval": {"value": 1, "unit": "km"}}` (1, 10 ou 100 km) trace le
+   quadrillage UTM étiqueté par les deux chiffres du kilomètre (aucune étiquette à 100 km, ni
+   au-delà de 60 lignes sur un côté) et pose au coin bas droit de la carte le cadre « Carrés de
+   100 km : 32T KR, … » ; la zone et les carrés sont posés par le noyau d'après l'emprise du
+   projet (journal : `grid.epsg`, `grid.squares`), un projet sans emprise donne
+   `layout.no_extent`. `header` et `footer` (une ligne, 120 caractères au plus) s'impriment
+   centrés en haut et en bas de la page. La ligne des sources dit pour chaque fichier sa taille
+   de cellule (raster en mètres) et sa date (« fichier du … » ou « données du … » d'après les
+   métadonnées) ; une sortie de Cassini n'a pas de date. Sonde :
+   `qgis-plugin/tests/probe_mgrs_layout.py` (Annecy, A3, puis rejeu).
 7. Sonde sous le vrai QGIS : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat"
    qgis-plugin/tests/probe_layout_export.py` doit finir par `RÉSULTAT : OK` (elle exporte
    aussi au 1:25 000 et relit l'échelle, repasse le centre en EPSG:4326 pour éprouver la

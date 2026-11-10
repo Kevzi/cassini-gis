@@ -4179,3 +4179,200 @@ fn a_converted_raster_replays_identically_in_a_new_session_and_twice_in_the_same
     assert_eq!(fs::read_to_string(work.join(JOURNAL_FILE)).unwrap(), before);
     let _ = fs::remove_dir_all(dir);
 }
+
+// ---- Epic 10, entrée 31 : carroyage MGRS complété par le noyau, sources détaillées ----
+
+/// QGIS de test de la mise en page : un inventaire d'emprise donnée (`None` : aucune), un export
+/// qui note ses paramètres et rend, ou non, `source_details` ; `sources` longues ou courtes.
+struct ExportQgis {
+    extent: Option<Value>,
+    details: bool,
+    many_sources: bool,
+    seen: std::rc::Rc<std::cell::RefCell<Vec<(String, Value)>>>,
+}
+
+impl ExportQgis {
+    fn new(extent: Option<Value>, details: bool, many_sources: bool) -> Self {
+        ExportQgis {
+            extent,
+            details,
+            many_sources,
+            seen: Default::default(),
+        }
+    }
+}
+
+impl Executor for ExportQgis {
+    fn execute(&self, id: &str, p: Value) -> Result<Value, RegistryError> {
+        self.seen.borrow_mut().push((id.to_string(), p.clone()));
+        match id {
+            INVENTORY => Ok(match &self.extent {
+                Some(lonlat) => json!({"layers": [], "extent": {"lonlat": lonlat}}),
+                None => json!({"layers": []}),
+            }),
+            "layout.export_pdf" => {
+                let out = p["out"].as_str().unwrap().to_string();
+                fs::write(&out, "pdf").unwrap();
+                let sources: Vec<String> = if self.many_sources {
+                    (1..=12).map(|n| format!("couche_{n:02}.gpkg")).collect()
+                } else {
+                    vec!["gares.gpkg".into()]
+                };
+                let mut result = json!({"file": out, "page_count": 1, "layer_count": sources.len(),
+                    "sources": sources, "truncated": false});
+                if self.details {
+                    result["source_details"] = json!(sources
+                        .iter()
+                        .map(|s| json!({"source": s, "resolution": null,
+                            "date": "2026-10-15", "date_origin": "file"}))
+                        .collect::<Vec<_>>());
+                }
+                Ok(result)
+            }
+            other => panic!("commande inattendue : {other}"),
+        }
+    }
+}
+
+fn annecy_lonlat() -> Value {
+    json!({"west": 6.05, "south": 45.78, "east": 6.25, "north": 45.95, "crs": "EPSG:4326"})
+}
+
+#[test]
+fn an_mgrs_grid_is_filled_by_the_core_journaled_and_replayed_as_is() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis = ExportQgis::new(Some(annecy_lonlat()), true, false);
+    let seen = qgis.seen.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    // Ce que l'appelant écrit de la zone et des carrés est ôté : le noyau les pose.
+    s.call(
+        "layout.export_pdf",
+        json!({"title": "Secteur", "header": "Document de travail",
+            "grid": {"kind": "mgrs", "interval": {"value": 1, "unit": "km"},
+                     "epsg": 32631, "squares": ["31T ZZ"]}}),
+    )
+    .unwrap();
+    let (expected_epsg, expected_squares) = crate::commands::layout_export_pdf::mgrs_grid_of(
+        &json!({"extent": {"lonlat": annecy_lonlat()}}),
+    )
+    .unwrap();
+    assert_eq!(expected_epsg, 32632);
+    {
+        let seen = seen.borrow();
+        let ids: Vec<&str> = seen.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids, [INVENTORY, "layout.export_pdf"]);
+        let grid = &seen[1].1["grid"];
+        assert_eq!(grid["epsg"], json!(32632));
+        assert_eq!(grid["squares"], json!(expected_squares));
+        assert_eq!(seen[1].1["header"], json!("Document de travail"));
+    }
+    let l = lines(&s);
+    assert_eq!(l.len(), 1, "l'inventaire n'est pas une étape du journal");
+    assert_eq!(l[0]["params"]["grid"]["epsg"], json!(32632));
+    assert_eq!(l[0]["params"]["grid"]["squares"], json!(expected_squares));
+    drop(s);
+    // Au rejeu, l'emprise a changé (ou manque) : la zone et les carrés journalisés sont
+    // repassés tels quels, sans relire l'inventaire.
+    let qgis = ExportQgis::new(None, true, false);
+    let seen = qgis.seen.clone();
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(&Router::new(&registry).with_qgis(qgis), &mut HashSet::new())
+        .unwrap();
+    assert!(report.identical);
+    let seen = seen.borrow();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].1["grid"]["epsg"], json!(32632));
+    assert_eq!(seen[0].1["grid"]["squares"], json!(expected_squares));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_mgrs_grid_without_a_readable_extent_is_refused_before_the_export() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis = ExportQgis::new(None, true, false);
+    let seen = qgis.seen.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    let err = s
+        .call(
+            "layout.export_pdf",
+            json!({"title": "Secteur", "grid": {"kind": "mgrs", "interval": {"value": 10, "unit": "km"}}}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "layout.no_extent");
+    assert!(lines(&s).is_empty());
+    assert_eq!(seen.borrow().len(), 1, "seul l'inventaire est lu");
+    // Un intervalle hors liste est refusé par le noyau avant toute lecture auprès de QGIS.
+    let err = s
+        .call(
+            "layout.export_pdf",
+            json!({"title": "Secteur", "grid": {"kind": "mgrs", "interval": {"value": 5, "unit": "km"}}}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "registry.invalid_params");
+    assert_eq!(seen.borrow().len(), 1, "l'inventaire n'est pas relu");
+    // Les autres carroyages ne lisent pas l'inventaire.
+    s.call(
+        "layout.export_pdf",
+        json!({"title": "Carte", "grid": {"kind": "projected", "epsg": 32631,
+            "interval": {"value": 1, "unit": "km"}}}),
+    )
+    .unwrap();
+    assert_eq!(seen.borrow().last().unwrap().0, "layout.export_pdf");
+    assert_eq!(seen.borrow().len(), 2);
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_export_journaled_before_source_details_replays_identically() {
+    for many in [false, true] {
+        let (dir, project, _) = temp_project();
+        let registry = Registry::standard();
+        // Journal d'avant l'entrée 31 : le résultat ne porte pas `source_details`.
+        let mut s = Session::open(&registry, &project)
+            .unwrap()
+            .with_qgis(ExportQgis::new(None, false, many));
+        s.call("layout.export_pdf", json!({"title": "Carte"}))
+            .unwrap();
+        let kept = lines(&s)[0]["result"].clone();
+        assert_eq!(kept.get("truncated") == Some(&json!(true)), many, "{kept}");
+        drop(s);
+        // Le geste d'aujourd'hui rend `source_details` : la ligne ancienne se rejoue à l'identique.
+        let report = Replay::load(&registry, &project)
+            .unwrap()
+            .run(
+                &Router::new(&registry).with_qgis(ExportQgis::new(None, true, many)),
+                &mut HashSet::new(),
+            )
+            .unwrap();
+        assert!(report.identical, "résumé : {many}");
+        let _ = fs::remove_dir_all(dir);
+    }
+}
+
+#[test]
+fn an_export_journaled_with_source_details_compares_them() {
+    for many in [false, true] {
+        let (dir, project, _) = temp_project();
+        let registry = Registry::standard();
+        let mut s = Session::open(&registry, &project)
+            .unwrap()
+            .with_qgis(ExportQgis::new(None, true, many));
+        s.call("layout.export_pdf", json!({"title": "Carte"}))
+            .unwrap();
+        drop(s);
+        // Un rejeu qui ne les rend plus diverge : le champ, journalisé, est comparé.
+        let err = Replay::load(&registry, &project)
+            .unwrap()
+            .run(
+                &Router::new(&registry).with_qgis(ExportQgis::new(None, false, many)),
+                &mut HashSet::new(),
+            )
+            .unwrap_err();
+        assert_eq!(err.code, "replay.diverged", "résumé : {many}");
+        let _ = fs::remove_dir_all(dir);
+    }
+}

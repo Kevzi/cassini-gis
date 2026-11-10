@@ -710,11 +710,13 @@ sources. Une page A4 paysage par défaut ; format, orientation et carroyage au c
 | `page_size` | chaîne | non | `a4` (défaut), `a3`, `a2`, `a1`, `a0` | Format de page. |
 | `orientation` | chaîne | non | `landscape` (défaut), `portrait` | Orientation de la page. |
 | `grid` | union étiquetée par `kind` | non | voir ci-dessous | Carroyage ; absent, aucun. |
+| `header` | chaîne | non | 120 caractères au plus, une ligne | En-tête recopié de la demande (epic 10, entrée 31). |
+| `footer` | chaîne | non | 120 caractères au plus, une ligne | Pied de page recopié de la demande (epic 10, entrée 31). |
 
-`grid` est l'une de deux formes : `{"kind": "degrees", "interval": Angle}` (graticule en
-WGS84, étiquettes en degrés décimaux) ou `{"kind": "projected", "epsg": entier, "interval":
-Distance}` (quadrillage dans le système nommé ; un carroyage UTM au kilomètre trace les
-lignes MGRS, sans leurs étiquettes, la grille de QGIS n'en ayant pas). Un `epsg` de grille
+`grid` est l'une de trois formes : `{"kind": "degrees", "interval": Angle}` (graticule en
+WGS84, étiquettes en degrés décimaux), `{"kind": "projected", "epsg": entier, "interval":
+Distance}` (quadrillage dans le système nommé, étiquettes en décimal) ou `{"kind": "mgrs",
+"interval": Distance}` (carroyage MGRS étiqueté, epic 10, entrée 31, voir ci-dessous). Un `epsg` de grille
 inconnu de QGIS rend l'erreur `data.unknown_crs`. Pas de nombre d'exemplaires :
 l'impression reste hors du produit.
 
@@ -730,7 +732,7 @@ l'impression reste hors du produit.
 | `skipped_layers` | liste de chaînes | **Epic 10, entrée 15** : couches distantes (WMS, WMTS, XYZ, tuiles vectorielles distantes) écartées de la carte et nommées. |
 | `source_details` | liste d'objets, 50 au plus | **Epic 10, entrée 31** : résolution et date de chaque source (voir ci-dessous). |
 
-**Planifié (changement de cap du 2026-11-10, epic 10, entrée 31).** `header` et `footer` : une
+**Fait (changement de cap du 2026-11-10, epic 10, entrée 31).** `header` et `footer` : une
 ligne libre chacun (120 caractères au plus, sans saut de ligne), imprimée en haut et en bas de
 page. `grid` gagne la forme `{"kind": "mgrs", "interval": Distance}` (1 km, 10 km ou 100 km) :
 quadrillage UTM étiqueté par les deux chiffres principaux de chaque ligne, et cadre de légende
@@ -739,8 +741,23 @@ le noyau** d'après `extent.lonlat` de l'inventaire, jamais écrits par le modè
 l'utilisateur, et journalisés pour le rejeu ; sans emprise lisible, `layout.no_extent`.
 `source_details`, tronquée comme `sources` : pour chaque source `source` (nom du fichier),
 `resolution` (`Distance` ou `null`), `date` (AAAA-MM-JJ ou `null`) et `date_origin`
-(`metadata`, `file` ou `null`) ; la ligne des sources imprimée les reprend (« mnt_5m.tif, 5 m,
-fichier du 2025-03-14 »). `sources` ne change pas.
+(`metadata`, `file` ou `null`) ; la ligne des sources imprimée les reprend (« mnt_5m.tif (5 m,
+fichier du 2025-03-14) »). `sources` ne change pas.
+
+Détails de l'entrée 31, tranchés en party le 2026-11-10, à confirmer par le propriétaire : à
+1 km et 10 km, chaque ligne porte les deux chiffres du kilomètre (format de grille fixe de QGIS,
+une expression constante de l'extension) ; à 100 km, ils vaudraient toujours 00 : aucune
+étiquette, le cadre des carrés suffit ; au-delà de 60 lignes sur un côté de la carte, les
+étiquettes se chevaucheraient et ne sont pas posées. Une emprise sur deux fuseaux, dont des
+points sortent de la zone retenue, finit la liste des carrés par « … ». Le cadre est posé au coin bas droit de la carte ; la zone
+est celle du centre de l'emprise (règle de `utm_epsg`), les carrés ceux que l'emprise touche dans
+cette zone, 12 au plus puis « … ». En-tête centré en haut de page au-dessus du titre, pied centré
+tout en bas, sous les sources (7 pt). Date des métadonnées : publication, sinon révision, sinon
+création (« données du AAAA-MM-JJ ») ; sinon la date du fichier (« fichier du AAAA-MM-JJ ») ; une
+sortie de Cassini (fichier sous le dossier de travail `<projet>.cassini`, réécrit au rejeu) n'a
+pas de date. Résolution en mètres seulement : `null` pour un raster en degrés. Le rejeu d'une
+ligne écrite avant l'entrée 31, sans `source_details`, ne compare pas ce champ ; une ligne qui le
+porte le compare.
 
 ```json fiche
 {"id": "layout.export_pdf", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
@@ -754,19 +771,15 @@ fichier du 2025-03-14 »). `sources` ne change pas.
             "grid": {"type": "union", "required": false, "tag": "kind",
                      "variants": {"degrees": {"interval": {"type": "Angle", "required": true}},
                                   "projected": {"epsg": {"type": "integer", "required": true},
-                                                "interval": {"type": "Distance", "required": true}}}}},
- "result": ["center", "file", "layer_count", "page_count", "scale", "sources", "truncated"],
- "planned_by": "epic 10, entrée 15 (skipped_layers) ; entrée 31 (header, footer, grid mgrs, source_details)",
- "planned_params": {"header": {"type": "string", "required": false},
-                    "footer": {"type": "string", "required": false},
-                    "grid": {"type": "union", "required": false, "tag": "kind",
-                             "variants": {"degrees": {"interval": {"type": "Angle", "required": true}},
-                                          "projected": {"epsg": {"type": "integer", "required": true},
-                                                        "interval": {"type": "Distance", "required": true}},
-                                          "mgrs": {"interval": {"type": "Distance", "required": true},
-                                                   "epsg": {"type": "integer", "required": false},
-                                                   "squares": {"type": "array", "required": false, "items": "string"}}}}},
- "planned_result": ["skipped_layers", "source_details"]}
+                                                "interval": {"type": "Distance", "required": true}},
+                                  "mgrs": {"interval": {"type": "Distance", "required": true},
+                                           "epsg": {"type": "integer", "required": false},
+                                           "squares": {"type": "array", "required": false, "items": "string"}}}},
+            "header": {"type": "string", "required": false},
+            "footer": {"type": "string", "required": false}},
+ "result": ["center", "file", "layer_count", "page_count", "scale", "source_details", "sources", "truncated"],
+ "planned_by": "epic 10, entrée 15 (skipped_layers)",
+ "planned_result": ["skipped_layers"]}
 ```
 
 ### `terrain.slope`

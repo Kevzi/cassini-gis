@@ -966,3 +966,9 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-conversion-d-un-raster-en-geotiff-data-convert-raster-plan.md`
   summary: l'annulation d'un gdalwarp en cours par `data.convert_raster` n'est jouée que par la doublure, pas sous le vrai QGIS.
   evidence: la sonde annule avant le lancement ; une conversion d'un gros MNT annulée en cours sous QGIS 3.44 le tranche (aucun .tif ni .aux.xml laissé).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-mise-en-page-carroyage-mgrs-etiquete-en-tete-et-pied-de-page-plan.md`
+  summary: le rejeu d'un export compare `source_details`, dont la date de fichier d'une source qui n'est pas une entrée journalisée : une source réenregistrée fait diverger l'export sans message « source modifiée ».
+  evidence: `check_inputs` ne suit que les `inputs` des paramètres de chemin ; `layout.export_pdf` n'en a pas. À trancher : journaliser les sources de l'export comme entrées, ou nommer la cause dans le message de divergence.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-mise-en-page-carroyage-mgrs-etiquete-en-tete-et-pied-de-page-plan.md`
+  summary: le cadre des carrés de 100 km liste les carrés de l'emprise du projet (D7), pas ceux du cadre d'un export à l'échelle : à 1:25 000 sur Annecy, quatre carrés listés pour deux visibles.
+  evidence: relevé sur la sonde du 2026-11-10 (`probe_mgrs_layout.py`, export 2) ; trancher avec le propriétaire si le noyau doit recevoir le cadre de la carte.

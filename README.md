@@ -118,7 +118,7 @@ Une couche que Cassini ne reconnaît pas garde son style : il ne devine pas.
 | `analysis.select_by_attribute` | sélection par attribut |
 | `analysis.zonal_statistics` | nombre de points dans chaque zone |
 | `analysis.isochrone` | isochrones à pied et en voiture sur un réseau |
-| `layout.export_pdf` | carte en PDF : titre, légende, échelle, flèche du nord, sources, format, orientation, carroyage |
+| `layout.export_pdf` | carte en PDF : titre, légende, échelle, flèche du nord, sources détaillées (résolution, date), format, orientation, carroyage (dont MGRS étiqueté), en-tête et pied de page |
 
 **Calculées par le noyau**, en Rust, testées sans QGIS :
 

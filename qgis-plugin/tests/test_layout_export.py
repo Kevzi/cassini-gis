@@ -27,7 +27,7 @@ class FakeBackend:
         self.frame = frame  # emprise de la carte de mise en page ; None : voir `export_pdf`
         self.crs = crs
         self.grid_frame = grid_frame  # cadre de la carte dans le système de la grille
-        self.known = {2154, 4326, 32631}
+        self.known = {2154, 4326, 32631, 32632}
         self.exported = None
         self.scale = "jamais passée"
         self.center_asked = []
@@ -66,6 +66,25 @@ class FakeBackend:
 
     def is_vector(self, layer):
         return not layer.source.lower().endswith((".tif", ".tiff", ".asc", ".vrt"))
+
+    # Détail des sources (epic 10, entrée 31) : rien par défaut, comme QGIS qui ne sait pas.
+    project_folder, project_stem = "", ""
+    resolutions, metadata_dates, file_dates = {}, {}, {}
+
+    def project_dir(self):
+        return self.project_folder
+
+    def project_name(self):
+        return self.project_stem
+
+    def resolution_of(self, layer):
+        return self.resolutions.get(layer.lid)
+
+    def metadata_date(self, layer):
+        return self.metadata_dates.get(layer.lid)
+
+    def file_date(self, path):
+        return self.file_dates.get(path)
 
     def export_pdf(self, layers, title, sources_text, out, authid, box, **kwargs):
         self.exported = (layers, title, sources_text, out, authid, box)
@@ -124,7 +143,11 @@ class LayoutExportTest(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual(
             result,
-            {"file": self.out, "page_count": 1, "layer_count": 2, "sources": ["gares.gpkg", "communes.shp"], "truncated": False},
+            {"file": self.out, "page_count": 1, "layer_count": 2, "sources": ["gares.gpkg", "communes.shp"], "truncated": False,
+             "source_details": [
+                 {"source": "gares.gpkg", "resolution": None, "date": None, "date_origin": None},
+                 {"source": "communes.shp", "resolution": None, "date": None, "date_origin": None},
+             ]},
         )
         with open(self.out, "rb") as f:
             self.assertTrue(f.read().startswith(b"%PDF"))
@@ -428,7 +451,7 @@ class LayoutExportTest(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual(backend.kwargs, {})
         self.assertEqual(layout_export.page_dimensions(None), (297.0, 210.0))
-        self.assertEqual(set(result), {"file", "page_count", "layer_count", "sources", "truncated"})
+        self.assertEqual(set(result), {"file", "page_count", "layer_count", "sources", "truncated", "source_details"})
         for extra in ({"page_size": None}, {"orientation": None}, {"grid": None}):
             backend = FakeBackend(TWO)
             (_, error), _ = run(backend, dict({"title": "Carte", "out": self.out}, **extra))
@@ -632,6 +655,134 @@ class LegendFitTest(unittest.TestCase):
             layout_export.choose_legend_step(measure, 72, 173), layout_export.LEGEND_STEPS[-1]
         )
         self.assertEqual(layout_export.LEGEND_STEPS[-1], (0.4, 3, True))
+
+
+
+class MgrsHeaderSourcesTest(unittest.TestCase):
+    """Epic 10, entrée 31 : carroyage MGRS, en-tête et pied de page, sources détaillées."""
+
+    MGRS = {"kind": "mgrs", "interval": {"value": 1, "unit": "km"}, "epsg": 32632, "squares": ["32T KR", "32T LR"]}
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.out = os.path.join(self.dir.name, "3-layout.export_pdf.pdf")
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def params(self, **extra):
+        return dict({"title": "Secteur de recherche", "out": self.out}, **extra)
+
+    def test_the_mgrs_grid_goes_to_the_backend_with_the_core_squares(self):
+        backend = FakeBackend(TWO)
+        (result, error), _ = run(backend, self.params(grid=self.MGRS))
+        self.assertIsNone(error)
+        self.assertEqual(
+            backend.kwargs["grid"],
+            {"authid": "EPSG:32632", "interval": 1000.0, "projected": True, "mgrs": True,
+             "squares": ["32T KR", "32T LR"]},
+        )
+        # 10 km et 100 km en mètres.
+        for value, unit, metres in ((10, "km", 10000.0), (100000, "m", 100000.0)):
+            backend = FakeBackend(TWO)
+            grid = dict(self.MGRS, interval={"value": value, "unit": unit})
+            (_, error), _ = run(backend, self.params(grid=grid))
+            self.assertIsNone(error)
+            self.assertEqual(backend.kwargs["grid"]["interval"], metres)
+
+    def test_an_mgrs_grid_without_the_core_fields_or_at_another_interval_is_refused(self):
+        bad = [
+            {"kind": "mgrs", "interval": {"value": 1, "unit": "km"}},
+            dict(self.MGRS, squares="32T LR"),
+            dict(self.MGRS, epsg="32632"),
+            dict(self.MGRS, interval={"value": 5, "unit": "km"}),
+            dict(self.MGRS, zone="32T"),
+        ]
+        for grid in bad:
+            backend = FakeBackend(TWO)
+            (result, error), _ = run(backend, self.params(grid=grid))
+            self.assertIsNone(result, grid)
+            self.assertEqual(error.code, "layout.bad_params", grid)
+            self.assertIsNone(backend.exported)
+            self.assertFalse(os.path.exists(self.out))
+
+    def test_the_mgrs_labels_are_a_fixed_format(self):
+        # Une expression constante de QGIS, les deux chiffres du kilomètre ; aucun calcul MGRS.
+        self.assertIn("@grid_number", layout_export.MGRS_LABEL_EXPRESSION)
+        self.assertIn("% 100", layout_export.MGRS_LABEL_EXPRESSION)
+        for word in ("square", "zone", "letter"):
+            self.assertNotIn(word, layout_export.MGRS_LABEL_EXPRESSION)
+
+    def test_header_and_footer_are_passed_as_written(self):
+        backend = FakeBackend(TWO)
+        (_, error), _ = run(backend, self.params(header="Document de travail", footer="Bureau Lac et Monts — confidentiel"))
+        self.assertIsNone(error)
+        self.assertEqual(backend.kwargs, {"header": "Document de travail", "footer": "Bureau Lac et Monts — confidentiel"})
+        backend = FakeBackend(TWO)
+        (_, error), _ = run(backend, self.params(header="  Pièce n° 4  "))
+        self.assertEqual(backend.kwargs["header"], "  Pièce n° 4  ")
+
+    def test_a_long_or_multiline_margin_text_is_refused(self):
+        for extra in ({"header": "x" * 121}, {"footer": "deux\nlignes"}, {"header": "  "}, {"footer": 3},
+                      {"header": "a\u2028b"}, {"footer": "a\tb"}):
+            backend = FakeBackend(TWO)
+            (result, error), _ = run(backend, self.params(**extra))
+            self.assertEqual(error.code, "layout.bad_params", extra)
+            self.assertIsNone(backend.exported)
+        backend = FakeBackend(TWO)
+        (_, error), _ = run(backend, self.params(header="é" * 120))
+        self.assertIsNone(error)
+
+    def test_source_details_give_resolution_and_date_with_their_origin(self):
+        project = os.path.join(self.dir.name, "projet")
+        layers = [
+            FakeLayer("m", os.path.join(project, "mnt", "mnt_5m.tif"), (0.0, 0.0, 10.0, 10.0)),
+            FakeLayer("c", os.path.join(project, "communes.gpkg") + "|layername=communes", (0.0, 0.0, 5.0, 5.0)),
+            FakeLayer("p", os.path.join(project, "projet.cassini", "1-terrain.slope.tif"), (0.0, 0.0, 10.0, 10.0)),
+            FakeLayer("z", os.path.join(project, "zonage.shp"), (0.0, 0.0, 5.0, 5.0)),
+        ]
+        backend = FakeBackend(layers)
+        backend.project_folder, backend.project_stem = project, "projet"
+        backend.resolutions = {"m": 5.0, "p": 5.0}
+        backend.metadata_dates = {"z": "2024-05-01"}
+        backend.file_dates = {
+            os.path.join(project, "mnt", "mnt_5m.tif"): "2025-03-14",
+            os.path.join(project, "communes.gpkg"): "2026-10-15",
+            os.path.join(project, "projet.cassini", "1-terrain.slope.tif"): "2026-11-10",
+            os.path.join(project, "zonage.shp"): "2026-01-02",
+        }
+        (result, error), _ = run(backend, self.params())
+        self.assertIsNone(error)
+        self.assertEqual(result["sources"], ["mnt_5m.tif", "communes.gpkg", "1-terrain.slope.tif", "zonage.shp"])
+        self.assertEqual(result["source_details"], [
+            {"source": "mnt_5m.tif", "resolution": {"value": 5.0, "unit": "m"}, "date": "2025-03-14", "date_origin": "file"},
+            {"source": "communes.gpkg", "resolution": None, "date": "2026-10-15", "date_origin": "file"},
+            # Sortie de Cassini, réécrite au rejeu : pas de date (P3).
+            {"source": "1-terrain.slope.tif", "resolution": {"value": 5.0, "unit": "m"}, "date": None, "date_origin": None},
+            # Les métadonnées priment sur la date du fichier.
+            {"source": "zonage.shp", "resolution": None, "date": "2024-05-01", "date_origin": "metadata"},
+        ])
+        sources_text = backend.exported[2]
+        self.assertEqual(
+            sources_text,
+            "Sources : mnt_5m.tif (5 m, fichier du 2025-03-14), communes.gpkg (fichier du 2026-10-15), "
+            "1-terrain.slope.tif (5 m), zonage.shp (données du 2024-05-01)",
+        )
+        self.assertNotIn(self.dir.name, sources_text)
+
+    def test_a_csv_uri_gives_its_decoded_file_path(self):
+        self.assertEqual(
+            layout_export._file_path("file:///C:/Mes%20donn%C3%A9es/gares.csv?type=csv&xField=X"),
+            "C:/Mes données/gares.csv",
+        )
+        self.assertEqual(layout_export._file_path("file:///home/x/gares.csv?type=csv"), "/home/x/gares.csv")
+        self.assertEqual(layout_export._file_path("/d/communes.gpkg|layername=communes"), "/d/communes.gpkg")
+        self.assertIsNone(layout_export._file_path("memory?geometry=Point"))
+
+    def test_a_decimal_resolution_is_written_with_a_comma(self):
+        self.assertEqual(layout_export._metres_text(0.5), "0,5 m")
+        self.assertEqual(layout_export._metres_text(25.0), "25 m")
+        self.assertEqual(layout_export._metres_text(1.25), "1,25 m")
 
 
 if __name__ == "__main__":
