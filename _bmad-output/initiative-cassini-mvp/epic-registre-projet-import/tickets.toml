@@ -133,3 +133,14 @@ covers = ["R4", "R5"]
 after = [9]
 hitl = false
 risk = "medium"
+
+[[entry]]
+id = 12
+type = "bug"
+title = "Le rejeu dans la meme session diverge sur une lecture du projet sans dire pourquoi"
+description = "Un journal qui porte project.inventory, rejoue en fin de session, diverge des l'etape 1 : l'inventaire voit les couches posees depuis par la session. Le rejeu identique promis part de l'etat d'ouverture du projet ; le noyau doit dire la cause et le remede, et la recette rejouer apres reouverture."
+verify = "Tests du noyau (rejeu en meme session : divergence nommee avec la couche et le remede ; session neuve : identique), tests de l'extension, puis recette QGIS d'Annecy rejouee apres reouverture : rejeu identique, meme score."
+covers = ["R5"]
+after = []
+hitl = false
+risk = "high"
