@@ -60,6 +60,7 @@ qui sait ce qu'il veut mais pas où cliquer.
 | 👀 **Rien sans votre accord** | L'IA ne fait que *proposer* une suite de commandes. Rien ne s'exécute avant que vous ayez validé le plan. |
 | 🔁 **Reproductible** | Chaque étape est journalisée à côté du projet QGIS. On rouvre le projet, on rejoue, on obtient la même chose. |
 | 📂 **Vos données restent les vôtres** | Vous ouvrez vos propres fichiers. Cassini ne télécharge aucune donnée et ne modifie jamais un fichier d'origine. |
+| 🎨 **Une carte lisible tout de suite** | Une phrase met vos couches aux couleurs de l'IGN et du standard CNIG des PLU, et range le projet par thème. |
 | 🗺️ **QGIS, pas un SIG de plus** | QGIS fait la carte, les analyses et l'export depuis vingt ans. Cassini ne le refait pas : il le pilote. |
 
 Ce qui n'existait nulle part, c'est un SIG de bureau hors ligne **piloté par une IA
@@ -78,7 +79,27 @@ et appelée à l'identique depuis le panneau, la ligne de commande et une IA ext
 | **Terrain** | pente, exposition, ombrage, ligne de vue, champ de vision simple ou cumulé, points hauts, coût de déplacement et chemin de moindre coût | noyau Cassini |
 | **Rasters** | reclassement, superposition pondérée de plusieurs critères | noyau Cassini |
 | **Coordonnées** | conversion WGS84 ↔ UTM ↔ MGRS, distance et azimut, point par azimut et distance, recoupement de deux visées, reprojection d'un point | noyau Cassini · QGIS |
-| **Carte** | mise en forme topographique, dégradé selon un champ, export PDF avec titre, légende, échelle, nord, sources, format et carroyage | noyau Cassini · QGIS |
+| **Carte** | couleurs officielles de l'IGN et du CNIG en un mot, dégradé selon un champ, export PDF avec titre, légende, échelle, nord, sources, format et carroyage | noyau Cassini · QGIS |
+
+### 🎨 Une carte aux couleurs de l'IGN, en une phrase
+
+> **« Je voudrais que la carte ressemble à une carte IGN. »**
+
+Vous ouvrez vos couches BD TOPO, votre PLU et votre MNT : elles arrivent dans QGIS avec
+des couleurs au hasard. Une phrase suffit pour que Cassini les mette aux couleurs
+**de la carte IGN au 1:25 000** et **du standard CNIG pour les zones de PLU**, puis les
+range par thème :
+
+- **chaque couche est reconnue** d'après son nom et ses champs (`nature` et
+  `importance` de la BD TOPO, `typezone` du PLU) ;
+- **chaque classe a sa couleur** : routes par importance, bâti par usage, zones U, AU,
+  A et N du PLU, MNT en teintes d'altitude sous un ombrage ;
+- **le projet est rangé** : vos résultats en haut, puis les points, les lignes, les
+  surfaces, et le relief tout en dessous ;
+- **rien n'est modifié** dans vos fichiers, et la mise en forme se rejoue comme le
+  reste.
+
+Une couche que Cassini ne reconnaît pas garde son style : il ne devine pas.
 
 <details>
 <summary><b>La liste complète des commandes</b></summary>
@@ -112,7 +133,8 @@ et appelée à l'identique depuis le panneau, la ligne de commande et une IA ext
 | `raster.reclassify`, `raster.weighted_overlay` | reclassement, superposition pondérée |
 | `coord.convert` | conversion d'une coordonnée entre WGS84, UTM et MGRS |
 | `geo.distance_azimuth`, `geo.destination_point`, `geo.bearing_intersection` | géodésie : distance et azimut, point d'arrivée, recoupement |
-| `map.topographic_style`, `map.graduated_style` | mise en forme topographique, dégradé selon un champ |
+| `map.topographic_style` | couleurs de la carte IGN au 1:25 000 et du standard CNIG des PLU, couches rangées par thème |
+| `map.graduated_style` | dégradé de couleurs selon un champ numérique (intervalles égaux, quantiles, Jenks) |
 | `system.about`, `model.list` | version du noyau, modèles présents sur le poste |
 
 Quatre commandes de plus (`layer.open_raster`, `layer.open_vector`, `layer.set_style`,
