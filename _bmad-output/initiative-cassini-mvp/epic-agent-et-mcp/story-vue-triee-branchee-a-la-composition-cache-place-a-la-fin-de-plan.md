@@ -3,7 +3,7 @@ title: "Vue triée branchée à la composition, cache placé à la fin de l'inde
 type: 'feature'
 ticket: '48'
 created: '2026-11-10'
-status: 'in-review'
+status: 'built'
 baseline_revision: '12333c56b72b30fbd7275ea020f2c11736777163'
 route: 'full'
 route_source: 'auto'
