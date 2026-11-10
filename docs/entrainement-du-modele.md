@@ -530,6 +530,13 @@ fusions dites à part, 24 `label_field` suffixés, 37 cibles par catégorie prè
 filtrée ou d'une zone, 84 références par nom propre, 49 plans à deux appartenances ; aucun exemple
 écarté.
 
+Entraînement (commit `ea591bc`) : 100 min ; validation 283/300. Essais GPU : `plan_reel` 23/25,
+`question_reel` 12/12, `ecart_reel` 37/40 (plans 24/27), `echelle_utm_reel` 8/8, `terrain_reel`
+8/8, `epic11_reel` 27/28 et F03 en question, `style_reel` 9/10 : barres tenues. Recette QGIS sur
+Annecy : recul, les tampons autour des gares en degrés partent sans `data.reproject`, et le nom des
+communes est un champ inventé. Modèle dans `cassini-modeles\ajuste-quatre-causes\`, non installé ;
+décision au propriétaire.
+
 ### Les inventaires de QGIS (5.15)
 
 Les valeurs d'un champ texte sont triées, comme le produit les rend. `unloaded_files` est
