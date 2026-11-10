@@ -156,8 +156,10 @@ pub static FAMILIES: &[Family] = &[
         make: isochrone_vers_cible,
     },
     Family {
+        // Après les quatre causes (2026-11-10, nom des communes inventé à Annecy) : 4 → 8, et le
+        // nom des zones trois fois sur quatre, pour bien plus d'exemples de `label_field`.
         name: "decompte_par_zone",
-        weight: 4,
+        weight: 8,
         make: decompte_par_zone,
     },
     Family {
@@ -250,17 +252,19 @@ pub static FAMILIES: &[Family] = &[
         make: reprojection_couche,
     },
     // Recette d'Annecy du 2026-11-09 (reprojection manquée) : poids 4 → 6, au-dessus
-    // d'`analyse_couche_metrique`.
+    // d'`analyse_couche_metrique`. Après les quatre causes (2026-11-10, plans avec reprojection
+    // tombés de 318 à 294) : 6 → 8.
     Family {
         name: "reprojection_avant_analyse",
-        weight: 6,
+        weight: 8,
         make: reprojection_avant_analyse,
     },
     // Second essai de 11.23 (constat S07) : la même analyse sur une couche déjà en mètres,
-    // à côté d'une couche en degrés, ne reprojette rien.
+    // à côté d'une couche en degrés, ne reprojette rien. Après les quatre causes (2026-11-10) :
+    // 4 → 5, contrepoids de `reprojection_avant_analyse` passé à 8.
     Family {
         name: "analyse_couche_metrique",
-        weight: 4,
+        weight: 5,
         make: analyse_couche_metrique,
     },
     // Conversion de format d'une couche (10.9) : GeoPackage, Shapefile ou GeoJSON. Remplace le
@@ -272,10 +276,11 @@ pub static FAMILIES: &[Family] = &[
         make: conversion_format,
     },
     // Retrait d'une couche du projet (10.27) : jamais de son fichier. Remplace le refus
-    // « aucune commande ne retire de couche du projet ».
+    // « aucune commande ne retire de couche du projet ». Après les quatre causes (2026-11-10) :
+    // 3 → 6, avec le raster, plusieurs couches et le verbe seul (question).
     Family {
         name: "retrait_couche",
-        weight: 3,
+        weight: 6,
         make: retrait_couche,
     },
     Family {
@@ -2413,6 +2418,13 @@ fn export_pdf_format(rng: &mut Rng) -> Option<Example> {
             // d'`epic11_reel` (recouvrement, après 11.23) : la tête prend « -moi ».
             "Exporte-moi la carte",
         ]);
+        // « Fais un PDF de la carte » suivi du seul carroyage UTM rendait F03 d'`epic11_reel`
+        // (recouvrement, 2026-11-10) : devant un carroyage, la tête prend « -moi ».
+        let head = if head == "Fais un PDF de la carte" && gw.contains("carroyage") {
+            "Fais-moi un PDF de la carte"
+        } else {
+            head
+        };
         let mut body = format!("{head}{pw}{gw}");
         if titled {
             match rng.below(2) {
@@ -3159,9 +3171,10 @@ fn isochrone_vers_cible(rng: &mut Rng) -> Option<Example> {
 fn decompte_par_zone(rng: &mut Rng) -> Option<Example> {
     let mut b = Builder::new();
     let zkey = *rng.pick(&["communes", "quartiers"]);
-    // Une fois sur deux (une sur trois avant l'analyse après 11.23) : le champ de nom, parfois
-    // suffixé du thème (`nom_quartier`), se recopie tel quel.
-    let labelled = rng.chance(1, 2);
+    // Trois fois sur quatre (une sur trois avant l'analyse après 11.23, une sur deux avant les
+    // quatre causes) : le champ de nom se recopie tel quel de l'inventaire, à côté de ses leurres
+    // (majuscules, code) ; son nom ne se déduit jamais du thème.
+    let labelled = rng.below(4) < 3;
     let require: &[&str] = if labelled { &["nom"] } else { &[] };
     let zones = b.add(rng, zkey, require, &[], &[]);
     let z = &zones.theme.noun;
@@ -5885,25 +5898,51 @@ fn remove_call(id: &str) -> Value {
 /// `layer.remove` (10.27). La couche quitte le projet ; son fichier reste. La couche se désigne
 /// par son nom entre guillemets ou par « les <pluriel> », jamais par « la couche des <pluriel> »
 /// suivi de « du projet ».
+///
+/// Après les quatre causes (2026-11-10), trois formes de plus : un raster (« retire le MNT du
+/// projet »), plusieurs couches d'un coup (une étape par couche, dans l'ordre de la phrase), et
+/// le verbe seul, sans « du projet » ni « de la carte » (« supprime les gares ») : il peut viser
+/// le fichier ou les entités, donc une question demande si l'on veut retirer la couche du projet.
 fn retrait_couche(rng: &mut Rng) -> Option<Example> {
+    match rng.below(10) {
+        0..=3 => retrait_une_couche(rng),
+        4 | 5 => retrait_raster(rng),
+        6 | 7 => retrait_plusieurs(rng),
+        _ => retrait_verbe_seul(rng),
+    }
+}
+
+fn removal_from(rng: &mut Rng) -> &'static str {
+    let from: &&'static str = rng.pick(&["du projet", "du projet", "de la carte"]);
+    from
+}
+
+/// « Retire {what} {from} » et ses variantes ; `what` désigne la ou les couches.
+fn removal_body(rng: &mut Rng, what: &str, from: &str) -> (String, bool) {
+    match rng.below(7) {
+        0 | 1 => (format!("Retire {what} {from}"), false),
+        2 => (format!("Enlève {what} {from}"), false),
+        3 => (format!("Supprime {what} {from}"), false),
+        4 => (format!("Ôte {what} {from}"), false),
+        5 => (format!("Retire {from} {what}"), false),
+        _ => (format!("Peux-tu retirer {what} {from}"), true),
+    }
+}
+
+fn retrait_une_couche(rng: &mut Rng) -> Option<Example> {
     let mut b = Builder::new();
     let t = pick_theme(rng, &b, vector)?;
     let layer = b.add(rng, t.key, &[], &[], &[]);
     let name = layer.name.clone();
     let pl = t.noun.pl;
-    let from = *rng.pick(&["du projet", "du projet", "de la carte"]);
+    let from = removal_from(rng);
     let what = if rng.chance(1, 4) {
         format!("les {pl}")
     } else {
         format!("la couche « {name} »")
     };
     let (body, q) = match rng.below(9) {
-        0 | 1 => (format!("Retire {what} {from}"), false),
-        2 => (format!("Enlève {what} {from}"), false),
-        3 => (format!("Supprime {what} {from}"), false),
-        4 => (format!("Ôte {what} {from}"), false),
-        5 => (format!("Retire {from} {what}"), false),
-        6 => (format!("Peux-tu retirer {what} {from}"), true),
+        0..=6 => removal_body(rng, &what, from),
         7 => (
             format!("J'ai fini avec la couche « {name} », retire-la {from}"),
             false,
@@ -5921,6 +5960,94 @@ fn retrait_couche(rng: &mut Rng) -> Option<Example> {
         request,
         calls(vec![remove_call(&layer.id)]),
     ))
+}
+
+fn retrait_raster(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let t = pick_theme(rng, &b, |t| t.geom == Geom::Raster)?;
+    let layer = b.add(rng, t.key, &[], &[], &[]);
+    let name = layer.name.clone();
+    let what = match (t.key, rng.below(3)) {
+        ("mnt", 0) => "le MNT".to_string(),
+        ("mnt", 1) => "le modèle numérique de terrain".to_string(),
+        (_, 0) => format!("{} {}", if t.noun.fem { "la" } else { "le" }, t.noun.sg),
+        _ => format!("la couche « {name} »"),
+    };
+    let from = removal_from(rng);
+    let (body, q) = removal_body(rng, &what, from);
+    let request = finish(rng, &body, q, false);
+    Some(example(
+        "retrait_couche",
+        b,
+        rng,
+        request,
+        calls(vec![remove_call(&layer.id)]),
+    ))
+}
+
+fn retrait_plusieurs(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let n = if rng.chance(1, 4) { 3 } else { 2 };
+    let mut layers = Vec::new();
+    for _ in 0..n {
+        let t = pick_theme(rng, &b, vector)?;
+        layers.push(b.add(rng, t.key, &[], &[], &[]));
+    }
+    let by_name = rng.chance(1, 2);
+    let items: Vec<String> = layers
+        .iter()
+        .map(|l| {
+            if by_name {
+                format!("« {} »", l.name)
+            } else {
+                format!("les {}", l.theme.noun.pl)
+            }
+        })
+        .collect();
+    let list = match items.as_slice() {
+        [a, b] => format!("{a} et {b}"),
+        [a, b, c] => format!("{a}, {b} et {c}"),
+        _ => return None,
+    };
+    let what = if by_name {
+        format!("les couches {list}")
+    } else {
+        list
+    };
+    let from = removal_from(rng);
+    let (body, q) = removal_body(rng, &what, from);
+    let request = finish(rng, &body, q, false);
+    let steps = layers.iter().map(|l| remove_call(&l.id)).collect();
+    Some(example("retrait_couche", b, rng, request, calls(steps)))
+}
+
+fn retrait_verbe_seul(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let t = pick_theme(rng, &b, ordinary)?;
+    let layer = b.add(rng, t.key, &[], &[], &[]);
+    let name = layer.name.clone();
+    let pl = t.noun.pl;
+    let (body, q) = match rng.below(4) {
+        0 => (format!("Supprime les {pl}"), false),
+        1 => (format!("Supprime la couche « {name} »"), false),
+        2 => (format!("Efface les {pl}"), false),
+        _ => (format!("Peux-tu supprimer les {pl}"), true),
+    };
+    let request = finish(rng, &body, q, false);
+    let text = match rng.below(3) {
+        0 => format!(
+            "Son fichier ne sera pas effacé : faut-il retirer la couche « {name} » du projet ?"
+        ),
+        1 => format!(
+            "Aucune commande n'efface de fichier, il reste sur le disque : veux-tu retirer la \
+             couche « {name} » du projet ?"
+        ),
+        _ => format!(
+            "Je peux retirer la couche « {name} » du projet, sans effacer son fichier : est-ce \
+             bien ce qu'il faut faire ?"
+        ),
+    };
+    Some(example("retrait_couche", b, rng, request, question(text)))
 }
 
 /// Décale de `by` chaque référence d'étape (`step:k`, `step:k.champ`) d'un plan.
@@ -8079,14 +8206,9 @@ mod tests {
     // -- retrait d'une couche (10.27) -----------------------------------------
 
     #[test]
-    fn a_requested_removal_is_one_step_on_a_layer_of_the_inventory() {
-        let mut heads = HashSet::new();
-        for e in valid(retrait_couche, 300) {
-            assert_eq!(commands(&e), ["layer.remove"], "{}", e.request);
-            let params = &e.expected["calls"][0]["params"];
-            // Le seul paramètre de la fiche : une couche de l'inventaire.
-            assert_eq!(params.as_object().unwrap().len(), 1, "{}", e.request);
-            layer_of(&e, params["layer_id"].as_str().unwrap());
+    fn a_requested_removal_is_one_step_per_layer_of_the_inventory() {
+        let (mut heads, mut raster, mut several, mut asked) = (HashSet::new(), 0, 0, 0);
+        for e in valid(retrait_couche, 600) {
             let r = e.request.to_lowercase();
             // Jamais « la couche des <pluriel> … du projet » (S04 de `plan_reel`), jamais
             // « ne sert plus » (H35 du jeu tenu à l'écart).
@@ -8099,8 +8221,73 @@ mod tests {
                 e.request
             );
             heads.insert(r.split_whitespace().next().unwrap().to_string());
+            if e.expected["kind"] == "question" {
+                // Le verbe seul : ni « du projet » ni « de la carte ».
+                asked += 1;
+                assert!(
+                    !r.contains("du projet") && !r.contains("de la carte"),
+                    "{}",
+                    e.request
+                );
+                let text = e.expected["question"].as_str().unwrap();
+                assert!(text.contains("retirer la couche « "), "{text}");
+                assert!(text.contains("du projet"), "{text}");
+                continue;
+            }
+            assert!(
+                r.contains("du projet") || r.contains("de la carte") || r.starts_with("range"),
+                "{}",
+                e.request
+            );
+            let calls = e.expected["calls"].as_array().unwrap();
+            assert!(
+                commands(&e).iter().all(|c| *c == "layer.remove"),
+                "{}",
+                e.request
+            );
+            let mut ids = HashSet::new();
+            for c in calls {
+                // Le seul paramètre de la fiche : une couche de l'inventaire, une fois.
+                assert_eq!(c["params"].as_object().unwrap().len(), 1, "{}", e.request);
+                let id = c["params"]["layer_id"].as_str().unwrap();
+                let layer = layer_of(&e, id);
+                assert!(ids.insert(id), "{}", e.request);
+                raster += usize::from(layer["kind"] == "raster");
+            }
+            several += usize::from(calls.len() > 1);
         }
         assert!(heads.len() >= 5, "{heads:?}");
+        assert!(
+            raster > 60 && several > 60 && asked > 60,
+            "{raster} {several} {asked}"
+        );
+    }
+
+    #[test]
+    fn several_layers_are_removed_in_the_order_of_the_sentence() {
+        for e in valid(retrait_couche, 600) {
+            let Some(calls) = e.expected["calls"].as_array() else {
+                continue;
+            };
+            if calls.len() < 2 {
+                continue;
+            }
+            let at: Vec<usize> = calls
+                .iter()
+                .map(|c| {
+                    let layer = layer_of(&e, c["params"]["layer_id"].as_str().unwrap());
+                    let name = layer["name"].as_str().unwrap();
+                    e.request.find(&format!("« {name} »")).unwrap_or_else(|| {
+                        let theme = crate::inventories::THEMES
+                            .iter()
+                            .find(|t| t.names.contains(&name))
+                            .unwrap();
+                        e.request.find(&format!("les {}", theme.noun.pl)).unwrap()
+                    })
+                })
+                .collect();
+            assert!(at.windows(2).all(|w| w[0] < w[1]), "{}", e.request);
+        }
     }
 
     #[test]
@@ -9928,19 +10115,64 @@ mod tests {
     }
 
     #[test]
-    fn a_label_field_is_the_name_field_of_the_zones_as_written_suffixed_or_not() {
-        let (mut suffixed, mut plain) = (0, 0);
+    fn a_label_field_is_the_name_field_of_the_zones_as_written_never_a_decoy() {
+        let (mut names, mut with_decoys, mut labelled) = (HashSet::new(), 0, 0);
         for e in valid(decompte_par_zone, 1500) {
             let p = &call(&e, 0)["params"];
             let Some(label) = p.get("label_field").and_then(Value::as_str) else {
                 continue;
             };
+            labelled += 1;
             let zones = layer_of(&e, p["layer_id"].as_str().unwrap());
-            assert!(field_names(zones).contains(&label), "{}", e.request);
-            suffixed += usize::from(label.starts_with("nom_"));
-            plain += usize::from(label == "nom");
+            let fields = field_names(zones);
+            assert!(fields.contains(&label), "{}", e.request);
+            // Le nom du champ vient du pool commun, jamais du thème (`nom_commune`).
+            assert!(
+                crate::inventories::NAME_FIELDS.contains(&label),
+                "{label} : {}",
+                e.request
+            );
+            names.insert(label.to_string());
+            // Leurres seuls : le code INSEE propre aux communes n'en est pas un.
+            let codes = ["code_postal", "cleabs", "code", "id_source", "identifiant"];
+            with_decoys += usize::from(
+                fields
+                    .iter()
+                    .any(|f| *f != label && (f.starts_with(label) || codes.contains(f))),
+            );
         }
-        assert!(suffixed > 20 && plain > 20, "{suffixed} {plain}");
+        assert!(labelled > 1000, "{labelled}");
+        assert!(
+            names.len() == crate::inventories::NAME_FIELDS.len(),
+            "{names:?}"
+        );
+        assert!(with_decoys > 200, "{with_decoys}");
+    }
+
+    #[test]
+    fn no_name_field_is_derived_from_the_theme() {
+        // Toute couche de tout thème qui a un champ de nom : son nom vient du pool commun, et
+        // aucun leurre ne reprend le nom d'un autre champ de la couche (casse comprise).
+        let mut rng = Rng::new(7);
+        for t in crate::inventories::THEMES {
+            if !t.fields.iter().any(|f| f.role == "nom") {
+                continue;
+            }
+            for _ in 0..60 {
+                let mut b = Builder::new();
+                let layer = b.add(&mut rng, t.key, &["nom"], &[], &[]);
+                let name = &layer.field("nom").unwrap().name;
+                assert!(
+                    crate::inventories::NAME_FIELDS.contains(&name.as_str()),
+                    "{}",
+                    t.key
+                );
+                let mut seen = HashSet::new();
+                for f in &layer.fields {
+                    assert!(seen.insert(f.name.to_lowercase()), "{} : {}", t.key, f.name);
+                }
+            }
+        }
     }
 
     #[test]
@@ -10180,7 +10412,7 @@ mod tests {
         let label = has(&|e| {
             e.expected["calls"][0]["params"]["label_field"]
                 .as_str()
-                .is_some_and(|l| l.starts_with("nom_"))
+                .is_some_and(|l| crate::inventories::NAME_FIELDS.contains(&l))
         });
         let apart = has(&|e| DISSOLVE_APART.iter().any(|w| e.request.contains(w)));
         let whole = has(&|e| e.family == "toutes_zones_confondues");

@@ -150,9 +150,32 @@ macro_rules! number {
     };
 }
 
+/// Noms du champ de rôle `nom`, communs à tous les thèmes (après les quatre causes, 2026-11-10) :
+/// un nom tiré du thème (`nom_commune`, `nom_<thème>`) apprenait au modèle à le deviner au lieu
+/// de le recopier de l'inventaire. Noms génériques de producteurs publics et d'usage courant.
+pub const NAME_FIELDS: &[&str] = &[
+    "nom",
+    "nom_officiel",
+    "NOM",
+    "libelle",
+    "toponyme",
+    "nom_usuel",
+    "appellation",
+    "denomination",
+];
+
+/// Champ leurre posé à côté du champ de nom : sa version en majuscules ou un code. Rôle à part,
+/// qu'aucune famille ne demande : un plan ne le cite jamais.
+static DECOY: FieldDef = FieldDef {
+    role: "leurre",
+    names: &[],
+    label: "",
+    kind: Kind::Name { fragments: &[] },
+};
+
 const NOM: FieldDef = FieldDef {
     role: "nom",
-    names: &["nom", "libelle", "nom_usuel"],
+    names: NAME_FIELDS,
     label: "de nom",
     kind: Kind::Name {
         fragments: &[
@@ -352,7 +375,7 @@ pub static THEMES: &[Theme] = &[
         fields: &[
             FieldDef {
                 role: "nom",
-                names: &["nom", "nom_commune", "libelle"],
+                names: NAME_FIELDS,
                 label: "de nom",
                 kind: Kind::Name {
                     fragments: &[
@@ -505,7 +528,7 @@ pub static THEMES: &[Theme] = &[
         fields: &[
             FieldDef {
                 role: "nom",
-                names: &["nom", "nom_voie"],
+                names: NAME_FIELDS,
                 label: "de nom",
                 kind: Kind::Name {
                     fragments: &["Avenue", "Rue", "Boulevard", "Chemin", "Route de", "Quai"],
@@ -681,7 +704,7 @@ pub static THEMES: &[Theme] = &[
         fields: &[
             FieldDef {
                 role: "nom",
-                names: &["nom", "toponyme"],
+                names: NAME_FIELDS,
                 label: "de nom",
                 kind: Kind::Name {
                     fragments: &["Seine", "Yerres", "Orge", "ru de", "Marne", "Bièvre"],
@@ -901,7 +924,7 @@ pub static THEMES: &[Theme] = &[
         fields: &[
             FieldDef {
                 role: "nom",
-                names: &["nom", "nom_etab"],
+                names: NAME_FIELDS,
                 label: "de nom",
                 kind: Kind::Name {
                     fragments: &[
@@ -1595,6 +1618,36 @@ impl Layer {
     }
 }
 
+/// Leurres d'un champ de nom (après les quatre causes, 2026-11-10 : à Annecy, `nom_officiel`
+/// voisinait avec `nom_officiel_en_majuscules` et `code_insee`) : sa version en majuscules, un
+/// code, ou les deux. Le plan cite toujours le champ de nom lui-même.
+fn decoys(rng: &mut Rng, t: &Theme, name: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let both = rng.chance(1, 3);
+    if both || rng.chance(1, 2) {
+        out.push(match name {
+            "nom_officiel" => "nom_officiel_en_majuscules".to_string(),
+            "NOM" => "NOM_M".to_string(),
+            "nom" => "nom_m".to_string(),
+            other => format!("{other}_maj"),
+        });
+    }
+    if both || out.is_empty() {
+        // Jamais le nom d'un champ du thème (le code INSEE des communes en est un), casse
+        // comprise : un GeoPackage ne distingue pas `INSEE_COM` d'`insee_com`.
+        let codes: Vec<&str> = ["code_postal", "cleabs", "code", "id_source", "identifiant"]
+            .into_iter()
+            .filter(|c| {
+                !t.fields
+                    .iter()
+                    .any(|f| f.names.iter().any(|n| n.eq_ignore_ascii_case(c)))
+            })
+            .collect();
+        out.push((*rng.pick(&codes)).to_string());
+    }
+    out
+}
+
 /// Un fichier non encore ouvert, présent dans `unloaded_files`.
 #[derive(Debug, Clone)]
 pub struct File {
@@ -1657,25 +1710,6 @@ fn layer_id(rng: &mut Rng, slug: &str) -> String {
             rng.hex(12)
         ),
     }
-}
-
-/// Premier mot d'un nom, en minuscules ASCII : « arrêt de bus » donne `arret`, pour un champ
-/// `nom_arret`.
-fn name_slug(sg: &str) -> String {
-    sg.split([' ', '\''])
-        .next()
-        .unwrap_or(sg)
-        .chars()
-        .map(|c| match c {
-            'à' | 'â' => 'a',
-            'é' | 'è' | 'ê' | 'ë' => 'e',
-            'î' | 'ï' => 'i',
-            'ô' => 'o',
-            'ù' | 'û' => 'u',
-            'ç' => 'c',
-            c => c.to_ascii_lowercase(),
-        })
-        .collect()
 }
 
 fn extension(rng: &mut Rng, geom: Geom) -> &'static str {
@@ -1873,12 +1907,7 @@ impl Builder {
             if forbid.contains(&def.role) || !(wanted || rng.chance(1, 2)) {
                 continue;
             }
-            let mut name = (*rng.pick(def.names)).to_string();
-            // Analyse après 11.23 : un champ de nom suffixé du thème (`nom_quartier`) était
-            // remplacé par `nom` ; le nom du champ se recopie de l'inventaire.
-            if def.role == "nom" && rng.chance(1, 4) {
-                name = format!("nom_{}", name_slug(t.noun.sg));
-            }
+            let name = (*rng.pick(def.names)).to_string();
             let values = match &def.kind {
                 Kind::Text { values, .. } => {
                     let forced: Vec<&str> = force
@@ -1906,7 +1935,17 @@ impl Builder {
                 }
                 _ => Vec::new(),
             };
+            let decoys = if def.role == "nom" && rng.chance(1, 2) {
+                decoys(rng, t, &name)
+            } else {
+                Vec::new()
+            };
             fields.push(FieldInst { def, name, values });
+            fields.extend(decoys.into_iter().map(|name| FieldInst {
+                def: &DECOY,
+                name,
+                values: Vec::new(),
+            }));
         }
         let layer = Layer {
             theme: t,

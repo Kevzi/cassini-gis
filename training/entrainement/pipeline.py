@@ -67,6 +67,10 @@ LLAMA_CPP_SYS_VERSION = "0.1.160"
 
 TRAINING_SEED = 1
 VALIDATION_SEED = 2
+# Graine de l'entraînement (torch, ordre des exemples, LoRA, llama.cpp), réglable par
+# `--graine-torch` : deux entraînements la même nuit sur le même jeu (décision du propriétaire,
+# 2026-11-10). Les graines du générateur (1 et 2) ne changent pas : le jeu reste celui que
+# `training/tests/recouvrement.rs` contrôle.
 TORCH_SEED = 1
 TRAINING_COUNT = 8000  # décision du propriétaire, 5.15
 VALIDATION_COUNT = 300
@@ -988,6 +992,13 @@ def launch(args: argparse.Namespace) -> dict[str, Any]:
     work.mkdir(exist_ok=True)
     report_path = output / "rapport.json"
     report = read_report(report_path) if args.resume else {}
+    started_seed = report.get("graines", {}).get("torch")
+    if started_seed is not None and started_seed != TORCH_SEED:
+        # L'adaptateur déjà écrit a été entraîné avec l'autre graine (deux graines par nuit).
+        raise PipelineStop(
+            f"--reprendre avec la graine d'entraînement {TORCH_SEED}, l'entraînement commencé a "
+            f"la graine {started_seed} : relancez avec --graine-torch {started_seed}"
+        )
 
     report.update({
         "base": {"depot": BASE_REPO, "revision": BASE_REVISION, "licence": "Apache-2.0"},
@@ -1172,6 +1183,7 @@ def launch(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    global FAST_KERNELS, USE_UNSLOTH, TORCH_SEED
     parser = argparse.ArgumentParser(description="Ré-entraîne le modèle de composition de Cassini.")
     parser.add_argument("--sortie", dest="output", type=Path, required=True,
                         help="dossier de sortie, vide et hors du dépôt")
@@ -1197,10 +1209,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="nom de l'adaptateur de domaine et de sa déclaration (avec --exemples-externes)")
     parser.add_argument("--externe-seul", dest="external_only", action="store_true",
                         help="n'entraîne que sur le fichier externe, sans le jeu civil engendré")
+    parser.add_argument("--graine-torch", dest="torch_seed", type=int, default=TORCH_SEED,
+                        help="graine de l'entraînement seul ; le jeu engendré ne change pas")
     parser.add_argument("--validation-externe", dest="external_validation", type=Path, default=None,
                         help="second fichier pour le score externe, au lieu d'une part du premier")
     args = parser.parse_args(argv)
-    global FAST_KERNELS, USE_UNSLOTH
+    TORCH_SEED = args.torch_seed
     FAST_KERNELS = not args.reference_kernels
     USE_UNSLOTH = not args.without_unsloth
     start = time.time()

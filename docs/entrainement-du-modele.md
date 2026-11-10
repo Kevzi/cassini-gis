@@ -98,7 +98,7 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `isochrone` | « zone atteinte en 10 minutes à pied depuis le point ... (Lambert-93) » |
 | `isochrone_utm` | « zone atteinte en 10 minutes à pied depuis le point 412 300 / 5 412 000 (UTM 31N) » → même isochrone, code 32631 ou 32632 ; zone 31N ou 32N, écrite « UTM 31N », « UTM 31 N », « UTM zone 31 Nord » ou « UTM31N » (5.37) |
 | `isochrone_vers_cible` | « les écoles à 10 min à pied du point ... (Lambert-93) » → isochrone, puis intersection de la cible avec l'étape 1 ; la couche du lieu (gares, écoles...) est souvent dans l'inventaire, seules les coordonnées donnent l'origine ; une fois sur trois, le lieu est nommé avec ses coordonnées (« de la gare de X (652 000 / 6 862 000, Lambert-93) ») et reste un plan |
-| `decompte_par_zone` | « nombre d'écoles par commune », nom des zones sur demande seulement (une fois sur deux), `label_field` recopié de l'inventaire, `nom` ou suffixé du thème (`nom_quartier`) |
+| `decompte_par_zone` | « nombre d'écoles par commune », nom des zones sur demande seulement (trois fois sur quatre depuis les quatre causes, poids 8), `label_field` recopié de l'inventaire : un nom du pool commun `NAME_FIELDS` (`nom`, `nom_officiel`, `NOM`, `libelle`…), jamais déduit du thème, à côté de ses leurres (majuscules, code) |
 | `ouverture` | ouvrir un fichier non chargé, CSV à coordonnées compris |
 | `description` | décrire une couche, inventaire du projet, version, modèles installés |
 | `question_couche_absente` | une couche dont rien ne parle dans l'inventaire → question |
@@ -115,10 +115,10 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `conversion_coordonnees` | « donne la référence MGRS du point 48,8566 N, 2,3522 E (WGS84) », « convertis 31U DQ 52000 12000 en latitude et longitude » → `coord.convert` entre WGS84, UTM et MGRS, une ou deux formes demandées ; `mgrs_precision` (« à 3 chiffres ») et `utm_zone` (« dans le fuseau 32 ») seulement s'ils sont écrits ; un point en Lambert-93 vers l'UTM ou le MGRS → `data.transform_point` vers 4326, puis `coord.convert` sur `step:1.point` (11.12) ; depuis 11.23, un point UTM vers le fuseau voisin (« … (UTM 31N) en UTM dans le fuseau 32 ») → `coord.convert` vers `utm`, `utm_zone` écrit (report de 11.16) ; depuis après 11.23, ce passage une fois sur deux pour un point UTM (une sur quatre avant), et le fuseau d'arrivée écrit de six façons : « dans le fuseau 32 », « dans la zone 32 », « fuseau 32 », « dans le fuseau UTM 32 », « en UTM zone 32 », « vers l'UTM 32N » |
 | `reprojection_point` | « reprojette le point … (Lambert-93) en WGS84 », « donne les coordonnées du point … (UTM 31N) en Lambert-93 », « … en Web Mercator (EPSG:3857) » → une étape `data.transform_point`, le système d'arrivée écrit (11.12) |
 | `reprojection_couche` | « reprojette la couche « Gares » en Lambert-93 », « convertis les écoles en WGS84 », « passe la couche des parcelles en UTM 32N » → une étape `data.reproject`, le système d'arrivée écrit ; la couche est tirée dans un autre système que la cible. Remplace le refus « aucune commande ne reprojette une couche » (10.7) |
-| `reprojection_avant_analyse` | tampon ou recherche à distance (« les écoles à moins de 500 m des gares ») sur une couche en degrés (`epsg: 4326` dans l'inventaire), sans que la demande parle de reprojection → `data.reproject` de cette couche, puis l'analyse sur `step:1.layer_id` (les étapes suivantes décalées d'un rang) ; cible : le système des autres couches vecteur en mètres de l'inventaire (Lambert-93, UTM 31N ou 32N), le système du projet, en mètres, quand toutes sont en degrés (depuis le ré-entraînement après 11.23 ; 2154 avant) ; l'`epsg` des couches n'est jamais effacé de ces inventaires (10.7) ; depuis après 11.23 (recette d'Annecy), poids 6 : une seconde couche en degrés, non citée et jamais reprojetée, deux fois sur trois ; la couche analysée en `.csv` une fois sur deux si elle est ponctuelle ; un inventaire long (quatre à six couches de plus) une fois sur deux ; quand toutes les couches sont en degrés, le projet est en 2154, 31N ou 32N et la cible est ce système |
-| `analyse_couche_metrique` | la même analyse (tampon ou recherche à distance) sur une couche déjà en mètres (Lambert-93, UTM 31N ou 32N), dans un inventaire qui porte aussi une couche vecteur en degrés qu'aucun plan ne cite → l'analyse seule, jamais un `data.reproject` (second essai de 11.23, constat S07) ; depuis après 11.23, la couche analysée en `.csv` une fois sur quatre, la couche en degrés en `.csv` une fois sur trois si elle est ponctuelle, un inventaire long (quatre à six couches de plus) une fois sur trois |
+| `reprojection_avant_analyse` | tampon ou recherche à distance (« les écoles à moins de 500 m des gares ») sur une couche en degrés (`epsg: 4326` dans l'inventaire), sans que la demande parle de reprojection → `data.reproject` de cette couche, puis l'analyse sur `step:1.layer_id` (les étapes suivantes décalées d'un rang) ; cible : le système des autres couches vecteur en mètres de l'inventaire (Lambert-93, UTM 31N ou 32N), le système du projet, en mètres, quand toutes sont en degrés (depuis le ré-entraînement après 11.23 ; 2154 avant) ; l'`epsg` des couches n'est jamais effacé de ces inventaires (10.7) ; depuis après 11.23 (recette d'Annecy), poids 6 (8 depuis les quatre causes) : une seconde couche en degrés, non citée et jamais reprojetée, deux fois sur trois ; la couche analysée en `.csv` une fois sur deux si elle est ponctuelle ; un inventaire long (quatre à six couches de plus) une fois sur deux ; quand toutes les couches sont en degrés, le projet est en 2154, 31N ou 32N et la cible est ce système |
+| `analyse_couche_metrique` | la même analyse (tampon ou recherche à distance) sur une couche déjà en mètres (Lambert-93, UTM 31N ou 32N), dans un inventaire qui porte aussi une couche vecteur en degrés qu'aucun plan ne cite → l'analyse seule, jamais un `data.reproject` (second essai de 11.23, constat S07 ; poids 5 depuis les quatre causes, contrepoids de la reprojection) ; depuis après 11.23, la couche analysée en `.csv` une fois sur quatre, la couche en degrés en `.csv` une fois sur trois si elle est ponctuelle, un inventaire long (quatre à six couches de plus) une fois sur trois |
 | `conversion_format` | « exporte les gares en shapefile », « convertis la couche « Écoles » en GeoPackage », « enregistre les parcelles au format GeoJSON » → une étape `data.convert`, `format` tel qu'écrit (`gpkg` : « GeoPackage », « gpkg » ; `shp` : « shapefile », « shp » ; `geojson` : « GeoJSON »), jamais un système de coordonnées dans la demande ; `out` n'est jamais écrit (le noyau le fournit). Remplace le refus « aucune commande n'exporte une couche vers un fichier » ; un tableur (Excel, CSV) reste un refus (10.9) |
-| `retrait_couche` | « retire la couche « Routes » du projet », « enlève les gares de la carte », « peux-tu retirer la couche « Écoles » du projet ? » → une étape `layer.remove`, `layer_id` seul ; la couche se dit par son nom entre guillemets ou par « les <pluriel> », jamais « la couche des <pluriel> … du projet » ; la couche quitte le projet, son fichier reste. Remplace le refus « aucune commande ne retire de couche du projet » (10.27) |
+| `retrait_couche` | « retire la couche « Routes » du projet », « enlève les gares de la carte », « peux-tu retirer la couche « Écoles » du projet ? » → une étape `layer.remove`, `layer_id` seul ; la couche se dit par son nom entre guillemets ou par « les <pluriel> », jamais « la couche des <pluriel> … du projet » ; la couche quitte le projet, son fichier reste. Remplace le refus « aucune commande ne retire de couche du projet » (10.27). Depuis les quatre causes (poids 6) : un raster (« retire le MNT du projet »), plusieurs couches d'un coup (« retire les couches « A » et « B » du projet », une étape par couche dans l'ordre de la phrase) et le verbe seul, sans « du projet » ni « de la carte » (« supprime les gares ») → une question qui demande s'il faut retirer la couche du projet, son fichier n'étant jamais effacé |
 | `distance_azimut` | « quelle distance sépare le point … du point … », « distance et azimut entre les points … et … (UTM 31N) » → `geo.distance_azimuth` ; `unit` seulement si elle est écrite (`gon` : « en grades », `deg` : « en degrés ») ; deux points en Lambert-93 → deux `data.transform_point` vers 4326, puis le calcul sur `step:1.point` et `step:2.point` ; système écrit à chaque point ou une fois pour les deux (11.12) |
 | `point_projete` | « quel point atteint-on à 3 km du point …, azimut 45° » → `geo.destination_point`, l'azimut toujours avec son unité (« 45° », « 45 degrés » → `deg` ; « 50 gr », « 50 grades » → `gon`) et la distance tels qu'écrits ; « résultat en MGRS » → `coord.convert` sur `step:1.point` (11.12) |
 | `recoupement` | « recoupe la visée du point … à l'azimut 40° avec celle du point … à l'azimut 310° » → `geo.bearing_intersection`, chaque station avec son azimut ; même suite MGRS que `point_projete` (11.12) |
@@ -544,6 +544,45 @@ Entraînement (commit `ea591bc`) : 100 min ; validation 283/300. Essais GPU : `p
 Annecy : recul, les tampons autour des gares en degrés partent sans `data.reproject`, et le nom des
 communes est un champ inventé. Modèle dans `cassini-modeles\ajuste-quatre-causes\`, non installé ;
 décision au propriétaire.
+
+### Après les quatre causes : nom recopié, reprojection, retrait de couche (2026-11-10)
+
+`ajuste-quatre-causes` tient ses barres mais recule sur Annecy (1/5) ; corrections du générateur,
+mêmes base, méthode, `DEFAULT_COUNT` et `DEFAULT_SEED` :
+
+- **Nom recopié** (`NAME_FIELDS`, `decoys`, `training/src/inventories.rs`) : le champ de rôle
+  `nom` prend un nom d'un pool commun à tous les thèmes (`nom`, `nom_officiel`, `NOM`, `libelle`,
+  `toponyme`, `nom_usuel`, `appellation`, `denomination`) ; `nom_<thème>`, `nom_commune`,
+  `nom_voie` et `nom_etab` disparaissent, car ils apprenaient à deviner le nom (`commune`) au lieu
+  de le recopier. Une fois sur deux, des leurres suivent le champ : sa version en majuscules
+  (`nom_officiel_en_majuscules`, `NOM_M`, `<nom>_maj`) et ou un code (`code_insee`, `INSEE_COM`,
+  `cleabs`…) ; le plan cite toujours le champ de nom lui-même. `decompte_par_zone` passe au poids
+  8 et demande le nom trois fois sur quatre.
+- **Reprojection** : `reprojection_avant_analyse` 6 → 8, et son contrepoids
+  `analyse_couche_metrique` 4 → 5.
+- **Retrait de couche** : `retrait_couche` 3 → 6, avec raster, plusieurs couches et verbe seul
+  (voir la table des familles).
+- **Recouvrement** : la tête « Fais un PDF de la carte » suivie du seul carroyage UTM rendait F03
+  d'`epic11_reel` ; devant un carroyage, elle devient « Fais-moi un PDF de la carte ».
+
+Au jeu par défaut (graine 1, 8 000), comparé à celui d'`ajuste-revue-11-23` (commit `47ef2f4`) :
+351 plans avec `data.reproject` (318), dont 246 reprojection puis analyse (201) ; 173 exemples
+avec `label_field` (41) ; 131 plans `layer.remove`, dont 35 de plusieurs couches et 23 sur un
+raster, et 38 questions du verbe seul. Le jeu ayant une taille fixe, les familles ajoutées depuis
+(`toutes_zones_confondues`, `retrait_couche`) et les poids remontés diluent les autres d'environ
+6 % en part de tirage ; à la graine 1, le hasard du tirage s'y ajoute (de −25 % à +25 % selon la
+famille, sur une centaine d'exemples).
+
+**Deux décisions du propriétaire (2026-11-10)** :
+
+1. **La recette QGIS d'Annecy est une barre officielle** : au moins 4 plans exécutés sur 5, dans
+   une seule session QGIS, sur le projet d'Annecy (`donnees-test-cassini/annecy/`), avec le modèle
+   chargé à part (`CASSINI_MODELS`), comme les essais GPU. Un modèle qui la manque n'est pas
+   installé, même s'il tient toutes les autres barres.
+2. **Deux graines par entraînement** : chaque entraînement se fait deux fois la même nuit, sur le
+   même jeu engendré, avec deux graines d'entraînement (`pipeline.py --graine-torch 1` puis `2` ;
+   les graines du générateur, 1 et 2, ne changent pas). On garde celui des deux qui tient le
+   mieux les barres et la recette d'Annecy ; l'autre reste à côté, non installé.
 
 ### Les inventaires de QGIS (5.15)
 
