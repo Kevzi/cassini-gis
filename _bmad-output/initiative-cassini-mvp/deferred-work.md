@@ -1048,6 +1048,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-53-3-barres-elargies.md`
   summary: 5.53, livrable 3, lot 3 — `epic11_reel` et `style_reel` portées à 40-50 phrases écrites à la main, au moins 3 refus chacune, seuils proportionnels ; puis remesure du parent installé au commit du lot 3 (Design Notes du lot 1), pour que la barre de non-oubli redevienne comparable.
   evidence: livrable 3 découpé en trois lots par le propriétaire le 2026-11-11 ; les totaux changés rendent « non comparable » tant que le parent n'est pas remesuré.
+  resolution: Barres construites par le lot 3 (`plan-5-53-3-lot-3.md`) : `epic11_reel` 28 + F03 + 20 = 49 (14 plans, 3 questions, 3 refus neufs ; seuil 47/49), `style_reel` 10 + 32 = 42 (25 plans, 3 questions, 4 refus neufs ; seuil 37/42). Entrée laissée ouverte jusqu'à la remesure du parent, écrite et non jouée : `~/cassini-entrainement/mesures-5-53-3.sh REV`, à lancer sur la révision où les lots 1 à 3 sont réunis, GPU libre.
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-53-4-formulations-terrain.md`
   summary: Gisement compté dans le quadrillage Lambert-93 (`north` grid sur un système projeté autre que l'UTM), usage courant des géomètres.

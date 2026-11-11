@@ -8,8 +8,9 @@
 //! (`ai/tests/par_commande/phrases.json`) et les phrases neuves de `plan_reel` et de
 //! `question_reel` (`ai/tests/plan_reel/phrases.json`, `ai/tests/question_reel/phrases.json`,
 //! livrable 3, lot 1), puis celles de `echelle_utm_reel` et de `terrain_reel`
-//! (`ai/tests/echelle_utm_reel/phrases.json`, `ai/tests/terrain_reel/phrases.json`, lot 2).
-//! Les familles visent leur sorte de demande
+//! (`ai/tests/echelle_utm_reel/phrases.json`, `ai/tests/terrain_reel/phrases.json`, lot 2), puis
+//! celles d'`epic11_reel` et de `style_reel` (`ai/tests/epic11_reel/phrases.json`,
+//! `ai/tests/style_reel/phrases.json`, lot 3). Les familles visent leur sorte de demande
 //! avec d'autres tournures ; elles ne les recopient jamais. Deux comparaisons, sur le texte normalisé
 //! (minuscules, sans accents ni ponctuation) : à l'identique, puis à un nombre ou une commune
 //! près (chiffres masqués, noms de communes remplacés par un même repère, des deux côtés).
@@ -46,6 +47,10 @@ const QUESTION_REEL_PHRASES: &str = include_str!("../../ai/tests/question_reel/p
 const ECHELLE_UTM_REEL_PHRASES: &str = include_str!("../../ai/tests/echelle_utm_reel/phrases.json");
 /// Les phrases neuves de `terrain_reel` (5.53, livrable 3, lot 2), écrites à la main.
 const TERRAIN_REEL_PHRASES: &str = include_str!("../../ai/tests/terrain_reel/phrases.json");
+/// Les phrases neuves d'`epic11_reel` (5.53, livrable 3, lot 3), écrites à la main.
+const EPIC11_REEL_PHRASES: &str = include_str!("../../ai/tests/epic11_reel/phrases.json");
+/// Les phrases neuves de `style_reel` (5.53, livrable 3, lot 3), écrites à la main.
+const STYLE_REEL_PHRASES: &str = include_str!("../../ai/tests/style_reel/phrases.json");
 
 /// Les fichiers `phrases.json` écrits à la main pour 5.53, chacun avec son nom et son compte.
 const HAND_WRITTEN: [(&str, &str, usize); 5] = [
@@ -54,6 +59,9 @@ const HAND_WRITTEN: [(&str, &str, usize); 5] = [
     ("question_reel", QUESTION_REEL_PHRASES, 35),
     ("echelle_utm_reel", ECHELLE_UTM_REEL_PHRASES, 36),
     ("terrain_reel", TERRAIN_REEL_PHRASES, 36),
+    // Nommées à part des constantes de leur essai (`epic11_reel`, `style_reel`), comparées à elles.
+    ("epic11_reel:phrases", EPIC11_REEL_PHRASES, 20),
+    ("style_reel:phrases", STYLE_REEL_PHRASES, 32),
 ];
 
 /// Texte normalisé, chiffres masqués et communes remplacées par un même repère.
@@ -167,7 +175,7 @@ fn pairs(source: &str, start: &str) -> Vec<(String, String)> {
 /// Les phrases des essais réels de `ai/tests/` : `plan_reel`, `question_reel`, `duree_reel`,
 /// `echelle_utm_reel`, `terrain_reel`, `epic11_reel`, `style_reel`, la recette QGIS d'Annecy et,
 /// depuis 5.53, la barre par commande puis les phrases neuves de `plan_reel`, `question_reel`,
-/// `echelle_utm_reel` et `terrain_reel`.
+/// `echelle_utm_reel`, `terrain_reel`, `epic11_reel` et `style_reel`.
 fn real_trials() -> Vec<(String, String)> {
     real_trials_by_source()
         .into_iter()
@@ -258,9 +266,9 @@ fn no_sentence_of_the_real_trials_appears_in_the_generated_set() {
 }
 
 /// Les phrases écrites à la main pour 5.53 (barre par commande, phrases neuves de `plan_reel`,
-/// `question_reel`, `echelle_utm_reel` et `terrain_reel`) sont écrites à neuf : aucune ne
-/// reprend, à un nombre ou une commune près, une phrase d'une autre source d'essai réel, ni une
-/// autre phrase de son propre fichier.
+/// `question_reel`, `echelle_utm_reel`, `terrain_reel`, `epic11_reel` et `style_reel`) sont
+/// écrites à neuf : aucune ne reprend, à un nombre ou une commune près, une phrase d'une autre
+/// source d'essai réel, ni une autre phrase de son propre fichier.
 #[test]
 fn no_hand_written_sentence_copies_another_real_trial() {
     let sources = real_trials_by_source();
@@ -357,6 +365,14 @@ fn the_real_trials_are_read_whole() {
     assert_eq!(
         find("TR36"),
         "Calcule le rayonnement solaire reçu par le terrain sur une année."
+    );
+    assert_eq!(
+        find("EP20"),
+        "Calcule l'indice de rugosité du terrain à partir du MNT."
+    );
+    assert_eq!(
+        find("SR32"),
+        "Représente la population des communes par des cercles proportionnels."
     );
 }
 
