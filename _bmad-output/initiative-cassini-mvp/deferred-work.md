@@ -1048,3 +1048,16 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-53-3-barres-elargies.md`
   summary: 5.53, livrable 3, lot 3 — `epic11_reel` et `style_reel` portées à 40-50 phrases écrites à la main, au moins 3 refus chacune, seuils proportionnels ; puis remesure du parent installé au commit du lot 3 (Design Notes du lot 1), pour que la barre de non-oubli redevienne comparable.
   evidence: livrable 3 découpé en trois lots par le propriétaire le 2026-11-11 ; les totaux changés rendent « non comparable » tant que le parent n'est pas remesuré.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-53-4-formulations-terrain.md`
+  summary: Gisement compté dans le quadrillage Lambert-93 (`north` grid sur un système projeté autre que l'UTM), usage courant des géomètres.
+  evidence: décision D2 du 2026-11-11 ; le gisement du noyau est UTM seul, la tournure « gisement Lambert » est évitée au générateur en attendant.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-53-4-formulations-terrain.md`
+  summary: Déclinaison magnétique ou convergence des méridiens demandée en un seul point, sans second point.
+  evidence: décision D3 du 2026-11-11 ; `geo.distance_azimuth` les rend mais exige deux points, aucune commande ne prend un point seul.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-53-4-formulations-terrain.md`
+  summary: Paramètre `north` (magnétique, quadrillage) sur `geo.bearing_intersection`, pour un recoupement de visées prises à la boussole.
+  evidence: décision D4 du 2026-11-11 ; l'intersection ne connaît que le nord vrai, la tournure « à la boussole » est évitée au générateur.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-53-4-formulations-terrain.md`
+  summary: Relèvement inverse : retrouver sa propre position à partir de visées prises vers deux repères connus.
+  evidence: décision D5 du 2026-11-11 ; il faudrait le contre-azimut corrigé de la convergence, que le modèle ne doit pas calculer lui-même ; tournure évitée au générateur.

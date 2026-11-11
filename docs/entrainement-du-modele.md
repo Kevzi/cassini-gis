@@ -125,11 +125,11 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `conversion_raster` | « convertis le fichier donnees/mnt.asc en GeoTIFF, il est en Lambert-93 », « passe le MNT en GeoTIFF », « le MNT est en ASCII Grid : passe-le en GeoTIFF et calcule la pente en degrés », « calcule la pente en degrés » sur un MNT ouvert depuis un `.asc` → `data.convert_raster` (`raster` : chemin d'un fichier non ouvert ou `source` du MNT ; `assign_epsg` seulement si la demande écrit le système d'un fichier, ou le système que l'inventaire donne au MNT ouvert), suivie de la commande de terrain sur `step:1` quand la demande en dit une (pente, exposition, ombrage). Poids 4, environ 1 % du jeu de 8 600 (85 exemples à la graine 1). Epic 10, entrée 30 ; apprise au ré-entraînement groupé 5.49 |
 | `carroyage_mgrs` | « exporte la carte en PDF avec un carroyage MGRS au kilomètre », « prépare la carte pour l'équipe de recherche avec la grille USNG de 1 km », « … carroyée en MGRS de 10 km » → `layout.export_pdf` avec `grid` `{"kind": "mgrs", "interval": …}` (1, 10 ou 100 km, toujours écrit), jamais `epsg` ni `squares` (le noyau les fournit d'après l'emprise). Usage : secours et recherche de personnes. Poids 4. Epic 10, entrée 31 ; apprise au ré-entraînement groupé 5.49 |
 | `entete_pied_de_page` | « exporte la carte en PDF avec l'en-tête « Document de travail » », « … avec « Bureau d'études Lac et Monts » en pied de page », les deux, parfois avec un titre → `header`, `footer` recopiés tels qu'écrits entre guillemets, jamais inventés ; le titre reste distinct. Usage : bureaux d'études et collectivités. Poids 4. Epic 10, entrée 31 ; la ligne des sources détaillée est automatique, sans famille |
-| `distance_azimut` | « quelle distance sépare le point … du point … », « distance et azimut entre les points … et … (UTM 31N) » → `geo.distance_azimuth` ; `unit` seulement si elle est écrite (`gon` : « en grades », `deg` : « en degrés ») ; deux points en Lambert-93 → deux `data.transform_point` vers 4326, puis le calcul sur `step:1.point` et `step:2.point` ; système écrit à chaque point ou une fois pour les deux (11.12) |
-| `point_projete` | « quel point atteint-on à 3 km du point …, azimut 45° » → `geo.destination_point`, l'azimut toujours avec son unité (« 45° », « 45 degrés » → `deg` ; « 50 gr », « 50 grades » → `gon`) et la distance tels qu'écrits ; « résultat en MGRS » → `coord.convert` sur `step:1.point` (11.12) |
-| `gisement` | « donne le gisement du point … au point … (en grades) », « implante un point à 800 m du point …, au gisement 250 gr », « azimut … en nord du quadrillage », « par rapport au quadrillage UTM » → `geo.distance_azimuth` ou `geo.destination_point` avec `north: "grid"` ; `utm_zone` seulement si la zone du quadrillage est écrite (« dans le quadrillage de la zone 32 ») ; même suite MGRS que `point_projete` (10.28) ; depuis après 5.49 (D5, poids 5), aussi « azimut du quadrillage », « par rapport au nord du quadrillage », « en nord UTM », des points en WGS84 deux fois sur trois, dont un sur trois nommé devant ses coordonnées (« le refuge du col (48,1234 N, 7,1234 E, WGS84) ») ; jamais « nord Lambert » |
-| `azimut_magnetique` | « quel est l'azimut magnétique du point … au point … », « donne l'azimut à la boussole … », « calcule le cap magnétique entre … », « depuis le point …, je marche 2 km à 120° à la boussole », « … avec la déclinaison magnétique » → `geo.distance_azimuth` ou `geo.destination_point` avec `north: "magnetic"` ; `date` (AAAA-MM-JJ) seulement si la date est écrite (« le 1er mai 2026 », « à la date du 2027-06-14 »), absente sinon : le noyau prend la date du jour ; même suite MGRS que `point_projete` (10.29) |
-| `recoupement` | « recoupe la visée du point … à l'azimut 40° avec celle du point … à l'azimut 310° » → `geo.bearing_intersection`, chaque station avec son azimut ; même suite MGRS que `point_projete` (11.12) |
+| `distance_azimut` | « quelle distance sépare le point … du point … », « combien de kilomètres séparent … de … », « donne la distance à vol d'oiseau et l'azimut vrai entre les points … et … (UTM 31N) », « calcule l'azimut et le contre-azimut du point … au point … » → `geo.distance_azimuth`, `north` absent (nord géographique) ; `unit` seulement si elle est écrite (`gon` : « en grades », `deg` : « en degrés ») ; deux points en Lambert-93 → deux `data.transform_point` vers 4326, puis le calcul sur `step:1.point` et `step:2.point` ; système écrit à chaque point ou une fois pour les deux (11.12) ; tournures en listes depuis 5.53 (« Formulations de terrain ») |
+| `point_projete` | « reporte un point à 3 km du point …, à l'azimut vrai 45° », « depuis le point …, avance de 2 km à 50 gr par rapport au nord géographique », « quel point atteint-on à … du point …, à l'azimut 45° » → `geo.destination_point`, `north` absent, l'azimut toujours avec son unité (« 45° », « 45 degrés » → `deg` ; « 50 gr », « 50 grades » → `gon`) et la distance tels qu'écrits ; « résultat en MGRS » → `coord.convert` sur `step:1.point` (11.12) ; tournures en listes depuis 5.53 |
+| `gisement` | « donne le gisement du point … au point … (en grades) », « implante un point à 800 m du point …, au gisement de 250 gr », « calcule l'azimut en nord du quadrillage entre … et … », « place un point à … du point …, à 120° par rapport au quadrillage UTM », « quel gisement faut-il prendre depuis … pour aller au … » → `geo.distance_azimuth` ou `geo.destination_point` avec `north: "grid"` ; `utm_zone` seulement si la zone du quadrillage est écrite (« dans le quadrillage de la zone 32 ») ; même suite MGRS que `point_projete` (10.28) ; depuis après 5.49 (D5, poids 5), des points en WGS84 deux fois sur trois, dont un sur trois nommé devant ses coordonnées (« le refuge du col (48,1234 N, 7,1234 E, WGS84) ») ; jamais « nord Lambert » ni « gisement Lambert » ; tournures en listes depuis 5.53 |
+| `azimut_magnetique` | « quel est l'azimut magnétique du point … vers le point … », « donne l'azimut à la boussole … », « calcule le cap magnétique entre … et … », « je pars du point … et je marche 2 km à 120° à la boussole : quel est le point d'arrivée », « … en tenant compte de la déclinaison magnétique » → `geo.distance_azimuth` ou `geo.destination_point` avec `north: "magnetic"` ; `date` (AAAA-MM-JJ) seulement si la date est écrite (« le 1er mai 2026 », « à la date du 2027-06-14 »), absente sinon : le noyau prend la date du jour ; même suite MGRS que `point_projete` (10.29) ; tournures en listes depuis 5.53 |
+| `recoupement` | « recoupe la visée du point … à l'azimut 40° avec celle du point … à l'azimut 310° », « calcule le recoupement : 40° depuis le point …, 310° depuis le point … », « l'intersection des relèvements pris depuis le point … à 40° et depuis le point … à 310° » → `geo.bearing_intersection`, chaque station avec son azimut, nord vrai seul (jamais « à la boussole ») ; même suite MGRS que `point_projete` (11.12) ; tournures en listes depuis 5.53 |
 | `terrain_autre_systeme` | champ de vision ou ligne de vue depuis un point écrit dans un autre système que le MNT (WGS84, UTM d'une autre zone, Lambert-93 sur un MNT en UTM) → depuis 11.23, la commande de terrain avec le point **recopié tel qu'écrit**, sans `data.transform_point` : le noyau ajoute la conversion au plan avant de le montrer (11.22) ; une ligne de vue peut viser un point du système du MNT ; une référence MGRS (une fois sur quatre, alors pour chaque point), qui n'est pas un `Point`, garde `coord.convert` vers le WGS84 puis `data.transform_point` vers l'`epsg` du MNT, et la commande prend `step:k.point` (MNT à système connu seulement). Remplace le refus `NO_TERRAIN_CRS` de 5.41 (11.12) |
 | `exposition` | « calcule l'exposition des versants du MNT » → `terrain.aspect`, `dem` seul (11.12, lot 2a) ; depuis 11.23, l'orientation des pentes dite sans le mot « exposition » (« dans quelle direction regardent les pentes », « vers où sont orientées les pentes ») aussi, jamais une pente reclassée (constat A01 de 11.16) |
 | `ombrage` | « ombrage du MNT, soleil à l'ouest (azimut 270°), hauteur du soleil 30°, exagération verticale de 2 » → `terrain.hillshade` ; `sun_azimuth`, `sun_altitude` et `z_factor` seulement s'ils sont écrits, les angles en degrés ou en grades (`gon`), tous dans la même unité ; sans réglage écrit, `dem` seul (11.12, lot 2a) |
@@ -2554,3 +2554,57 @@ près, il n'aurait pas été installé sur ces seuls relevés. La validation, ti
 ne compte pas. La recette d'Annecy n'est pas comparable (5 phrases pour le parent, 20 pour le
 candidat) ; seul son rejeu l'est, et il tient. L'ancienne recette du parent, à « phrase 1 », est
 nommée d'après son fichier, comme l'avertissement le dit.
+
+## Formulations de terrain (ticket 5.53, livrable 4, 2026-11-11)
+
+Les familles de géométrie et de terrain n'écrivent plus leurs tournures en phrases entières : chaque
+notion est une **liste de synonymes nommée** de `training/src/families.rs` (forme de `TOPO_WORDS` :
+la tournure sans le verbe), assemblée avec une liste de verbes. Règle : **une tournure, un
+paramètre** — chaque liste est liée à une commande et, pour les nords, à la valeur de `north`.
+Quelques tournures d'avant (« Recoupe la visée … avec celle … », « Quel gisement faut-il prendre
+… », « Montre la zone vue depuis … ») restent des branches à côté des listes.
+
+- Nords : `TRUE_NORTH_WORDS` et `TRUE_NORTH_HEADINGS` (« l'azimut vrai », « à {az} par rapport au
+  nord géographique » → `north` absent, D1), `GRID_NORTH_WORDS` et `GRID_NORTH_HEADINGS` (« le
+  gisement », « l'azimut en nord UTM », « par rapport au quadrillage UTM » → `grid`),
+  `MAGNETIC_NORTH_WORDS` et `MAGNETIC_NORTH_HEADINGS` (« l'azimut à la boussole », « le cap
+  magnétique » → `magnetic`) ; les listes en `_WORDS` servent `geo.distance_azimuth`, celles en
+  `_HEADINGS` (l'azimut `{az}` écrit dedans) `geo.destination_point`. Une demande ne parle que
+  d'un nord ; « l'azimut » ou « la direction » nus valent le nord vrai.
+- Mesures et verbes : `DISTANCE_WORDS` (« à vol d'oiseau », « géodésique », « en ligne droite »),
+  `DISTANCE_QUESTIONS` (« combien de kilomètres séparent A de B », « quelle distance sépare A de
+  B »), `MEASURE_VERBS`, `DESTINATION_VERBS` (« reporte un point », « projette », « depuis …,
+  avance de », « je pars de … et je marche …. Où suis-je »), `INTERSECTION_WORDS`
+  (`geo.bearing_intersection`, nord vrai seul : « le recoupement », « l'intersection des relèvements
+  pris depuis »).
+- Terrain : `SLOPE_WORDS` (pente, inclinaison, déclivité), `ASPECT_WORDS` (« les versants du MNT, à
+  l'adret et à l'ubac » compris), `HILLSHADE_WORDS` (estompage, relief ombré, avec leurs verbes),
+  `PEAK_WORDS` (points culminants, dominants), `VIEWSHED_WORDS` (bassin visuel),
+  `LINE_OF_SIGHT_WORDS` (intervisibilité, vue directe), `CUMULATIVE_VIEWSHED_WORDS`, assemblées par
+  `DEM_PRODUCT_VERBS` ou des verbes propres à la famille. Les réglages (unité, hauteurs, rayon,
+  soleil, nombre) restent des clauses à part.
+- Conversion et PDF complétés : degrés décimaux, coordonnées GPS (WGS84), coordonnées MGRS,
+  référence USNG (`convert_words`), « en RGF93 / Lambert-93 » (`TO_LAMBERT`), « quadrillage
+  kilométrique UTM », « quadrillage MGRS », « méridiens et parallèles » (grilles du PDF).
+
+**Tournures ambiguës** (`AMBIGUOUS_TERMS`, jamais engendrées, lues mot à mot) : « cap » sans
+« magnétique », occurrence par occurrence ; « gisement » avec « Lambert » sous toutes ses formes,
+« nord Lambert » (le gisement du noyau est UTM, D2) ; « coordonnées kilométriques » sans système
+nommé ; degrés, minutes et secondes (« DMS », « sexagésimal ») ; « relèvement », « recoupement » ou
+« recoupe » avec « boussole » (D4) ; « où suis-je » avec une visée, un repère ou un relèvement
+(relèvement inverse, D5 ; permis au bout d'un report de point) ; « crêtes », « ligne de crête » et
+« points cotés » pour les sommets ; « triangulation ». Les cas laissés au noyau (gisement
+Lambert-93, déclinaison en un point, `north` sur l'intersection, relèvement inverse) sont en
+`deferred-work`.
+
+Cinq tests les tiennent : `every_wording_of_every_list_is_generated` (chaque tournure tirée au
+moins une fois, entière et bornée, dans la branche de sa commande),
+`a_wording_is_recognised_only_as_drawn` (le contrôle lui-même),
+`a_request_speaks_of_one_north_and_its_plan_carries_it` (un seul nord par demande, son `north` au
+plan), `every_ambiguous_term_is_caught_and_its_neighbours_are_not` (chaque entrée de
+`AMBIGUOUS_TERMS` épinglée) et
+`the_default_set_has_every_wording_list_one_north_per_request_and_no_ambiguous_term` (graines 1 à
+5 : aucune tournure ambiguë, aucun mélange de nords ; graine par défaut : chaque liste présente
+dans les demandes de sa commande). Poids, graine et `DEFAULT_COUNT` inchangés ; le jeu engendré
+change (349 redemandes sur 8 600 à la graine 1, 4,06 %, au bas de la fourchette de 4 à 7 %), et
+le modèle ne l'apprend qu'au prochain entraînement.

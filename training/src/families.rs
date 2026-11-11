@@ -2381,10 +2381,11 @@ fn grid_words(rng: &mut Rng, with_system: bool) -> (String, GridAsk) {
                 _ => format!("{n} degré"),
             }
         };
-        let text = match rng.below(4) {
+        let text = match rng.below(5) {
             0 => format!(" avec un graticule tous les {iv}"),
             1 => format!(" avec un graticule de {iv}"),
             2 => format!(" avec un carroyage géographique tous les {iv}"),
+            3 => format!(" avec les méridiens et parallèles tous les {iv}"),
             _ => format!(" avec un quadrillage géographique de {iv}"),
         };
         let unit = if gon { "gon" } else { "deg" };
@@ -2648,7 +2649,14 @@ fn carroyage_utm_projet(rng: &mut Rng) -> Option<Example> {
                 2 => (format!(" avec un quadrillage UTM tous les {iv}"), interval),
                 3 => (format!(" carroyée en UTM tous les {iv}"), interval),
                 4 => (
-                    " avec un carroyage UTM kilométrique".to_string(),
+                    pick_str(
+                        rng,
+                        &[
+                            " avec un carroyage UTM kilométrique",
+                            " avec un quadrillage kilométrique UTM",
+                        ],
+                    )
+                    .to_string(),
                     json!({"value": 1, "unit": "km"}),
                 ),
                 _ => (
@@ -4362,30 +4370,116 @@ fn slope_unit(rng: &mut Rng) -> (&'static str, &'static str) {
     }
 }
 
-/// « Fais la carte des pentes du MNT en pourcentage » : `terrain.slope` sur le `source` du MNT,
-/// l'unité telle qu'écrite.
+// -- formulations de terrain (5.53, livrable 4) ------------------------------
+//
+// Une notion, une liste, comme pour la géométrie : la tournure sans le verbe, liée à une commande
+// de terrain ; les familles l'assemblent avec des verbes. Aucune ne porte de paramètre : les
+// réglages (unité, hauteurs, rayon, soleil, nombre) restent écrits à part, chacun par sa clause.
+
+/// La pente, `terrain.slope` (l'unité écrite à part, `slope_unit`).
+const SLOPE_WORDS: &[&str] = &["la pente", "l'inclinaison", "la déclivité", "les pentes"];
+
+/// L'exposition, `terrain.aspect` (aucun paramètre). L'orientation des pentes dite sans nom
+/// (« vers où sont orientées les pentes », constat A01) reste aux questions d'`exposition`.
+/// `{of}`, quand il y est, place le MNT dans la tournure (« les versants du MNT, à l'adret et à
+/// l'ubac ») ; sinon le MNT la suit.
+const ASPECT_WORDS: &[&str] = &[
+    "l'exposition",
+    "l'exposition des versants",
+    "l'orientation des versants",
+    "les versants {of}, à l'adret et à l'ubac",
+];
+
+/// L'ombrage, `terrain.hillshade` (soleil et exagération écrits à part). « L'ombrage du relief »
+/// prend le MNT après « à partir » (jamais « du relief du MNT »).
+const HILLSHADE_WORDS: &[&str] = &[
+    "l'ombrage",
+    "l'estompage",
+    "le relief ombré",
+    "l'ombrage du relief",
+];
+
+/// Les verbes de l'ombrage : « calcule » pour l'ombrage seulement ; un estompage ou un relief
+/// ombré se génère ou se produit.
+fn hillshade_verbs(w: &str) -> &'static [&'static str] {
+    if w.starts_with("l'ombrage") {
+        &["calcule", "génère", "produis"]
+    } else {
+        &["génère", "produis", "réalise"]
+    }
+}
+
+/// Les sommets, `terrain.peaks` (`max_count` seulement s'il est écrit). Jamais « crêtes » ni
+/// « points cotés » (`AMBIGUOUS_TERMS`).
+const PEAK_WORDS: &[&str] = &[
+    "les sommets",
+    "les points hauts",
+    "les points culminants",
+    "les points dominants",
+];
+
+/// Le champ de vision d'un point, `terrain.viewshed`, suivi de « depuis » et du point.
+const VIEWSHED_WORDS: &[&str] = &[
+    "le champ de vision",
+    "les zones visibles",
+    "le bassin visuel",
+];
+
+/// La ligne de vue entre deux points, `terrain.line_of_sight`, suivie de « entre A et B ».
+const LINE_OF_SIGHT_WORDS: &[&str] = &["la ligne de vue", "l'intervisibilité", "la vue directe"];
+
+/// La visibilité cumulée de plusieurs points, `terrain.viewshed_cumulative`, suivie de
+/// « depuis » et des points.
+const CUMULATIVE_VIEWSHED_WORDS: &[&str] = &[
+    "la visibilité cumulée",
+    "le bassin visuel cumulé",
+    "le champ de vision cumulé",
+];
+
+/// Les verbes d'un produit du MNT : `{np}` la tournure et le MNT, `{de}` la même précédée de
+/// « de » (« de la pente du MNT », « des pentes du MNT ») ; et s'ils ouvrent une question.
+const DEM_PRODUCT_VERBS: &[(&str, bool)] = &[
+    ("donne-moi {np}", false),
+    ("détermine {np}", false),
+    ("fais la carte {de}", false),
+    ("génère le raster {de}", false),
+    ("produis la carte {de}", false),
+    ("cartographie {np}", false),
+    ("peux-tu calculer {np}", true),
+];
+
+/// Un produit du MNT assemblé : un verbe de `DEM_PRODUCT_VERBS`, la tournure `np` et le MNT
+/// `of` (à la place de `{of}` s'il y est, après sinon), puis `tail` (l'unité d'une pente). Rend
+/// le corps et s'il est interrogatif.
+fn dem_product(rng: &mut Rng, np: &str, of: &str, tail: &str) -> (String, bool) {
+    let np = if np.contains("{of}") {
+        np.replace("{of}", of)
+    } else {
+        format!("{np} {of}")
+    };
+    let (verb, q) = *rng.pick(DEM_PRODUCT_VERBS);
+    let body = verb.replace("{np}", &np).replace("{de}", &de_np(&np));
+    (format!("{body}{tail}"), q)
+}
+
+/// « Fais la carte des pentes du MNT en pourcentage », « Détermine la déclivité du terrain en
+/// degrés » : `terrain.slope` (`SLOPE_WORDS`) sur le `source` du MNT, l'unité telle qu'écrite.
 fn pente(rng: &mut Rng) -> Option<Example> {
     let mut b = Builder::new();
     let epsg = terrain_epsg(rng);
     let dem = b.add_dem(rng, epsg);
     let (unit, unit_text) = slope_unit(rng);
     let of = dem_words(rng, &dem);
-    let (body, q) = match rng.below(6) {
-        // Pas « Calcule la pente du terrain en pourcentage » : c'est une phrase des essais
-        // réels (`training/tests/recouvrement.rs`).
-        0 => (format!("Calcule les pentes {of} {unit_text}"), false),
-        1 => (format!("Fais la carte des pentes {of} {unit_text}"), false),
-        2 => (
-            format!("Génère un raster de pente {unit_text} à partir {of}"),
-            false,
-        ),
-        3 => (format!("Peux-tu calculer la pente {of} {unit_text}"), true),
-        4 => (format!("Donne-moi l'inclinaison {of} {unit_text}"), false),
-        _ => (
-            format!("Produis la carte des pentes {unit_text} {of}"),
-            false,
-        ),
+    // Jamais « Calcule » : « Calcule la pente du terrain en pourcentage » et « Calcule
+    // l'inclinaison du MNT en degrés » sont des phrases de mesure (`training/tests/recouvrement.rs`).
+    let np = pick_str(rng, SLOPE_WORDS);
+    // « les pentes … exprimées en degrés » : le participe s'accorde au pluriel.
+    let unit_text = if np.starts_with("les ") {
+        unit_text.replace("exprimée", "exprimées")
+    } else {
+        unit_text.to_string()
     };
+    let (body, q) = dem_product(rng, np, &of, &format!(" {unit_text}"));
     let request = finish(rng, &body, q, true);
     let expected = calls(vec![json!({"command": "terrain.slope",
         "params": {"dem": dem.source, "unit": unit}})]);
@@ -4403,14 +4497,20 @@ fn ligne_de_vue(rng: &mut Rng) -> Option<Example> {
     let c = terrain_point(rng, epsg)?;
     let (pa, pc) = (&a.place, &c.place);
     let du_a = pa.replacen("le point", "du point", 1);
-    let (body, q) = match rng.below(5) {
-        0 => (
-            format!("Y a-t-il une ligne de vue entre {pa} et {pc}"),
-            true,
-        ),
+    let w = pick_str(rng, LINE_OF_SIGHT_WORDS);
+    let (body, q) = match rng.below(6) {
+        0 => {
+            // « une ligne de vue », « une vue directe », « intervisibilité » sans article.
+            let some = w.replacen("la ", "une ", 1).replacen("l'", "", 1);
+            (format!("Y a-t-il {some} entre {pa} et {pc}"), true)
+        }
         1 => (format!("Vérifie si {pc} est visible depuis {pa}"), false),
-        2 => (format!("Calcule la ligne de vue {du_a} vers {pc}"), false),
+        2 => {
+            let verb = pick_str(rng, &["calcule", "vérifie", "teste", "contrôle"]);
+            (format!("{verb} {w} entre {pa} et {pc}"), false)
+        }
         3 => (format!("Est-ce qu'on voit {pc} depuis {pa}"), true),
+        4 => (format!("Calcule {w} {du_a} vers {pc}"), false),
         _ => (
             format!(
                 "Trace le profil de visibilité {du_a} jusqu'au point {}",
@@ -4490,13 +4590,17 @@ fn champ_de_vision(rng: &mut Rng) -> Option<Example> {
             ),
         }
     } else {
-        match rng.below(6) {
-            0 => (format!("Calcule le champ de vision depuis {p}"), false),
-            1 => (format!("Quelles zones sont visibles depuis {p}"), true),
+        match rng.below(7) {
+            0 => (format!("Quelles zones sont visibles depuis {p}"), true),
+            1 => (format!("Qu'est-ce qui est visible depuis {p}"), true),
             2 => (format!("Détermine ce qu'on voit depuis {p}"), false),
             3 => (format!("Fais une analyse de visibilité depuis {p}"), false),
             4 => (format!("Montre la zone vue depuis {p}"), false),
-            _ => (format!("Qu'est-ce qui est visible depuis {p}"), true),
+            _ => {
+                let w = pick_str(rng, VIEWSHED_WORDS);
+                let verb = pick_str(rng, &["calcule", "détermine", "montre", "cartographie"]);
+                (format!("{verb} {w} depuis {p}"), false)
+            }
         }
     };
     let mut params = json!({"dem": dem.source, "observer": o.point});
@@ -4540,25 +4644,21 @@ fn exposition(rng: &mut Rng) -> Option<Example> {
     // Constat de 11.16 (A01) : l'orientation des pentes, dite sans le mot « exposition », est
     // une exposition, jamais une pente reclassée.
     let (body, q) = match rng.below(10) {
-        0 => (format!("Calcule l'exposition des versants {of}"), false),
-        1 => (format!("Fais la carte d'exposition {of}"), false),
-        2 => (format!("Vers où sont tournés les versants {of}"), true),
-        3 => (format!("Donne l'orientation des versants {of}"), false),
-        4 => (
-            format!("Génère un raster d'exposition à partir {of}"),
-            false,
-        ),
+        0..=3 => {
+            let np = pick_str(rng, ASPECT_WORDS);
+            dem_product(rng, np, &of, "")
+        }
+        4 => (format!("Vers où sont tournés les versants {of}"), true),
         5 => (
             format!("Dans quelle direction regardent les pentes {of}"),
             true,
         ),
         6 => (format!("Vers où sont orientées les pentes {of}"), true),
         7 => (format!("Quelle est l'orientation des pentes {of}"), true),
-        8 => (
+        _ => (
             format!("Dans quel sens les pentes {of} sont-elles tournées"),
             true,
         ),
-        _ => (format!("Peux-tu calculer l'exposition {of}"), true),
     };
     let request = finish(rng, &body, q, true);
     let expected = calls(vec![
@@ -4589,12 +4689,16 @@ fn ombrage(rng: &mut Rng) -> Option<Example> {
     let epsg = terrain_epsg(rng);
     let dem = b.add_dem(rng, epsg);
     let of = dem_words(rng, &dem);
-    let (mut body, q) = match rng.below(5) {
-        0 => (format!("Calcule l'ombrage {of}"), false),
-        1 => (format!("Fais un ombrage du relief à partir {of}"), false),
-        2 => (format!("Génère un estompage {of}"), false),
-        3 => (format!("Produis la carte d'ombrage {of}"), false),
-        _ => (format!("Peux-tu ombrer le relief {of}"), true),
+    let (mut body, q) = if rng.chance(1, 6) {
+        (format!("Peux-tu ombrer le relief {of}"), true)
+    } else {
+        let w = pick_str(rng, HILLSHADE_WORDS);
+        let verb = pick_str(rng, hillshade_verbs(w));
+        if w.ends_with(" du relief") {
+            (format!("{verb} {w} à partir {of}"), false)
+        } else {
+            (format!("{verb} {w} {of}"), false)
+        }
     };
     let gon = rng.chance(1, 4);
     let mut params = json!({"dem": dem.source});
@@ -4675,11 +4779,11 @@ fn champ_de_vision_cumule(rng: &mut Rng) -> Option<Example> {
             format!("Combien de ces points voient chaque endroit : {pts}"),
             true,
         ),
-        1 => (format!("Calcule la visibilité cumulée depuis {pts}"), false),
-        2 => (
-            format!("Fais un champ de vision cumulé depuis {pts}"),
-            false,
-        ),
+        1 | 2 => {
+            let w = pick_str(rng, CUMULATIVE_VIEWSHED_WORDS);
+            let verb = pick_str(rng, &["calcule", "fais", "détermine", "cartographie"]);
+            (format!("{verb} {w} depuis {pts}"), false)
+        }
         3 => (
             format!(
                 "Compte, pour chaque endroit du terrain, combien de points le voient parmi {pts}"
@@ -4744,18 +4848,28 @@ fn points_hauts(rng: &mut Rng) -> Option<Example> {
             rng.range(2, 30)
         };
         params["max_count"] = json!(n);
+        let w = pick_str(rng, PEAK_WORDS);
+        // « les 10 sommets les plus hauts », jamais « les 10 points les plus hauts » (PK2).
+        let counted = if w == "les sommets" && rng.chance(1, 2) {
+            format!("les {n} sommets les plus hauts")
+        } else {
+            w.replacen("les ", &format!("les {n} "), 1)
+        };
         match rng.below(4) {
-            0 => (format!("Trouve les {n} sommets les plus hauts {of}"), false),
-            1 => (format!("Liste les {n} points culminants {of}"), false),
-            2 => (format!("Repère les {n} plus hauts sommets {of}"), false),
-            _ => (format!("Quels sont les {n} sommets principaux {of}"), true),
+            0 => (format!("Quels sont {counted} {of}"), true),
+            _ => {
+                let verb = pick_str(rng, &["trouve", "liste", "repère", "localise"]);
+                (format!("{verb} {counted} {of}"), false)
+            }
         }
     } else {
+        let w = pick_str(rng, PEAK_WORDS);
         match rng.below(4) {
-            0 => (format!("Trouve les sommets {of}"), false),
-            1 => (format!("Quels sont les points hauts {of}"), true),
-            2 => (format!("Repère les points hauts {of}"), false),
-            _ => (format!("Localise les sommets {of}"), false),
+            0 => (format!("Quels sont {w} {of}"), true),
+            _ => {
+                let verb = pick_str(rng, &["trouve", "liste", "repère", "localise"]);
+                (format!("{verb} {w} {of}"), false)
+            }
         }
     };
     if rng.chance(1, 2) {
@@ -5755,12 +5869,20 @@ fn convert_words(
     zone: Option<u64>,
 ) -> (String, String) {
     match target {
-        "wgs84" => match rng.below(3) {
+        "wgs84" => match rng.below(5) {
             0 => (
                 "en latitude et longitude".into(),
                 "la latitude et la longitude".into(),
             ),
             1 => ("en WGS84".into(), "les coordonnées WGS84".into()),
+            2 => (
+                "en degrés décimaux".into(),
+                "les coordonnées en degrés décimaux".into(),
+            ),
+            3 => (
+                "en coordonnées GPS (WGS84)".into(),
+                "les coordonnées GPS (WGS84)".into(),
+            ),
             _ => (
                 "en coordonnées géographiques".into(),
                 "les coordonnées géographiques".into(),
@@ -5797,10 +5919,12 @@ fn convert_words(
             }
         }
         _ => {
-            let (en, noun) = if rng.chance(1, 2) {
-                ("en MGRS", "la référence MGRS")
-            } else {
-                ("en référence MGRS", "la référence MGRS")
+            // USNG : la même grille que le MGRS sur le WGS84, écrite à l'américaine.
+            let (en, noun) = match rng.below(5) {
+                0 | 1 => ("en MGRS", "la référence MGRS"),
+                2 => ("en référence MGRS", "la référence MGRS"),
+                3 => ("en coordonnées MGRS", "les coordonnées MGRS"),
+                _ => ("en référence USNG", "la référence USNG"),
             };
             match precision {
                 Some(p) => (
@@ -5922,7 +6046,12 @@ fn conversion_coordonnees(rng: &mut Rng) -> Option<Example> {
 fn reprojection_point(rng: &mut Rng) -> Option<Example> {
     let b = Builder::new();
     let east = rng.chance(1, 3);
-    const TO_LAMBERT: &[&str] = &["en Lambert-93", "en Lambert 93", "vers l'EPSG:2154"];
+    const TO_LAMBERT: &[&str] = &[
+        "en Lambert-93",
+        "en Lambert 93",
+        "vers l'EPSG:2154",
+        "en RGF93 / Lambert-93",
+    ];
     let (np, point, target, words): (String, Value, u32, String) = match rng.below(4) {
         0 => {
             let c = lambert_coord(rng);
@@ -6436,10 +6565,392 @@ fn metric_analysis(rng: &mut Rng, others: u32) -> Option<(Builder, String, bool,
     })
 }
 
-/// « Quelle distance sépare le point … du point … », « distance et azimut entre les points …
-/// et … (UTM 31N), azimut en grades » : `geo.distance_azimuth`, `unit` seulement si elle est
-/// écrite (`gon` pour les grades). Des points en Lambert-93 sont d'abord reprojetés en WGS84,
-/// chacun par son étape.
+// -- formulations de géométrie (5.53, livrable 4) ---------------------------
+//
+// Une notion, une liste : chaque liste porte la tournure sans le verbe (forme de `TOPO_WORDS`),
+// liée à une commande et à ses paramètres ; les familles l'assemblent avec des listes de verbes,
+// jamais en phrases entières. Une tournure de nord porte le `north` de sa liste, et une demande
+// ne parle que d'un nord. Vocabulaire civil : topographie (IGN, carte au 1:25 000), géomètres,
+// course d'orientation, randonnée, enseignement. Les tournures ambiguës sont rassemblées dans
+// `AMBIGUOUS_TERMS`, qu'aucune demande du jeu ne contient.
+
+/// Nord géographique (vrai) de `geo.distance_azimuth` : `north` absent (D1, 2026-11-11 : un seul
+/// plan par sens, le nord vrai étant le défaut). « Le contre-azimut » est rendu par
+/// `back_azimuth`, sans paramètre.
+const TRUE_NORTH_WORDS: &[&str] = &[
+    "l'azimut",
+    "l'azimut géographique",
+    "l'azimut vrai",
+    "l'azimut par rapport au nord géographique",
+    "la direction",
+    "l'azimut et le contre-azimut",
+];
+
+/// Le nord géographique de `geo.destination_point`, `north` absent : `{az}` est l'azimut écrit
+/// avec son unité (`azimuth`).
+const TRUE_NORTH_HEADINGS: &[&str] = &[
+    "à l'azimut {az}",
+    "à l'azimut géographique {az}",
+    "à l'azimut vrai {az}",
+    "à {az} par rapport au nord géographique",
+    "suivant la direction {az}",
+];
+
+/// La distance de `geo.distance_azimuth`, sans azimut ni `unit` (la distance est rendue en
+/// mètres) : des noms, à côté de « la distance ».
+const DISTANCE_WORDS: &[&str] = &[
+    "la distance à vol d'oiseau",
+    "la distance géodésique",
+    "la distance en ligne droite",
+];
+
+/// Les questions de distance seule, suivies de « A de B » : `geo.distance_azimuth` sans `unit`.
+const DISTANCE_QUESTIONS: &[&str] = &["combien de kilomètres séparent", "quelle distance sépare"];
+
+/// Le gisement, compté depuis le nord du quadrillage UTM : `north: "grid"` sur
+/// `geo.distance_azimuth`, `utm_zone` seulement si la zone est écrite (`grid_zone_words`).
+/// Jamais « gisement Lambert » ni « nord Lambert » (D2 : le gisement du noyau est UTM).
+const GRID_NORTH_WORDS: &[&str] = &[
+    "le gisement",
+    "l'azimut du quadrillage",
+    "l'azimut en nord du quadrillage",
+    "l'azimut par rapport au nord du quadrillage",
+    "l'azimut par rapport au quadrillage UTM",
+    "l'azimut en nord UTM",
+    "l'angle compté depuis le nord du quadrillage UTM",
+];
+
+/// Le gisement de `geo.destination_point` : `north: "grid"`, `{az}` l'azimut écrit.
+const GRID_NORTH_HEADINGS: &[&str] = &[
+    "au gisement {az}",
+    "au gisement de {az}",
+    "à l'azimut du quadrillage {az}",
+    "à {az} en nord du quadrillage",
+    "à {az} par rapport au nord du quadrillage",
+    "à {az} par rapport au quadrillage UTM",
+    "à l'azimut {az} en nord UTM",
+    "à {az} comptés depuis le nord du quadrillage UTM",
+];
+
+/// L'azimut magnétique (boussole) : `north: "magnetic"` sur `geo.distance_azimuth`, `date`
+/// seulement si elle est écrite (`magnetic_date_words`). « Cap » n'y est jamais seul
+/// (`AMBIGUOUS_TERMS`). Une tournure qui commence par « en » suit les points, après
+/// « l'azimut ».
+const MAGNETIC_NORTH_WORDS: &[&str] = &[
+    "l'azimut magnétique",
+    "l'azimut à la boussole",
+    "l'azimut boussole",
+    "l'azimut lu à la boussole",
+    "l'azimut par rapport au nord magnétique",
+    "le cap magnétique",
+    "en tenant compte de la déclinaison magnétique",
+];
+
+/// L'azimut magnétique de `geo.destination_point` : `north: "magnetic"`, `{az}` l'azimut écrit.
+const MAGNETIC_NORTH_HEADINGS: &[&str] = &[
+    "à l'azimut magnétique {az}",
+    "à {az} à la boussole",
+    "à l'azimut boussole {az}",
+    "à {az} lus à la boussole",
+    "à {az} par rapport au nord magnétique",
+    "au cap magnétique {az}",
+    "à l'azimut {az}, en tenant compte de la déclinaison magnétique",
+];
+
+/// Les verbes de `geo.destination_point`, et s'ils ouvrent une question : `{d}` la distance,
+/// `{p}` le départ (« le point … »), `{de_p}` le même précédé de « de » (« du point … »), `{h}` le
+/// cap d'un des trois nords (`*_HEADINGS`). « Où suis-je » n'y est permis que sans visée vers un
+/// repère (`AMBIGUOUS_TERMS`, D5).
+const DESTINATION_VERBS: &[(&str, bool)] = &[
+    ("projette un point à {d} {de_p}, {h}", false),
+    ("depuis {p}, avance de {d} {h}", false),
+    ("donne les coordonnées du point à {d} {de_p}, {h}", false),
+    ("reporte un point à {d} {de_p}, {h}", false),
+    ("implante un point à {d} {de_p}, {h}", false),
+    ("place un point à {d} {de_p}, {h}", false),
+    ("positionne un point à {d} {de_p}, {h}", false),
+    ("trace le point situé à {d} {de_p}, {h}", false),
+    ("quel point atteint-on à {d} {de_p}, {h}", true),
+    ("où arrive-t-on en partant {de_p} sur {d} {h}", true),
+    (
+        "je pars {de_p} et je marche {d} {h} : quel est le point d'arrivée",
+        true,
+    ),
+    ("je pars {de_p} et je marche {d} {h}. Où suis-je", true),
+];
+
+/// Les verbes d'une mesure entre deux points (`geo.distance_azimuth`, `geo.bearing_intersection`).
+const MEASURE_VERBS: &[&str] = &["donne", "calcule", "mesure", "indique", "détermine"];
+
+/// Le recoupement de deux visées, `geo.bearing_intersection` : nord vrai seul, sans `north`
+/// (D4 : jamais « à la boussole »). Une tournure qui finit par « depuis » prend les stations
+/// juste après elle.
+const INTERSECTION_WORDS: &[&str] = &[
+    "le recoupement",
+    "l'intersection des deux visées",
+    "le croisement des deux azimuts",
+    "le point où se coupent les deux directions",
+    "l'intersection des relèvements pris depuis",
+];
+
+/// Une tournure ambiguë, jamais engendrée. Les fragments se cherchent dans la demande normalisée
+/// par `ambiguity_text` (minuscules, ponctuation en espaces, une espace de chaque côté : « cap »
+/// s'écrit « ␣cap␣ » pour ne pas prendre « captage »).
+pub struct Ambiguous {
+    /// Tous présents.
+    pub all: &'static [&'static str],
+    /// Au moins un présent (aucune condition si vide).
+    pub any: &'static [&'static str],
+    /// Retirés avant la recherche, occurrence par occurrence (« cap magnétique » n'est pas un
+    /// « cap » seul, mais n'excuse pas un autre « cap » de la demande).
+    pub except: &'static [&'static str],
+    /// Un seul présent lève l'ambiguïté (un système nommé).
+    pub lifted_by: &'static [&'static str],
+    pub why: &'static str,
+}
+
+/// Tournures ambiguës, jamais engendrées : les tests
+/// `the_default_set_has_every_wording_list_one_north_per_request_and_no_ambiguous_term` (jeu
+/// engendré, graines 1 à 5) et `every_ambiguous_term_is_caught_and_its_neighbours_are_not`
+/// (chaque entrée épinglée) les tiennent.
+pub const AMBIGUOUS_TERMS: &[Ambiguous] = &[
+    Ambiguous {
+        all: &[" cap "],
+        any: &[],
+        except: &[" cap magnétique "],
+        lifted_by: &[],
+        why: "« cap » seul est souvent magnétique (2026-11-11)",
+    },
+    Ambiguous {
+        all: &[" gisement", " lambert"],
+        any: &[],
+        except: &[],
+        lifted_by: &[],
+        why: "gisement en Lambert : le gisement du noyau est UTM (D2)",
+    },
+    Ambiguous {
+        all: &[" nord lambert"],
+        any: &[],
+        except: &[],
+        lifted_by: &[],
+        why: "le nord du quadrillage du noyau est UTM (D2)",
+    },
+    Ambiguous {
+        all: &[" coordonnées kilométriques"],
+        any: &[],
+        except: &[],
+        lifted_by: &[" lambert", " utm", " epsg"],
+        why: "coordonnées kilométriques sans système nommé",
+    },
+    Ambiguous {
+        all: &[],
+        any: &[
+            " degrés minutes secondes",
+            " degrés minutes et secondes",
+            " dms ",
+            " sexagésima",
+        ],
+        except: &[],
+        lifted_by: &[],
+        why: "le noyau ne rend pas les degrés, minutes et secondes",
+    },
+    Ambiguous {
+        all: &[" boussole"],
+        any: &[" relèvement", " recoupement", " recoupe "],
+        except: &[],
+        lifted_by: &[],
+        why: "relèvement ou recoupement à la boussole : l'intersection est au nord vrai (D4)",
+    },
+    Ambiguous {
+        all: &[" où suis je "],
+        any: &[" vise", " visée", " repère", " relèvement", " relevé"],
+        except: &[],
+        lifted_by: &[],
+        why: "relèvement inverse depuis des visées vers des repères, hors du catalogue (D5)",
+    },
+    Ambiguous {
+        all: &[],
+        any: &[" crêtes ", " ligne de crête", " lignes de crête"],
+        except: &[],
+        lifted_by: &[],
+        why: "des crêtes ne sont ni des sommets ni des maximums (`terrain.peaks`)",
+    },
+    Ambiguous {
+        all: &[],
+        any: &[" points cotés", " point coté"],
+        except: &[],
+        lifted_by: &[],
+        why: "des points cotés ne sont ni des sommets ni des maximums (`terrain.peaks`)",
+    },
+    Ambiguous {
+        all: &[" triangulation"],
+        any: &[],
+        except: &[],
+        lifted_by: &[],
+        why: "triangulation : hors du catalogue",
+    },
+];
+
+/// La demande telle que la lit `AMBIGUOUS_TERMS` : minuscules, tout signe hors lettre et chiffre
+/// changé en espace, une espace de chaque côté.
+pub fn ambiguity_text(request: &str) -> String {
+    let words: String = request
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+        .collect();
+    format!(
+        " {} ",
+        words.split_whitespace().collect::<Vec<_>>().join(" ")
+    )
+}
+
+/// La raison de la première tournure ambiguë de la demande, s'il y en a une.
+pub fn ambiguous_term(request: &str) -> Option<&'static str> {
+    let text = ambiguity_text(request);
+    AMBIGUOUS_TERMS
+        .iter()
+        .find(|a| {
+            let mut t = text.clone();
+            for e in a.except {
+                t = t.replace(e, " ");
+            }
+            a.all.iter().all(|f| t.contains(f))
+                && (a.any.is_empty() || a.any.iter().any(|f| t.contains(f)))
+                && !a.lifted_by.iter().any(|f| t.contains(f))
+        })
+        .map(|a| a.why)
+}
+
+/// Le nord d'une demande d'azimut, et ses listes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum North {
+    True,
+    Grid,
+    Magnetic,
+}
+
+impl North {
+    fn words(self) -> &'static [&'static str] {
+        match self {
+            North::True => TRUE_NORTH_WORDS,
+            North::Grid => GRID_NORTH_WORDS,
+            North::Magnetic => MAGNETIC_NORTH_WORDS,
+        }
+    }
+
+    fn headings(self) -> &'static [&'static str] {
+        match self {
+            North::True => TRUE_NORTH_HEADINGS,
+            North::Grid => GRID_NORTH_HEADINGS,
+            North::Magnetic => MAGNETIC_NORTH_HEADINGS,
+        }
+    }
+}
+
+/// « Quel est », « Quelle est » ou « Quels sont » devant le nom d'une mesure.
+fn quel_est(np: &str) -> &'static str {
+    let nouns: Vec<&str> = np.split(", ").flat_map(|n| n.split(" et ")).collect();
+    let feminine = nouns.iter().all(|n| n.starts_with("la "));
+    match (nouns.len() > 1, feminine) {
+        (true, true) => "Quelles sont",
+        (true, false) => "Quels sont",
+        (false, true) => "Quelle est",
+        (false, false) => "Quel est",
+    }
+}
+
+/// Le nom d'une mesure entre deux points : avec `bearing`, une tournure du nord `north`, la
+/// distance devant une fois sur trois ; sans, la distance seule. Rend le nom et ce qui suit les
+/// points (« en tenant compte de la déclinaison magnétique »).
+fn measure_noun(rng: &mut Rng, north: North, bearing: bool) -> (String, String) {
+    let distance = |rng: &mut Rng| {
+        if rng.chance(1, 2) {
+            "la distance"
+        } else {
+            pick_str(rng, DISTANCE_WORDS)
+        }
+    };
+    if !bearing {
+        return (distance(rng).to_string(), String::new());
+    }
+    let w = pick_str(rng, north.words());
+    let (noun, after) = if w.starts_with("en ") {
+        ("l'azimut".to_string(), format!(" {w}"))
+    } else {
+        (w.to_string(), String::new())
+    };
+    if !rng.chance(1, 3) {
+        return (noun, after);
+    }
+    let d = distance(rng);
+    let noun = if noun.contains(" et ") {
+        format!("{d}, {noun}")
+    } else {
+        format!("{d} et {noun}")
+    };
+    (noun, after)
+}
+
+/// Une mesure entre `pa` et `pc`, assemblée avec un verbe de mesure ou une question. Rend le
+/// corps et s'il est interrogatif.
+fn two_point_request(rng: &mut Rng, noun: &str, after: &str, pa: &str, pc: &str) -> (String, bool) {
+    let verb = pick_str(rng, MEASURE_VERBS);
+    match rng.below(4) {
+        0 => (
+            format!("{verb} {noun} {} {}{after}", de_np(pa), a_np(pc)),
+            false,
+        ),
+        1 => (format!("{verb} {noun} entre {pa} et {pc}{after}"), false),
+        2 => (
+            format!("{} {noun} {} vers {pc}{after}", quel_est(noun), de_np(pa)),
+            true,
+        ),
+        _ => (
+            format!("{verb} {noun} {} vers {pc}{after}", de_np(pa)),
+            false,
+        ),
+    }
+}
+
+/// La demande de `geo.destination_point` au nord `north` : un verbe de `DESTINATION_VERBS`, un
+/// cap de la liste du nord, puis `extra` (zone du quadrillage, date de la déclinaison) collé au
+/// cap. Rend le corps et s'il est interrogatif.
+fn heading_request(
+    rng: &mut Rng,
+    north: North,
+    p: &str,
+    d_text: &str,
+    az_text: &str,
+    extra: &str,
+) -> (String, bool) {
+    let h = format!(
+        "{}{extra}",
+        pick_str(rng, north.headings()).replace("{az}", az_text)
+    );
+    let (verb, q) = *rng.pick(DESTINATION_VERBS);
+    let body = verb
+        .replace("{d}", d_text)
+        .replace("{de_p}", &de_np(p))
+        .replace("{p}", p)
+        .replace("{h}", &h);
+    (body, q)
+}
+
+/// Ajoute `text` (le résultat en MGRS) au corps, avant le « Où suis-je » final s'il y est.
+fn push_before_question(body: &mut String, text: &str) {
+    const ASK: &str = ". Où suis-je";
+    match body.strip_suffix(ASK) {
+        Some(head) => *body = format!("{head}{text}{ASK}"),
+        None => body.push_str(text),
+    }
+}
+
+/// « La distance à vol d'oiseau entre le point … et le point … », « Calcule l'azimut vrai et le
+/// contre-azimut entre les points … et … (UTM 31N) » : `geo.distance_azimuth` au nord
+/// géographique (`TRUE_NORTH_WORDS`, `DISTANCE_WORDS`), `north` absent (D1) ; `unit` seulement
+/// si elle est écrite (`gon` pour les grades). Des points en Lambert-93 sont d'abord reprojetés
+/// en WGS84, chacun par son étape.
 fn distance_azimut(rng: &mut Rng) -> Option<Example> {
     let b = Builder::new();
     let east = rng.chance(1, 3);
@@ -6457,7 +6968,14 @@ fn distance_azimut(rng: &mut Rng) -> Option<Example> {
     if a.point == c.point {
         return None;
     }
-    let (mut body, q) = if rng.chance(1, 3) {
+    // Trois fois sur huit, la distance seule ; une de ces trois, une question de
+    // `DISTANCE_QUESTIONS` (« combien de kilomètres séparent A de B »).
+    let kind = rng.below(8);
+    let bearing = kind >= 3;
+    let (mut body, q) = if kind == 0 {
+        let head = pick_str(rng, DISTANCE_QUESTIONS);
+        (format!("{head} {} {}", a.place, de_np(&c.place)), true)
+    } else if rng.chance(1, 3) {
         // Le système écrit une fois pour les deux points.
         let suffix = if a.bare.starts_with('X') || a.bare.starts_with('(') {
             format!("en {}", a.crs)
@@ -6465,42 +6983,29 @@ fn distance_azimut(rng: &mut Rng) -> Option<Example> {
             format!("({})", a.crs)
         };
         let between = format!("les points {} et {} {suffix}", a.bare, c.bare);
-        match rng.below(3) {
-            0 => (
-                format!("Donne la distance et l'azimut entre {between}"),
-                false,
-            ),
-            1 => (format!("Quelle est la distance entre {between}"), true),
-            _ => (format!("Calcule distance et azimut entre {between}"), false),
+        let (noun, after) = measure_noun(rng, North::True, bearing);
+        if rng.chance(1, 3) {
+            (
+                format!("{} {noun} entre {between}{after}", quel_est(&noun)),
+                true,
+            )
+        } else {
+            let verb = pick_str(rng, MEASURE_VERBS);
+            (format!("{verb} {noun} entre {between}{after}"), false)
         }
     } else {
-        let (pa, pc) = (&a.place, &c.place);
-        match rng.below(5) {
-            0 => (format!("Quelle distance sépare {pa} {}", de_np(pc)), true),
-            1 => (
-                format!("Calcule la distance et l'azimut {} {}", de_np(pa), a_np(pc)),
-                false,
-            ),
-            2 => (
-                format!("Donne la distance et l'azimut entre {pa} et {pc}"),
-                false,
-            ),
-            3 => (format!("Quel est l'azimut {} vers {pc}", de_np(pa)), true),
-            _ => (
-                format!("Mesure la distance géodésique entre {pa} et {pc}"),
-                false,
-            ),
-        }
+        let (noun, after) = measure_noun(rng, North::True, bearing);
+        two_point_request(rng, &noun, &after, &a.place, &c.place)
     };
-    let unit = match rng.below(4) {
-        0 => {
+    let unit = match (bearing, rng.below(4)) {
+        (true, 0) => {
             body.push_str(pick_str(
                 rng,
                 &[", azimut en grades", " (angles en grades)"],
             ));
             Some("gon")
         }
-        1 => {
+        (true, 1) => {
             body.push_str(pick_str(
                 rng,
                 &[", azimut en degrés", " (angles en degrés)"],
@@ -6526,9 +7031,9 @@ fn distance_azimut(rng: &mut Rng) -> Option<Example> {
     Some(example("distance_azimut", b, rng, request, calls(list)))
 }
 
-/// « Quel point atteint-on à 3 km du point …, azimut 45° » : `geo.destination_point`, l'azimut
-/// avec son unité et la distance tels qu'écrits ; résultat demandé en MGRS → `coord.convert`
-/// sur `step:1.point`.
+/// « Reporte un point à 3 km du point …, à l'azimut vrai 45° » : `geo.destination_point` au nord
+/// géographique (`TRUE_NORTH_HEADINGS`, `north` absent), l'azimut avec son unité et la distance
+/// tels qu'écrits ; résultat demandé en MGRS → `coord.convert` sur `step:1.point`.
 fn point_projete(rng: &mut Rng) -> Option<Example> {
     let b = Builder::new();
     let east = rng.chance(1, 3);
@@ -6536,35 +7041,12 @@ fn point_projete(rng: &mut Rng) -> Option<Example> {
     let gon = rng.chance(1, 4);
     let (az, az_text) = azimuth_words(rng, gon, 10, 350);
     let (d, d_text) = geo_distance(rng);
-    let p = &from.place;
-    let de_p = de_np(p);
-    let (mut body, q) = match rng.below(5) {
-        0 => (
-            format!("Quel point atteint-on à {d_text} {de_p}, azimut {az_text}"),
-            true,
-        ),
-        1 => (
-            format!("Calcule le point situé à {d_text} {de_p} dans l'azimut {az_text}"),
-            false,
-        ),
-        2 => (
-            format!("Depuis {p}, avance de {d_text} à l'azimut {az_text}"),
-            false,
-        ),
-        3 => (
-            format!("Donne les coordonnées du point à {d_text} {de_p}, à l'azimut {az_text}"),
-            false,
-        ),
-        _ => (
-            format!("Projette un point à {d_text} {de_p}, azimut {az_text}"),
-            false,
-        ),
-    };
+    let (mut body, q) = heading_request(rng, North::True, &from.place, &d_text, &az_text, "");
     let mut list = vec![json!({"command": "geo.destination_point",
         "params": {"from": from.point, "azimuth": az, "distance": d}})];
     if rng.chance(1, 3) {
         let (text, call) = mgrs_result(rng, 1);
-        body.push_str(&text);
+        push_before_question(&mut body, &text);
         list.push(call);
     }
     let request = finish(rng, &body, q, false);
@@ -6637,7 +7119,7 @@ fn grid_point(rng: &mut Rng, east: bool) -> Coord {
 }
 
 /// « Donne le gisement du point … au point … », « Implante un point à 800 m du point …, au
-/// gisement 250 gr » : tournures de géomètre (gisement, nord du quadrillage, quadrillage UTM),
+/// gisement 250 gr » : tournures de géomètre (`GRID_NORTH_WORDS`, `GRID_NORTH_HEADINGS`),
 /// grades fréquents → `geo.distance_azimuth` ou `geo.destination_point` avec `north: "grid"` ;
 /// `utm_zone` seulement si la zone du quadrillage est écrite (10.28).
 fn gisement(rng: &mut Rng) -> Option<Example> {
@@ -6653,58 +7135,19 @@ fn gisement(rng: &mut Rng) -> Option<Example> {
         if a.point == c.point {
             return None;
         }
-        let (pa, pc) = (&a.place, &c.place);
-        let (mut body, q) = match rng.below(9) {
-            0 => (
+        let (mut body, q) = if rng.chance(1, 6) {
+            // Tournure de géomètre gardée à côté des listes (avant 5.53).
+            (
                 format!(
-                    "Donne le gisement et la distance {} {}",
-                    de_np(pa),
-                    a_np(pc)
-                ),
-                false,
-            ),
-            1 => (
-                format!("Quel est le gisement {} vers {pc}", de_np(pa)),
-                true,
-            ),
-            2 => (format!("Calcule le gisement entre {pa} et {pc}"), false),
-            3 => (
-                format!(
-                    "Calcule l'azimut {} {} en nord du quadrillage",
-                    de_np(pa),
-                    a_np(pc)
-                ),
-                false,
-            ),
-            4 => (
-                format!(
-                    "Mesure distance et azimut par rapport au quadrillage UTM entre {pa} et {pc}"
-                ),
-                false,
-            ),
-            // D5 (après 5.49) : azimut du quadrillage, nord du quadrillage, nord UTM.
-            5 => (
-                format!("Donne l'azimut du quadrillage {} {}", de_np(pa), a_np(pc)),
-                false,
-            ),
-            6 => (
-                format!(
-                    "Quel est l'azimut {} vers {pc} par rapport au nord du quadrillage",
-                    de_np(pa)
+                    "Quel gisement faut-il prendre depuis {} pour aller {}",
+                    a.place,
+                    a_np(&c.place)
                 ),
                 true,
-            ),
-            7 => (
-                format!("Calcule l'azimut en nord UTM {} {}", de_np(pa), a_np(pc)),
-                false,
-            ),
-            _ => (
-                format!(
-                    "Quel gisement faut-il prendre depuis {pa} pour aller {}",
-                    a_np(pc)
-                ),
-                true,
-            ),
+            )
+        } else {
+            let (noun, after) = measure_noun(rng, North::Grid, true);
+            two_point_request(rng, &noun, &after, &a.place, &c.place)
         };
         body.push_str(zone_text);
         let mut params = json!({"from": a.point, "to": c.point, "north": "grid"});
@@ -6727,50 +7170,8 @@ fn gisement(rng: &mut Rng) -> Option<Example> {
         let from = grid_point(rng, east);
         let (az, az_text) = azimuth_words(rng, gon, 10, 350);
         let (d, d_text) = geo_distance(rng);
-        let p = &from.place;
-        let de_p = de_np(p);
-        let (mut body, q) = match rng.below(8) {
-            0 => (
-                format!("Quel point atteint-on à {d_text} {de_p}, gisement {az_text}"),
-                true,
-            ),
-            1 => (
-                format!("Implante un point à {d_text} {de_p}, au gisement {az_text}"),
-                false,
-            ),
-            2 => (
-                format!("Depuis {p}, avance de {d_text} au gisement de {az_text}"),
-                false,
-            ),
-            3 => (
-                format!(
-                    "Calcule le point situé à {d_text} {de_p}, azimut {az_text} en nord du quadrillage"
-                ),
-                false,
-            ),
-            4 => (
-                format!(
-                    "Projette un point à {d_text} {de_p} à {az_text} par rapport au quadrillage UTM"
-                ),
-                false,
-            ),
-            // D5 (après 5.49) : azimut du quadrillage, nord du quadrillage, nord UTM.
-            5 => (
-                format!("Place un point à {d_text} {de_p}, azimut du quadrillage {az_text}"),
-                false,
-            ),
-            6 => (
-                format!(
-                    "Quel point se trouve à {d_text} {de_p}, à {az_text} par rapport au nord du quadrillage"
-                ),
-                true,
-            ),
-            _ => (
-                format!("Depuis {p}, avance de {d_text} à {az_text} en nord UTM"),
-                false,
-            ),
-        };
-        body.push_str(zone_text);
+        let (mut body, q) =
+            heading_request(rng, North::Grid, &from.place, &d_text, &az_text, zone_text);
         let mut params = json!({"from": from.point, "azimuth": az, "distance": d,
             "north": "grid"});
         if let Some((_, z)) = zone {
@@ -6779,7 +7180,7 @@ fn gisement(rng: &mut Rng) -> Option<Example> {
         list.push(json!({"command": "geo.destination_point", "params": params}));
         if rng.chance(1, 4) {
             let (text, call) = mgrs_result(rng, 1);
-            body.push_str(&text);
+            push_before_question(&mut body, &text);
             list.push(call);
         }
         (body, q)
@@ -6842,9 +7243,9 @@ fn magnetic_date_words(rng: &mut Rng) -> Option<(String, String)> {
     Some((written, iso))
 }
 
-/// « Quel est l'azimut magnétique du point … au point … », « Depuis le point …, je marche 2 km
-/// à 120° à la boussole » : tournures de randonnée et d'orientation (azimut magnétique, à la
-/// boussole, cap magnétique, avec la déclinaison) → `geo.distance_azimuth` ou
+/// « Quel est l'azimut magnétique du point … au point … », « Je pars du point … et je marche
+/// 2 km à 120° à la boussole » : tournures de randonnée et d'orientation
+/// (`MAGNETIC_NORTH_WORDS`, `MAGNETIC_NORTH_HEADINGS`) → `geo.distance_azimuth` ou
 /// `geo.destination_point` avec `north: "magnetic"` ; `date` seulement si la date est écrite
 /// (10.29).
 fn azimut_magnetique(rng: &mut Rng) -> Option<Example> {
@@ -6860,37 +7261,8 @@ fn azimut_magnetique(rng: &mut Rng) -> Option<Example> {
         if a.point == c.point {
             return None;
         }
-        let (pa, pc) = (&a.place, &c.place);
-        let (mut body, q) = match rng.below(5) {
-            0 => (
-                format!("Quel est l'azimut magnétique {} {}", de_np(pa), a_np(pc)),
-                true,
-            ),
-            1 => (
-                format!("Donne l'azimut à la boussole {} vers {pc}", de_np(pa)),
-                false,
-            ),
-            2 => (
-                format!("Calcule le cap magnétique entre {pa} et {pc}"),
-                false,
-            ),
-            3 => (
-                format!(
-                    "Donne la distance et l'azimut magnétique {} {}",
-                    de_np(pa),
-                    a_np(pc)
-                ),
-                false,
-            ),
-            _ => (
-                format!(
-                    "Mesure l'azimut {} {} avec la déclinaison magnétique",
-                    de_np(pa),
-                    a_np(pc)
-                ),
-                false,
-            ),
-        };
+        let (noun, after) = measure_noun(rng, North::Magnetic, true);
+        let (mut body, q) = two_point_request(rng, &noun, &after, &a.place, &c.place);
         body.push_str(date_text);
         let mut params = json!({"from": a.point, "to": c.point, "north": "magnetic"});
         if gon {
@@ -6909,35 +7281,14 @@ fn azimut_magnetique(rng: &mut Rng) -> Option<Example> {
         let from = named_or_plain_any(rng, east);
         let (az, az_text) = azimuth_words(rng, gon, 10, 350);
         let (d, d_text) = geo_distance(rng);
-        let p = &from.place;
-        let de_p = de_np(p);
-        let (mut body, q) = match rng.below(5) {
-            0 => (
-                format!("Quel point atteint-on à {d_text} {de_p}, azimut magnétique {az_text}"),
-                true,
-            ),
-            1 => (
-                format!("Depuis {p}, je marche {d_text} à {az_text} à la boussole"),
-                false,
-            ),
-            2 => (
-                format!("Projette un point à {d_text} {de_p}, cap magnétique {az_text}"),
-                false,
-            ),
-            3 => (
-                format!(
-                    "Où arrive-t-on en suivant l'azimut boussole {az_text} sur {d_text} {de_p}"
-                ),
-                true,
-            ),
-            _ => (
-                format!(
-                    "Calcule le point à {d_text} {de_p}, azimut {az_text} lu à la boussole, avec la déclinaison"
-                ),
-                false,
-            ),
-        };
-        body.push_str(date_text);
+        let (mut body, q) = heading_request(
+            rng,
+            North::Magnetic,
+            &from.place,
+            &d_text,
+            &az_text,
+            date_text,
+        );
         let mut params = json!({"from": from.point, "azimuth": az, "distance": d,
             "north": "magnetic"});
         if let Some((_, iso)) = &date {
@@ -6946,7 +7297,7 @@ fn azimut_magnetique(rng: &mut Rng) -> Option<Example> {
         list.push(json!({"command": "geo.destination_point", "params": params}));
         if rng.chance(1, 5) {
             let (text, call) = mgrs_result(rng, 1);
-            body.push_str(&text);
+            push_before_question(&mut body, &text);
             list.push(call);
         }
         (body, q)
@@ -6955,8 +7306,9 @@ fn azimut_magnetique(rng: &mut Rng) -> Option<Example> {
     Some(example("azimut_magnetique", b, rng, request, calls(list)))
 }
 
-/// « Recoupe la visée du point … à l'azimut 40° avec celle du point … à l'azimut 310° » :
-/// `geo.bearing_intersection`, chaque station avec son azimut écrit (unité comprise) ;
+/// « Calcule le recoupement : 40° depuis le point …, 310° depuis le point … » :
+/// `geo.bearing_intersection` (`INTERSECTION_WORDS`, nord vrai seul, sans `north`), chaque
+/// station avec son azimut écrit (unité comprise) ;
 /// résultat demandé en MGRS → `coord.convert` sur `step:1.point`.
 fn recoupement(rng: &mut Rng) -> Option<Example> {
     let b = Builder::new();
@@ -7001,7 +7353,22 @@ fn recoupement(rng: &mut Rng) -> Option<Example> {
     let (az1, t1) = angle_words(rng, gon, b1);
     let (az2, t2) = angle_words(rng, gon, b2);
     let (pa, pc) = (&a.place, &c.place);
-    let (mut body, q) = match rng.below(5) {
+    let w = pick_str(rng, INTERSECTION_WORDS);
+    let stations = if w.ends_with("depuis") {
+        format!(" {pa} à {t1} et depuis {pc} à {t2}")
+    } else {
+        match rng.below(3) {
+            0 => format!(" : {t1} depuis {pa}, {t2} depuis {pc}"),
+            1 => format!(
+                " {} (azimut {t1}) et {} (azimut {t2})",
+                de_np(pa),
+                de_np(pc)
+            ),
+            _ => format!(", avec l'azimut {t1} depuis {pa} et l'azimut {t2} depuis {pc}"),
+        }
+    };
+    // Tournures d'avant 5.53, gardées à côté des listes (jamais « à la boussole », D4).
+    let (mut body, q) = match rng.below(8) {
         0 => (
             format!(
                 "Recoupe la visée {} à l'azimut {t1} avec celle {} à l'azimut {t2}",
@@ -7017,17 +7384,14 @@ fn recoupement(rng: &mut Rng) -> Option<Example> {
             true,
         ),
         2 => (
-            format!("Calcule l'intersection des visées : {t1} depuis {pa}, {t2} depuis {pc}"),
-            false,
-        ),
-        3 => (
             format!("Depuis {pa} je relève {t1}, depuis {pc} je relève {t2} : trouve le point visé"),
             false,
         ),
-        _ => (
-            format!("Fais un recoupement entre {pa} (azimut {t1}) et {pc} (azimut {t2})"),
-            false,
-        ),
+        3 => (format!("Peux-tu calculer {w}{stations}"), true),
+        _ => {
+            let verb = pick_str(rng, &["calcule", "donne", "trouve", "détermine", "situe"]);
+            (format!("{verb} {w}{stations}"), false)
+        }
     };
     let mut list = vec![json!({"command": "geo.bearing_intersection", "params": {
         "first": a.point, "first_azimuth": az1, "second": c.point, "second_azimuth": az2}})];
@@ -7492,10 +7856,11 @@ fn carroyage_mgrs(rng: &mut Rng) -> Option<Example> {
     b.project_utm(rng, present);
     let (km, forms) = *rng.pick(MGRS_STEPS);
     let step = *rng.pick(forms);
-    let grid_words = match rng.below(6) {
+    let grid_words = match rng.below(7) {
         0 => format!(" avec un carroyage MGRS {step}"),
         1 => format!(" avec la grille MGRS {step}"),
         2 => format!(" avec un quadrillage MGRS étiqueté {step}"),
+        6 => format!(" avec un quadrillage MGRS {step}"),
         3 => format!(" avec la grille USNG {step}"),
         4 => format!(" carroyée en MGRS {step}"),
         _ => format!(" avec un carroyage MGRS (USNG) {step}"),
@@ -8851,6 +9216,481 @@ mod tests {
             assert_eq!(p["first_azimuth"]["unit"], p["second_azimuth"]["unit"]);
         }
         mgrs_tail(&examples, "geo.bearing_intersection");
+    }
+
+    // -- formulations de géométrie et de terrain (5.53, livrable 4) ----------------
+
+    /// La demande en minuscules, ses angles écrits (« 45° », « 45 degrés », « 50 gr »,
+    /// « 50 grades ») remplacés par `{az}`, l'emplacement des listes `*_HEADINGS`.
+    fn masked_request(r: &str) -> String {
+        let chars: Vec<char> = r.to_lowercase().chars().collect();
+        let mut out = String::new();
+        let mut i = 0;
+        while i < chars.len() {
+            if chars[i].is_ascii_digit() && (i == 0 || !chars[i - 1].is_alphanumeric()) {
+                let mut j = i;
+                while j < chars.len() && chars[j].is_ascii_digit() {
+                    j += 1;
+                }
+                let rest: String = chars[j..].iter().collect();
+                let unit = ["°", " degrés", " grades", " gr"].iter().find(|u| {
+                    rest.starts_with(*u)
+                        && !rest[u.len()..].starts_with(|c: char| c.is_alphanumeric())
+                });
+                if let Some(u) = unit {
+                    out.push_str("{az}");
+                    i = j + u.chars().count();
+                } else {
+                    out.extend(&chars[i..j]);
+                    i = j;
+                }
+                continue;
+            }
+            out.push(chars[i]);
+            i += 1;
+        }
+        out
+    }
+
+    /// La tournure `w` de `list` est-elle celle tirée dans la demande masquée `r` : écrite en
+    /// entier, article compris, bornée par des non-lettres, et non couverte par une tournure plus
+    /// longue de la même liste qui la contient (« l'azimut » dans « l'azimut vrai » ne compte
+    /// pas). Un `{of}` est un joker : les morceaux autour, dans l'ordre.
+    fn drawn(r: &str, w: &str, list: &[&str]) -> bool {
+        let w = w.to_lowercase();
+        if w.contains("{of}") {
+            let mut rest = r;
+            for chunk in w.split("{of}") {
+                match rest.find(chunk) {
+                    Some(k) => rest = &rest[k + chunk.len()..],
+                    None => return false,
+                }
+            }
+            return true;
+        }
+        let longer: Vec<String> = list
+            .iter()
+            .map(|f| f.to_lowercase())
+            .filter(|f| *f != w && f.contains(w.as_str()))
+            .collect();
+        r.match_indices(w.as_str()).any(|(i, _)| {
+            let before = r[..i].chars().last().is_none_or(|c| !c.is_alphanumeric());
+            let after = r[i + w.len()..]
+                .chars()
+                .next()
+                .is_none_or(|c| !c.is_alphanumeric());
+            before
+                && after
+                && !longer.iter().any(|f| {
+                    f.match_indices(w.as_str())
+                        .any(|(k, _)| i >= k && r[i - k..].starts_with(f.as_str()))
+                })
+        })
+    }
+
+    /// Le verbe `v` (gabarit à emplacements) est-il celui de la demande : elle commence par sa
+    /// tête (avant le premier emplacement) et contient sa queue (après le dernier).
+    fn drawn_verb(r: &str, v: &str) -> bool {
+        let v = v.to_lowercase();
+        // Un verbe sans emplacement (« donne ») est suivi d'une espace.
+        let head = match v.find('{') {
+            Some(k) => v[..k].to_string(),
+            None => format!("{v} "),
+        };
+        let tail = &v[v.rfind('}').map_or(v.len(), |k| k + 1)..];
+        r.starts_with(head.as_str()) && (tail.is_empty() || r.contains(tail))
+    }
+
+    type FamilyFn = fn(&mut Rng) -> Option<Example>;
+
+    /// Une liste de tournures : son nom, ses tournures, si ce sont des verbes (gabarits), les
+    /// familles qui la tirent et les commandes dont le plan l'emploie (la branche qui la sert).
+    struct WordingList {
+        name: &'static str,
+        words: Vec<&'static str>,
+        verbs: bool,
+        makes: Vec<FamilyFn>,
+        commands: &'static [&'static str],
+    }
+
+    fn wording_lists() -> Vec<WordingList> {
+        let verbs = |l: &[(&'static str, bool)]| l.iter().map(|(v, _)| *v).collect::<Vec<_>>();
+        fn list(
+            name: &'static str,
+            words: &[&'static str],
+            makes: Vec<FamilyFn>,
+            commands: &'static [&'static str],
+        ) -> WordingList {
+            WordingList {
+                name,
+                words: words.to_vec(),
+                verbs: false,
+                makes,
+                commands,
+            }
+        }
+        const DA: &[&str] = &["geo.distance_azimuth"];
+        const DP: &[&str] = &["geo.destination_point"];
+        vec![
+            list(
+                "TRUE_NORTH_WORDS",
+                TRUE_NORTH_WORDS,
+                vec![distance_azimut],
+                DA,
+            ),
+            list(
+                "TRUE_NORTH_HEADINGS",
+                TRUE_NORTH_HEADINGS,
+                vec![point_projete],
+                DP,
+            ),
+            list("DISTANCE_WORDS", DISTANCE_WORDS, vec![distance_azimut], DA),
+            list(
+                "DISTANCE_QUESTIONS",
+                DISTANCE_QUESTIONS,
+                vec![distance_azimut],
+                DA,
+            ),
+            list("GRID_NORTH_WORDS", GRID_NORTH_WORDS, vec![gisement], DA),
+            list(
+                "GRID_NORTH_HEADINGS",
+                GRID_NORTH_HEADINGS,
+                vec![gisement],
+                DP,
+            ),
+            list(
+                "MAGNETIC_NORTH_WORDS",
+                MAGNETIC_NORTH_WORDS,
+                vec![azimut_magnetique],
+                DA,
+            ),
+            list(
+                "MAGNETIC_NORTH_HEADINGS",
+                MAGNETIC_NORTH_HEADINGS,
+                vec![azimut_magnetique],
+                DP,
+            ),
+            WordingList {
+                name: "DESTINATION_VERBS",
+                words: verbs(DESTINATION_VERBS),
+                verbs: true,
+                makes: vec![point_projete, gisement, azimut_magnetique],
+                commands: DP,
+            },
+            WordingList {
+                name: "MEASURE_VERBS",
+                words: MEASURE_VERBS.to_vec(),
+                verbs: true,
+                makes: vec![distance_azimut, gisement, azimut_magnetique],
+                commands: DA,
+            },
+            list(
+                "INTERSECTION_WORDS",
+                INTERSECTION_WORDS,
+                vec![recoupement],
+                &["geo.bearing_intersection"],
+            ),
+            list("SLOPE_WORDS", SLOPE_WORDS, vec![pente], &["terrain.slope"]),
+            list(
+                "ASPECT_WORDS",
+                ASPECT_WORDS,
+                vec![exposition],
+                &["terrain.aspect"],
+            ),
+            list(
+                "HILLSHADE_WORDS",
+                HILLSHADE_WORDS,
+                vec![ombrage],
+                &["terrain.hillshade"],
+            ),
+            list(
+                "PEAK_WORDS",
+                PEAK_WORDS,
+                vec![points_hauts],
+                &["terrain.peaks"],
+            ),
+            list(
+                "VIEWSHED_WORDS",
+                VIEWSHED_WORDS,
+                vec![champ_de_vision],
+                &["terrain.viewshed"],
+            ),
+            list(
+                "LINE_OF_SIGHT_WORDS",
+                LINE_OF_SIGHT_WORDS,
+                vec![ligne_de_vue],
+                &["terrain.line_of_sight"],
+            ),
+            list(
+                "CUMULATIVE_VIEWSHED_WORDS",
+                CUMULATIVE_VIEWSHED_WORDS,
+                vec![champ_de_vision_cumule],
+                &["terrain.viewshed_cumulative"],
+            ),
+            WordingList {
+                name: "DEM_PRODUCT_VERBS",
+                words: verbs(DEM_PRODUCT_VERBS),
+                verbs: true,
+                makes: vec![pente, exposition],
+                commands: &["terrain.slope", "terrain.aspect"],
+            },
+            // Ajouts de 5.53 aux conversions, à la reprojection d'un point et aux grilles du PDF.
+            list(
+                "convert_words",
+                &[
+                    "en degrés décimaux",
+                    "coordonnées gps (wgs84)",
+                    "coordonnées mgrs",
+                    "référence usng",
+                ],
+                vec![conversion_coordonnees],
+                &["coord.convert"],
+            ),
+            list(
+                "TO_LAMBERT",
+                &["en rgf93 / lambert-93"],
+                vec![reprojection_point],
+                &["data.transform_point"],
+            ),
+            list(
+                "grilles du PDF (UTM)",
+                &["quadrillage kilométrique utm"],
+                vec![carroyage_utm_projet],
+                &["layout.export_pdf"],
+            ),
+            list(
+                "grilles du PDF (MGRS)",
+                &["quadrillage mgrs"],
+                vec![carroyage_mgrs],
+                &["layout.export_pdf"],
+            ),
+            list(
+                "grilles du PDF (degrés)",
+                &["méridiens et parallèles"],
+                vec![export_pdf_format],
+                &["layout.export_pdf"],
+            ),
+        ]
+    }
+
+    /// Les demandes masquées des exemples dont le plan appelle une des `commands`.
+    fn requests_of(examples: &[Example], wanted: &[&str]) -> Vec<String> {
+        examples
+            .iter()
+            .filter(|e| commands(e).iter().any(|c| wanted.contains(c)))
+            .map(|e| masked_request(&e.request))
+            .collect()
+    }
+
+    /// La tournure `w` de la liste `l` est-elle tirée dans une des demandes.
+    fn seen_in(requests: &[String], l: &WordingList, w: &str) -> bool {
+        // « quadrillage MGRS » nu, jamais celui d'un « quadrillage MGRS étiqueté ».
+        let context: Vec<&str> = if l.name == "grilles du PDF (MGRS)" {
+            vec!["quadrillage mgrs", "quadrillage mgrs étiqueté"]
+        } else {
+            l.words.clone()
+        };
+        requests.iter().any(|r| {
+            if l.verbs {
+                drawn_verb(r, w)
+            } else {
+                drawn(r, w, &context)
+            }
+        })
+    }
+
+    #[test]
+    fn every_wording_of_every_list_is_generated() {
+        for l in wording_lists() {
+            let examples: Vec<Example> = l.makes.iter().flat_map(|m| valid(*m, 600)).collect();
+            let requests = requests_of(&examples, l.commands);
+            assert!(!requests.is_empty(), "{}", l.name);
+            for w in &l.words {
+                assert!(
+                    seen_in(&requests, &l, w),
+                    "{} : « {w} » jamais tirée",
+                    l.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_wording_is_recognised_only_as_drawn() {
+        let r = masked_request("Calcule l'azimut vrai du point A au point B, à 45° (en degrés)");
+        assert!(drawn(&r, "l'azimut vrai", TRUE_NORTH_WORDS));
+        assert!(!drawn(&r, "l'azimut", TRUE_NORTH_WORDS));
+        assert!(drawn(&r, "à {az}", &["à {az}"]));
+        assert!(!drawn(
+            &masked_request("les pentes du MNT"),
+            "la pente",
+            SLOPE_WORDS
+        ));
+        assert!(drawn_verb(
+            &masked_request("Je pars du point A et je marche 2 km à 45°. Où suis-je ?"),
+            "je pars {de_p} et je marche {d} {h}. Où suis-je"
+        ));
+        assert!(!drawn_verb(
+            &masked_request(
+                "Je pars du point A et je marche 2 km à 45° : quel est le point d'arrivée ?"
+            ),
+            "je pars {de_p} et je marche {d} {h}. Où suis-je"
+        ));
+    }
+
+    /// Les nords qu'une demande nomme : `grid`, `magnetic`, `true`. « L'azimut » et « la
+    /// direction » nus ne nomment aucun nord : ils comptent comme nord vrai.
+    fn norths_written(request: &str) -> Vec<&'static str> {
+        let r = request.to_lowercase();
+        let mut out = Vec::new();
+        if ["gisement", "quadrillage", "nord utm"]
+            .iter()
+            .any(|m| r.contains(m))
+        {
+            out.push("grid");
+        }
+        if ["magnétique", "boussole"].iter().any(|m| r.contains(m)) {
+            out.push("magnetic");
+        }
+        if ["nord géographique", "azimut géographique", "azimut vrai"]
+            .iter()
+            .any(|m| r.contains(m))
+        {
+            out.push("true");
+        }
+        out
+    }
+
+    /// Une demande d'azimut parle d'un seul nord, et son plan porte le `north` de sa liste :
+    /// `grid`, `magnetic`, ou rien pour le nord vrai, nommé ou nu (D1). Un recoupement est au
+    /// nord vrai seul (D4).
+    fn one_north_per_request(e: &Example) {
+        let written = norths_written(&e.request);
+        assert!(written.len() <= 1, "deux nords {written:?} : {}", e.request);
+        for c in e.expected["calls"].as_array().into_iter().flatten() {
+            let north = c["params"].get("north").and_then(Value::as_str);
+            match c["command"].as_str().unwrap() {
+                "geo.distance_azimuth" | "geo.destination_point" => {
+                    let expected = match written.first() {
+                        Some(&"grid") => Some("grid"),
+                        Some(&"magnetic") => Some("magnetic"),
+                        _ => None,
+                    };
+                    assert_eq!(north, expected, "{}", e.request);
+                }
+                "geo.bearing_intersection" => {
+                    assert!(written.is_empty() || written == ["true"], "{}", e.request);
+                    assert!(north.is_none(), "{}", e.request);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn a_request_speaks_of_one_north_and_its_plan_carries_it() {
+        let (mut named, mut bare) = (HashSet::new(), 0);
+        for make in [
+            distance_azimut as FamilyFn,
+            point_projete,
+            gisement,
+            azimut_magnetique,
+            recoupement,
+        ] {
+            for e in geometry_examples(make) {
+                one_north_per_request(&e);
+                let written = norths_written(&e.request);
+                bare += usize::from(written.is_empty());
+                named.extend(written);
+            }
+        }
+        assert_eq!(named.len(), 3, "{named:?}");
+        assert!(bare > 0);
+        // Le nord vrai, nommé ou nu, n'a pas de `north` (D1).
+        for e in valid(distance_azimut, 600)
+            .into_iter()
+            .chain(valid(point_projete, 600))
+        {
+            for c in e.expected["calls"].as_array().unwrap() {
+                assert!(c["params"].get("north").is_none(), "{}", e.request);
+            }
+        }
+    }
+
+    #[test]
+    fn every_ambiguous_term_is_caught_and_its_neighbours_are_not() {
+        // (phrase, indice de l'entrée de `AMBIGUOUS_TERMS` qui la prend).
+        let caught: &[(&str, usize)] = &[
+            ("Quel cap faut-il prendre ?", 0),
+            ("Donne le cap magnétique, puis le cap vers le refuge.", 0),
+            ("Le gisement Lambert du point A au point B.", 1),
+            ("Donne le gisement en Lambert-93 du point A au point B.", 1),
+            ("Le gisement dans le quadrillage Lambert du point A.", 1),
+            ("L'azimut en nord Lambert du point A au point B.", 2),
+            ("Donne les coordonnées kilométriques du point.", 3),
+            ("Convertis le point en degrés, minutes et secondes.", 4),
+            ("Convertis le point en degrés minutes secondes.", 4),
+            ("Donne la position en DMS.", 4),
+            ("Écris les coordonnées en sexagésimal.", 4),
+            ("Recoupement de deux relèvements à la boussole.", 5),
+            ("Recoupe à la boussole les deux visées.", 5),
+            (
+                "Je vise le clocher à 40° et le château d'eau à 300°. Où suis-je ?",
+                6,
+            ),
+            ("Deux repères relevés à 40° et 300° : où suis-je ?", 6),
+            ("Trouve les crêtes du MNT.", 7),
+            ("Trace la ligne de crête du MNT.", 7),
+            ("Liste les points cotés du MNT.", 8),
+            ("Fais une triangulation des trois points.", 9),
+        ];
+        let mut pinned = HashSet::new();
+        for (sentence, k) in caught {
+            assert_eq!(
+                ambiguous_term(sentence),
+                Some(AMBIGUOUS_TERMS[*k].why),
+                "{sentence}"
+            );
+            pinned.insert(*k);
+        }
+        assert_eq!(pinned.len(), AMBIGUOUS_TERMS.len(), "entrée non épinglée");
+        for sentence in [
+            "Donne le cap magnétique du point A au point B.",
+            "Les captages de la commune.",
+            "Le sommet de la crête (48,1 N, 2,3 E, WGS84).",
+            "Des coordonnées kilométriques en Lambert-93.",
+            "Je pars du point A et je marche 800 m à l'azimut 200°. Où suis-je ?",
+            "Je marche 2 km à 120° à la boussole.",
+            "Calcule le recoupement : 40° depuis le point A, 310° depuis le point B.",
+        ] {
+            assert_eq!(ambiguous_term(sentence), None, "{sentence}");
+        }
+    }
+
+    #[test]
+    fn the_default_set_has_every_wording_list_one_north_per_request_and_no_ambiguous_term() {
+        for seed in 1..=5 {
+            let (examples, _) = crate::generate(seed, crate::DEFAULT_COUNT);
+            for e in &examples {
+                if let Some(why) = ambiguous_term(&e.request) {
+                    panic!("graine {seed}, tournure ambiguë ({why}) : {}", e.request);
+                }
+                if commands(e).iter().any(|c| c.starts_with("geo.")) {
+                    one_north_per_request(e);
+                }
+            }
+            if seed != crate::DEFAULT_SEED {
+                continue;
+            }
+            for l in wording_lists() {
+                let requests = requests_of(&examples, l.commands);
+                assert!(
+                    l.words.iter().any(|w| seen_in(&requests, &l, w)),
+                    "{} absente du jeu par défaut",
+                    l.name
+                );
+            }
+        }
     }
 
     #[test]
