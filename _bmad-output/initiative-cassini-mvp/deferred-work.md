@@ -999,3 +999,13 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-re-entrainement-groupe-grands-inventaires-gros-projets-couch-plan.md`
   summary: après le jeu de 5.49, le refus des statistiques par zone d'un raster recule (S15 réponse coupée pour les trois candidats ; S23, S24 plan rendu pour b et la fusion) ; RA05 (`begins_with` au lieu de l'égalité) et RA09 (tampon sans distance → 10 m au lieu d'une question) restent ratés par les trois candidats.
   evidence: nuit du 2026-11-10 au 11, `~/cassini-entrainement/5-49-mesures/` ; à corriger par le générateur (exemples de refus des statistiques par zone d'un raster, question du tampon sans distance) avant le prochain entraînement, jamais par un pansement.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-generateur-apres-5-49.md`
+  summary: `refus_stats_raster`, branche du champ de vision puis statistique (venue de 5.41) : une demande à un mot de S24 (« de hauteur » contre « de haut ») reste possible au tirage.
+  evidence: relecture adversariale du 2026-11-11 (graines 3 à 10) ; `recouvrement` ne compare qu'à un nombre ou une commune près.
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-generateur-apres-5-49.md`
+  summary: `dissolve_words` accorde au masculin (« fusionné en une seule zone ») après « une zone tampon ».
+  evidence: relecture adversariale du 2026-11-11 : « Dessine une zone tampon autour de la couche des gares, fusionné en une seule zone. » ; antérieur, partagé par `tampon`.
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-generateur-apres-5-49.md`
+  summary: `grid_zone_words` force parfois une zone UTM à 6–7° du point (« zone 32 » à 2,46 E), plus fréquente depuis D5.
+  evidence: relecture adversariale du 2026-11-11 ; accepté par le schéma, discutable comme leçon de gisement.

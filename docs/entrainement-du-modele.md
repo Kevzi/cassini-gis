@@ -78,12 +78,13 @@ standards publics et ne sont tirées d'aucun fichier réel.
 
 | Famille | Ce qu'elle enseigne |
 |---|---|
-| `filtre_egalite` | « les gares de la ligne D », « les routes nationales » → sélection par attribut ; depuis après 11.23, une fois sur huit, les zones du PLU d'une catégorie dite en mots (« les zones agricoles du PLU ») → une sélection sur `typezone`, `eq` `A` ou `U`, `begins_with` `N` ou `AU`, la couche sans champ de libellé |
+| `filtre_egalite` | « les gares de la ligne D », « les routes nationales » → sélection par attribut ; depuis après 11.23, une fois sur huit, les zones du PLU d'une catégorie dite en mots (« les zones agricoles du PLU ») → une sélection sur `typezone`, `eq` `A` ou `U`, `begins_with` `AU`, et pour `N` l'opérateur déduit des valeurs montrées depuis après 5.49 (`eq` quand aucune autre valeur commençant par `N` n'est montrée, `begins_with` à côté de `Nh`), la couche sans champ de libellé |
 | `garde_seulement` | « garde seulement », « ne garde que », « conserve uniquement » → une sélection, jamais une suppression |
 | `filtre_numerique` | « bâtiments de plus de 12 m de haut », « communes de moins de 12 500 habitants » → `gt`, `lt`, `gte`, `lte` |
 | `filtre_texte` | « dont le nom contient », « commence par » → `contains`, `begins_with` |
 | `filtre_different` | « sauf celles de la section AB », « qui ne sont pas » → `ne` |
 | `tampon` | zone tampon en m ou en km, fusionnée sur demande seulement ; depuis l'analyse après 11.23, la fusion se dit aussi dans une proposition à part (« …, puis fusionne le résultat ») → `dissolve: true` |
+| `question_tampon_sans_distance` | depuis après 5.49 (RA09), « Crée un tampon autour des … », « Trace un périmètre autour de la couche « … » » sans distance écrite → une question qui demande la distance du tampon autour de la couche nommée, jamais une distance devinée ; mêmes verbes que `tampon`, son contrepoids ; jamais la tête « Fais un tampon autour » (poids 3) |
 | `tampon_filtre` | tampon autour d'une couche filtrée ; depuis l'analyse après 11.23 (poids 6), une fois sur trois, une valeur dite par son adjectif au pluriel (« des routes départementales ») à côté d'une valeur voisine du même champ, elle aussi à adjectif → `select` sur la valeur dite |
 | `distance` | « à moins de 500 m d'une gare » → tampon sur la référence, puis intersection |
 | `distance_reference_filtree` | distance à une référence filtrée (« des gares de la ligne D ») ; depuis l'analyse après 11.23, une fois sur quatre, une référence dite par son nom propre (« de la gare Les Saules ») → `select` `eq` sur son champ de nom, qui liste ce nom |
@@ -105,7 +106,8 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `question_couche_absente` | une couche dont rien ne parle dans l'inventaire → question |
 | `question_champ_absent` | un critère qu'aucun champ ne porte → question, jamais un champ voisin deviné |
 | `refus` | courriel, suppression d'entités, effacement du fichier d'une couche sur le disque (« supprime le fichier de la couche … du disque », depuis 10.27 : retirer la couche du projet est un plan, `retrait_couche` ; le refus dit que les fichiers de l'utilisateur ne sont jamais modifiés), export d'une couche en tableur (Excel, CSV : le refus nomme les formats de `data.convert`, depuis 10.9), couleur choisie à la main (« mets les gares en rouge » : depuis 11.23, le refus dit que le catalogue ne pose pas de couleur choisie mais sait les couleurs topographiques et le dégradé, jamais qu'aucune commande ne change le style), itinéraire sur le réseau routier entre deux objets d'une couche (depuis 11.12, lot 2b-1, le refus dit que le chemin de moindre coût demande un raster de coût et deux points en coordonnées), téléchargement, 3D → refus affirmatif |
-| `refus_hors_registre` | cadrage ou zoom de la carte, PDF dans un format hors de la série du catalogue (A5, lettre US), ou envoyé à une imprimante ou avec un nombre d'exemplaires (« envoie la carte à l'imprimante », « en 3 exemplaires ») ; « imprime la carte » seul reste un export, PDF qui nomme les couches à montrer (« fais une carte PDF A3 des écoles et des gares », depuis 11.23 : l'export met en page la carte affichée sans choisir ses couches, même avec un format ou une orientation connus), altitude moyenne par zone (statistiques sur un raster ; depuis 5.41 aussi après une pente ou un champ de vision : « la pente puis sa moyenne par commune » est un refus entier), MNT présent pour l'altitude par zone, trajet depuis plusieurs lieux (« de chaque gare », « de toutes les gares », « des gares ») → refus affirmatif, jamais un plan de substitution. Le point de terrain écrit dans un autre système que le MNT, refusé en 5.41, est un plan depuis 11.12 (`terrain_autre_systeme`). Le champ de vision, la ligne de vue et la pente n'y sont plus depuis 4.6 : le registre les a. Le seuil sur la pente (« où la pente dépasse 15 % »), refusé de 4.6 à 11.12, est un plan depuis 11.12, lot 2a (`pente_seuil`). Le PDF en A3, A0 ou portrait, refusé jusqu'au lot 3 de 11.12 (« seulement une page A4 paysage »), est un plan depuis (`export_pdf_format`) |
+| `refus_hors_registre` | cadrage ou zoom de la carte, PDF dans un format hors de la série du catalogue (A5, lettre US), ou envoyé à une imprimante ou avec un nombre d'exemplaires (« envoie la carte à l'imprimante », « en 3 exemplaires ») ; « imprime la carte » seul reste un export, PDF qui nomme les couches à montrer (« fais une carte PDF A3 des écoles et des gares », depuis 11.23 : l'export met en page la carte affichée sans choisir ses couches, même avec un format ou une orientation connus), trajet depuis plusieurs lieux (« de chaque gare », « de toutes les gares », « des gares ») → refus affirmatif, jamais un plan de substitution. Le point de terrain écrit dans un autre système que le MNT, refusé en 5.41, est un plan depuis 11.12 (`terrain_autre_systeme`). Le champ de vision, la ligne de vue et la pente n'y sont plus depuis 4.6 : le registre les a. Le seuil sur la pente (« où la pente dépasse 15 % »), refusé de 4.6 à 11.12, est un plan depuis 11.12, lot 2a (`pente_seuil`). Le PDF en A3, A0 ou portrait, refusé jusqu'au lot 3 de 11.12 (« seulement une page A4 paysage »), est un plan depuis (`export_pdf_format`) |
+| `refus_stats_raster` | depuis après 5.49, sortie de `refus_hors_registre` (poids 5) : statistiques par zone d'un raster, MNT présent → refus `NO_RASTER_STATS` ; surtout des demandes courtes à une proposition (« Calcule l'altitude moyenne par commune », « Pente médiane de chaque quartier »), deux statistiques à la fois (« l'altitude moyenne et maximale de chaque quartier »), et un dérivé du MNT suivi de sa statistique (pente ou champ de vision, « puis son maximum par commune ») : refus entier depuis 5.41 |
 | `pente` | « fais la carte des pentes du MNT en pourcentage » → `terrain.slope`, `dem` recopié de la `source` du raster de l'inventaire, `unit` telle qu'écrite (`degrees` : « en degrés », « en ° » ; `percent` : « en pourcentage », « en % », « en pour cent ») (4.6) |
 | `ligne_de_vue` | « y a-t-il une ligne de vue entre le point (... ; ...) en Lambert-93 et le point (... ; ...) en Lambert-93, œil à 2 m » → `terrain.line_of_sight`, deux points écrits en Lambert-93 ou en UTM 31N/32N, le système écrit à chaque point (le garde-fou en demande une occurrence par point), le MNT dans ce même système ; `observer_height` et `target_height` seulement s'ils sont écrits, jamais courbure ni réfraction (4.6) ; depuis le second essai de 11.23, une fois sur quatre, une même hauteur pour les deux bouts (« , 2 m de hauteur de chaque côté », « observateur et cible à 5 m du sol », « de part et d'autre ») → les deux hauteurs (constat S21) |
 | `champ_de_vision` | « calcule le champ de vision depuis le point ... (UTM 31N) sur 2 km » → `terrain.viewshed`, même règle de points et de MNT ; hauteurs et `radius` seulement s'ils sont écrits (4.6) ; depuis 5.41, le rayon aussi avant le point (« dans un rayon de 800 m autour du point … ») ; depuis 11.23, une fois sur six, un lieu nommé suivi de ses coordonnées (« depuis le château d'eau de Thiais (652 000 ; 6 862 000, Lambert-93) ») reste un plan, jamais une question (constat S20 de 11.16) |
@@ -125,7 +127,7 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `entete_pied_de_page` | « exporte la carte en PDF avec l'en-tête « Document de travail » », « … avec « Bureau d'études Lac et Monts » en pied de page », les deux, parfois avec un titre → `header`, `footer` recopiés tels qu'écrits entre guillemets, jamais inventés ; le titre reste distinct. Usage : bureaux d'études et collectivités. Poids 4. Epic 10, entrée 31 ; la ligne des sources détaillée est automatique, sans famille |
 | `distance_azimut` | « quelle distance sépare le point … du point … », « distance et azimut entre les points … et … (UTM 31N) » → `geo.distance_azimuth` ; `unit` seulement si elle est écrite (`gon` : « en grades », `deg` : « en degrés ») ; deux points en Lambert-93 → deux `data.transform_point` vers 4326, puis le calcul sur `step:1.point` et `step:2.point` ; système écrit à chaque point ou une fois pour les deux (11.12) |
 | `point_projete` | « quel point atteint-on à 3 km du point …, azimut 45° » → `geo.destination_point`, l'azimut toujours avec son unité (« 45° », « 45 degrés » → `deg` ; « 50 gr », « 50 grades » → `gon`) et la distance tels qu'écrits ; « résultat en MGRS » → `coord.convert` sur `step:1.point` (11.12) |
-| `gisement` | « donne le gisement du point … au point … (en grades) », « implante un point à 800 m du point …, au gisement 250 gr », « azimut … en nord du quadrillage », « par rapport au quadrillage UTM » → `geo.distance_azimuth` ou `geo.destination_point` avec `north: "grid"` ; `utm_zone` seulement si la zone du quadrillage est écrite (« dans le quadrillage de la zone 32 ») ; même suite MGRS que `point_projete` (10.28) |
+| `gisement` | « donne le gisement du point … au point … (en grades) », « implante un point à 800 m du point …, au gisement 250 gr », « azimut … en nord du quadrillage », « par rapport au quadrillage UTM » → `geo.distance_azimuth` ou `geo.destination_point` avec `north: "grid"` ; `utm_zone` seulement si la zone du quadrillage est écrite (« dans le quadrillage de la zone 32 ») ; même suite MGRS que `point_projete` (10.28) ; depuis après 5.49 (D5, poids 5), aussi « azimut du quadrillage », « par rapport au nord du quadrillage », « en nord UTM », des points en WGS84 deux fois sur trois, dont un sur trois nommé devant ses coordonnées (« le refuge du col (48,1234 N, 7,1234 E, WGS84) ») ; jamais « nord Lambert » |
 | `azimut_magnetique` | « quel est l'azimut magnétique du point … au point … », « donne l'azimut à la boussole … », « calcule le cap magnétique entre … », « depuis le point …, je marche 2 km à 120° à la boussole », « … avec la déclinaison magnétique » → `geo.distance_azimuth` ou `geo.destination_point` avec `north: "magnetic"` ; `date` (AAAA-MM-JJ) seulement si la date est écrite (« le 1er mai 2026 », « à la date du 2027-06-14 »), absente sinon : le noyau prend la date du jour ; même suite MGRS que `point_projete` (10.29) |
 | `recoupement` | « recoupe la visée du point … à l'azimut 40° avec celle du point … à l'azimut 310° » → `geo.bearing_intersection`, chaque station avec son azimut ; même suite MGRS que `point_projete` (11.12) |
 | `terrain_autre_systeme` | champ de vision ou ligne de vue depuis un point écrit dans un autre système que le MNT (WGS84, UTM d'une autre zone, Lambert-93 sur un MNT en UTM) → depuis 11.23, la commande de terrain avec le point **recopié tel qu'écrit**, sans `data.transform_point` : le noyau ajoute la conversion au plan avant de le montrer (11.22) ; une ligne de vue peut viser un point du système du MNT ; une référence MGRS (une fois sur quatre, alors pour chaque point), qui n'est pas un `Point`, garde `coord.convert` vers le WGS84 puis `data.transform_point` vers l'`epsg` du MNT, et la commande prend `step:k.point` (MNT à système connu seulement). Remplace le refus `NO_TERRAIN_CRS` de 5.41 (11.12) |
@@ -955,6 +957,71 @@ réponse coupée, trop longue) ; b et la fusion ratent aussi S23 et S24 (statist
 raster calculé, refus attendu : plan rendu). Le refus des statistiques par zone d'un raster recule
 donc avec ce jeu. Modèles dans `cassini-modeles\ajuste-5-49-a`, `-b` et `-fusion`, non installés ;
 décision au propriétaire.
+
+### Générateur après 5.49 (2026-11-11)
+
+Aucun candidat de 5.49 installé (décision du propriétaire du 2026-11-11). Trois sortes de demandes
+ratées par la nuit corrigées par les familles, sans pansement par phrase ; décisions tranchées en
+party le 2026-11-11 (ingénieur ML, géomaticien, architecte), **à confirmer par le propriétaire**.
+Mêmes base, méthode, `DEFAULT_COUNT` (8 600), graines du générateur (1 et 2), `MAX_PROMPT_CHARS`
+(19 000) et `MAX_LENGTH` (5 632).
+
+- **D1, refus des statistiques d'un raster** (S15, S23, S24 de `plan_reel`) : famille
+  `refus_stats_raster` (poids 5), sortie de `refus_hors_registre` (9 → 6 : ses quatre autres
+  branches, une sur quatre, gardent leur compte). Tournures neuves : deux statistiques à la fois,
+  « par commune », la statistique d'un dérivé dite d'un trait (« la pente médiane de chaque
+  quartier »), un dérivé du MNT puis sa statistique. Jamais « Donne-moi l'altitude … » ni
+  « Calcule la pente … puis sa moyenne par … » (S15, S23).
+- **D2** : le motif `NO_RASTER_STATS` est gardé tel quel ; « raccourcir » porte sur les demandes,
+  courtes et à une seule proposition dans plus de la moitié des exemples (le test
+  `statistics_of_a_raster_per_zone_are_a_whole_refusal` le tient).
+- **D3, tampon sans distance** (RA09 d'Annecy) : famille `question_tampon_sans_distance`
+  (poids 3) ; `tampon` (7) reste intact, contrepoids aux mêmes verbes.
+- **D4, zone naturelle** (RA05) : l'opérateur d'une catégorie de zone n'est plus figé dans
+  `ZONE_CATEGORIES` ; il se déduit des valeurs montrées (`zone_operator`, partagé par
+  `filtre_egalite` et `dans_une_zone`). Une valeur est de la catégorie si elle est le code, ou le
+  code suivi d'un indice en minuscule (`Nh` pour `N`, `AUc` pour `AU`, mais `AUc` n'est pas
+  agricole) ; `eq` quand la seule valeur de la catégorie montrée est le code, `begins_with`
+  sinon. `N` est forcé trois fois sur quatre, et alors sans `Nh` (standard du CNIG de 2017),
+  `Nh` une fois sur quatre. « Agricole », « urbaine » : `eq` ; « à urbaniser » : `begins_with AU`.
+- **D5, gisement entre lieux nommés** (essai QGIS du 2026-11-11 avec `ajuste-5-49-a` :
+  gisement entre deux lieux nommés en WGS84 rendu sans `north: "grid"`, comme le modèle
+  installé) : `gisement` 3 → 5 ; tournures « azimut du quadrillage », « par rapport au nord du
+  quadrillage », « en nord UTM » des deux côtés (distance et azimut, point projeté) ; points en
+  WGS84 deux fois sur trois (une sur deux avant), dont un sur trois nommé devant ses coordonnées
+  entre parenthèses (sommet, clocher, refuge, pylône, carrefour, château d'eau). Jamais « nord
+  Lambert » : le nord du quadrillage de la commande est celui de l'UTM. « Azimut grille » n'est
+  pas posé : le test du gisement interdit le mot « grille », tournure du carroyage du PDF (5.49).
+
+Le total des poids passe de 501 à 508 (D1 +2, D3 +3, D5 +2) : les familles à poids inchangé
+perdent 1,4 % de part de tirage.
+
+**Comptes du jeu par défaut** (graine 1, 8 600 exemples ; avant : commit `3a8eefb`). Familles en
+petits projets, puis exemples du jeu entier, gros projets compris :
+
+| Mesure | avant | après |
+|---|---|---|
+| `refus_hors_registre` | 148 | 107 |
+| `refus_stats_raster` | — | 95 |
+| `question_tampon_sans_distance` | — | 63 |
+| `tampon` | 126 | 103 |
+| `gisement` | 54 | 101 |
+| `filtre_egalite` | 212 | 182 |
+| `dans_une_zone` | 85 | 110 |
+| `gros_projet` | 2 165 (25,2 %), 132 écartés | 2 096 (24,4 %), 134 écartés |
+| refus `NO_RASTER_STATS`, jeu entier | 75 | 132 |
+| questions de la distance d'un tampon, jeu entier | 0 | 86 |
+| appels `north: "grid"`, jeu entier | 86 | 131 |
+| « naturelle » → `eq N` / `begins_with N`, jeu entier | 0 / 28 | 13 / 7 |
+| « agricole » `eq A`, « urbaine » `eq U`, « à urbaniser » `begins_with AU` | 24, 54, 15 | 17, 30, 21 |
+
+Les écarts des familles à poids inchangé (`tampon`, `filtre_egalite`, `dans_une_zone`) restent
+dans la fourchette du hasard du tirage. Le jeu de validation (graine 2, 300) se régénère.
+
+**Nuit préparée, non lancée** : `~/cassini-entrainement/nuit-apres-5-49.sh` et
+`fusion-apres-5-49.sh`, copies de ceux de 5.49 qui écrivent dans `ajuste-apres-5-49-a`, `-b` et
+`-fusion` (`cassini-modeles\`) et n'installent rien. Avant de la lancer : commiter, puis mettre
+l'arbre Windows des essais (`CASSINI-nuit`) sur ce commit.
 
 ### Les inventaires de QGIS (5.15)
 
