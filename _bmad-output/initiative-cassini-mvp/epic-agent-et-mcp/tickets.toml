@@ -928,3 +928,64 @@ notes = [
   "Decision: 2026-11-10 — proprietaire : « ok pour 7, 8 et 9 » ; le modele local ne voit une commande ajoutee que si sa declaration la nomme. Attend la publication et l'epic 10 a travers 2.14.",
   "Controle hors des criteres : relecture a plusieurs lentilles (thorough), risque high sur la composition des plans.",
 ]
+
+[[entry]]
+id = 53
+type = "story"
+title = "Barre de mesure par commande, phrases ecrites a la main"
+description = "Chaque commande offerte au modele local a au moins 3 phrases de mesure ecrites a la main, avec le plan, la question ou le refus attendu ; ces phrases ne vont jamais au jeu d'entrainement. Les barres existantes sont portees a 40-50 phrases. Un test echoue des qu'une commande offerte n'a pas ses phrases. Une barre de non-oubli compare un nouveau modele a celui qu'il remplace : il tient chaque barre de son parent a une phrase pres, sinon il n'est pas installe. Le proprietaire fournit des formulations de terrain (gisement, releve, intersection, carroyage...) ; le generateur en tire des listes de synonymes, jamais les phrases."
+verify = "Retirer les phrases d'une commande fait echouer le test de couverture ; la barre de non-oubli, jouee sur ajuste-5-49-a contre la fusion de la nuit du 11-10, donne un verdict par barre ; aucune phrase de mesure ne figure dans un jeu d'entrainement genere (test de recouvrement)."
+covers = ["CAP-4"]
+after = []
+hitl = true
+risk = "high"
+notes = [
+  "Decision: 2026-11-11 — tranche en party (architecte, ingenieure ML, architecte des tests, geomaticien), approuve par le proprietaire : la mesure passe avant tout nouvel entrainement.",
+  "Constat du 2026-11-11 : aucune barre ne couvrait 10.28 a 10.31 ; l'ancien modele faisait 2/5 sur cinq phrases improvisees, ajuste-5-49-a 4/5 (gisement sans north grid rate par les deux).",
+  "Controle hors des criteres : le proprietaire relit les phrases de terrain ; relecture thorough.",
+]
+
+[[entry]]
+id = 54
+type = "story"
+title = "Ajustement continu : l'entrainement repart de l'adaptateur du modele installe"
+description = "La chaine d'entrainement peut repartir d'un adaptateur LoRA existant au lieu de la base seule. Le jeu d'une seance continue melange les familles nouvelles ou ratees et un rappel d'au moins 40 % tire de toutes les familles ; le taux d'apprentissage est divise par 4 (5e-5) ; une seule graine. Le rapport nomme le parent : empreinte SHA-256 de l'adaptateur de depart, commit et graine de chaque maillon. Une chaine compte au plus 3 maillons ; au-dela, un entrainement de zero sur le jeu complet sert de recalage. Un parent dont la base Qwen, sa revision ou les modules adaptes different est refuse : la chaine est coupee."
+verify = "Tests du pipeline : un depart depuis un adaptateur est refuse si la base ou la revision different ; le rapport d'une seance continue porte la lignee complete ; un quatrieme maillon est refuse ; un essai court (--pas-max) depuis ajuste-5-49-a produit un modele qui se charge dans le noyau."
+covers = ["CAP-4"]
+after = [53]
+hitl = false
+risk = "high"
+notes = [
+  "Decision: 2026-11-11 — idee du proprietaire, tranchee en party et approuvee : rappel >= 40 %, taux / 4, 3 maillons puis recalage, meme base sinon chaine coupee.",
+  "Controle hors des criteres : la barre de non-oubli de 53 juge chaque maillon avant installation.",
+]
+
+[[entry]]
+id = 55
+type = "story"
+title = "Nuit d'experience : ajustement continu contre depart de zero"
+description = "Une nuit entraine deux modeles sur le meme jeu : l'un repart de l'adaptateur installe (54), l'autre de la base. Les deux passent toutes les barres, dont les barres par commande et de non-oubli (53), et la recette d'Annecy. Le resultat dit si les nuits suivantes se font en continu ; le proprietaire decide et l'installation suit les regles habituelles."
+verify = "Un tableau compare les deux modeles barre par barre et par commande, avec la duree d'entrainement de chacun ; la decision du proprietaire est consignee dans le plan."
+covers = ["CAP-4"]
+after = [53, 54]
+hitl = true
+risk = "medium"
+notes = [
+  "Decision: 2026-11-11 — tranche en party et approuve : l'experience decide, pas l'opinion.",
+]
+
+[[entry]]
+id = 56
+type = "story"
+title = "Grammaire des parametres tiree des schemas du registre, textes bornes"
+description = "La grammaire du plan contraint aujourd'hui l'enveloppe et les identifiants de commande ; les parametres sont du JSON libre. Elle est desormais construite depuis le schema JSON des parametres de chaque commande offerte : champs connus, types, valeurs enumerees, champs requis. Les textes d'une question et d'un refus ont une longueur bornee. La verification par le noyau apres generation reste en place. La grammaire reste identique pour un registre donne, et sa duree de construction et de decodage est mesuree."
+verify = "Tests du noyau : un plan avec un champ inconnu, un type faux (un entier a la place d'un angle) ou une valeur hors enumeration ne peut pas etre produit sous la grammaire ; une question ou un refus trop long est impossible ; plan_reel, question_reel et la recette d'Annecy ne baissent pas avec le modele installe ; la duree par phrase reste dans la barre de 5.19."
+covers = ["CAP-4"]
+after = []
+hitl = false
+risk = "high"
+notes = [
+  "Decision: 2026-11-11 — verification de la party : plan_grammar ne contraint que l'enveloppe et les ids ; S15 (refus coupe) et l'angle rendu en 0 par l'ancien modele en relevent.",
+  "Touche la meme grammaire que 52 (commandes connues du modele) : la seconde construite part de la premiere.",
+  "Controle hors des criteres : relecture thorough, risque high sur la composition des plans.",
+]
