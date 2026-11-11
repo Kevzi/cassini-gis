@@ -216,6 +216,13 @@ sont réservés pour l'hydrologie et la couverture radio.
 - Le noyau ne convertit que des **coordonnées ponctuelles** (WGS84, UTM, MGRS) ;
   toute couche est reprojetée par QGIS (AD-19).
 - Aucune parité avec QGIS n'est visée ni revendiquée.
+- Le modèle local, mesuré sur ses barres élargies (novembre 2026), garde encore des
+  faiblesses connues, objectifs du prochain entraînement : il perd parfois le format
+  de page quand une échelle est donnée, remplace une fonction absente (courbes de
+  niveau, crue, étiquettes…) par une commande voisine au lieu de la refuser, oublie
+  des options écrites (« sans courbure terrestre »), et confond le champ de vision
+  cumulé avec plusieurs champs simples. Chaque plan reste affiché et validé avant
+  d'être exécuté.
 
 </details>
 
@@ -430,6 +437,16 @@ flowchart TB
   bibliothèque — jamais un serveur HTTP. Il est ré-entraîné par lots quand le
   catalogue grandit, et n'est installé que s'il tient des barres fixes sur des phrases
   qu'il n'a jamais vues ([la chaîne d'entraînement](docs/entrainement-du-modele.md)).
+- **Une grammaire tirée du catalogue.** Le modèle ne peut écrire que des plans
+  conformes au schéma de chaque commande : champs connus, bons types, valeurs
+  permises, questions et refus de 240 caractères au plus. La vérification du noyau
+  reste derrière. Effet de bord bienvenu : une phrase se compose en 3,3 s au lieu de
+  5,0 s sur carte graphique.
+- **Un modèle n'en remplace un autre que s'il n'oublie rien.** Chaque commande a ses
+  phrases de mesure écrites à la main, et chaque barre en compte 40 à 50, refus
+  compris. Avant toute installation, la barre de non-oubli compare le candidat au
+  modèle en place, barre par barre, à une phrase près
+  ([`non_oubli.py`](training/entrainement/non_oubli.py)).
 - **Un verrou hors ligne vérifié**, pas seulement promis : la table d'imports du
   binaire Windows ne nomme aucune bibliothèque réseau, l'extension n'importe aucun
   module réseau, et `cargo deny` refuse tout client HTTP et toute couche TLS.
@@ -517,8 +534,12 @@ un seul contrôle en échec fait passer le run au rouge.
 Deux familles ne tournent pas en CI, parce qu'elles demandent ce que la CI n'a pas :
 **les sondes sous le vrai QGIS** (`qgis-plugin/tests/probe_*.py`), qui enchaînent les
 commandes dans un vrai projet, le rouvrent et rejouent le journal ; et **les mesures du
-vrai modèle** (`ai/tests/*_reel.rs`) : justesse des plans et des questions, score sur
-des phrases tenues à l'écart, durée par phrase.
+vrai modèle** (`ai/tests/*_reel.rs`) : justesse des plans, des questions et des refus,
+score sur des phrases tenues à l'écart, une barre par commande, durée par phrase.
+Leurs phrases sont protégées : un test sans modèle vérifie chaque réponse attendue
+(schéma, couches, champs et valeurs de l'inventaire, système de coordonnées accepté
+par la commande), et un autre garantit qu'aucune n'est produite par le générateur
+d'entraînement ni recopiée d'une autre barre.
 
 Un garde-fou qu'on n'a jamais vu refuser quelque chose ne garde rien : d'où les
 contrôles qui échouent exprès.
