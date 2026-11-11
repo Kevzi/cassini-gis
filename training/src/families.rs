@@ -81,6 +81,13 @@ pub static FAMILIES: &[Family] = &[
         weight: 7,
         make: tampon,
     },
+    // Après 5.49 (RA09 d'Annecy) : un tampon sans distance recevait une distance inventée.
+    // `tampon` reste le contrepoids : mêmes verbes, distance écrite, un plan.
+    Family {
+        name: "question_tampon_sans_distance",
+        weight: 3,
+        make: question_tampon_sans_distance,
+    },
     Family {
         name: "tampon_filtre",
         // 5 → 6 après 11.23 : valeur au pluriel parmi des valeurs voisines du même champ.
@@ -197,11 +204,19 @@ pub static FAMILIES: &[Family] = &[
         make: refus,
     },
     // Essais GPU après 11.23 : 7 → 9, le PDF qui choisit ses couches et la statistique
-    // d'altitude par zone y prenant plus de place.
+    // d'altitude par zone y prenant plus de place. Après 5.49 : 9 → 6, la statistique sur un
+    // raster sortie dans `refus_stats_raster` ; les autres branches gardent leur compte.
     Family {
         name: "refus_hors_registre",
-        weight: 9,
+        weight: 6,
         make: refus_hors_registre,
+    },
+    // Après 5.49 (S15, S23, S24 de `plan_reel`) : le refus des statistiques par zone d'un
+    // raster reculait. Famille à part, plus lourde (≈ 115 exemples contre ≈ 69 avant).
+    Family {
+        name: "refus_stats_raster",
+        weight: 5,
+        make: refus_stats_raster,
     },
     // Les trois commandes de terrain (4.6) : MNT désigné par sa source, points écrits.
     Family {
@@ -304,7 +319,9 @@ pub static FAMILIES: &[Family] = &[
     // les deux commandes ; `utm_zone` seulement si la zone du quadrillage est écrite.
     Family {
         name: "gisement",
-        weight: 3,
+        // Après 5.49 (D5, essai QGIS du 2026-11-11 : gisement entre deux lieux nommés en WGS84
+        // rendu sans `north: "grid"`) : 3 → 5.
+        weight: 5,
         make: gisement,
     },
     // Azimut magnétique (10.29) : azimut lu à la boussole, `north: "magnetic"`, sur les deux
@@ -844,10 +861,7 @@ fn draft_filter_eq(rng: &mut Rng) -> Option<Draft> {
     // Après 11.23 : les zones du PLU d'une catégorie dite en mots (« les zones agricoles du
     // PLU ») → une sélection sur `typezone`, égal au code ou commençant par lui.
     if rng.chance(1, 8) {
-        let (_, pl, op, code, values) = *rng.pick(ZONE_CATEGORIES);
-        let forced = *rng.pick(values);
-        let layer = b.add(rng, "zonage", &["zone"], &["libelle"], &[("zone", forced)]);
-        let field = layer.field("zone")?;
+        let (_, pl, sel) = zone_category_select(rng, &mut b)?;
         let t = theme("zonage");
         let np = match rng.below(3) {
             0 => format!("les zones {pl} du PLU"),
@@ -855,7 +869,7 @@ fn draft_filter_eq(rng: &mut Rng) -> Option<Draft> {
             _ => format!("les zones {pl} de {}", t.the_layer),
         };
         return Some(Draft {
-            calls: vec![select(&layer.id, &field.name, op, code)],
+            calls: vec![sel],
             b,
             noun: &t.noun,
             np,
@@ -1081,7 +1095,7 @@ fn dissolve_words(rng: &mut Rng) -> &'static str {
 }
 
 fn tampon_head(rng: &mut Rng, d: &Dist, around: &str) -> String {
-    match rng.below(6) {
+    match rng.below(8) {
         // « Fais-moi », pas « Fais une zone tampon ... autour des ... » : cette tournure nue est
         // celle de phrases des essais réels (`training/tests/recouvrement.rs`).
         0 => format!("Fais-moi une zone tampon {} autour {around}", d.de()),
@@ -1089,6 +1103,10 @@ fn tampon_head(rng: &mut Rng, d: &Dist, around: &str) -> String {
         2 => format!("Trace un périmètre {} autour {around}", d.de()),
         3 => format!("Génère une zone {} autour {around}", d.de()),
         4 => format!("Tampon {} autour {around}", d.de()),
+        // Après 5.49 : les têtes de `question_tampon_sans_distance` ont aussi leur plan, distance
+        // écrite ; aucune tête n'appelle seule la question.
+        5 => format!("Ajoute un tampon {} autour {around}", d.de()),
+        6 => format!("Génère une zone tampon {} autour {around}", d.de()),
         _ => format!("Dessine une zone tampon {} autour {around}", d.de()),
     }
 }
@@ -1104,11 +1122,17 @@ fn tampon(rng: &mut Rng) -> Option<Example> {
         _ => t.noun.des(),
     };
     let dissolve = rng.chance(1, 5);
-    let mut body = tampon_head(rng, &d, &around);
+    // Après 5.49 : la tête interrogative de `question_tampon_sans_distance`, distance écrite.
+    let q = rng.chance(1, 8);
+    let mut body = if q {
+        format!("Peux-tu faire une zone tampon {} autour {around}", d.de())
+    } else {
+        tampon_head(rng, &d, &around)
+    };
     if dissolve {
         body.push_str(dissolve_words(rng));
     }
-    let request = finish(rng, &body, false, false);
+    let request = finish(rng, &body, q, false);
     let expected = calls(vec![buffer(&layer.id, &d, dissolve)]);
     Some(example("tampon", b, rng, request, expected))
 }
@@ -1376,31 +1400,67 @@ const AREAS: &[Area] = &[
 ];
 
 /// Catégorie d'une zone du PLU dite en langage courant (standard du CNIG) : mot au singulier,
-/// au pluriel, opérateur et code de `typezone`, valeur forcée dans l'inventaire. « Agricole » et
-/// « urbaine » sont un code seul (`A`, `U`) ; « naturelle » couvre `N` et `Nh`, « à urbaniser »
-/// `AUc` et `AUs` : ce qui commence par le code.
-const ZONE_CATEGORIES: &[(&str, &str, &str, &str, &[&str])] = &[
-    ("agricole", "agricoles", "eq", "A", &["A"]),
-    ("naturelle", "naturelles", "begins_with", "N", &["N", "Nh"]),
-    ("urbaine", "urbaines", "eq", "U", &["U"]),
-    (
-        "à urbaniser",
-        "à urbaniser",
-        "begins_with",
-        "AU",
-        &["AUc", "AUs"],
-    ),
+/// au pluriel, code de `typezone` et valeurs dont l'une est forcée dans l'inventaire (une valeur
+/// répétée est tirée plus souvent). L'opérateur n'est pas figé : il se déduit des valeurs
+/// montrées (`zone_operator`). Après 5.49 (RA05), `N` est forcé trois fois sur quatre, et
+/// alors sans `Nh` (le standard du CNIG de 2017 n'en a plus) : un zonage qui ne montre que `N`
+/// appelle l'égalité ; `Nh` forcé, une fois sur quatre, appelle `begins_with`.
+const ZONE_CATEGORIES: &[(&str, &str, &str, &[&str])] = &[
+    ("agricole", "agricoles", "A", &["A"]),
+    ("naturelle", "naturelles", "N", &["N", "N", "N", "Nh"]),
+    ("urbaine", "urbaines", "U", &["U"]),
+    ("à urbaniser", "à urbaniser", "AU", &["AUc", "AUs"]),
 ];
+
+/// Opérateur de la sélection d'une catégorie de zone, d'après les valeurs montrées : `eq` quand
+/// la seule valeur de la catégorie est le code lui-même, `begins_with` sinon. Une valeur est de
+/// la catégorie si elle est le code, ou le code suivi d'un indice en minuscule (`Nh` pour `N`,
+/// `AUc` pour `AU`) : `AUc` n'est pas une zone agricole, ni `AUs` une zone urbaine.
+fn zone_operator<'a>(code: &str, shown: impl IntoIterator<Item = &'a str>) -> &'static str {
+    let only_code = shown
+        .into_iter()
+        .filter(|v| in_zone_category(code, v))
+        .all(|v| v == code);
+    if only_code {
+        "eq"
+    } else {
+        "begins_with"
+    }
+}
+
+/// Valeur de la catégorie du code : le code, ou le code suivi d'un indice en minuscule.
+fn in_zone_category(code: &str, v: &str) -> bool {
+    v.strip_prefix(code)
+        .is_some_and(|rest| rest.chars().next().is_none_or(char::is_lowercase))
+}
+
+/// Pose la couche de zonage d'une catégorie tirée et rend son mot au singulier, au pluriel et
+/// la sélection, l'opérateur déduit des valeurs montrées. Sans `libelle` : sa valeur « Zone
+/// agricole » appellerait une sélection sur ce champ.
+fn zone_category_select(
+    rng: &mut Rng,
+    b: &mut Builder,
+) -> Option<(&'static str, &'static str, Value)> {
+    let (sg, pl, code, values) = *rng.pick(ZONE_CATEGORIES);
+    let forced = *rng.pick(values);
+    let layer = b.add(rng, "zonage", &["zone"], &["libelle"], &[("zone", forced)]);
+    let field = layer.field("zone")?;
+    let mut shown = field.values.clone();
+    // Le code lui-même forcé : un zonage du standard de 2017, sans sous-zone de la catégorie
+    // (aucun `Nh` à côté de `N`).
+    if forced == code {
+        shown.retain(|v| v.v == code || !in_zone_category(code, v.v));
+        b.set_values(&layer.id, "zone", &shown)?;
+    }
+    let op = zone_operator(code, shown.iter().map(|v| v.v));
+    Some((sg, pl, select(&layer.id, &field.name, op, code)))
+}
 
 /// Essais GPU après 11.23 (question posée sur un code de zone non écrit) : « en zone
 /// agricole », « dans les zones naturelles du PLU » → `typezone` égal au code, ou commençant
 /// par lui, jamais une question.
 fn zone_category(rng: &mut Rng, b: &mut Builder, target: &Noun) -> Option<(String, Value)> {
-    let (sg, pl, op, code, values) = *rng.pick(ZONE_CATEGORIES);
-    let forced = *rng.pick(values);
-    // Sans `libelle` : sa valeur « Zone agricole » appellerait une sélection sur ce champ.
-    let layer = b.add(rng, "zonage", &["zone"], &["libelle"], &[("zone", forced)]);
-    let field = layer.field("zone")?;
+    let (sg, pl, sel) = zone_category_select(rng, b)?;
     let words = match rng.below(6) {
         0 | 1 => format!("en zone {sg}"),
         2 => format!("{} en zone {sg} du PLU", target.agree("situé")),
@@ -1408,7 +1468,7 @@ fn zone_category(rng: &mut Rng, b: &mut Builder, target: &Noun) -> Option<(Strin
         4 => format!("dans les zones {pl} du PLU"),
         _ => format!("dans la zone {sg} du PLU"),
     };
-    Some((words, select(&layer.id, &field.name, op, code)))
+    Some((words, sel))
 }
 
 /// Pose la condition de zone : rend la tournure et le `select` (à placer en tête du plan).
@@ -3734,10 +3794,9 @@ const NO_RASTER_STATS: &str = "Aucune commande du catalogue ne calcule de statis
 /// gares », « des gares » ; l'isochrone du catalogue part d'un seul point en coordonnées.
 pub const NO_MULTI_ORIGIN: &str = "L'isochrone du catalogue part d'un seul point donné en coordonnées : elle ne se calcule pas depuis plusieurs lieux à la fois.";
 
-/// Ce que le registre ne sait pas encore faire, quoi que l'inventaire contienne (un MNT pour
-/// les statistiques sur un raster) : un refus affirmatif, jamais un plan de substitution (un
-/// décompte à la place d'une moyenne d'altitude). Depuis 5.41 : un calcul de terrain suivi
-/// d'une statistique par zone (refus entier, jamais le seul calcul de terrain). Le point de
+/// Ce que le registre ne sait pas encore faire : un refus affirmatif, jamais un plan de
+/// substitution. Les statistiques sur un raster en sont sorties après 5.49
+/// (`refus_stats_raster`). Le point de
 /// terrain écrit dans un autre système que le MNT n'y est plus depuis 11.12 :
 /// `data.transform_point` le reprojette (`terrain_autre_systeme`). Le seuil sur la pente non
 /// plus depuis 11.12, lot 2a : `raster.reclassify` le fait (`pente_seuil`). Ni le format A3, A0
@@ -3745,17 +3804,15 @@ pub const NO_MULTI_ORIGIN: &str = "L'isochrone du catalogue part d'un seul point
 /// catalogue et l'impression restent refusés.
 fn refus_hors_registre(rng: &mut Rng) -> Option<Example> {
     let mut b = Builder::new();
-    // Essais GPU après 11.23 : le PDF qui choisit ses couches (1 sur 12 avant) et la
-    // statistique d'altitude par zone (1 sur 4 avant) ont chacun plus de poids.
-    let roll = match rng.below(6) {
-        4 => 2,
-        5 => 5,
-        r => r,
+    // Essais GPU après 11.23 : le PDF qui choisit ses couches (1 sur 12 avant) a plus de poids.
+    // Après 5.49, la statistique sur un raster (2 sur 6) est sortie dans `refus_stats_raster` :
+    // les quatre branches restantes, une sur quatre au poids 6, gardent chacune leur compte.
+    let roll = match rng.below(4) {
+        0 => 0,
+        1 => 1,
+        2 => 3,
+        _ => 5,
     };
-    // Les statistiques portent sur un MNT : il est là, ce n'est pas lui qui manque.
-    if roll == 2 {
-        b.add(rng, "mnt", &[], &[], &[]);
-    }
     let (body, q, reason): (String, bool, &str) = match roll {
         0 => {
             let t = pick_theme(rng, &b, ordinary)?;
@@ -3888,95 +3945,7 @@ fn refus_hors_registre(rng: &mut Rng) -> Option<Example> {
             };
             (body, q, NO_MULTI_ORIGIN)
         }
-        _ => {
-            let zkey = *rng.pick(&["communes", "quartiers", "parcelles"]);
-            let zones = b.add(rng, zkey, &[], &[], &[]);
-            let z = &zones.theme.noun;
-            let stat = *rng.pick(&["moyenne", "maximale", "minimale", "médiane"]);
-            let (body, q) = match rng.below(8) {
-                0 => (
-                    format!("Calcule l'altitude {stat} de chaque {}", z.sg),
-                    false,
-                ),
-                1 => (
-                    format!("Quelle est l'altitude {stat} de chaque {}", z.sg),
-                    true,
-                ),
-                2 => (
-                    format!("Fais les statistiques du MNT pour chaque {}", z.sg),
-                    false,
-                ),
-                3 => (
-                    format!("Donne l'altitude {stat} du terrain dans {}", z.les()),
-                    false,
-                ),
-                // 5.41 : un calcul de terrain suivi d'une statistique par zone reste un refus
-                // entier, jamais un plan à moitié.
-                4 => (
-                    format!(
-                        "Fais la carte des pentes {}, puis donne la pente {stat} de chaque {}",
-                        slope_unit(rng).1,
-                        z.sg
-                    ),
-                    false,
-                ),
-                5 => (
-                    format!("Calcule la pente du MNT et sa valeur {stat} par {}", z.sg),
-                    false,
-                ),
-                // La forme de S24 (essai terrain-11-18) : point écrit, hauteur et rayon, puis la
-                // statistique par zone ; le plan entier reste refusé.
-                6 => {
-                    let o = lambert_origin(rng);
-                    // Une forme « X / Y (système) » parmi les autres, sans figer celle de S24.
-                    let p = if rng.chance(1, 3) {
-                        let x = o.point["x"].as_u64().unwrap();
-                        let y = o.point["y"].as_u64().unwrap();
-                        let (xs, ys) = if rng.chance(1, 2) {
-                            (thousands(x), thousands(y))
-                        } else {
-                            (x.to_string(), y.to_string())
-                        };
-                        let crs = *rng.pick(&["Lambert-93", "Lambert 93", "EPSG:2154"]);
-                        format!("le point {xs} / {ys} ({crs})")
-                    } else {
-                        o.place
-                    };
-                    let mut body = format!("Calcule le champ de vision depuis {p}");
-                    if rng.chance(2, 3) {
-                        body.push_str(&eye_clause(rng).1);
-                    }
-                    if rng.chance(2, 3) {
-                        body.push_str(&radius_clause(rng).1);
-                    }
-                    let its = match stat {
-                        "moyenne" => "sa moyenne",
-                        "maximale" => "son maximum",
-                        "minimale" => "son minimum",
-                        _ => "sa médiane",
-                    };
-                    let tail = match rng.below(3) {
-                        0 => format!(", puis {its} par {}", z.sg),
-                        1 => format!(", puis sa valeur {stat} par {}", z.sg),
-                        _ => format!(", puis calcule {its} pour chaque {}", z.sg),
-                    };
-                    body.push_str(&tail);
-                    (body, false)
-                }
-                _ => {
-                    let p = lambert_origin(rng).place;
-                    let tail = match rng.below(2) {
-                        0 => format!("la part visible de chaque {}", z.sg),
-                        _ => format!("fais la moyenne pour chaque {}", z.sg),
-                    };
-                    (
-                        format!("Détermine ce qu'on voit depuis {p}, puis {tail}"),
-                        false,
-                    )
-                }
-            };
-            (body, q, NO_RASTER_STATS)
-        }
+        _ => unreachable!("tirage hors des quatre branches"),
     };
     let request = finish(rng, &body, q, false);
     Some(example(
@@ -3985,6 +3954,215 @@ fn refus_hors_registre(rng: &mut Rng) -> Option<Example> {
         rng,
         request,
         refusal(reason),
+    ))
+}
+
+/// Statistique d'altitude ou de pente : (adjectif au féminin, « sa moyenne »).
+const RASTER_STATS: &[(&str, &str)] = &[
+    ("moyenne", "sa moyenne"),
+    ("maximale", "son maximum"),
+    ("minimale", "son minimum"),
+    ("médiane", "sa médiane"),
+];
+
+/// « de chaque commune », « par commune », « pour chaque commune », « dans chaque commune ».
+fn per_zone(rng: &mut Rng, z: &Noun) -> String {
+    match rng.below(4) {
+        0 => format!("par {}", z.sg),
+        1 => format!("pour chaque {}", z.sg),
+        2 => format!("dans chaque {}", z.sg),
+        _ => format!("de chaque {}", z.sg),
+    }
+}
+
+/// Après 5.49 : statistiques par zone d'un raster, refus entier (S15, S23, S24 de `plan_reel`
+/// reculaient au jeu de 5.49). Sortie de `refus_hors_registre`, plus lourde, et surtout faite de
+/// demandes courtes, à une seule proposition (décision D2 du 2026-11-11 : le motif
+/// `NO_RASTER_STATS` est gardé tel quel). Tournures : une statistique, deux à la fois
+/// (« l'altitude moyenne et maximale de chaque quartier »), « par commune », un dérivé du MNT
+/// (pente, champ de vision) puis sa statistique, ou la statistique du dérivé dite d'un trait
+/// (« la pente moyenne par commune »). Le MNT est toujours là : ce n'est pas lui qui manque.
+/// Jamais « Donne-moi l'altitude … par … » ni « Calcule la pente … puis sa … par … », tournures
+/// de S15 et S23.
+fn refus_stats_raster(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    b.add(rng, "mnt", &[], &[], &[]);
+    let zkey = *rng.pick(&["communes", "quartiers", "parcelles"]);
+    let zones = b.add(rng, zkey, &[], &[], &[]);
+    let z = &zones.theme.noun;
+    let (stat, its) = *rng.pick(RASTER_STATS);
+    let per = per_zone(rng, z);
+    let (body, q) = match rng.below(10) {
+        // Une statistique, une proposition : la forme dominante.
+        0 => (format!("Calcule l'altitude {stat} {per}"), false),
+        1 => (format!("Quelle est l'altitude {stat} {per}"), true),
+        2 => match rng.below(3) {
+            0 => (format!("Donne l'altitude {stat} {per}"), false),
+            1 => (format!("Altitude {stat} {per}"), false),
+            _ => (format!("Je voudrais l'altitude {stat} {per}"), false),
+        },
+        3 => match rng.below(3) {
+            0 => (format!("Fais les statistiques du MNT {per}"), false),
+            1 => (format!("Statistiques d'altitude {per}"), false),
+            _ => (
+                format!("Donne l'altitude {stat} du terrain dans {}", z.les()),
+                false,
+            ),
+        },
+        // Deux statistiques à la fois.
+        4 | 5 => {
+            // Jamais « moyenne et maximale » : la paire de S15.
+            let (a, c) = *rng.pick(&[
+                ("minimale", "maximale"),
+                ("moyenne", "minimale"),
+                ("moyenne", "médiane"),
+            ]);
+            match rng.below(5) {
+                0 => (format!("Calcule l'altitude {a} et {c} {per}"), false),
+                1 => (format!("Quelles sont les altitudes {a} et {c} {per}"), true),
+                2 => (format!("Altitude {a} et {c} {per}"), false),
+                3 => (
+                    format!("Je veux l'altitude {a} et l'altitude {c} {per}"),
+                    false,
+                ),
+                _ => (
+                    format!("Donne l'altitude {a} et {c} de chaque {}", z.sg),
+                    false,
+                ),
+            }
+        }
+        // La statistique d'un dérivé du MNT, dite d'un trait.
+        6 => match rng.below(3) {
+            0 => (format!("Calcule la pente {stat} {per}"), false),
+            1 => (format!("Quelle est la pente {stat} {per}"), true),
+            _ => (format!("Pente {stat} {per}"), false),
+        },
+        // Un dérivé du MNT puis sa statistique : refus entier, jamais un plan à moitié (5.41).
+        7 => match rng.below(3) {
+            0 => (
+                format!(
+                    "Fais la carte des pentes {}, puis donne la pente {stat} de chaque {}",
+                    slope_unit(rng).1,
+                    z.sg
+                ),
+                false,
+            ),
+            1 => (
+                format!("Calcule la pente du MNT et sa valeur {stat} par {}", z.sg),
+                false,
+            ),
+            // Sans unité : « Pente du MNT en degrés et sa moyenne par commune » serait S23.
+            _ => (format!("Pente du MNT et {its} {per}"), false),
+        },
+        // La forme de S24 (essai terrain-11-18) : point écrit, hauteur et rayon, puis la
+        // statistique par zone ; le plan entier reste refusé.
+        8 => {
+            let o = lambert_origin(rng);
+            // Une forme « X / Y (système) » parmi les autres, sans figer celle de S24.
+            let p = if rng.chance(1, 3) {
+                let x = o.point["x"].as_u64().unwrap();
+                let y = o.point["y"].as_u64().unwrap();
+                let (xs, ys) = if rng.chance(1, 2) {
+                    (thousands(x), thousands(y))
+                } else {
+                    (x.to_string(), y.to_string())
+                };
+                let crs = *rng.pick(&["Lambert-93", "Lambert 93", "EPSG:2154"]);
+                format!("le point {xs} / {ys} ({crs})")
+            } else {
+                o.place
+            };
+            let mut body = format!("Calcule le champ de vision depuis {p}");
+            if rng.chance(2, 3) {
+                body.push_str(&eye_clause(rng).1);
+            }
+            if rng.chance(2, 3) {
+                body.push_str(&radius_clause(rng).1);
+            }
+            let tail = match rng.below(3) {
+                0 => format!(", puis {its} par {}", z.sg),
+                1 => format!(", puis sa valeur {stat} par {}", z.sg),
+                _ => format!(", puis calcule {its} pour chaque {}", z.sg),
+            };
+            body.push_str(&tail);
+            (body, false)
+        }
+        _ => {
+            let p = lambert_origin(rng).place;
+            let tail = match rng.below(2) {
+                0 => format!("la part visible de chaque {}", z.sg),
+                _ => format!("fais la moyenne pour chaque {}", z.sg),
+            };
+            (
+                format!("Détermine ce qu'on voit depuis {p}, puis {tail}"),
+                false,
+            )
+        }
+    };
+    let request = finish(rng, &body, q, false);
+    Some(example(
+        "refus_stats_raster",
+        b,
+        rng,
+        request,
+        refusal(NO_RASTER_STATS),
+    ))
+}
+
+/// Après 5.49 (RA09 d'Annecy, « tampon autour des routes » sans distance : 10 m inventés) : un
+/// tampon dont la demande n'écrit aucune distance → la question de la distance, jamais une
+/// distance devinée. Mêmes verbes que `tampon`, son contrepoids ; jamais la tête « Fais un
+/// tampon autour », celle de RA09.
+fn question_tampon_sans_distance(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    // Jamais le réseau routier : « Crée un tampon autour des routes » serait à un mot de RA09.
+    let t = pick_theme(rng, &b, |t| vector(t) && t.group != "voirie")?;
+    let layer = b.add(rng, t.key, &[], &[], &[]);
+    // Aucun chiffre dans la demande : un nom de couche qui en porte (« ZNIEFF de type 1 et 2 »)
+    // n'y est pas recopié, pour qu'aucun nombre ne passe pour une distance.
+    let named = !layer.name.chars().any(|c| c.is_ascii_digit());
+    let around = match rng.below(4) {
+        0 if named => format!("de la couche « {} »", layer.name),
+        1 => format!("de {}", t.the_layer),
+        _ => t.noun.des(),
+    };
+    let (mut body, q) = match rng.below(8) {
+        0 => (format!("Fais-moi une zone tampon autour {around}"), false),
+        1 => (format!("Crée un tampon autour {around}"), false),
+        2 => (format!("Trace un périmètre autour {around}"), false),
+        3 => (format!("Génère une zone tampon autour {around}"), false),
+        4 => (format!("Tampon autour {around}"), false),
+        5 => (format!("Dessine une zone tampon autour {around}"), false),
+        6 => (
+            format!("Peux-tu faire une zone tampon autour {around}"),
+            true,
+        ),
+        _ => (format!("Ajoute un tampon autour {around}"), false),
+    };
+    if rng.chance(1, 6) {
+        body.push_str(dissolve_words(rng));
+    }
+    let request = finish(rng, &body, q, false);
+    let text = match rng.below(3) {
+        0 => format!(
+            "Quelle distance faut-il pour le tampon autour de la couche « {} » ?",
+            layer.name
+        ),
+        1 => format!(
+            "De quelle distance faut-il faire le tampon autour de la couche « {} » (en m ou en km) ?",
+            layer.name
+        ),
+        _ => format!(
+            "La demande ne donne pas de distance : quelle largeur faut-il au tampon autour de la couche « {} » ?",
+            layer.name
+        ),
+    };
+    Some(example(
+        "question_tampon_sans_distance",
+        b,
+        rng,
+        request,
+        question(text),
     ))
 }
 
@@ -6267,7 +6445,10 @@ fn distance_azimut(rng: &mut Rng) -> Option<Example> {
     let east = rng.chance(1, 3);
     let roll = rng.below(3);
     let make = |rng: &mut Rng| match roll {
-        0 => wgs84_coord(rng, east),
+        0 => {
+            let c = wgs84_coord(rng, east);
+            named_or_plain(rng, c)
+        }
         1 => utm_coord(rng, if east { 32 } else { 31 }),
         _ => lambert_coord(rng),
     };
@@ -6409,6 +6590,52 @@ fn grid_zone_words(rng: &mut Rng, east: bool) -> Option<(String, u64)> {
     Some((text, zone))
 }
 
+/// Lieux génériques nommés devant leurs coordonnées (D5, après 5.49) : aucune commune, dont
+/// les coordonnées ne seraient pas celles du point.
+fn named_landmark(rng: &mut Rng) -> &'static str {
+    pick_str(
+        rng,
+        &[
+            "le sommet de la crête",
+            "le refuge du col",
+            "le pylône de la ligne électrique",
+            "le carrefour de la route forestière",
+            "le sommet boisé",
+            "le pylône du relais",
+            "le château d'eau isolé",
+        ],
+    )
+}
+
+/// Un point WGS84 sur trois devient un lieu nommé suivi de ses coordonnées entre parenthèses
+/// (« le refuge du col (48,1234 N, 7,1234 E, WGS84) ») ; les autres points restent tels quels.
+/// Partagé par `gisement`, `distance_azimut` et `azimut_magnetique` : le lieu nommé se voit avec
+/// chaque nord, jamais comme un signe du seul nord du quadrillage.
+fn named_or_plain(rng: &mut Rng, c: Coord) -> Coord {
+    if c.point["epsg"] == 4326 && rng.chance(1, 3) {
+        let place = format!("{} ({}, {})", named_landmark(rng), c.bare, c.crs);
+        Coord { place, ..c }
+    } else {
+        c
+    }
+}
+
+/// `wgs84_or_utm`, le point WGS84 parfois nommé (`named_or_plain`).
+fn named_or_plain_any(rng: &mut Rng, east: bool) -> Coord {
+    let c = wgs84_or_utm(rng, east);
+    named_or_plain(rng, c)
+}
+
+/// Un point d'un gisement : en WGS84 deux fois sur trois (une sur deux avant D5), sinon en
+/// UTM, le point WGS84 parfois nommé (`named_or_plain`).
+fn grid_point(rng: &mut Rng, east: bool) -> Coord {
+    if !rng.chance(2, 3) {
+        return utm_coord(rng, if east { 32 } else { 31 });
+    }
+    let c = wgs84_coord(rng, east);
+    named_or_plain(rng, c)
+}
+
 /// « Donne le gisement du point … au point … », « Implante un point à 800 m du point …, au
 /// gisement 250 gr » : tournures de géomètre (gisement, nord du quadrillage, quadrillage UTM),
 /// grades fréquents → `geo.distance_azimuth` ou `geo.destination_point` avec `north: "grid"` ;
@@ -6421,13 +6648,13 @@ fn gisement(rng: &mut Rng) -> Option<Example> {
     let zone_text = zone.as_ref().map(|(t, _)| t.as_str()).unwrap_or("");
     let mut list = Vec::new();
     let (body, q) = if rng.chance(1, 2) {
-        let a = wgs84_or_utm(rng, east);
-        let c = wgs84_or_utm(rng, east);
+        let a = grid_point(rng, east);
+        let c = grid_point(rng, east);
         if a.point == c.point {
             return None;
         }
         let (pa, pc) = (&a.place, &c.place);
-        let (mut body, q) = match rng.below(5) {
+        let (mut body, q) = match rng.below(9) {
             0 => (
                 format!(
                     "Donne le gisement et la distance {} {}",
@@ -6449,11 +6676,34 @@ fn gisement(rng: &mut Rng) -> Option<Example> {
                 ),
                 false,
             ),
-            _ => (
+            4 => (
                 format!(
                     "Mesure distance et azimut par rapport au quadrillage UTM entre {pa} et {pc}"
                 ),
                 false,
+            ),
+            // D5 (après 5.49) : azimut du quadrillage, nord du quadrillage, nord UTM.
+            5 => (
+                format!("Donne l'azimut du quadrillage {} {}", de_np(pa), a_np(pc)),
+                false,
+            ),
+            6 => (
+                format!(
+                    "Quel est l'azimut {} vers {pc} par rapport au nord du quadrillage",
+                    de_np(pa)
+                ),
+                true,
+            ),
+            7 => (
+                format!("Calcule l'azimut en nord UTM {} {}", de_np(pa), a_np(pc)),
+                false,
+            ),
+            _ => (
+                format!(
+                    "Quel gisement faut-il prendre depuis {pa} pour aller {}",
+                    a_np(pc)
+                ),
+                true,
             ),
         };
         body.push_str(zone_text);
@@ -6474,12 +6724,12 @@ fn gisement(rng: &mut Rng) -> Option<Example> {
         list.push(json!({"command": "geo.distance_azimuth", "params": params}));
         (body, q)
     } else {
-        let from = wgs84_or_utm(rng, east);
+        let from = grid_point(rng, east);
         let (az, az_text) = azimuth_words(rng, gon, 10, 350);
         let (d, d_text) = geo_distance(rng);
         let p = &from.place;
         let de_p = de_np(p);
-        let (mut body, q) = match rng.below(5) {
+        let (mut body, q) = match rng.below(8) {
             0 => (
                 format!("Quel point atteint-on à {d_text} {de_p}, gisement {az_text}"),
                 true,
@@ -6498,10 +6748,25 @@ fn gisement(rng: &mut Rng) -> Option<Example> {
                 ),
                 false,
             ),
-            _ => (
+            4 => (
                 format!(
                     "Projette un point à {d_text} {de_p} à {az_text} par rapport au quadrillage UTM"
                 ),
+                false,
+            ),
+            // D5 (après 5.49) : azimut du quadrillage, nord du quadrillage, nord UTM.
+            5 => (
+                format!("Place un point à {d_text} {de_p}, azimut du quadrillage {az_text}"),
+                false,
+            ),
+            6 => (
+                format!(
+                    "Quel point se trouve à {d_text} {de_p}, à {az_text} par rapport au nord du quadrillage"
+                ),
+                true,
+            ),
+            _ => (
+                format!("Depuis {p}, avance de {d_text} à {az_text} en nord UTM"),
                 false,
             ),
         };
@@ -6590,8 +6855,8 @@ fn azimut_magnetique(rng: &mut Rng) -> Option<Example> {
     let date_text = date.as_ref().map(|(t, _)| t.as_str()).unwrap_or("");
     let mut list = Vec::new();
     let (body, q) = if rng.chance(1, 2) {
-        let a = wgs84_or_utm(rng, east);
-        let c = wgs84_or_utm(rng, east);
+        let a = named_or_plain_any(rng, east);
+        let c = named_or_plain_any(rng, east);
         if a.point == c.point {
             return None;
         }
@@ -6641,7 +6906,7 @@ fn azimut_magnetique(rng: &mut Rng) -> Option<Example> {
         list.push(json!({"command": "geo.distance_azimuth", "params": params}));
         (body, q)
     } else {
-        let from = wgs84_or_utm(rng, east);
+        let from = named_or_plain_any(rng, east);
         let (az, az_text) = azimuth_words(rng, gon, 10, 350);
         let (d, d_text) = geo_distance(rng);
         let p = &from.place;
@@ -8361,6 +8626,52 @@ mod tests {
     }
 
     #[test]
+    fn every_grid_bearing_says_grid_with_named_wgs84_places_and_utm_north() {
+        // D5 (après 5.49) : toute demande de `gisement` porte `north: "grid"` ; des lieux nommés
+        // suivis de leurs coordonnées WGS84, « nord UTM » et « quadrillage » sont vus, des deux
+        // côtés (distance et azimut, point projeté). Jamais un « nord Lambert ».
+        let examples = geometry_examples(gisement);
+        let (mut named, mut utm_north, mut grid_words) = (HashSet::new(), 0, 0);
+        for e in &examples {
+            let step = call(e, 0);
+            assert_eq!(step["params"]["north"], "grid", "{}", e.request);
+            let r = e.request.to_lowercase();
+            assert!(!r.contains("lambert"), "{}", e.request);
+            if ["château d'eau", "sommet", "refuge", "pylône", "carrefour"]
+                .iter()
+                .any(|w| r.contains(w))
+                && (r.contains("wgs") || r.contains("epsg:4326"))
+            {
+                named.insert(step["command"].as_str().unwrap().to_string());
+            }
+            utm_north += usize::from(r.contains("nord utm"));
+            grid_words += usize::from(r.contains("quadrillage"));
+        }
+        assert_eq!(named.len(), 2, "{named:?}");
+        assert!(utm_north > 0 && grid_words > 0, "{utm_north} {grid_words}");
+        // Le lieu nommé se voit aussi au nord géographique et au nord magnétique : il n'est pas
+        // un signe du seul nord du quadrillage.
+        for make in [
+            distance_azimut as fn(&mut Rng) -> Option<Example>,
+            azimut_magnetique,
+        ] {
+            assert!(valid(make, 600).iter().any(|e| {
+                let r = e.request.to_lowercase();
+                [
+                    "refuge du col",
+                    "sommet de la crête",
+                    "pylône",
+                    "carrefour de la route",
+                    "sommet boisé",
+                    "château d'eau isolé",
+                ]
+                .iter()
+                .any(|w| r.contains(w))
+            }));
+        }
+    }
+
+    #[test]
     fn a_grid_bearing_says_grid_and_names_its_zone_only_when_written() {
         let examples = geometry_examples(gisement);
         let (mut both, mut zones, mut grads) = (HashSet::new(), 0, 0);
@@ -8370,8 +8681,21 @@ mod tests {
             assert_eq!(p["north"], "grid", "{}", e.request);
             both.insert(step["command"].as_str().unwrap().to_string());
             let r = e.request.to_lowercase();
+            // 5.49 : « quadrillage UTM » est aussi la tournure du carroyage du PDF ; un gisement
+            // ne parle ni de carte ni d'export, et son plan n'a aucun appel `layout.*` : les deux
+            // familles ne s'enseignent pas deux plans pour une même demande.
+            for w in ["carte", "pdf", "export", "carroyage", "grille", "tous les"] {
+                assert!(!r.contains(w), "{w} : {}", e.request);
+            }
+            for c in e.expected["calls"].as_array().unwrap() {
+                assert!(
+                    !c["command"].as_str().unwrap().starts_with("layout."),
+                    "{}",
+                    e.request
+                );
+            }
             assert!(
-                r.contains("gisement") || r.contains("quadrillage"),
+                r.contains("gisement") || r.contains("quadrillage") || r.contains("nord utm"),
                 "{}",
                 e.request
             );
@@ -8749,8 +9073,9 @@ mod tests {
 
     #[test]
     fn a_terrain_computation_then_a_statistic_per_zone_is_refused() {
-        // 5.41 : « la pente puis sa moyenne par commune » est un refus entier.
-        let examples = valid(refus_hors_registre, 600);
+        // 5.41 : « la pente puis sa moyenne par commune » est un refus entier. Depuis après
+        // 5.49, dans `refus_stats_raster`.
+        let examples = valid(refus_stats_raster, 600);
         let stats: Vec<&Example> = examples
             .iter()
             .filter(|e| e.expected["reason"] == NO_RASTER_STATS)
@@ -8764,6 +9089,144 @@ mod tests {
             && e.request.contains(", puis ")));
         for e in stats {
             assert_eq!(e.expected["kind"], "refusal", "{}", e.request);
+        }
+    }
+
+    #[test]
+    fn statistics_of_a_raster_per_zone_are_a_whole_refusal() {
+        // Après 5.49 : refus seul, MNT présent, deux statistiques à la fois, « par commune »,
+        // et un dérivé du MNT suivi de sa statistique, tous vus ; aucun autre motif.
+        let examples = valid(refus_stats_raster, 800);
+        let (mut two, mut per, mut derived, mut short) = (0, 0, 0, 0);
+        for e in &examples {
+            assert_eq!(e.expected, refusal(NO_RASTER_STATS), "{}", e.request);
+            assert!(has_theme(e, "mnt"), "MNT présent : {}", e.request);
+            assert!(
+                ["communes", "quartiers", "parcelles"]
+                    .iter()
+                    .any(|z| has_theme(e, z)),
+                "{}",
+                e.request
+            );
+            let r = e.request.to_lowercase();
+            // Jamais les tournures de S15 et S23.
+            assert!(!r.starts_with("donne-moi"), "{}", e.request);
+            assert!(
+                !(r.starts_with("calcule la pente") && r.contains(" puis sa moyenne par ")),
+                "{}",
+                e.request
+            );
+            // Ni la paire de S15, ni « Fais la pente, puis … », ni la pente du MNT à unité
+            // suivie de sa statistique (S23).
+            assert!(!r.contains("moyenne et maximale"), "{}", e.request);
+            assert!(!r.starts_with("fais la pente, puis"), "{}", e.request);
+            assert!(
+                !(r.starts_with("pente du mnt en ") || r.starts_with("pente du mnt à ")),
+                "{}",
+                e.request
+            );
+            if RASTER_STATS
+                .iter()
+                .filter(|(stat, _)| {
+                    r.contains(&format!(" {stat} ")) || r.contains(&format!(" et {stat}"))
+                })
+                .count()
+                >= 2
+            {
+                two += 1;
+            }
+            if r.contains(" par commune") {
+                per += 1;
+            }
+            if (r.contains("pente") || r.contains("champ de vision") || r.contains("voit"))
+                && (r.contains(", puis") || r.contains(" et sa ") || r.contains(" et son "))
+            {
+                derived += 1;
+            }
+            if !r.contains(", puis") && !r.contains(" et sa ") && !r.contains(" et son ") {
+                short += 1;
+            }
+        }
+        assert!(two > 0 && per > 0 && derived > 0, "{two} {per} {derived}");
+        // Les demandes courtes, à une seule proposition, dominent.
+        assert!(2 * short > examples.len(), "{short}/{}", examples.len());
+    }
+
+    #[test]
+    fn out_of_registry_requests_no_longer_hold_the_raster_statistics() {
+        // Après 5.49 : la statistique sur un raster vit dans `refus_stats_raster` seulement.
+        for e in valid(refus_hors_registre, 600) {
+            assert_ne!(e.expected["reason"], NO_RASTER_STATS, "{}", e.request);
+        }
+    }
+
+    /// La tête d'une demande de tampon jusqu'à « autour » : « crée un tampon autour ».
+    fn head_before_around(r: &str) -> String {
+        format!("{} autour", r.split_once(" autour").unwrap().0)
+    }
+
+    #[test]
+    fn a_buffer_without_a_distance_asks_for_it() {
+        // Après 5.49 (RA09) : aucune distance écrite → la question de la distance, sur une
+        // couche bien présente ; jamais la tête « Fais un tampon autour ».
+        let examples = valid(question_tampon_sans_distance, 600);
+        let mut heads = HashSet::new();
+        for e in &examples {
+            assert_eq!(e.expected["kind"], "question", "{}", e.request);
+            // Jamais le réseau routier pour couche cible, à un mot de RA09.
+            let r = e.request.to_lowercase();
+            for w in ["route", "routier", "voirie", "réseau de voirie", "réseau »"] {
+                assert!(!r.contains(w), "{}", e.request);
+            }
+            assert!(
+                !e.request.chars().any(|c| c.is_ascii_digit()),
+                "{}",
+                e.request
+            );
+            let r = e.request.to_lowercase();
+            assert!(!r.starts_with("fais un tampon autour"), "{}", e.request);
+            assert!(
+                r.contains("tampon") || r.contains("périmètre"),
+                "{}",
+                e.request
+            );
+            let q = e.expected["question"].as_str().unwrap();
+            assert!(q.contains("distance") || q.contains("largeur"), "{q}");
+            let named = q
+                .split('«')
+                .nth(1)
+                .and_then(|s| s.split('»').next())
+                .unwrap()
+                .trim();
+            assert!(
+                e.inventory["layers"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|l| l["name"] == named),
+                "couche cible absente : {q}"
+            );
+            heads.insert(head_before_around(&r));
+        }
+        assert!(heads.len() >= 5, "{heads:?}");
+        // Chaque tête de la question ouvre aussi un plan de `tampon`, distance écrite : aucune
+        // tête n'appelle seule la question.
+        let planned: HashSet<String> = valid(tampon, 1500)
+            .iter()
+            .map(|e| {
+                // « crée un tampon de 500 m autour » → « crée un tampon autour ».
+                let r = e.request.to_lowercase();
+                let head = r.split_once(" autour").unwrap().0;
+                let words: Vec<&str> = head.split_whitespace().collect();
+                let cut = words
+                    .iter()
+                    .position(|w| *w == "de" || w.starts_with("d'"))
+                    .unwrap_or(words.len());
+                format!("{} autour", words[..cut].join(" "))
+            })
+            .collect();
+        for h in &heads {
+            assert!(planned.contains(h), "tête sans plan : {h} ; {planned:?}");
         }
     }
 
@@ -9235,6 +9698,7 @@ mod tests {
         for make in [
             refus as fn(&mut Rng) -> Option<Example>,
             refus_hors_registre,
+            refus_stats_raster,
         ] {
             let mut rng = Rng::new(3);
             for _ in 0..2000 {
@@ -11101,12 +11565,50 @@ mod tests {
         assert!(edits.len() >= 3, "{edits:?}");
     }
 
+    /// Valeurs montrées du champ d'une sélection, lues dans l'inventaire de l'exemple.
+    fn shown_values<'a>(e: &'a Example, call: &Value) -> Vec<&'a str> {
+        let layer = layer_of(e, call["params"]["layer_id"].as_str().unwrap());
+        let field = layer["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["name"] == call["params"]["field"])
+            .unwrap_or_else(|| panic!("champ absent : {}", e.request));
+        field["values"]
+            .as_array()
+            .map(|v| v.iter().map(|v| v.as_str().unwrap()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Après 5.49 (RA05) : l'opérateur d'une catégorie de zone suit les valeurs montrées. Rend
+    /// l'opérateur attendu, que le test compare au plan.
+    fn expected_zone_operator(code: &str, shown: &[&str]) -> &'static str {
+        match code {
+            "A" | "U" => "eq",
+            "AU" => "begins_with",
+            "N" if shown.iter().any(|v| v.starts_with('N') && *v != "N") => "begins_with",
+            "N" => "eq",
+            other => panic!("code inattendu {other}"),
+        }
+    }
+
+    #[test]
+    fn a_zone_operator_follows_the_values_shown() {
+        assert_eq!(zone_operator("N", ["A", "N", "U"]), "eq");
+        assert_eq!(zone_operator("N", ["N", "Nh", "U"]), "begins_with");
+        assert_eq!(zone_operator("N", ["Nh", "U"]), "begins_with");
+        assert_eq!(zone_operator("A", ["A", "AUc", "AUs", "N"]), "eq");
+        assert_eq!(zone_operator("U", ["AUc", "U"]), "eq");
+        assert_eq!(zone_operator("AU", ["AUc", "U"]), "begins_with");
+    }
+
     #[test]
     fn a_plu_zone_said_in_plain_words_selects_its_code() {
         let mut seen = HashSet::new();
+        let mut natural = HashSet::new();
         for e in valid(dans_une_zone, 1500) {
             let r = e.request.to_lowercase();
-            let Some((_, _, op, code, _)) = ZONE_CATEGORIES.iter().find(|(sg, pl, ..)| {
+            let Some((_, _, code, _)) = ZONE_CATEGORIES.iter().find(|(sg, pl, ..)| {
                 r.contains(&format!("zone {sg}")) || r.contains(&format!("zones {pl}"))
             }) else {
                 continue;
@@ -11117,18 +11619,26 @@ mod tests {
                 "{}",
                 e.request
             );
-            assert_eq!(first["params"]["operator"], *op, "{}", e.request);
+            let shown = shown_values(&e, first);
+            assert!(shown.iter().any(|v| v.starts_with(code)), "{}", e.request);
+            let op = expected_zone_operator(code, &shown);
+            assert_eq!(first["params"]["operator"], op, "{}", e.request);
             assert_eq!(first["params"]["value"], *code, "{}", e.request);
+            if *code == "N" {
+                natural.insert(op);
+            }
             seen.insert(*code);
         }
         assert_eq!(seen.len(), ZONE_CATEGORIES.len(), "{seen:?}");
+        assert_eq!(natural.len(), 2, "« naturelle » : {natural:?}");
     }
 
     #[test]
     fn the_plu_zones_of_a_category_said_in_words_are_one_selection() {
         let mut seen = HashSet::new();
+        let mut natural = HashSet::new();
         let zonage = theme("zonage");
-        for e in valid(filtre_egalite, 1500) {
+        for e in valid(filtre_egalite, 3000) {
             let r = e.request.to_lowercase();
             let id = e.expected["calls"][0]["params"]["layer_id"]
                 .as_str()
@@ -11140,7 +11650,7 @@ mod tests {
             {
                 continue;
             }
-            let Some((_, _, op, code, _)) = ZONE_CATEGORIES
+            let Some((_, _, code, _)) = ZONE_CATEGORIES
                 .iter()
                 .find(|(_, pl, ..)| r.contains(&format!("zones {pl}")))
             else {
@@ -11148,7 +11658,9 @@ mod tests {
             };
             let calls = e.expected["calls"].as_array().unwrap();
             assert_eq!(calls.len(), 1, "{}", e.request);
-            assert_eq!(calls[0]["params"]["operator"], *op, "{}", e.request);
+            let shown = shown_values(&e, &calls[0]);
+            let op = expected_zone_operator(code, &shown);
+            assert_eq!(calls[0]["params"]["operator"], op, "{}", e.request);
             assert_eq!(calls[0]["params"]["value"], *code, "{}", e.request);
             let layer = layer_of(&e, calls[0]["params"]["layer_id"].as_str().unwrap());
             let fields = layer["fields"].as_array().unwrap();
@@ -11159,9 +11671,13 @@ mod tests {
                 "{}",
                 e.request
             );
+            if *code == "N" {
+                natural.insert(op);
+            }
             seen.insert(*code);
         }
         assert_eq!(seen.len(), ZONE_CATEGORIES.len(), "{seen:?}");
+        assert_eq!(natural.len(), 2, "« naturelle » : {natural:?}");
     }
 
     #[test]
