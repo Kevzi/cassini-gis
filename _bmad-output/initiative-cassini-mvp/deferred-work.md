@@ -1032,3 +1032,11 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-barre-de-mesure-par-commande-phrases-ecrites-a-la-main-plan.md`
   summary: Le relevé de l'essai réel (lignes `SCORE` sur la sortie d'erreur, sans nom ni empreinte du modèle) doit être fixé dans un format lisible par la barre de non-oubli ; un pas raté d'un enchaînement compte contre la commande étiquette seule.
   evidence: relecture blind-hunter du 2026-11-11 ; à décider dans le livrable 2, qui lit ces relevés.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-53-2-barre-de-non-oubli.md`
+  summary: Barre de non-oubli : deux relevés de même total sur des phrases différentes se comparent (recettes QGIS, et essais GPU dont le test a changé) ; porter dans le relevé l'empreinte du fichier de phrases, ou la révision git du test.
+  evidence: relecture edge-case du 2026-11-11 ; la ligne `phrases :` ne donne que le chemin, pas le contenu, et un essai GPU ne dit pas de quelle révision du test il vient.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-53-2-barre-de-non-oubli.md`
+  summary: Brancher `non_oubli.py` sur les scripts de nuit (hors dépôt) pour qu'un candidat refusé ne soit jamais proposé à l'installation.
+  evidence: relecture intent-alignment du 2026-11-11 : l'outil rend un code de sortie, rien ne l'applique encore.

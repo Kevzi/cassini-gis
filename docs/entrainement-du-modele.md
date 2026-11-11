@@ -2380,3 +2380,129 @@ dicte seul) : 33 commandes au 2026-11-11, 99 phrases.
   au jeu engendré, à l'identique puis à un nombre ou une commune près. À l'écriture, trois
   phrases (LR3, GS1, HS1) figuraient déjà au jeu : elles ont été réécrites, le générateur n'a pas
   été touché.
+
+## Barre de non-oubli (ticket 5.53, livrable 2, 2026-11-11)
+
+Avant d'installer un modèle, on vérifie qu'il n'a rien oublié de ce que savait celui qu'il
+remplace. L'outil `training/entrainement/non_oubli.py` lit les relevés déjà produits du
+**parent** (le modèle installé) et du **candidat**, et rend un verdict par barre puis un verdict
+d'ensemble. Il ne charge aucun modèle, n'utilise pas le GPU, n'installe et ne déplace rien ;
+Python standard seul.
+
+```
+python3 -I training/entrainement/non_oubli.py \
+  --parent  <essais GPU> <recette(s) QGIS> <rapport.json> \
+  --candidat <essais GPU> <recette(s) QGIS> <rapport.json> \
+  --json non-oubli.json
+```
+
+Chaque relevé est reconnu à son contenu :
+
+- **essais GPU** (`essais-gpu-*.log`) : une barre par section `=== <essai> ===`, la première
+  fraction de sa ligne `SCORE` (les sous-scores d'`ecart_reel` ne comptent pas) ; dans la seule
+  section `par_commande_reel`, les lignes `SCORE <commande> <j>/<n>` donnent une barre
+  `par_commande:<commande>` par commande, et `SCORE total` la barre `par_commande_reel`.
+  Avertissements : section relancée ou à deux lignes `SCORE` (la dernière compte), section finie
+  sans `SCORE`, section sans ligne `=== fin … ===` (relevé coupé : seuil inconnu), ligne
+  `SCORE` de forme inconnue (nommée, ignorée), `SCORE <commande> 0/0` (ignorée) ;
+- **recette QGIS** (`recette-*.txt`) : `SCORE : <j>/<n>` (ou l'ancien `PLANS EXECUTES : <j>/<n>`)
+  donne la barre `recette:<nom>` (deux lignes de score : la dernière compte, avertissement ;
+  nombre de phrases annoncé par `phrases : … (N)` différent du total : avertissement), et
+  la ligne `FIN :` la barre `recette:<nom>:rejeu`, 1/1 pour « rejeu identique », 0/1 sinon ; une
+  recette sans ligne `FIN` (interrompue) n'a pas de barre de rejeu, ce qu'un avertissement
+  signale. Le nom vient du préfixe des phrases (`RA` → `annecy`, `G` → `gros`), sinon du fichier
+  de phrases de la ligne `phrases :` (`phrases-gros.json` → `gros`), sinon, pour les anciennes
+  recettes à « phrase 1 », du nom du fichier (`recette-annecy-…`), ce qu'un avertissement dit.
+  Un nom autre qu'`annecy` ou `gros` (`phrases-gros-v2.json` → `gros-v2`) est signalé : il
+  compte comme une barre ordinaire, jamais indicative ;
+- **rapport d'entraînement** (`rapport.json`) : `validation.justes` sur `validation.total`,
+  barre `validation`, et `validation.par_sorte`, la composition du jeu.
+
+Le texte est lu en ASCII seul : la marque d'ordre et les accents abîmés par la console Windows
+tombent. Chaque modèle est nommé par ses relevés (dossier du GGUF des essais, ligne `modèles :`
+de la recette, dossier et empreinte SHA-256 du rapport). Deux modèles différents d'un même côté,
+ou le même modèle des deux côtés, font un avertissement, et l'ensemble vaut alors **au mieux
+« à décider »** : on ne déclare pas installable une comparaison de relevés mélangés. Une barre lue dans deux fichiers d'un
+même côté, une fraction impossible (total nul, plus de justes que de phrases), un relevé vide
+ou de forme inconnue, ou un `--json` qui désigne un des relevés arrêtent l'outil (code 2), en
+nommant le fichier.
+
+**Règle.** Une barre **tient** si le candidat a au plus une phrase juste de moins que le parent,
+sur le même total ; le rejeu identique ne se perd pas (aucune tolérance). **Seuil propre** : le
+code de fin d'une section d'essais (`=== fin <essai> : 0 ===`, passée ; non nul, ratée) et, pour
+une recette, `(barre N)` de la ligne `SCORE :` (passée si justes ≥ N), ou à défaut la tournure
+« barre tenue », « SOUS LA BARRE » / « barre non tenue » (ni l'un ni l'autre : avertissement) ;
+un candidat qui rate un seuil que le parent passait est en `baisse`, même à une phrase près et
+même sur un autre total ; un candidat au seuil inconnu (section coupée) face à un parent qui le
+passait est `non comparable`. Le tableau montre le seuil (`seuil ok → raté (101)`).
+
+| Verdict de barre | Quand | Effet sur l'ensemble |
+|---|---|---|
+| `tenue` | au plus une phrase de moins, même total, seuil gardé | — |
+| `baisse` | deux phrases de moins ou plus, rejeu perdu, ou seuil propre perdu | `refusé` |
+| `absente` | barre du parent que le candidat n'a pas | `refusé` |
+| `sans parent` | barre nouvelle (par commande au premier relevé) | `à décider` |
+| `non comparable` | totaux différents (recette passée de 5 à 20 phrases) | `à décider` |
+
+`refusé` l'emporte sur `à décider`. Deux barres sont **indicatives** (leur verdict est montré, il
+ne compte pas) :
+
+- la recette du gros projet (`recette:gros`), tant que 5.50 n'en fait pas une barre ;
+- la **validation**, sauf si les deux jeux ont la même composition (`par_sorte` : mêmes totaux
+  par sorte) ; lue d'un seul côté, elle est indicative aussi (avertissement). Même composition
+  ne prouve pas mêmes phrases : c'est la meilleure garantie que porte le rapport. Le jeu de validation est tiré du générateur et renouvelé à chaque entraînement, ce
+  n'est pas une liste de phrases écrites à la main : 289/300 sur un jeu de 249/38/13 ne se
+  compare pas à 291/300 sur 253/25/22 (décision du propriétaire, 2026-11-11).
+
+Si aucune barre ne compte, le verdict est `à décider`.
+
+**Que faire d'un « à décider ».** Refuser bloquerait toute installation après l'ajout d'une
+barre, accepter ferait passer un oubli : le propriétaire tranche, sur le tableau. Deux voies :
+rejouer la mesure du parent sur la barre neuve ou élargie (par exemple la recette d'Annecy à 20
+phrases sur le modèle installé), qui rend la barre comparable ; ou décider à la main, et noter la
+décision dans le plan du ré-entraînement.
+
+Codes de sortie : 0 installable, 1 refusé, 2 relevé illisible, usage faux ou erreur imprévue (le
+message nomme le fichier ; jamais 1, qui voudrait dire « refusé » ; le fichier `--json` d'un
+lancement précédent est effacé), 3 à décider. Le JSON porte la règle, les identités, chaque barre
+(scores, code de fin de section, seuil, composition de la validation, relevé lu), les
+avertissements et le verdict.
+
+Les tests sans modèle : `python3 -I -m unittest discover -s training/entrainement/tests`
+(`tests/test_non_oubli.py`, une ligne de la matrice par test, les cas limites de la relecture,
+plus des extraits des vrais formats).
+
+**Essai : `ajuste-5-49-a` contre la fusion de la nuit du 11-10.** Parent :
+`11-23-mesures/essais-gpu-nuit-11-10-fusion.log`, `11-23-mesures/recette-annecy-nuit-11-10-fusion.txt`,
+`ajuste-nuit-11-10-fusion/rapport.json` ; candidat : `5-49-mesures/essais-gpu-a.log`,
+`recette-annecy-a.txt`, `recette-gros-a.txt`, `ajuste-5-49-a/rapport.json` (tous sous
+`~/cassini-entrainement/`). Sortie recopiée (chemins abrégés en `…`) :
+
+```
+Parent   : ajuste-nuit-11-10-fusion
+Candidat : ajuste-5-49-a
+
+plan_reel              25/25 → 24/25    tenue                    seuil ok → ok
+question_reel          12/12 → 11/12    tenue                    seuil ok → ok
+ecart_reel             37/40 → 35/40    baisse                   seuil ok → ok
+echelle_utm_reel         8/8 → 8/8      tenue                    seuil ok → ok
+terrain_reel             8/8 → 8/8      tenue                    seuil ok → ok
+epic11_reel            28/28 → 27/28    tenue                    seuil ok → ok
+style_reel             10/10 → 10/10    tenue                    seuil ok → ok
+validation           291/300 → 289/300  baisse (indicative)
+recette:annecy           4/5 → 18/20    non comparable           seuil — → ok
+recette:annecy:rejeu     1/1 → 1/1      tenue
+recette:gros               — → 6/7      sans parent (indicative) seuil — → ok
+recette:gros:rejeu         — → 1/1      sans parent (indicative)
+
+attention : …/11-23-mesures/recette-annecy-nuit-11-10-fusion.txt : ligne de score sans seuil (ni « (barre N) », ni « barre tenue »).
+attention : …/11-23-mesures/recette-annecy-nuit-11-10-fusion.txt : recette nommée « annecy » d'après le nom du fichier.
+attention : validation indicative : les deux jeux n'ont pas la même composition (calls 253/question 25/refusal 22 contre calls 249/question 38/refusal 13).
+Verdict : refusé
+```
+
+Code de sortie 1. `ajuste-5-49-a` perd deux phrases d'`ecart_reel` : à la règle d'une phrase
+près, il n'aurait pas été installé sur ces seuls relevés. La validation, tirée d'un autre jeu,
+ne compte pas. La recette d'Annecy n'est pas comparable (5 phrases pour le parent, 20 pour le
+candidat) ; seul son rejeu l'est, et il tient. L'ancienne recette du parent, à « phrase 1 », est
+nommée d'après son fichier, comme l'avertissement le dit.
