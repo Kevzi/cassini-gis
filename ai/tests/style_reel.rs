@@ -23,10 +23,11 @@
 //! test sans modèle nomme la phrase. Les attendus passent tous les contrôles communs
 //! (`common::invalid`) ; tout dégradé porte un champ numérique de sa couche. Les 10 phrases de
 //! `SENTENCES` gardent la comparaison exacte ; les neuves celle des autres barres
-//! (`common::same_calls`). Un seul `SCORE`, sur le total. Seuil (ticket 11.23, rapporté au total
-//! par la décision D4 du 2026-11-11) : 9/10 des réponses attendues, arrondi vers le bas, soit
-//! 37/42. Le jeu d'entraînement ne voit aucune de ces phrases : `training/tests/recouvrement.rs`
-//! les garde.
+//! (`common::same_calls`). Un seul `SCORE`, sur le total. Seuil : décision du propriétaire du
+//! 2026-11-11, au niveau du modèle installé (`ajuste-apres-5-49-b`, 31/42) moins une phrase,
+//! soit 30/42 (`NEEDED`) ; l'objectif proportionnel (ticket 11.23, D4 du 2026-11-11 : 9/10
+//! arrondi vers le bas, 37/42) reste calculé et imprimé, sans faire échouer. Le jeu
+//! d'entraînement ne voit aucune de ces phrases : `training/tests/recouvrement.rs` les garde.
 
 mod common;
 
@@ -166,14 +167,18 @@ fn answers(phrase: &Value, got: &Result<Plan, AgentError>) -> bool {
     }
 }
 
-/// Réponses attendues exigées : 9/10 du total, arrondi vers le bas (D4).
+/// Seuil exigé : décision du propriétaire du 2026-11-11, au niveau du modèle installé
+/// `ajuste-apres-5-49-b` (31/42) moins une phrase. À relever quand un modèle fait mieux.
+const NEEDED: usize = 30;
+
+/// Objectif proportionnel, imprimé sans faire échouer : 9/10 du total, arrondi vers le bas (D4).
 fn answers_needed(total: usize) -> usize {
     common::proportional(total, 9, 10)
 }
 
 #[test]
 #[ignore = "charge le vrai modèle ; lancer avec CASSINI_TEST_MODEL et --ignored"]
-fn style_reel_at_least_9_of_10_answers_match_on_the_whole_bar() {
+fn style_reel_answers_match_at_the_installed_level_on_the_whole_bar() {
     let Some((files, style)) = common::test_model() else {
         eprintln!("CASSINI_TEST_MODEL absent : essai ignore.");
         return;
@@ -228,11 +233,13 @@ fn style_reel_at_least_9_of_10_answers_match_on_the_whole_bar() {
         ));
     }
     let total = all.len();
-    let need = answers_needed(total);
-    eprintln!("SCORE {right}/{total} réponses conformes, dont {guarded} question(s) du garde-fou");
+    let goal = answers_needed(total);
+    eprintln!(
+        "SCORE {right}/{total} réponses conformes, dont {guarded} question(s) du garde-fou (seuil {NEEDED}, objectif 9/10 : {goal}/{total})"
+    );
     assert!(
-        right >= need,
-        "{right}/{total} : sous le seuil de 9/10 arrondi vers le bas ({need}/{total})"
+        right >= NEEDED,
+        "{right}/{total} : sous le seuil fixé (modèle installé moins une phrase, 2026-11-11) ({NEEDED}/{total})"
     );
 }
 
@@ -343,7 +350,8 @@ fn the_sentences_split_into_four_topographic_five_graduated_and_one_question() {
 }
 
 #[test]
-fn the_threshold_is_9_of_10_rounded_down() {
+fn the_threshold_is_the_installed_level_and_the_goal_9_of_10_rounded_down() {
+    assert_eq!(NEEDED, 30);
     assert_eq!(answers_needed(10), 9);
     assert_eq!(all_phrases().len(), 42);
     assert_eq!(answers_needed(42), 37);

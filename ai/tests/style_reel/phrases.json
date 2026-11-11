@@ -87,7 +87,7 @@
   },
   {
     "id": "SR06",
-    "phrase": "Population des communes en dégradé divergent rouge-bleu, 7 classes.",
+    "phrase": "Population des communes en dégradé divergent rouge-bleu, 7 classes en seuils naturels.",
     "expected": {
       "kind": "calls",
       "calls": [
@@ -96,6 +96,7 @@
           "params": {
             "layer_id": "communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946",
             "field": "population",
+            "method": "jenks",
             "class_count": 7,
             "ramp": "red_blue"
           }

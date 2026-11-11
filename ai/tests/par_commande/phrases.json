@@ -595,22 +595,36 @@
       "kind": "calls",
       "calls": [
         {
-          "command": "geo.bearing_intersection",
+          "command": "data.transform_point",
           "params": {
-            "first": {
+            "point": {
               "x": 655900,
               "y": 6847300,
               "epsg": 2154
             },
-            "first_azimuth": {
-              "value": 40,
-              "unit": "deg"
-            },
-            "second": {
+            "target_epsg": 4326
+          }
+        },
+        {
+          "command": "data.transform_point",
+          "params": {
+            "point": {
               "x": 657200,
               "y": 6847150,
               "epsg": 2154
             },
+            "target_epsg": 4326
+          }
+        },
+        {
+          "command": "geo.bearing_intersection",
+          "params": {
+            "first": "step:1.point",
+            "first_azimuth": {
+              "value": 40,
+              "unit": "deg"
+            },
+            "second": "step:2.point",
             "second_azimuth": {
               "value": 310,
               "unit": "deg"
@@ -694,13 +708,20 @@
       "kind": "calls",
       "calls": [
         {
-          "command": "geo.destination_point",
+          "command": "data.transform_point",
           "params": {
-            "from": {
+            "point": {
               "x": 656300,
               "y": 6847900,
               "epsg": 2154
             },
+            "target_epsg": 4326
+          }
+        },
+        {
+          "command": "geo.destination_point",
+          "params": {
+            "from": "step:1.point",
             "azimuth": {
               "value": 200,
               "unit": "deg"
@@ -779,18 +800,32 @@
       "kind": "calls",
       "calls": [
         {
-          "command": "geo.distance_azimuth",
+          "command": "data.transform_point",
           "params": {
-            "from": {
+            "point": {
               "x": 655950,
               "y": 6847650,
               "epsg": 2154
             },
-            "to": {
+            "target_epsg": 4326
+          }
+        },
+        {
+          "command": "data.transform_point",
+          "params": {
+            "point": {
               "x": 657150,
               "y": 6848350,
               "epsg": 2154
-            }
+            },
+            "target_epsg": 4326
+          }
+        },
+        {
+          "command": "geo.distance_azimuth",
+          "params": {
+            "from": "step:1.point",
+            "to": "step:2.point"
           }
         }
       ]
@@ -830,18 +865,32 @@
       "kind": "calls",
       "calls": [
         {
-          "command": "geo.distance_azimuth",
+          "command": "data.transform_point",
           "params": {
-            "from": {
+            "point": {
               "x": 656100,
               "y": 6847400,
               "epsg": 2154
             },
-            "to": {
+            "target_epsg": 4326
+          }
+        },
+        {
+          "command": "data.transform_point",
+          "params": {
+            "point": {
               "x": 656900,
               "y": 6848200,
               "epsg": 2154
             },
+            "target_epsg": 4326
+          }
+        },
+        {
+          "command": "geo.distance_azimuth",
+          "params": {
+            "from": "step:1.point",
+            "to": "step:2.point",
             "north": "magnetic",
             "date": "2026-03-01"
           }

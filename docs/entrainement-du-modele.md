@@ -2421,6 +2421,14 @@ engendrées, jamais recopiées d'une autre barre), sur l'inventaire de l'épreuv
   neuves comparent le titre exactement quand l'attendu en porte un, sinon le laissent libre
   (non vide). Dans `plan_reel`, seules les phrases qui attendent `layer.add` nomment un fichier
   non ouvert ; dans `question_reel`, aucune.
+- Systèmes des points (2026-11-11) : `invalid` nomme aussi un `Point` littéral de
+  `coord.convert`, `geo.distance_azimuth`, `geo.destination_point` ou `geo.bearing_intersection`
+  qui n'est ni en WGS84 (4326) ni en UTM sur WGS84 (32601 à 32660, 32701 à 32760), la règle de
+  `geo_point::read_point` (`geo.unsupported_crs` à l'exécution) ; une référence `step:k.champ`
+  passe. PL18, PL19, DA1, DA3, BI1 et DP1, aux points en Lambert-93, attendent désormais une
+  étape `data.transform_point` vers 4326 par point, puis la commande sur `step:k.point`. Dans
+  `plan_reel`, le plafond de fausses questions ne compte plus qu'une question rendue sur une
+  phrase qui attend un plan : sur un refus attendu, c'est un raté ordinaire.
 - `training/tests/recouvrement.rs` lit les deux fichiers neufs : aucune phrase au jeu engendré,
   à un nombre ou une commune près ; aucune phrase écrite à la main pour 5.53 ne reprend une
   phrase d'un autre essai ni une autre de son propre fichier (`no_hand_written_sentence_copies_another_real_trial`).
@@ -2518,6 +2526,55 @@ et leurs attendus intacts à l'octet près, un seul `SCORE` sur le total.
   recette d'Annecy et le `rapport.json` d'`ajuste-apres-5-49-b`), et tout candidat se mesure à
   `REV`. Si le parent ne tient pas un des nouveaux seuils, le seuil est revu sur les chiffres,
   par décision du propriétaire.
+
+### Seuils au niveau du modèle installé (2026-11-11)
+
+Remesuré sur `8333fd2` (les trois lots réunis), le modèle installé `ajuste-apres-5-49-b` ratait
+**cinq** seuils : les quatre barres ci-dessous, et `plan_reel` par son plafond de fausses
+questions (PL19, question du garde-fou, et PL22). Décision du propriétaire (2026-11-11) : le
+seuil des quatre est fixé au niveau du modèle installé moins une phrase, dans une constante
+`NEEDED` de chaque essai ;
+l'objectif proportionnel reste calculé et imprimé dans la ligne `SCORE` (`seuil N, objectif …`),
+sans faire échouer. Ces seuils sont à relever quand un modèle fait mieux.
+
+| Barre | Installé | Objectif proportionnel | Seuil |
+|---|---|---|---|
+| `echelle_utm_reel` | 34/44 | 7/8, soit 38/44 | **33/44** |
+| `terrain_reel` | 33/44 | 7/8, soit 38/44 | **32/44** |
+| `epic11_reel` | 42/49 | 27/28, soit 47/49 | **41/49**, F03 toujours exigée en plus |
+| `style_reel` | 31/42 | 9/10, soit 37/42 | **30/42** |
+
+`plan_reel` (38/48, plafond de fausses questions), `question_reel` (35/47) et `ecart_reel` sont
+inchangés. `plan_reel` ne tient que parce que son plafond ne compte plus qu'une question rendue
+sur une phrase qui attend un plan (le compteur « dont garde-fou » suit la même règle) : PL22
+attend un refus et sort du plafond, PL19 y reste, soit exactement le plafond (1/1), sans marge.
+`ecart_reel` n'a pas reçu de seuil proportionnel neuf : sa barre de 40 est inchangée.
+
+Ces niveaux ont été mesurés sur `8333fd2`, **avant** la correction des attendus de points
+(conversion par `data.transform_point`, ci-dessus) et la nouvelle SR06 : ils sont à remesurer
+sur le commit final, et la remesure sera faite. Les essais sont renommés pour ne pas mentir sur leur seuil :
+`echelle_utm_reel_answers_match_at_the_installed_level`,
+`terrain_reel_answers_match_at_the_installed_level`,
+`epic11_reel_answers_match_at_the_installed_level_and_the_grid_question_asked`,
+`style_reel_answers_match_at_the_installed_level_on_the_whole_bar` (les filtres `--test <fichier>`
+ne changent pas).
+
+- **Pourquoi.** Ces barres sont des alarmes de régression : un seuil que le modèle installé ne
+  tient pas sonnerait à chaque mesure, sans rien dire. La garde contre l'oubli est ailleurs : la
+  barre de non-oubli (ci-dessous) compare chaque candidat à son parent, barre par barre. Les
+  objectifs proportionnels restent ceux du prochain entraînement.
+- **SR06** (`style_reel/phrases.json`) était discutable : la phrase ne disait pas la méthode et
+  l'attendu l'omettait, alors que `method: jenks`, égal au défaut, est aussi juste. La phrase dit
+  désormais « en seuils naturels » et l'attendu porte `method: "jenks"`, comme SR02 :
+  une seule réponse défendable, sans toucher à `common::same_calls`. Mesuré avant ce
+  changement, le modèle installé a eu SR06 fausse (`method: jenks` écrit) ; le seuil de 30 suit
+  la même règle que les trois autres barres.
+- **Leçons de la remesure**, à porter au générateur avant le prochain entraînement : `page_size`
+  perdu quand l'export porte aussi une échelle ; refus des fonctions absentes du registre (les
+  refus neufs des barres élargies) ; options non par défaut écrites dans la phrase (méthode,
+  dégradé, nombre de classes) ; champ de vision cumulé (`terrain.viewshed_cumulative`) ; un
+  point en Lambert-93 donné à une commande `geo.*` ou à `coord.convert` passe d'abord par
+  `data.transform_point` vers 4326, la commande lisant ensuite `step:k.point`.
 
 ## Barre de non-oubli (ticket 5.53, livrable 2, 2026-11-11)
 

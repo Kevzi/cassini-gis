@@ -32,9 +32,11 @@
 //! (`common::invalid`) sur l'inventaire augmenté. Les 28 phrases de `SENTENCES` gardent leur
 //! comparaison (`comparable`, titre seulement non vide) ; les neuves celle des autres barres
 //! (`common::same_calls`). Un seul `SCORE`, sur le total de la barre (F03 compris, les quatre
-//! `FOREIGN_POINTS` toujours hors barre). Seuil (décision du coordinateur, 2026-11-11, D4) :
-//! 27/28 rapporté au total, arrondi vers le bas, soit 47/49 ; F03 garde en plus son exigence
-//! dure (sans question, l'essai échoue, quel que soit le total). Plus de règle par commande :
+//! `FOREIGN_POINTS` toujours hors barre). Seuil : décision du propriétaire du 2026-11-11, au niveau
+//! du modèle installé (`ajuste-apres-5-49-b`, 42/49) moins une phrase, soit 41/49 (`NEEDED`) ;
+//! l'objectif proportionnel (D4 du 2026-11-11 : 27/28 rapporté au total, arrondi vers le bas,
+//! 47/49) reste calculé et imprimé, sans faire échouer. F03 garde en plus son exigence dure
+//! (sans question, l'essai échoue, quel que soit le total). Plus de règle par commande :
 //! les lignes `COMMANDE …` restent imprimées sans seuil, avec un avertissement non bloquant pour
 //! une commande sans aucun plan juste. Le jeu d'entraînement ne voit aucune de ces
 //! phrases : `training/tests/recouvrement.rs` les garde.
@@ -456,7 +458,13 @@ fn answers(phrase: &Value, got: &Result<Plan, AgentError>) -> bool {
     }
 }
 
-/// Réponses attendues exigées : 27/28 du total de la barre, arrondi vers le bas (D4).
+/// Seuil exigé : décision du propriétaire du 2026-11-11, au niveau du modèle installé
+/// `ajuste-apres-5-49-b` (42/49) moins une phrase, F03 restant exigée en plus. À relever quand
+/// un modèle fait mieux.
+const NEEDED: usize = 41;
+
+/// Objectif proportionnel, imprimé sans faire échouer : 27/28 du total de la barre, arrondi
+/// vers le bas (D4).
 fn answers_needed(total: usize) -> usize {
     common::proportional(total, 27, 28)
 }
@@ -475,7 +483,7 @@ fn plans_per_command(bar: &[Value]) -> Vec<usize> {
 
 #[test]
 #[ignore = "charge le vrai modèle ; lancer avec CASSINI_TEST_MODEL et --ignored"]
-fn epic11_reel_at_least_27_of_28_rounded_down_and_the_grid_question_asked() {
+fn epic11_reel_answers_match_at_the_installed_level_and_the_grid_question_asked() {
     let Some((files, style)) = common::test_model() else {
         eprintln!("CASSINI_TEST_MODEL absent : essai ignore.");
         return;
@@ -576,15 +584,17 @@ fn epic11_reel_at_least_27_of_28_rounded_down_and_the_grid_question_asked() {
         }
     }
     let total = all.len();
-    let need = answers_needed(total);
+    let goal = answers_needed(total);
     eprintln!(
-        "SCORE {right}/{total} réponses attendues ; carroyage sans système : {} ; {guarded} question(s) du garde-fou ; points d'un autre système (hors barre) : {foreign}/{}",
+        "SCORE {right}/{total} réponses attendues (seuil {NEEDED}, objectif 27/28 : {goal}/{total}) ; carroyage sans système : {} ; {guarded} question(s) du garde-fou ; points d'un autre système (hors barre) : {foreign}/{}",
         if asked { "question" } else { "pas de question" },
         FOREIGN_POINTS.len()
     );
     let failures: Vec<String> = [
-        (right < need).then(|| {
-            format!("{right}/{total} : sous le seuil de 27/28 arrondi vers le bas ({need}/{total})")
+        (right < NEEDED).then(|| {
+            format!(
+                "{right}/{total} : sous le seuil fixé (modèle installé moins une phrase, 2026-11-11) ({NEEDED}/{total})"
+            )
         }),
         (!asked).then(|| "le carroyage sans système n'a pas rendu de question".to_string()),
     ]
@@ -753,7 +763,8 @@ fn every_expected_plan_is_left_unchanged_by_the_completion() {
 }
 
 #[test]
-fn the_threshold_is_27_of_28_rounded_down() {
+fn the_threshold_is_the_installed_level_and_the_goal_27_of_28_rounded_down() {
+    assert_eq!(NEEDED, 41);
     assert_eq!(answers_needed(28), 27);
     assert_eq!(answers_needed(29), 27);
     assert_eq!(bar().len(), 49);

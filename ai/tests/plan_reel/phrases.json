@@ -316,18 +316,32 @@
       "kind": "calls",
       "calls": [
         {
-          "command": "geo.distance_azimuth",
+          "command": "data.transform_point",
           "params": {
-            "from": {
+            "point": {
               "x": 656000,
               "y": 6847000,
               "epsg": 2154
             },
-            "to": {
+            "target_epsg": 4326
+          }
+        },
+        {
+          "command": "data.transform_point",
+          "params": {
+            "point": {
               "x": 657500,
               "y": 6848100,
               "epsg": 2154
-            }
+            },
+            "target_epsg": 4326
+          }
+        },
+        {
+          "command": "geo.distance_azimuth",
+          "params": {
+            "from": "step:1.point",
+            "to": "step:2.point"
           }
         }
       ]
@@ -340,13 +354,20 @@
       "kind": "calls",
       "calls": [
         {
-          "command": "coord.convert",
+          "command": "data.transform_point",
           "params": {
             "point": {
               "x": 656410,
               "y": 6847920,
               "epsg": 2154
             },
+            "target_epsg": 4326
+          }
+        },
+        {
+          "command": "coord.convert",
+          "params": {
+            "point": "step:1.point",
             "to": [
               "mgrs"
             ]

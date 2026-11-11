@@ -196,6 +196,133 @@ fn an_invalid_expected_answer_is_named() {
 }
 
 #[test]
+fn an_expected_point_in_lambert_93_for_a_geo_command_is_named() {
+    // `geo.*` et `coord.convert` refusent à l'exécution un point ni WGS84 ni UTM
+    // (`geo.unsupported_crs`) : l'attendu d'avant le 2026-11-11, les points Lambert-93 écrits
+    // tels quels, est nommé ; seule la forme convertie par `data.transform_point` passe.
+    let registry = Registry::standard();
+    let mut broken = phrases();
+    let p = broken.iter_mut().find(|p| p["id"] == "DA3").unwrap();
+    p["expected"]["calls"] = json!([{
+        "command": "geo.distance_azimuth",
+        "params": {
+            "from": {"x": 656100, "y": 6847400, "epsg": 2154},
+            "to": {"x": 656900, "y": 6848200, "epsg": 2154},
+            "north": "magnetic",
+            "date": "2026-03-01"
+        }
+    }]);
+    let q = broken.iter_mut().find(|p| p["id"] == "CC1").unwrap();
+    q["expected"]["calls"][0]["params"]["point"]["epsg"] = json!(2154);
+    let errors = invalid(&registry, &inventory(), &broken);
+    let named = |id: &str, field: &str| {
+        errors.iter().any(|e| {
+            e.starts_with(&format!("{id} : point en système refusé"))
+                && e.contains(&format!("({field} en EPSG:2154)"))
+        })
+    };
+    assert!(named("DA3", "from") && named("DA3", "to"), "{errors:?}");
+    assert!(named("CC1", "point"), "{errors:?}");
+}
+
+/// Les erreurs « point en système refusé » de `invalid` sur `phrases`.
+fn refused_points(phrases: &[Value]) -> Vec<String> {
+    invalid(&Registry::standard(), &inventory(), phrases)
+        .into_iter()
+        .filter(|e| e.contains("point en système refusé"))
+        .collect()
+}
+
+/// L'appel de `command` dans l'attendu de la phrase `id`.
+fn call_of<'a>(phrases: &'a mut [Value], id: &str, command: &str) -> &'a mut Value {
+    phrases.iter_mut().find(|p| p["id"] == id).unwrap()["expected"]["calls"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|c| c["command"] == command)
+        .unwrap()
+}
+
+#[test]
+fn every_point_form_refused_by_a_geo_command_is_named() {
+    // Les attendus corrigés ne lèvent rien.
+    let fixed = refused_points(&phrases());
+    assert!(fixed.is_empty(), "{fixed:?}");
+    let mut broken = phrases();
+    let lambert = json!({"x": 656300, "y": 6847900, "epsg": 2154});
+    call_of(&mut broken, "DP1", "geo.destination_point")["params"]["from"] = lambert.clone();
+    let bi1 = call_of(&mut broken, "BI1", "geo.bearing_intersection");
+    bi1["params"]["first"] = lambert.clone();
+    bi1["params"]["second"] = lambert;
+    // Un `epsg` écrit en flottant n'est pas un entier : refusé.
+    call_of(&mut broken, "BI2", "geo.bearing_intersection")["params"]["first"]["epsg"] =
+        json!(4326.0);
+    // Une référence à une conversion vers Lambert-93 est jugée sur sa cible.
+    call_of(&mut broken, "DA1", "data.transform_point")["params"]["target_epsg"] = json!(2154);
+    let errors = refused_points(&broken);
+    let named = |id: &str, field: &str, epsg: &str| {
+        errors.iter().any(|e| {
+            e.starts_with(&format!("{id} : point en système refusé"))
+                && e.contains(&format!("({field} en EPSG:{epsg})"))
+        })
+    };
+    assert!(named("DP1", "from", "2154"), "{errors:?}");
+    assert!(
+        named("BI1", "first", "2154") && named("BI1", "second", "2154"),
+        "{errors:?}"
+    );
+    // Un `epsg` non entier ne passe jamais en silence : `check_plan` le refuse déjà (schéma),
+    // avant `unsupported_points`, qui le refuserait aussi.
+    let all = invalid(&Registry::standard(), &inventory(), &broken);
+    assert!(
+        all.iter().any(|e| e.starts_with("BI2 : check_plan refuse")),
+        "{all:?}"
+    );
+    assert!(named("DA1", "from", "2154"), "{errors:?}");
+    assert!(!named("DA1", "to", "2154"), "{errors:?}");
+    assert_eq!(errors.len(), 4, "{errors:?}");
+}
+
+#[test]
+fn the_utm_bounds_of_the_geo_commands_are_exact() {
+    for (epsg, accepted) in [
+        (4326, true),
+        (32601, true),
+        (32660, true),
+        (32701, true),
+        (32760, true),
+        (32600, false),
+        (32661, false),
+        (32700, false),
+    ] {
+        let mut set = phrases();
+        call_of(&mut set, "CC1", "coord.convert")["params"]["point"]["epsg"] = json!(epsg);
+        let errors = refused_points(&set);
+        assert_eq!(errors.is_empty(), accepted, "EPSG:{epsg} : {errors:?}");
+        if !accepted {
+            assert!(
+                errors[0].contains(&format!("(point en EPSG:{epsg})")),
+                "{errors:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_points_checked_are_those_of_every_geo_command_and_coord_convert() {
+    let mut in_registry: BTreeSet<String> = common::registry_ids(&Registry::standard())
+        .into_iter()
+        .filter(|id| id.starts_with("geo."))
+        .collect();
+    in_registry.insert("coord.convert".to_string());
+    let listed: BTreeSet<String> = common::WGS84_OR_UTM_POINTS
+        .iter()
+        .map(|(command, _)| command.to_string())
+        .collect();
+    assert_eq!(listed, in_registry);
+}
+
+#[test]
 #[ignore = "charge le vrai modèle ; lancer avec CASSINI_TEST_MODEL et --ignored"]
 fn par_commande_reel_scores_every_offered_command() {
     let Some((files, style)) = common::test_model() else {

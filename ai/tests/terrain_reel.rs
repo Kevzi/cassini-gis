@@ -30,8 +30,10 @@
 //! libre mais non vide ; entier écrit en flottant ramené à l'entier. Un refus attendu compte
 //! juste contre un refus rendu ; une question est un échec. Un seul `SCORE`, sur le total.
 //!
-//! Seuil (ticket 5.41, rapporté au total par D4 du 2026-11-11) : 7/8 des réponses attendues,
-//! arrondi vers le bas, soit 38/44.
+//! Seuil : décision du propriétaire du 2026-11-11, au niveau du modèle installé
+//! (`ajuste-apres-5-49-b`, 33/44) moins une phrase, soit 32/44 (`NEEDED`). L'objectif
+//! proportionnel (ticket 5.41, D4 du 2026-11-11 : 7/8 arrondi vers le bas, 38/44) reste
+//! calculé et imprimé, sans faire échouer.
 
 mod common;
 
@@ -144,14 +146,18 @@ fn answers(phrase: &Value, got: &Result<Plan, AgentError>) -> bool {
     }
 }
 
-/// Réponses attendues exigées : 7/8 du total, arrondi vers le bas (D4).
+/// Seuil exigé : décision du propriétaire du 2026-11-11, au niveau du modèle installé
+/// `ajuste-apres-5-49-b` (33/44) moins une phrase. À relever quand un modèle fait mieux.
+const NEEDED: usize = 32;
+
+/// Objectif proportionnel, imprimé sans faire échouer : 7/8 du total, arrondi vers le bas (D4).
 fn answers_needed(total: usize) -> usize {
     common::proportional(total, 7, 8)
 }
 
 #[test]
 #[ignore = "charge le vrai modèle ; lancer avec CASSINI_TEST_MODEL et --ignored"]
-fn terrain_reel_at_least_7_of_8_of_the_answers_match() {
+fn terrain_reel_answers_match_at_the_installed_level() {
     let Some((files, style)) = common::test_model() else {
         eprintln!("CASSINI_TEST_MODEL absent : essai ignore.");
         return;
@@ -198,16 +204,20 @@ fn terrain_reel_at_least_7_of_8_of_the_answers_match() {
         }
         right += usize::from(ok);
     }
-    eprintln!("SCORE {right}/{total} réponses attendues");
-    let need = answers_needed(total);
+    let goal = answers_needed(total);
+    eprintln!(
+        "SCORE {right}/{total} réponses attendues (seuil {NEEDED}, objectif 7/8 : {goal}/{total})"
+    );
     assert!(
-        right >= need,
-        "{right}/{total} : sous le seuil de 7/8 arrondi vers le bas ({need}/{total})"
+        right >= NEEDED,
+        "{right}/{total} : sous le seuil fixé (modèle installé moins une phrase, 2026-11-11) ({NEEDED}/{total})"
     );
 }
 
 #[test]
-fn the_threshold_is_7_of_8_of_the_total_rounded_down() {
+fn the_threshold_is_the_installed_level_and_the_goal_7_of_8_rounded_down() {
+    assert_eq!(NEEDED, 32);
+    assert_eq!(all_phrases().len(), 44);
     assert_eq!(answers_needed(8), 7);
     assert_eq!(answers_needed(44), 38);
     assert_eq!(answers_needed(40), 35);

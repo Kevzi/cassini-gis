@@ -38,7 +38,9 @@
 //! par commande (titre libre, entiers écrits en flottant ramenés à l'entier). Le jeu
 //! d'entraînement ne voit aucune de ces phrases : `training/tests/recouvrement.rs` les garde.
 //!
-//! Une question rendue sur une phrase claire est un échec. Seuils (décision du propriétaire,
+//! Une question rendue sur une phrase claire est un échec ; seule une question sur une phrase
+//! qui attend un plan compte au plafond des fausses questions, une question sur un refus attendu
+//! restant un raté ordinaire (2026-11-11). Seuils (décision du propriétaire,
 //! 2026-11-11, D4), proportionnels aux décisions passées et arrondis vers le bas sur le total :
 //! au moins 80 % de plans conformes, arrondi vers le bas (20/25 hier, soit 38/48 aujourd'hui) ; au plus 2/25 fausses questions pour un
 //! GGUF seul au long prompt (concession du 2026-10-17 : 3/48), 1/25 pour un modèle au prompt
@@ -272,9 +274,12 @@ fn plan_reel_at_least_80_percent_of_the_plans_match() {
             assert_eq!(registry.check_plan(plan), Ok(()), "{id}");
         }
         right += usize::from(ok);
-        // Une phrase claire ne doit pas devenir une question (déjà un échec ci-dessus).
-        questions += usize::from(matches!(&got, Ok(Plan::Question { .. })));
-        guarded += usize::from(guard_answer);
+        // Une phrase claire ne doit pas devenir une question (déjà un échec ci-dessus). Seule
+        // une phrase qui attend un plan compte : une question sur un refus attendu est un raté
+        // ordinaire (2026-11-11).
+        let false_question = is_false_question(phrase, &got);
+        questions += usize::from(false_question);
+        guarded += usize::from(false_question && guard_answer);
     }
     eprintln!(
         "SCORE {right}/{total} plans conformes, {questions} fausses questions, dont {guarded} du garde-fou"
@@ -293,6 +298,32 @@ fn plan_reel_at_least_80_percent_of_the_plans_match() {
     .flatten()
     .collect();
     assert!(failures.is_empty(), "{}", failures.join(" ; "));
+}
+
+/// Une fausse question : une question rendue sur une phrase qui attend un plan. Sur une phrase
+/// qui attend un refus, la question est un raté ordinaire, hors du plafond (2026-11-11).
+fn is_false_question(phrase: &Value, got: &Result<Plan, AgentError>) -> bool {
+    phrase["expected"]["kind"] == "calls" && matches!(got, Ok(Plan::Question { .. }))
+}
+
+#[test]
+fn only_a_question_on_a_sentence_expecting_a_plan_is_a_false_question() {
+    let question: Result<Plan, AgentError> = Ok(Plan::Question {
+        question: "Quelle couche ?".into(),
+        source: QuestionSource::Model,
+    });
+    let all = all_phrases();
+    let plan = all.iter().find(|p| p["id"] == "PL01").unwrap();
+    let refusal = all.iter().find(|p| p["id"] == "S10").unwrap();
+    assert_eq!(plan["expected"]["kind"], "calls");
+    assert_eq!(refusal["expected"]["kind"], "refusal");
+    assert!(is_false_question(plan, &question));
+    assert!(!is_false_question(refusal, &question));
+    // Ni un plan ni un refus rendus ne sont des questions.
+    let refused: Result<Plan, AgentError> = Err(AgentError::Refused("absent".into()));
+    assert!(!is_false_question(plan, &refused));
+    // Un raté reste un raté : la question sur un refus attendu ne vaut pas le refus.
+    assert!(!answers(refusal, &question));
 }
 
 /// Plans conformes exigés : 80 % du total, arrondi vers le bas (D4).

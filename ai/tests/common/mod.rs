@@ -351,7 +351,9 @@ pub fn malformed_refusals(registry: &Registry, phrases: &[Value]) -> Vec<String>
 
 /// Les phrases dont l'attendu est invalide, avec la raison : sorte inconnue ; refus mal écrit,
 /// ou dont un mot de `missing` ou une option de `missing_params` est au registre ; plan qui échoue `check_plan`, le garde-fou des coordonnées ou
-/// que la complétion change ; couche, raster, champ ou fichier non chargé absents de l'inventaire.
+/// que la complétion change ; point littéral dans un système que sa commande refuse (WGS84 ou
+/// UTM seuls pour `coord.convert` et `geo.*`) ; couche, raster, champ ou fichier non chargé
+/// absents de l'inventaire.
 #[allow(dead_code)]
 pub fn invalid(registry: &Registry, inventory: &Value, phrases: &[Value]) -> Vec<String> {
     use cassini_core::point::guard_coordinates;
@@ -389,6 +391,12 @@ pub fn invalid(registry: &Registry, inventory: &Value, phrases: &[Value]) -> Vec
             ));
         }
         for call in calls {
+            for (field, epsg) in unsupported_points(call, calls) {
+                out.push(format!(
+                    "{id} : point en système refusé par {} ({field} en EPSG:{epsg})",
+                    call["command"].as_str().unwrap_or_default()
+                ));
+            }
             let (named_layers, named_rasters) = references(call);
             for layer in named_layers.iter().filter(|l| !l.starts_with("step:")) {
                 if !known.fields.contains_key(layer) {
@@ -443,6 +451,63 @@ pub fn invalid(registry: &Registry, inventory: &Value, phrases: &[Value]) -> Vec
         }
     }
     out
+}
+
+/// Les champs `Point` lus par `geo_point::read_point` dans le noyau, par commande : ces
+/// commandes ne connaissent que le WGS84 (EPSG:4326) et l'UTM sur WGS84 (EPSG:32601 à 32660,
+/// 32701 à 32760), et refusent tout autre système à l'exécution (`geo.unsupported_crs`).
+#[allow(dead_code)]
+pub const WGS84_OR_UTM_POINTS: [(&str, &[&str]); 4] = [
+    ("coord.convert", &["point"]),
+    ("geo.distance_azimuth", &["from", "to"]),
+    ("geo.destination_point", &["from"]),
+    ("geo.bearing_intersection", &["first", "second"]),
+];
+
+/// Les points d'un appel que sa commande refuserait à l'exécution, `(champ, epsg écrit)` : ni
+/// WGS84 ni UTM sur WGS84 (règle de `geo_point::read_point`, 2026-11-11). Un `epsg` qui n'est
+/// pas un entier (`2154.0`, `"2154"`) est refusé. Une référence `step:k.champ` vers un
+/// `data.transform_point` de `calls` (k compté depuis 1) est jugée sur son `target_epsg` ; vers
+/// une autre étape, elle passe.
+fn unsupported_points(call: &Value, calls: &[Value]) -> Vec<(String, String)> {
+    use cassini_core::geodesy::Utm;
+    let Some((_, fields)) = WGS84_OR_UTM_POINTS
+        .iter()
+        .find(|(command, _)| call["command"] == *command)
+    else {
+        return Vec::new();
+    };
+    let accepted = |epsg: &Value| {
+        epsg.as_u64().is_some_and(|e| {
+            e == 4326 || u32::try_from(e).is_ok_and(|e| Utm::zone_of_epsg(e).is_some())
+        })
+    };
+    fields
+        .iter()
+        .filter_map(|field| {
+            let point = &call["params"][*field];
+            let epsg = match point.as_str() {
+                Some(reference) => {
+                    let step: usize = reference
+                        .strip_prefix("step:")?
+                        .split('.')
+                        .next()?
+                        .parse()
+                        .ok()?;
+                    let source = calls.get(step.checked_sub(1)?)?;
+                    if source["command"] != "data.transform_point" {
+                        return None;
+                    }
+                    &source["params"]["target_epsg"]
+                }
+                None => &point["epsg"],
+            };
+            if epsg.is_null() && !point.is_string() {
+                return None;
+            }
+            (!accepted(epsg)).then(|| (field.to_string(), epsg.to_string()))
+        })
+        .collect()
 }
 
 /// Un nombre entier écrit en flottant (`2.0`) vaut l'entier (`2`) : serde_json les distingue.
