@@ -100,3 +100,59 @@ fn missing_or_wrong_arguments_give_a_non_zero_code() {
     }
     assert!(!std::path::Path::new("jamais.jsonl").exists());
 }
+
+#[test]
+fn the_families_option_draws_only_the_named_families_and_refuses_an_unknown_one() {
+    // 5.54 : le jeu ciblé d'une séance continue. Le résumé par famille, sur la sortie d'erreur,
+    // ne nomme que les familles demandées ; le fichier n'a que des exemples de celles-ci.
+    let dir = scratch("familles");
+    let out = dir.join("cible.jsonl");
+    let status = Command::new(BIN)
+        .args(["--seed", "3", "--count", "60", "--format", "chat"])
+        .args(["--familles", "tampon,refus", "--out"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&status.stderr);
+    assert!(status.status.success(), "{stderr}");
+    assert_eq!(std::fs::read_to_string(&out).unwrap().lines().count(), 60);
+    let table: Vec<&str> = stderr
+        .lines()
+        .skip_while(|l| !l.starts_with("famille "))
+        .skip(1)
+        .filter_map(|l| l.split_whitespace().next())
+        .collect();
+    assert_eq!(table, ["refus", "tampon"], "{stderr}");
+    let known: Vec<&str> = cassini_training::families::FAMILIES
+        .iter()
+        .map(|f| f.name)
+        .collect();
+    for (families, needle) in [
+        ("tampon,nexiste_pas", "nexiste_pas"),
+        (cassini_training::FOCUS_EXCLUDED[0], "refusée au jeu ciblé"),
+    ] {
+        let refused = dir.join("refuse.jsonl");
+        let status = Command::new(BIN)
+            .args(["--count", "10", "--familles", families, "--out"])
+            .arg(&refused)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&status.stderr);
+        assert_eq!(status.status.code(), Some(2), "{families} : {stderr}");
+        assert!(stderr.contains(needle), "{stderr}");
+        assert!(!refused.exists());
+    }
+    let listed = Command::new(BIN)
+        .arg("--familles-connues")
+        .output()
+        .unwrap();
+    assert!(listed.status.success());
+    assert_eq!(
+        String::from_utf8(listed.stdout)
+            .unwrap()
+            .lines()
+            .collect::<Vec<_>>(),
+        known
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

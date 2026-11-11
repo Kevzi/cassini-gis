@@ -1069,3 +1069,15 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-grammaire-des-parametres-tiree-des-schemas-du-registre-texte-plan.md`
   summary: Vérifier en CI que llama.cpp accepte la grammaire des paramètres (aujourd'hui seul l'essai ignoré `grammaire_reel` le fait).
   evidence: relecture verification-gap du 2026-11-11 ; il faut un petit vocabulaire GGUF au dépôt ou en cache de CI.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-ajustement-continu-l-entrainement-repart-de-l-adaptateur-du-plan.md`
+  summary: 5.54 lot 2 (after lot 1) — contenu du jeu de la première séance continue : familles neuves `page_size` avec échelle, courbure, N/E inversé, `data.transform_point` vers 4326 avant `geo.*`/`coord.convert` ; renforcement des refus de fonctions absentes, des options non par défaut et du champ de vision cumulé ; sans recopier de phrase de barre (`recouvrement.rs`).
+  evidence: décision D1 du propriétaire, 2026-11-11 ; plan de 5.54 au-dessus de 1 600 jetons, mécanique de reprise et contenu du jeu sont deux livrables, la vraie séance attend ce lot (D4).
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-ajustement-continu-l-entrainement-repart-de-l-adaptateur-du-plan.md`
+  summary: 5.54 lot 2 — reprendre les tournures des cinq familles de `FOCUS_EXCLUDED` (`training/src/lib.rs` : `filtre_numerique`, `pente`, `reprojection_couche`, `retrait_couche`, `carroyage_mgrs`) qui, tirées seules à la graine 3 jusqu'à 1 800 exemples, engendrent une phrase de barre à un nombre ou une commune près ; les retirer de la liste une fois réparées (le test `no_family_drawn_alone_at_the_focus_seed_copies_a_held_out_or_real_trial_sentence` la tient exacte).
+  evidence: relevé du nouveau contrôle de `training/tests/recouvrement.rs`, 2026-11-11 (identifiants : SEL2, PL15, RP2, LR1, PDF3) ; le jeu complet graine 1 ne les tire pas, la garde du jeu ciblé les a vues.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-ajustement-continu-l-entrainement-repart-de-l-adaptateur-du-plan.md`
+  summary: 5.54 — recréer le script Windows de recette (`RECETTE_PS1` de `~/cassini-entrainement/nuit-5-54.sh`, par défaut `%TEMP%\recette-5-54.ps1`, sur le modèle de `recette-5-56.ps1`, qui lançait `qgis-plugin/tests/probe_recette.py`) avant la première séance : ni `recette-5-49\recette.ps1` ni `recette-5-56.ps1` ne sont plus dans `%TEMP%`.
+  evidence: constat à la construction de 5.54 lot 1, 2026-11-11 ; le script de nuit refuse de partir sans lui (garde `preparatifs`).

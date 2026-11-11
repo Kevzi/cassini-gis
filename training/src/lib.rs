@@ -8,6 +8,7 @@
 //! enregistrements sont structurés ; leur mise en forme en prompt court (tâche 2) vit dans
 //! `prompt`, seul endroit qui décide du texte vu par le modèle.
 
+pub mod barres;
 pub mod families;
 pub mod inventories;
 pub mod prompt;
@@ -19,7 +20,7 @@ use cassini_core::plan::Plan;
 use cassini_core::registry::Registry;
 use serde_json::json;
 
-use families::{Example, Retry, FAMILIES};
+use families::{Example, Family, Retry, FAMILIES};
 use rng::Rng;
 
 /// Graine par défaut : celle de la commande documentée et du test de recouvrement (le jeu
@@ -275,20 +276,125 @@ fn validate_retry(registry: &Registry, expected: &Plan, retry: &Retry) -> Result
 /// suite, à l'octet près. S'arrête plus tôt (et le résumé le montre) si les familles ne
 /// rendent plus d'exemples neufs.
 pub fn generate(seed: u64, count: usize) -> (Vec<Example>, Summary) {
+    let all: Vec<&'static Family> = FAMILIES.iter().collect();
+    generate_from(seed, count, &all)
+}
+
+/// Graine du jeu ciblé d'une séance d'ajustement continu (5.54) : autre que celle de
+/// l'entraînement (1) et de la validation (2). `training/tests/recouvrement.rs` garde chaque
+/// famille tirée seule à cette graine.
+pub const FOCUS_SEED: u64 = 3;
+/// Exemples ciblés d'une séance continue par défaut : 3 000 exemples, dont 1 200 de rappel
+/// (décision D2 du propriétaire, 2026-11-11).
+pub const FOCUS_COUNT: usize = 1800;
+/// Familles qui, tirées seules à `FOCUS_SEED` jusqu'à `FOCUS_COUNT` exemples, engendrent une
+/// phrase d'une barre à un nombre ou une commune près (relevé de
+/// `training/tests/recouvrement.rs`, 2026-11-11) : le jeu complet ne la tire pas, un jeu ciblé
+/// le pourrait. Refusées au jeu ciblé tant que leurs tournures ne sont pas reprises (5.54,
+/// lot 2) ; le test tient cette liste exacte, dans les deux sens.
+pub const FOCUS_EXCLUDED: &[&str] = &[
+    "filtre_numerique",
+    "pente",
+    "reprojection_couche",
+    "retrait_couche",
+    "carroyage_mgrs",
+];
+
+/// Les familles nommées, dans l'ordre fixe de `FAMILIES` (le tirage ne dépend pas de l'ordre
+/// de la liste donnée). Un nom inconnu, un nom en double ou une liste vide sont refusés, avec
+/// la liste des noms connus.
+pub fn select_families(names: &[&str]) -> Result<Vec<&'static Family>, String> {
+    let known = || {
+        FAMILIES
+            .iter()
+            .map(|f| f.name)
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    if names.is_empty() {
+        return Err(format!(
+            "aucune famille nommée ; familles connues : {}",
+            known()
+        ));
+    }
+    let mut asked = HashSet::new();
+    for name in names {
+        if !FAMILIES.iter().any(|f| f.name == *name) {
+            return Err(format!(
+                "famille inconnue : {name:?} ; familles connues : {}",
+                known()
+            ));
+        }
+        if !asked.insert(*name) {
+            return Err(format!("famille nommée deux fois : {name:?}"));
+        }
+    }
+    Ok(select_unchecked(&asked))
+}
+
+/// Les familles du jeu ciblé, refusées si l'une d'elles est dans `FOCUS_EXCLUDED`.
+fn check_focus(families: Vec<&'static Family>) -> Result<Vec<&'static Family>, String> {
+    let excluded: Vec<&str> = families
+        .iter()
+        .map(|f| f.name)
+        .filter(|n| FOCUS_EXCLUDED.contains(n))
+        .collect();
+    if excluded.is_empty() {
+        Ok(families)
+    } else {
+        Err(format!(
+            "famille refusée au jeu ciblé : {} (tirée seule, elle engendre une phrase d'une \
+             barre ; voir FOCUS_EXCLUDED)",
+            excluded.join(", ")
+        ))
+    }
+}
+
+fn select_unchecked(asked: &HashSet<&str>) -> Vec<&'static Family> {
+    FAMILIES.iter().filter(|f| asked.contains(f.name)).collect()
+}
+
+/// Comme `generate`, sur les seules familles nommées (jeu ciblé d'une séance continue, 5.54) :
+/// même tirage pondéré, restreint à leurs poids. Une famille de `FOCUS_EXCLUDED` est refusée.
+pub fn generate_families(
+    seed: u64,
+    count: usize,
+    names: &[&str],
+) -> Result<(Vec<Example>, Summary), String> {
+    Ok(generate_from(
+        seed,
+        count,
+        &check_focus(select_families(names)?)?,
+    ))
+}
+
+/// Comme `generate_families`, sans le refus de `FOCUS_EXCLUDED` : pour le relevé de
+/// `training/tests/recouvrement.rs` et les tests, jamais pour un jeu d'entraînement.
+pub fn generate_families_unchecked(
+    seed: u64,
+    count: usize,
+    names: &[&str],
+) -> Result<(Vec<Example>, Summary), String> {
+    Ok(generate_from(seed, count, &select_families(names)?))
+}
+
+/// Le tirage pondéré sur `families`, dans leur ordre ; `generate` le fait sur toutes, à
+/// l'octet près comme avant 5.54.
+fn generate_from(seed: u64, count: usize, families: &[&'static Family]) -> (Vec<Example>, Summary) {
     let registry = Registry::standard();
     let mut rng = Rng::new(seed);
     let mut summary = Summary::default();
-    for family in FAMILIES {
+    for family in families {
         summary.families.insert(family.name, Tally::default());
     }
-    let total: u64 = FAMILIES.iter().map(|f| f.weight).sum();
+    let total: u64 = families.iter().map(|f| f.weight).sum();
     let mut seen = HashSet::new();
     let mut out = Vec::with_capacity(count);
     let mut attempts = 0usize;
     while out.len() < count && attempts < count.saturating_mul(50).max(1000) {
         attempts += 1;
         let mut roll = rng.below(total as usize) as u64;
-        let family = FAMILIES
+        let family = families
             .iter()
             .find(|f| {
                 if roll < f.weight {
@@ -1294,6 +1400,86 @@ mod tests {
             let n = e.expected["calls"].as_array().map_or(0, Vec::len);
             assert!(n <= 6, "{n} étapes : {}", e.request);
         }
+    }
+
+    #[test]
+    fn a_focused_set_draws_only_the_named_families_and_the_full_set_is_unchanged() {
+        // 5.54 : le jeu ciblé vient du même générateur, restreint aux familles nommées.
+        let names = ["tampon", "refus"];
+        let (examples, summary) = generate_families(FOCUS_SEED, 200, &names).unwrap();
+        assert_eq!(examples.len(), 200, "{:?}", summary.families);
+        assert!(examples.iter().all(|e| names.contains(&e.family)));
+        assert!(names
+            .iter()
+            .all(|n| examples.iter().any(|e| e.family == *n)));
+        assert_eq!(
+            summary.families.keys().copied().collect::<Vec<_>>(),
+            vec!["refus", "tampon"]
+        );
+        // Même graine, même suite ; l'ordre de la liste donnée ne compte pas.
+        let (again, _) = generate_families(FOCUS_SEED, 200, &["refus", "tampon"]).unwrap();
+        assert_eq!(to_jsonl(&examples), to_jsonl(&again));
+        // Toutes les familles nommées : le jeu complet, à l'octet près.
+        let all: Vec<&str> = FAMILIES.iter().map(|f| f.name).collect();
+        let (full, _) = generate_families_unchecked(DEFAULT_SEED, 500, &all).unwrap();
+        assert_eq!(to_jsonl(&full), to_jsonl(&generate(DEFAULT_SEED, 500).0));
+    }
+
+    #[test]
+    fn the_recall_set_is_a_prefix_of_the_full_set() {
+        // 5.54 : le rappel d'une séance continue est le début du jeu graine 1.
+        let (full, _) = generate(DEFAULT_SEED, DEFAULT_COUNT);
+        let (recall, _) = generate(DEFAULT_SEED, 1200);
+        assert_eq!(to_jsonl(&recall), to_jsonl(&full[..1200]));
+    }
+
+    #[test]
+    fn the_pipeline_reads_the_family_names_and_constants_as_written_here() {
+        // `pipeline.py` lit, avant le GPU, les noms (`Family {` puis `name: "…"` dans
+        // `families.rs`), `FOCUS_EXCLUDED`, `FOCUS_SEED`, `FOCUS_COUNT` et `DEFAULT_COUNT` dans
+        // le texte des sources : la forme qu'il cherche doit rendre exactement ces valeurs.
+        let source = include_str!("families.rs");
+        let read: Vec<&str> = source
+            .split("Family {")
+            .skip(1)
+            .filter_map(|block| {
+                // Les lignes de commentaire entre `Family {` et `name:` sont sautées.
+                let line = block
+                    .lines()
+                    .map(str::trim)
+                    .find(|l| !l.is_empty() && !l.starts_with("//"))?;
+                line.strip_prefix("name: \"")?.split('"').next()
+            })
+            .collect();
+        let names: Vec<&str> = FAMILIES.iter().map(|f| f.name).collect();
+        assert_eq!(read, names);
+        let lib = include_str!("lib.rs");
+        for line in [
+            format!("pub const FOCUS_SEED: u64 = {FOCUS_SEED};"),
+            format!("pub const FOCUS_COUNT: usize = {FOCUS_COUNT};"),
+            format!("pub const DEFAULT_COUNT: usize = {DEFAULT_COUNT};"),
+            format!("pub const FOCUS_EXCLUDED: &[&str] = &{}", "["),
+        ] {
+            assert_eq!(lib.matches(line.as_str()).count(), 1, "{line}");
+        }
+    }
+
+    #[test]
+    fn an_unknown_twice_named_or_empty_family_list_is_refused_with_the_known_names() {
+        let err = generate_families(FOCUS_SEED, 10, &["tampon", "nexiste_pas"]).unwrap_err();
+        assert!(err.contains("nexiste_pas"), "{err}");
+        assert!(
+            FAMILIES.iter().all(|f| err.contains(f.name)),
+            "liste des noms connus : {err}"
+        );
+        let err = generate_families(FOCUS_SEED, 10, &["tampon", "tampon"]).unwrap_err();
+        assert!(err.contains("deux fois"), "{err}");
+        assert!(generate_families(FOCUS_SEED, 10, &[]).is_err());
+        assert!(generate_families(FOCUS_SEED, 10, &[""]).is_err());
+        // Une famille qui, tirée seule, engendre une phrase de barre est refusée au jeu ciblé.
+        let err = generate_families(FOCUS_SEED, 10, &["tampon", FOCUS_EXCLUDED[0]]).unwrap_err();
+        assert!(err.contains(FOCUS_EXCLUDED[0]), "{err}");
+        assert!(generate_families_unchecked(FOCUS_SEED, 10, &[FOCUS_EXCLUDED[0]]).is_ok());
     }
 
     #[test]

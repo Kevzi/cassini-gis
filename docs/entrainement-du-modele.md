@@ -1192,7 +1192,12 @@ La commande, sans intervention :
    l'adaptateur GGUF (`--lora`), et le modèle fusionné. Les deux sorties doivent se lire
    comme un plan JSON, sinon la commande s'arrête ;
 10. écrit `rapport.json`, avec le commit du dépôt, l'état de l'arbre de travail (modifié ou
-   non, chemins modifiés) et l'empreinte de `uv.lock`.
+   non, chemins modifiés) et l'empreinte de `uv.lock`. Depuis 5.54, le rapport porte aussi la
+   **lignée** (`lignee`, un maillon pour un entraînement de zéro), que lit l'ajustement continu.
+
+Pour corriger quelques familles sans tout ré-entraîner, `--depuis <dossier> --familles a,b`
+repart de l'adaptateur d'un entraînement précédent au lieu de la base nue : voir « Ajustement
+continu » plus bas (règle des trois maillons, juge `non_oubli.py`).
 
 Dépendances épinglées par `training/entrainement/uv.lock` (Python 3.12) : torch (BSD-3),
 transformers, peft, accelerate, huggingface-hub (Apache-2.0), bitsandbytes (MIT),
@@ -2701,6 +2706,92 @@ près, il n'aurait pas été installé sur ces seuls relevés. La validation, ti
 ne compte pas. La recette d'Annecy n'est pas comparable (5 phrases pour le parent, 20 pour le
 candidat) ; seul son rejeu l'est, et il tient. L'ancienne recette du parent, à « phrase 1 », est
 nommée d'après son fichier, comme l'avertissement le dit.
+
+## Ajustement continu (ticket 5.54, lot 1, 2026-11-11)
+
+Un entraînement de zéro dure plusieurs heures sur 8 600 exemples, alors que le modèle installé
+ne rate que quelques familles. La même commande peut **repartir de l'adaptateur LoRA** d'un
+entraînement précédent (le **parent**, un dossier de sortie de `pipeline.py`, jamais modifié) et
+ne voir que les familles à corriger, mêlées d'un rappel de tout le reste :
+
+```
+uv run --project training/entrainement python training/entrainement/pipeline.py \
+  --sortie ~/cassini-entrainement/ajuste-continu-5-54-1 \
+  --depuis ~/cassini-entrainement/ajuste-apres-5-49-b --familles export_pdf_format,refus
+```
+
+- **Jeu de la séance** : 3 000 exemples par défaut (`--exemples`, décision D2), dont une part de
+  **rappel** d'au moins 0,4 (`--part-rappel`, 0,4 par défaut et au plus bas, D3), arrondie
+  au-dessus : 1 200 exemples, les premiers du jeu graine 1 (toutes familles ; le générateur est
+  déterministe, ses premiers exemples ne dépendent pas du compte demandé), tirés avec une marge
+  de 60 puis coupés au compte une fois les trop longs écartés, puis 1 800 exemples **ciblés**,
+  graine 3, tirés par `cassini-training --familles a,b` parmi les seules familles nommées (même
+  tirage pondéré, restreint à leurs poids). Le jeu ciblé ne dépasse pas `FOCUS_COUNT` (1 800), ni
+  le rappel tiré `DEFAULT_COUNT` (8 600) : refus avant le GPU. Un jeu engendré plus court que
+  demandé arrête la chaîne. Le générateur refuse aussi d'écrire un jeu ciblé qui reprend une
+  phrase de barre (code 3, identifiant nommé : module `training/src/barres.rs`, la même
+  normalisation que `recouvrement.rs`). Une demande ciblée déjà vue (même prompt dans le rappel
+  ou plus haut dans le jeu ciblé, quelle que soit la réponse) est retirée et comptée ; la part du
+  rappel se compte sur le jeu final, et la chaîne s'arrête si elle tombe sous 0,4. Le rapport
+  l'écrit (`donnees.seance`).
+- **Validation** : celle d'un entraînement de zéro, graine 2, 300 exemples, moins les prompts vus
+  à l'entraînement ; le score reste comparable au parent.
+- **Entraînement** : taux d'apprentissage 5e-5 (au lieu de 2e-4), une seule graine
+  (`--graine-torch`), mêmes rang, alpha, modules et chemin d'Unsloth. L'adaptateur est posé par
+  `get_peft_model` comme pour un entraînement de zéro, puis reçoit les poids du parent
+  (`set_peft_model_state_dict`) ; une clé inattendue ou un paramètre LoRA resté à son
+  initialisation arrête la chaîne. L'empreinte du fichier est revérifiée juste avant sa lecture,
+  et chaque matrice `lora_B` chargée doit égaler celle du parent. La suite (GGUF, fusion, score,
+  essai) ne change pas.
+- **Lignée** (`lignee` du rapport) : une liste de maillons ; le maillon 1 est un entraînement de
+  zéro (`depart: "base"`). Chaque maillon porte le commit de Cassini, la graine torch, l'empreinte
+  SHA-256 de l'`adapter_model.safetensors` produit et, à partir du 2e, l'empreinte de
+  l'adaptateur de départ (`depart`), les familles et la part de rappel. Un parent d'avant 5.54
+  (sans `lignee`, comme `ajuste-apres-5-49-b`) est le maillon 1, reconstruit depuis son rapport
+  (`reconstruit: true`). Le rapport porte aussi `depart` et `depuis` (le dossier du parent).
+
+**Gardes**, toutes avant le GPU et avant de toucher au dossier de sortie (code 1, message clair) :
+parent incomplet ou illisible (le fichier est nommé), essai court (`pas_max`) ou entraînement
+sans score de validation ; lignée mal formée (maillon 1 parti de la base, chaque suivant de
+l'adaptateur du précédent, empreintes de 64 chiffres hexadécimaux) ; autre base ou autre révision (rapport, ou
+`base_model_name_or_path` de `adapter_config.json`, où Hugging Face écrit la révision) ; autres
+modules, rang ou alpha (rapport et `adapter_config.json`), autres `lora_dropout`, `bias`,
+`use_dora`, `use_rslora` ou `modules_to_save` ; adaptateur de domaine ; poids
+substitués (l'empreinte de l'`adapter_model.safetensors` diffère du dernier maillon du rapport) :
+« chaîne coupée ». Famille inconnue ou nommée deux fois (refusée avec la liste des noms connus ;
+le générateur la refuse aussi, en code 2) ; `--part-rappel` sous 0,4 ; `--familles` ou
+`--part-rappel` sans `--depuis` ; `--depuis` avec `--exemples-externes` (l'adaptateur de domaine
+reste hors de la chaîne) ; `--reprendre` avec un autre parent, d'autres familles (l'ordre ne
+compte pas), une autre part de rappel ou un autre nombre d'exemples que l'entraînement commencé ;
+en reprise, le maillon garde le commit enregistré.
+
+**Règle des trois maillons.** Une chaîne compte au plus trois maillons : l'entraînement de zéro
+et deux séances. Un parent qui en a déjà trois est refusé : **recalage**, c'est-à-dire un
+entraînement de zéro sur le jeu complet (8 600 exemples), qui intègre les familles corrigées et
+redevient le maillon 1. Chaque séance dérive un peu ; le recalage borne la dérive.
+
+**Le juge** de chaque maillon est la barre de non-oubli (plus haut) : `non_oubli.py`, contre les
+relevés de référence du modèle installé (`~/cassini-entrainement/reference-non-oubli/` : essais
+GPU, recettes d'Annecy et du gros projet). Le script de nuit
+`~/cassini-entrainement/nuit-5-54.sh <familles>` (hors dépôt) enchaîne les gardes du GPU, une
+séance depuis `ajuste-apres-5-49-b` (graine 1, 3 000 exemples, rappel 0,4), la copie dans
+`cassini-modeles/ajuste-continu-5-54-1` (non installé), les essais GPU, la recette d'Annecy, puis
+`non_oubli.py`, et écrit le verdict dans `nuit-5-54.etat`. Il n'installe rien.
+
+**Familles refusées au jeu ciblé** (`FOCUS_EXCLUDED`, `training/src/lib.rs`). Le jeu complet de la
+graine 1 ne copie aucune phrase de barre (`training/tests/recouvrement.rs`), mais une famille tirée
+seule bien plus souvent qu'au jeu complet parcourt davantage ses tournures. Le test tire donc
+chaque famille seule, à la graine 3, jusqu'à 1 800 exemples, et la soumet aux mêmes contrôles. Le
+premier relevé (2026-11-11) en trouve cinq qui engendrent une phrase de barre à un nombre ou une
+commune près : `filtre_numerique`, `pente`, `reprojection_couche`, `retrait_couche`,
+`carroyage_mgrs`. Le générateur (et la chaîne, avant le GPU) les refuse au jeu ciblé tant que
+leurs tournures ne sont pas reprises (lot 2) ; le test tient la liste exacte, dans les deux sens.
+
+Lot 1 (ce ticket) : la mécanique et le script, écrits, non lancés. Le contenu du jeu de la
+première séance (familles neuves ou renforcées) est le lot 2 ; la première vraie séance l'attend
+(D4). L'essai court `--depuis … --familles … --pas-max 2`, qui vérifie sur le GPU que le GGUF
+fusionné se charge dans le noyau et que le rapport porte deux maillons, attend l'accord du
+propriétaire.
 
 ## Formulations de terrain (ticket 5.53, livrable 4, 2026-11-11)
 
