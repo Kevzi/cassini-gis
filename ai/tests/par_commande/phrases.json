@@ -1,0 +1,2092 @@
+[
+  {
+    "id": "BUF1",
+    "command": "analysis.buffer",
+    "phrase": "Trace une bande de 25 m de part et d'autre des routes.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.buffer",
+          "params": {
+            "layer_id": "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67",
+            "distance": {
+              "value": 25,
+              "unit": "m"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "BUF2",
+    "command": "analysis.buffer",
+    "phrase": "Entoure chaque gare d'un rayon de 800 mètres, en une seule zone fusionnée.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.buffer",
+          "params": {
+            "layer_id": "gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1",
+            "distance": {
+              "value": 800,
+              "unit": "m"
+            },
+            "dissolve": true
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "BUF3",
+    "command": "analysis.buffer",
+    "phrase": "Sélectionne les routes nationales, puis crée une zone de 2 km autour.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67",
+            "field": "classe",
+            "operator": "eq",
+            "value": "nationale"
+          }
+        },
+        {
+          "command": "analysis.buffer",
+          "params": {
+            "layer_id": "step:1.layer_id",
+            "distance": {
+              "value": 2,
+              "unit": "km"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "INT1",
+    "command": "analysis.intersect",
+    "phrase": "Quelles parcelles touchent la zone agricole du PLU ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "plu_zonage_a81d5c06_2e9f_4a37_b6c4_5f13e07d92a8",
+            "field": "typezone",
+            "operator": "eq",
+            "value": "A"
+          }
+        },
+        {
+          "command": "analysis.intersect",
+          "params": {
+            "layer_id": "parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3",
+            "overlay_layer_id": "step:1.layer_id"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "INT2",
+    "command": "analysis.intersect",
+    "phrase": "Croise les bâtiments avec les communes.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.intersect",
+          "params": {
+            "layer_id": "batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649",
+            "overlay_layer_id": "communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "INT3",
+    "command": "analysis.intersect",
+    "phrase": "Garde uniquement les parcelles situées à moins de 300 m d'une gare.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.buffer",
+          "params": {
+            "layer_id": "gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1",
+            "distance": {
+              "value": 300,
+              "unit": "m"
+            }
+          }
+        },
+        {
+          "command": "analysis.intersect",
+          "params": {
+            "layer_id": "parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3",
+            "overlay_layer_id": "step:1.layer_id"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "ISO1",
+    "command": "analysis.isochrone",
+    "phrase": "Jusqu'où peut-on aller en voiture en 5 minutes depuis le point 656 800 / 6 847 500 (Lambert-93), par les routes ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.isochrone",
+          "params": {
+            "layer_id": "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67",
+            "origin": {
+              "x": 656800,
+              "y": 6847500,
+              "epsg": 2154
+            },
+            "mode": "car",
+            "duration": {
+              "value": 5,
+              "unit": "min"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "ISO2",
+    "command": "analysis.isochrone",
+    "phrase": "Zone accessible à pied en 15 minutes à partir du point 657 050 / 6 848 150 (Lambert-93) sur le réseau routier.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.isochrone",
+          "params": {
+            "layer_id": "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67",
+            "origin": {
+              "x": 657050,
+              "y": 6848150,
+              "epsg": 2154
+            },
+            "mode": "walk",
+            "duration": {
+              "value": 15,
+              "unit": "min"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "ISO3",
+    "command": "analysis.isochrone",
+    "phrase": "Fais une isochrone à pied autour du point 656 600 / 6 847 800 (Lambert-93).",
+    "expected": {
+      "kind": "question"
+    }
+  },
+  {
+    "id": "SEL1",
+    "command": "analysis.select_by_attribute",
+    "phrase": "Isole les bâtiments à usage industriel.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649",
+            "field": "usage",
+            "operator": "eq",
+            "value": "industriel"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "SEL2",
+    "command": "analysis.select_by_attribute",
+    "phrase": "Montre-moi les parcelles de plus de 2 000 m².",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3",
+            "field": "surface_m2",
+            "operator": "gt",
+            "value": "2000"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "SEL3",
+    "command": "analysis.select_by_attribute",
+    "phrase": "Quelles communes comptent moins de 5 000 habitants ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946",
+            "field": "population",
+            "operator": "lt",
+            "value": "5000"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "ZON1",
+    "command": "analysis.zonal_statistics",
+    "phrase": "Combien de gares y a-t-il dans chaque commune ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.zonal_statistics",
+          "params": {
+            "layer_id": "communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946",
+            "points_layer_id": "gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "ZON2",
+    "command": "analysis.zonal_statistics",
+    "phrase": "Compte les gares par zone du PLU.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.zonal_statistics",
+          "params": {
+            "layer_id": "plu_zonage_a81d5c06_2e9f_4a37_b6c4_5f13e07d92a8",
+            "points_layer_id": "gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "ZON3",
+    "command": "analysis.zonal_statistics",
+    "phrase": "Nombre de gares par commune, avec le nom de chaque commune.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.zonal_statistics",
+          "params": {
+            "layer_id": "communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946",
+            "points_layer_id": "gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1",
+            "label_field": "nom"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "CC1",
+    "command": "coord.convert",
+    "phrase": "Convertis le point 48,7412 N, 2,4196 E (WGS84) en coordonnées UTM.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "coord.convert",
+          "params": {
+            "point": {
+              "x": 2.4196,
+              "y": 48.7412,
+              "epsg": 4326
+            },
+            "to": [
+              "utm"
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "CC2",
+    "command": "coord.convert",
+    "phrase": "Traduis la référence MGRS 31UDQ 4930 1240 en UTM.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "coord.convert",
+          "params": {
+            "mgrs": "31UDQ49301240",
+            "to": [
+              "utm"
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "CC3",
+    "command": "coord.convert",
+    "phrase": "Donne la position du point 453 900 / 5 399 600 (UTM 31N) en MGRS et en latitude-longitude.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "coord.convert",
+          "params": {
+            "point": {
+              "x": 453900,
+              "y": 5399600,
+              "epsg": 32631
+            },
+            "to": [
+              "mgrs",
+              "wgs84"
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "DC1",
+    "command": "data.convert",
+    "phrase": "Enregistre la couche des gares au format GeoJSON.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "data.convert",
+          "params": {
+            "layer_id": "gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1",
+            "format": "geojson"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "DC2",
+    "command": "data.convert",
+    "phrase": "Exporte les communes en Shapefile.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "data.convert",
+          "params": {
+            "layer_id": "communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946",
+            "format": "shp"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "DC3",
+    "command": "data.convert",
+    "phrase": "Passe le zonage du PLU en GeoPackage.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "data.convert",
+          "params": {
+            "layer_id": "plu_zonage_a81d5c06_2e9f_4a37_b6c4_5f13e07d92a8",
+            "format": "gpkg"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "DR1",
+    "command": "data.convert_raster",
+    "phrase": "Transforme le relevé ASCII du terrain en GeoTIFF.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "data.convert_raster",
+          "params": {
+            "raster": "donnees/releve_terrain_2019.asc"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "DR2",
+    "command": "data.convert_raster",
+    "phrase": "Convertis le fichier .asc du relevé en GeoTIFF en lui donnant le système Lambert-93.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "data.convert_raster",
+          "params": {
+            "raster": "donnees/releve_terrain_2019.asc",
+            "assign_epsg": 2154
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "DR3",
+    "command": "data.convert_raster",
+    "phrase": "Mets le relevé ASCII en GeoTIFF en Lambert-93, puis calcule sa pente en degrés.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "data.convert_raster",
+          "params": {
+            "raster": "donnees/releve_terrain_2019.asc",
+            "assign_epsg": 2154
+          }
+        },
+        {
+          "command": "terrain.slope",
+          "params": {
+            "dem": "step:1",
+            "unit": "degrees"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "RP1",
+    "command": "data.reproject",
+    "phrase": "Reprojette les communes en WGS84.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "data.reproject",
+          "params": {
+            "layer_id": "communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946",
+            "target_epsg": 4326
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "RP2",
+    "command": "data.reproject",
+    "phrase": "Passe la couche des routes en UTM 31N.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "data.reproject",
+          "params": {
+            "layer_id": "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67",
+            "target_epsg": 32631
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "RP3",
+    "command": "data.reproject",
+    "phrase": "Change le système de coordonnées des bâtiments.",
+    "expected": {
+      "kind": "question"
+    }
+  },
+  {
+    "id": "TP1",
+    "command": "data.transform_point",
+    "phrase": "Exprime le point 2,4310 E, 48,7268 N (WGS84) en Lambert-93.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "data.transform_point",
+          "params": {
+            "point": {
+              "x": 2.431,
+              "y": 48.7268,
+              "epsg": 4326
+            },
+            "target_epsg": 2154
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TP2",
+    "command": "data.transform_point",
+    "phrase": "Le point 657 480 / 6 846 950 en Lambert-93, ça donne quoi en WGS84 ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "data.transform_point",
+          "params": {
+            "point": {
+              "x": 657480,
+              "y": 6846950,
+              "epsg": 2154
+            },
+            "target_epsg": 4326
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TP3",
+    "command": "data.transform_point",
+    "phrase": "Quelles coordonnées Lambert-93 pour le point 452 700 / 5 398 900 (UTM 31N) ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "data.transform_point",
+          "params": {
+            "point": {
+              "x": 452700,
+              "y": 5398900,
+              "epsg": 32631
+            },
+            "target_epsg": 2154
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "BI1",
+    "command": "geo.bearing_intersection",
+    "phrase": "Depuis le point 655 900 / 6 847 300 (Lambert-93) je vois un clocher à l'azimut 40°, et depuis le point 657 200 / 6 847 150 (Lambert-93) à l'azimut 310°. Où est-il ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "geo.bearing_intersection",
+          "params": {
+            "first": {
+              "x": 655900,
+              "y": 6847300,
+              "epsg": 2154
+            },
+            "first_azimuth": {
+              "value": 40,
+              "unit": "deg"
+            },
+            "second": {
+              "x": 657200,
+              "y": 6847150,
+              "epsg": 2154
+            },
+            "second_azimuth": {
+              "value": 310,
+              "unit": "deg"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "BI2",
+    "command": "geo.bearing_intersection",
+    "phrase": "Recoupe deux visées : 75 grades depuis 48,7290 N, 2,4020 E (WGS84) et 355 grades depuis 48,7310 N, 2,4380 E (WGS84).",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "geo.bearing_intersection",
+          "params": {
+            "first": {
+              "x": 2.402,
+              "y": 48.729,
+              "epsg": 4326
+            },
+            "first_azimuth": {
+              "value": 75,
+              "unit": "gon"
+            },
+            "second": {
+              "x": 2.438,
+              "y": 48.731,
+              "epsg": 4326
+            },
+            "second_azimuth": {
+              "value": 355,
+              "unit": "gon"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "BI3",
+    "command": "geo.bearing_intersection",
+    "phrase": "Intersection des relèvements 20° depuis le point (453 100 ; 5 397 600) en UTM 31N et 290° depuis le point (455 600 ; 5 398 200) en UTM 31N.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "geo.bearing_intersection",
+          "params": {
+            "first": {
+              "x": 453100,
+              "y": 5397600,
+              "epsg": 32631
+            },
+            "first_azimuth": {
+              "value": 20,
+              "unit": "deg"
+            },
+            "second": {
+              "x": 455600,
+              "y": 5398200,
+              "epsg": 32631
+            },
+            "second_azimuth": {
+              "value": 290,
+              "unit": "deg"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "DP1",
+    "command": "geo.destination_point",
+    "phrase": "Je pars du point 656 300 / 6 847 900 (Lambert-93) et je marche 800 m à l'azimut 200°. Où suis-je ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "geo.destination_point",
+          "params": {
+            "from": {
+              "x": 656300,
+              "y": 6847900,
+              "epsg": 2154
+            },
+            "azimuth": {
+              "value": 200,
+              "unit": "deg"
+            },
+            "distance": {
+              "value": 800,
+              "unit": "m"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "DP2",
+    "command": "geo.destination_point",
+    "phrase": "Point situé à 2,5 km à l'azimut 75° du point 48,7330 N, 2,4110 E (WGS84).",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "geo.destination_point",
+          "params": {
+            "from": {
+              "x": 2.411,
+              "y": 48.733,
+              "epsg": 4326
+            },
+            "azimuth": {
+              "value": 75,
+              "unit": "deg"
+            },
+            "distance": {
+              "value": 2.5,
+              "unit": "km"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "DP3",
+    "command": "geo.destination_point",
+    "phrase": "Reporte un point à 600 m, azimut magnétique 130°, depuis le point 48,7380 N, 2,4250 E (WGS84).",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "geo.destination_point",
+          "params": {
+            "from": {
+              "x": 2.425,
+              "y": 48.738,
+              "epsg": 4326
+            },
+            "azimuth": {
+              "value": 130,
+              "unit": "deg"
+            },
+            "distance": {
+              "value": 600,
+              "unit": "m"
+            },
+            "north": "magnetic"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "DA1",
+    "command": "geo.distance_azimuth",
+    "phrase": "Quel est l'écart entre le point 655 950 / 6 847 650 (Lambert-93) et le point 657 150 / 6 848 350 (Lambert-93), et son orientation ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "geo.distance_azimuth",
+          "params": {
+            "from": {
+              "x": 655950,
+              "y": 6847650,
+              "epsg": 2154
+            },
+            "to": {
+              "x": 657150,
+              "y": 6848350,
+              "epsg": 2154
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "DA2",
+    "command": "geo.distance_azimuth",
+    "phrase": "Gisement et distance du point 48,7275 N, 2,4080 E (WGS84) vers le point 48,7460 N, 2,4330 E (WGS84).",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "geo.distance_azimuth",
+          "params": {
+            "from": {
+              "x": 2.408,
+              "y": 48.7275,
+              "epsg": 4326
+            },
+            "to": {
+              "x": 2.433,
+              "y": 48.746,
+              "epsg": 4326
+            },
+            "north": "grid"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "DA3",
+    "command": "geo.distance_azimuth",
+    "phrase": "Azimut magnétique et distance du point 656 100 / 6 847 400 (Lambert-93) au point 656 900 / 6 848 200 (Lambert-93), à la date du 1er mars 2026.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "geo.distance_azimuth",
+          "params": {
+            "from": {
+              "x": 656100,
+              "y": 6847400,
+              "epsg": 2154
+            },
+            "to": {
+              "x": 656900,
+              "y": 6848200,
+              "epsg": 2154
+            },
+            "north": "magnetic",
+            "date": "2026-03-01"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "LA1",
+    "command": "layer.add",
+    "phrase": "Charge le fichier de l'hydrographie.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layer.add",
+          "params": {
+            "path": "donnees/hydrographie.shp"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "LA2",
+    "command": "layer.add",
+    "phrase": "Ajoute le CSV des arrêts de bus, colonnes lon et lat en WGS84.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layer.add",
+          "params": {
+            "path": "donnees/arrets_bus.csv",
+            "crs": "EPSG:4326",
+            "x_field": "lon",
+            "y_field": "lat"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "LA3",
+    "command": "layer.add",
+    "phrase": "Mets les pistes cyclables dans le projet.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layer.add",
+          "params": {
+            "path": "donnees/pistes_cyclables.gpkg"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "LD1",
+    "command": "layer.describe",
+    "phrase": "De quels attributs dispose la couche des bâtiments ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layer.describe",
+          "params": {
+            "layer_id": "batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "LD2",
+    "command": "layer.describe",
+    "phrase": "Décris-moi le zonage du PLU.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layer.describe",
+          "params": {
+            "layer_id": "plu_zonage_a81d5c06_2e9f_4a37_b6c4_5f13e07d92a8"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "LD3",
+    "command": "layer.describe",
+    "phrase": "Que contient la couche des communes ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layer.describe",
+          "params": {
+            "layer_id": "communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "LR1",
+    "command": "layer.remove",
+    "phrase": "Enlève les bâtiments de la carte.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layer.remove",
+          "params": {
+            "layer_id": "batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "LR2",
+    "command": "layer.remove",
+    "phrase": "Supprime la couche des gares du projet, je n'en ai plus besoin.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layer.remove",
+          "params": {
+            "layer_id": "gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "LR3",
+    "command": "layer.remove",
+    "phrase": "Je n'ai plus besoin du modèle de terrain, ôte-le du projet.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layer.remove",
+          "params": {
+            "layer_id": "mnt_5m_b40c2e97_8a13_4d65_9b0f_7c6e3a158d24"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "PDF1",
+    "command": "layout.export_pdf",
+    "phrase": "Imprime la carte en PDF, format A4 paysage.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "page_size": "a4",
+            "orientation": "landscape"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "PDF2",
+    "command": "layout.export_pdf",
+    "phrase": "Fais le PDF de la carte au 1/5 000, sans la couche des routes.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 5000,
+            "leave_out": [
+              "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67"
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "PDF3",
+    "command": "layout.export_pdf",
+    "phrase": "Sors la carte en PDF avec un carroyage MGRS de 1 km.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "grid": {
+              "kind": "mgrs",
+              "interval": {
+                "value": 1,
+                "unit": "km"
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "GS1",
+    "command": "map.graduated_style",
+    "phrase": "Fais varier la couleur des parcelles d'après leur superficie.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.graduated_style",
+          "params": {
+            "layer_id": "parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3",
+            "field": "surface_m2"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "GS2",
+    "command": "map.graduated_style",
+    "phrase": "Carte des communes par population en 4 classes, dégradé de rouges.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.graduated_style",
+          "params": {
+            "layer_id": "communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946",
+            "field": "population",
+            "class_count": 4,
+            "ramp": "reds"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "GS3",
+    "command": "map.graduated_style",
+    "phrase": "Représente les bâtiments par hauteur avec des seuils naturels de Jenks.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.graduated_style",
+          "params": {
+            "layer_id": "batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649",
+            "field": "hauteur_m",
+            "method": "jenks"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TS1",
+    "command": "map.topographic_style",
+    "phrase": "Donne à la carte un habillage topographique.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.topographic_style",
+          "params": {}
+        }
+      ]
+    }
+  },
+  {
+    "id": "TS2",
+    "command": "map.topographic_style",
+    "phrase": "Applique les couleurs de carte topographique aux routes seulement.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.topographic_style",
+          "params": {
+            "layers": [
+              "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67"
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TS3",
+    "command": "map.topographic_style",
+    "phrase": "Mets les communes et le PLU en style topo.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.topographic_style",
+          "params": {
+            "layers": [
+              "communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946",
+              "plu_zonage_a81d5c06_2e9f_4a37_b6c4_5f13e07d92a8"
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "ML1",
+    "command": "model.list",
+    "phrase": "Quels modèles d'IA sont installés ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "model.list",
+          "params": {}
+        }
+      ]
+    }
+  },
+  {
+    "id": "ML2",
+    "command": "model.list",
+    "phrase": "Liste les modèles locaux disponibles.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "model.list",
+          "params": {}
+        }
+      ]
+    }
+  },
+  {
+    "id": "ML3",
+    "command": "model.list",
+    "phrase": "Avec quels modèles d'intelligence artificielle je peux travailler sur ce poste ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "model.list",
+          "params": {}
+        }
+      ]
+    }
+  },
+  {
+    "id": "PI1",
+    "command": "project.inventory",
+    "phrase": "Qu'est-ce qui est chargé dans le projet ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "project.inventory",
+          "params": {}
+        }
+      ]
+    }
+  },
+  {
+    "id": "PI2",
+    "command": "project.inventory",
+    "phrase": "Fais-moi la liste des couches ouvertes.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "project.inventory",
+          "params": {}
+        }
+      ]
+    }
+  },
+  {
+    "id": "PI3",
+    "command": "project.inventory",
+    "phrase": "Montre l'inventaire du projet.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "project.inventory",
+          "params": {}
+        }
+      ]
+    }
+  },
+  {
+    "id": "RC1",
+    "command": "raster.reclassify",
+    "phrase": "Reclasse le MNT : sous 40 m vaut 1, de 40 à 80 m vaut 2, au-dessus de 80 m vaut 3.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "raster.reclassify",
+          "params": {
+            "raster": "donnees/mnt_5m.tif",
+            "classes": [
+              {
+                "max": 40,
+                "value": 1
+              },
+              {
+                "min": 40,
+                "max": 80,
+                "value": 2
+              },
+              {
+                "min": 80,
+                "value": 3
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "RC2",
+    "command": "raster.reclassify",
+    "phrase": "Découpe le raster de coût en deux classes : 1 sous 20, 2 à partir de 20.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "raster.reclassify",
+          "params": {
+            "raster": "donnees/cout_deplacement.tif",
+            "classes": [
+              {
+                "max": 20,
+                "value": 1
+              },
+              {
+                "min": 20,
+                "value": 2
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "RC3",
+    "command": "raster.reclassify",
+    "phrase": "Calcule l'exposition du MNT puis reclasse-la : 1 de 0 à 180°, 2 de 180 à 360°.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.aspect",
+          "params": {
+            "dem": "donnees/mnt_5m.tif"
+          }
+        },
+        {
+          "command": "raster.reclassify",
+          "params": {
+            "raster": "step:1",
+            "classes": [
+              {
+                "min": 0,
+                "max": 180,
+                "value": 1
+              },
+              {
+                "min": 180,
+                "max": 360,
+                "value": 2
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "WO1",
+    "command": "raster.weighted_overlay",
+    "phrase": "Combine la note d'accessibilité avec le poids 3 et le calme avec le poids 1.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "raster.weighted_overlay",
+          "params": {
+            "criteria": [
+              {
+                "raster": "donnees/note_accessibilite.tif",
+                "weight": 3
+              },
+              {
+                "raster": "donnees/note_calme.tif",
+                "weight": 1
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "WO2",
+    "command": "raster.weighted_overlay",
+    "phrase": "Superpose l'accessibilité et le calme à poids égaux, en excluant les zones inondables.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "raster.weighted_overlay",
+          "params": {
+            "criteria": [
+              {
+                "raster": "donnees/note_accessibilite.tif",
+                "weight": 1
+              },
+              {
+                "raster": "donnees/note_calme.tif",
+                "weight": 1
+              }
+            ],
+            "exclusions": [
+              "donnees/zones_inondables_masque.tif"
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "WO3",
+    "command": "raster.weighted_overlay",
+    "phrase": "Superposition pondérée : accessibilité poids 2, calme poids 5, hors zones inondables.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "raster.weighted_overlay",
+          "params": {
+            "criteria": [
+              {
+                "raster": "donnees/note_accessibilite.tif",
+                "weight": 2
+              },
+              {
+                "raster": "donnees/note_calme.tif",
+                "weight": 5
+              }
+            ],
+            "exclusions": [
+              "donnees/zones_inondables_masque.tif"
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "SA1",
+    "command": "system.about",
+    "phrase": "Quelle version du noyau Cassini tourne ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "system.about",
+          "params": {}
+        }
+      ]
+    }
+  },
+  {
+    "id": "SA2",
+    "command": "system.about",
+    "phrase": "Donne-moi la version du protocole.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "system.about",
+          "params": {}
+        }
+      ]
+    }
+  },
+  {
+    "id": "SA3",
+    "command": "system.about",
+    "phrase": "À propos de Cassini : quelle version est installée ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "system.about",
+          "params": {}
+        }
+      ]
+    }
+  },
+  {
+    "id": "AS1",
+    "command": "terrain.aspect",
+    "phrase": "Dans quelle direction sont orientées les pentes du MNT ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.aspect",
+          "params": {
+            "dem": "donnees/mnt_5m.tif"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "AS2",
+    "command": "terrain.aspect",
+    "phrase": "Carte d'exposition du terrain.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.aspect",
+          "params": {
+            "dem": "donnees/mnt_5m.tif"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "AS3",
+    "command": "terrain.aspect",
+    "phrase": "Calcule l'orientation des versants.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.aspect",
+          "params": {
+            "dem": "donnees/mnt_5m.tif"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "CD1",
+    "command": "terrain.cost_distance",
+    "phrase": "Calcule l'effort cumulé pour rejoindre chaque cellule à partir du point 656 700 / 6 848 000 (Lambert-93), d'après le raster de coût.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.cost_distance",
+          "params": {
+            "cost": "donnees/cout_deplacement.tif",
+            "sources": [
+              {
+                "x": 656700,
+                "y": 6848000,
+                "epsg": 2154
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "CD2",
+    "command": "terrain.cost_distance",
+    "phrase": "Surface de coût au départ de deux points : 656 000 / 6 847 500 (Lambert-93) et 657 000 / 6 848 200 (Lambert-93).",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.cost_distance",
+          "params": {
+            "cost": "donnees/cout_deplacement.tif",
+            "sources": [
+              {
+                "x": 656000,
+                "y": 6847500,
+                "epsg": 2154
+              },
+              {
+                "x": 657000,
+                "y": 6848200,
+                "epsg": 2154
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "CD3",
+    "command": "terrain.cost_distance",
+    "phrase": "À partir du point 656 450 / 6 847 350 (Lambert-93), quel est le coût cumulé de déplacement partout ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.cost_distance",
+          "params": {
+            "cost": "donnees/cout_deplacement.tif",
+            "sources": [
+              {
+                "x": 656450,
+                "y": 6847350,
+                "epsg": 2154
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "HS1",
+    "command": "terrain.hillshade",
+    "phrase": "Je voudrais le relief ombré du MNT.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.hillshade",
+          "params": {
+            "dem": "donnees/mnt_5m.tif"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "HS2",
+    "command": "terrain.hillshade",
+    "phrase": "Ombrage du MNT avec le soleil à l'azimut 135° et à 45° de hauteur.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.hillshade",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "sun_azimuth": {
+              "value": 135,
+              "unit": "deg"
+            },
+            "sun_altitude": {
+              "value": 45,
+              "unit": "deg"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "HS3",
+    "command": "terrain.hillshade",
+    "phrase": "Relief ombré avec une exagération verticale de 2.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.hillshade",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "z_factor": 2
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "LC1",
+    "command": "terrain.least_cost_path",
+    "phrase": "Trouve le trajet le moins coûteux du point 655 850 / 6 847 250 (Lambert-93) au point 657 350 / 6 848 400 (Lambert-93).",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.least_cost_path",
+          "params": {
+            "cost": "donnees/cout_deplacement.tif",
+            "start": {
+              "x": 655850,
+              "y": 6847250,
+              "epsg": 2154
+            },
+            "end": {
+              "x": 657350,
+              "y": 6848400,
+              "epsg": 2154
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "LC2",
+    "command": "terrain.least_cost_path",
+    "phrase": "Chemin le plus économique sur le raster de coût entre le point 656 200 / 6 848 300 (Lambert-93) et le point 657 000 / 6 847 200 (Lambert-93).",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.least_cost_path",
+          "params": {
+            "cost": "donnees/cout_deplacement.tif",
+            "start": {
+              "x": 656200,
+              "y": 6848300,
+              "epsg": 2154
+            },
+            "end": {
+              "x": 657000,
+              "y": 6847200,
+              "epsg": 2154
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "LC3",
+    "command": "terrain.least_cost_path",
+    "phrase": "Quel itinéraire demande le moins d'effort pour aller du point 656 050 / 6 847 950 (Lambert-93) au point 657 150 / 6 847 450 (Lambert-93) ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.least_cost_path",
+          "params": {
+            "cost": "donnees/cout_deplacement.tif",
+            "start": {
+              "x": 656050,
+              "y": 6847950,
+              "epsg": 2154
+            },
+            "end": {
+              "x": 657150,
+              "y": 6847450,
+              "epsg": 2154
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "LOS1",
+    "command": "terrain.line_of_sight",
+    "phrase": "Le point 656 250 / 6 847 650 (Lambert-93) voit-il le point 657 050 / 6 848 250 (Lambert-93) ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.line_of_sight",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "observer": {
+              "x": 656250,
+              "y": 6847650,
+              "epsg": 2154
+            },
+            "target": {
+              "x": 657050,
+              "y": 6848250,
+              "epsg": 2154
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "LOS2",
+    "command": "terrain.line_of_sight",
+    "phrase": "Ligne de vue du point 656 100 / 6 848 100 (Lambert-93) vers le point 656 950 / 6 847 350 (Lambert-93), avec un observateur à 1,70 m.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.line_of_sight",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "observer": {
+              "x": 656100,
+              "y": 6848100,
+              "epsg": 2154
+            },
+            "target": {
+              "x": 656950,
+              "y": 6847350,
+              "epsg": 2154
+            },
+            "observer_height": {
+              "value": 1.7,
+              "unit": "m"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "LOS3",
+    "command": "terrain.line_of_sight",
+    "phrase": "Y a-t-il une vue dégagée entre le point 655 950 / 6 847 450 (Lambert-93) et le sommet d'une antenne de 30 m au point 657 250 / 6 848 150 (Lambert-93) ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.line_of_sight",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "observer": {
+              "x": 655950,
+              "y": 6847450,
+              "epsg": 2154
+            },
+            "target": {
+              "x": 657250,
+              "y": 6848150,
+              "epsg": 2154
+            },
+            "target_height": {
+              "value": 30,
+              "unit": "m"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "PK1",
+    "command": "terrain.peaks",
+    "phrase": "Où sont les sommets du MNT ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.peaks",
+          "params": {
+            "dem": "donnees/mnt_5m.tif"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "PK2",
+    "command": "terrain.peaks",
+    "phrase": "Trouve les 5 points les plus hauts du terrain.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.peaks",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "max_count": 5
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "PK3",
+    "command": "terrain.peaks",
+    "phrase": "Points hauts du MNT espacés d'au moins 300 m.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.peaks",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "min_distance": {
+              "value": 300,
+              "unit": "m"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "SL1",
+    "command": "terrain.slope",
+    "phrase": "Pente du terrain en pourcentage.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.slope",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "unit": "percent"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "SL2",
+    "command": "terrain.slope",
+    "phrase": "Calcule l'inclinaison du MNT en degrés.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.slope",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "unit": "degrees"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "SL3",
+    "command": "terrain.slope",
+    "phrase": "Carte des pentes en %, puis garde les zones au-dessus de 20 %.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.slope",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "unit": "percent"
+          }
+        },
+        {
+          "command": "raster.reclassify",
+          "params": {
+            "raster": "step:1",
+            "classes": [
+              {
+                "min": 20,
+                "value": 1
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "VS1",
+    "command": "terrain.viewshed",
+    "phrase": "Que voit-on depuis le point 656 550 / 6 847 750 (Lambert-93) ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.viewshed",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "observer": {
+              "x": 656550,
+              "y": 6847750,
+              "epsg": 2154
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "VS2",
+    "command": "terrain.viewshed",
+    "phrase": "Champ de vision depuis le point 656 850 / 6 848 050 (Lambert-93) dans un rayon de 2 km, yeux à 1,60 m.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.viewshed",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "observer": {
+              "x": 656850,
+              "y": 6848050,
+              "epsg": 2154
+            },
+            "radius": {
+              "value": 2,
+              "unit": "km"
+            },
+            "observer_height": {
+              "value": 1.6,
+              "unit": "m"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "VS3",
+    "command": "terrain.viewshed",
+    "phrase": "Zone visible depuis le haut d'un château d'eau de 25 m au point 656 150 / 6 847 550 (Lambert-93).",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.viewshed",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "observer": {
+              "x": 656150,
+              "y": 6847550,
+              "epsg": 2154
+            },
+            "observer_height": {
+              "value": 25,
+              "unit": "m"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "VC1",
+    "command": "terrain.viewshed_cumulative",
+    "phrase": "Visibilité cumulée depuis les points 656 300 / 6 847 300 (Lambert-93), 656 900 / 6 847 900 (Lambert-93) et 657 100 / 6 848 400 (Lambert-93).",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.viewshed_cumulative",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "observers": [
+              {
+                "x": 656300,
+                "y": 6847300,
+                "epsg": 2154
+              },
+              {
+                "x": 656900,
+                "y": 6847900,
+                "epsg": 2154
+              },
+              {
+                "x": 657100,
+                "y": 6848400,
+                "epsg": 2154
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "VC2",
+    "command": "terrain.viewshed_cumulative",
+    "phrase": "Combien de ces deux belvédères voient chaque endroit : 656 400 / 6 848 200 (Lambert-93) et 657 000 / 6 847 600 (Lambert-93) ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.viewshed_cumulative",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "observers": [
+              {
+                "x": 656400,
+                "y": 6848200,
+                "epsg": 2154
+              },
+              {
+                "x": 657000,
+                "y": 6847600,
+                "epsg": 2154
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "VC3",
+    "command": "terrain.viewshed_cumulative",
+    "phrase": "Champ de vision cumulé de trois observateurs à 2 m de hauteur : 655 900 / 6 847 800 (Lambert-93), 656 600 / 6 847 200 (Lambert-93), 657 200 / 6 848 000 (Lambert-93).",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.viewshed_cumulative",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "observer_height": {
+              "value": 2,
+              "unit": "m"
+            },
+            "observers": [
+              {
+                "x": 655900,
+                "y": 6847800,
+                "epsg": 2154
+              },
+              {
+                "x": 656600,
+                "y": 6847200,
+                "epsg": 2154
+              },
+              {
+                "x": 657200,
+                "y": 6848000,
+                "epsg": 2154
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+]
