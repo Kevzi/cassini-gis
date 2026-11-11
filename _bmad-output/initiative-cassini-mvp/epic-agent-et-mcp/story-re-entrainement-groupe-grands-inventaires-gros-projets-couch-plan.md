@@ -61,7 +61,7 @@ dans le dépôt principal ; nouvelle dépendance ; baisser une borne de test.
 **Execution:**
 - [x] `training/src/lib.rs`, `training/entrainement/pipeline.py` -- bornes relevées, commentaires
 - [x] `training/src/families.rs` -- garde : une demande de gisement ne parle jamais de carte ni de PDF
-- [ ] `docs/entrainement-du-modele.md` -- décision, mesures, essai mémoire, résultats de la nuit
+- [x] `docs/entrainement-du-modele.md` -- décision, mesures, essai mémoire, résultats de la nuit
 
 **Acceptance Criteria:**
 - Given le jeu par défaut, then 23 à 27 % de gros projets, aucun exemple au-delà de `MAX_LENGTH` jetons de Qwen3.5.
@@ -88,6 +88,10 @@ mesures.
 - Nuit : `~/cassini-entrainement/nuit-5-49.sh` et `fusion-5-49.sh`, essais Windows depuis
   `CASSINI-nuit` remis sur le commit, noyau construit dans `C:\ct-5-48` (`--features gpu`, non
   installé). Résultats : `docs/entrainement-du-modele.md`.
+- Nuit (41ede5d) : a 289/300, b 285, fusion 290 ; Annecy 18/20 pour les trois, rejeu identique ;
+  `plan_reel` 24 / 22 / 22 (barre 23) : seule la graine a tient toutes les barres chiffrées, mais
+  `plan_reel`, `question_reel` et `ecart_reel` baissent face au modèle installé (règle du ticket :
+  « pas en baisse »). Aucun modèle installé.
 
 ## Review Triage Log
 

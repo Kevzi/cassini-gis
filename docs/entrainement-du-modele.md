@@ -926,6 +926,36 @@ plus longues coûtent plus que leur part de jetons (54 s à 4 500 jetons contre 
 environ 2 h 30 à 2 h 45 par entraînement, plus la chaîne GGUF et la validation, soit environ 7 h
 pour la nuit à deux graines.
 
+**Nuit du 2026-11-10 au 11** (commit `41ede5d`, jeu identique pour les trois candidats ; essais
+GPU `--features cuda` ; recettes QGIS par `probe_recette.py`, noyau construit sur le commit, non
+installé, `CASSINI_MODELS` sur le seul modèle mesuré). Entraînements : 2 h 33 (a) et 2 h 15 (b)
+pour 537 pas, pic de 5,76 Gio au plus : la carte ne s'est pas remplie.
+
+| Barre | graine a | graine b | fusion a+b | installé (fusion du 11-10) |
+|---|---|---|---|---|
+| validation | 289/300 | 285/300 | 290/300 | 291/300 |
+| `plan_reel` (≥ 23/25) | 24/25 | **22/25** | **22/25** | 25/25 |
+| `question_reel` (≥ 11/12) | 11/12 | 12/12 | 11/12 | 12/12 |
+| `ecart_reel` (≥ 32/40) | 35/40 | 36/40 | 37/40 | 37/40 |
+| `echelle_utm_reel` (≥ 7/8) | 8/8 | 8/8 | 8/8 | 8/8 |
+| `terrain_reel` (≥ 7/8) | 8/8 | 8/8 | 8/8 | 8/8 |
+| `epic11_reel` | 27/28 | 28/28 | 28/28 | 28/28 |
+| `style_reel` (≥ 9/10) | 10/10 | 10/10 | 10/10 | 10/10 |
+| Annecy, 20 phrases (≥ 16/20) | 18/20 | 18/20 | 18/20 | 17/20 |
+| rejeu après réouverture | identique (29 étapes) | identique | identique | identique |
+| gros projet, 7 phrases (indicatif) | 6/7 | 7/7 | 7/7 | 7/7 (mesure de 5.48) |
+
+Annecy : les trois candidats ratent RA05 (« parcelles en zone naturelle du PLUi » : opérateur
+`begins_with` au lieu de l'égalité attendue) et RA09 (« tampon autour des routes » sans distance :
+10 m au lieu d'une question) ; RA07 (nom recopié) et RA13 (`coord.convert`), ratés par le modèle
+installé, passent. Gros projet de 63 couches : première phrase en 36 à 38 s (inventaire de QGIS
+compris), puis 3 à 5 s ; la graine a prend `commune_associee_ou_deleguee` pour « les communes ».
+`plan_reel` : les trois ratent S15 (« altitude moyenne et maximale par commune », refus attendu :
+réponse coupée, trop longue) ; b et la fusion ratent aussi S23 et S24 (statistiques par zone d'un
+raster calculé, refus attendu : plan rendu). Le refus des statistiques par zone d'un raster recule
+donc avec ce jeu. Modèles dans `cassini-modeles\ajuste-5-49-a`, `-b` et `-fusion`, non installés ;
+décision au propriétaire.
+
 ### Les inventaires de QGIS (5.15)
 
 Les valeurs d'un champ texte sont triées, comme le produit les rend. `unloaded_files` est
