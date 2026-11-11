@@ -228,11 +228,13 @@ class Continuation(unittest.TestCase):
         for families in ["refus,refus", "refus,", ""]:
             self.refused_before_the_gpu(options(output=self.output, parent=parent, families=families))
         # Une famille que le générateur refuse au jeu ciblé (FOCUS_EXCLUDED) est refusée ici aussi.
-        excluded = pipeline.focus_excluded()
-        self.assertIn("retrait_couche", excluded)
-        message = self.refused_before_the_gpu(options(output=self.output, parent=parent,
-                                                      families=f"refus,{excluded[0]}"))
-        self.assertIn(excluded[0], message)
+        # La liste est vide depuis 5.54, lot 2 (les cinq familles du premier relevé réparées) : lue
+        # telle quelle dans lib.rs, puis le refus essayé sur une liste posée à la main.
+        self.assertEqual(pipeline.focus_excluded(), [])
+        with mock.patch.object(pipeline, "focus_excluded", return_value=["retrait_couche"]):
+            message = self.refused_before_the_gpu(options(output=self.output, parent=parent,
+                                                          families="refus,retrait_couche"))
+        self.assertIn("retrait_couche", message)
 
     def test_a_recall_share_under_the_floor_is_refused(self):
         parent = write_parent(self.dir / "b")

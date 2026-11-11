@@ -127,10 +127,13 @@ fn the_families_option_draws_only_the_named_families_and_refuses_an_unknown_one(
         .iter()
         .map(|f| f.name)
         .collect();
-    for (families, needle) in [
-        ("tampon,nexiste_pas", "nexiste_pas"),
-        (cassini_training::FOCUS_EXCLUDED[0], "refusée au jeu ciblé"),
-    ] {
+    // Une famille de `FOCUS_EXCLUDED` est refusée au jeu ciblé ; la liste est vide depuis 5.54,
+    // lot 2 (le contrôle reste pour les familles futures).
+    let mut refusals = vec![("tampon,nexiste_pas", "nexiste_pas")];
+    if let Some(excluded) = cassini_training::FOCUS_EXCLUDED.first() {
+        refusals.push((excluded, "refusée au jeu ciblé"));
+    }
+    for (families, needle) in refusals {
         let refused = dir.join("refuse.jsonl");
         let status = Command::new(BIN)
             .args(["--count", "10", "--familles", families, "--out"])

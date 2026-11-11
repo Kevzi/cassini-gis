@@ -504,7 +504,7 @@ def parse_families(text: str) -> list[str]:
     if excluded:
         raise PipelineStop(
             f"famille refusée au jeu ciblé : {', '.join(excluded)} (tirée seule, elle engendre une phrase "
-            "d'une barre ; FOCUS_EXCLUDED de training/src/lib.rs, à reprendre au lot 2 de 5.54)")
+            "d'une barre ; FOCUS_EXCLUDED de training/src/lib.rs, tant que sa tournure n'est pas reprise)")
     return names
 
 

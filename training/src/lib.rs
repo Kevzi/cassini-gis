@@ -289,15 +289,27 @@ pub const FOCUS_SEED: u64 = 3;
 pub const FOCUS_COUNT: usize = 1800;
 /// Familles qui, tirées seules à `FOCUS_SEED` jusqu'à `FOCUS_COUNT` exemples, engendrent une
 /// phrase d'une barre à un nombre ou une commune près (relevé de
-/// `training/tests/recouvrement.rs`, 2026-11-11) : le jeu complet ne la tire pas, un jeu ciblé
-/// le pourrait. Refusées au jeu ciblé tant que leurs tournures ne sont pas reprises (5.54,
-/// lot 2) ; le test tient cette liste exacte, dans les deux sens.
-pub const FOCUS_EXCLUDED: &[&str] = &[
-    "filtre_numerique",
-    "pente",
-    "reprojection_couche",
-    "retrait_couche",
-    "carroyage_mgrs",
+/// `training/tests/recouvrement.rs`) : le jeu complet ne la tire pas, un jeu ciblé le pourrait.
+/// Refusées au jeu ciblé tant que leurs tournures ne sont pas reprises ; le test tient cette liste
+/// exacte, dans les deux sens. Vide depuis 5.54, lot 2 : les cinq familles du premier relevé
+/// (`filtre_numerique`, `pente`, `reprojection_couche`, `retrait_couche`, `carroyage_mgrs`) ont
+/// perdu leur tournure fautive. La liste reste le contrôle des familles futures.
+pub const FOCUS_EXCLUDED: &[&str] = &[];
+
+/// Les familles du jeu ciblé de la première séance continue (5.54, lot 2) : les six familles
+/// neuves ou renforcées d'après les leçons de la remesure du 2026-11-11 (format gardé avec
+/// l'échelle, fonctions absentes du registre, options écrites, champ de vision cumulé, point en
+/// Lambert-93 vers `geo.*` ou `coord.convert`, nord écrit avant l'est). Recopiée dans la commande
+/// de la séance (`docs/entrainement-du-modele.md`), que le test
+/// `the_session_command_of_the_doc_names_the_first_session_families` tient égale ; le rappel tient
+/// le reste.
+pub const FIRST_SESSION_FAMILIES: &[&str] = &[
+    "export_pdf_echelle_format",
+    "refus_fonction_absente",
+    "options_ecrites",
+    "champ_de_vision_cumule",
+    "point_lambert_vers_geo",
+    "ordre_nord_est",
 ];
 
 /// Les familles nommées, dans l'ordre fixe de `FAMILIES` (le tirage ne dépend pas de l'ordre
@@ -334,10 +346,18 @@ pub fn select_families(names: &[&str]) -> Result<Vec<&'static Family>, String> {
 
 /// Les familles du jeu ciblé, refusées si l'une d'elles est dans `FOCUS_EXCLUDED`.
 fn check_focus(families: Vec<&'static Family>) -> Result<Vec<&'static Family>, String> {
+    check_focus_against(families, FOCUS_EXCLUDED)
+}
+
+/// `check_focus` contre une liste d'exclusion donnée (le test l'essaie sur une liste non vide).
+fn check_focus_against(
+    families: Vec<&'static Family>,
+    excluded_names: &[&str],
+) -> Result<Vec<&'static Family>, String> {
     let excluded: Vec<&str> = families
         .iter()
         .map(|f| f.name)
-        .filter(|n| FOCUS_EXCLUDED.contains(n))
+        .filter(|n| excluded_names.contains(n))
         .collect();
     if excluded.is_empty() {
         Ok(families)
@@ -1476,10 +1496,54 @@ mod tests {
         assert!(err.contains("deux fois"), "{err}");
         assert!(generate_families(FOCUS_SEED, 10, &[]).is_err());
         assert!(generate_families(FOCUS_SEED, 10, &[""]).is_err());
-        // Une famille qui, tirée seule, engendre une phrase de barre est refusée au jeu ciblé.
-        let err = generate_families(FOCUS_SEED, 10, &["tampon", FOCUS_EXCLUDED[0]]).unwrap_err();
-        assert!(err.contains(FOCUS_EXCLUDED[0]), "{err}");
-        assert!(generate_families_unchecked(FOCUS_SEED, 10, &[FOCUS_EXCLUDED[0]]).is_ok());
+        // Une famille qui, tirée seule, engendre une phrase de barre est refusée au jeu ciblé
+        // (`FOCUS_EXCLUDED`, vide depuis 5.54, lot 2 : le contrôle reste pour les familles futures).
+        if let Some(excluded) = FOCUS_EXCLUDED.first() {
+            let err = generate_families(FOCUS_SEED, 10, &["tampon", excluded]).unwrap_err();
+            assert!(err.contains(excluded), "{err}");
+            assert!(generate_families_unchecked(FOCUS_SEED, 10, &[excluded]).is_ok());
+        }
+        // La branche de refus, sur une liste d'exclusion donnée au test.
+        let asked = select_unchecked(&HashSet::from(["tampon", "refus"]));
+        let Err(err) = check_focus_against(asked.clone(), &["refus"]) else {
+            panic!("refus attendu");
+        };
+        assert!(
+            err.contains("refus") && err.contains("refusée au jeu ciblé"),
+            "{err}"
+        );
+        let kept = check_focus_against(asked, &["pente"]).map(|f| f.len());
+        assert_eq!(kept, Ok(2));
+    }
+
+    #[test]
+    fn the_first_session_families_give_the_whole_focused_set_without_a_bar_sentence() {
+        // 5.54, lot 2 : la liste de la première séance est acceptée par le générateur, rend
+        // exactement `FOCUS_COUNT` exemples à `FOCUS_SEED`, tous de ses familles, chacune présente,
+        // et ne reprend aucune phrase de barre.
+        let (examples, summary) =
+            generate_families(FOCUS_SEED, FOCUS_COUNT, FIRST_SESSION_FAMILIES).unwrap();
+        assert_eq!(examples.len(), FOCUS_COUNT, "{:?}", summary.families);
+        assert!(examples
+            .iter()
+            .all(|e| FIRST_SESSION_FAMILIES.contains(&e.family)));
+        for name in FIRST_SESSION_FAMILIES {
+            let tally = &summary.families[name];
+            assert!(tally.kept > 0 && tally.rejected == 0, "{name} : {tally:?}");
+        }
+        assert_eq!(barres::copies(&examples), Vec::<String>::new());
+        // Aucune n'est refusée au jeu ciblé.
+        assert!(FIRST_SESSION_FAMILIES
+            .iter()
+            .all(|n| !FOCUS_EXCLUDED.contains(n)));
+    }
+
+    #[test]
+    fn the_session_command_of_the_doc_names_the_first_session_families() {
+        // La commande de la séance, recopiée dans la doc, nomme exactement `FIRST_SESSION_FAMILIES`.
+        let doc = include_str!("../../docs/entrainement-du-modele.md");
+        let line = format!("nuit-5-54.sh {}", FIRST_SESSION_FAMILIES.join(","));
+        assert!(doc.contains(&format!("{line}\n")), "{line}");
     }
 
     #[test]
