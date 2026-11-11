@@ -1,0 +1,177 @@
+[
+  {
+    "id": "EP01",
+    "command": "coord.convert",
+    "phrase": "Quelle est la référence de carroyage MGRS du point 48,7468 N, 2,3952 E (WGS84) ?",
+    "expected": {"kind": "calls", "calls": [
+      {"command": "coord.convert", "params": {
+        "point": {"x": 2.3952, "y": 48.7468, "epsg": 4326}, "to": ["mgrs"]}}
+    ]}
+  },
+  {
+    "id": "EP02",
+    "command": "data.transform_point",
+    "phrase": "Reporte en Lambert-93 les coordonnées du point (454 600 ; 5 399 100) en UTM 31N.",
+    "expected": {"kind": "calls", "calls": [
+      {"command": "data.transform_point", "params": {
+        "point": {"x": 454600, "y": 5399100, "epsg": 32631}, "target_epsg": 2154}}
+    ]}
+  },
+  {
+    "id": "EP03",
+    "command": "geo.distance_azimuth",
+    "phrase": "À quelle distance et dans quelle direction se trouve le point 48,7522 N, 2,4361 E (WGS84) quand on part du point 48,7314 N, 2,4018 E (WGS84) ?",
+    "expected": {"kind": "calls", "calls": [
+      {"command": "geo.distance_azimuth", "params": {
+        "from": {"x": 2.4018, "y": 48.7314, "epsg": 4326},
+        "to": {"x": 2.4361, "y": 48.7522, "epsg": 4326}}}
+    ]}
+  },
+  {
+    "id": "EP04",
+    "command": "geo.destination_point",
+    "phrase": "Où tombe le point rayonné à 800 m à l'azimut 210° depuis le point (453 400 ; 5 398 700) en UTM 31N ?",
+    "expected": {"kind": "calls", "calls": [
+      {"command": "geo.destination_point", "params": {
+        "from": {"x": 453400, "y": 5398700, "epsg": 32631},
+        "azimuth": {"value": 210, "unit": "deg"},
+        "distance": {"value": 800, "unit": "m"}}}
+    ]}
+  },
+  {
+    "id": "EP05",
+    "command": "geo.bearing_intersection",
+    "phrase": "Intersection de deux visées : l'une à 100° depuis le point 48,7255 N, 2,3880 E (WGS84), l'autre à 20° depuis le point 48,7180 N, 2,4320 E (WGS84).",
+    "expected": {"kind": "calls", "calls": [
+      {"command": "geo.bearing_intersection", "params": {
+        "first": {"x": 2.388, "y": 48.7255, "epsg": 4326},
+        "first_azimuth": {"value": 100, "unit": "deg"},
+        "second": {"x": 2.432, "y": 48.718, "epsg": 4326},
+        "second_azimuth": {"value": 20, "unit": "deg"}}}
+    ]}
+  },
+  {
+    "id": "EP06",
+    "command": "terrain.aspect",
+    "phrase": "Sors l'exposition des versants sur toute l'étendue du MNT.",
+    "expected": {"kind": "calls", "calls": [
+      {"command": "terrain.aspect", "params": {"dem": "donnees/mnt_5m.tif"}}
+    ]}
+  },
+  {
+    "id": "EP07",
+    "command": "terrain.hillshade",
+    "phrase": "Fais un estompage du relief du MNT, éclairé depuis l'azimut 315°.",
+    "expected": {"kind": "calls", "calls": [
+      {"command": "terrain.hillshade", "params": {
+        "dem": "donnees/mnt_5m.tif", "sun_azimuth": {"value": 315, "unit": "deg"}}}
+    ]}
+  },
+  {
+    "id": "EP08",
+    "command": "terrain.viewshed_cumulative",
+    "phrase": "Bassin visuel cumulé de deux points d'observation, 656 350 / 6 847 450 (Lambert-93) et 657 150 / 6 848 250 (Lambert-93), avec des observateurs à 1,80 m.",
+    "expected": {"kind": "calls", "calls": [
+      {"command": "terrain.viewshed_cumulative", "params": {
+        "dem": "donnees/mnt_5m.tif",
+        "observers": [
+          {"x": 656350, "y": 6847450, "epsg": 2154},
+          {"x": 657150, "y": 6848250, "epsg": 2154}],
+        "observer_height": {"value": 1.8, "unit": "m"}}}
+    ]}
+  },
+  {
+    "id": "EP09",
+    "command": "terrain.peaks",
+    "phrase": "Repère les 3 sommets remarquables du MNT, distants d'au moins 500 m les uns des autres.",
+    "expected": {"kind": "calls", "calls": [
+      {"command": "terrain.peaks", "params": {
+        "dem": "donnees/mnt_5m.tif", "max_count": 3,
+        "min_distance": {"value": 500, "unit": "m"}}}
+    ]}
+  },
+  {
+    "id": "EP10",
+    "command": "raster.reclassify",
+    "phrase": "Classes de pente du MNT en pourcentage : 1 sous 5 %, 2 de 5 à 25 %, 3 au-delà de 25 %.",
+    "expected": {"kind": "calls", "calls": [
+      {"command": "terrain.slope", "params": {"dem": "donnees/mnt_5m.tif", "unit": "percent"}},
+      {"command": "raster.reclassify", "params": {"raster": "step:1", "classes": [
+        {"max": 5, "value": 1}, {"min": 5, "max": 25, "value": 2}, {"min": 25, "value": 3}]}}
+    ]}
+  },
+  {
+    "id": "EP11",
+    "command": "raster.weighted_overlay",
+    "phrase": "Carte d'aptitude pondérée : la note de calme au poids 3, la note d'accessibilité au poids 2, zones inondables exclues.",
+    "expected": {"kind": "calls", "calls": [
+      {"command": "raster.weighted_overlay", "params": {
+        "criteria": [
+          {"raster": "donnees/note_calme.tif", "weight": 3},
+          {"raster": "donnees/note_accessibilite.tif", "weight": 2}],
+        "exclusions": ["donnees/zones_inondables_masque.tif"]}}
+    ]}
+  },
+  {
+    "id": "EP12",
+    "command": "terrain.cost_distance",
+    "phrase": "Effort de déplacement cumulé sur le raster de coût, en partant de trois points : 656 050 / 6 847 750 (Lambert-93), 656 750 / 6 848 350 (Lambert-93) et 657 250 / 6 847 550 (Lambert-93).",
+    "expected": {"kind": "calls", "calls": [
+      {"command": "terrain.cost_distance", "params": {
+        "cost": "donnees/cout_deplacement.tif",
+        "sources": [
+          {"x": 656050, "y": 6847750, "epsg": 2154},
+          {"x": 656750, "y": 6848350, "epsg": 2154},
+          {"x": 657250, "y": 6847550, "epsg": 2154}]}}
+    ]}
+  },
+  {
+    "id": "EP13",
+    "command": "terrain.least_cost_path",
+    "phrase": "Quel est le tracé le plus économique entre le point 655 900 / 6 848 050 (Lambert-93) et le point 657 200 / 6 847 250 (Lambert-93), d'après la couche de coût de déplacement ?",
+    "expected": {"kind": "calls", "calls": [
+      {"command": "terrain.least_cost_path", "params": {
+        "cost": "donnees/cout_deplacement.tif",
+        "start": {"x": 655900, "y": 6848050, "epsg": 2154},
+        "end": {"x": 657200, "y": 6847250, "epsg": 2154}}}
+    ]}
+  },
+  {
+    "id": "EP14",
+    "command": "layout.export_pdf",
+    "phrase": "Il me faut un tirage PDF de la carte en A1 paysage.",
+    "expected": {"kind": "calls", "calls": [
+      {"command": "layout.export_pdf", "params": {"page_size": "a1", "orientation": "landscape"}}
+    ]}
+  },
+  {
+    "id": "EP15",
+    "phrase": "Calcule la distance et l'azimut entre le point (12 450 ; 3 870) et le point (13 120 ; 4 260) ; je ne sais pas dans quel système sont ces coordonnées.",
+    "expected": {"kind": "question"}
+  },
+  {
+    "id": "EP16",
+    "phrase": "Donne le point qui se trouve à 2 km du point 48,7330 N, 2,4180 E (WGS84).",
+    "expected": {"kind": "question"}
+  },
+  {
+    "id": "EP17",
+    "phrase": "Trace le chemin de moindre coût sur le raster de coût au départ du point 656 400 / 6 847 600 (Lambert-93).",
+    "expected": {"kind": "question"}
+  },
+  {
+    "id": "EP18",
+    "phrase": "Calcule l'accumulation des écoulements sur le MNT.",
+    "expected": {"kind": "refusal", "missing": ["flow", "hydro", "accumul"]}
+  },
+  {
+    "id": "EP19",
+    "phrase": "Lisse le MNT avec un filtre moyen sur 3 × 3 cellules.",
+    "expected": {"kind": "refusal", "missing": ["smooth", "focal", "mean_filter"]}
+  },
+  {
+    "id": "EP20",
+    "phrase": "Calcule l'indice de rugosité du terrain à partir du MNT.",
+    "expected": {"kind": "refusal", "missing": ["rough", "rugos"]}
+  }
+]

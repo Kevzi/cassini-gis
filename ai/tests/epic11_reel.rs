@@ -20,11 +20,29 @@
 //! 11.16) donnent un point dans un autre système que le raster, ou passent d'un fuseau UTM à
 //! l'autre : elles sont mesurées et imprimées à part, hors du score des quatorze commandes et de
 //! sa barre (27 / 28).
+//!
+//! Depuis 5.53 (livrable 3, lot 3), la barre est élargie en place : aux 28 phrases de
+//! `SENTENCES` et à F03 s'ajoutent 20 phrases neuves écrites à la main (`epic11_reel/phrases.json`,
+//! schéma de `par_commande/phrases.json` ; une phrase qui attend un plan porte `command`, une
+//! question ou un refus n'en porte pas), soit 49 : un plan neuf par commande (14), 3 questions
+//! (point sans système, destination sans azimut, chemin sans arrivée) et 3 refus (accumulation
+//! des écoulements, lissage du MNT, rugosité), qui nomment dans `missing` ce que le registre n'a
+//! pas ; le jour où un identifiant du registre contient un de ces mots, le refus devient faux et
+//! le test sans modèle nomme la phrase. Les attendus passent tous les contrôles communs
+//! (`common::invalid`) sur l'inventaire augmenté. Les 28 phrases de `SENTENCES` gardent leur
+//! comparaison (`comparable`, titre seulement non vide) ; les neuves celle des autres barres
+//! (`common::same_calls`). Un seul `SCORE`, sur le total de la barre (F03 compris, les quatre
+//! `FOREIGN_POINTS` toujours hors barre). Seuil (décision du coordinateur, 2026-11-11, D4) :
+//! 27/28 rapporté au total, arrondi vers le bas, soit 47/49 ; F03 garde en plus son exigence
+//! dure (sans question, l'essai échoue, quel que soit le total). Plus de règle par commande :
+//! les lignes `COMMANDE …` restent imprimées sans seuil, avec un avertissement non bloquant pour
+//! une commande sans aucun plan juste. Le jeu d'entraînement ne voit aucune de ces
+//! phrases : `training/tests/recouvrement.rs` les garde.
 
 mod common;
 
-use cassini_ai::plan::{compose_plan_with, model_files_generator};
-use cassini_core::plan::Plan;
+use cassini_ai::plan::{compose_plan_with, model_files_generator, AgentError};
+use cassini_core::plan::{Plan, QuestionSource};
 use cassini_core::point::guard_coordinates;
 use cassini_core::registry::Registry;
 use serde_json::{json, Value};
@@ -393,9 +411,71 @@ fn comparable(mut calls: Value) -> Option<Value> {
     Some(calls)
 }
 
+/// Les phrases neuves de la barre (5.53, livrable 3), écrites à la main.
+const PHRASES: &str = include_str!("epic11_reel/phrases.json");
+
+/// Les phrases neuves de `epic11_reel/phrases.json`.
+fn new_phrases() -> Vec<Value> {
+    common::read_phrases(PHRASES, "epic11_reel/phrases.json")
+}
+
+/// Toute la barre, dans la forme des `phrases.json` : les 28 phrases de `SENTENCES` (attendu de
+/// `expected`, titre d'export retiré, `exact` : comparées par `comparable`), F03 (une question),
+/// puis les phrases neuves.
+fn bar() -> Vec<Value> {
+    let mut all: Vec<Value> = SENTENCES
+        .iter()
+        .map(|(id, text)| {
+            json!({"id": id, "command": command(id), "phrase": text,
+                "expected": {"kind": "calls", "calls": expected(id)}, "exact": true})
+        })
+        .collect();
+    all.extend(
+        GRID_QUESTION
+            .iter()
+            .map(|(id, text)| json!({"id": id, "phrase": text, "expected": {"kind": "question"}})),
+    );
+    all.extend(new_phrases());
+    all
+}
+
+/// La réponse rendue à une phrase de la barre est-elle l'attendue : pour `SENTENCES` (`exact`),
+/// les appels de `expected` à l'identique, titre d'export seulement non vide (`comparable`) ;
+/// pour les neuves, les appels par `common::same_calls` ; une question (du modèle ou du
+/// garde-fou) là où une question est attendue, un refus là où un refus l'est.
+fn answers(phrase: &Value, got: &Result<Plan, AgentError>) -> bool {
+    let want = &phrase["expected"];
+    match (want["kind"].as_str(), got) {
+        (Some("calls"), Ok(Plan::Calls { calls })) if phrase["exact"] == true => {
+            comparable(serde_json::to_value(calls).unwrap()).is_some_and(|c| c == want["calls"])
+        }
+        (Some("calls"), Ok(Plan::Calls { calls })) => common::same_calls(calls, &want["calls"]),
+        (Some("question"), Ok(Plan::Question { .. })) => true,
+        (Some("refusal"), Err(AgentError::Refused(_))) => true,
+        _ => false,
+    }
+}
+
+/// Réponses attendues exigées : 27/28 du total de la barre, arrondi vers le bas (D4).
+fn answers_needed(total: usize) -> usize {
+    common::proportional(total, 27, 28)
+}
+
+/// Plans mesurés par commande sur la barre : ceux qui portent la commande en `command`.
+fn plans_per_command(bar: &[Value]) -> Vec<usize> {
+    COMMANDS
+        .iter()
+        .map(|c| {
+            bar.iter()
+                .filter(|p| p["command"] == *c && p["expected"]["kind"] == "calls")
+                .count()
+        })
+        .collect()
+}
+
 #[test]
 #[ignore = "charge le vrai modèle ; lancer avec CASSINI_TEST_MODEL et --ignored"]
-fn epic11_reel_every_command_has_at_least_one_matching_plan() {
+fn epic11_reel_at_least_27_of_28_rounded_down_and_the_grid_question_asked() {
     let Some((files, style)) = common::test_model() else {
         eprintln!("CASSINI_TEST_MODEL absent : essai ignore.");
         return;
@@ -406,10 +486,15 @@ fn epic11_reel_every_command_has_at_least_one_matching_plan() {
     let full = inventory();
     let (_, ids) = common::shown_inventory(&full);
     let mut generator = model_files_generator(files);
+    let all = bar();
+    let counts = plans_per_command(&all);
     let mut scores = vec![0usize; COMMANDS.len()];
-    let mut right = 0;
-    for (id, text) in SENTENCES {
-        let want = expected(id);
+    let (mut right, mut guarded, mut asked) = (0, 0, true);
+    for phrase in &all {
+        let (id, text) = (
+            phrase["id"].as_str().unwrap(),
+            phrase["phrase"].as_str().unwrap(),
+        );
         let got = common::completed(
             &registry,
             common::restored(
@@ -424,51 +509,34 @@ fn epic11_reel_every_command_has_at_least_one_matching_plan() {
             ),
             &full,
         );
-        let ok = match &got {
-            Ok(Plan::Calls { calls }) => {
-                comparable(serde_json::to_value(calls).unwrap()).is_some_and(|c| c == want)
-            }
-            _ => false,
-        };
+        let ok = answers(phrase, &got);
         // Score exact, phrase par phrase : jamais filtré.
         eprintln!(
             "{} {id} {text}
-     attendu : {want}
+     attendu : {}
      obtenu  : {got:?}",
-            if ok { "OK  " } else { "FAIL" }
+            if ok { "OK  " } else { "FAIL" },
+            phrase["expected"]
         );
         // Aucun plan invalide n'est jamais rendu : tout `Ok` passe `check_plan`.
         if let Ok(plan) = &got {
             assert_eq!(registry.check_plan(plan), Ok(()), "{id}");
         }
-        let index = COMMANDS.iter().position(|c| *c == command(id)).unwrap();
-        scores[index] += usize::from(ok);
+        if let Some(index) = COMMANDS.iter().position(|c| phrase["command"] == *c) {
+            scores[index] += usize::from(ok);
+        }
+        // F03 : exigence dure en plus de compter dans le total.
+        if GRID_QUESTION.iter().any(|(g, _)| *g == id) {
+            asked &= ok;
+        }
         right += usize::from(ok);
-    }
-    let mut asked = true;
-    for (id, text) in GRID_QUESTION {
-        let got = common::completed(
-            &registry,
-            common::restored(
-                compose_plan_with(
-                    style,
-                    &registry,
-                    &common::view(&full, text),
-                    text,
-                    &mut generator,
-                ),
-                &ids,
-            ),
-            &full,
-        );
-        let ok = matches!(&got, Ok(Plan::Question { .. }));
-        eprintln!(
-            "{} {id} {text}
-     attendu : une question sur le système du carroyage
-     obtenu  : {got:?}",
-            if ok { "OK  " } else { "FAIL" }
-        );
-        asked &= ok;
+        guarded += usize::from(matches!(
+            &got,
+            Ok(Plan::Question {
+                source: QuestionSource::Guard,
+                ..
+            })
+        ));
     }
     let mut foreign = 0;
     for (id, text) in FOREIGN_POINTS {
@@ -500,23 +568,24 @@ fn epic11_reel_every_command_has_at_least_one_matching_plan() {
         }
         foreign += usize::from(ok);
     }
-    for (command, score) in COMMANDS.iter().zip(&scores) {
-        eprintln!("COMMANDE {command:<28} {score}/2");
+    // Imprimées sans seuil ; jamais `SCORE <commande>`, réservé à `par_commande_reel`.
+    for ((command, score), count) in COMMANDS.iter().zip(&scores).zip(&counts) {
+        eprintln!("COMMANDE {command:<28} {score}/{count}");
+        if *score == 0 {
+            eprintln!("attention : {command} n'a aucun plan juste (non bloquant)");
+        }
     }
-    let total = SENTENCES.len();
+    let total = all.len();
+    let need = answers_needed(total);
     eprintln!(
-        "SCORE {right}/{total} plans conformes ; carroyage sans système : {} ; points d'un autre système (hors barre) : {foreign}/{}",
+        "SCORE {right}/{total} réponses attendues ; carroyage sans système : {} ; {guarded} question(s) du garde-fou ; points d'un autre système (hors barre) : {foreign}/{}",
         if asked { "question" } else { "pas de question" },
         FOREIGN_POINTS.len()
     );
-    let unlearned: Vec<&str> = COMMANDS
-        .iter()
-        .zip(&scores)
-        .filter(|(_, s)| **s == 0)
-        .map(|(c, _)| *c)
-        .collect();
     let failures: Vec<String> = [
-        (!unlearned.is_empty()).then(|| format!("commandes non apprises : {unlearned:?}")),
+        (right < need).then(|| {
+            format!("{right}/{total} : sous le seuil de 27/28 arrondi vers le bas ({need}/{total})")
+        }),
         (!asked).then(|| "le carroyage sans système n'a pas rendu de question".to_string()),
     ]
     .into_iter()
@@ -681,4 +750,259 @@ fn every_expected_plan_is_left_unchanged_by_the_completion() {
             "{id}"
         );
     }
+}
+
+#[test]
+fn the_threshold_is_27_of_28_rounded_down() {
+    assert_eq!(answers_needed(28), 27);
+    assert_eq!(answers_needed(29), 27);
+    assert_eq!(bar().len(), 49);
+    assert_eq!(answers_needed(49), 47);
+    assert_eq!(answers_needed(41), 39);
+    assert_eq!(answers_needed(50), 48);
+}
+
+#[test]
+fn the_bar_has_41_to_50_sentences_with_questions_and_refusals_naming_what_is_missing() {
+    let all = bar();
+    assert!((41..=50).contains(&all.len()), "{} phrases", all.len());
+    let mut ids = std::collections::BTreeSet::new();
+    for p in all.iter().chain(
+        FOREIGN_POINTS
+            .iter()
+            .map(|(id, text)| json!({"id": id, "phrase": text}))
+            .collect::<Vec<_>>()
+            .iter(),
+    ) {
+        let id = p["id"].as_str().expect("phrase sans id");
+        assert!(ids.insert(id.to_string()), "id en double : {id}");
+        assert!(
+            p["phrase"].as_str().is_some_and(|t| !t.trim().is_empty()),
+            "{id} : phrase vide"
+        );
+    }
+    let fresh = new_phrases();
+    assert!(
+        (12..=21).contains(&fresh.len()),
+        "{} phrases neuves",
+        fresh.len()
+    );
+    let kind = |k: &str| fresh.iter().filter(|p| p["expected"]["kind"] == k).count();
+    assert!(
+        kind("question") >= 2,
+        "{} questions neuves",
+        kind("question")
+    );
+    assert!(kind("refusal") >= 3, "{} refus neufs", kind("refusal"));
+    for p in &fresh {
+        let id = &p["id"];
+        match p["expected"]["kind"].as_str() {
+            // Un plan porte sa commande, une des quatorze.
+            Some("calls") => assert!(
+                COMMANDS.iter().any(|c| p["command"] == *c),
+                "{id} : commande {}",
+                p["command"]
+            ),
+            // Une question ou un refus n'en porte pas.
+            Some("question") => assert!(p.get("command").is_none(), "{id}"),
+            Some("refusal") => {
+                assert!(p.get("command").is_none(), "{id}");
+                assert!(
+                    p["expected"]["missing"]
+                        .as_array()
+                        .is_some_and(|m| !m.is_empty() && m.iter().all(Value::is_string)),
+                    "{id} : refus sans `missing`"
+                );
+            }
+            other => panic!("{id} : sorte {other:?}"),
+        }
+    }
+}
+
+/// Les phrases neuves dont le plan attendu n'appelle pas leur `command`.
+fn plans_not_calling_their_command(phrases: &[Value]) -> Vec<String> {
+    phrases
+        .iter()
+        .filter(|p| {
+            common::expected_calls(p)
+                .is_some_and(|calls| !calls.iter().any(|c| c["command"] == p["command"]))
+        })
+        .map(|p| p["id"].as_str().unwrap_or("?").to_string())
+        .collect()
+}
+
+/// Les commandes de `COMMANDS` sans plan neuf qui les appelle et les porte en `command`.
+fn commands_without_a_new_plan(phrases: &[Value]) -> Vec<&'static str> {
+    COMMANDS
+        .iter()
+        .filter(|c| {
+            !phrases.iter().any(|p| {
+                p["command"] == **c
+                    && common::expected_calls(p)
+                        .is_some_and(|calls| calls.iter().any(|call| call["command"] == **c))
+            })
+        })
+        .copied()
+        .collect()
+}
+
+#[test]
+fn every_command_has_a_new_plan_that_calls_it() {
+    let fresh = new_phrases();
+    assert!(plans_not_calling_their_command(&fresh).is_empty());
+    assert!(commands_without_a_new_plan(&fresh).is_empty());
+    // Une commande privée de son plan neuf est nommée ; un plan qui n'appelle pas sa commande
+    // aussi.
+    let without: Vec<Value> = fresh
+        .iter()
+        .filter(|p| p["command"] != "terrain.peaks")
+        .cloned()
+        .collect();
+    assert_eq!(commands_without_a_new_plan(&without), ["terrain.peaks"]);
+    let mut wrong = fresh.clone();
+    let p = wrong.iter_mut().find(|p| p["id"] == "EP06").unwrap();
+    p["command"] = json!("terrain.hillshade");
+    assert_eq!(plans_not_calling_their_command(&wrong), ["EP06"]);
+    assert_eq!(commands_without_a_new_plan(&wrong), ["terrain.aspect"]);
+}
+
+#[test]
+fn every_expected_answer_is_valid() {
+    // `check_plan`, garde-fou des coordonnées, complétion sans effet, couches, champs, rasters
+    // et fichiers présents dans l'inventaire augmenté, refus encore justes : toute la barre.
+    let errors = common::invalid(&Registry::standard(), &inventory(), &bar());
+    assert!(
+        errors.is_empty(),
+        "attendus invalides :\n{}",
+        errors.join("\n")
+    );
+}
+
+#[test]
+fn an_invalid_expected_answer_or_a_wrong_refusal_is_named() {
+    let registry = Registry::standard();
+    let mut broken = bar();
+    let k = broken.iter_mut().find(|p| p["id"] == "EP09").unwrap();
+    k["expected"]["calls"][0]["params"]["max_count"] = json!(0);
+    let w = broken.iter_mut().find(|p| p["id"] == "EP11").unwrap();
+    w["expected"]["calls"][0]["params"]["criteria"][0]["raster"] = json!("donnees/note_bruit.tif");
+    // Un point d'un autre système que le raster : la complétion ajouterait une conversion.
+    let o = broken.iter_mut().find(|p| p["id"] == "EP12").unwrap();
+    o["expected"]["calls"][0]["params"]["sources"][0] =
+        json!({"x": 2.41, "y": 48.73, "epsg": 4326});
+    // Un refus qui dit absente une commande du registre.
+    let r = broken.iter_mut().find(|p| p["id"] == "EP19").unwrap();
+    r["expected"]["missing"] = json!(["slope"]);
+    let errors = common::invalid(&registry, &inventory(), &broken);
+    for (id, reason) in [
+        ("EP09", "check_plan refuse"),
+        ("EP11", "raster absent"),
+        ("EP12", "le garde-fou"),
+        ("EP12", "la complétion"),
+        ("EP19", "refus devenu faux"),
+    ] {
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.starts_with(&format!("{id} : {reason}"))),
+            "{id} : {errors:?}"
+        );
+    }
+    assert_eq!(errors.len(), 5, "{errors:?}");
+}
+
+#[test]
+fn a_refusal_turns_red_when_its_command_reaches_the_registry() {
+    let mut ids = common::registry_ids(&Registry::standard());
+    assert!(common::refusals_now_wrong(&ids, &bar()).is_empty());
+    ids.push("terrain.flow_accumulation".to_string());
+    let wrong = common::refusals_now_wrong(&ids, &bar());
+    assert!(!wrong.is_empty(), "{wrong:?}");
+    assert!(
+        wrong
+            .iter()
+            .all(|w| w.starts_with("EP18 : refus devenu faux")),
+        "{wrong:?}"
+    );
+}
+
+#[test]
+fn no_sentence_names_a_file_that_is_not_open() {
+    assert!(common::naming_unloaded_files(&inventory(), &bar()).is_empty());
+}
+
+/// Un plan rendu, depuis ses appels.
+fn calls(value: Value) -> Result<Plan, AgentError> {
+    Ok(serde_json::from_value(json!({"kind": "calls", "calls": value})).unwrap())
+}
+
+#[test]
+fn the_score_of_a_new_sentence_compares_titles_numbers_and_kinds_as_documented() {
+    let fresh = new_phrases();
+    let find = |id: &str| fresh.iter().find(|p| p["id"] == id).unwrap().clone();
+    let asked: Result<Plan, AgentError> = Ok(Plan::Question {
+        question: "Quel système ?".into(),
+        source: QuestionSource::Guard,
+    });
+    let refused: Result<Plan, AgentError> = Err(AgentError::Refused("non".into()));
+    // Titre d'export libre mais non vide.
+    let ep14 = find("EP14");
+    let mut titled = ep14["expected"]["calls"].clone();
+    titled[0]["params"]["title"] = json!("Carte");
+    assert!(answers(&ep14, &calls(titled.clone())));
+    titled[0]["params"]["title"] = json!(" ");
+    assert!(!answers(&ep14, &calls(titled)));
+    // Un entier écrit en flottant vaut l'entier ; une option de plus est un échec.
+    let ep09 = find("EP09");
+    let mut floats = ep09["expected"]["calls"].clone();
+    floats[0]["params"]["max_count"] = json!(3.0);
+    assert!(answers(&ep09, &calls(floats.clone())));
+    floats[0]["params"]["min_prominence"] = json!({"value": 5, "unit": "m"});
+    assert!(!answers(&ep09, &calls(floats)));
+    // L'ordre des critères écrit compte.
+    let ep11 = find("EP11");
+    let mut swapped = ep11["expected"]["calls"].clone();
+    let criteria = swapped[0]["params"]["criteria"].as_array_mut().unwrap();
+    criteria.reverse();
+    assert!(!answers(&ep11, &calls(swapped)));
+    // Une question, du garde-fou compris, pour une question ; un refus pour un refus.
+    assert!(answers(&find("EP15"), &asked));
+    assert!(!answers(&find("EP15"), &refused));
+    assert!(answers(&find("EP18"), &refused));
+    assert!(!answers(&find("EP18"), &asked));
+    assert!(!answers(&ep09, &asked));
+    assert!(!answers(
+        &find("EP18"),
+        &calls(ep09["expected"]["calls"].clone())
+    ));
+}
+
+#[test]
+fn every_command_is_measured_on_its_two_sentences_and_its_new_plan() {
+    assert_eq!(plans_per_command(&bar()), vec![3; COMMANDS.len()]);
+}
+
+#[test]
+fn the_original_sentences_are_scored_by_comparable() {
+    let all = bar();
+    let f01 = all.iter().find(|p| p["id"] == "F01").unwrap().clone();
+    let mut titled = f01["expected"]["calls"].clone();
+    titled[0]["params"]["title"] = json!("Carte");
+    assert!(answers(&f01, &calls(titled.clone())));
+    // Sans titre : `comparable` le refuse.
+    assert!(!answers(&f01, &calls(f01["expected"]["calls"].clone())));
+    // Un nombre écrit en flottant compte faux sur les phrases d'origine (comparaison exacte).
+    let k02 = all.iter().find(|p| p["id"] == "K02").unwrap().clone();
+    let mut floats = k02["expected"]["calls"].clone();
+    assert!(answers(&k02, &calls(floats.clone())));
+    floats[0]["params"]["max_count"] = json!(10.0);
+    assert!(!answers(&k02, &calls(floats)));
+    // F03 : une question.
+    let f03 = all.iter().find(|p| p["id"] == "F03").unwrap().clone();
+    let asked: Result<Plan, AgentError> = Ok(Plan::Question {
+        question: "Quel système ?".into(),
+        source: QuestionSource::Model,
+    });
+    assert!(answers(&f03, &asked));
+    assert!(!answers(&f03, &calls(titled)));
 }

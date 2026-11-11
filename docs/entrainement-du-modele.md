@@ -2429,6 +2429,51 @@ engendrées, jamais recopiées d'une autre barre), sur l'inventaire de l'épreuv
   prévue après le lot 3 (`echelle_utm_reel`, `terrain_reel` au lot 2 ; `epic11_reel`,
   `style_reel` au lot 3).
 
+## Barres élargies : `epic11_reel` et `style_reel` (ticket 5.53, livrable 3, lot 3, 2026-11-11)
+
+Même règle qu'au lot 1 : élargies en place, phrases neuves écrites à la main dans un
+`phrases.json` par barre, constantes de phrases (`SENTENCES`, `GRID_QUESTION`, `FOREIGN_POINTS`)
+et leurs attendus intacts à l'octet près, un seul `SCORE` sur le total.
+
+| Barre | Phrases | Dont neuves | Composition des neuves | Seuil |
+|---|---|---|---|---|
+| `epic11_reel` | 28 + F03 + 20 = **49** (les 4 `FOREIGN_POINTS` toujours hors barre) | `ai/tests/epic11_reel/phrases.json` | un plan par commande (14, chacun portant `command`), 3 questions (point sans système, écrit comme tel, destination sans azimut, chemin sans arrivée), 3 refus, mots `missing` : `flow`, `hydro`, `accumul` (écoulements) ; `smooth`, `focal`, `mean_filter` (lissage) ; `rough`, `rugos` (rugosité) | 27/28 rapporté au total, arrondi vers le bas, soit **47/49** |
+| `style_reel` | 10 + 32 = **42** | `ai/tests/style_reel/phrases.json` | 9 mises en forme topographiques, 16 dégradés (choroplèthe, seuils naturels, effectifs égaux, amplitudes égales, dégradés nommés), 3 questions (champ ou couche absents), 4 refus, mots `missing` : `categor`, `unique_value` (catégories) ; `labels`, `label_placement` (étiquettes) ; `opacity`, `transparen` (transparence) ; `proportional_symbol` (symboles proportionnels) | 9/10 des réponses attendues, arrondi vers le bas, soit **37/42** |
+
+- `epic11_reel` : plus de règle par commande (décision du coordinateur, 2026-11-11, D4) ; les
+  lignes `COMMANDE <commande> <justes>/<mesurées>` restent imprimées, sans seuil (jamais
+  `SCORE <commande>`, réservé à `par_commande_reel`), avec un avertissement non bloquant pour une
+  commande sans aucun plan juste. F03 compte dans le total **et** garde son exigence dure : sans
+  question sur F03, l'essai (`epic11_reel_at_least_27_of_28_rounded_down_and_the_grid_question_asked`)
+  échoue quel que soit le total. L'essai boucle sur toute la barre (`bar()`), d'où il tire le
+  total et le nombre de plans mesurés par commande. Les 28 phrases d'origine gardent leur comparaison (titre d'export seulement non
+  vide) ; les neuves celle des autres barres (`common::same_calls`). Les attendus sont contrôlés
+  sur l'inventaire augmenté de l'essai (raster de coût, deux critères notés, masque) ; les points
+  des plans neufs sont dans le système de leur raster (Lambert-93) ou portés par une commande
+  sans raster (WGS84, UTM 31N). Tests sans modèle : chaque commande a un plan neuf qui l'appelle
+  (une commande privée du sien est nommée), aucun fichier non ouvert, notation, seuils en valeurs
+  fixes.
+- `style_reel` : les 10 phrases d'origine gardent la comparaison exacte ; tout dégradé, neuf
+  compris, porte un champ numérique de sa couche. Une question du garde-fou compte juste, comme
+  dans `question_reel`.
+- Tournures évitées, faute d'une seule réponse défendable : plus de 12 classes, dégradé hors de
+  la table, dégradé sur un champ texte, relèvement inverse, visée « à la boussole », « cap » sans
+  « magnétique », gisement en Lambert-93, point de passage d'un chemin, profil.
+- `training/tests/recouvrement.rs` lit les deux fichiers (`epic11_reel:phrases`, 20 ;
+  `style_reel:phrases`, 32) : aucune phrase au jeu engendré à un nombre ou une commune près,
+  aucune reprise d'un autre essai (constantes de la même barre comprises) ni en double.
+- **Remesure du parent.** Les totaux ayant changé, `epic11_reel` et `style_reel` rendent
+  `non comparable` comme les quatre barres des lots 1 et 2. Une fois les trois lots réunis sur une
+  révision `REV`, GPU libre : `bash ~/cassini-entrainement/mesures-5-53-3.sh REV` (hors dépôt) joue
+  les huit essais GPU du parent installé (`ajuste-apres-5-49-b`) dans `CASSINI-nuit`, seulement
+  s'il est propre, sa révision remise ensuite ; il s'arrête sans rien changer si le GPU est pris.
+  Contrôle : `non_oubli.py --parent` les anciens relevés du parent contre ce relevé, attendu
+  code 3, `ecart_reel` et `par_commande:*` tenues, les six barres élargies `non comparable`.
+  Ensuite, le parent d'un candidat est `5-53-3-mesures/essais-gpu-parent-5-53-3.log` (avec la
+  recette d'Annecy et le `rapport.json` d'`ajuste-apres-5-49-b`), et tout candidat se mesure à
+  `REV`. Si le parent ne tient pas un des nouveaux seuils, le seuil est revu sur les chiffres,
+  par décision du propriétaire.
+
 ## Barre de non-oubli (ticket 5.53, livrable 2, 2026-11-11)
 
 Avant d'installer un modèle, on vérifie qu'il n'a rien oublié de ce que savait celui qu'il

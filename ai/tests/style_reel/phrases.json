@@ -1,0 +1,488 @@
+[
+  {
+    "id": "SR01",
+    "phrase": "Carte choroplèthe des communes selon la population.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.graduated_style",
+          "params": {
+            "layer_id": "communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946",
+            "field": "population"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "SR02",
+    "phrase": "Classe les parcelles par surface en seuils naturels.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.graduated_style",
+          "params": {
+            "layer_id": "parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3",
+            "field": "surface_m2",
+            "method": "jenks"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "SR03",
+    "phrase": "Dégradé du jaune au rouge sur les routes d'après la vitesse limite.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.graduated_style",
+          "params": {
+            "layer_id": "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67",
+            "field": "vitesse_kmh",
+            "ramp": "yellow_red"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "SR04",
+    "phrase": "Représente la hauteur des bâtiments en 5 classes d'effectifs égaux.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.graduated_style",
+          "params": {
+            "layer_id": "batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649",
+            "field": "hauteur_m",
+            "class_count": 5,
+            "method": "quantile"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "SR05",
+    "phrase": "Nombre d'étages des bâtiments en amplitudes égales, dégradé de gris.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.graduated_style",
+          "params": {
+            "layer_id": "batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649",
+            "field": "nb_etages",
+            "method": "equal_interval",
+            "ramp": "greys"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "SR06",
+    "phrase": "Population des communes en dégradé divergent rouge-bleu, 7 classes.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.graduated_style",
+          "params": {
+            "layer_id": "communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946",
+            "field": "population",
+            "class_count": 7,
+            "ramp": "red_blue"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "SR07",
+    "phrase": "Teinte les parcelles selon leur superficie, du vert clair au vert foncé.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.graduated_style",
+          "params": {
+            "layer_id": "parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3",
+            "field": "surface_m2",
+            "ramp": "greens"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "SR08",
+    "phrase": "Mets les routes en dégradé de rouges selon leur vitesse, en 3 classes.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.graduated_style",
+          "params": {
+            "layer_id": "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67",
+            "field": "vitesse_kmh",
+            "class_count": 3,
+            "ramp": "reds"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "SR09",
+    "phrase": "Hauteur des bâtiments par quantiles, en bleus.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.graduated_style",
+          "params": {
+            "layer_id": "batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649",
+            "field": "hauteur_m",
+            "method": "quantile",
+            "ramp": "blues"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "SR10",
+    "phrase": "Symbolise les bâtiments par leur hauteur en mètres.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.graduated_style",
+          "params": {
+            "layer_id": "batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649",
+            "field": "hauteur_m"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "SR11",
+    "phrase": "Fais une analyse thématique des parcelles par surface en 8 classes de Jenks.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.graduated_style",
+          "params": {
+            "layer_id": "parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3",
+            "field": "surface_m2",
+            "class_count": 8,
+            "method": "jenks"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "SR12",
+    "phrase": "Gradue la couleur des parcelles selon leur surface, du jaune au rouge, à intervalles réguliers.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.graduated_style",
+          "params": {
+            "layer_id": "parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3",
+            "field": "surface_m2",
+            "method": "equal_interval",
+            "ramp": "yellow_red"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "SR13",
+    "phrase": "Colorie les bâtiments selon leur nombre de niveaux, en violets, avec 4 classes.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.graduated_style",
+          "params": {
+            "layer_id": "batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649",
+            "field": "nb_etages",
+            "class_count": 4,
+            "ramp": "purples"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "SR14",
+    "phrase": "Dégradé de gris sur les parcelles en fonction de leur surface.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.graduated_style",
+          "params": {
+            "layer_id": "parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3",
+            "field": "surface_m2",
+            "ramp": "greys"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "SR15",
+    "phrase": "La vitesse maximale des routes en seuils naturels de Jenks, 5 classes, en bleus.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.graduated_style",
+          "params": {
+            "layer_id": "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67",
+            "field": "vitesse_kmh",
+            "class_count": 5,
+            "method": "jenks",
+            "ramp": "blues"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "SR16",
+    "phrase": "Symbologie graduée des routes selon la limitation de vitesse, en 6 classes de Jenks.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.graduated_style",
+          "params": {
+            "layer_id": "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67",
+            "field": "vitesse_kmh",
+            "class_count": 6,
+            "method": "jenks"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "SR17",
+    "phrase": "Applique la charte graphique IGN à l'ensemble du projet.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.topographic_style",
+          "params": {}
+        }
+      ]
+    }
+  },
+  {
+    "id": "SR18",
+    "phrase": "Symbolisation conventionnelle de carte topographique pour toutes les couches.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.topographic_style",
+          "params": {}
+        }
+      ]
+    }
+  },
+  {
+    "id": "SR19",
+    "phrase": "Habille toute la carte avec les teintes topographiques officielles.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.topographic_style",
+          "params": {}
+        }
+      ]
+    }
+  },
+  {
+    "id": "SR20",
+    "phrase": "Donne aux bâtiments le style d'une carte topographique, rien d'autre.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.topographic_style",
+          "params": {
+            "layers": [
+              "batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649"
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "SR21",
+    "phrase": "Habille les communes, puis les routes, en sémiologie topographique.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.topographic_style",
+          "params": {
+            "layers": [
+              "communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946",
+              "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67"
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "SR22",
+    "phrase": "Couleurs topographiques officielles sur les parcelles et le zonage du PLU uniquement.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.topographic_style",
+          "params": {
+            "layers": [
+              "parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3",
+              "plu_zonage_a81d5c06_2e9f_4a37_b6c4_5f13e07d92a8"
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "SR23",
+    "phrase": "Seules les gares prennent la symbolisation de la carte topo.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.topographic_style",
+          "params": {
+            "layers": [
+              "gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1"
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "SR24",
+    "phrase": "Applique le style topographique aux routes, aux bâtiments et aux gares.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.topographic_style",
+          "params": {
+            "layers": [
+              "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67",
+              "batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649",
+              "gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1"
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "SR25",
+    "phrase": "Applique la symbologie topographique officielle à chacune des couches.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "map.topographic_style",
+          "params": {}
+        }
+      ]
+    }
+  },
+  {
+    "id": "SR26",
+    "phrase": "Colore les parcelles selon leur prix au mètre carré.",
+    "expected": {
+      "kind": "question"
+    }
+  },
+  {
+    "id": "SR27",
+    "phrase": "Fais un dégradé des communes selon leur taux de chômage.",
+    "expected": {
+      "kind": "question"
+    }
+  },
+  {
+    "id": "SR28",
+    "phrase": "Mets la couche des forêts en style topographique.",
+    "expected": {
+      "kind": "question"
+    }
+  },
+  {
+    "id": "SR29",
+    "phrase": "Colore les bâtiments par usage, une couleur par catégorie.",
+    "expected": {
+      "kind": "refusal",
+      "missing": [
+        "categor",
+        "unique_value"
+      ]
+    }
+  },
+  {
+    "id": "SR30",
+    "phrase": "Affiche le nom de chaque gare en étiquette sur la carte.",
+    "expected": {
+      "kind": "refusal",
+      "missing": [
+        "labels",
+        "label_placement"
+      ]
+    }
+  },
+  {
+    "id": "SR31",
+    "phrase": "Rends la couche des parcelles transparente à 50 %.",
+    "expected": {
+      "kind": "refusal",
+      "missing": [
+        "opacity",
+        "transparen"
+      ]
+    }
+  },
+  {
+    "id": "SR32",
+    "phrase": "Représente la population des communes par des cercles proportionnels.",
+    "expected": {
+      "kind": "refusal",
+      "missing": [
+        "proportional_symbol"
+      ]
+    }
+  }
+]
