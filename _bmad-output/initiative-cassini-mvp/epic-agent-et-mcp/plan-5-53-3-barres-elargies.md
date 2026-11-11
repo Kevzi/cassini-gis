@@ -177,3 +177,5 @@ Verdicts : high 0, medium 7, low 14, false 0, maybe-false 0. Corrigés 12 (patch
 | Synonymes manqués par le mot-clé `missing` | low | reject | limite écrite dans la doc |
 | QR35 rougira à l'arrivée de `terrain.watershed` | low | reject | comportement voulu |
 | Validation du propriétaire | — | propriétaire | phrases de terrain approuvées le 2026-11-11 (« ok pour les deux ») |
+
+Intégration (2026-11-11) : réunies avec le livrable 4, PL14 et PL19 étaient produites par le nouveau générateur (« Repère les points culminants du terrain », « Convertis le point … en MGRS ») ; tournures très courantes, gardées au générateur ; les deux phrases de barre, jamais encore mesurées, sont reformulées (même demande, même attendu).
