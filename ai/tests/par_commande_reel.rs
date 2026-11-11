@@ -19,7 +19,6 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use cassini_ai::plan::{compose_plan_with, model_files_generator, AgentError};
 use cassini_core::plan::{Plan, QuestionSource};
-use cassini_core::point::guard_coordinates;
 use cassini_core::registry::Registry;
 use serde_json::{json, Value};
 
@@ -32,7 +31,7 @@ const MIN_PHRASES: usize = 3;
 const MIN_PLANS: usize = 2;
 
 fn phrases() -> Vec<Value> {
-    serde_json::from_str(PHRASES).expect("par_commande/phrases.json illisible")
+    common::read_phrases(PHRASES, "par_commande/phrases.json")
 }
 
 fn inventory() -> Value {
@@ -50,9 +49,7 @@ fn offered(registry: &Registry) -> Vec<String> {
 }
 
 fn expected_calls(phrase: &Value) -> Option<&Vec<Value>> {
-    (phrase["expected"]["kind"] == "calls")
-        .then(|| phrase["expected"]["calls"].as_array())
-        .flatten()
+    common::expected_calls(phrase)
 }
 
 /// Les commandes offertes qui n'ont pas leurs phrases : moins de `MIN_PHRASES` phrases, ou
@@ -75,161 +72,18 @@ fn uncovered(offered: &[String], phrases: &[Value]) -> Vec<String> {
         .collect()
 }
 
-/// Le plan attendu d'une phrase, prêt pour `check_plan` : un export sans titre en reçoit un
-/// (le titre est libre et retiré à la comparaison).
-fn expected_plan(calls: &[Value]) -> Plan {
-    let mut calls = calls.to_vec();
-    for call in &mut calls {
-        if call["command"] == "layout.export_pdf" && call["params"].get("title").is_none() {
-            call["params"]["title"] = json!("Carte");
-        }
-    }
-    serde_json::from_value(json!({"kind": "calls", "calls": calls})).unwrap()
-}
-
-/// Ce que l'inventaire du jeu connaît : les couches (`layer_id`) et leurs champs, les rasters
-/// (`source`) et les fichiers non chargés (`unloaded_files`).
-struct Known {
-    fields: BTreeMap<String, BTreeSet<String>>,
-    rasters: BTreeSet<String>,
-    unloaded: BTreeSet<String>,
-}
-
-fn known(inventory: &Value) -> Known {
-    let mut fields = BTreeMap::new();
-    let mut rasters = BTreeSet::new();
-    for layer in inventory["layers"].as_array().unwrap() {
-        let names = layer["fields"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|f| f["name"].as_str().map(str::to_string))
-            .collect();
-        fields.insert(layer["layer_id"].as_str().unwrap().to_string(), names);
-        if layer["kind"] == "raster" {
-            rasters.insert(layer["source"].as_str().unwrap().to_string());
-        }
-    }
-    let unloaded = inventory["unloaded_files"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|f| f["path"].as_str().map(str::to_string))
-        .collect();
-    Known {
-        fields,
-        rasters,
-        unloaded,
-    }
-}
-
-/// Les identifiants de couche et les chemins de raster que nomme un appel.
-fn references(call: &Value) -> (Vec<String>, Vec<String>) {
-    let params = &call["params"];
-    let text = |v: &Value| v.as_str().map(str::to_string);
-    let mut layers: Vec<String> = ["layer_id", "overlay_layer_id", "points_layer_id"]
-        .iter()
-        .filter_map(|k| text(&params[*k]))
-        .collect();
-    for key in ["leave_out", "layers"] {
-        layers.extend(
-            params[key]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(text),
-        );
-    }
-    let mut rasters: Vec<String> = ["dem", "cost", "raster"]
-        .iter()
-        .filter_map(|k| text(&params[*k]))
-        .collect();
-    for criterion in params["criteria"].as_array().into_iter().flatten() {
-        rasters.extend(text(&criterion["raster"]));
-    }
-    rasters.extend(
-        params["exclusions"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(text),
-    );
-    (layers, rasters)
-}
-
-/// Les phrases dont l'attendu est invalide, avec la raison.
+/// Les phrases dont l'attendu est invalide, avec la raison : les contrôles communs à toutes
+/// les barres (`common::invalid`), plus un plan attendu qui n'appelle pas sa commande.
 fn invalid(registry: &Registry, inventory: &Value, phrases: &[Value]) -> Vec<String> {
-    let known = known(inventory);
-    let mut out = Vec::new();
+    let mut out = common::invalid(registry, inventory, phrases);
     for p in phrases {
         let id = p["id"].as_str().unwrap_or("?");
-        let text = p["phrase"].as_str().unwrap_or_default();
-        match p["expected"]["kind"].as_str() {
-            Some("question" | "refusal") => continue,
-            Some("calls") => {}
-            other => {
-                out.push(format!("{id} : sorte attendue inconnue {other:?}"));
-                continue;
-            }
-        }
-        let Some(calls) = expected_calls(p) else {
-            out.push(format!("{id} : plan attendu sans appels"));
-            continue;
-        };
-        if !calls.iter().any(|c| c["command"] == p["command"]) {
-            out.push(format!(
-                "{id} : le plan attendu n'appelle pas {}",
-                p["command"]
-            ));
-        }
-        let plan = expected_plan(calls);
-        if let Err(e) = registry.check_plan(&plan) {
-            out.push(format!("{id} : check_plan refuse ({e:?})"));
-            continue;
-        }
-        if guard_coordinates(registry, plan.clone(), text) != plan {
-            out.push(format!(
-                "{id} : le garde-fou des coordonnées refuse le plan attendu"
-            ));
-        }
-        if common::complete_with(registry, plan.clone(), inventory) != plan {
-            out.push(format!(
-                "{id} : la complétion ajoute une conversion au plan attendu"
-            ));
-        }
-        for call in calls {
-            let (named_layers, named_rasters) = references(call);
-            for layer in named_layers.iter().filter(|l| !l.starts_with("step:")) {
-                if !known.fields.contains_key(layer) {
-                    out.push(format!("{id} : couche absente de l'inventaire {layer}"));
-                }
-            }
-            for raster in named_rasters.iter().filter(|r| !r.starts_with("step:")) {
-                if !known.rasters.contains(raster) {
-                    out.push(format!("{id} : raster absent de l'inventaire {raster}"));
-                }
-            }
-            // Un champ nommé doit exister dans la couche qu'il désigne directement.
-            let params = &call["params"];
-            if let Some(own) = params["layer_id"]
-                .as_str()
-                .and_then(|l| known.fields.get(l))
-            {
-                for key in ["field", "label_field"] {
-                    if let Some(field) = params[key].as_str() {
-                        if !own.contains(field) {
-                            out.push(format!("{id} : champ absent de la couche {field}"));
-                        }
-                    }
-                }
-            }
-            if call["command"] == "layer.add" {
-                let path = params["path"].as_str().unwrap_or_default();
-                if !known.unloaded.contains(path) {
-                    out.push(format!(
-                        "{id} : fichier absent des fichiers non chargés {path}"
-                    ));
-                }
+        if let Some(calls) = expected_calls(p) {
+            if !calls.iter().any(|c| c["command"] == p["command"]) {
+                out.push(format!(
+                    "{id} : le plan attendu n'appelle pas {}",
+                    p["command"]
+                ));
             }
         }
     }
@@ -341,38 +195,6 @@ fn an_invalid_expected_answer_is_named() {
     }
 }
 
-/// Un nombre entier écrit en flottant (`2.0`) vaut l'entier (`2`) : serde_json les distingue.
-fn normalize_numbers(value: Value) -> Value {
-    match value {
-        Value::Number(n) => match n.as_f64() {
-            Some(f) if n.is_f64() && f.fract() == 0.0 && f.abs() < 9.0e15 => Value::from(f as i64),
-            _ => Value::Number(n),
-        },
-        Value::Array(items) => Value::Array(items.into_iter().map(normalize_numbers).collect()),
-        Value::Object(map) => Value::Object(
-            map.into_iter()
-                .map(|(k, v)| (k, normalize_numbers(v)))
-                .collect(),
-        ),
-        other => other,
-    }
-}
-
-/// Le plan obtenu, prêt à comparer : `None` si un export n'a pas de titre non vide, sinon les
-/// appels avec le titre de chaque export retiré.
-fn comparable(mut calls: Value) -> Option<Value> {
-    for call in calls.as_array_mut()? {
-        if call["command"] == "layout.export_pdf" {
-            let params = call.get_mut("params")?.as_object_mut()?;
-            let title = params.remove("title")?;
-            if title.as_str().is_none_or(|t| t.trim().is_empty()) {
-                return None;
-            }
-        }
-    }
-    Some(calls)
-}
-
 #[test]
 #[ignore = "charge le vrai modèle ; lancer avec CASSINI_TEST_MODEL et --ignored"]
 fn par_commande_reel_scores_every_offered_command() {
@@ -408,10 +230,7 @@ fn par_commande_reel_scores_every_offered_command() {
         );
         let want = &p["expected"];
         let ok = match (want["kind"].as_str(), &got) {
-            (Some("calls"), Ok(Plan::Calls { calls })) => {
-                comparable(serde_json::to_value(calls).unwrap()).map(normalize_numbers)
-                    == Some(normalize_numbers(want["calls"].clone()))
-            }
+            (Some("calls"), Ok(Plan::Calls { calls })) => common::same_calls(calls, &want["calls"]),
             // Une question du garde-fou des coordonnées répond à autre chose que la phrase.
             (
                 Some("question"),

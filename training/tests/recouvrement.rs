@@ -5,7 +5,9 @@
 //! `terrain_reel`, depuis 11.16, `epic11_reel` et, depuis 11.23, `style_reel` et les points d'un
 //! autre système de `epic11_reel` et, depuis 5.45, les 20 phrases de la recette QGIS d'Annecy
 //! (`qgis-plugin/tests/recette/annecy.json`), puis depuis 5.53 la barre par commande
-//! (`ai/tests/par_commande/phrases.json`). Les familles visent leur sorte de demande
+//! (`ai/tests/par_commande/phrases.json`) et les phrases neuves de `plan_reel` et de
+//! `question_reel` (`ai/tests/plan_reel/phrases.json`, `ai/tests/question_reel/phrases.json`,
+//! livrable 3, lot 1). Les familles visent leur sorte de demande
 //! avec d'autres tournures ; elles ne les recopient jamais. Deux comparaisons, sur le texte normalisé
 //! (minuscules, sans accents ni ponctuation) : à l'identique, puis à un nombre ou une commune
 //! près (chiffres masqués, noms de communes remplacés par un même repère, des deux côtés).
@@ -34,6 +36,17 @@ const STYLE_REEL: &str = include_str!("../../ai/tests/style_reel.rs");
 const RECETTE_ANNECY: &str = include_str!("../../qgis-plugin/tests/recette/annecy.json");
 /// Les phrases de la barre par commande (5.53), écrites à la main : `{id, command, phrase, …}`.
 const PAR_COMMANDE: &str = include_str!("../../ai/tests/par_commande/phrases.json");
+/// Les phrases neuves de `plan_reel` (5.53, livrable 3), écrites à la main : `{id, phrase, …}`.
+const PLAN_REEL_PHRASES: &str = include_str!("../../ai/tests/plan_reel/phrases.json");
+/// Les phrases neuves de `question_reel` (5.53, livrable 3), écrites à la main.
+const QUESTION_REEL_PHRASES: &str = include_str!("../../ai/tests/question_reel/phrases.json");
+
+/// Les fichiers `phrases.json` écrits à la main pour 5.53, chacun avec son nom et son compte.
+const HAND_WRITTEN: [(&str, &str, usize); 3] = [
+    ("par_commande", PAR_COMMANDE, 99),
+    ("plan_reel", PLAN_REEL_PHRASES, 23),
+    ("question_reel", QUESTION_REEL_PHRASES, 35),
+];
 
 /// Texte normalisé, chiffres masqués et communes remplacées par un même repère.
 fn masked(text: &str) -> String {
@@ -83,7 +96,7 @@ fn from_json(text: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Les phrases `{id, phrase}` de la barre par commande.
+/// Les phrases `{id, phrase}` d'un `phrases.json` écrit à la main (5.53).
 fn from_phrases(text: &str) -> Vec<(String, String)> {
     let phrases: Vec<Value> = serde_json::from_str(text).expect("phrases.json lisible");
     phrases
@@ -145,38 +158,52 @@ fn pairs(source: &str, start: &str) -> Vec<(String, String)> {
 
 /// Les phrases des essais réels de `ai/tests/` : `plan_reel`, `question_reel`, `duree_reel`,
 /// `echelle_utm_reel`, `terrain_reel`, `epic11_reel`, `style_reel`, la recette QGIS d'Annecy et,
-/// depuis 5.53, la barre par commande.
+/// depuis 5.53, la barre par commande puis les phrases neuves de `plan_reel` et de
+/// `question_reel`.
 fn real_trials() -> Vec<(String, String)> {
-    let mut all = from_json(PLAN_REEL);
+    real_trials_by_source()
+        .into_iter()
+        .flat_map(|(_, s)| s)
+        .collect()
+}
+
+/// Les phrases des essais réels, groupées par source (fichier ou constante qui les porte).
+fn real_trials_by_source() -> Vec<(&'static str, Vec<(String, String)>)> {
+    let mut all = vec![("plan_reel:epreuve", from_json(PLAN_REEL))];
     let questions = pairs(QUESTION_REEL, "const AMBIGUOUS");
     assert_eq!(questions.len(), 12, "{questions:?}");
-    all.extend(questions);
+    all.push(("question_reel:ambiguous", questions));
     let scenario = pairs(DUREE_REEL, "const SCENARIO");
     assert_eq!(scenario.len(), 8, "{scenario:?}");
-    all.extend(scenario);
-    all.extend(pairs(DUREE_REEL, "const WARMUP"));
+    all.push(("duree_reel:scenario", scenario));
+    all.push(("duree_reel:warmup", pairs(DUREE_REEL, "const WARMUP")));
     let scale_utm = pairs(ECHELLE_UTM_REEL, "const SENTENCES");
     assert_eq!(scale_utm.len(), 8, "{scale_utm:?}");
-    all.extend(scale_utm);
+    all.push(("echelle_utm_reel", scale_utm));
     let terrain = pairs(TERRAIN_REEL, "const SENTENCES");
     assert_eq!(terrain.len(), 8, "{terrain:?}");
-    all.extend(terrain);
+    all.push(("terrain_reel", terrain));
     let epic11 = pairs(EPIC11_REEL, "const SENTENCES");
     assert_eq!(epic11.len(), 28, "{epic11:?}");
-    all.extend(epic11);
-    all.extend(pairs(EPIC11_REEL, "const GRID_QUESTION"));
+    all.push(("epic11_reel", epic11));
+    all.push((
+        "epic11_reel:grid_question",
+        pairs(EPIC11_REEL, "const GRID_QUESTION"),
+    ));
     let foreign = pairs(EPIC11_REEL, "const FOREIGN_POINTS");
     assert_eq!(foreign.len(), 4, "{foreign:?}");
-    all.extend(foreign);
+    all.push(("epic11_reel:foreign_points", foreign));
     let style = pairs(STYLE_REEL, "const SENTENCES");
     assert_eq!(style.len(), 10, "{style:?}");
-    all.extend(style);
+    all.push(("style_reel", style));
     let annecy = from_json(RECETTE_ANNECY);
     assert_eq!(annecy.len(), 20, "{annecy:?}");
-    all.extend(annecy);
-    let par_commande = from_phrases(PAR_COMMANDE);
-    assert_eq!(par_commande.len(), 99, "{par_commande:?}");
-    all.extend(par_commande);
+    all.push(("recette:annecy", annecy));
+    for (name, text, count) in HAND_WRITTEN {
+        let phrases = from_phrases(text);
+        assert_eq!(phrases.len(), count, "{name} : {phrases:?}");
+        all.push((name, phrases));
+    }
     all
 }
 
@@ -222,27 +249,31 @@ fn no_sentence_of_the_real_trials_appears_in_the_generated_set() {
     );
 }
 
-/// La barre par commande (5.53) est écrite à neuf : aucune de ses phrases ne reprend, à un
-/// nombre ou une commune près, une phrase d'un autre essai réel.
+/// Les phrases écrites à la main pour 5.53 (barre par commande, phrases neuves de `plan_reel`
+/// et de `question_reel`) sont écrites à neuf : aucune ne reprend, à un nombre ou une commune
+/// près, une phrase d'une autre source d'essai réel, ni une autre phrase de son propre fichier.
 #[test]
-fn no_sentence_of_the_per_command_bar_copies_another_real_trial() {
-    let mine: HashSet<String> = from_phrases(PAR_COMMANDE)
-        .iter()
-        .map(|(id, _)| id.clone())
-        .collect();
-    let others: HashSet<String> = real_trials()
-        .into_iter()
-        .filter(|(id, _)| !mine.contains(id))
-        .map(|(_, text)| masked(&text))
-        .collect();
-    let copies: Vec<String> = from_phrases(PAR_COMMANDE)
-        .into_iter()
-        .filter(|(_, text)| others.contains(&masked(text)))
-        .map(|(id, _)| id)
-        .collect();
+fn no_hand_written_sentence_copies_another_real_trial() {
+    let sources = real_trials_by_source();
+    let mut copies = Vec::new();
+    for (name, _, _) in HAND_WRITTEN {
+        let (_, mine) = sources.iter().find(|(n, _)| *n == name).unwrap();
+        let others: HashSet<String> = sources
+            .iter()
+            .filter(|(n, _)| *n != name)
+            .flat_map(|(_, s)| s.iter().map(|(_, text)| masked(text)))
+            .collect();
+        let mut own = HashSet::new();
+        for (id, text) in mine {
+            let key = masked(text);
+            if others.contains(&key) || !own.insert(key) {
+                copies.push(format!("{name}:{id}"));
+            }
+        }
+    }
     assert!(
         copies.is_empty(),
-        "phrases de la barre par commande reprises d'un autre essai : {}",
+        "phrases écrites à la main reprises d'un autre essai ou en double : {}",
         copies.join(", ")
     );
 }
@@ -252,7 +283,17 @@ fn the_real_trials_are_read_whole() {
     let all = real_trials();
     assert_eq!(
         all.len(),
-        25 + 12 + 8 + 1 + 8 + 8 + 28 + 1 + 4 + 10 + 20 + 99
+        25 + 12
+            + 8
+            + 1
+            + 8
+            + 8
+            + 28
+            + 1
+            + 4
+            + 10
+            + 20
+            + HAND_WRITTEN.iter().map(|(_, _, n)| n).sum::<usize>()
     );
     let find = |id: &str| all.iter().find(|(i, _)| i == id).unwrap().1.clone();
     assert_eq!(
@@ -278,6 +319,11 @@ fn the_real_trials_are_read_whole() {
     assert_eq!(find("ST10"), "Colore les gares selon leur fréquentation.");
     assert_eq!(find("RA09"), "Fais un tampon autour des routes.");
     assert_eq!(find("PK1"), "Où sont les sommets du MNT ?");
+    assert_eq!(
+        find("PL23"),
+        "Trace les courbes de niveau du MNT tous les 5 m."
+    );
+    assert_eq!(find("QR35"), "Délimite le bassin versant à partir du MNT.");
 }
 
 #[test]

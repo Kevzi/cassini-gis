@@ -27,10 +27,22 @@
 //! `tests/epreuve-modele-local/` reste gelé : son `sentences.json` et son banc Python (étape 2)
 //! gardent S25 en refus ; seul cet essai porte l'attendu du registre réel.
 //!
-//! Une question rendue sur une phrase claire est un échec, et il en faut au plus deux sur les 25 :
-//! concession du propriétaire (2026-10-17) pour un GGUF seul au long prompt. Un modèle au prompt
-//! court (le modèle ajusté du ticket 5.10, déclaré par `*.modele.json`) tient le plafond strict :
-//! au plus une, avec au moins 9 questions sur 12 phrases ambiguës (`question_reel`).
+//! Depuis 5.53 (livrable 3, lot 1), la barre est élargie en place : aux 25 phrases de l'épreuve
+//! s'ajoutent 23 phrases neuves écrites à la main (`plan_reel/phrases.json`, schéma de
+//! `par_commande/phrases.json` sans `command`), soit 48, dont 4 refus neufs qui nomment dans
+//! `missing` ce que le registre n'a pas (un mot-clé cherché dans ses identifiants, jamais un
+//! synonyme ; les 5 refus de l'épreuve le portent aussi, `refusal_of`) : le jour où un identifiant du registre contient un de ces
+//! mots, le refus devient faux et le test sans modèle nomme la phrase. Les attendus passent tous
+//! les contrôles communs (`common::invalid`). Un seul `SCORE`, sur le total. Les 25 phrases de
+//! l'épreuve gardent la comparaison exacte (titre d'export compris) ; les neuves celle de la barre
+//! par commande (titre libre, entiers écrits en flottant ramenés à l'entier). Le jeu
+//! d'entraînement ne voit aucune de ces phrases : `training/tests/recouvrement.rs` les garde.
+//!
+//! Une question rendue sur une phrase claire est un échec. Seuils (décision du propriétaire,
+//! 2026-11-11, D4), proportionnels aux décisions passées et arrondis vers le bas sur le total :
+//! au moins 80 % de plans conformes, arrondi vers le bas (20/25 hier, soit 38/48 aujourd'hui) ; au plus 2/25 fausses questions pour un
+//! GGUF seul au long prompt (concession du 2026-10-17 : 3/48), 1/25 pour un modèle au prompt
+//! court (le modèle ajusté du ticket 5.10, déclaré par `*.modele.json`, plafond strict : 1/48).
 
 mod common;
 
@@ -145,6 +157,66 @@ fn expected(id: &str) -> Want {
     Want::Plan(plan)
 }
 
+/// Les phrases neuves de la barre (5.53, livrable 3), écrites à la main.
+const PHRASES: &str = include_str!("plan_reel/phrases.json");
+
+/// Les phrases de l'épreuve, dans la forme des `phrases.json` : `{id, phrase, expected}`, l'attendu
+/// réécrit pour le registre réel par `expected`. `exact` : le titre d'un export compte (règle
+/// d'avant 5.53, gardée pour ces 25 phrases).
+fn epreuve() -> Vec<Value> {
+    let sentences: Vec<Value> = serde_json::from_str(SENTENCES).unwrap();
+    sentences
+        .iter()
+        .map(|s| {
+            let id = s["id"].as_str().unwrap();
+            let expected = match expected(id) {
+                Want::Plan(calls) => json!({"kind": "calls", "calls": calls}),
+                Want::Refusal => refusal_of(id),
+            };
+            json!({"id": id, "phrase": s["text"], "expected": expected, "exact": true})
+        })
+        .collect()
+}
+
+/// L'attendu d'un refus de l'épreuve, avec ce que le registre n'a pas (écrit ici, l'épreuve
+/// restant gelée) : le cadrage de la carte (S10), les statistiques d'un raster par polygone,
+/// identifiant réservé `raster.zonal_statistics` (S15, S23, S24), les couches nommées d'un
+/// export PDF (S18, option `layers`).
+fn refusal_of(id: &str) -> Value {
+    match id {
+        "S10" => json!({"kind": "refusal", "missing": ["zoom", "frame", "cadr"]}),
+        "S15" | "S23" | "S24" => json!({"kind": "refusal", "missing": ["raster.zonal"]}),
+        "S18" => json!({"kind": "refusal", "missing_params": ["layout.export_pdf:layers"]}),
+        _ => panic!("{id} : refus de l'épreuve sans ce qui manque"),
+    }
+}
+
+/// Les phrases neuves de `plan_reel/phrases.json`.
+fn new_phrases() -> Vec<Value> {
+    common::read_phrases(PHRASES, "plan_reel/phrases.json")
+}
+
+/// Toute la barre : les 25 phrases de l'épreuve, puis les phrases neuves.
+fn all_phrases() -> Vec<Value> {
+    let mut all = epreuve();
+    all.extend(new_phrases());
+    all
+}
+
+/// Le plan rendu vaut-il l'attendu de la phrase : à l'identique pour l'épreuve, titre d'export
+/// libre pour les phrases neuves (`common::same_calls`) ; un refus attendu, un refus rendu.
+fn answers(phrase: &Value, got: &Result<Plan, AgentError>) -> bool {
+    let want = &phrase["expected"];
+    match (want["kind"].as_str(), got) {
+        (Some("calls"), Ok(Plan::Calls { calls })) if phrase["exact"] == true => {
+            serde_json::to_value(calls).unwrap() == want["calls"]
+        }
+        (Some("calls"), Ok(Plan::Calls { calls })) => common::same_calls(calls, &want["calls"]),
+        (Some("refusal"), Err(AgentError::Refused(_))) => true,
+        _ => false,
+    }
+}
+
 #[test]
 #[ignore = "charge le vrai modèle ; lancer avec CASSINI_TEST_MODEL et --ignored"]
 fn plan_reel_at_least_80_percent_of_the_plans_match() {
@@ -157,15 +229,13 @@ fn plan_reel_at_least_80_percent_of_the_plans_match() {
     // Comme dans le produit : identifiants courts montrés, plan retraduit (ticket 5.19), puis
     // complété par les conversions de points (11.22).
     let (_, ids) = common::shown_inventory(&full);
-    let sentences: Vec<Value> = serde_json::from_str(SENTENCES).unwrap();
     let mut generator = model_files_generator(files);
     let (mut right, mut total, mut questions, mut guarded) = (0, 0, 0, 0);
-    for sentence in &sentences {
+    for phrase in &all_phrases() {
         let (id, text) = (
-            sentence["id"].as_str().unwrap(),
-            sentence["text"].as_str().unwrap(),
+            phrase["id"].as_str().unwrap(),
+            phrase["phrase"].as_str().unwrap(),
         );
-        let want = expected(id);
         total += 1;
         let got = common::completed(
             &registry,
@@ -188,19 +258,14 @@ fn plan_reel_at_least_80_percent_of_the_plans_match() {
                 ..
             })
         );
-        let ok = match (&got, &want) {
-            (Ok(Plan::Calls { calls }), Want::Plan(plan)) => {
-                serde_json::to_value(calls).unwrap() == *plan
-            }
-            (Err(AgentError::Refused(_)), Want::Refusal) => true,
-            _ => false,
-        };
+        let ok = answers(phrase, &got);
         // Score exact, phrase par phrase : jamais filtré.
         eprintln!(
             "{} {id} {text}
-     attendu : {want:?}
+     attendu : {}
      obtenu  : {got:?}",
-            if ok { "OK  " } else { "FAIL" }
+            if ok { "OK  " } else { "FAIL" },
+            phrase["expected"]
         );
         // Aucun plan invalide n'est jamais rendu : tout `Ok` passe `check_plan`.
         if let Ok(plan) = &got {
@@ -215,9 +280,11 @@ fn plan_reel_at_least_80_percent_of_the_plans_match() {
         "SCORE {right}/{total} plans conformes, {questions} fausses questions, dont {guarded} du garde-fou"
     );
     // Les deux seuils sont jugés ensemble : un score sous la barre ne cache pas le plafond.
-    let cap = question_cap(style);
+    let (need, cap) = (plans_needed(total), question_cap(style, total));
     let failures: Vec<String> = [
-        (right * 5 < total * 4).then(|| format!("{right}/{total} : sous le seuil de 80 %")),
+        (right < need).then(|| {
+            format!("{right}/{total} : sous le seuil de 80 % arrondi vers le bas ({need}/{total})")
+        }),
         (questions > cap).then(|| {
             format!("{questions} phrases claires sont devenues des questions (au plus {cap})")
         }),
@@ -228,19 +295,143 @@ fn plan_reel_at_least_80_percent_of_the_plans_match() {
     assert!(failures.is_empty(), "{}", failures.join(" ; "));
 }
 
-/// Plafond de fausses questions sur les 25 phrases claires : la concession du propriétaire
-/// (2026-10-17) pour le long prompt, le plafond strict du ticket 5.10 pour le prompt court.
-fn question_cap(style: PromptStyle) -> usize {
+/// Plans conformes exigés : 80 % du total, arrondi vers le bas (D4).
+fn plans_needed(total: usize) -> usize {
+    common::proportional(total, 4, 5)
+}
+
+/// Plafond de fausses questions sur les phrases claires : la concession du propriétaire
+/// (2026-10-17) pour le long prompt, 2 sur 25, le plafond strict du ticket 5.10 pour le prompt
+/// court, 1 sur 25 ; rapportés au total, arrondis vers le bas (D4).
+fn question_cap(style: PromptStyle, total: usize) -> usize {
     match style {
-        PromptStyle::Full => 2,
-        PromptStyle::Short => 1,
+        PromptStyle::Full => common::proportional(total, 2, 25),
+        PromptStyle::Short => common::proportional(total, 1, 25),
     }
 }
 
 #[test]
 fn the_short_prompt_gets_the_strict_question_cap() {
-    assert_eq!(question_cap(PromptStyle::Short), 1);
-    assert_eq!(question_cap(PromptStyle::Full), 2);
+    // Sur les 25 phrases de l'épreuve : les décisions passées, à l'identique.
+    assert_eq!(question_cap(PromptStyle::Short, 25), 1);
+    assert_eq!(question_cap(PromptStyle::Full, 25), 2);
+    assert_eq!(plans_needed(25), 20);
+    // Sur la barre élargie : la même proportion, arrondie vers le bas.
+    assert_eq!(all_phrases().len(), 48);
+    assert_eq!(plans_needed(48), 38);
+    assert_eq!(question_cap(PromptStyle::Full, 48), 3);
+    assert_eq!(question_cap(PromptStyle::Short, 48), 1);
+    assert_eq!(plans_needed(47), 37);
+    assert_eq!(question_cap(PromptStyle::Full, 47), 3);
+    assert_eq!(question_cap(PromptStyle::Short, 47), 1);
+}
+
+#[test]
+fn the_bar_has_40_to_50_sentences_with_at_least_3_refusals_naming_what_is_missing() {
+    let all = all_phrases();
+    assert!((40..=50).contains(&all.len()), "{} phrases", all.len());
+    let mut ids = std::collections::BTreeSet::new();
+    for p in &all {
+        let id = p["id"].as_str().expect("phrase sans id");
+        assert!(ids.insert(id.to_string()), "id en double : {id}");
+        assert!(
+            p["phrase"].as_str().is_some_and(|t| !t.trim().is_empty()),
+            "{id} : phrase vide"
+        );
+    }
+    let fresh = new_phrases();
+    assert!(
+        (15..=25).contains(&fresh.len()),
+        "{} phrases neuves",
+        fresh.len()
+    );
+    let refusals: Vec<&Value> = fresh
+        .iter()
+        .filter(|p| p["expected"]["kind"] == "refusal")
+        .collect();
+    assert!(refusals.len() >= 3, "{} refus neufs", refusals.len());
+    for p in refusals {
+        assert!(
+            p["expected"]["missing"]
+                .as_array()
+                .is_some_and(|m| !m.is_empty() && m.iter().all(Value::is_string)),
+            "{} : refus sans `missing`",
+            p["id"]
+        );
+    }
+}
+
+#[test]
+fn every_expected_answer_is_valid() {
+    // `check_plan`, garde-fou des coordonnées, complétion sans effet, couches, champs, rasters
+    // et fichiers présents dans l'inventaire de l'épreuve, refus encore justes.
+    let inventory: Value = serde_json::from_str(INVENTORY).unwrap();
+    let errors = common::invalid(&Registry::standard(), &inventory, &all_phrases());
+    assert!(
+        errors.is_empty(),
+        "attendus invalides :\n{}",
+        errors.join("\n")
+    );
+}
+
+#[test]
+fn an_invalid_expected_answer_or_a_wrong_refusal_is_named() {
+    let registry = Registry::standard();
+    let inventory: Value = serde_json::from_str(INVENTORY).unwrap();
+    let mut broken = all_phrases();
+    let f = broken.iter_mut().find(|p| p["id"] == "PL01").unwrap();
+    f["expected"]["calls"][0]["params"]["field"] = json!("superficie");
+    let u = broken.iter_mut().find(|p| p["id"] == "PL15").unwrap();
+    u["expected"]["calls"][0]["params"]["unit"] = json!("radians");
+    // Un refus qui dit absente une commande du registre.
+    let r = broken.iter_mut().find(|p| p["id"] == "PL21").unwrap();
+    r["expected"]["missing"] = json!(["reproject"]);
+    // Un mot vide ou qui n'est pas un mot-clé en minuscules ASCII.
+    let e = broken.iter_mut().find(|p| p["id"] == "PL20").unwrap();
+    e["expected"]["missing"] = json!([""]);
+    let m = broken.iter_mut().find(|p| p["id"] == "PL22").unwrap();
+    m["expected"]["missing"] = json!(["Géocod"]);
+    // Un refus sans ce qui manque, une option que la commande porte.
+    let n = broken.iter_mut().find(|p| p["id"] == "S10").unwrap();
+    n["expected"] = json!({"kind": "refusal"});
+    let o = broken.iter_mut().find(|p| p["id"] == "S18").unwrap();
+    o["expected"]["missing_params"] = json!(["layout.export_pdf:page_size"]);
+    // Une égalité sur une valeur que le champ ne montre pas.
+    let v = broken.iter_mut().find(|p| p["id"] == "PL06").unwrap();
+    v["expected"]["calls"][0]["params"]["value"] = json!("B");
+    let errors = common::invalid(&registry, &inventory, &broken);
+    for (id, reason) in [
+        ("PL01", "champ absent"),
+        ("PL15", "check_plan refuse"),
+        ("PL21", "refus devenu faux"),
+        ("PL20", "mot `missing` invalide"),
+        ("PL22", "mot `missing` invalide"),
+        ("S10", "refus sans `missing`"),
+        ("S18", "refus devenu faux"),
+        ("PL06", "valeur absente"),
+    ] {
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.starts_with(&format!("{id} : {reason}"))),
+            "{id} : {errors:?}"
+        );
+    }
+    // `contains("")` est toujours vrai : le mot vide est refusé, sans autre refus devenu faux.
+    assert_eq!(errors.len(), 8, "{errors:?}");
+}
+
+#[test]
+fn a_refusal_turns_red_when_its_command_reaches_the_registry() {
+    let mut ids = common::registry_ids(&Registry::standard());
+    assert!(common::refusals_now_wrong(&ids, &all_phrases()).is_empty());
+    ids.push("terrain.contour_lines".to_string());
+    let wrong = common::refusals_now_wrong(&ids, &all_phrases());
+    assert_eq!(wrong.len(), 1, "{wrong:?}");
+    assert!(
+        wrong[0].starts_with("PL23 : refus devenu faux"),
+        "{wrong:?}"
+    );
 }
 
 /// Le texte d'une phrase de l'épreuve.
@@ -248,26 +439,6 @@ fn sentence(id: &str) -> String {
     let sentences: Vec<Value> = serde_json::from_str(SENTENCES).unwrap();
     let found = sentences.iter().find(|s| s["id"] == id).unwrap();
     found["text"].as_str().unwrap().to_string()
-}
-
-#[test]
-fn every_expected_plan_is_valid_and_passes_the_coordinate_guard() {
-    let registry = Registry::standard();
-    let sentences: Vec<Value> = serde_json::from_str(SENTENCES).unwrap();
-    for s in &sentences {
-        let id = s["id"].as_str().unwrap();
-        let Want::Plan(calls) = expected(id) else {
-            continue;
-        };
-        let plan: Plan = serde_json::from_value(json!({"kind": "calls", "calls": calls})).unwrap();
-        assert_eq!(registry.check_plan(&plan), Ok(()), "{id}");
-        let text = s["text"].as_str().unwrap();
-        assert_eq!(
-            guard_coordinates(&registry, plan.clone(), text),
-            plan,
-            "{id}"
-        );
-    }
 }
 
 #[test]
@@ -354,21 +525,75 @@ fn s25_written_as_given_is_completed_into_the_expected_plan() {
 }
 
 #[test]
-fn every_expected_plan_is_left_unchanged_by_the_completion() {
-    // Un attendu est un plan complété : la complétion n'y ajoute rien.
-    let registry = Registry::standard();
+fn only_the_sentences_that_open_a_file_name_a_file_that_is_not_open() {
+    // Une phrase qui nomme un fichier non ouvert attend son `layer.add` (S01, PL11) ; aucune
+    // autre ne le nomme.
     let inventory: Value = serde_json::from_str(INVENTORY).unwrap();
-    let sentences: Vec<Value> = serde_json::from_str(SENTENCES).unwrap();
-    for s in &sentences {
-        let id = s["id"].as_str().unwrap();
-        let Want::Plan(calls) = expected(id) else {
-            continue;
-        };
-        let plan: Plan = serde_json::from_value(json!({"kind": "calls", "calls": calls})).unwrap();
-        assert_eq!(
-            common::complete_with(&registry, plan.clone(), &inventory),
-            plan,
-            "{id}"
-        );
-    }
+    let all = all_phrases();
+    let opening: Vec<String> = all
+        .iter()
+        .filter(|p| {
+            common::expected_calls(p)
+                .is_some_and(|calls| calls.iter().any(|c| c["command"] == "layer.add"))
+        })
+        .map(|p| p["id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(common::naming_unloaded_files(&inventory, &all), opening);
+    assert_eq!(opening, ["S01", "PL11"]);
+}
+
+/// Un plan rendu, depuis ses appels.
+fn calls(value: Value) -> Result<Plan, AgentError> {
+    Ok(serde_json::from_value(json!({"kind": "calls", "calls": value})).unwrap())
+}
+
+#[test]
+fn the_score_compares_titles_numbers_and_kinds_as_documented() {
+    let all = all_phrases();
+    let find = |id: &str| all.iter().find(|p| p["id"] == id).unwrap().clone();
+    // L'épreuve : comparaison exacte, titre compris.
+    let s17 = find("S17");
+    let mut right = s17["expected"]["calls"].clone();
+    assert!(answers(&s17, &calls(right.clone())));
+    right[4]["params"]["title"] = json!("Autre titre");
+    assert!(!answers(&s17, &calls(right)));
+    // Une phrase neuve dont l'attendu porte un titre : comparé exactement.
+    let pl16 = find("PL16");
+    let mut titled = pl16["expected"]["calls"].clone();
+    assert!(answers(&pl16, &calls(titled.clone())));
+    titled[0]["params"]["title"] = json!("Routes");
+    assert!(!answers(&pl16, &calls(titled)));
+    // Sans titre attendu : libre, mais non vide ; un entier écrit en flottant vaut l'entier.
+    let free = json!({"id": "X1", "phrase": "Exporte la carte en PDF au 1:25 000.",
+        "expected": {"kind": "calls", "calls": [
+            {"command": "layout.export_pdf", "params": {"scale": 25000}}]}});
+    assert!(answers(
+        &free,
+        &calls(json!([
+        {"command": "layout.export_pdf", "params": {"title": "Ma carte", "scale": 25000.0}}]))
+    ));
+    assert!(!answers(
+        &free,
+        &calls(json!([
+        {"command": "layout.export_pdf", "params": {"title": " ", "scale": 25000}}]))
+    ));
+    let pl06 = find("PL06");
+    let mut floats = pl06["expected"]["calls"].clone();
+    floats[1]["params"]["distance"]["value"] = json!(750.0);
+    assert!(answers(&pl06, &calls(floats)));
+    // Un refus ne compte que contre un refus attendu ; une question n'est jamais juste ici.
+    let refused: Result<Plan, AgentError> = Err(AgentError::Refused("non".into()));
+    let asked: Result<Plan, AgentError> = Ok(Plan::Question {
+        question: "Laquelle ?".into(),
+        source: QuestionSource::Model,
+    });
+    assert!(answers(&find("PL20"), &refused));
+    assert!(answers(&find("S10"), &refused));
+    assert!(!answers(&pl06, &refused));
+    assert!(!answers(&find("PL20"), &asked));
+    assert!(!answers(&pl06, &asked));
+    assert!(!answers(
+        &find("PL20"),
+        &calls(pl06["expected"]["calls"].clone())
+    ));
 }
