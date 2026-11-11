@@ -53,7 +53,7 @@ const EPIC11_REEL_PHRASES: &str = include_str!("../../ai/tests/epic11_reel/phras
 const STYLE_REEL_PHRASES: &str = include_str!("../../ai/tests/style_reel/phrases.json");
 
 /// Les fichiers `phrases.json` écrits à la main pour 5.53, chacun avec son nom et son compte.
-const HAND_WRITTEN: [(&str, &str, usize); 5] = [
+const HAND_WRITTEN: [(&str, &str, usize); 7] = [
     ("par_commande", PAR_COMMANDE, 99),
     ("plan_reel", PLAN_REEL_PHRASES, 23),
     ("question_reel", QUESTION_REEL_PHRASES, 35),
