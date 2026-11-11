@@ -639,3 +639,25 @@ Sur le gros projet, chaque phrase relit la fin de l'index et ses couches détail
 caractères, ≈ 1 800 jetons) : les barres de 60 s (CPU) et 30 s (GPU) tiennent, celle du CPU
 de justesse. La première phrase d'une session reste longue (lecture de l'inventaire par QGIS, déjà
 reportée, puis lecture complète de l'invite).
+
+## Grammaire des paramètres (ticket 5.56, 2026-11-11)
+
+La grammaire du modèle contraint désormais les paramètres de chaque commande offerte, d'après le
+schéma que le catalogue montre au modèle. Construite en ~15 ms (registre standard, 348 règles,
+~26 Ko) ; lue par llama.cpp en 0,7 ms. La ligne `cassini-timings` gagne trois champs, à la fin :
+`grammaire=` (construction, au premier essai seulement, `0` à la redemande), `echantillonneur=`
+(création de l'échantillonneur de grammaire, comptée aussi dans `ecriture=`, `0` sans grammaire)
+et `replis=` (champs retombés sur le JSON libre, `0` attendu ; la liste est écrite une fois sur la
+sortie d'erreur quand elle n'est pas vide).
+
+Limites à connaître :
+
+- La borne de 240 caractères ne règle que la **question** et le **refus**. Un paramètre texte
+  (`value` d'un filtre, `field`, chemins, titres) reste une chaîne JSON sans borne de longueur.
+- L'acceptation de la grammaire par llama.cpp (syntaxe, plafond de répétition) n'est vérifiée que
+  par l'essai ignoré `grammaire_reel` ; à lancer à la main à chaque changement de
+  `ai/src/grammar.rs` ou d'un schéma de commande :
+  `CASSINI_TEST_MODEL=<gguf ou déclaration> cargo test -p cassini-ai --lib -- --ignored --nocapture grammaire_reel`.
+
+Mesures avec le modèle (base `e912a11` contre la branche, GPU) : à faire, après la fin de
+l'entraînement en cours.

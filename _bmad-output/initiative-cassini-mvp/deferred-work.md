@@ -1040,3 +1040,10 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-53-2-barre-de-non-oubli.md`
   summary: Brancher `non_oubli.py` sur les scripts de nuit (hors dépôt) pour qu'un candidat refusé ne soit jamais proposé à l'installation.
   evidence: relecture intent-alignment du 2026-11-11 : l'outil rend un code de sortie, rien ne l'applique encore.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-grammaire-des-parametres-tiree-des-schemas-du-registre-texte-plan.md`
+  summary: Test fragile `an_autonomous_call_while_another_session_holds_the_lock_is_read_only` (cli/tests/mcp.rs) : l'appel qui suit la libération du verrou peut encore voir le journal tenu sous forte charge.
+  evidence: un échec le 2026-11-11 pendant la fusion du modèle et une autre recette ; vert 3/3 seul et à la relance.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-grammaire-des-parametres-tiree-des-schemas-du-registre-texte-plan.md`
+  summary: Vérifier en CI que llama.cpp accepte la grammaire des paramètres (aujourd'hui seul l'essai ignoré `grammaire_reel` le fait).
+  evidence: relecture verification-gap du 2026-11-11 ; il faut un petit vocabulaire GGUF au dépôt ou en cache de CI.

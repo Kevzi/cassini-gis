@@ -336,14 +336,17 @@ fn measured_generator(
         )?;
         if report {
             eprintln!(
-                "cassini-timings chargement={:.2}s lecture={:.2}s jetons={} repris={} ecriture={:.2}s ecrits={} fils={}",
+                "cassini-timings chargement={:.2}s lecture={:.2}s jetons={} repris={} ecriture={:.2}s ecrits={} fils={} grammaire={:.3}s echantillonneur={:.3}s replis={}",
                 t.load.as_secs_f64(),
                 t.prompt.as_secs_f64(),
                 t.prompt_tokens,
                 t.cached_tokens,
                 t.write.as_secs_f64(),
                 t.written_tokens,
-                n
+                n,
+                request.grammar_build.as_secs_f64(),
+                t.sampler.as_secs_f64(),
+                request.grammar_fallbacks
             );
         }
         Ok(completion)

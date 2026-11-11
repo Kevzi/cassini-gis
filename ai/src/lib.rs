@@ -25,6 +25,7 @@ use llama_cpp_2::vocab::LlamaVocab;
 use llama_cpp_2::{LlamaStateSeqFlags, SeqState};
 
 mod devices;
+mod grammar;
 pub mod plan;
 mod threads;
 
@@ -549,6 +550,10 @@ pub struct Timings {
     pub write: Duration,
     /// Nombre de jetons écrits.
     pub written_tokens: usize,
+    /// Création de l'échantillonneur de grammaire (analyse du GBNF par llama.cpp), comptée aussi
+    /// dans `write` (ticket 5.56) : le reste de `write` est le décodage contraint. Nulle sans
+    /// grammaire.
+    pub sampler: Duration,
 }
 
 /// Génération générale : conversation `turns`, sortie contrainte par la
@@ -763,12 +768,18 @@ fn generate_on(
 
     // `sample` fait déjà accepter le jeton choisi par la chaîne : l'accepter une
     // seconde fois ferait avancer la grammaire deux fois.
+    let mut sampler_time = Duration::ZERO;
     let mut sampler = match grammar {
         None => LlamaSampler::greedy(),
-        Some(g) => LlamaSampler::chain_simple([
-            LlamaSampler::grammar(llama, g, "root").map_err(|e| AiError::Grammar(e.to_string()))?,
-            LlamaSampler::greedy(),
-        ]),
+        Some(g) => {
+            let chain = LlamaSampler::chain_simple([
+                LlamaSampler::grammar(llama, g, "root")
+                    .map_err(|e| AiError::Grammar(e.to_string()))?,
+                LlamaSampler::greedy(),
+            ]);
+            sampler_time = write_start.elapsed();
+            chain
+        }
     };
     let mut bytes: Vec<u8> = Vec::new();
     let mut pos = tokens.len() as i32;
@@ -800,6 +811,7 @@ fn generate_on(
         cached_tokens,
         write: write_start.elapsed(),
         written_tokens,
+        sampler: sampler_time,
     };
     Ok((completion, timings))
 }

@@ -16,6 +16,7 @@ use cassini_core::point::{guard_coordinates, guard_rejected};
 use cassini_core::registry::{CommandSpec, Registry};
 use serde_json::{json, Map, Value};
 
+use crate::grammar::{base_rules, ParamsGrammar};
 use crate::{generate_files, AiError, Completion, ModelFiles, Role, Turn};
 
 /// Le prompt que le modèle attend (ticket 5.10, tâche 3).
@@ -55,6 +56,11 @@ pub struct GenerationRequest<'a> {
     pub turns: &'a [Turn],
     pub grammar: &'a str,
     pub max_new_tokens: usize,
+    /// Durée de construction de `grammar` depuis le registre (ticket 5.56), pour la mesure : nulle
+    /// à la redemande, qui reprend la grammaire du premier essai.
+    pub grammar_build: std::time::Duration,
+    /// Nombre de champs de `grammar` retombés sur le JSON libre (ticket 5.56).
+    pub grammar_fallbacks: usize,
 }
 
 /// Échecs de `compose_plan`, tous typés.
@@ -112,32 +118,59 @@ fn offered(registry: &Registry) -> impl Iterator<Item = &CommandSpec> {
 }
 
 /// Grammaire GBNF d'un plan : `{"kind":"calls","calls":[{"command":<id du
-/// registre>,"params":<objet JSON>}, ...]}`, `{"kind":"refusal","reason":<texte>}` ou
+/// registre>,"params":<paramètres>}, ...]}`, `{"kind":"refusal","reason":<texte>}` ou
 /// `{"kind":"question","question":<texte>}`.
-/// Les identifiants de commande sont ceux du registre ; le contenu des
-/// paramètres est contraint à du JSON bien formé, le reste (types, champs,
-/// références) étant vérifié ensuite par `check_plan`. Format compact, sans
-/// espaces : c'est celui des exemples du prompt.
+///
+/// Chaque étape est l'alternative d'une commande offerte, ses paramètres contraints par le schéma
+/// que le catalogue montre au modèle (ticket 5.56, `crate::grammar`) : champs connus, clés triées,
+/// types, énumérations, champs requis, références `step:` là où `check_plan` les admet. Une
+/// question ou un refus tient en `MAX_TEXT_CHARS` caractères. Le reste (bornes numériques, valeurs
+/// propres à la désérialisation, sens des références) est vérifié ensuite par `check_plan`.
+/// Format compact, sans espaces : c'est celui des exemples du prompt.
 pub fn plan_grammar(registry: &Registry) -> String {
-    let commands = offered(registry)
-        .map(|s| format!("\"\\\"{}\\\"\"", s.id))
-        .collect::<Vec<_>>()
-        .join(" | ");
-    let hex = "[0-9a-fA-F]";
-    format!(
-        "root ::= calls | refusal | question\n\
-         calls ::= \"{{\\\"kind\\\":\\\"calls\\\",\\\"calls\\\":[\" step (\",\" step)* \"]}}\"\n\
-         step ::= \"{{\\\"command\\\":\" command \",\\\"params\\\":\" object \"}}\"\n\
-         command ::= {commands}\n\
-         refusal ::= \"{{\\\"kind\\\":\\\"refusal\\\",\\\"reason\\\":\" string \"}}\"\n\
-         question ::= \"{{\\\"kind\\\":\\\"question\\\",\\\"question\\\":\" string \"}}\"\n\
-         value ::= object | array | string | number | \"true\" | \"false\" | \"null\"\n\
-         object ::= \"{{\" (pair (\",\" pair)*)? \"}}\"\n\
-         pair ::= string \":\" value\n\
-         array ::= \"[\" (value (\",\" value)*)? \"]\"\n\
-         string ::= \"\\\"\" ([^\"\\\\\\x00-\\x1f] | \"\\\\\" ([\"\\\\/bfnrt] | \"u\" {hex} {hex} {hex} {hex}))* \"\\\"\"\n\
-         number ::= \"-\"? (\"0\" | [1-9] [0-9]*) (\".\" [0-9]+)? ([eE] [-+]? [0-9]+)?\n"
-    )
+    plan_grammar_built(registry).0
+}
+
+/// Écrit les replis de la grammaire sur la sortie d'erreur, une seule fois par processus : un
+/// schéma non traduit n'est jamais silencieux (AD-21), sans répéter la liste à chaque phrase.
+fn report_fallbacks(fallbacks: &[String]) {
+    static REPORTED: std::sync::Once = std::sync::Once::new();
+    if !fallbacks.is_empty() {
+        REPORTED.call_once(|| {
+            eprintln!(
+                "cassini : {} champ(s) de la grammaire retombé(s) sur le JSON libre : {}",
+                fallbacks.len(),
+                fallbacks.join(", ")
+            );
+        });
+    }
+}
+
+/// La grammaire d'un plan, et les champs dont le schéma n'a pas su se traduire (retombés sur le
+/// JSON libre), chacun par son chemin `commande/champ/...`.
+pub(crate) fn plan_grammar_built(registry: &Registry) -> (String, Vec<String>) {
+    let mut params = ParamsGrammar::new();
+    let steps: Vec<String> = offered(registry)
+        .map(|spec| params.step(&spec.id, &model_params(spec)))
+        .collect();
+    let mut text = if steps.is_empty() {
+        "root ::= refusal | question\n".to_string()
+    } else {
+        format!(
+            "root ::= calls | refusal | question\n\
+             calls ::= \"{{\\\"kind\\\":\\\"calls\\\",\\\"calls\\\":[\" steps \"]}}\" | \"{{\\\"calls\\\":[\" steps \"],\\\"kind\\\":\\\"calls\\\"}}\"\n\
+             steps ::= step (\",\" step)*\n\
+             step ::= {}\n",
+            steps.join(" | ")
+        )
+    };
+    text.push_str(
+        "refusal ::= \"{\\\"kind\\\":\\\"refusal\\\",\\\"reason\\\":\" text \"}\"\n\
+         question ::= \"{\\\"kind\\\":\\\"question\\\",\\\"question\\\":\" text \"}\"\n",
+    );
+    text.push_str(&params.text());
+    text.push_str(&base_rules());
+    (text, params.fallbacks)
 }
 
 // -- prompt ----------------------------------------------------------------
@@ -235,6 +268,15 @@ fn examples() -> Vec<(Value, &'static str, Value)> {
 /// ôtés : le noyau les décide (AD-10), le modèle n'a pas à les connaître. De même pour le
 /// paramètre que seul le rejeu remplit (ticket 5.36).
 fn catalog_entry(spec: &CommandSpec) -> Value {
+    let mut params = model_params(spec);
+    strip_marks(&mut params);
+    json!({"id": spec.id, "description": spec.description_fr, "params": params})
+}
+
+/// Le schéma des paramètres que le catalogue montre au modèle, avant le retrait des marques
+/// `x-cassini` : la grammaire part de lui (ticket 5.56), les marques lui servant à reconnaître un
+/// tableau de `Point`.
+fn model_params(spec: &CommandSpec) -> Value {
     let mut params = spec.params_schema.clone();
     let hidden: Vec<&String> = spec
         .output_params
@@ -282,8 +324,7 @@ fn catalog_entry(spec: &CommandSpec) -> Value {
             }
         }
     }
-    strip_marks(&mut params);
-    json!({"id": spec.id, "description": spec.description_fr, "params": params})
+    params
 }
 
 /// Champs d'un carroyage `mgrs` que le noyau remplit, ôtés du schéma montré au modèle.
@@ -651,7 +692,10 @@ pub fn compose_plan_anchored(
     if request.trim().is_empty() {
         return Err(AiError::EmptyPrompt.into());
     }
-    let grammar = plan_grammar(registry);
+    let grammar_start = std::time::Instant::now();
+    let (grammar, fallbacks) = plan_grammar_built(registry);
+    let grammar_build = grammar_start.elapsed();
+    report_fallbacks(&fallbacks);
     let mut turns = first_turns_anchored(style, registry, inventory, user_layers, request);
     let mut last_errors = Vec::new();
     for attempt in 0..2 {
@@ -659,6 +703,12 @@ pub fn compose_plan_anchored(
             turns: &turns,
             grammar: &grammar,
             max_new_tokens: MAX_PLAN_TOKENS,
+            grammar_build: if attempt == 0 {
+                grammar_build
+            } else {
+                std::time::Duration::ZERO
+            },
+            grammar_fallbacks: fallbacks.len(),
         }) {
             Ok(c) => c,
             // La redemande ne tient pas au contexte : on s'en tient aux écarts de la première sortie.
@@ -763,6 +813,8 @@ mod tests {
     }
 
     const GOOD: &str = r#"{"kind":"calls","calls":[{"command":"analysis.buffer","params":{"layer_id":"gares_1","distance":{"value":300,"unit":"m"}}}]}"#;
+    /// `GOOD` écrit comme le modèle l'a appris : clés triées, sous-objets compris.
+    const SORTED_GOOD: &str = r#"{"kind":"calls","calls":[{"command":"analysis.buffer","params":{"distance":{"unit":"m","value":300},"layer_id":"gares_1"}}]}"#;
     const BAD: &str = r#"{"kind":"calls","calls":[{"command":"analysis.buffer","params":{"layer_id":"gares_1","distance":{"value":-3,"unit":"m"}}}]}"#;
 
     /// Générateur scripté : rend les sorties dans l'ordre et note les tours reçus.
@@ -1240,35 +1292,270 @@ mod tests {
     fn the_grammar_lists_every_command_and_the_three_plan_shapes() {
         let reg = registry();
         let g = plan_grammar(&reg);
-        for spec in offered(&reg) {
-            assert!(
-                g.contains(&format!("\"\\\"{}\\\"\"", spec.id)),
-                "{}",
+        let lines: Vec<&str> = g.lines().collect();
+        let step = lines
+            .iter()
+            .find_map(|l| l.strip_prefix("step ::= "))
+            .expect("une règle step");
+        let alternatives: Vec<&str> = step.split(" | ").collect();
+        // Une alternative par commande offerte, chacune avec sa règle de paramètres.
+        assert_eq!(alternatives.len(), offered(&reg).count());
+        for (spec, alt) in offered(&reg).zip(&alternatives) {
+            let head = format!(
+                r#"{alt} ::= "{{\"command\":\"{}\",\"params\":" p-"#,
                 spec.id
             );
+            let rule = lines
+                .iter()
+                .find(|l| l.starts_with(&head))
+                .unwrap_or_else(|| panic!("{}", spec.id));
+            assert!(rule.ends_with(r#" "}""#), "{rule}");
         }
         assert!(g.starts_with("root ::= calls | refusal | question\n"));
-        assert!(g.contains("{\\\"kind\\\":\\\"calls\\\""));
+        // `kind` en tête, comme l'entraînement l'écrit, ou en dernier, comme les exemples du long
+        // prompt (clés triées) l'écrivent.
+        assert!(lines.contains(
+            &r#"calls ::= "{\"kind\":\"calls\",\"calls\":[" steps "]}" | "{\"calls\":[" steps "],\"kind\":\"calls\"}""#
+        ));
+        assert!(lines.contains(&r#"steps ::= step ("," step)*"#));
         // Les règles entières, telles qu'émises : une fermeture cassée ne passe pas.
-        let lines: Vec<&str> = g.lines().collect();
         assert!(
-            lines.contains(&r#"refusal ::= "{\"kind\":\"refusal\",\"reason\":" string "}""#),
+            lines.contains(&r#"refusal ::= "{\"kind\":\"refusal\",\"reason\":" text "}""#),
             "{g}"
         );
         assert!(
-            lines.contains(&r#"question ::= "{\"kind\":\"question\",\"question\":" string "}""#),
+            lines.contains(&r#"question ::= "{\"kind\":\"question\",\"question\":" text "}""#),
             "{g}"
         );
-        // Toute règle citée est définie.
-        for rule in [
-            "calls", "step", "command", "refusal", "question", "value", "object", "pair", "array",
-            "string", "number",
-        ] {
-            assert!(
-                g.contains(&format!("\n{rule} ::= ")) || g.starts_with(&format!("{rule} ::= ")),
-                "{rule}"
-            );
+        assert!(lines.contains(&r#"text ::= "\"" char{1,240} "\"""#), "{g}");
+        // Toute règle citée est définie, chacune une seule fois : le vérificateur le contrôle à
+        // la lecture.
+        let checker = crate::grammar::check::Grammar::parse(&g);
+        assert!(checker.accepts(SORTED_GOOD));
+        // `GOOD`, écrit à la main, ne suit pas l'ordre trié des clés : la grammaire l'exclut.
+        assert!(!checker.accepts(GOOD));
+    }
+
+    // -- grammaire des paramètres (ticket 5.56) --------------------------------
+
+    /// Le vérificateur d'appartenance, sur la grammaire du registre standard.
+    fn checker() -> crate::grammar::check::Grammar {
+        crate::grammar::check::Grammar::parse(&plan_grammar(&registry()))
+    }
+
+    /// Un plan d'une étape `command`, de paramètres `params` (texte JSON compact).
+    fn one_step(command: &str, params: &str) -> String {
+        format!(r#"{{"kind":"calls","calls":[{{"command":"{command}","params":{params}}}]}}"#)
+    }
+
+    #[test]
+    fn the_grammar_accepts_the_prompt_examples_as_written() {
+        let g = checker();
+        for (_, sentence, plan) in examples() {
+            assert!(g.accepts(&plan.to_string()), "{sentence} : {plan}");
         }
+    }
+
+    /// Tout le jeu engendré (graine 1), tel que l'entraînement écrit les complétions : la grammaire
+    /// n'exclut rien de ce que le modèle a appris.
+    #[test]
+    fn the_grammar_accepts_every_generated_training_completion() {
+        let g = checker();
+        let (all, _) = cassini_training::generate(
+            cassini_training::DEFAULT_SEED,
+            cassini_training::DEFAULT_COUNT,
+        );
+        assert_eq!(all.len(), cassini_training::DEFAULT_COUNT);
+        let mut rejected = Vec::new();
+        for e in &all {
+            let plan: Plan = serde_json::from_value(e.expected.clone()).unwrap();
+            let completion = serde_json::to_string(&plan).unwrap();
+            // Le texte appris par le modèle, fin de tour ôtée.
+            assert!(cassini_training::prompt::completion(&plan).starts_with(&completion));
+            if !g.accepts(&completion) {
+                rejected.push(format!("{} : {completion}", e.request));
+            }
+        }
+        assert!(
+            rejected.is_empty(),
+            "{} refusés :\n{}",
+            rejected.len(),
+            rejected.join("\n")
+        );
+    }
+
+    #[test]
+    fn the_grammar_rejects_unknown_fields_wrong_types_and_missing_fields() {
+        let g = checker();
+        let buffer = r#"{"distance":{"unit":"m","value":300},"layer_id":"gares_1"}"#;
+        assert!(g.accepts(&one_step("analysis.buffer", buffer)));
+        let select = r#"{"field":"ligne","layer_id":"gares_1","operator":"eq","value":"D"}"#;
+        assert!(g.accepts(&one_step("analysis.select_by_attribute", select)));
+        let destination = r#"{"azimuth":{"unit":"deg","value":45},"distance":{"unit":"m","value":100},"from":{"epsg":2154,"x":1.5,"y":2}}"#;
+        assert!(g.accepts(&one_step("geo.destination_point", destination)));
+        // Les trois formes du carroyage (`oneOf` de `MapGrid`), `epsg` gardé pour `projected`.
+        for grid in [
+            r#"{"interval":{"unit":"deg","value":1},"kind":"degrees"}"#,
+            r#"{"epsg":2154,"interval":{"unit":"km","value":1},"kind":"projected"}"#,
+            r#"{"interval":{"unit":"km","value":1},"kind":"mgrs"}"#,
+        ] {
+            let params = format!(r#"{{"grid":{grid},"title":"T"}}"#);
+            assert!(g.accepts(&one_step("layout.export_pdf", &params)), "{grid}");
+        }
+        for (command, params) in [
+            // Champ inconnu.
+            ("layer.describe", r#"{"foo":1,"layer_id":"x"}"#),
+            ("layer.describe", r#"{"layer_id":"x","foo":1}"#),
+            // Type faux : l'angle en nombre nu.
+            (
+                "geo.destination_point",
+                r#"{"azimuth":45,"distance":{"unit":"m","value":100},"from":{"epsg":2154,"x":1.5,"y":2}}"#,
+            ),
+            // Hors énumération.
+            (
+                "analysis.buffer",
+                r#"{"distance":{"unit":"km2","value":300},"layer_id":"gares_1"}"#,
+            ),
+            (
+                "analysis.select_by_attribute",
+                r#"{"field":"ligne","layer_id":"gares_1","operator":"like","value":"D"}"#,
+            ),
+            // Requis absent.
+            ("analysis.buffer", r#"{"layer_id":"gares_1"}"#),
+            // Commande inconnue, et commande dictée par le noyau.
+            ("analysis.nope", r#"{"layer_id":"gares_1"}"#),
+            ("layer.open_vector", r#"{"path":"a.gpkg"}"#),
+            // Un paramètre de sortie, que le noyau décide.
+            (
+                "analysis.buffer",
+                r#"{"distance":{"unit":"m","value":300},"layer_id":"gares_1","out":"x.gpkg"}"#,
+            ),
+            // Le paramètre de rejeu et `leave_out`, remplis par le noyau seul.
+            (
+                "layout.export_pdf",
+                r#"{"center":{"epsg":2154,"x":1,"y":2},"title":"T"}"#,
+            ),
+            ("layout.export_pdf", r#"{"leave_out":"x","title":"T"}"#),
+            // La zone et les carrés d'un carroyage MGRS, fournis par le noyau.
+            (
+                "layout.export_pdf",
+                r#"{"grid":{"epsg":32632,"interval":{"unit":"km","value":1},"kind":"mgrs"},"title":"T"}"#,
+            ),
+            (
+                "layout.export_pdf",
+                r#"{"grid":{"interval":{"unit":"km","value":1},"kind":"mgrs","squares":[]},"title":"T"}"#,
+            ),
+            // Une étiquette de carroyage inconnue.
+            (
+                "layout.export_pdf",
+                r#"{"grid":{"interval":{"unit":"km","value":1},"kind":"utm"},"title":"T"}"#,
+            ),
+        ] {
+            let text = one_step(command, params);
+            assert!(!g.accepts(&text), "{text}");
+        }
+        // Le noyau garde le dernier mot : une distance négative passe la grammaire, pas le juge.
+        let bad: Plan = serde_json::from_str(&one_step(
+            "analysis.buffer",
+            r#"{"distance":{"unit":"m","value":-3},"layer_id":"gares_1"}"#,
+        ))
+        .unwrap();
+        assert!(g.accepts(&serde_json::to_string(&bad).unwrap()));
+        assert!(registry().check_plan(&bad).is_err());
+        // De même pour une référence écrite dans une chaîne imbriquée : la grammaire n'y voit
+        // qu'une chaîne, `check_plan` la refuse.
+        let nested: Plan = serde_json::from_str(&one_step(
+            "raster.weighted_overlay",
+            r#"{"criteria":[{"raster":"a.tif","weight":1},{"raster":"step:1","weight":1}]}"#,
+        ))
+        .unwrap();
+        assert!(g.accepts(&serde_json::to_string(&nested).unwrap()));
+        assert_eq!(
+            registry().check_plan(&nested).unwrap_err().code,
+            "plan.bad_reference"
+        );
+    }
+
+    #[test]
+    fn the_grammar_accepts_references_where_the_plan_check_admits_them() {
+        let g = checker();
+        let chained = r#"{"kind":"calls","calls":[{"command":"analysis.select_by_attribute","params":{"field":"classe","layer_id":"routes_1","operator":"eq","value":"nationale"}},{"command":"analysis.buffer","params":{"distance":{"unit":"m","value":200},"layer_id":"step:1.layer_id"}}]}"#;
+        assert!(g.accepts(chained));
+        // Un élément d'un tableau de `Point` en `step:k.champ`, à côté d'un point littéral.
+        let cumulative = r#"{"kind":"calls","calls":[{"command":"data.transform_point","params":{"point":{"epsg":4326,"x":6.1,"y":45.9},"target_epsg":2154}},{"command":"terrain.viewshed_cumulative","params":{"dem":"mnt.tif","observers":["step:1.point",{"epsg":2154,"x":1,"y":2}]}}]}"#;
+        assert!(g.accepts(cumulative));
+        let plan: Plan = serde_json::from_str(cumulative).unwrap();
+        assert_eq!(registry().check_plan(&plan), Ok(()));
+        // Un raster et un `Point` tenus chacun par une référence.
+        assert!(g.accepts(&one_step(
+            "terrain.viewshed",
+            r#"{"dem":"step:1","observer":"step:2.point"}"#
+        )));
+        // Un entier sans signe (`integer-nn`) tenu par une référence.
+        assert!(g.accepts(&one_step(
+            "data.reproject",
+            r#"{"layer_id":"x","target_epsg":"step:1.epsg"}"#
+        )));
+        // La grammaire admet une référence vers une étape qui n'est pas antérieure : c'est
+        // `check_plan` qui la rejette.
+        let forward = one_step(
+            "analysis.buffer",
+            r#"{"distance":{"unit":"m","value":200},"layer_id":"step:1.layer_id"}"#,
+        );
+        assert!(g.accepts(&forward));
+        let plan: Plan = serde_json::from_str(&forward).unwrap();
+        assert_eq!(
+            registry().check_plan(&plan).unwrap_err().code,
+            "plan.bad_reference"
+        );
+        // Mal formées : étape zéro, zéro de tête, deux champs.
+        for reference in ["step:0", "step:01", "step:1.a.b", "step:"] {
+            let text = one_step(
+                "terrain.viewshed",
+                &format!(r#"{{"dem":"x","observer":"{reference}"}}"#),
+            );
+            assert!(!g.accepts(&text), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_question_or_a_refusal_holds_in_240_characters() {
+        let g = checker();
+        let at = |n: usize, c: &str| c.repeat(n);
+        for kind in ["question", "refusal"] {
+            let key = if kind == "question" {
+                "question"
+            } else {
+                "reason"
+            };
+            let text = |body: String| format!(r#"{{"kind":"{kind}","{key}":"{body}"}}"#);
+            assert!(g.accepts(&text(at(240, "é"))), "{kind}");
+            // Un échappement compte pour un caractère.
+            assert!(g.accepts(&text(at(240, "\\\""))), "{kind}");
+            assert!(g.accepts(&text(at(240, "\\u00e9"))), "{kind}");
+            assert!(!g.accepts(&text(at(241, "a"))), "{kind}");
+            assert!(!g.accepts(&text(String::new())), "{kind}");
+        }
+    }
+
+    /// La grammaire est identique d'une construction à l'autre et pour deux registres standard,
+    /// aucun champ du registre standard ne retombe sur le JSON libre, et sa durée de construction
+    /// est mesurée.
+    #[test]
+    fn the_grammar_is_identical_measured_and_without_fallback() {
+        let reg = registry();
+        let start = std::time::Instant::now();
+        let (first, fallbacks) = plan_grammar_built(&reg);
+        let elapsed = start.elapsed();
+        assert!(fallbacks.is_empty(), "replis : {fallbacks:?}");
+        assert_eq!(first, plan_grammar(&reg));
+        assert_eq!(first, plan_grammar(&Registry::standard()));
+        eprintln!(
+            "grammaire : {} règles, {} octets, construite en {:.2} ms",
+            first.lines().count(),
+            first.len(),
+            elapsed.as_secs_f64() * 1000.0
+        );
     }
 
     /// Une commande que le noyau dicte seul (ticket 4.9) n'est jamais offerte au modèle : le
@@ -1613,6 +1900,46 @@ mod tests {
         assert_eq!(
             chat_text(turns),
             cassini_training::prompt::render_prompt(&inv, "Tampon de 300 m.")
+        );
+    }
+
+    /// Avec le vrai découpeur (ticket 5.56) : llama.cpp lit la grammaire du registre standard
+    /// (syntaxe, plafond de répétition), et sa durée d'analyse est imprimée. Seul le vocabulaire
+    /// est chargé. Ignoré sans `CASSINI_TEST_MODEL` (GGUF ou déclaration) :
+    ///
+    ///   cargo test -p cassini-ai --lib -- --ignored --nocapture grammaire_reel
+    #[test]
+    #[ignore = "charge le vocabulaire du vrai modèle ; lancer avec CASSINI_TEST_MODEL et --ignored"]
+    fn grammaire_reel_llama_cpp_reads_the_registry_grammar() {
+        use llama_cpp_2::model::params::LlamaModelParams;
+        use llama_cpp_2::model::LlamaModel;
+        use llama_cpp_2::sampling::LlamaSampler;
+        let Some(path) = std::env::var_os("CASSINI_TEST_MODEL") else {
+            eprintln!("CASSINI_TEST_MODEL absent : essai ignoré.");
+            return;
+        };
+        let (files, _) = resolve_model(Path::new(&path)).unwrap();
+        let guard = crate::engine()
+            .unwrap()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let vocab_only = LlamaModelParams::default().with_vocab_only(true);
+        let model = LlamaModel::load_from_file(&guard.backend, &files.model, &vocab_only).unwrap();
+        let start = std::time::Instant::now();
+        let grammar = plan_grammar(&registry());
+        let built = start.elapsed();
+        let start = std::time::Instant::now();
+        let sampler = LlamaSampler::grammar(&model, &grammar, "root");
+        let parsed = start.elapsed();
+        assert!(
+            sampler.is_ok(),
+            "llama.cpp refuse la grammaire : {sampler:?}"
+        );
+        eprintln!(
+            "grammaire : construite en {:.2} ms, lue par llama.cpp en {:.2} ms ({} règles)",
+            built.as_secs_f64() * 1000.0,
+            parsed.as_secs_f64() * 1000.0,
+            grammar.lines().count()
         );
     }
 
