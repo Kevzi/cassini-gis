@@ -1,7 +1,7 @@
 ---
 title: 'epic11_reel et style_reel portées à 40-50 phrases écrites à la main, refus compris, puis remesure du parent (livrable 3 de 5.53, lot 3)'
 type: 'feature'
-ticket: '53'
+ticket: '' # livrable de 5.53, plan rattaché à story-barre-de-mesure-par-commande-phrases-ecrites-a-la-main-plan.md
 created: '2026-11-11'
 status: 'built'
 baseline_revision: '9ad0716d1a7d3297a345181b029addf47163bc4a'

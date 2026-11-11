@@ -1,7 +1,7 @@
 ---
 title: 'Formulations de terrain en listes de synonymes du générateur (livrable 4 de 5.53)'
 type: 'feature'
-ticket: '53'
+ticket: '' # livrable de 5.53, plan rattaché à story-barre-de-mesure-par-commande-phrases-ecrites-a-la-main-plan.md
 created: '2026-11-11'
 status: 'built'
 baseline_revision: 'e912a11e58fd112fd3e5c42a522855fb4a326391'

@@ -1,7 +1,7 @@
 ---
 title: 'Barre de non-oubli : un candidat tient chaque barre de son parent (livrable 2 de 5.53)'
 type: 'feature'
-ticket: '53'
+ticket: '' # livrable de 5.53, plan rattaché à story-barre-de-mesure-par-commande-phrases-ecrites-a-la-main-plan.md
 created: '2026-11-11'
 status: 'built'
 baseline_revision: '7459e2fb000f6da9af8a99e926eb32fe651b3759'
