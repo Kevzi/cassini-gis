@@ -307,6 +307,7 @@ fn call(load: u64, prompt: u64, write: u64, read: usize, written: usize) -> Timi
         cached_tokens: read / 2,
         write: Duration::from_millis(write),
         written_tokens: written,
+        sampler: Duration::ZERO,
     }
 }
 

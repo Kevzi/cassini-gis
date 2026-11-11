@@ -437,10 +437,11 @@ fn previous_error(step: usize, k: usize) -> PlanError {
 }
 
 /// Le schéma des éléments d'un paramètre tableau dont les éléments sont des [`Point`]
-/// (`Vec<Point>`, `observers`, `sources`) ; `None` pour tout autre paramètre.
+/// (`Vec<Point>`, `observers`, `sources`) ; `None` pour tout autre paramètre. Public pour que la
+/// grammaire du modèle (`cassini-ai`, ticket 5.56) reconnaisse les mêmes tableaux.
 ///
 /// [`Point`]: crate::point::Point
-pub(crate) fn point_items_schema(schema: &Value, root: &Value) -> Option<Value> {
+pub fn point_items_schema(schema: &Value, root: &Value) -> Option<Value> {
     let items = crate::point::items_schema(schema, root, 0)?;
     crate::point::is_point(items, root).then(|| items.clone())
 }

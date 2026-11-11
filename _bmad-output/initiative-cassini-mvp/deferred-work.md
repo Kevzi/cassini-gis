@@ -1061,3 +1061,10 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-53-4-formulations-terrain.md`
   summary: Relèvement inverse : retrouver sa propre position à partir de visées prises vers deux repères connus.
   evidence: décision D5 du 2026-11-11 ; il faudrait le contre-azimut corrigé de la convergence, que le modèle ne doit pas calculer lui-même ; tournure évitée au générateur.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-grammaire-des-parametres-tiree-des-schemas-du-registre-texte-plan.md`
+  summary: Test fragile `an_autonomous_call_while_another_session_holds_the_lock_is_read_only` (cli/tests/mcp.rs) : l'appel qui suit la libération du verrou peut encore voir le journal tenu sous forte charge.
+  evidence: un échec le 2026-11-11 pendant la fusion du modèle et une autre recette ; vert 3/3 seul et à la relance.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-grammaire-des-parametres-tiree-des-schemas-du-registre-texte-plan.md`
+  summary: Vérifier en CI que llama.cpp accepte la grammaire des paramètres (aujourd'hui seul l'essai ignoré `grammaire_reel` le fait).
+  evidence: relecture verification-gap du 2026-11-11 ; il faut un petit vocabulaire GGUF au dépôt ou en cache de CI.
