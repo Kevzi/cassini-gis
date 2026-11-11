@@ -1023,6 +1023,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-barre-de-mesure-par-commande-phrases-ecrites-a-la-main-plan.md`
   summary: Barre par commande : aucune phrase n'attend un refus ; la sorte `refusal` est prise en charge mais jamais mesurée (S15, refus coupé, en relève).
   evidence: relecture thorough du 2026-11-11 (blind-hunter, intent-alignment) ; 97 plans, 2 questions, 0 refus. À ajouter avec le livrable 3 (barres à 40-50 phrases).
+  resolution: Clos par 5.53, livrable 3, lot 1 (décision D3 du 2026-11-11) : la barre par commande n'est pas touchée ; la sorte `refusal` est mesurée par `plan_reel` (4 refus neufs, 9 en tout) et `question_reel` (4 refus neufs), chacun avec `missing`, contrôlé contre le registre.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-barre-de-mesure-par-commande-phrases-ecrites-a-la-main-plan.md`
   summary: Comparaison de l'essai réel stricte sur les paramètres par défaut (`dissolve: false`, `north` implicite) et l'ordre des listes de type ensemble (`layers`, `leave_out`, `observers`).
   evidence: relecture du 2026-11-11 (edge-case-hunter, blind-hunter) ; même rigueur que les autres barres (epic11_reel, style_reel), donc comparaison juste entre modèles ; à trancher avec le livrable 2 si un modèle juste est sous-noté.
@@ -1040,3 +1041,10 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-53-2-barre-de-non-oubli.md`
   summary: Brancher `non_oubli.py` sur les scripts de nuit (hors dépôt) pour qu'un candidat refusé ne soit jamais proposé à l'installation.
   evidence: relecture intent-alignment du 2026-11-11 : l'outil rend un code de sortie, rien ne l'applique encore.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-53-3-barres-elargies.md`
+  summary: 5.53, livrable 3, lot 2 — `echelle_utm_reel` et `terrain_reel` portées à 40-50 phrases écrites à la main (`phrases.json` par barre, élargies en place), au moins 3 refus chacune, seuils proportionnels arrondis vers le bas (7/8 → 35/40).
+  evidence: livrable 3 découpé en trois lots par le propriétaire le 2026-11-11 (décisions D1-D6 du plan du lot 1) ; une tâche courte par session (§8).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-53-3-barres-elargies.md`
+  summary: 5.53, livrable 3, lot 3 — `epic11_reel` et `style_reel` portées à 40-50 phrases écrites à la main, au moins 3 refus chacune, seuils proportionnels ; puis remesure du parent installé au commit du lot 3 (Design Notes du lot 1), pour que la barre de non-oubli redevienne comparable.
+  evidence: livrable 3 découpé en trois lots par le propriétaire le 2026-11-11 ; les totaux changés rendent « non comparable » tant que le parent n'est pas remesuré.

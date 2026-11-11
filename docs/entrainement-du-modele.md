@@ -1059,8 +1059,9 @@ deux. Le jeu s'en tient donc à `U`.
 ## Le jeu tenu à l'écart
 
 `ai/tests/tenu_a_l_ecart/` porte 40 phrases inédites sur un inventaire de projet
-d'urbanisme : 26 plans (dont la phrase de démonstration exacte de `CLAUDE.md`),
-8 questions et 6 refus. C'est la barre honnête.
+d'urbanisme : 28 plans (dont la phrase de démonstration exacte de `CLAUDE.md`),
+8 questions et 4 refus (compte relu dans `sentences.json` le 2026-11-11 ; la doc disait
+26/8/6). C'est la barre honnête.
 
 Règle : il a été écrit par un autre auteur que le générateur, qui ne l'a pas lu. Seuls
 deux fichiers le lisent :
@@ -1649,7 +1650,9 @@ court) et, pour comparaison, Qwen3.5-9B Q4_K_M seul (long prompt). Décision du 
 - Les essais réels `ecart_reel`, `question_reel`, `plan_reel` et `duree_reel` prennent dans
   `CASSINI_TEST_MODEL` un GGUF ou une déclaration (`ai/tests/common/mod.rs`).
 - `plan_reel` : au plus 2 fausses questions sur 25 pour le long prompt (concession du
-  2026-10-17), au plus 1 pour le prompt court (plafond strict du ticket).
+  2026-10-17), au plus 1 pour le prompt court (plafond strict du ticket). Depuis 5.53
+  (livrable 3), ces plafonds sont rapportés au total de la barre élargie (voir « Barres
+  élargies »).
 - `ecart_reel` : le notateur est une fonction (`grade`) testée sans modèle. Pour chaque phrase
   manquée, il imprime la forme de l'écart (sorte, nombre d'étapes, ordre, commande ou nom du
   paramètre à l'étape k), jamais une valeur ni le texte ; la ligne `REDEMANDES` compte les
@@ -2380,6 +2383,51 @@ dicte seul) : 33 commandes au 2026-11-11, 99 phrases.
   au jeu engendré, à l'identique puis à un nombre ou une commune près. À l'écriture, trois
   phrases (LR3, GS1, HS1) figuraient déjà au jeu : elles ont été réécrites, le générateur n'a pas
   été touché.
+
+## Barres élargies : `plan_reel` et `question_reel` (ticket 5.53, livrable 3, lot 1, 2026-11-11)
+
+À 25 et 12 phrases, un raté pesait 4 à 8 % : trop pour juger un oubli à une phrase près.
+Les deux barres sont élargies en place, avec des phrases neuves écrites à la main (jamais
+engendrées, jamais recopiées d'une autre barre), sur l'inventaire de l'épreuve tel quel :
+
+| Barre | Phrases | Dont neuves | Refus attendus | Seuil |
+|---|---|---|---|---|
+| `plan_reel` | 25 + 23 = **48** | `ai/tests/plan_reel/phrases.json` | 5 de l'épreuve + 4 neufs | ≥ 80 % de plans conformes arrondi vers le bas, soit **38/48** (79,2 %) ; fausses questions au plus 2/25 du total au long prompt (**3**), 1/25 au prompt court (**1**) |
+| `question_reel` | 12 + 35 = **47** | `ai/tests/question_reel/phrases.json` | 4 neufs | ≥ 9/12 de réponses attendues arrondi vers le bas, soit **35/47** (74,5 %) |
+
+- Schéma : celui de `par_commande/phrases.json` sans `command` (`id`, `phrase`, `expected` :
+  `calls`, `question` ou `refusal`). Chaque refus porte `missing`, des mots qu'aucun identifiant
+  du registre ne contient (`mail`, `undo`, `geocod`, `contour`, `raster.zonal`, `translat`,
+  `weather`, `watershed`…), ou `missing_params`, une option `commande:paramètre` que le schéma
+  n'a pas (S18 : `layout.export_pdf:layers`) : le jour où une commande ou une option les porte,
+  le refus est faux et le test sans modèle nomme la phrase. Les 5 refus de l'épreuve reçoivent
+  les leurs dans `plan_reel.rs` (`refusal_of`), l'épreuve restant gelée. **Limite** : un mot
+  de `missing` est un mot-clé cherché tel quel dans les identifiants (non vide, minuscules
+  ASCII, contrôlé), pas un synonyme : une commande arrivée sous un autre nom (`terrain.isolines`
+  pour des courbes de niveau) ne fait pas rougir le refus.
+- Les sources gelées ne bougent pas : `plan_reel` lit toujours `tests/epreuve-modele-local/sentences.json`,
+  `question_reel` sa constante `AMBIGUOUS`. Un seul `SCORE`, sur le total.
+- `question_reel` compte désormais les **réponses attendues** : une question là où une question
+  est attendue, un refus là où un refus l'est. Ses 35 phrases neuves : 31 questions (couche,
+  champ ou valeur absents, distance ou point manquants, lieu sans coordonnées) et 4 refus.
+  Aucune ne nomme un fichier non ouvert de l'inventaire (test sans modèle).
+- Seuils (décision du propriétaire, D4) : proportionnels aux décisions passées, arrondis vers le
+  bas sur le total (`common::proportional`).
+- Contrôle commun des attendus (`ai/tests/common/mod.rs`, `invalid`) : celui de la barre par
+  commande, partagé par les trois barres — `check_plan`, garde-fou des coordonnées, complétion
+  sans effet, couches, champs, rasters et fichiers non chargés présents, valeur d'une égalité
+  (`eq`, `ne`) prise parmi les valeurs montrées du champ, refus bien écrits et encore justes.
+  Les 25 phrases de l'épreuve gardent leur comparaison exacte (titre d'export compris) ; les
+  neuves comparent le titre exactement quand l'attendu en porte un, sinon le laissent libre
+  (non vide). Dans `plan_reel`, seules les phrases qui attendent `layer.add` nomment un fichier
+  non ouvert ; dans `question_reel`, aucune.
+- `training/tests/recouvrement.rs` lit les deux fichiers neufs : aucune phrase au jeu engendré,
+  à un nombre ou une commune près ; aucune phrase écrite à la main pour 5.53 ne reprend une
+  phrase d'un autre essai ni une autre de son propre fichier (`no_hand_written_sentence_copies_another_real_trial`).
+- `ecart_reel` reste à 40 (D5). Les totaux ayant changé, la barre de non-oubli rend
+  `non comparable` pour `plan_reel` et `question_reel` jusqu'à la remesure du parent installé,
+  prévue après le lot 3 (`echelle_utm_reel`, `terrain_reel` au lot 2 ; `epic11_reel`,
+  `style_reel` au lot 3).
 
 ## Barre de non-oubli (ticket 5.53, livrable 2, 2026-11-11)
 
