@@ -7,7 +7,9 @@
 //! (`qgis-plugin/tests/recette/annecy.json`), puis depuis 5.53 la barre par commande
 //! (`ai/tests/par_commande/phrases.json`) et les phrases neuves de `plan_reel` et de
 //! `question_reel` (`ai/tests/plan_reel/phrases.json`, `ai/tests/question_reel/phrases.json`,
-//! livrable 3, lot 1). Les familles visent leur sorte de demande
+//! livrable 3, lot 1), puis celles de `echelle_utm_reel` et de `terrain_reel`
+//! (`ai/tests/echelle_utm_reel/phrases.json`, `ai/tests/terrain_reel/phrases.json`, lot 2).
+//! Les familles visent leur sorte de demande
 //! avec d'autres tournures ; elles ne les recopient jamais. Deux comparaisons, sur le texte normalisé
 //! (minuscules, sans accents ni ponctuation) : à l'identique, puis à un nombre ou une commune
 //! près (chiffres masqués, noms de communes remplacés par un même repère, des deux côtés).
@@ -40,12 +42,18 @@ const PAR_COMMANDE: &str = include_str!("../../ai/tests/par_commande/phrases.jso
 const PLAN_REEL_PHRASES: &str = include_str!("../../ai/tests/plan_reel/phrases.json");
 /// Les phrases neuves de `question_reel` (5.53, livrable 3), écrites à la main.
 const QUESTION_REEL_PHRASES: &str = include_str!("../../ai/tests/question_reel/phrases.json");
+/// Les phrases neuves de `echelle_utm_reel` (5.53, livrable 3, lot 2), écrites à la main.
+const ECHELLE_UTM_REEL_PHRASES: &str = include_str!("../../ai/tests/echelle_utm_reel/phrases.json");
+/// Les phrases neuves de `terrain_reel` (5.53, livrable 3, lot 2), écrites à la main.
+const TERRAIN_REEL_PHRASES: &str = include_str!("../../ai/tests/terrain_reel/phrases.json");
 
 /// Les fichiers `phrases.json` écrits à la main pour 5.53, chacun avec son nom et son compte.
-const HAND_WRITTEN: [(&str, &str, usize); 3] = [
+const HAND_WRITTEN: [(&str, &str, usize); 5] = [
     ("par_commande", PAR_COMMANDE, 99),
     ("plan_reel", PLAN_REEL_PHRASES, 23),
     ("question_reel", QUESTION_REEL_PHRASES, 35),
+    ("echelle_utm_reel", ECHELLE_UTM_REEL_PHRASES, 36),
+    ("terrain_reel", TERRAIN_REEL_PHRASES, 36),
 ];
 
 /// Texte normalisé, chiffres masqués et communes remplacées par un même repère.
@@ -158,8 +166,8 @@ fn pairs(source: &str, start: &str) -> Vec<(String, String)> {
 
 /// Les phrases des essais réels de `ai/tests/` : `plan_reel`, `question_reel`, `duree_reel`,
 /// `echelle_utm_reel`, `terrain_reel`, `epic11_reel`, `style_reel`, la recette QGIS d'Annecy et,
-/// depuis 5.53, la barre par commande puis les phrases neuves de `plan_reel` et de
-/// `question_reel`.
+/// depuis 5.53, la barre par commande puis les phrases neuves de `plan_reel`, `question_reel`,
+/// `echelle_utm_reel` et `terrain_reel`.
 fn real_trials() -> Vec<(String, String)> {
     real_trials_by_source()
         .into_iter()
@@ -179,10 +187,10 @@ fn real_trials_by_source() -> Vec<(&'static str, Vec<(String, String)>)> {
     all.push(("duree_reel:warmup", pairs(DUREE_REEL, "const WARMUP")));
     let scale_utm = pairs(ECHELLE_UTM_REEL, "const SENTENCES");
     assert_eq!(scale_utm.len(), 8, "{scale_utm:?}");
-    all.push(("echelle_utm_reel", scale_utm));
+    all.push(("echelle_utm_reel:sentences", scale_utm));
     let terrain = pairs(TERRAIN_REEL, "const SENTENCES");
     assert_eq!(terrain.len(), 8, "{terrain:?}");
-    all.push(("terrain_reel", terrain));
+    all.push(("terrain_reel:sentences", terrain));
     let epic11 = pairs(EPIC11_REEL, "const SENTENCES");
     assert_eq!(epic11.len(), 28, "{epic11:?}");
     all.push(("epic11_reel", epic11));
@@ -249,9 +257,10 @@ fn no_sentence_of_the_real_trials_appears_in_the_generated_set() {
     );
 }
 
-/// Les phrases écrites à la main pour 5.53 (barre par commande, phrases neuves de `plan_reel`
-/// et de `question_reel`) sont écrites à neuf : aucune ne reprend, à un nombre ou une commune
-/// près, une phrase d'une autre source d'essai réel, ni une autre phrase de son propre fichier.
+/// Les phrases écrites à la main pour 5.53 (barre par commande, phrases neuves de `plan_reel`,
+/// `question_reel`, `echelle_utm_reel` et `terrain_reel`) sont écrites à neuf : aucune ne
+/// reprend, à un nombre ou une commune près, une phrase d'une autre source d'essai réel, ni une
+/// autre phrase de son propre fichier.
 #[test]
 fn no_hand_written_sentence_copies_another_real_trial() {
     let sources = real_trials_by_source();
@@ -276,6 +285,23 @@ fn no_hand_written_sentence_copies_another_real_trial() {
         "phrases écrites à la main reprises d'un autre essai ou en double : {}",
         copies.join(", ")
     );
+}
+
+/// Le contrôle anti-copie retrouve chaque source par son nom : deux sources du même nom
+/// confondraient leurs phrases.
+#[test]
+fn the_real_trial_sources_have_distinct_names() {
+    let sources = real_trials_by_source();
+    let mut names = HashSet::new();
+    for (name, _) in &sources {
+        assert!(names.insert(*name), "source en double : {name}");
+    }
+    for (name, _, _) in HAND_WRITTEN {
+        assert!(
+            names.contains(name),
+            "source écrite à la main absente : {name}"
+        );
+    }
 }
 
 #[test]
@@ -324,6 +350,14 @@ fn the_real_trials_are_read_whole() {
         "Trace les courbes de niveau du MNT tous les 5 m."
     );
     assert_eq!(find("QR35"), "Délimite le bassin versant à partir du MNT.");
+    assert_eq!(
+        find("EU36"),
+        "Donne le temps de trajet en voiture entre le point 451 000 / 5 409 000 et le point 457 000 / 5 401 000, UTM 31N."
+    );
+    assert_eq!(
+        find("TR36"),
+        "Calcule le rayonnement solaire reçu par le terrain sur une année."
+    );
 }
 
 #[test]

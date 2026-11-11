@@ -1,0 +1,753 @@
+[
+  {
+    "id": "TR01",
+    "phrase": "Calcule la déclivité du terrain en degrés.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.slope",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "unit": "degrees"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR02",
+    "phrase": "Donne-moi l'inclinaison des versants en pourcentage.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.slope",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "unit": "percent"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR03",
+    "phrase": "Carte des pentes en % à partir du modèle de terrain.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.slope",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "unit": "percent"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR04",
+    "phrase": "Quelle est l'inclinaison du relief, exprimée en degrés ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.slope",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "unit": "degrees"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR05",
+    "phrase": "Je veux la pente en pour cent sur tout le MNT.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.slope",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "unit": "percent"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR06",
+    "phrase": "Mesure la raideur des pentes en degrés d'angle.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.slope",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "unit": "degrees"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR07",
+    "phrase": "Pente du MNT en %, puis mise en page de la carte au 1:10 000.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.slope",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "unit": "percent"
+          }
+        },
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 10000
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR08",
+    "phrase": "Intervisibilité entre 656 200 / 6 847 400 et 657 600 / 6 848 900, en Lambert-93.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.line_of_sight",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "observer": {
+              "x": 656200,
+              "y": 6847400,
+              "epsg": 2154
+            },
+            "target": {
+              "x": 657600,
+              "y": 6848900,
+              "epsg": 2154
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR09",
+    "phrase": "Le point 655 700 / 6 848 000 (Lambert-93) a-t-il une vue dégagée sur le point 656 900 / 6 847 300 (Lambert-93) ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.line_of_sight",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "observer": {
+              "x": 655700,
+              "y": 6848000,
+              "epsg": 2154
+            },
+            "target": {
+              "x": 656900,
+              "y": 6847300,
+              "epsg": 2154
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR10",
+    "phrase": "Visibilité réciproque entre un observateur en X = 656000, Y = 6846900 et un mât de 12 m en X = 657200, Y = 6848500, en Lambert-93.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.line_of_sight",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "observer": {
+              "x": 656000,
+              "y": 6846900,
+              "epsg": 2154
+            },
+            "target": {
+              "x": 657200,
+              "y": 6848500,
+              "epsg": 2154
+            },
+            "target_height": {
+              "value": 12,
+              "unit": "m"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR11",
+    "phrase": "Depuis un belvédère en 656 400 / 6 848 600 (Lambert-93), l'œil à 3 m, aperçoit-on le point 657 800 / 6 847 700 (Lambert-93) ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.line_of_sight",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "observer": {
+              "x": 656400,
+              "y": 6848600,
+              "epsg": 2154
+            },
+            "target": {
+              "x": 657800,
+              "y": 6847700,
+              "epsg": 2154
+            },
+            "observer_height": {
+              "value": 3,
+              "unit": "m"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR12",
+    "phrase": "Ligne de vue sans courbure terrestre de 655 500 / 6 847 100 vers 656 700 / 6 848 200 (Lambert-93).",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.line_of_sight",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "observer": {
+              "x": 655500,
+              "y": 6847100,
+              "epsg": 2154
+            },
+            "target": {
+              "x": 656700,
+              "y": 6848200,
+              "epsg": 2154
+            },
+            "curvature": false
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR13",
+    "phrase": "Le relief masque-t-il 657 400 / 6 848 100 vu depuis 656 100 / 6 847 600 ? Les deux points sont en Lambert-93.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.line_of_sight",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "observer": {
+              "x": 656100,
+              "y": 6847600,
+              "epsg": 2154
+            },
+            "target": {
+              "x": 657400,
+              "y": 6848100,
+              "epsg": 2154
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR14",
+    "phrase": "Intervisibilité entre 656 800 / 6 846 800 et 657 900 / 6 848 300 en Lambert-93, avec un coefficient de réfraction de 0,2.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.line_of_sight",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "observer": {
+              "x": 656800,
+              "y": 6846800,
+              "epsg": 2154
+            },
+            "target": {
+              "x": 657900,
+              "y": 6848300,
+              "epsg": 2154
+            },
+            "refraction": 0.2
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR15",
+    "phrase": "Un observateur de 1,75 m au point 655 900 / 6 848 400 (Lambert-93) voit-il le haut d'un château d'eau de 30 m au point 656 600 / 6 847 500 (Lambert-93) ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.line_of_sight",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "observer": {
+              "x": 655900,
+              "y": 6848400,
+              "epsg": 2154
+            },
+            "target": {
+              "x": 656600,
+              "y": 6847500,
+              "epsg": 2154
+            },
+            "observer_height": {
+              "value": 1.75,
+              "unit": "m"
+            },
+            "target_height": {
+              "value": 30,
+              "unit": "m"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR16",
+    "phrase": "Ligne de vue de 656 300 / 6 848 800 à 657 500 / 6 847 900 en Lambert-93, puis imprime la carte au 1:5 000.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.line_of_sight",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "observer": {
+              "x": 656300,
+              "y": 6848800,
+              "epsg": 2154
+            },
+            "target": {
+              "x": 657500,
+              "y": 6847900,
+              "epsg": 2154
+            }
+          }
+        },
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 5000
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR17",
+    "phrase": "Bassin visuel depuis le point 656 500 / 6 848 000 (Lambert-93).",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.viewshed",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "observer": {
+              "x": 656500,
+              "y": 6848000,
+              "epsg": 2154
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR18",
+    "phrase": "Zone d'influence visuelle d'un observateur au sommet d'un mât de 40 m posé en 657 100 / 6 847 200, Lambert-93.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.viewshed",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "observer": {
+              "x": 657100,
+              "y": 6847200,
+              "epsg": 2154
+            },
+            "observer_height": {
+              "value": 40,
+              "unit": "m"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR19",
+    "phrase": "Que voit-on du haut d'un château d'eau de 25 m situé en X = 656300, Y = 6848300 (Lambert-93), dans un rayon de 1 500 m ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.viewshed",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "observer": {
+              "x": 656300,
+              "y": 6848300,
+              "epsg": 2154
+            },
+            "observer_height": {
+              "value": 25,
+              "unit": "m"
+            },
+            "radius": {
+              "value": 1500,
+              "unit": "m"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR20",
+    "phrase": "Depuis le belvédère 655 800 / 6 847 800 en Lambert-93, montre la zone visible jusqu'à 2 500 m.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.viewshed",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "observer": {
+              "x": 655800,
+              "y": 6847800,
+              "epsg": 2154
+            },
+            "radius": {
+              "value": 2500,
+              "unit": "m"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR21",
+    "phrase": "Champ de vision d'un observateur en 656 900 / 6 848 700 (Lambert-93), pour des cibles de 5 m de haut.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.viewshed",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "observer": {
+              "x": 656900,
+              "y": 6848700,
+              "epsg": 2154
+            },
+            "target_height": {
+              "value": 5,
+              "unit": "m"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR22",
+    "phrase": "Bassin visuel sans courbure de la Terre depuis 657 300 / 6 847 500 en Lambert-93, rayon 900 m.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.viewshed",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "observer": {
+              "x": 657300,
+              "y": 6847500,
+              "epsg": 2154
+            },
+            "curvature": false,
+            "radius": {
+              "value": 900,
+              "unit": "m"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR23",
+    "phrase": "Quelles zones sont visibles depuis 656 000 / 6 847 300 (Lambert-93), avec un œil à 2 m et un rayon de 1 000 m ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.viewshed",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "observer": {
+              "x": 656000,
+              "y": 6847300,
+              "epsg": 2154
+            },
+            "observer_height": {
+              "value": 2,
+              "unit": "m"
+            },
+            "radius": {
+              "value": 1000,
+              "unit": "m"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR24",
+    "phrase": "Ce qu'on découvre du sommet d'une tour de 60 m en 656 700 / 6 846 900 (Lambert-93), sur 2 000 m alentour.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.viewshed",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "observer": {
+              "x": 656700,
+              "y": 6846900,
+              "epsg": 2154
+            },
+            "observer_height": {
+              "value": 60,
+              "unit": "m"
+            },
+            "radius": {
+              "value": 2000,
+              "unit": "m"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR25",
+    "phrase": "Bassin visuel depuis 657 000 / 6 848 400 (Lambert-93), puis une planche de la carte au 1:10 000.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.viewshed",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "observer": {
+              "x": 657000,
+              "y": 6848400,
+              "epsg": 2154
+            }
+          }
+        },
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 10000
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR26",
+    "phrase": "Montre le champ de vision depuis 655 600 / 6 848 200 en Lambert-93, coefficient de réfraction 0,25.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.viewshed",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "observer": {
+              "x": 655600,
+              "y": 6848200,
+              "epsg": 2154
+            },
+            "refraction": 0.25
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR27",
+    "phrase": "Prépare une mise en page de la carte au 1:25 000.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 25000
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR28",
+    "phrase": "Lance l'impression de la carte au 1/2 000.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 2000
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR29",
+    "phrase": "Fais un tirage de la carte au 50 000e, en A3.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 50000,
+            "page_size": "a3"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR30",
+    "phrase": "Une édition papier de la carte au 1:20k, en portrait.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 20000,
+            "orientation": "portrait"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR31",
+    "phrase": "Mets en page la carte au 1 : 7 500 avec le titre « Relief du secteur ».",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 7500,
+            "title": "Relief du secteur"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR32",
+    "phrase": "Imprime une planche A2 de la carte au 1:15 000.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 15000,
+            "page_size": "a2"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "TR33",
+    "phrase": "Simule l'extension d'une crue de 2 m sur le MNT.",
+    "expected": {
+      "kind": "refusal",
+      "missing": [
+        "flood"
+      ]
+    }
+  },
+  {
+    "id": "TR34",
+    "phrase": "Calcule l'accumulation d'écoulement sur le MNT.",
+    "expected": {
+      "kind": "refusal",
+      "missing": [
+        "flow_accum"
+      ]
+    }
+  },
+  {
+    "id": "TR35",
+    "phrase": "Calcule la cubature de déblai et de remblai pour araser le terrain à la cote 42 m.",
+    "expected": {
+      "kind": "refusal",
+      "missing": [
+        "cut_fill",
+        "volume"
+      ]
+    }
+  },
+  {
+    "id": "TR36",
+    "phrase": "Calcule le rayonnement solaire reçu par le terrain sur une année.",
+    "expected": {
+      "kind": "refusal",
+      "missing": [
+        "solar",
+        "insolation"
+      ]
+    }
+  }
+]

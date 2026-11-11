@@ -2429,6 +2429,51 @@ engendrées, jamais recopiées d'une autre barre), sur l'inventaire de l'épreuv
   prévue après le lot 3 (`echelle_utm_reel`, `terrain_reel` au lot 2 ; `epic11_reel`,
   `style_reel` au lot 3).
 
+### Lot 2 : `echelle_utm_reel` et `terrain_reel` (2026-11-11)
+
+À 8 phrases, un raté pesait 12,5 %, et aucune n'attendait de refus. Les deux barres sont
+élargies de la même façon que celles du lot 1, sur l'inventaire de l'épreuve tel quel :
+
+| Barre | Phrases | Fichier des phrases neuves | Refus attendus | Seuil |
+|---|---|---|---|---|
+| `echelle_utm_reel` | 8 + 36 = **44** | `ai/tests/echelle_utm_reel/phrases.json` (`EU01`…`EU36`) | 4 neufs : `atlas`, `shortest_path`, `export_image`/`image`, `distance_matrix` | ≥ 7/8 de réponses attendues arrondi vers le bas, soit **38/44** (86,4 %) |
+| `terrain_reel` | 8 + 36 = **44** | `ai/tests/terrain_reel/phrases.json` (`TR01`…`TR36`) | 4 neufs : `flood`, `flow_accum`, `cut_fill`/`volume`, `solar`/`insolation` | ≥ 7/8 de réponses attendues arrondi vers le bas, soit **38/44** (86,4 %) |
+
+- `echelle_utm_reel` : exports à une échelle sous toutes ses écritures (« 1 : 2 500 », « 1/50 000e »,
+  « au 75 000e », « 1:20k », « au vingt-cinq millième »), avec page, orientation ou titre ; exports
+  au bout d'une sélection, d'un tampon ou d'une isochrone ; isochrones depuis un point UTM 31N ou
+  32N (est et nord écrits « E … / N … », nord avant l'est, « EPSG:32631 », relevé GPS
+  et « UTM31N »). Refus : atlas par commune, itinéraire le plus court par les routes, export
+  en image, temps de trajet entre deux points.
+- `terrain_reel` : pentes en degrés ou en pourcentage (déclivité, inclinaison, raideur) ; lignes de
+  vue et champs de vision, points en Lambert-93 seuls, hauteurs, rayon (au plus 2 500 m sur le MNT
+  de 5 m), courbure ou réfraction écrits et jamais égaux au défaut ; 6 exports seuls sans le
+  mot « PDF » (mise en page, impression, tirage, édition, planche), plus 3 en fin d'étape de
+  terrain (9 neufs). Refus : extension d'une crue, accumulation d'écoulement, cubature
+  déblai/remblai, rayonnement solaire annuel. La crue est écrite sans cote ni rivière : une cote
+  se ferait par `raster.reclassify` du MNT, une rivière absente de l'inventaire appellerait une
+  question.
+- Mots-clés des refus : `atlas` (`layout.export_atlas`), `shortest_path`
+  (`network.shortest_path`), `distance_matrix` (`analysis.distance_matrix`), `flood`
+  (`terrain.flood_extent`) et `flow_accum` (`terrain.flow_accumulation`) sont des morceaux
+  d'identifiants planifiés ou réservés du catalogue ; `export_image`, `image`, `cut_fill`,
+  `volume`, `solar` et `insolation` sont des mots-clés anglais choisis pour un futur identifiant,
+  aucun n'étant au catalogue. Le test sans modèle essaie chaque mot-clé de chaque refus.
+- Les distances des phrases neuves sont écrites en mètres : « 1 km » laissait `{1, km}` et
+  `{1000, m}` défendables, et la comparaison ne ramène pas l'une à l'autre.
+- Les 8 phrases de `SENTENCES` et leurs attendus ne bougent pas ; une seule comparaison pour les 44
+  (`common::same_calls`, l'ancien `comparable` retiré) : un `10.0` vaut désormais `10`. Un refus
+  attendu compte juste contre un refus rendu, une question est un échec. Un seul `SCORE … réponses
+  attendues` ; les essais sont renommés `echelle_utm_reel_at_least_7_of_8_of_the_answers_match`
+  et `terrain_reel_at_least_7_of_8_of_the_answers_match`, le seuil suivant le total (les filtres `echelle_utm_reel` et `terrain_reel`
+  des scripts les trouvent toujours).
+- Tests sans modèle : contrôles communs (`common::invalid`) sur les 44, total 40-50, au moins 3
+  refus avec `missing`, aucun fichier non ouvert nommé, et, pour `terrain_reel`, aucune phrase
+  dont l'attendu exporte la carte ne dit « PDF » (repérée par la commande attendue, plus par
+  l'identifiant). `echelle_utm_reel` mesure toujours le plan sans complétion.
+- `training/tests/recouvrement.rs` lit les deux fichiers neufs (`HAND_WRITTEN`) ; les phrases des
+  constantes Rust deviennent les sources `echelle_utm_reel:sentences` et `terrain_reel:sentences`.
+
 ## Barre de non-oubli (ticket 5.53, livrable 2, 2026-11-11)
 
 Avant d'installer un modèle, on vérifie qu'il n'a rien oublié de ce que savait celui qu'il
