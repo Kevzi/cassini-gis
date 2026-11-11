@@ -1040,3 +1040,16 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-53-2-barre-de-non-oubli.md`
   summary: Brancher `non_oubli.py` sur les scripts de nuit (hors dépôt) pour qu'un candidat refusé ne soit jamais proposé à l'installation.
   evidence: relecture intent-alignment du 2026-11-11 : l'outil rend un code de sortie, rien ne l'applique encore.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-53-4-formulations-terrain.md`
+  summary: Gisement compté dans le quadrillage Lambert-93 (`north` grid sur un système projeté autre que l'UTM), usage courant des géomètres.
+  evidence: décision D2 du 2026-11-11 ; le gisement du noyau est UTM seul, la tournure « gisement Lambert » est évitée au générateur en attendant.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-53-4-formulations-terrain.md`
+  summary: Déclinaison magnétique ou convergence des méridiens demandée en un seul point, sans second point.
+  evidence: décision D3 du 2026-11-11 ; `geo.distance_azimuth` les rend mais exige deux points, aucune commande ne prend un point seul.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-53-4-formulations-terrain.md`
+  summary: Paramètre `north` (magnétique, quadrillage) sur `geo.bearing_intersection`, pour un recoupement de visées prises à la boussole.
+  evidence: décision D4 du 2026-11-11 ; l'intersection ne connaît que le nord vrai, la tournure « à la boussole » est évitée au générateur.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-53-4-formulations-terrain.md`
+  summary: Relèvement inverse : retrouver sa propre position à partir de visées prises vers deux repères connus.
+  evidence: décision D5 du 2026-11-11 ; il faudrait le contre-azimut corrigé de la convergence, que le modèle ne doit pas calculer lui-même ; tournure évitée au générateur.
