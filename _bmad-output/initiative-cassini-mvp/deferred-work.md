@@ -1009,3 +1009,26 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-generateur-apres-5-49.md`
   summary: `grid_zone_words` force parfois une zone UTM à 6–7° du point (« zone 32 » à 2,46 E), plus fréquente depuis D5.
   evidence: relecture adversariale du 2026-11-11 ; accepté par le schéma, discutable comme leçon de gisement.
+
+- source_plan: none
+  summary: 5.53, livrable 2 — barre de non-oubli : comparer un nouveau modèle à celui qu'il remplace, barre par barre, à une phrase près ; verdict par barre (essai réel ajuste-5-49-a contre la fusion de la nuit du 11-10).
+  evidence: 5.53 découpé le 2026-11-11 avec le propriétaire (« 1 puis 2 ») ; à construire juste après le livrable 1, avant toute installation d'un candidat de la nuit après 5.49.
+- source_plan: none
+  summary: 5.53, livrable 3 — barres existantes portées à 40-50 phrases écrites à la main.
+  evidence: 5.53 découpé le 2026-11-11 avec le propriétaire ; après les livrables 1 et 2, avant le prochain entraînement.
+- source_plan: none
+  summary: 5.53, livrable 4 — formulations de terrain fournies par le propriétaire (gisement, relevé, intersection, carroyage…) transformées en listes de synonymes du générateur, jamais en phrases.
+  evidence: 5.53 découpé le 2026-11-11 avec le propriétaire ; dépend des formulations que le propriétaire dictera.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-barre-de-mesure-par-commande-phrases-ecrites-a-la-main-plan.md`
+  summary: Barre par commande : aucune phrase n'attend un refus ; la sorte `refusal` est prise en charge mais jamais mesurée (S15, refus coupé, en relève).
+  evidence: relecture thorough du 2026-11-11 (blind-hunter, intent-alignment) ; 97 plans, 2 questions, 0 refus. À ajouter avec le livrable 3 (barres à 40-50 phrases).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-barre-de-mesure-par-commande-phrases-ecrites-a-la-main-plan.md`
+  summary: Comparaison de l'essai réel stricte sur les paramètres par défaut (`dissolve: false`, `north` implicite) et l'ordre des listes de type ensemble (`layers`, `leave_out`, `observers`).
+  evidence: relecture du 2026-11-11 (edge-case-hunter, blind-hunter) ; même rigueur que les autres barres (epic11_reel, style_reel), donc comparaison juste entre modèles ; à trancher avec le livrable 2 si un modèle juste est sous-noté.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-barre-de-mesure-par-commande-phrases-ecrites-a-la-main-plan.md`
+  summary: Le test relit le filtre « offerte » (`!dictated_by_core`) au lieu d'appeler `offered` d'`ai/src/plan.rs`, privé ; un changement du filtre du produit ne serait pas suivi.
+  evidence: relecture intent-alignment du 2026-11-11 ; les deux coïncident à f574fff ; rendre `offered` public ajoute une surface d'API, hors d'un correctif.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-barre-de-mesure-par-commande-phrases-ecrites-a-la-main-plan.md`
+  summary: Le relevé de l'essai réel (lignes `SCORE` sur la sortie d'erreur, sans nom ni empreinte du modèle) doit être fixé dans un format lisible par la barre de non-oubli ; un pas raté d'un enchaînement compte contre la commande étiquette seule.
+  evidence: relecture blind-hunter du 2026-11-11 ; à décider dans le livrable 2, qui lit ces relevés.

@@ -2354,3 +2354,29 @@ Complément (relecture), même jour, seconde sonde sur une autre copie (`projet-
 
 La distance de la première sonde (3 606 m, 55,9°) se retrouve à la main par l'approximation
 plane locale sur les deux points reprojetés (≈ 3,60 km, ≈ 55,9°).
+
+## Barre par commande (ticket 5.53, 2026-11-11)
+
+Règle : **une commande offerte au modèle, au moins trois phrases de mesure écrites à la main**,
+dont au moins deux attendent un plan qui l'appelle ; la troisième peut attendre une question ou
+un refus. « Offerte » se lit au registre (`Registry::standard()` sans les commandes que le noyau
+dicte seul) : 33 commandes au 2026-11-11, 99 phrases.
+
+- Phrases : `ai/tests/par_commande/phrases.json` (`id`, `command`, `phrase`, `expected` :
+  `{"kind": "calls", "calls": [...]}`, `{"kind": "question"}` ou `{"kind": "refusal"}`) ; le
+  titre d'un export PDF est libre et n'est pas écrit dans l'attendu.
+- Inventaire : `ai/tests/par_commande/inventory.json`, celui de l'épreuve (Villeneuve-le-Roi)
+  complété d'un raster de coût, de deux rasters notés, d'un masque, d'un relevé ASCII Grid et de
+  deux fichiers non chargés (CSV d'arrêts de bus, pistes cyclables).
+- Sans modèle, `cargo test -p cassini-ai --test par_commande_reel` vérifie la couverture (une
+  commande ajoutée au registre sans ses phrases fait échouer, en la nommant) et chaque attendu :
+  `check_plan`, garde-fou des coordonnées, complétion sans effet, couches et rasters présents.
+- Avec le modèle :
+  `CASSINI_TEST_MODEL=<*.modele.json> cargo test -p cassini-ai --release --features cuda --test par_commande_reel -- --ignored`
+  imprime une ligne `SCORE <commande> <justes>/<phrases>` par commande et `SCORE total`. Pas de
+  seuil : la barre de non-oubli (livrable 2 de 5.53) compare le relevé d'un nouveau modèle à
+  celui du modèle qu'il remplace.
+- Les phrases ne vont jamais au jeu d'entraînement : `training/tests/recouvrement.rs` les compare
+  au jeu engendré, à l'identique puis à un nombre ou une commune près. À l'écriture, trois
+  phrases (LR3, GS1, HS1) figuraient déjà au jeu : elles ont été réécrites, le générateur n'a pas
+  été touché.

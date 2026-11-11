@@ -4,7 +4,8 @@
 //! `duree_reel` (le scénario de démo et son amorce), depuis 5.39 `echelle_utm_reel`, depuis 5.41
 //! `terrain_reel`, depuis 11.16, `epic11_reel` et, depuis 11.23, `style_reel` et les points d'un
 //! autre système de `epic11_reel` et, depuis 5.45, les 20 phrases de la recette QGIS d'Annecy
-//! (`qgis-plugin/tests/recette/annecy.json`). Les familles visent leur sorte de demande
+//! (`qgis-plugin/tests/recette/annecy.json`), puis depuis 5.53 la barre par commande
+//! (`ai/tests/par_commande/phrases.json`). Les familles visent leur sorte de demande
 //! avec d'autres tournures ; elles ne les recopient jamais. Deux comparaisons, sur le texte normalisé
 //! (minuscules, sans accents ni ponctuation) : à l'identique, puis à un nombre ou une commune
 //! près (chiffres masqués, noms de communes remplacés par un même repère, des deux côtés).
@@ -31,6 +32,8 @@ const EPIC11_REEL: &str = include_str!("../../ai/tests/epic11_reel.rs");
 const STYLE_REEL: &str = include_str!("../../ai/tests/style_reel.rs");
 /// Les phrases de la recette QGIS d'Annecy (5.45), écrites à la main, jouées sous QGIS.
 const RECETTE_ANNECY: &str = include_str!("../../qgis-plugin/tests/recette/annecy.json");
+/// Les phrases de la barre par commande (5.53), écrites à la main : `{id, command, phrase, …}`.
+const PAR_COMMANDE: &str = include_str!("../../ai/tests/par_commande/phrases.json");
 
 /// Texte normalisé, chiffres masqués et communes remplacées par un même repère.
 fn masked(text: &str) -> String {
@@ -75,6 +78,20 @@ fn from_json(text: &str) -> Vec<(String, String)> {
             (
                 s["id"].as_str().expect("id").to_string(),
                 s["text"].as_str().expect("texte").to_string(),
+            )
+        })
+        .collect()
+}
+
+/// Les phrases `{id, phrase}` de la barre par commande.
+fn from_phrases(text: &str) -> Vec<(String, String)> {
+    let phrases: Vec<Value> = serde_json::from_str(text).expect("phrases.json lisible");
+    phrases
+        .iter()
+        .map(|p| {
+            (
+                p["id"].as_str().expect("id").to_string(),
+                p["phrase"].as_str().expect("phrase").to_string(),
             )
         })
         .collect()
@@ -127,7 +144,8 @@ fn pairs(source: &str, start: &str) -> Vec<(String, String)> {
 }
 
 /// Les phrases des essais réels de `ai/tests/` : `plan_reel`, `question_reel`, `duree_reel`,
-/// `echelle_utm_reel`, `terrain_reel`, `epic11_reel`, `style_reel`, et la recette QGIS d'Annecy.
+/// `echelle_utm_reel`, `terrain_reel`, `epic11_reel`, `style_reel`, la recette QGIS d'Annecy et,
+/// depuis 5.53, la barre par commande.
 fn real_trials() -> Vec<(String, String)> {
     let mut all = from_json(PLAN_REEL);
     let questions = pairs(QUESTION_REEL, "const AMBIGUOUS");
@@ -156,6 +174,9 @@ fn real_trials() -> Vec<(String, String)> {
     let annecy = from_json(RECETTE_ANNECY);
     assert_eq!(annecy.len(), 20, "{annecy:?}");
     all.extend(annecy);
+    let par_commande = from_phrases(PAR_COMMANDE);
+    assert_eq!(par_commande.len(), 99, "{par_commande:?}");
+    all.extend(par_commande);
     all
 }
 
@@ -201,10 +222,38 @@ fn no_sentence_of_the_real_trials_appears_in_the_generated_set() {
     );
 }
 
+/// La barre par commande (5.53) est écrite à neuf : aucune de ses phrases ne reprend, à un
+/// nombre ou une commune près, une phrase d'un autre essai réel.
+#[test]
+fn no_sentence_of_the_per_command_bar_copies_another_real_trial() {
+    let mine: HashSet<String> = from_phrases(PAR_COMMANDE)
+        .iter()
+        .map(|(id, _)| id.clone())
+        .collect();
+    let others: HashSet<String> = real_trials()
+        .into_iter()
+        .filter(|(id, _)| !mine.contains(id))
+        .map(|(_, text)| masked(&text))
+        .collect();
+    let copies: Vec<String> = from_phrases(PAR_COMMANDE)
+        .into_iter()
+        .filter(|(_, text)| others.contains(&masked(text)))
+        .map(|(id, _)| id)
+        .collect();
+    assert!(
+        copies.is_empty(),
+        "phrases de la barre par commande reprises d'un autre essai : {}",
+        copies.join(", ")
+    );
+}
+
 #[test]
 fn the_real_trials_are_read_whole() {
     let all = real_trials();
-    assert_eq!(all.len(), 25 + 12 + 8 + 1 + 8 + 8 + 28 + 1 + 4 + 10 + 20);
+    assert_eq!(
+        all.len(),
+        25 + 12 + 8 + 1 + 8 + 8 + 28 + 1 + 4 + 10 + 20 + 99
+    );
     let find = |id: &str| all.iter().find(|(i, _)| i == id).unwrap().1.clone();
     assert_eq!(
         find("Q11"),
@@ -228,6 +277,7 @@ fn the_real_trials_are_read_whole() {
     assert!(find("Y04").contains("UTM 32N"));
     assert_eq!(find("ST10"), "Colore les gares selon leur fréquentation.");
     assert_eq!(find("RA09"), "Fais un tampon autour des routes.");
+    assert_eq!(find("PK1"), "Où sont les sommets du MNT ?");
 }
 
 #[test]
