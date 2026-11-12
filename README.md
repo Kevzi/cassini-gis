@@ -75,7 +75,7 @@ et appelée à l'identique depuis le panneau, la ligne de commande et une IA ext
 | Domaine | Ce qu'on peut demander | Calculé par |
 |---|---|---|
 | **Données et projet** | ouvrir un GeoPackage, un Shapefile, un GeoJSON, un CSV ou un GeoParquet ; décrire le projet et ses couches ; reprojeter ou convertir une couche ; retirer une couche du projet | QGIS |
-| **Analyses** | zone tampon, intersection, sélection par attribut, comptage de points par zone, isochrones à pied ou en voiture | QGIS |
+| **Analyses** | zone tampon (en mètres, même sur une couche en degrés), intersection, sélection par attribut, comptage de points par zone, isochrones à pied ou en voiture | QGIS |
 | **Terrain** | pente, exposition, ombrage, ligne de vue, champ de vision simple ou cumulé, points hauts, coût de déplacement et chemin de moindre coût | noyau Cassini |
 | **Rasters** | reclassement, superposition pondérée de plusieurs critères | noyau Cassini |
 | **Coordonnées** | conversion WGS84 ↔ UTM ↔ MGRS, distance et azimut, point par azimut et distance, recoupement de deux visées, reprojection d'un point | noyau Cassini · QGIS |
@@ -118,7 +118,7 @@ Une couche que Cassini ne reconnaît pas garde son style : il ne devine pas.
 | `analysis.select_by_attribute` | sélection par attribut |
 | `analysis.zonal_statistics` | nombre de points dans chaque zone |
 | `analysis.isochrone` | isochrones à pied et en voiture sur un réseau |
-| `layout.export_pdf` | carte en PDF : titre, légende, échelle, flèche du nord, sources détaillées (résolution, date), format, orientation, carroyage (dont MGRS étiqueté), en-tête et pied de page |
+| `layout.export_pdf` | carte en PDF : titre, légende, échelle, flèche du nord, sources détaillées (résolution, date), format, orientation, carroyage (dont MGRS étiqueté), en-tête et pied de page ; au bout d'un plan, cadrée sur le résultat mis en évidence |
 
 **Calculées par le noyau**, en Rust, testées sans QGIS :
 
@@ -150,14 +150,29 @@ spécification de la NGA pour MGRS). Comparé à QGIS et à GRASS sur un vrai MN
 donne les mêmes résultats, **2,9 à 124 fois plus vite** —
 [le détail](docs/comparaison-terrain-qgis.md).
 
-**L'IA répond vite.** Sur une carte graphique (RTX 3070 Ti), la phrase de démo est
-résolue en 14 s. Sans carte graphique, sur un processeur de bureau bridé à quatre
-cœurs, huit phrases longues sur neuf passent sous 30 s ; la phrase de démo reste
-juste au-dessus. Cassini choisit seul la carte graphique quand il y en a une
+**Le PDF montre la réponse.** Quand un export termine un plan, la carte est cadrée sur
+le résultat, qui est dessiné en magenta (en violet foncé pour des lignes) et nommé en
+clair dans la légende. Les couches intermédiaires du plan sont cachées de la carte, de
+la légende et des sources, et les intitulés techniques des MNT (« Band 1 (Gray) »)
+disparaissent. Les autres couches sont celles que vous avez cochées dans QGIS.
+**Attention : la couleur magenta n'existe que dans le PDF.** Elle est portée par une
+copie en mémoire, posée dans la seule mise en page ; dans le projet, la couche de
+résultat garde sa couleur. Un raster de résultat garde son style.
+
+**L'IA répond vite.** Sur une carte graphique (RTX 3070 Ti), une phrase longue se
+compose en 14 s sur un petit projet. Sur le jeu d'Annecy, plus gros, la phrase de démo
+va jusqu'au PDF en 1 min 40 environ : 24 s pour lire le projet, 41 s pour composer le
+plan, 55 s pour l'exécuter. Sans carte graphique, sur un processeur de bureau bridé à
+quatre cœurs, huit phrases longues sur neuf passent sous 30 s. Cassini choisit seul la carte graphique quand il y en a une
 (NVIDIA, AMD, Intel, par Vulkan), sans réglage —
 [les mesures](docs/mesure-duree-par-phrase.md).
 
-**Quand la demande est ambiguë, Cassini pose une question** au lieu de deviner.
+**Quand la demande est ambiguë, Cassini pose une question** au lieu de deviner. Un
+garde-fou du noyau le fait aussi derrière le modèle : une sélection sur une valeur
+qu'un champ n'a pas (quand ses valeurs sont toutes connues, dix au plus), ou sur un
+champ que la couche n'a pas, devient une question qui nomme la couche, le champ et les
+valeurs (ou les champs) connus, au lieu d'une carte vide ou fausse. Rien n'est alors
+écrit au journal ([le détail](docs/canal-local.md)).
 
 ## Comment ça marche
 
@@ -198,12 +213,19 @@ flowchart LR
 | ✅ | **5.** Agent IA local et serveur MCP | fait |
 | ✅ | **6.** Analyse de terrain dans le noyau | fait, comparée à QGIS et GRASS |
 | 🔨 | **6 bis.** Géométrie, terrain étendu, catalogue figé | presque fait : reste la démonstration de bout en bout dans QGIS |
-| ⏳ | **7.** Démo filmée sur Annecy, puis publication : dépôt d'extensions QGIS, installeurs, vidéo | à venir |
+| 🔨 | **7.** Démo filmée sur Annecy, puis publication : dépôt d'extensions QGIS, installeurs, vidéo | en cours : la phrase de démo va jusqu'au PDF dans QGIS ; restent la vidéo et la publication |
 
 **Ensuite** : un catalogue étendu est déjà décrit — plus proche voisin, plus court
 chemin sur un réseau, atlas PDF, courbes de niveau, vectorisation, statistiques
 zonales sur un MNT, géocodage sur la Base Adresse Nationale — et des identifiants
 sont réservés pour l'hydrologie et la couverture radio.
+
+**Prévu après la publication** :
+
+- le choix automatique des couches de contexte du PDF ;
+- une option « sans changer les couleurs » à l'export ;
+- l'isochrone sur une couche en degrés, et le terrain sur un MNT en degrés ;
+- les courbes de niveau.
 
 <details>
 <summary><b>Limites connues</b></summary>
@@ -215,14 +237,19 @@ sont réservés pour l'hydrologie et la couverture radio.
   Raster : MNT et rasters de critères en GeoTIFF à une bande.
 - Le noyau ne convertit que des **coordonnées ponctuelles** (WGS84, UTM, MGRS) ;
   toute couche est reprojetée par QGIS (AD-19).
+- Une distance en mètres sur une couche en degrés : pour la zone tampon, le noyau
+  choisit un système en mètres (celui du projet s'il est métrique et pas Mercator,
+  sinon le fuseau UTM de son étendue), et QGIS reprojette une copie temporaire avant le
+  tampon ; c'est journalisé et se rejoue à l'identique. L'isochrone et un MNT en
+  degrés ne le font pas encore.
 - Aucune parité avec QGIS n'est visée ni revendiquée.
-- Le modèle local, mesuré sur ses barres élargies (novembre 2026), garde encore des
-  faiblesses connues, objectifs du prochain entraînement : il perd parfois le format
-  de page quand une échelle est donnée, remplace une fonction absente (courbes de
-  niveau, crue, étiquettes…) par une commande voisine au lieu de la refuser, oublie
-  des options écrites (« sans courbure terrestre »), et confond le champ de vision
-  cumulé avec plusieurs champs simples. Chaque plan reste affiché et validé avant
-  d'être exécuté.
+- Le modèle installé (séance 3 de l'ajustement continu, 12 novembre 2026), mesuré
+  avec le garde-fou, sur des phrases qu'il n'a jamais vues : plans 47/48 sans aucune
+  fausse question, questions 47/47, phrases éloignées de l'entraînement 36/40,
+  échelle et UTM 41/44, terrain 38/44, géométrie 43/49, style 36/42, 89/99 commande
+  par commande, gros projet 6/7, et 20/20 dans QGIS sur Annecy, rejeu identique. Son
+  point faible : les plans longs d'urbanisme, à plusieurs conditions. Chaque plan reste affiché et validé avant d'être
+  exécuté.
 
 </details>
 
@@ -446,7 +473,10 @@ flowchart TB
   phrases de mesure écrites à la main, et chaque barre en compte 40 à 50, refus
   compris. Avant toute installation, la barre de non-oubli compare le candidat au
   modèle en place, barre par barre, à une phrase près
-  ([`non_oubli.py`](training/entrainement/non_oubli.py)).
+  ([`non_oubli.py`](training/entrainement/non_oubli.py)). Une seule exception, décidée
+  à la main le 12 novembre 2026 : la séance 3 est installée malgré une baisse sur une
+  barre (phrases éloignées, 39 → 36/40) ; le modèle
+  d'avant reste installé à côté.
 - **Un verrou hors ligne vérifié**, pas seulement promis : la table d'imports du
   binaire Windows ne nomme aucune bibliothèque réseau, l'extension n'importe aucun
   module réseau, et `cargo deny` refuse tout client HTTP et toute couche TLS.
@@ -533,7 +563,8 @@ un seul contrôle en échec fait passer le run au rouge.
 
 Deux familles ne tournent pas en CI, parce qu'elles demandent ce que la CI n'a pas :
 **les sondes sous le vrai QGIS** (`qgis-plugin/tests/probe_*.py`), qui enchaînent les
-commandes dans un vrai projet, le rouvrent et rejouent le journal ; et **les mesures du
+commandes dans un vrai projet, le rouvrent et rejouent le journal (`probe_demo.py` joue la
+phrase de démo d'Annecy jusqu'au PDF) ; et **les mesures du
 vrai modèle** (`ai/tests/*_reel.rs`) : justesse des plans, des questions et des refus,
 score sur des phrases tenues à l'écart, une barre par commande, durée par phrase.
 Leurs phrases sont protégées : un test sans modèle vérifie chaque réponse attendue
