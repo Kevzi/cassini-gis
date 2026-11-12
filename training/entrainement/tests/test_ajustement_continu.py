@@ -90,7 +90,9 @@ def link(rank: int, sha: str, depart: str = "base") -> dict:
 class Continuation(unittest.TestCase):
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
-        self.dir = Path(self.folder.name)
+        # Résolu : sous Windows, le dossier temporaire a un nom court (RUNNER~1) que la chaîne
+        # résout avant de le citer.
+        self.dir = Path(self.folder.name).resolve()
         self.output = self.dir / "sortie"
 
     def tearDown(self):
@@ -387,7 +389,9 @@ class ParentIdentity(unittest.TestCase):
 
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
-        self.dir = Path(self.folder.name)
+        # Résolu : sous Windows, le dossier temporaire a un nom court (RUNNER~1) que la chaîne
+        # résout avant de le citer.
+        self.dir = Path(self.folder.name).resolve()
 
     def tearDown(self):
         self.folder.cleanup()
@@ -515,7 +519,7 @@ class Bounds(unittest.TestCase):
         pipeline.check_counts(plan, {"cible": [Example(f"c{i}", CALLS % i) for i in range(3)]})
         with self.assertRaises(pipeline.PipelineStop) as stop:
             pipeline.check_counts(plan, {"cible": [Example("c0", CALLS % 0)]})
-        self.assertIn("/x/cible.jsonl", str(stop.exception))
+        self.assertIn(str(Path("/x/cible.jsonl")), str(stop.exception))
 
     def test_a_generator_refusal_names_the_bar_sentence(self):
         refused = mock.Mock(returncode=3, stderr="jeu ciblé refusé, il reprend une phrase de barre : essai réel XX9\n")
@@ -586,7 +590,9 @@ class LaunchPastTheGpu(unittest.TestCase):
 
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
-        self.dir = Path(self.folder.name)
+        # Résolu : sous Windows, le dossier temporaire a un nom court (RUNNER~1) que la chaîne
+        # résout avant de le citer.
+        self.dir = Path(self.folder.name).resolve()
         self.output = self.dir / "sortie"
         self.calls: list = []
 
