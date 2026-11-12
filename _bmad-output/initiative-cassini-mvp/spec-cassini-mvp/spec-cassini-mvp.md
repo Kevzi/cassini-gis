@@ -32,7 +32,7 @@ CAP-2 a été retirée (préparation des données d'une commune par code INSEE) 
 
 - **CAP-3** — Analyses vectorielles
   - **intent:** l'utilisateur répond à une question spatiale en combinant des analyses élémentaires sur les couches de son projet.
-  - **success:** zone tampon, intersection, sélection par attribut, statistiques par zone et isochrones à pied et en voiture sont chacune une commande du registre, **exécutée par le cadre de traitement de QGIS**, et donnent un résultat vérifiable par un test, hors ligne.
+  - **success:** zone tampon, intersection, sélection par attribut, statistiques par zone et isochrones à pied et en voiture sont chacune une commande du registre, **exécutée par le cadre de traitement de QGIS**, et donnent un résultat vérifiable par un test, hors ligne. Une distance donnée en mètres s'applique aussi à une couche en degrés : la commande calcule dans un système en mètres choisi par le noyau, sans étape ajoutée au plan (changement de cap du 2026-11-12, tampon d'abord).
 
 - **CAP-4** — Agent en langage naturel
   - **intent:** l'utilisateur formule sa demande en français et obtient le travail fait, sans connaître les commandes.

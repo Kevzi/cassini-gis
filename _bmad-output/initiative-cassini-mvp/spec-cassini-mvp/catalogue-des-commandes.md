@@ -437,14 +437,17 @@ Inventaire du projet ouvert : couches dans l'ordre de la légende, système du p
 | Résultat | Type | Sens |
 |---|---|---|
 | `extent` | emprise ou `null` | Étendue de l'ensemble, dans le système du projet ; porte aussi `lonlat` (`west`, `south`, `east`, `north`, `crs` = `EPSG:4326`), la même étendue en degrés WGS84 reprojetée par QGIS, absente quand aucune couche ne se reprojette en degrés valides. Le noyau en déduit le fuseau UTM du projet vu par le modèle (`project.utm_epsg`). |
-| `layers` | liste de couches | `layer_id`, `name`, `crs`, `kind`, `source`, `geometry`, `feature_count`, `fields`. |
+| `layers` | liste de couches | `layer_id`, `name`, `crs`, `crs_unit`, `kind`, `source`, `geometry`, `feature_count`, `fields`. `crs_unit` : `m`, `deg` ou `other`, unité du système lue par QGIS ; lue par le noyau, jamais montrée au modèle. |
 | `project_crs` | chaîne | Système du projet, code explicite. |
+| `project_crs_unit` | chaîne | Unité du système du projet : `m`, `deg` ou `other`. |
 | `project_name` | chaîne ou `null` | Nom du fichier de projet sans extension. |
 
 ```json fiche
 {"id": "project.inventory", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
  "params": {},
- "result": ["extent", "layers", "project_crs", "project_name"]}
+ "result": ["extent", "layers", "project_crs", "project_name"],
+ "planned_by": "epic 9, entrée 16",
+ "planned_result": ["project_crs_unit"]}
 ```
 
 ### `layer.add`
@@ -573,8 +576,15 @@ Erreur : `layer.invalid_source` (fichier illisible ou système non reconnu).
 
 ### `analysis.buffer`
 
-Zone tampon autour des entités d'une couche, ajoutée comme nouvelle couche. La couche doit
-être dans un système en mètres (`analysis.crs_not_metric` sinon).
+Zone tampon autour des entités d'une couche, ajoutée comme nouvelle couche. Une couche en
+degrés est d'abord reprojetée par QGIS, dans la même étape, vers le système en mètres
+choisi par le noyau (`work_epsg`) :
+- celui de la couche si elle est déjà en mètres ;
+- sinon celui du projet s'il est en mètres ;
+- sinon le fuseau UTM de l'étendue du projet.
+
+Si aucun ne convient : `analysis.crs_not_metric`, avant tout ordre. Le tampon sort dans ce
+système (`crs` du résultat). Changement de cap du 2026-11-12.
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
@@ -582,6 +592,7 @@ Zone tampon autour des entités d'une couche, ajoutée comme nouvelle couche. La
 | `distance` | `Distance` | oui | `m`, `km` | Distance du tampon. |
 | `dissolve` | booléen | non | défaut faux | Fusionner les tampons en une entité, seulement si la phrase le demande. |
 | `out` | chaîne | non | — | Fourni par le noyau. |
+| `work_epsg` | entier | non | code EPSG | Fourni par le noyau : système en mètres du calcul. |
 
 Résultat : `layer_id`, `name`, `crs`, `feature_count` (couche créée).
 
@@ -591,6 +602,8 @@ Résultat : `layer_id`, `name`, `crs`, `feature_count` (couche créée).
             "distance": {"type": "Distance", "required": true},
             "dissolve": {"type": "boolean", "required": false},
             "out": {"type": "string", "required": false}},
+ "planned_params": {"work_epsg": {"type": "integer", "required": false}},
+ "planned_by": "epic 9, entrée 16",
  "result": ["crs", "feature_count", "layer_id", "name"]}
 ```
 
@@ -1745,8 +1758,9 @@ Résultat : `layer_id`, `name`, `crs`, `feature_count`.
 ### `analysis.area`
 
 Ajoute un champ de surface plane (dans le système projeté de la couche, formule fixe de la
-ligne de table) sur une couche nouvelle (epic 10, entrée 22). Couche en degrés :
-`analysis.crs_not_metric`.
+ligne de table) sur une couche nouvelle (epic 10, entrée 22). Couche en degrés : calcul
+dans le système en mètres choisi par le noyau (`work_epsg`), comme `analysis.buffer`
+(changement de cap du 2026-11-12).
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
@@ -1973,7 +1987,8 @@ Compte et somme par valeur d'un champ de catégorie (epic 10, entrée 11). Chaqu
 ### `analysis.sum_line_lengths`
 
 Longueur des lignes contenues dans chaque polygone (epic 10, entrée 11). Couche en degrés :
-`analysis.crs_not_metric`.
+calcul dans le système en mètres choisi par le noyau (`work_epsg`), comme `analysis.buffer`
+(changement de cap du 2026-11-12).
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|

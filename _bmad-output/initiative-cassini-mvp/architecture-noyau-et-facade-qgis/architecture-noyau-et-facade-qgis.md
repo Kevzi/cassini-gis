@@ -538,6 +538,41 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   montré, exécuté et journalisé comme un plan ordinaire. Un appel direct
   (`command.run`, MCP, CLI `run`) ou un rejeu n'est jamais complété : il reste
   refusé par `terrain.crs_mismatch`.
+- **Précision (2026-11-12, changement de cap `change-distance-en-metres-sur-couche-en-degres`) :**
+  une commande déléguée qui applique une distance en mètres à une couche vecteur calcule
+  dans un système en mètres **choisi par le noyau** et passé dans un paramètre rempli par
+  lui (`work_epsg`), absent de la grammaire du modèle, du MCP et du formulaire, comme
+  `out`.
+  - Couche en mètres : son propre système.
+  - Couche en degrés : le système du projet s'il est en mètres, sinon le fuseau UTM sur
+    WGS84 de l'étendue du projet (`project.utm_epsg`), sinon `analysis.crs_not_metric`
+    avant tout ordre.
+  - Unité inconnue : le système de la couche, que la garde de l'extension refuse s'il
+    n'est pas en mètres.
+
+  La reprojection est faite par QGIS dans la chaîne fixe de la ligne de table (AD-24). Le
+  noyau ne reprojette rien.
+
+  Ce n'est pas une conversion « en silence » au sens de l'amendement du 2026-11-05 :
+  - elle est déclarée par la description de la commande ;
+  - elle est journalisée dans les paramètres ;
+  - elle est rendue par le `crs` du résultat.
+
+  Aucune étape n'est ajoutée au plan (AD-23). L'unité du système est un fait lu par QGIS et
+  rendu par `project.inventory`. Le rejeu relit `work_epsg` ; une ligne qui ne le porte
+  pas est complétée par le système de la couche. Première commande : `analysis.buffer`
+  (entrée 9.16). Les autres suivent par leurs propres entrées.
+- **Précision (2026-11-12, complément du changement de cap
+  `change-distance-en-metres-sur-couche-en-degres`) :** la même règle vaut pour un MNT en
+  degrés lu par une commande du noyau (`terrain.*`, `raster.reclassify`,
+  `raster.weighted_overlay`) ou déléguée (`raster.contour`). Le noyau choisit `work_epsg`
+  (système du MNT s'il est en mètres, sinon celui du projet s'il est en mètres, sinon le
+  fuseau UTM de l'étendue du projet, sinon `dem.not_projected` avant tout ordre) ;
+  l'extension reprojette le MNT dans ce système par un geste fixe de QGIS, en fichier
+  temporaire à l'emplacement décidé par le noyau (AD-10), avant que le noyau le lise. Le
+  noyau ne reprojette rien. Aucune étape n'est ajoutée au plan (AD-23) ; `work_epsg` est
+  journalisé et relu au rejeu (AD-11). Les points en WGS84 restent convertis par la
+  complétion de 11.22, vers `work_epsg`. Entrée 10.33, après la vidéo.
 
 ### AD-20 — Le noyau lit ses rasters lui-même, derrière un seul module remplaçable
 
@@ -574,6 +609,10 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   taille × √2 en diagonale). Le coût cumulé rendu est dans l'unité du raster
   multipliée par des mètres. La ligne de moindre coût va du départ à l'arrivée,
   dans cet ordre.
+- **Précision (2026-11-12, même complément) :** le module unique ne lit toujours qu'un MNT
+  projeté en mètres et garde son refus `dem.not_projected`. Un MNT en degrés lui parvient
+  déjà reprojeté par QGIS dans `work_epsg` (AD-19, précision du 2026-11-12) ; le noyau ne
+  lie ni GDAL ni PROJ.
 
 ### AD-21 — Une seule forme d'erreur, et aucun échec silencieux [ADOPTED]
 
@@ -748,6 +787,11 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   exactement les commandes déclarées `runs_in: qgis` du registre, ni plus ni
   moins : une ligne pour une commande calculée par le noyau (par exemple
   `raster.reclassify`) la fait échouer.
+- **Précision (2026-11-12, même changement de cap) :** une ligne dont la commande porte
+  `work_epsg` commence par une reprojection fixe (`native:reprojectlayer` vers
+  `work_epsg`, en temporaire), **toujours exécutée**, identité comprise. Ce n'est pas un
+  choix entre deux suites. La garde « système en mètres » porte sur `work_epsg`.
+  L'ajout incrémente la version de chaîne de la ligne (AD-11).
 
 ### AD-25 — Une commande déléguée n'est annoncée que si toute sa chaîne existe chez l'utilisateur
 

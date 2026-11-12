@@ -156,6 +156,34 @@ after = [5]
 hitl = false
 risk = "medium"
 references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-28"]
+notes = ["Decision: 2026-11-12 — changement de cap approuvé : change-distance-en-metres-sur-couche-en-degres. Une distance ou une mesure en metres sur une couche en degres se calcule dans le systeme work_epsg choisi par le noyau, comme analysis.buffer (9.16) ; la commande nait avec cette regle."]
+
+[[entry]]
+id = 32
+type = "story"
+title = "Isochrone sur un reseau en degres : calcul dans un systeme en metres choisi par le noyau"
+description = "Applique a analysis.isochrone la regle de 9.16 (work_epsg, chaine native:reprojectlayer en tete, version de chaine augmentee) : longueurs du reseau et accrochage de l'origine en metres sur un reseau en EPSG:4326 ; l'origine est transformee vers work_epsg. Fiche du catalogue mise a jour."
+verify = "Une isochrone sur un reseau de test en EPSG:4326 rend la meme emprise, a quelques metres pres, que sur le meme reseau reprojete a la main ; reseau metrique inchange ; rejeu identique ; core/tests/catalogue.rs vert."
+covers = ["CAP-3"]
+after = [6, "9.16"]
+hitl = false
+risk = "high"
+references = ["change-distance-en-metres-sur-couche-en-degres/change-distance-en-metres-sur-couche-en-degres.md"]
+notes = ["Decision: 2026-11-12 — changement de cap approuvé : change-distance-en-metres-sur-couche-en-degres. Apres la demo ; apres 10.6, qui reprend analysis.isochrone sur NetworkOptions, pour ne pas la toucher deux fois."]
+
+[[entry]]
+id = 33
+type = "story"
+title = "MNT en degres : calcul dans un systeme en metres choisi par le noyau"
+description = "Applique aux commandes qui lisent un MNT (terrain.*, raster.reclassify, raster.weighted_overlay, raster.contour, et toute commande qui ouvre un MNT par dem.rs) la regle de 9.16. Le noyau choisit work_epsg : systeme du MNT s'il est en metres, sinon systeme du projet s'il est en metres, sinon fuseau UTM de l'etendue du projet (project.utm_epsg), sinon dem.not_projected avant tout ordre, message qui dit pourquoi. L'extension reprojette le MNT dans work_epsg par un geste fixe delegue a QGIS, sans choix (AD-5, AD-24), en fichier temporaire a l'emplacement decide par le noyau (AD-10), avant que le noyau le lise ; dem.rs ne lit toujours qu'un MNT metrique, sans GDAL (AD-1, AD-20). Aucune etape ajoutee au plan (AD-23). work_epsg journalise et relu au rejeu ; une ligne ancienne sans work_epsg est completee par le systeme du MNT. Les points en WGS84 restent convertis par la completion de 11.22, vers work_epsg. Fiches du catalogue concernees mises a jour."
+verify = "Pente et champ de vision sur un MNT de test en EPSG:4326 donnent le resultat du meme MNT reprojete a la main dans le meme systeme, a la tolerance de reechantillonnage pres ; un MNT metrique donne un resultat inchange ; rejeu identique dans la meme session et dans une session neuve, y compris apres un changement du systeme du projet ; refus clair (dem.not_projected, message qui dit pourquoi) si aucun systeme en metres n'est trouvable ; core/tests/catalogue.rs vert."
+covers = ["CAP-11", "CAP-15"]
+after = ["epic-publication", "9.16"]
+hitl = false
+risk = "high"
+references = ["change-distance-en-metres-sur-couche-en-degres/change-distance-en-metres-sur-couche-en-degres.md, §6", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md, AD-19 et AD-20 (precisions du 2026-11-12), AD-24, AD-10, AD-11, AD-23"]
+unknown = "Algorithme de reprojection raster de QGIS, methode de reechantillonnage et taille de cellule du MNT reprojete, fixes dans la ligne de table ; message qui porte l'ordre de reprojection au noyau : a trancher au plan."
+notes = ["Decision: 2026-11-12 — complément du changement de cap approuvé, après la vidéo."]
 
 # ---- Mesure de depart ----
 
@@ -195,7 +223,7 @@ covers = ["CAP-14"]
 after = [21]
 hitl = false
 risk = "medium"
-notes = ["A regler au plan : la selection numerique existante prend une valeur sans unite ; « plus de 2 500 m2 » sur un champ en ha donnerait un plan faux sans signal. Le plan aligne l'unite du champ sur celle de la phrase, ou la selection compare dans l'unite nommee par le resultat."]
+notes = ["A regler au plan : la selection numerique existante prend une valeur sans unite ; « plus de 2 500 m2 » sur un champ en ha donnerait un plan faux sans signal. Le plan aligne l'unite du champ sur celle de la phrase, ou la selection compare dans l'unite nommee par le resultat.", "Decision: 2026-11-12 — changement de cap approuvé : change-distance-en-metres-sur-couche-en-degres. Une distance ou une mesure en metres sur une couche en degres se calcule dans le systeme work_epsg choisi par le noyau, comme analysis.buffer (9.16) ; la commande nait avec cette regle."]
 references = ["research-taches-sig-des-bureaux-d-etudes-et-analy/research-taches-sig-des-bureaux-d-etudes-et-analy.md", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-23", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-24", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-11"]
 
 [[entry]]
@@ -221,6 +249,7 @@ after = [9]
 hitl = false
 risk = "medium"
 references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-24", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-27"]
+notes = ["Decision: 2026-11-12 — changement de cap approuvé : change-distance-en-metres-sur-couche-en-degres. Une distance ou une mesure en metres sur une couche en degres se calcule dans le systeme work_epsg choisi par le noyau, comme analysis.buffer (9.16) ; la commande nait avec cette regle."]
 
 [[entry]]
 id = 11
@@ -233,6 +262,7 @@ after = [10]
 hitl = false
 risk = "low"
 references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-24", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-27"]
+notes = ["Decision: 2026-11-12 — changement de cap approuvé : change-distance-en-metres-sur-couche-en-degres. Une distance ou une mesure en metres sur une couche en degres se calcule dans le systeme work_epsg choisi par le noyau, comme analysis.buffer (9.16) ; la commande nait avec cette regle."]
 
 [[entry]]
 id = 23
@@ -322,6 +352,7 @@ after = [6, 26]
 hitl = false
 risk = "medium"
 references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-24", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-28", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-8"]
+notes = ["Decision: 2026-11-12 — changement de cap approuvé : change-distance-en-metres-sur-couche-en-degres. Une distance ou une mesure en metres sur une couche en degres se calcule dans le systeme work_epsg choisi par le noyau, comme analysis.buffer (9.16) ; la commande nait avec cette regle."]
 
 [[entry]]
 id = 14
@@ -334,6 +365,7 @@ after = [13]
 hitl = false
 risk = "high"
 references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-24", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-28", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-25"]
+notes = ["Decision: 2026-11-12 — changement de cap approuvé : change-distance-en-metres-sur-couche-en-degres. Une distance ou une mesure en metres sur une couche en degres se calcule dans le systeme work_epsg choisi par le noyau, comme analysis.buffer (9.16) ; la commande nait avec cette regle."]
 
 [[entry]]
 id = 15
@@ -382,7 +414,7 @@ title = "Refactor sweep"
 description = "Nettoyage seulement, dont la portee se fixe au demarrage a partir des plans et des constats de revue reportes pendant l'epic."
 verify = "Tests du noyau et de l'extension verts, cargo fmt et clippy sans avertissement, recette hors ligne verte."
 covers = ["CAP-6", "CAP-14"]
-after = [1, 2, 3, 4, 5, 6, 7, 8, 21, 22, 9, 10, 11, 23, 24, 20, 12, 25, 26, 13, 14, 15, 16, 28, 29, 30, 31, 17, 27]
+after = [1, 2, 3, 4, 5, 6, 7, 8, 21, 22, 9, 10, 11, 23, 24, 20, 12, 25, 26, 13, 14, 15, 16, 28, 29, 30, 31, 17, 27, 32, 33]
 hitl = false
 risk = "low"
 

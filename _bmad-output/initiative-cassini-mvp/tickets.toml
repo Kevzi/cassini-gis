@@ -106,6 +106,7 @@ after = [
   { epic = 4, needs = "les MNT de recette (4.1) et l'inventaire des rasters (4.3), pour l'entree 20" },
   { epic = 6, needs = "le MVP complet et la demo, qui figent le registre et l'agent sur lesquels le catalogue s'etend" },
   { epic = 7, needs = "la chaine de publication de l'extension et du paquet, par laquelle le catalogue etendu est livre" },
+  { epic = 9, needs = "le tampon en metres sur une couche en degres (9.16), dont l'isochrone de 10.32 reprend la regle (changement de cap change-distance-en-metres-sur-couche-en-degres du 2026-11-12)" },
 ]
 
 # ---- Retire ----

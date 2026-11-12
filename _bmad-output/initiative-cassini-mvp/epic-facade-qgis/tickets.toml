@@ -181,3 +181,23 @@ references = [
 notes = [
   "Decision: 2026-11-10 — proprietaire : « ok pour 7, 8 et 9 » ; le panneau affiche le programme branche et demande confirmation au premier branchement ; reglage cassini/core_path rendu visible. Attend la publication et l'epic 10 a travers 2.14.",
 ]
+
+[[entry]]
+id = 16
+type = "story"
+title = "Tampon sur une couche en degres : calcul dans un systeme en metres choisi par le noyau"
+description = "analysis.buffer recoit work_epsg, rempli par le noyau comme out, absent de la grammaire du modele, du MCP et du formulaire. Le noyau le choisit par une fonction pure : couche en metres -> son systeme ; couche en degres -> systeme du projet s'il est en metres, sinon fuseau UTM de l'etendue du projet (project.utm_epsg), sinon analysis.crs_not_metric avant tout ordre, message qui dit pourquoi ; unite inconnue -> systeme de la couche. Unite lue dans l'inventaire (crs_unit par couche, project_crs_unit), ou dans le crs rendu par une etape step:k. La ligne de table devient native:reprojectlayer (temporaire) puis native:buffer, version de chaine augmentee, garde metrique portee par work_epsg. Aucune etape ajoutee au plan (AD-23). Rejeu : work_epsg relu dans le journal ; une ligne ancienne sans work_epsg est completee par le systeme de la couche. Descriptions FR/EN de la commande reecrites. Fiches analysis.buffer et project.inventory : planned_* reportes. Compte rendu de l'etape : nomme le systeme de calcul quand la couche etait en degres."
+verify = "Tests du noyau sans QGIS : choix de work_epsg sur les cinq cas (metrique, projet metrique, UTM, refus avec message, unite inconnue), et sur une couche step:k. Tests de l'extension : un tampon de 500 m sur une couche de points en EPSG:4326 donne le meme resultat, a quelques metres pres (ecart de surface et distance de Hausdorff mesures), qu'un data.reproject manuel vers le meme systeme suivi du tampon ; une couche deja metrique donne un resultat inchange (meme systeme, meme nombre d'entites, meme geometrie) ; work_epsg non metrique refuse par analysis.crs_not_metric. Rejeu identique dans la meme session et dans une session neuve, y compris apres un changement du systeme du projet ; une ligne ancienne sans work_epsg se rejoue comme avant. Message clair si aucun systeme en metres n'est trouvable (projet et couche en degres, etendue trop large). core/tests/catalogue.rs vert. Recette QGIS reelle : la demo d'Annecy, phrase de CLAUDE.md §1, rejouee jusqu'au PDF, rendu en PNG et regarde a l'oeil, puis rejouee depuis le journal apres fermeture et reouverture du projet."
+covers = ["CAP-3"]
+after = []
+hitl = false
+risk = "high"
+references = [
+  "change — _bmad-output/initiative-cassini-mvp/change-distance-en-metres-sur-couche-en-degres/change-distance-en-metres-sur-couche-en-degres.md, §3.2 et §4",
+  "architecture — architecture-noyau-et-facade-qgis.md, AD-19 et AD-24 (precisions du 2026-11-12), AD-5, AD-11, AD-23",
+]
+unknown = "Appel direct sans inventaire tenu par la session : comment le noyau obtient l'unite de la couche (relecture de l'inventaire, hors journal) — a verifier dans serve.rs au plan."
+notes = [
+  "Decision: 2026-11-12 — changement de cap approuvé : change-distance-en-metres-sur-couche-en-degres (avec work_epsg rempli par le noyau, et crs_unit et project_crs_unit dans l'inventaire).",
+  "Decision: 2026-11-12 — proprietaire, en party : la commande convertit elle-meme, aucune etape ajoutee au plan ; tampon d'abord, le reste apres la demo.",
+]

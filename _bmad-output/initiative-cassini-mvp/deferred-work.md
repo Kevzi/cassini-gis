@@ -825,6 +825,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-second-jeu-de-test-reel-annecy-pret-pour-la-demonstration-plan.md`
   summary: Une couche de points en EPSG:4326, le cas d'un CSV de gares en latitude et longitude, ne passe pas un tampon (`analysis.crs_not_metric`) tant que `data.reproject` reste seulement planifiée ; la phrase de démo transposée à Annecy échoue pour cette raison.
   evidence: Sonde 11.18, phrases 1 et 10, couche `gares` lue depuis `gares-74-4326.csv`. Le jeu de Villeneuve donne ses gares en 2154 et ne montrait pas ce cas.
+  status: à résoudre par 9.16
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-second-jeu-de-test-reel-annecy-pret-pour-la-demonstration-plan.md`
   summary: Sur le projet d'Annecy (10 couches, dont BD TOPO aux dizaines de champs), la composition prend 30 à 35 s par phrase sur GPU une fois les communes ramenées au 74 (37 à 60 s au premier passage), contre environ 14 s sur Villeneuve ; l'exigence est de moins de 30 s.
