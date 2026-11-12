@@ -104,13 +104,12 @@ risk = "low"
 id = 10
 type = "story"
 title = "L'extension publiée sur le dépôt d'extensions QGIS"
-description = "Complète metadata.txt (version 0.1.0, experimental=False, homepage, repository, tracker, email, description sans « traceur »), ajoute l'icône et le LICENSE à l'archive construite par 7.2, et soumet l'extension au dépôt (compte OSGeo et approbation : étape hitl)."
+description = "Complète metadata.txt (version 0.1.0, experimental=False, homepage, repository, tracker, email = cassini-sig@proton.me, description sans « traceur »), ajoute l'icône et le LICENSE à l'archive construite par 7.2, et soumet l'extension au dépôt (compte OSGeo et approbation : étape hitl)."
 verify = "L'extension s'installe depuis le gestionnaire d'extensions de QGIS 3.44 et 4.x, ouvre le panneau et trouve le noyau ; l'archive ne contient aucun binaire et pèse moins de 25 Mo."
 covers = ["R1"]
 after = [2, 8]
 hitl = true
 risk = "medium"
-unknown = "L'adresse e-mail publique de contact du projet, dédiée, que le propriétaire crée, à mettre dans metadata.txt."
 
 [[entry]]
 id = 11
@@ -134,7 +133,6 @@ covers = ["R8"]
 after = [4, 7, 10, "6.5", "6.6"]
 hitl = true
 risk = "low"
-unknown = "L'adresse e-mail publique de contact du projet, dédiée, que le propriétaire crée, à afficher sur la page."
 
 [[entry]]
 id = 13

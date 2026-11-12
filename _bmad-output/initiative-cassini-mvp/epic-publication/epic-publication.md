@@ -118,7 +118,7 @@ Frontière par activité : l'empaquetage et la mise en ligne. Le README d'archit
 - Handoff: le jeu de phrases réelles écrit par 7.11 est celui que reprend 10.8 pour sa mesure de départ ; 10.8 l'attend dans son `after`.
 - Check outside: 7.1 (risque high) — l'audit de l'historique est fait par une personne avant le passage en public, et la recette GitHub (garde hors ligne) reste verte sur la release.
 - Check outside: 7.2 (risque high) — le propriétaire installe le fichier de la porte 2 dans une VM Windows propre, réseau coupé.
-- Open question: l'adresse e-mail publique de contact du projet, dédiée, que le propriétaire crée ; elle gate l'entrée du dépôt d'extensions (7.10) et figure sur la page d'accueil (7.12) (2026-11-12).
+- Decision: 2026-11-12 — adresse publique de contact du projet : cassini-sig@proton.me (Proton Mail, créée par le propriétaire) ; elle va dans `metadata.txt` (7.10) et sur la page d'accueil (7.12), jamais une adresse personnelle.
 - Open question: la source du jeu de phrases réelles d'utilisateurs (collecte, communauté QGIS, sources publiques), reprise de l'Open question de l'epic 10 ; portée par 7.11 (2026-11-12).
 - Source conflict: spec Constraints, « Le noyau se compile sur Windows, macOS et Linux » vs `.github/workflows/recette.yml`, qui n'a aucun job macOS (2026-11-12).
 - Source conflict: commentaire d'en-tête de `.github/workflows/recette.yml`, « Rien d'autre que les actions officielles de GitHub » vs le job `noyau`, qui utilise `EmbarkStudios/cargo-deny-action` (2026-11-12). Confié à 7.1, qui touche le même workflow.
