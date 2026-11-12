@@ -99,7 +99,7 @@ CAP-2 a été retirée (préparation des données d'une commune par code INSEE) 
 - Indépendance des fournisseurs d'IA : le code ne dépend d'aucune IA en particulier. IA locale par défaut, IA externes via MCP.
 - Les fichiers d'origine de l'utilisateur ne sont jamais modifiés ni déplacés.
 - Petit et solide : à effort égal, la fiabilité passe avant le nombre de fonctions.
-- Le noyau se compile sur Windows, macOS et Linux ; l'extension cible les plateformes où QGIS tourne.
+- Le noyau se compile sur Windows et Linux, macOS plus tard, quand un Mac est disponible (amendé le 2026-11-12, inception de l'epic 7, décision du propriétaire du 2026-11-10) ; l'extension cible les plateformes où QGIS tourne.
 - Chaque nouvelle commande est livrée avec au moins un test.
 - Tout seuil d'une commande de CAP-14 (distance réglementaire, pente, surface minimale) est un paramètre, jamais une constante.
 - Les fournisseurs de traitement sous GPL (GRASS, extensions tierces) ne s'exécutent que dans le processus de QGIS, jamais liés au noyau. Le géocodeur intégré de QGIS interroge un service en ligne : il est exclu.

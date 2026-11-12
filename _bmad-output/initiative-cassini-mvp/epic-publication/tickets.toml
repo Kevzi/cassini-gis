@@ -5,8 +5,8 @@
 id = 1
 type = "story"
 title = "Balle traçante : étiquette, release et installeur en ligne minimal sous Windows"
-description = "Une personne audite tout l'historique du dépôt puis le passe en public (étape hitl) ; une étiquette de version fait construire par la recette le noyau Windows processeur et publier une release avec le manifeste des versions (version et SHA-256) ; un installeur en ligne minimal, Inno Setup après vérification dans sa documentation officielle qu'il télécharge et vérifie une empreinte (sinon le repli décidé), télécharge le noyau, vérifie son SHA-256, le pose dans %LOCALAPPDATA%\\Cassini\\bin et y écrit la version et la date d'installation ; la licence d'Inno Setup est donnée et approuvée avant son adoption, et le commentaire d'en-tête du workflow de recette est remis d'accord avec cargo-deny-action."
-verify = "Sur un poste Windows, l'étiquette produit la release et son manifeste, la garde hors ligne passe sur le binaire livré, l'installeur pose le noyau, l'extension copiée à la main le trouve et exécute une commande, et une empreinte altérée dans le manifeste fait refuser l'installation."
+description = "Une personne audite tout l'historique du dépôt puis le passe en public (étape hitl) ; une page d'accueil minimale est publiée à son adresse fixe (deux phrases, lien de téléchargement, page sur l'avertissement de Windows), complétée en 7.12 ; une étiquette de version fait construire par la recette le noyau Windows processeur et publier une release avec le manifeste des versions (version et SHA-256) ; un installeur en ligne minimal, Inno Setup après vérification dans sa documentation officielle qu'il télécharge et vérifie une empreinte (sinon le repli décidé), télécharge le noyau, vérifie son SHA-256, le pose dans %LOCALAPPDATA%\\Cassini\\bin et y écrit la version et la date d'installation ; la licence d'Inno Setup est donnée et approuvée avant son adoption, et le commentaire d'en-tête du workflow de recette est remis d'accord avec cargo-deny-action."
+verify = "La page minimale répond à son adresse fixe et explique l'avertissement de Windows ; sur un poste Windows, l'étiquette produit la release et son manifeste, la garde hors ligne passe sur le binaire livré, l'installeur pose le noyau, l'extension copiée à la main le trouve et exécute une commande, et une empreinte altérée dans le manifeste fait refuser l'installation."
 covers = ["R2", "R3"]
 after = []
 hitl = true
@@ -82,7 +82,7 @@ risk = "medium"
 id = 8
 type = "story"
 title = "Panneau : moteur introuvable, page d'accueil, version et rappel de mise à jour"
-description = "Quand le noyau est introuvable, le panneau dit « Cassini a besoin de son moteur pour fonctionner » et un bouton ouvre la page d'accueil du contrat (AD-17) dans le navigateur, puis retrouve le noyau sans redémarrer QGIS ; il affiche la version installée et, passé le délai, rappelle de lancer « Mettre à jour Cassini », d'après la date écrite par 7.1, sans réseau."
+description = "Quand le noyau est introuvable, le panneau dit « Cassini a besoin de son moteur pour fonctionner » et un bouton ouvre la page d'accueil du contrat (AD-17) dans le navigateur, puis retrouve le noyau sans redémarrer QGIS ; il affiche la version installée et, passé trois mois depuis l'installation ou la dernière mise à jour, rappelle de lancer « Mettre à jour Cassini », d'après la date écrite par 7.1, sans réseau."
 verify = "Dans QGIS, sans noyau, le message et le bouton apparaissent et le bouton ouvre la page ; après l'installation, le panneau trouve le noyau sans redémarrage ; une date d'installation vieillie à la main fait paraître le rappel ; la garde hors ligne de l'extension reste verte."
 covers = ["R6"]
 after = [1]
@@ -121,7 +121,7 @@ covers = ["R9"]
 after = []
 hitl = false
 risk = "medium"
-unknown = "La source du jeu de phrases réelles d'utilisateurs (collecte, communauté QGIS, sources publiques) et la façon de juger la couverture (vrai modèle ou jugement à la main)."
+unknown = "La source du jeu de phrases réelles d'utilisateurs (collecte, communauté QGIS, sources publiques)."
 
 [[entry]]
 id = 12
