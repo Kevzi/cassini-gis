@@ -3,7 +3,7 @@ title: 'PDF de résultat lisible : cadre sur le résultat, résultat mis en évi
 type: 'feature'
 ticket: '9'
 created: '2026-11-12'
-status: 'built'
+status: done
 baseline_revision: '96e4b99842fbb82439ce2524e0457a880bd9f9fa'
 route: 'full'
 route_source: 'pinned'
