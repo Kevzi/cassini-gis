@@ -123,7 +123,8 @@ class Continuation(unittest.TestCase):
         self.assertEqual(pipeline.effective_hyperparameters(continuation)["taux_apprentissage"], 5e-5)
         plan = pipeline.generation_plan(self.dir, pipeline.CONTINUOUS_COUNT, 300, continuation)
         self.assertEqual(list(plan), ["rappel", "cible", "validation"])
-        self.assertEqual(plan["rappel"][1:], (pipeline.TRAINING_SEED, 1200 + pipeline.RECALL_MARGIN, []))
+        self.assertEqual(plan["rappel"][1:], (pipeline.TRAINING_SEED, 1200 + pipeline.RECALL_MARGIN,
+                                              ["--rappel-stratifie", "15"]))
         self.assertEqual(plan["cible"][1:], (pipeline.FOCUS_SEED, 1800, ["--familles", FAMILIES]))
         self.assertEqual(plan["validation"][1:], (pipeline.VALIDATION_SEED, 300, []))
         lineage = pipeline.lineage(continuation, "d" * 40, 1)
@@ -133,7 +134,7 @@ class Continuation(unittest.TestCase):
                                       "graine_torch": 2, "adaptateur_sha256": sha, "reconstruit": True})
         self.assertEqual(lineage[1], {"maillon": 2, "depart": sha, "commit": "d" * 40, "graine_torch": 1,
                                       "adaptateur_sha256": None, "familles": ["export_pdf_format", "refus"],
-                                      "part_rappel": 0.4, "exemples": 3000})
+                                      "part_rappel": 0.4, "rappel_plancher": 15, "rappel_version": 1, "exemples": 3000})
         # Le parent garde sa lignée : la nouvelle est une copie.
         self.assertNotIn("lignee", json.loads((parent / "rapport.json").read_text(encoding="utf-8")))
 
@@ -274,6 +275,18 @@ class Continuation(unittest.TestCase):
         for now in others:
             with self.assertRaises(pipeline.PipelineStop):
                 pipeline.check_resume_parent(report, now)
+        # Une séance commencée avant le rappel stratifié (maillon sans `rappel_plancher` : l'ancien
+        # préfixe du jeu graine 1) ne se reprend pas avec le rappel stratifié.
+        old = json.loads(json.dumps(report))
+        del old["lignee"][-1]["rappel_plancher"]
+        with self.assertRaises(pipeline.PipelineStop) as stop:
+            pipeline.check_resume_parent(old, b)
+        self.assertIn("plancher", str(stop.exception))
+        # Une autre version de l'algorithme du rappel stratifié non plus.
+        other_version = json.loads(json.dumps(report))
+        other_version["lignee"][-1]["rappel_version"] = 0
+        with self.assertRaises(pipeline.PipelineStop):
+            pipeline.check_resume_parent(other_version, b)
         # Un entraînement de zéro commencé (d'avant 5.54 ou d'après) ne se reprend pas en séance.
         for scratch in [{"donnees": {"entrainement": 8600}}, {"lignee": pipeline.lineage(None, "d" * 40, 1)}]:
             pipeline.check_resume_parent(scratch, None)
@@ -303,7 +316,8 @@ class Lineage(unittest.TestCase):
         self.assertEqual(lineage[:2], lignee)
         self.assertEqual(lineage[2] | {"adaptateur_sha256": "x"},
                          {"maillon": 3, "depart": sha, "commit": "f" * 40, "graine_torch": 1,
-                          "adaptateur_sha256": "x", "familles": ["tampon"], "part_rappel": 0.4, "exemples": 3000})
+                          "adaptateur_sha256": "x", "familles": ["tampon"], "part_rappel": 0.4,
+                          "rappel_plancher": 15, "rappel_version": 1, "exemples": 3000})
         self.assertEqual(pipeline.MAX_LINKS, 3)
 
     def test_a_training_from_scratch_writes_a_one_link_lineage(self):
@@ -326,9 +340,14 @@ class Lineage(unittest.TestCase):
 class RecallShare(unittest.TestCase):
     def test_the_recall_share_is_counted_on_the_final_set_and_never_below_the_floor(self):
         self.assertEqual(pipeline.session_counts(3000, 0.4), (1200, 1800))
-        recall, focus = pipeline.session_counts(7, 0.4)
-        self.assertEqual((recall, focus), (3, 4))
-        self.assertGreaterEqual(recall / 7, 0.4)
+        recall, focus = pipeline.session_counts(3001, 0.4)
+        self.assertEqual((recall, focus), (1201, 1800))
+        self.assertGreaterEqual(recall / 3001, 0.4)
+        # Un rappel trop court pour le plancher du rappel stratifié (15 par famille) : refusé avant
+        # le GPU.
+        with self.assertRaises(pipeline.PipelineStop) as stop:
+            pipeline.session_counts(600, 0.5)
+        self.assertIn("plancher", str(stop.exception))
         recall_set = [Example(f"r{i}", CALLS % i) for i in range(4)]
         focus_set = [Example(f"c{i}", CALLS % (100 + i)) for i in range(5)] + [recall_set[0]]
         # Même demande, autre réponse : retirée aussi, dans le rappel comme dans le jeu ciblé.
@@ -438,11 +457,47 @@ class Bounds(unittest.TestCase):
     def test_the_python_constants_are_those_of_the_generator(self):
         constants = pipeline.generator_constants()
         self.assertEqual(constants, {"FOCUS_SEED": pipeline.FOCUS_SEED, "FOCUS_COUNT": pipeline.FOCUS_COUNT,
-                                     "DEFAULT_COUNT": pipeline.TRAINING_COUNT})
+                                     "DEFAULT_COUNT": pipeline.TRAINING_COUNT, "RECALL_FLOOR": 15,
+                                     "RECALL_VERSION": 1})
         self.assertEqual(pipeline.session_counts(pipeline.CONTINUOUS_COUNT, pipeline.RECALL_SHARE)[1],
                          pipeline.FOCUS_COUNT)
         # Une famille dont le nom suit une ligne de commentaire est lue aussi.
         self.assertIn("decompte_par_zone", pipeline.known_families())
+
+    def test_a_session_at_half_recall_draws_a_stratified_recall_and_a_focused_set_within_the_bound(self):
+        # Séance 2 de 5.54 : 3 000 exemples à 0,5 → 1 500 de rappel (plus 60 de marge), stratifié au
+        # plancher du générateur, et 1 500 ciblés, sous FOCUS_COUNT.
+        continuation = pipeline.Continuation(parent=None, families=["ligne_de_vue", "recoupement"],
+                                             recall_share=0.5)
+        plan = pipeline.generation_plan(Path("/d"), 3000, 300, continuation)
+        self.assertEqual(plan["rappel"][1:], (pipeline.TRAINING_SEED, 1500 + pipeline.RECALL_MARGIN,
+                                              ["--rappel-stratifie", str(pipeline.generator_constants()["RECALL_FLOOR"])]))
+        self.assertEqual(plan["cible"][1:], (pipeline.FOCUS_SEED, 1500, ["--familles", "ligne_de_vue,recoupement"]))
+        self.assertLessEqual(plan["cible"][2], pipeline.FOCUS_COUNT)
+
+    def test_the_recall_floor_is_checked_again_after_dropping_the_too_long_examples(self):
+        minimum = {"a": 2, "b": 1}
+        pipeline.check_recall_floor(["a", "b", "a", "c", "x"], 4, minimum)
+        # Un exemple du plancher écarté (trop long) : la famille est nommée.
+        with self.assertRaises(pipeline.PipelineStop) as stop:
+            pipeline.check_recall_floor(["a", "b", "c", "c"], 4, minimum)
+        self.assertIn("famille a", str(stop.exception))
+        # Le plancher hors des exemples gardés (après la coupe) ne compte pas.
+        with self.assertRaises(pipeline.PipelineStop):
+            pipeline.check_recall_floor(["a", "c", "c", "c", "a", "b"], 4, minimum)
+        # Plus d'exemples écartés que la marge : le rappel n'a pas son compte.
+        with self.assertRaises(pipeline.PipelineStop) as stop:
+            pipeline.check_recall_floor(["a", "b", "a"], 4, minimum)
+        self.assertIn("3 exemples", str(stop.exception))
+        # Le fichier des familles absent ou mal formé arrête la chaîne.
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "rappel.jsonl"
+            with self.assertRaises(pipeline.PipelineStop):
+                pipeline.recall_families(path)
+            Path(f"{path}.familles.json").write_text(json.dumps({"plancher": 3, "familles": [], "minimum": {}}),
+                                                     encoding="utf-8")
+            with self.assertRaises(pipeline.PipelineStop):
+                pipeline.recall_families(path)
 
     def test_a_session_beyond_what_recouvrement_guards_is_refused_before_the_gpu(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -544,6 +599,10 @@ class LaunchPastTheGpu(unittest.TestCase):
         for name, (path, _, n, _) in plan.items():
             path.write_text("".join(json.dumps({"prompt": f"{name} {i}", "completion": CALLS % i}) + "\n"
                                     for i in range(n)), encoding="utf-8")
+            if name == "rappel":
+                Path(f"{path}.familles.json").write_text(json.dumps(
+                    {"plancher": 15, "familles": [f"f{i % 3}" for i in range(n)], "minimum": {"f0": 15, "f1": 15}}),
+                    encoding="utf-8")
         return {name: path for name, (path, _, _, _) in plan.items()}
 
     def fake_train(self, base_dir, examples, adapter_dir, max_steps, long_first=False, hyperparameters=None,

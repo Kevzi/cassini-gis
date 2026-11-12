@@ -312,6 +312,129 @@ pub const FIRST_SESSION_FAMILIES: &[&str] = &[
     "ordre_nord_est",
 ];
 
+/// Les familles du jeu ciblé de la seconde séance continue (5.54, séance 2) : celles de la
+/// première (la séance repart de B, ses gains se réapprennent), plus la ligne de vue et le
+/// recoupement, que le champ de vision et la reprojection vers 4326 attiraient (contraste).
+/// Recopiée dans la commande de la séance (`docs/entrainement-du-modele.md`), que le test
+/// `the_session_command_of_the_doc_names_the_second_session_families` tient égale.
+pub const SECOND_SESSION_FAMILIES: &[&str] = &[
+    "export_pdf_echelle_format",
+    "refus_fonction_absente",
+    "options_ecrites",
+    "champ_de_vision_cumule",
+    "point_lambert_vers_geo",
+    "ordre_nord_est",
+    "ligne_de_vue",
+    "recoupement",
+];
+
+/// Plancher du rappel stratifié d'une séance continue (5.54, séance 2) : au moins autant
+/// d'exemples de chaque famille (ou tous ceux du jeu complet, s'il en a moins). 15 garde les gros
+/// projets vers 22 % d'un rappel de 1 500 ; 20 les ferait tomber vers 5 %. Lu par `pipeline.py`.
+pub const RECALL_FLOOR: usize = 15;
+/// Version de l'algorithme de `stratified_recall` : la lignée l'écrit (`rappel_version`) et
+/// `pipeline.py` refuse de reprendre une séance commencée sous une autre. À relever à chaque
+/// changement de l'algorithme (quotas, ordre rendu) ; lue par `pipeline.py`.
+pub const RECALL_VERSION: usize = 1;
+
+/// Le rappel stratifié d'une séance continue (5.54, séance 2) : `count` exemples du jeu graine 1
+/// complet (`generate(DEFAULT_SEED, DEFAULT_COUNT)`, que `training/tests/recouvrement.rs` garde),
+/// au moins `min(floor, n_f)` de chaque famille `f` (`n_f` ses exemples dans le jeu complet), le
+/// reste au poids réel des familles dans le jeu complet (rejets de `gros_projet` compris).
+///
+/// Quota de `f` : `q_f = min(n_f, max(min(floor, n_f), ⌊λ·n_f⌋))`, λ le plus grand tel que
+/// Σ q_f ≤ `count` ; chaque famille prend ses `q_f` premiers exemples (ordre du jeu complet), et le
+/// reliquat se comble par les premiers exemples non pris. Ordre rendu : le plancher (les
+/// `min(floor, n_f)` premiers de chaque famille, dans l'ordre du jeu complet), puis le surplus
+/// (dans l'ordre du jeu complet) : un rappel coupé à la fin (marge de `pipeline.py`) ne perd que du
+/// surplus. Refusé si `count` dépasse `DEFAULT_COUNT` ou si le plancher n'y tient pas.
+pub fn stratified_recall(count: usize, floor: usize) -> Result<Vec<Example>, String> {
+    stratified_recall_with_floor(count, floor).map(|(recall, _)| recall)
+}
+
+/// `stratified_recall`, plus le plancher de chaque famille, `min(floor, n_f)` : ce que la chaîne
+/// vérifie encore après avoir écarté les exemples trop longs et coupé la marge.
+pub fn stratified_recall_with_floor(
+    count: usize,
+    floor: usize,
+) -> Result<(Vec<Example>, BTreeMap<&'static str, usize>), String> {
+    if floor == 0 {
+        return Err("rappel stratifié sans plancher : --rappel-stratifie vaut au moins 1".into());
+    }
+    if count > DEFAULT_COUNT {
+        return Err(format!(
+            "rappel stratifié de {count} exemples : au plus {DEFAULT_COUNT} (DEFAULT_COUNT, le jeu \
+             graine {DEFAULT_SEED} gardé par recouvrement.rs)"
+        ));
+    }
+    let (full, _) = generate(DEFAULT_SEED, DEFAULT_COUNT);
+    if full.len() < count {
+        return Err(format!(
+            "jeu graine {DEFAULT_SEED} de {} exemples seulement, {count} demandés",
+            full.len()
+        ));
+    }
+    let mut sizes: BTreeMap<&'static str, usize> = BTreeMap::new();
+    for e in &full {
+        *sizes.entry(e.family).or_default() += 1;
+    }
+    let minimum: BTreeMap<&'static str, usize> =
+        sizes.iter().map(|(f, &n)| (*f, n.min(floor))).collect();
+    let quota = |lambda: f64, n: usize| -> usize {
+        let share = (lambda * n as f64).floor() as usize;
+        n.min(floor.min(n).max(share))
+    };
+    let total = |lambda: f64| -> usize { sizes.values().map(|&n| quota(lambda, n)).sum() };
+    let base = total(0.0);
+    if base > count {
+        return Err(format!(
+            "plancher de {floor} exemples par famille : {base} exemples, plus que les {count} \
+             demandés"
+        ));
+    }
+    // λ le plus grand tel que Σ q_f ≤ count, par dichotomie : Σ q_f croît avec λ, et vaut à
+    // λ = 1 le jeu complet entier, au moins `count`.
+    let (mut lo, mut hi) = (0.0_f64, 1.0_f64);
+    for _ in 0..64 {
+        let mid = (lo + hi) / 2.0;
+        if total(mid) <= count {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    let quotas: BTreeMap<&str, usize> = sizes.iter().map(|(f, &n)| (*f, quota(lo, n))).collect();
+    // Pris : les `q_f` premiers de chaque famille, puis le reliquat dans l'ordre du jeu complet.
+    // Le plancher (`r < floor`) est toujours pris : `q_f ≥ min(floor, n_f)`.
+    let mut taken = vec![false; full.len()];
+    let mut in_floor = vec![false; full.len()];
+    let mut rank: BTreeMap<&str, usize> = BTreeMap::new();
+    for (i, e) in full.iter().enumerate() {
+        let r = rank.entry(e.family).or_default();
+        taken[i] = *r < quotas[e.family];
+        in_floor[i] = *r < floor;
+        *r += 1;
+    }
+    let mut left = count - taken.iter().filter(|t| **t).count();
+    for t in taken.iter_mut() {
+        if left == 0 {
+            break;
+        }
+        if !*t {
+            *t = true;
+            left -= 1;
+        }
+    }
+    let (taken, in_floor, full) = (&taken, &in_floor, &full);
+    let pick = |floor_part: bool| {
+        full.iter()
+            .enumerate()
+            .filter(move |(i, _)| taken[*i] && in_floor[*i] == floor_part)
+            .map(|(_, e)| e.clone())
+    };
+    Ok((pick(true).chain(pick(false)).collect(), minimum))
+}
+
 /// Les familles nommées, dans l'ordre fixe de `FAMILIES` (le tirage ne dépend pas de l'ordre
 /// de la liste donnée). Un nom inconnu, un nom en double ou une liste vide sont refusés, avec
 /// la liste des noms connus.
@@ -1446,11 +1569,63 @@ mod tests {
     }
 
     #[test]
-    fn the_recall_set_is_a_prefix_of_the_full_set() {
-        // 5.54 : le rappel d'une séance continue est le début du jeu graine 1.
+    fn the_stratified_recall_is_a_subset_of_the_full_set_with_a_floor_per_family() {
+        // 5.54, séance 2 : le rappel d'une séance continue est fait d'exemples du jeu graine 1
+        // complet (que `recouvrement.rs` garde), au moins `RECALL_FLOOR` par famille (ou tous ceux
+        // du jeu complet), le reste au poids ; le plancher vient d'abord, la marge coupée ne mord
+        // que le surplus.
         let (full, _) = generate(DEFAULT_SEED, DEFAULT_COUNT);
-        let (recall, _) = generate(DEFAULT_SEED, 1200);
-        assert_eq!(to_jsonl(&recall), to_jsonl(&full[..1200]));
+        let lines: Vec<String> = full.iter().map(to_line).collect();
+        let index: std::collections::HashMap<&str, usize> = lines
+            .iter()
+            .enumerate()
+            .map(|(i, l)| (l.as_str(), i))
+            .collect();
+        let mut sizes: BTreeMap<&str, usize> = BTreeMap::new();
+        for e in &full {
+            *sizes.entry(e.family).or_default() += 1;
+        }
+        let recall = stratified_recall(1560, RECALL_FLOOR).unwrap();
+        assert_eq!(recall.len(), 1560);
+        // Chaque exemple est un exemple distinct du jeu complet.
+        let positions: Vec<usize> = recall.iter().map(|e| index[to_line(e).as_str()]).collect();
+        assert_eq!(positions.iter().collect::<HashSet<_>>().len(), 1560);
+        let count = |examples: &[Example], family: &str| {
+            examples.iter().filter(|e| e.family == family).count()
+        };
+        for (family, &n) in &sizes {
+            let floor = n.min(RECALL_FLOOR);
+            assert!(count(&recall, family) >= floor, "{family}");
+            // Coupé aux 1 500 premiers (la marge de 60 de `pipeline.py`), le plancher reste.
+            assert!(count(&recall[..1500], family) >= floor, "{family}");
+        }
+        // Les gros projets, sur les 1 500 réellement entraînés.
+        let big = count(&recall[..1500], "gros_projet");
+        assert!(big * 100 >= 1500 * 20, "{big} gros projets");
+        // Le plancher puis le surplus, chacun dans l'ordre du jeu complet.
+        let floor_len: usize = sizes.values().map(|&n| n.min(RECALL_FLOOR)).sum();
+        assert!(positions[..floor_len].windows(2).all(|w| w[0] < w[1]));
+        assert!(positions[floor_len..].windows(2).all(|w| w[0] < w[1]));
+        // Déterministe, et le jeu complet entier à son compte.
+        let again = stratified_recall(1560, RECALL_FLOOR).unwrap();
+        assert_eq!(to_jsonl(&recall), to_jsonl(&again));
+        let all = stratified_recall(DEFAULT_COUNT, RECALL_FLOOR).unwrap();
+        let mut all_lines: Vec<String> = all.iter().map(to_line).collect();
+        let mut sorted = lines.clone();
+        all_lines.sort();
+        sorted.sort();
+        assert_eq!(all_lines, sorted);
+        // Au-delà du jeu complet, ou un plancher qui n'y tient pas : refusé.
+        assert!(stratified_recall(DEFAULT_COUNT + 1, RECALL_FLOOR).is_err());
+        assert!(stratified_recall(100, RECALL_FLOOR).is_err());
+        assert!(stratified_recall(1560, 0).is_err());
+        // Le plancher rendu : `min(RECALL_FLOOR, n_f)` par famille.
+        let (_, minimum) = stratified_recall_with_floor(1560, RECALL_FLOOR).unwrap();
+        let expected: BTreeMap<&str, usize> = sizes
+            .iter()
+            .map(|(f, &n)| (*f, n.min(RECALL_FLOOR)))
+            .collect();
+        assert_eq!(minimum, expected);
     }
 
     #[test]
@@ -1478,6 +1653,8 @@ mod tests {
             format!("pub const FOCUS_SEED: u64 = {FOCUS_SEED};"),
             format!("pub const FOCUS_COUNT: usize = {FOCUS_COUNT};"),
             format!("pub const DEFAULT_COUNT: usize = {DEFAULT_COUNT};"),
+            format!("pub const RECALL_FLOOR: usize = {RECALL_FLOOR};"),
+            format!("pub const RECALL_VERSION: usize = {RECALL_VERSION};"),
             format!("pub const FOCUS_EXCLUDED: &[&str] = &{}", "["),
         ] {
             assert_eq!(lib.matches(line.as_str()).count(), 1, "{line}");
@@ -1543,6 +1720,39 @@ mod tests {
         // La commande de la séance, recopiée dans la doc, nomme exactement `FIRST_SESSION_FAMILIES`.
         let doc = include_str!("../../docs/entrainement-du-modele.md");
         let line = format!("nuit-5-54.sh {}", FIRST_SESSION_FAMILIES.join(","));
+        assert!(doc.contains(&format!("{line}\n")), "{line}");
+    }
+
+    #[test]
+    fn the_second_session_families_give_the_whole_focused_set_without_a_bar_sentence() {
+        // 5.54, séance 2 : la liste de la première séance plus la ligne de vue et le recoupement ;
+        // `FOCUS_COUNT` exemples à `FOCUS_SEED`, chacune présente, aucune phrase de barre.
+        let first: Vec<&str> = SECOND_SESSION_FAMILIES[..FIRST_SESSION_FAMILIES.len()].to_vec();
+        assert_eq!(first, FIRST_SESSION_FAMILIES);
+        assert_eq!(
+            &SECOND_SESSION_FAMILIES[FIRST_SESSION_FAMILIES.len()..],
+            &["ligne_de_vue", "recoupement"]
+        );
+        let (examples, summary) =
+            generate_families(FOCUS_SEED, FOCUS_COUNT, SECOND_SESSION_FAMILIES).unwrap();
+        assert_eq!(examples.len(), FOCUS_COUNT, "{:?}", summary.families);
+        assert!(examples
+            .iter()
+            .all(|e| SECOND_SESSION_FAMILIES.contains(&e.family)));
+        for name in SECOND_SESSION_FAMILIES {
+            let tally = &summary.families[name];
+            assert!(tally.kept > 0 && tally.rejected == 0, "{name} : {tally:?}");
+        }
+        assert_eq!(barres::copies(&examples), Vec::<String>::new());
+        assert!(SECOND_SESSION_FAMILIES
+            .iter()
+            .all(|n| !FOCUS_EXCLUDED.contains(n)));
+    }
+
+    #[test]
+    fn the_session_command_of_the_doc_names_the_second_session_families() {
+        let doc = include_str!("../../docs/entrainement-du-modele.md");
+        let line = format!("nuit-5-54.sh {}", SECOND_SESSION_FAMILIES.join(","));
         assert!(doc.contains(&format!("{line}\n")), "{line}");
     }
 

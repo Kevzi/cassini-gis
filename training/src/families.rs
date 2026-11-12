@@ -150,10 +150,11 @@ pub static FAMILIES: &[Family] = &[
     // sa propre famille, `export_pdf_format` n'en donnant qu'une poignée au jeu par défaut.
     // Second essai de 11.23 (constat F03) : poids 3 → 4, et deux questions pour trois recopies.
     // 5.54, lot 2 : 4 → 6, le tirage déplacé par les familles neuves laissait moins d'une question
-    // pour deux recopies au jeu graine 1.
+    // pour deux recopies au jeu graine 1. Séance 2 de 5.54 : 6 → 9, pour la même raison (35
+    // questions pour 71 recopies après les poids de la séance, 36 pour 76 à 8).
     Family {
         name: "carroyage_utm_projet",
-        weight: 6,
+        weight: 9,
         make: carroyage_utm_projet,
     },
     Family {
@@ -356,9 +357,10 @@ pub static FAMILIES: &[Family] = &[
         make: ombrage,
     },
     // 5.54, lot 2 (leçon de la remesure) : 4 → 6, tournures de décompte, deux à six points.
+    // Séance 2 : 6 → 3, l'« aimant » du champ de vision (contre la ligne de vue).
     Family {
         name: "champ_de_vision_cumule",
-        weight: 6,
+        weight: 3,
         make: champ_de_vision_cumule,
     },
     Family {
@@ -436,9 +438,10 @@ pub static FAMILIES: &[Family] = &[
         weight: 4,
         make: export_pdf_echelle_format,
     },
+    // Séance 2 de 5.54 : 6 → 3, des refus devenus réflexes (un presque refus sur deux).
     Family {
         name: "refus_fonction_absente",
-        weight: 6,
+        weight: 3,
         make: refus_fonction_absente,
     },
     Family {
@@ -3046,6 +3049,23 @@ impl Travel {
 }
 
 /// « de 10 minutes », « d'une gare », « d'un quart d'heure ».
+/// « de gares », mais « d'écoles », « d'hôpitaux », « d'arrêts » : élision devant une voyelle,
+/// accentuée ou non, et devant un h muet ; jamais devant un h aspiré (« de haies »).
+fn de_plural(pl: &str) -> String {
+    const H_ASPIRE: &[&str] = &[
+        "haie", "halle", "halte", "hameau", "hangar", "hauteur", "héron",
+    ];
+    let vowel = pl.starts_with([
+        'a', 'à', 'â', 'e', 'é', 'è', 'ê', 'ë', 'i', 'î', 'ï', 'o', 'ô', 'u', 'û', 'ù', 'y',
+    ]);
+    let h_muet = pl.starts_with(['h']) && !H_ASPIRE.iter().any(|w| pl.starts_with(w));
+    if vowel || h_muet {
+        format!("d'{pl}")
+    } else {
+        format!("de {pl}")
+    }
+}
+
 fn de_word(s: &str) -> String {
     if s.starts_with("un ") || s.starts_with("une ") {
         format!("d'{s}")
@@ -3365,12 +3385,7 @@ fn decompte_par_zone(rng: &mut Rng) -> Option<Example> {
     let p = pick_theme(rng, &b, |t| t.geom == Geom::Point)?;
     let points = b.add(rng, p.key, &[], &[], &[]);
     let pl = p.noun.pl;
-    // « de gares », mais « d'écoles », « d'hôpitaux ».
-    let de_pl = if pl.starts_with(['a', 'e', 'é', 'i', 'o', 'u', 'h']) {
-        format!("d'{pl}")
-    } else {
-        format!("de {pl}")
-    };
+    let de_pl = de_plural(pl);
     let (mut body, q) = match rng.below(5) {
         0 => (format!("Compte les {pl} par {}", z.sg), false),
         1 => (
@@ -3690,6 +3705,13 @@ fn subset_phrase(rng: &mut Rng, t: &Theme) -> Option<String> {
     Some(fill(pick_str(rng, phrases), &t.noun, val.v))
 }
 
+// Les refus de `refus`, en constantes : `KNOWN_REFUSALS` (tests) les liste tous.
+const NO_EMAIL: &str = "Aucune commande du catalogue n'envoie de courriel.";
+const NO_FEATURE_DELETION: &str = "Aucune commande du catalogue ne supprime d'entités dans une couche : les analyses créent de nouvelles couches.";
+const NO_RENAME: &str = "Aucune commande du catalogue ne renomme une couche.";
+const NO_ROUTE: &str = "Aucune commande du catalogue ne calcule d'itinéraire sur un réseau routier entre deux objets d'une couche : le chemin de moindre coût demande un raster de coût et deux points en coordonnées.";
+const NO_DOWNLOAD: &str = "Aucune commande du catalogue ne télécharge de données : le projet utilise les fichiers de l'utilisateur.";
+const NO_PUBLISHING: &str = "Aucune commande du catalogue ne publie de carte en ligne.";
 const NO_3D: &str = "Aucune commande du catalogue n'affiche de vue en 3D.";
 const NO_EDIT: &str = "Aucune commande du catalogue ne modifie les attributs d'une couche.";
 
@@ -3732,33 +3754,47 @@ fn refus(rng: &mut Rng) -> Option<Example> {
     let commune = *rng.pick(COMMUNES);
     let subset = subset_phrase(rng, t);
     let (body, reason): (String, &str) = match rng.below(17) {
-        0 => (format!("Envoie la couche « {name} » par courriel {who}"), "Aucune commande du catalogue n'envoie de courriel."),
-        1 => (format!("Envoie le résultat par mail {who}"), "Aucune commande du catalogue n'envoie de courriel."),
+        0 => (
+            format!("Envoie la couche « {name} » par courriel {who}"),
+            NO_EMAIL,
+        ),
+        1 => (format!("Envoie le résultat par mail {who}"), NO_EMAIL),
         // Retirer une couche du projet n'est plus un refus depuis 10.27 : `layer.remove`
         // (`retrait_couche`). Effacer son fichier du disque en reste un (principe 6).
-        2 => (format!("Supprime le fichier de la couche « {name} » du disque"), NO_FILE_DELETION),
-        3 => (format!("Efface du disque le fichier des {pl}"), NO_FILE_DELETION),
+        2 => (
+            format!("Supprime le fichier de la couche « {name} » du disque"),
+            NO_FILE_DELETION,
+        ),
+        3 => (
+            format!("Efface du disque le fichier des {pl}"),
+            NO_FILE_DELETION,
+        ),
         4 => match &subset {
             Some(phrase) => {
                 let body = match rng.below(4) {
                     0 => format!("Supprime de la couche les {pl} {phrase}"),
                     1 => format!("Efface les {pl} {phrase} de la couche"),
                     2 => format!("Enlève de la table attributaire les {pl} {phrase}"),
-                    _ => format!("Supprime définitivement les {pl} {phrase} de la couche « {name} »"),
+                    _ => {
+                        format!("Supprime définitivement les {pl} {phrase} de la couche « {name} »")
+                    }
                 };
-                (
-                    body,
-                    "Aucune commande du catalogue ne supprime d'entités dans une couche : les analyses créent de nouvelles couches.",
-                )
+                (body, NO_FEATURE_DELETION)
             }
-            None => (format!("Efface toutes les {pl} de la couche"), "Aucune commande du catalogue ne supprime d'entités dans une couche."),
+            None => (
+                format!("Efface toutes les {pl} de la couche"),
+                NO_FEATURE_DELETION,
+            ),
         },
         // La reprojection d'une couche n'est plus un refus depuis 10.7 : `data.reproject`
         // (`reprojection_couche`, `reprojection_avant_analyse`). L'export d'une couche en
         // GeoPackage, Shapefile ou GeoJSON non plus depuis 10.9 : `data.convert`
         // (`conversion_format`) ; un tableur reste un refus, même d'un sous-ensemble filtré.
         5 => (format!("Exporte les {pl} en CSV"), NO_SPREADSHEET),
-        6 => (format!("Enregistre les {pl} dans un fichier Excel"), NO_SPREADSHEET),
+        6 => (
+            format!("Enregistre les {pl} dans un fichier Excel"),
+            NO_SPREADSHEET,
+        ),
         13 | 14 => {
             let purpose = spreadsheet_purpose(rng, who);
             let what = match &subset {
@@ -3778,17 +3814,32 @@ fn refus(rng: &mut Rng) -> Option<Example> {
             };
             (body, NO_SPREADSHEET)
         }
-        7 => (format!("Renomme la couche « {name} » en « {} »", rng.pick(USER_TITLES)), "Aucune commande du catalogue ne renomme une couche."),
+        7 => (
+            format!(
+                "Renomme la couche « {name} » en « {} »",
+                rng.pick(USER_TITLES)
+            ),
+            NO_RENAME,
+        ),
         // Le style d'une couche n'est plus un refus depuis 11.20 (`map.topographic_style`,
         // `map.graduated_style`, familles `style_topographique` et `style_degrade`) ; seule une
         // couleur choisie à la main n'a pas de commande (11.23).
-        8 => (format!("Mets les {pl} en rouge sur la carte"), NO_CHOSEN_COLOR),
-        9 => (format!("Calcule l'itinéraire le plus court entre deux {pl}"), "Aucune commande du catalogue ne calcule d'itinéraire sur un réseau routier entre deux objets d'une couche : le chemin de moindre coût demande un raster de coût et deux points en coordonnées."),
-        10 => (format!("Télécharge le cadastre {}", de_place(commune)), "Aucune commande du catalogue ne télécharge de données : le projet utilise les fichiers de l'utilisateur."),
+        8 => (
+            format!("Mets les {pl} en rouge sur la carte"),
+            NO_CHOSEN_COLOR,
+        ),
+        9 => (
+            format!("Calcule l'itinéraire le plus court entre deux {pl}"),
+            NO_ROUTE,
+        ),
+        10 => (
+            format!("Télécharge le cadastre {}", de_place(commune)),
+            NO_DOWNLOAD,
+        ),
         // Ce que l'export PDF ne fait pas (format hors liste, impression) vit dans
         // `refus_hors_registre` ; format, orientation et carroyage sont des plans
         // (`export_pdf_format`, 11.12, lot 3).
-        11 => ("Publie la carte sur internet".to_string(), "Aucune commande du catalogue ne publie de carte en ligne."),
+        11 => ("Publie la carte sur internet".to_string(), NO_PUBLISHING),
         12 => {
             let field = layer.fields.first().map(|f| f.name.clone());
             let new_value = *rng.pick(&["inconnu", "à vérifier", "0", "oui"]);
@@ -4536,18 +4587,36 @@ fn pente(rng: &mut Rng) -> Option<Example> {
 }
 
 /// « Y a-t-il une ligne de vue entre A et B, œil à 2 m » : `terrain.line_of_sight`, deux
-/// points écrits dans le système du MNT (chacun avec son système), hauteurs seulement si
-/// elles sont écrites. L'observateur est le point « depuis » ou le premier nommé.
+/// points écrits (chacun avec son système), hauteurs seulement si elles sont écrites.
+/// L'observateur est le point « depuis » ou le premier nommé ; jamais `terrain.viewshed`.
+/// Séance 2 de 5.54 (l'« aimant » du champ de vision) : « voit-on B depuis A », « B est-il visible de A », la
+/// hauteur de la cible plus souvent écrite, et une fois sur trois l'observateur, la cible ou les
+/// deux écrits dans un autre système que le MNT (`foreign_point`), recopiés tels qu'écrits : le
+/// noyau les convertit vers le système du MNT (11.22, comme `champ_de_vision_cumule` et
+/// `chemin_moindre_cout`).
 fn ligne_de_vue(rng: &mut Rng) -> Option<Example> {
     let mut b = Builder::new();
     let epsg = terrain_epsg(rng);
     let dem = b.add_dem(rng, epsg);
-    let a = terrain_point(rng, epsg)?;
-    let c = terrain_point(rng, epsg)?;
+    // Une fois sur trois, l'observateur, la cible ou les deux dans un autre système que le MNT
+    // (`foreign_point` : WGS84, autre fuseau UTM, Lambert-93 sur un MNT en UTM).
+    let (a, c) = match rng.below(9) {
+        0 => (foreign_point(rng, epsg)?, terrain_point(rng, epsg)?),
+        1 => (terrain_point(rng, epsg)?, foreign_point(rng, epsg)?),
+        2 => (foreign_point(rng, epsg)?, foreign_point(rng, epsg)?),
+        _ => (terrain_point(rng, epsg)?, terrain_point(rng, epsg)?),
+    };
+    if a.point == c.point {
+        return None;
+    }
     let (pa, pc) = (&a.place, &c.place);
     let du_a = pa.replacen("le point", "du point", 1);
     let w = pick_str(rng, LINE_OF_SIGHT_WORDS);
-    let (body, q) = match rng.below(6) {
+    let (body, q) = match rng.below(10) {
+        6 => (format!("Voit-on {pc} depuis {pa}"), true),
+        7 => (format!("{pc} est-il visible {du_a}"), true),
+        8 => (format!("Depuis {pa}, voit-on {pc}"), true),
+        9 => (format!("{pc} se voit-il depuis {pa}"), true),
         0 => {
             // « une ligne de vue », « une vue directe », « intervisibilité » sans article.
             let some = w.replacen("la ", "une ", 1).replacen("l'", "", 1);
@@ -4583,7 +4652,8 @@ fn ligne_de_vue(rng: &mut Rng) -> Option<Example> {
             body.push_str(&text);
             params["observer_height"] = h;
         }
-        if rng.chance(1, 3) {
+        // La hauteur de la cible une fois sur deux (une sur trois avant la séance 2 de 5.54).
+        if rng.chance(1, 2) {
             let (h, text) = target_clause(rng, false);
             body.push_str(&text);
             params["target_height"] = h;
@@ -7450,8 +7520,24 @@ fn recoupement(rng: &mut Rng) -> Option<Example> {
             _ => format!(", avec l'azimut {t1} depuis {pa} et l'azimut {t2} depuis {pc}"),
         }
     };
-    // Tournures d'avant 5.53, gardées à côté des listes (jamais « à la boussole », D4).
-    let (mut body, q) = match rng.below(8) {
+    // Tournures d'avant 5.53, gardées à côté des listes (jamais « à la boussole », D4). Séance 2
+    // de 5.54 (0/3 au recoupement, les stations reprojetées vers 4326 sans raison) : trois
+    // tournures neuves, les stations en WGS84 ou en UTM toujours recopiées telles qu'écrites.
+    let (mut body, q) = match rng.below(11) {
+        8 => (
+            format!("Situe le point visé à l'azimut {t1} depuis {pa} et à l'azimut {t2} depuis {pc}"),
+            false,
+        ),
+        9 => (
+            format!(
+                "Quel point se trouve à l'azimut {t1} depuis {pa} et à l'azimut {t2} depuis {pc}"
+            ),
+            true,
+        ),
+        10 => (
+            format!("Croise les deux visées : {t1} depuis {pa}, {t2} depuis {pc}"),
+            false,
+        ),
         0 => (
             format!(
                 "Recoupe la visée {} à l'azimut {t1} avec celle {} à l'azimut {t2}",
@@ -8485,6 +8571,69 @@ const NO_OPACITY: &str = "Aucune commande du catalogue ne règle l'opacité d'un
 const NO_PROPORTIONAL: &str =
     "Aucune commande du catalogue ne représente une couche par des symboles proportionnels.";
 
+/// Tous les refus que le générateur apprend, en constantes `NO_*` (séance 2 de 5.54) : un refus
+/// appris nomme une fonction absente du registre, jamais une phrase écrite en passant. `NO_CURVATURE`
+/// n'en est pas un (des tournures de la courbure désactivée).
+#[cfg(test)]
+const KNOWN_REFUSALS: &[&str] = &[
+    NO_EMAIL,
+    NO_FEATURE_DELETION,
+    NO_RENAME,
+    NO_ROUTE,
+    NO_DOWNLOAD,
+    NO_PUBLISHING,
+    NO_SPREADSHEET,
+    NO_3D,
+    NO_EDIT,
+    NO_FILE_DELETION,
+    NO_FRAMING,
+    NO_PAGE_SIZE,
+    NO_PRINTING,
+    NO_CHOSEN_COLOR,
+    NO_LAYER_CHOICE,
+    NO_RASTER_STATS,
+    NO_MULTI_ORIGIN,
+    NO_CONTOUR,
+    NO_GEOCODING,
+    NO_SHORTEST_PATH,
+    NO_IMAGE_EXPORT,
+    NO_TRAVEL_TIME,
+    NO_FLOOD,
+    NO_FLOW,
+    NO_WATERSHED,
+    NO_CUT_FILL,
+    NO_SMOOTHING,
+    NO_ROUGHNESS,
+    NO_CATEGORIES,
+    NO_LABELS,
+    NO_OPACITY,
+    NO_PROPORTIONAL,
+];
+
+/// Les autres refus de `KNOWN_REFUSALS` et leurs mots-clés, absents des identifiants du registre
+/// (minuscules ASCII, chiffres permis) : comme `ABSENT_FUNCTIONS`, le jour où une commande les
+/// porte, le refus est faux et le test le nomme.
+#[cfg(test)]
+const OTHER_REFUSALS: &[(&str, &[&str])] = &[
+    (NO_EMAIL, &["mail", "send"]),
+    (NO_FEATURE_DELETION, &["delete", "feature"]),
+    (NO_RENAME, &["rename"]),
+    (NO_ROUTE, &["route", "network"]),
+    (NO_DOWNLOAD, &["download", "fetch"]),
+    (NO_PUBLISHING, &["publish", "upload"]),
+    (NO_SPREADSHEET, &["csv", "excel", "xlsx"]),
+    (NO_3D, &["3d", "scene"]),
+    (NO_EDIT, &["edit", "attribute_update", "set_field"]),
+    (NO_FILE_DELETION, &["delete", "erase"]),
+    (NO_FRAMING, &["zoom", "frame"]),
+    (NO_PAGE_SIZE, &["a5", "letter"]),
+    (NO_PRINTING, &["print"]),
+    (NO_CHOSEN_COLOR, &["color", "colour", "single_symbol"]),
+    (NO_LAYER_CHOICE, &["visible_layers", "layer_visibility"]),
+    (NO_RASTER_STATS, &["raster_stat", "zonal_raster"]),
+    (NO_MULTI_ORIGIN, &["multi_origin", "isochrones"]),
+];
+
 /// Chaque refus de `refus_fonction_absente` et ses mots-clés, absents des identifiants du
 /// registre (minuscules ASCII).
 #[cfg(test)]
@@ -8514,9 +8663,10 @@ const ABSENT_FUNCTIONS: &[(&str, &[&str])] = &[
 /// nombre par commune avec son nom » reste un plan (`decompte_par_zone`) ; une couleur par valeur
 /// d'un champ texte se refuse, la mise aux couleurs topographiques reste un plan.
 fn refus_fonction_absente(rng: &mut Rng) -> Option<Example> {
-    // Une fois sur trois, un « presque refus » : une demande voisine qui est un plan, pour que les
-    // refus n'apprennent pas à refuser leurs voisines valides.
-    if rng.chance(1, 3) {
+    // Une fois sur deux (une sur trois avant la séance 2 de 5.54, où les refus devenaient des
+    // réflexes), un « presque refus » : une demande voisine qui est un plan, pour que les refus
+    // n'apprennent pas à refuser leurs voisines valides.
+    if rng.chance(1, 2) {
         return presque_refus(rng);
     }
     let mut b = Builder::new();
@@ -8847,9 +8997,16 @@ fn refus_fonction_absente(rng: &mut Rng) -> Option<Example> {
 /// l'exposition (`terrain.slope`, `terrain.aspect`, voisines des écoulements et de la rugosité), les
 /// couleurs topographiques ou un dégradé selon un champ numérique (`map.topographic_style`,
 /// `map.graduated_style`, voisins des catégories et des symboles proportionnels).
+///
+/// Séance 2 de 5.54 (refus devenus réflexes) : le chemin de moindre coût entre deux points écrits
+/// (`terrain.least_cost_path`, voisin du plus court chemin sur les routes et de la durée d'un
+/// trajet), un dégradé selon un champ numérique dit par d'autres verbes, le nombre de classes seul
+/// une fois sur deux (`class_count`, voisin des symboles proportionnels et des catégories), le
+/// décompte par zone avec le nom de chaque zone (`analysis.zonal_statistics` et `label_field`,
+/// voisin des étiquettes), et les questions sur le poste (`model.list`, `system.about`).
 fn presque_refus(rng: &mut Rng) -> Option<Example> {
     let mut b = Builder::new();
-    let (body, q, list): (String, bool, Vec<Value>) = match rng.below(4) {
+    let (body, q, list): (String, bool, Vec<Value>) = match rng.below(8) {
         0 => {
             let epsg = terrain_epsg(rng);
             let dem = b.add_dem(rng, epsg);
@@ -8923,6 +9080,150 @@ fn presque_refus(rng: &mut Rng) -> Option<Example> {
                     vec![json!({"command": "terrain.aspect", "params": {"dem": dem.source}})],
                 )
             }
+        }
+        4 => {
+            let epsg = terrain_epsg(rng);
+            let cost = cost_inventory(rng, &mut b, epsg);
+            let on = cost_words(rng, &cost);
+            let a = terrain_point(rng, epsg)?;
+            let c = terrain_point(rng, epsg)?;
+            if a.point == c.point {
+                return None;
+            }
+            let (pa, pc) = (&a.place, &c.place);
+            let (from, to) = (de_np(pa), a_np(pc));
+            let (body, q) = match rng.below(4) {
+                0 => (
+                    format!("Trouve le trajet le plus économique entre {pa} et {pc}, {on}"),
+                    false,
+                ),
+                1 => (
+                    format!("Quel itinéraire coûte le moins pour aller {from} {to}, {on}"),
+                    true,
+                ),
+                2 => (
+                    format!("Calcule le parcours le moins pénible {from} {to}, {on}"),
+                    false,
+                ),
+                _ => (
+                    format!("Par où passer pour relier {pa} et {pc} au moindre coût, {on}"),
+                    true,
+                ),
+            };
+            (
+                body,
+                q,
+                vec![json!({"command": "terrain.least_cost_path",
+                    "params": {"cost": cost.source, "start": a.point, "end": c.point}})],
+            )
+        }
+        5 => {
+            let t = pick_theme(rng, &b, |t| ordinary(t) && !number_fields(t).is_empty())?;
+            let def = *rng.pick(&number_fields(t));
+            let layer = b.add(rng, t.key, &[def.role], &[], &[]);
+            let subject = def
+                .label
+                .strip_prefix("de ")
+                .or_else(|| def.label.strip_prefix("d'"))?;
+            let field = layer.field(def.role)?.name.clone();
+            let pl = t.noun.pl;
+            let mut body = match rng.below(5) {
+                0 => format!("Représente les {pl} selon leur {subject}"),
+                1 => format!("Teinte les {pl} d'après leur {subject}"),
+                2 => format!("Nuance la couleur des {pl} selon leur {subject}"),
+                3 => format!("Fais varier la couleur des {pl} avec leur {subject}"),
+                _ => format!("Mets les {pl} en dégradé d'après leur {subject}"),
+            };
+            let mut params = json!({"layer_id": layer.id, "field": field});
+            // Le nombre de classes seul, une fois sur deux : ni méthode ni dégradé au plan.
+            if rng.chance(1, 2) {
+                let n = rng.range(3, 9);
+                body.push_str(
+                    &(*rng.pick(&[" en {n} classes", ", {n} classes", " avec {n} classes"]))
+                        .replace("{n}", &n.to_string()),
+                );
+                params["class_count"] = json!(n);
+            }
+            (
+                body,
+                false,
+                vec![json!({"command": "map.graduated_style", "params": params})],
+            )
+        }
+        6 => {
+            // Comme `decompte_par_zone` : le champ de nom à côté de ses leurres, une fois sur deux
+            // dans une couche de 15 à 20 champs.
+            let zkey = *rng.pick(&["communes", "quartiers"]);
+            if rng.chance(1, 2) {
+                b.wide_next();
+            }
+            let zones = b.add(rng, zkey, &["nom"], &[], &[]);
+            let z = &zones.theme.noun;
+            let p = pick_theme(rng, &b, |t| t.geom == Geom::Point)?;
+            let points = b.add(rng, p.key, &[], &[], &[]);
+            let pl = p.noun.pl;
+            let de_pl = de_plural(pl);
+            let (zs, zp) = (z.sg, z.pl);
+            let (body, q) = match rng.below(4) {
+                0 => (
+                    format!("Donne le nombre {de_pl} dans chaque {zs}, avec son nom"),
+                    false,
+                ),
+                1 => (
+                    format!("Pour chaque {zs}, donne son nom et le nombre {de_pl}"),
+                    false,
+                ),
+                2 => (
+                    format!("Liste chaque {zs} par son nom, avec son nombre {de_pl}"),
+                    false,
+                ),
+                _ => (
+                    format!("Combien {de_pl} par {zs}, en nommant les {zp}"),
+                    true,
+                ),
+            };
+            let params = json!({"layer_id": zones.id, "points_layer_id": points.id,
+                "label_field": zones.field("nom")?.name});
+            (
+                body,
+                q,
+                vec![json!({"command": "analysis.zonal_statistics", "params": params})],
+            )
+        }
+        7 => {
+            // Les questions sur le poste, verbe, objet et ordre tirés (jamais les tournures de
+            // `description`) ; Cassini nommé, pour ne pas se lire comme une question sur QGIS.
+            let models = rng.chance(1, 2);
+            let object = if models {
+                *rng.pick(&[
+                    "les modèles d'IA installés sur ce poste",
+                    "les modèles de langue que Cassini peut charger",
+                    "les modèles locaux de Cassini",
+                    "les modèles d'IA présents sur cet ordinateur",
+                ])
+            } else {
+                *rng.pick(&[
+                    "le numéro de version de Cassini",
+                    "la version du noyau de Cassini",
+                    "la version de Cassini installée sur ce poste",
+                ])
+            };
+            let (body, q) = match rng.below(5) {
+                0 => (format!("Donne-moi {object}"), false),
+                1 => (format!("Affiche {object}"), false),
+                2 => (format!("Peux-tu m'indiquer {object}"), true),
+                3 => (format!("Je voudrais voir {object}"), false),
+                _ => (
+                    format!(
+                        "{} {object}",
+                        if models { "Quels sont" } else { "Quel est" }
+                    )
+                    .replace("Quel est la", "Quelle est la"),
+                    true,
+                ),
+            };
+            let command = if models { "model.list" } else { "system.about" };
+            (body, q, vec![json!({"command": command, "params": {}})])
         }
         _ => {
             let t = pick_theme(rng, &b, |t| ordinary(t) && !number_fields(t).is_empty())?;
@@ -9004,8 +9305,9 @@ fn refraction_clause(rng: &mut Rng, with_curvature: bool) -> (Value, String) {
 }
 
 /// Options écrites (leçon de la remesure : les options non par défaut écrites dans la phrase
-/// étaient perdues). Un dégradé qui écrit au moins deux de sa méthode, de son nombre de classes et
-/// de son dégradé ; ou un champ de vision qui écrit au moins deux réglages parmi les hauteurs, le
+/// étaient perdues). Un dégradé qui écrit au moins une option parmi sa méthode, son nombre de
+/// classes et son dégradé (le nombre de classes seul depuis la séance 2 de 5.54 : « en 5 classes »
+/// devenait un refus) ; ou un champ de vision qui écrit au moins deux réglages parmi les hauteurs, le
 /// rayon, la courbure (« sans tenir compte de la courbure » → `curvature: false`) et la réfraction.
 /// Toute option écrite est au plan, aucune autre.
 fn options_ecrites(rng: &mut Rng) -> Option<Example> {
@@ -9034,8 +9336,9 @@ fn options_degrade(rng: &mut Rng) -> Option<Example> {
         3 => format!("Applique un dégradé sur les {pl} en fonction de leur {subject}"),
         _ => format!("Classe les {pl} par {subject} et colore-les"),
     };
-    // Au moins deux options sur trois : méthode, nombre de classes, dégradé.
-    let mask = *rng.pick(&[3usize, 5, 6, 7]);
+    // Au moins une option sur trois : méthode, nombre de classes, dégradé ; une seule, alors le
+    // nombre de classes (`mask` 2, séance 2 de 5.54), sinon au moins deux.
+    let mask = *rng.pick(&[2usize, 3, 5, 6, 7]);
     let mut params = json!({"layer_id": layer.id, "field": field});
     let mut clauses: Vec<String> = Vec::new();
     if mask & 1 != 0 {
@@ -9241,18 +9544,35 @@ fn point_lambert_vers_geo(rng: &mut Rng) -> Option<Example> {
             (body, q)
         }
         2 => {
-            let (mut a, mut c) = (lambert_coord(rng), lambert_coord(rng));
-            let x = |p: &Coord| p.point["x"].as_f64().unwrap_or(0.0);
-            let y = |p: &Coord| p.point["y"].as_f64().unwrap_or(0.0);
-            if x(&a) == x(&c) {
+            // Deux stations en Lambert-93 ; une fois sur deux (séance 2 de 5.54), la seconde en
+            // UTM 31N, recopiée telle qu'écrite : seule la station en Lambert-93 passe par
+            // `data.transform_point`. Jamais une station en WGS84 (voir la branche 0).
+            let a = lambert_coord(rng);
+            let c = if rng.chance(1, 2) {
+                utm_coord(rng, 31)
+            } else {
+                lambert_coord(rng)
+            };
+            let geographic = |p: &Coord| -> Option<(f64, f64)> {
+                if p.point["epsg"] == 2154 {
+                    let x = p.point["x"].as_f64()?;
+                    let y = p.point["y"].as_f64()?;
+                    Some(lambert93_to_lat_lon(x, y))
+                } else {
+                    lat_lon(p)
+                }
+            };
+            let (ga, gc) = (geographic(&a)?, geographic(&c)?);
+            if ga.1 == gc.1 {
                 return None;
             }
-            if x(&a) > x(&c) {
-                std::mem::swap(&mut a, &mut c);
-            }
+            // La première station à l'ouest, comme `recoupement`.
+            let ((a, (lat_a, lon_a)), (c, (lat_c, lon_c))) = if ga.1 > gc.1 {
+                ((c, gc), (a, ga))
+            } else {
+                ((a, ga), (c, gc))
+            };
             // Comme `recoupement` : les visées visent un vrai point au nord des deux stations.
-            let (lat_a, lon_a) = lambert93_to_lat_lon(x(&a), y(&a));
-            let (lat_c, lon_c) = lambert93_to_lat_lon(x(&c), y(&c));
             let k = rng.range(40, 120) as f64 / 100.0;
             let lat_t = lat_a.max(lat_c) + (lon_c - lon_a) * k;
             let lon_t =
@@ -9266,6 +9586,14 @@ fn point_lambert_vers_geo(rng: &mut Rng) -> Option<Example> {
             if !(30.0..=150.0).contains(&(b1 - b2).rem_euclid(360.0)) {
                 return None;
             }
+            // Une station en Lambert-93 et une en UTM : la station transformée vient toujours en
+            // premier, et le recoupement rend son point dans le système de la première station,
+            // le WGS84 de la transformation, quel que soit le côté où elle est.
+            let (a, c, b1, b2) = if a.point["epsg"] != 2154 && c.point["epsg"] == 2154 {
+                (c, a, b2, b1)
+            } else {
+                (a, c, b1, b2)
+            };
             let gon = rng.chance(1, 4);
             let (az1, t1) = angle_words(rng, gon, b1);
             let (az2, t2) = angle_words(rng, gon, b2);
@@ -9440,11 +9768,34 @@ fn labelled_coord(rng: &mut Rng, epsg: u32) -> Option<Coord> {
 /// Le nord écrit avant l'est (leçon de la remesure : « N 6 862 000, E 652 000 (Lambert-93) »
 /// rendait `x` et `y` inversés) : `x` est l'est et `y` le nord, l'étiquette fait foi. Une
 /// reprojection (`data.transform_point`), un champ de vision dans le système du MNT
-/// (`terrain.viewshed`) ou une conversion entre WGS84, UTM et MGRS (`coord.convert`).
+/// (`terrain.viewshed`) ou une conversion entre WGS84, UTM et MGRS (`coord.convert`). Depuis la
+/// séance 2 de 5.54, le champ de vision tombe d'un tirage sur trois à un sur six, et une ligne de
+/// vue entre deux points étiquetés (`terrain.line_of_sight`) prend le sixième libéré.
 fn ordre_nord_est(rng: &mut Rng) -> Option<Example> {
     let mut b = Builder::new();
-    let (body, q, list) = match rng.below(3) {
-        0 => {
+    let (body, q, list) = match rng.below(6) {
+        3 => {
+            let epsg = terrain_epsg(rng);
+            let dem = b.add_dem(rng, epsg);
+            let a = labelled_coord(rng, epsg)?;
+            let c = labelled_coord(rng, epsg)?;
+            if a.point == c.point {
+                return None;
+            }
+            let (pa, pc) = (&a.place, &c.place);
+            let (body, q) = match rng.below(3) {
+                0 => (format!("Voit-on {pc} depuis {pa}"), true),
+                1 => (format!("Vérifie la ligne de vue entre {pa} et {pc}"), false),
+                _ => (format!("{pc} est-il visible depuis {pa}"), true),
+            };
+            (
+                body,
+                q,
+                vec![json!({"command": "terrain.line_of_sight",
+                    "params": {"dem": dem.source, "observer": a.point, "target": c.point}})],
+            )
+        }
+        0 | 1 => {
             let (epsg, target, words): (u32, u32, &str) = match rng.below(4) {
                 0 => (
                     2154,
@@ -9472,7 +9823,7 @@ fn ordre_nord_est(rng: &mut Rng) -> Option<Example> {
             };
             (body, q, vec![transform_call(c.point, target)])
         }
-        1 => {
+        2 => {
             let epsg = terrain_epsg(rng);
             let dem = b.add_dem(rng, epsg);
             let c = labelled_coord(rng, epsg)?;
@@ -12690,7 +13041,57 @@ mod tests {
                 "target_height",
             ],
         );
-        points_in_the_dem_system(&examples, &["observer", "target"]);
+        // Séance 2 de 5.54 : une fois sur trois l'observateur, la cible ou les deux dans un autre
+        // système que le MNT (`foreign_point` : WGS84, autre fuseau UTM, Lambert-93 sur un MNT en
+        // UTM), recopiés tels qu'écrits ; le noyau les convertit (11.22). Les autres plans ont
+        // leurs deux points dans le système du MNT.
+        // Un point en WGS84 est toujours étranger ; un autre, s'il diffère du système du MNT que
+        // l'inventaire donne.
+        let foreign_end = |e: &Example, key: &str| {
+            let epsg = &params0(e)[key]["epsg"];
+            *epsg == 4326 || cited_dem(e).get("epsg").is_some_and(|d| d != epsg)
+        };
+        let (foreign, own): (Vec<Example>, Vec<Example>) = examples
+            .iter()
+            .cloned()
+            .partition(|e| foreign_end(e, "observer") || foreign_end(e, "target"));
+        points_in_the_dem_system(&own, &["observer", "target"]);
+        assert!(foreign.len() * 5 >= examples.len(), "{}", foreign.len());
+        let mut cases = HashSet::new();
+        for e in &foreign {
+            let Some(dem) = cited_dem(e)["epsg"].as_u64() else {
+                continue;
+            };
+            let ends = (foreign_end(e, "observer"), foreign_end(e, "target"));
+            cases.insert(format!("{ends:?}"));
+            for key in ["observer", "target"] {
+                if foreign_end(e, key) {
+                    let epsg = params0(e)[key]["epsg"].as_u64().unwrap();
+                    // Les systèmes de `foreign_point` : le Lambert-93 seulement sur un MNT en UTM.
+                    assert!(
+                        epsg == 4326 || (32631..=32632).contains(&epsg) || dem != 2154,
+                        "{}",
+                        e.request
+                    );
+                    cases.insert(format!("{epsg} sur {dem}"));
+                }
+            }
+        }
+        for case in [
+            "(true, false)",
+            "(false, true)",
+            "(true, true)",
+            "4326 sur 2154",
+            "32632 sur 32631",
+            "32631 sur 2154",
+            "2154 sur 32632",
+        ] {
+            assert!(cases.contains(case), "{case} : {cases:?}");
+        }
+        // Les tournures neuves de la séance 2 sont tirées.
+        for form in ["Voit-on ", " est-il visible ", " se voit-il "] {
+            assert!(examples.iter().any(|e| e.request.contains(form)), "{form}");
+        }
         let eye: Vec<&str> = EYE_MARKERS.iter().chain(BOTH_MARKERS).copied().collect();
         let target: Vec<&str> = ["cible"].iter().chain(BOTH_MARKERS).copied().collect();
         written_only(&examples, "observer_height", &eye);
@@ -14610,11 +15011,20 @@ mod tests {
         for (_, command) in EXISTING {
             assert!(registry.spec(command).is_some(), "{command}");
         }
+        // Séance 2 de 5.54 : les voisins neufs (chemin de moindre coût entre deux points, décompte
+        // par zone avec le nom, questions du poste).
         let near: HashSet<&str> = EXISTING
             .iter()
             .map(|(_, c)| *c)
-            .chain(["raster.reclassify"])
+            .chain([
+                "raster.reclassify",
+                "terrain.least_cost_path",
+                "analysis.zonal_statistics",
+                "model.list",
+                "system.about",
+            ])
             .collect();
+        let (mut labelled_zones, mut classes_only) = (0, 0);
         let (mut seen, mut planned) = (HashSet::new(), HashSet::new());
         let (mut refusals, mut plans) = (0, 0);
         for e in valid(refus_fonction_absente, 1500) {
@@ -14624,6 +15034,24 @@ mod tests {
                 assert_eq!(commands.len(), 1, "{}", e.request);
                 assert!(near.contains(commands[0]), "{}", e.request);
                 planned.insert(commands[0].to_string());
+                let p = &e.expected["calls"][0]["params"];
+                if commands[0] == "analysis.zonal_statistics" {
+                    assert!(p["label_field"].is_string(), "{}", e.request);
+                    labelled_zones += 1;
+                }
+                if commands[0] == "terrain.least_cost_path" {
+                    assert!(
+                        p["start"].is_object() && p["end"].is_object(),
+                        "{}",
+                        e.request
+                    );
+                }
+                if p.get("class_count").is_some() {
+                    assert!(p.get("method").is_none() && p.get("ramp").is_none());
+                    let n = p["class_count"].as_u64().unwrap();
+                    assert!(e.request.contains(&format!("{n} classes")), "{}", e.request);
+                    classes_only += 1;
+                }
                 continue;
             }
             refusals += 1;
@@ -14645,12 +15073,17 @@ mod tests {
             seen.insert(reason.to_string());
         }
         assert_eq!(seen.len(), ABSENT_FUNCTIONS.len(), "{seen:?}");
-        // Environ un presque refus pour deux refus, chaque commande voisine au moins une fois.
+        // Environ un presque refus pour un refus depuis la séance 2 de 5.54 (un pour deux avant),
+        // chaque commande voisine au moins une fois.
         assert!(
-            plans * 3 >= refusals && plans * 3 <= refusals * 2,
+            plans * 4 >= refusals * 3 && plans * 3 <= refusals * 4,
             "{plans} {refusals}"
         );
         assert_eq!(planned.len(), near.len(), "{planned:?}");
+        assert!(
+            labelled_zones > 20 && classes_only > 10,
+            "{labelled_zones} {classes_only}"
+        );
     }
 
     /// Un réglage écrit dans la demande, reconnu à ses mots : la valeur de la plus longue forme de
@@ -14670,7 +15103,7 @@ mod tests {
         // Leçon de la remesure : les options écrites (méthode, dégradé, nombre de classes ; courbure,
         // réfraction, hauteurs, rayon) sont au plan, et elles seules ; au moins deux par demande.
         let examples = valid(options_ecrites, 1200);
-        let (mut styles, mut views, mut flat) = (0, 0, 0);
+        let (mut styles, mut views, mut flat, mut classes_only) = (0, 0, 0, 0);
         for e in &examples {
             let call = &e.expected["calls"][0];
             let p = &call["params"];
@@ -14679,7 +15112,13 @@ mod tests {
             match call["command"].as_str().unwrap() {
                 "map.graduated_style" => {
                     styles += 1;
-                    assert!(options >= 4, "{}", e.request);
+                    // Au moins une option ; une seule, alors le nombre de classes (séance 2 de
+                    // 5.54 : « en 5 classes » seul devenait un refus).
+                    assert!(options >= 3, "{}", e.request);
+                    if options == 3 {
+                        assert!(p.get("class_count").is_some(), "{}", e.request);
+                        classes_only += 1;
+                    }
                     assert_eq!(
                         p.get("method").and_then(Value::as_str),
                         written_form(&e.request, GRADUATED_METHODS),
@@ -14751,8 +15190,8 @@ mod tests {
             }
         }
         assert!(
-            styles > 100 && views > 100 && flat > 50,
-            "{styles} {views} {flat}"
+            styles > 100 && views > 100 && flat > 50 && classes_only > 20,
+            "{styles} {views} {flat} {classes_only}"
         );
     }
 
@@ -14904,6 +15343,7 @@ mod tests {
                         assert!(
                             [
                                 "latitude et longitude",
+                                "latitude et la longitude",
                                 "WGS84",
                                 "décimaux",
                                 "GPS",
@@ -14961,9 +15401,222 @@ mod tests {
             inverted > 2 * ordinary && ordinary > 0,
             "{inverted} {ordinary}"
         );
-        for command in ["data.transform_point", "terrain.viewshed", "coord.convert"] {
+        // Séance 2 de 5.54 : la ligne de vue entre deux points étiquetés s'y ajoute.
+        for command in [
+            "data.transform_point",
+            "terrain.viewshed",
+            "terrain.line_of_sight",
+            "coord.convert",
+        ] {
             assert!(commands.contains(command), "{command}");
         }
+    }
+
+    /// Le jeu graine 1 complet et le jeu ciblé de la séance 2 de 5.54, partagés par ses tests.
+    fn default_and_second_session_sets() -> Vec<Example> {
+        let (mut examples, _) = crate::generate(crate::DEFAULT_SEED, crate::DEFAULT_COUNT);
+        let (focus, _) = crate::generate_families(
+            crate::FOCUS_SEED,
+            crate::FOCUS_COUNT,
+            crate::SECOND_SESSION_FAMILIES,
+        )
+        .unwrap();
+        examples.extend(focus);
+        examples
+    }
+
+    /// Une tournure de ligne de vue : voir un point B depuis un point A. « Que voit-on depuis A »,
+    /// « depuis combien de points voit-on chaque endroit » restent des champs de vision.
+    fn line_of_sight_wording(request: &str) -> bool {
+        let r = request.to_lowercase();
+        [
+            "voit-on le ",
+            "voit-on la ",
+            "voit-on l'",
+            "aperçoit-on le ",
+            "aperçoit-on la ",
+            " est-il visible ",
+            " est-elle visible ",
+            " se voit-il ",
+            " se voit-elle ",
+        ]
+        .iter()
+        .any(|w| r.contains(w))
+    }
+
+    #[test]
+    fn the_viewshed_families_never_use_a_line_of_sight_wording() {
+        // La réciproque : les familles du champ de vision, tirées seules, n'écrivent jamais une
+        // tournure de ligne de vue.
+        for make in [
+            champ_de_vision as fn(&mut Rng) -> Option<Example>,
+            champ_de_vision_cumule,
+            options_ecrites,
+            terrain_autre_systeme,
+            ordre_nord_est,
+        ] {
+            for e in valid(make, 600) {
+                let viewshed = commands(&e)
+                    .iter()
+                    .any(|c| c.starts_with("terrain.viewshed"));
+                if viewshed {
+                    assert!(!line_of_sight_wording(&e.request), "{}", e.request);
+                }
+            }
+        }
+        assert!(line_of_sight_wording(
+            "Aperçoit-on le point X depuis le point Y ?"
+        ));
+        assert!(!line_of_sight_wording("Que voit-on depuis le point Y ?"));
+        assert!(!line_of_sight_wording(
+            "Depuis combien de ces points voit-on chaque endroit : A, B ?"
+        ));
+    }
+
+    #[test]
+    fn every_learned_refusal_is_a_known_constant_and_line_of_sight_wordings_never_a_viewshed() {
+        // Séance 2 de 5.54 (refus devenus réflexes) : tout refus appris, au jeu graine 1 comme au
+        // jeu ciblé de la séance 2, a pour raison une constante de `KNOWN_REFUSALS` ; chacune est
+        // une phrase affirmative, sans doublon. « Voit-on B depuis A », « B est-il visible »,
+        // « B se voit-il » : une ligne de vue, jamais un champ de vision ; un recoupement ne
+        // reprojette jamais ses stations.
+        let known: HashSet<&str> = KNOWN_REFUSALS.iter().copied().collect();
+        assert_eq!(known.len(), KNOWN_REFUSALS.len());
+        // Chaque refus connu a ses mots-clés, absents des identifiants du registre.
+        let registry = cassini_core::registry::Registry::standard();
+        let keyed: Vec<(&str, &[&str])> = ABSENT_FUNCTIONS
+            .iter()
+            .chain(OTHER_REFUSALS)
+            .copied()
+            .collect();
+        assert_eq!(keyed.iter().map(|(r, _)| *r).collect::<HashSet<_>>(), known);
+        assert_eq!(keyed.len(), known.len());
+        for (reason, words) in &keyed {
+            assert!(!words.is_empty(), "{reason}");
+            for word in *words {
+                assert!(
+                    !word.is_empty()
+                        && word
+                            .chars()
+                            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
+                    "{word}"
+                );
+                for spec in registry.specs() {
+                    assert!(!spec.id.contains(word), "{} contient « {word} »", spec.id);
+                }
+            }
+        }
+        for reason in KNOWN_REFUSALS {
+            assert!(!reason.contains('?') && reason.ends_with('.'), "{reason}");
+        }
+        for (reason, _) in ABSENT_FUNCTIONS {
+            assert!(known.contains(reason), "{reason}");
+        }
+        let mut seen = HashSet::new();
+        let mut sighted = 0;
+        for e in default_and_second_session_sets() {
+            if e.expected["kind"] == "refusal" {
+                let reason = e.expected["reason"].as_str().unwrap();
+                assert!(known.contains(reason), "{reason} : {}", e.request);
+                seen.insert(reason.to_string());
+            }
+            if line_of_sight_wording(&e.request) {
+                // Ni champ de vision ni refus : une ligne de vue (ou la question d'un point).
+                assert_ne!(e.expected["kind"], "refusal", "{}", e.request);
+                assert!(!commands(&e).contains(&"terrain.viewshed"), "{}", e.request);
+                assert!(
+                    !commands(&e).contains(&"terrain.viewshed_cumulative"),
+                    "{}",
+                    e.request
+                );
+                sighted += usize::from(commands(&e).contains(&"terrain.line_of_sight"));
+            }
+            if e.family == "recoupement" {
+                assert!(
+                    !commands(&e).contains(&"data.transform_point"),
+                    "{}",
+                    e.request
+                );
+            }
+        }
+        assert!(sighted > 100, "{sighted}");
+        // Chaque refus connu est appris quelque part.
+        assert_eq!(
+            seen.len(),
+            known.len(),
+            "{:?}",
+            known
+                .difference(&seen.iter().map(String::as_str).collect())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn a_bearing_intersection_copies_its_wgs84_or_utm_stations_and_transforms_only_lambert_93() {
+        // Séance 2 de 5.54 : le recoupement recopie ses stations en WGS84 ou en UTM ; une station
+        // en Lambert-93 (`point_lambert_vers_geo`) passe seule par `data.transform_point`, à côté
+        // d'une station en UTM recopiée une fois sur deux.
+        let mut systems = HashSet::new();
+        for e in geometry_examples(recoupement) {
+            assert!(
+                !commands(&e).contains(&"data.transform_point"),
+                "{}",
+                e.request
+            );
+            let p = &call(&e, 0)["params"];
+            for key in ["first", "second"] {
+                let epsg = p[key]["epsg"].as_u64().unwrap();
+                assert!([4326, 32631, 32632].contains(&epsg), "{}", e.request);
+                systems.insert(epsg);
+            }
+        }
+        assert_eq!(systems.len(), 3, "{systems:?}");
+        let (mut mixed, mut lambert_only) = (0, 0);
+        for e in geometry_examples(point_lambert_vers_geo) {
+            let calls = e.expected["calls"].as_array().unwrap();
+            let Some(intersection) = calls
+                .iter()
+                .find(|c| c["command"] == "geo.bearing_intersection")
+            else {
+                continue;
+            };
+            let transforms = calls
+                .iter()
+                .filter(|c| c["command"] == "data.transform_point")
+                .count();
+            let p = &intersection["params"];
+            let utm: Vec<&Value> = ["first", "second"]
+                .iter()
+                .map(|k| &p[*k])
+                .filter(|v| v["epsg"] == 32631)
+                .collect();
+            // La première station est toujours la transformée, d'un point en Lambert-93 vers
+            // 4326 : le recoupement rend son point en WGS84, quel que soit l'ordre écrit.
+            let first = p["first"].as_str().expect("première station transformée");
+            let k: usize = first
+                .strip_prefix("step:")
+                .and_then(|r| r.strip_suffix(".point"))
+                .unwrap()
+                .parse()
+                .unwrap();
+            let source = &calls[k - 1];
+            assert_eq!(source["command"], "data.transform_point", "{}", e.request);
+            assert_eq!(source["params"]["point"]["epsg"], 2154, "{}", e.request);
+            assert_eq!(source["params"]["target_epsg"], 4326, "{}", e.request);
+            match utm.len() {
+                0 => {
+                    assert_eq!(transforms, 2, "{}", e.request);
+                    lambert_only += 1;
+                }
+                1 => {
+                    assert_eq!(transforms, 1, "{}", e.request);
+                    assert_eq!(p["second"]["epsg"], 32631, "{}", e.request);
+                    mixed += 1;
+                }
+                _ => panic!("{}", e.request),
+            }
+        }
+        assert!(mixed > 10 && lambert_only > 10, "{mixed} {lambert_only}");
     }
 
     #[test]

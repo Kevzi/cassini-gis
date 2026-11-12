@@ -2728,7 +2728,8 @@ uv run --project training/entrainement python training/entrainement/pipeline.py 
 - **Jeu de la séance** : 3 000 exemples par défaut (`--exemples`, décision D2), dont une part de
   **rappel** d'au moins 0,4 (`--part-rappel`, 0,4 par défaut et au plus bas, D3), arrondie
   au-dessus : 1 200 exemples, les premiers du jeu graine 1 (toutes familles ; le générateur est
-  déterministe, ses premiers exemples ne dépendent pas du compte demandé), tirés avec une marge
+  déterministe, ses premiers exemples ne dépendent pas du compte demandé ; stratifié depuis la
+  séance 2, voir « Séance 2 (5.54) » plus bas), tirés avec une marge
   de 60 puis coupés au compte une fois les trop longs écartés, puis 1 800 exemples **ciblés**,
   graine 3, tirés par `cassini-training --familles a,b` parmi les seules familles nommées (même
   tirage pondéré, restreint à leurs poids). Le jeu ciblé ne dépasse pas `FOCUS_COUNT` (1 800), ni
@@ -2873,6 +2874,123 @@ propre ; accord du propriétaire, GPU libre) :
 git -C ".../CASSINI-nuit" checkout -q --detach REV && WT=~/cassini-worktrees/5-54-lot-2 \
   bash ~/cassini-entrainement/nuit-5-54.sh export_pdf_echelle_format,refus_fonction_absente,options_ecrites,champ_de_vision_cumule,point_lambert_vers_geo,ordre_nord_est
 ```
+
+Écrite, pas lancée : la séance attend la revue et l'accord du propriétaire.
+
+## Séance 2 (5.54, 2026-11-12)
+
+La séance 1 (`ajuste-continu-5-54-1`, depuis B, `FIRST_SESSION_FAMILIES`, rappel 0,4 tiré du début
+du jeu graine 1) gagne sur les barres élargies, mais la barre de non-oubli la refuse : `ecart_reel`
+39 → 35/40, recoupement 2/3 → 0/3. Les causes relevées :
+
+- **refus devenus réflexes** : un dégradé selon un champ numérique, les modèles d'IA du poste, le
+  chemin de moindre coût entre deux points, le décompte par zone avec le nom, « en 5 classes »
+  devenaient des refus ;
+- **l'« aimant » du champ de vision** : environ 600 exemples de champ de vision contre 8 de ligne de
+  vue au jeu de la séance ;
+- **`data.transform_point` vers 4326** posé sur des points déjà en WGS84 ou en UTM (recoupement) ;
+- **oubli des petites familles** du rappel : le début du jeu graine 1 n'en tient que quelques-unes
+  (sur 1 500 : 4 recoupements, 4 reclassements, 13 lignes de vue).
+
+**Familles** (`training/src/families.rs`), chacune avec son test :
+
+| Cause | Changement | Test |
+|---|---|---|
+| refus réflexes | `refus_fonction_absente` poids 6 → 3, un presque refus sur deux (un sur trois avant) ; quatre voisins neufs : chemin de moindre coût entre deux points écrits (`terrain.least_cost_path`), dégradé dit par d'autres verbes, le nombre de classes seul une fois sur deux (`map.graduated_style` et `class_count`), décompte par zone avec le nom (`analysis.zonal_statistics` et `label_field`, inventaire et leurres de `decompte_par_zone`, même élision, `de_plural`), questions sur le poste (`model.list`, `system.about` : verbe, objet et ordre tirés, Cassini nommé, autres tournures que celles de `description`) | `what_is_refused_as_absent_is_absent_from_the_registry` |
+| un refus nomme une fonction absente | les refus écrits en clair dans `refus` deviennent des constantes `NO_*` (les deux raisons de suppression d'entités fusionnées en une) ; `KNOWN_REFUSALS` les liste toutes (32), chacune avec ses mots-clés absents des identifiants du registre (`ABSENT_FUNCTIONS`, `OTHER_REFUSALS`) | `every_learned_refusal_is_a_known_constant_and_line_of_sight_wordings_never_a_viewshed` (mots-clés ↔ registre ; jeu graine 1 et jeu ciblé de la séance 2 : toute raison de refus est dans la liste, chacune apprise) |
+| aimant du champ de vision | `ligne_de_vue` : « voit-on B depuis A », « B est-il visible de A », « B se voit-il depuis A », hauteur de la cible une fois sur deux (une sur trois), et une fois sur trois l'observateur, la cible ou les deux écrits dans un autre système que le MNT (`foreign_point` : WGS84, autre fuseau UTM, Lambert-93 sur un MNT en UTM), recopiés, le noyau les convertit (11.22) ; `champ_de_vision_cumule` poids 6 → 3 ; `ordre_nord_est` : champ de vision d'un tirage sur trois à un sur six, une ligne de vue entre deux points étiquetés prend le sixième libéré | `a_line_of_sight_takes_two_written_points_and_only_the_written_heights` (chaque cas étranger vu), `north_before_east_is_read_by_its_labels` (les quatre commandes) ; « voit-on le/la/l' », « aperçoit-on », « est-il (elle) visible », « se voit-il (elle) » : jamais un champ de vision ni un refus, et la réciproque, `the_viewshed_families_never_use_a_line_of_sight_wording` |
+| `transform_point` sur un point WGS84 ou UTM | `recoupement` : trois tournures neuves (dont « le point visé à l'azimut … »), stations en WGS84 ou en UTM toujours recopiées ; `point_lambert_vers_geo`, branche du recoupement : la seconde station en UTM 31N une fois sur deux, recopiée, seule la station en Lambert-93 transformée (jamais une station en WGS84), et toujours en premier : le recoupement rend son point dans le système de la première station, le WGS84 | `a_bearing_intersection_copies_its_wgs84_or_utm_stations_and_transforms_only_lambert_93` (la première station est la transformée, d'un point en 2154 vers 4326) |
+| « en 5 classes » refusé | `options_ecrites` : un dégradé qui n'écrit que le nombre de classes (au moins une option, au lieu de deux) | `a_written_option_is_in_the_plan_and_an_unwritten_one_is_not` (une seule option : le nombre de classes, ni méthode ni dégradé) |
+
+Les poids globaux de `ligne_de_vue` (4) et de `recoupement` (3) ne baissent pas : ils les
+retireraient du jeu complet, contre la cause d'oubli. `carroyage_utm_projet` passe de 6 à 9 : le
+tirage déplacé laissait 35 questions du fuseau pour 71 recopies (36 pour 76 au poids 8)
+(`the_default_set_never_reprojects_a_metric_layer_unasked_and_asks_for_a_missing_utm_zone`). Un
+test d'étiquettes acceptait « latitude et longitude », pas « la latitude et la longitude », que le
+tirage déplacé fait sortir : il les accepte toutes deux.
+
+**Rappel stratifié** (`stratified_recall`, `training/src/lib.rs`). Le rappel n'est plus le début du
+jeu graine 1 : il est fait d'exemples du jeu graine 1 **complet** (`generate(1, 8600)`, ce que
+`recouvrement.rs` garde déjà), au moins `RECALL_FLOOR` = 15 de chaque famille (ou tous ceux du jeu
+complet, s'il en a moins), le reste au poids réel des familles dans le jeu complet (rejets de
+`gros_projet` compris). Le quota de la famille `f`, qui a `n_f` exemples au jeu complet, est
+`q_f = min(n_f, max(min(15, n_f), ⌊λ·n_f⌋))`, λ le plus grand tel que Σ q_f ≤ le compte demandé ;
+le reliquat se comble par les premiers exemples non pris. Le fichier écrit le plancher d'abord (les
+15 premiers de chaque famille, dans l'ordre du jeu complet), puis le surplus : la marge de 60 que
+`session_mix` coupe ne mord que le surplus. L'entraînement mélange les exemples, l'ordre est sans
+effet sur lui. 15 plutôt que 20 : à 20, les gros projets tombaient vers 5 % du rappel.
+
+```
+cargo run -p cassini-training --release -- --format chat --seed 1 --count 1560 --rappel-stratifie 15 --out rappel.jsonl
+```
+
+Une autre graine que 1, `--familles`, un `--count` au-delà de 8 600 ou un plancher nul : rien n'est
+écrit (code 2) ; un rappel qui reprendrait une phrase de barre non plus (code 3, `barres::copies`).
+À côté du rappel, `rappel.jsonl.familles.json` donne la famille de chaque ligne et le plancher de
+chaque famille, `min(15, n_f)`. La chaîne (`pipeline.py`) :
+
+- lit `RECALL_FLOOR` et `RECALL_VERSION` dans `training/src/lib.rs` et passe toujours
+  `--rappel-stratifie 15` au rappel d'une séance (un seul chemin, pas d'option) ;
+- refuse avant le GPU un rappel plus court que 15 × le nombre de familles ;
+- après l'écart des exemples trop longs et la coupe de la marge, revérifie que le rappel a son
+  compte et que chaque famille garde son plancher (sinon arrêt, la famille nommée) ;
+- écrit `rappel_plancher` et `rappel_version` dans le maillon de la lignée, et refuse en reprise une
+  séance commencée avec l'ancien rappel (maillon sans `rappel_plancher`) ou une autre version de
+  l'algorithme. Le plancher de la part du rappel ne change pas
+(au moins 0,4) ; la séance 2 la porte à 0,5 (`--part-rappel 0.5`) : 3 000 exemples, 1 500 de rappel
+(1 560 tirés) et 1 500 ciblés, sous `FOCUS_COUNT`.
+
+**Comptes** (jeu graine 1, 8 600 exemples ; rappel de 1 500, avant : début du jeu graine 1 ; après :
+stratifié, 1 560 tirés) :
+
+| | Avant (`4fc3fe3`) | Après |
+|---|---|---|
+| gros projets (famille `gros_projet`) | 2 219 (25,8 %) | 2 124 (24,7 %) |
+| exemples de redemande (avec `retry`, gros projets compris) | 450 (5,23 %) | 428 (4,98 %) |
+| dont famille `redemande` seule (hors gros projets) | 330 | 337 |
+| refus | 518 | 464 |
+| exemples de `refus_fonction_absente` | 103 | 56 |
+| plans `terrain.line_of_sight` | 105 | 145 |
+| plans `terrain.viewshed` | 274 | 206 |
+| plans `terrain.viewshed_cumulative` | 147 | 79 |
+| plans `geo.bearing_intersection` (dont avec `data.transform_point`) | 65 (17) | 58 (10) |
+| dégradés au seul nombre de classes | 5 | 26 |
+| rappel : plus petite famille | 4 (`recoupement`, `reclassement_raster`) | 15 (toutes) |
+| rappel : `ligne_de_vue`, `recoupement` | 13, 4 | 15, 15 |
+| rappel : gros projets, sur les 1 500 entraînés | 407 (27,1 %) | 318 (21,2 %) |
+
+Les deux nombres de redemandes ne comptent pas la même chose : 330 (plan de la séance) est la
+famille `redemande` seule ; 450 (lot 2, plus haut) compte tous les exemples qui portent une
+redemande, y compris celles qu'un gros projet emballe. Les gros projets baissent un peu (2 219 →
+2 124) : le tirage déplacé par les poids neufs fait écarter un peu plus d'exemples emballés (124
+contre 116) et en tire moins ; ils restent dans la fourchette de 23 à 27 %.
+
+**Liste de la séance.** `SECOND_SESSION_FAMILIES` (`training/src/lib.rs`) : les six de la séance 1
+(la séance repart de B, ses gains se réapprennent), plus `ligne_de_vue` et `recoupement`. Dans la
+liste (poids 30), elles pèsent 13 % et 10 %. Le test
+`the_second_session_families_give_the_whole_focused_set_without_a_bar_sentence` vérifie qu'elle rend
+1 800 exemples à la graine 3, chacune présente, sans aucune phrase de barre ; le test
+`the_session_command_of_the_doc_names_the_second_session_families` tient égale la commande
+ci-dessous.
+
+**Script de nuit.** `nuit-5-54.sh` (hors dépôt) prend `NOM` (sortie, `ajuste-continu-5-54-1` par
+défaut), `MES` (relevés, `5-54-mesures` par défaut) et `PART_RAPPEL` (0,4 par défaut), passé à
+`--part-rappel`. L'état s'écrit dans `nuit-<NOM>.etat` (`nuit-5-54.etat` pour la séance 1) : une
+séance ne vide jamais l'état d'une autre.
+
+**Commande de la séance** (après fusion en avance rapide sur `main`, sans push, `REV` le commit du
+worktree, propre ; GPU libre, `ps` vérifié) :
+
+```
+git -C ".../CASSINI-nuit" checkout -q --detach REV && WT=~/cassini-worktrees/5-54-seance-2 \
+  NOM=ajuste-continu-5-54-2 MES=~/cassini-entrainement/5-54-2-mesures PART_RAPPEL=0.5 \
+  bash ~/cassini-entrainement/nuit-5-54.sh export_pdf_echelle_format,refus_fonction_absente,options_ecrites,champ_de_vision_cumule,point_lambert_vers_geo,ordre_nord_est,ligne_de_vue,recoupement
+```
+
+**Installation** : seulement si `nuit-ajuste-continu-5-54-2.etat` (l'état de la séance 2 ; celui de
+la séance 1, `nuit-5-54.etat`, reste lisible) dit « VERDICT non-oubli : installable » et que
+`[annecy] SCORE` vaut au moins 16/20 ; B reste installé à côté. Le juge est `non_oubli.py`, contre
+`reference-non-oubli/`.
 
 Écrite, pas lancée : la séance attend la revue et l'accord du propriétaire.
 

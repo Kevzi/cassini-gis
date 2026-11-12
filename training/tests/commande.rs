@@ -159,3 +159,60 @@ fn the_families_option_draws_only_the_named_families_and_refuses_an_unknown_one(
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn the_stratified_recall_is_written_as_the_library_draws_it_and_refused_out_of_its_bounds() {
+    // 5.54, séance 2 : le chemin `--rappel-stratifie` du binaire écrit, octet pour octet, le
+    // rappel de `stratified_recall`, et à côté la famille de chaque ligne et le plancher.
+    let dir = scratch("rappel");
+    let args = [
+        "--seed",
+        "1",
+        "--count",
+        "1560",
+        "--rappel-stratifie",
+        "15",
+        "--format",
+        "chat",
+    ];
+    let bytes = run(&dir, "rappel.jsonl", &args);
+    let recall = cassini_training::stratified_recall(1560, 15).unwrap();
+    assert_eq!(bytes, cassini_training::to_chat_jsonl(&recall).into_bytes());
+    assert_eq!(String::from_utf8_lossy(&bytes).lines().count(), 1560);
+    let side: Value =
+        serde_json::from_slice(&std::fs::read(dir.join("rappel.jsonl.familles.json")).unwrap())
+            .unwrap();
+    assert_eq!(side["plancher"], 15);
+    let families: Vec<&str> = recall.iter().map(|e| e.family).collect();
+    assert_eq!(side["familles"], serde_json::json!(families));
+    assert!(side["minimum"]
+        .as_object()
+        .unwrap()
+        .values()
+        .all(|n| (1..=15).contains(&n.as_u64().unwrap())));
+    // Hors de ses bornes : code 2, rien d'écrit.
+    for wrong in [
+        &["--seed", "2", "--count", "1560", "--rappel-stratifie", "15"][..],
+        &[
+            "--familles",
+            "tampon",
+            "--count",
+            "1560",
+            "--rappel-stratifie",
+            "15",
+        ],
+        &["--count", "8601", "--rappel-stratifie", "15"],
+        &["--count", "1560", "--rappel-stratifie", "0"],
+    ] {
+        let out = dir.join("refuse.jsonl");
+        let status = Command::new(BIN)
+            .args(wrong)
+            .arg("--out")
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert_eq!(status.status.code(), Some(2), "{wrong:?}");
+        assert!(!out.exists(), "{wrong:?}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

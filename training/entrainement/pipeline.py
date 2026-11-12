@@ -29,8 +29,8 @@ avant le GPU ; le rapport n'en garde que l'empreinte et les comptes, jamais le c
 Avec `--depuis <dossier> --familles a,b` (ticket 5.54, ajustement continu), l'entraînement repart
 de l'adaptateur LoRA d'un entraînement précédent (un dossier de sortie de cette commande, jamais
 modifié) au lieu de partir de zéro : jeu de séance = familles nommées (graine 3) + rappel tiré de
-toutes les familles (préfixe du jeu graine 1, au moins 40 %, `--part-rappel`), 3 000 exemples par
-défaut, taux d'apprentissage 5e-5, une graine. Le rapport porte la lignée (`lignee`, au plus trois
+toutes les familles (exemples du jeu graine 1 complet, stratifiés : au moins `RECALL_FLOOR` par
+famille, le reste au poids ; au moins 40 %, `--part-rappel`), 3 000 exemples par défaut, taux d'apprentissage 5e-5, une graine. Le rapport porte la lignée (`lignee`, au plus trois
 maillons) ; un parent d'une autre base, d'une autre révision ou d'autres modules est refusé, avant
 le GPU.
 
@@ -536,18 +536,20 @@ def check_continuation(args: argparse.Namespace) -> Continuation | None:
     return Continuation(parent=parent, families=names, recall_share=share, count=count)
 
 
-GENERATOR_CONSTANT = re.compile(r"pub const (FOCUS_SEED|FOCUS_COUNT|DEFAULT_COUNT): \w+ = ([0-9_]+);")
+GENERATOR_CONSTANT = re.compile(
+    r"pub const (FOCUS_SEED|FOCUS_COUNT|DEFAULT_COUNT|RECALL_FLOOR|RECALL_VERSION): \w+ = ([0-9_]+);")
 
 
 def generator_constants() -> dict[str, int]:
     """`FOCUS_SEED`, `FOCUS_COUNT` et `DEFAULT_COUNT`, lus dans `training/src/lib.rs` : les
-    bornes de ce que `training/tests/recouvrement.rs` garde."""
+    bornes de ce que `training/tests/recouvrement.rs` garde ; et `RECALL_FLOOR`, le plancher par
+    famille du rappel stratifié et `RECALL_VERSION`, la version de son algorithme (5.54, séance 2)."""
     try:
         found = {name: int(value.replace("_", ""))
                  for name, value in GENERATOR_CONSTANT.findall(GENERATOR_SOURCE.read_text(encoding="utf-8"))}
     except OSError as error:
         raise PipelineStop(f"générateur illisible : {GENERATOR_SOURCE} ({error})") from error
-    if set(found) != {"FOCUS_SEED", "FOCUS_COUNT", "DEFAULT_COUNT"}:
+    if set(found) != {"FOCUS_SEED", "FOCUS_COUNT", "DEFAULT_COUNT", "RECALL_FLOOR", "RECALL_VERSION"}:
         raise PipelineStop(f"générateur illisible : constantes absentes de {GENERATOR_SOURCE} ({sorted(found)})")
     return found
 
@@ -565,6 +567,11 @@ def session_counts(count: int, share: float) -> tuple[int, int]:
     if focus > bounds["FOCUS_COUNT"]:
         raise PipelineStop(f"--exemples {count} : {focus} exemples ciblés, au plus {bounds['FOCUS_COUNT']} "
                            "(FOCUS_COUNT, la borne gardée par recouvrement.rs)")
+    # Le plancher du rappel stratifié (au plus `RECALL_FLOOR` par famille) doit tenir dans le rappel.
+    floor_total = bounds["RECALL_FLOOR"] * len(known_families())
+    if floor_total > recall:
+        raise PipelineStop(f"--exemples {count} : {recall} exemples de rappel, moins que le plancher du rappel "
+                           f"stratifié ({bounds['RECALL_FLOOR']} par famille, {floor_total} en tout)")
     if recall + RECALL_MARGIN > bounds["DEFAULT_COUNT"]:
         raise PipelineStop(f"--exemples {count} : {recall} exemples de rappel et {RECALL_MARGIN} de marge, au plus "
                            f"{bounds['DEFAULT_COUNT']} (DEFAULT_COUNT, le jeu graine 1 gardé par recouvrement.rs)")
@@ -603,6 +610,37 @@ def session_mix(recall: list[data.Example], focus: list[data.Example], recall_co
                       "part_rappel_comptee": round(share, 4)}
 
 
+def recall_families(path: Path) -> dict[str, Any]:
+    """`<rappel>.familles.json`, écrit par le générateur à côté du rappel stratifié : la famille de
+    chaque ligne et le plancher de chaque famille. Absent ou mal formé : la chaîne s'arrête."""
+    side = Path(f"{path}.familles.json")
+    try:
+        value = json.loads(side.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise PipelineStop(f"familles du rappel illisibles : {side} ({error})") from error
+    if not (isinstance(value, dict) and isinstance(value.get("familles"), list)
+            and isinstance(value.get("minimum"), dict)
+            and value.get("plancher") == generator_constants()["RECALL_FLOOR"]):
+        raise PipelineStop(f"familles du rappel illisibles : {side} (familles, minimum ou plancher)")
+    return value
+
+
+def check_recall_floor(families: list[str], wanted: int, minimum: dict[str, int]) -> None:
+    """Après l'écart des exemples trop longs et la coupe de la marge, le rappel entraîné (les
+    `wanted` premiers) a son compte et garde au moins le plancher de chaque famille ; sinon la
+    chaîne s'arrête, en nommant la famille."""
+    if len(families) < wanted:
+        raise PipelineStop(f"rappel de {len(families)} exemples après l'écart des trop longs, {wanted} demandés : "
+                           "la marge ne suffit pas")
+    counts: dict[str, int] = {}
+    for family in families[:wanted]:
+        counts[family] = counts.get(family, 0) + 1
+    for family, floor in sorted(minimum.items()):
+        if counts.get(family, 0) < floor:
+            raise PipelineStop(f"rappel stratifié entamé : famille {family}, {counts.get(family, 0)} exemples "
+                               f"sur un plancher de {floor} (exemples trop longs écartés)")
+
+
 def check_counts(plan: dict[str, tuple[Path, int, int, list[str]]], read: dict[str, list[data.Example]]) -> None:
     """Chaque jeu engendré a le compte demandé : un jeu plus court (familles épuisées, fichier
     coupé) arrête la chaîne avant l'entraînement, en nommant le fichier."""
@@ -622,7 +660,8 @@ def lineage(continuation: Continuation | None, commit: str, torch_seed: int) -> 
     links = [dict(item) for item in continuation.parent.lineage]
     link |= {"maillon": len(links) + 1, "depart": continuation.parent.adapter_sha256,
              "familles": continuation.families, "part_rappel": continuation.recall_share,
-             "exemples": continuation.count}
+             "rappel_plancher": generator_constants()["RECALL_FLOOR"],
+             "rappel_version": generator_constants()["RECALL_VERSION"], "exemples": continuation.count}
     return links + [link]
 
 
@@ -631,22 +670,27 @@ def effective_hyperparameters(continuation: Continuation | None) -> dict[str, An
 
 
 def check_resume_parent(report: dict[str, Any], continuation: Continuation | None) -> None:
-    """À la reprise, refuse un autre parent ou d'autres familles (ou une autre part de rappel)
-    que ceux de l'entraînement commencé : l'adaptateur et les jeux déjà écrits ne leur
-    correspondraient pas. Un rapport d'avant 5.54 est un départ de zéro."""
+    """À la reprise, refuse un autre parent ou d'autres familles (ou une autre part de rappel, un
+    autre plancher du rappel stratifié) que ceux de l'entraînement commencé : l'adaptateur et les
+    jeux déjà écrits ne leur correspondraient pas (`rappel_version` : la version de l'algorithme du
+    rappel stratifié). Un rapport d'avant 5.54 est un départ de zéro ;
+    un maillon sans `rappel_plancher` a pris l'ancien rappel, le début du jeu graine 1."""
     if not any(key in report for key in ("depart", "lignee", "donnees")):
         return
     lignee = report.get("lignee")
     last = lignee[-1] if isinstance(lignee, list) and lignee and isinstance(lignee[-1], dict) else {}
     families = last.get("familles")
     before = (report.get("depart", "base"), sorted(families) if isinstance(families, list) else families,
-              last.get("part_rappel"), last.get("exemples"))
+              last.get("part_rappel"), last.get("rappel_plancher"), last.get("rappel_version"), last.get("exemples"))
+    constants = generator_constants() if continuation else {}
     now = ((continuation.parent.adapter_sha256, sorted(continuation.families), continuation.recall_share,
-            continuation.count) if continuation else ("base", None, None, None))
+            constants["RECALL_FLOOR"], constants["RECALL_VERSION"], continuation.count) if continuation
+           else ("base", None, None, None, None, None))
     if before != now:
         raise PipelineStop(
-            "--reprendre avec un autre parent, d'autres familles, une autre part de rappel ou un autre "
-            "nombre d'exemples que l'entraînement commencé : relancez avec les mêmes options, ou dans un dossier vide")
+            "--reprendre avec un autre parent, d'autres familles, une autre part de rappel, un autre rappel "
+            "(plancher par famille) ou un autre nombre d'exemples que l'entraînement commencé : relancez avec "
+            "les mêmes options, ou dans un dossier vide")
 
 
 def check_loaded_keys(missing: list[str], unexpected: list[str], loaded: int) -> None:
@@ -861,14 +905,17 @@ def generation_plan(folder: Path, count: int, validation_count: int,
                     continuation: Continuation | None = None) -> dict[str, tuple[Path, int, int, list[str]]]:
     """Les jeux à engendrer, dans l'ordre (la validation en dernier : sa présence dit, à la
     reprise, que les autres sont écrits). De zéro : graine 1 pour l'entraînement. Séance
-    continue : le rappel, préfixe du jeu graine 1 (le générateur est déterministe, ses premiers
-    exemples ne dépendent pas du compte), puis le jeu ciblé, graine 3, sur les familles nommées."""
+    continue : le rappel, stratifié dans le jeu graine 1 complet (`--rappel-stratifie
+    RECALL_FLOOR` : au moins `RECALL_FLOOR` exemples par famille d'abord, puis le reste au poids ;
+    la marge coupée par `session_mix` ne mord que ce reste), puis le jeu ciblé, graine 3, sur les
+    familles nommées."""
     if continuation is None:
         sets = {"entrainement": (folder / "entrainement.jsonl", TRAINING_SEED, count, [])}
     else:
         recall, focus = session_counts(count, continuation.recall_share)
         sets = {
-            "rappel": (folder / "rappel.jsonl", TRAINING_SEED, recall + RECALL_MARGIN, []),
+            "rappel": (folder / "rappel.jsonl", TRAINING_SEED, recall + RECALL_MARGIN,
+                       ["--rappel-stratifie", str(generator_constants()["RECALL_FLOOR"])]),
             "cible": (folder / "cible.jsonl", FOCUS_SEED, focus, ["--familles", ",".join(continuation.families)]),
         }
     return sets | {"validation": (folder / "validation.jsonl", VALIDATION_SEED, validation_count, [])}
@@ -1580,10 +1627,16 @@ def launch(args: argparse.Namespace) -> dict[str, Any]:
     session = None
     if continuation:
         # La part du rappel se compte sur le jeu final, une fois les exemples trop longs écartés.
+        side = recall_families(sets["rappel"])
+        if len(side["familles"]) != len(recall_all):
+            raise PipelineStop(f"familles du rappel : {len(side['familles'])} pour {len(recall_all)} exemples "
+                               f"({sets['rappel']})")
         recall_kept, recall_too_long = data.drop_too_long(recall_all, length, MAX_LENGTH)
+        kept_families = [f for e, f in zip(recall_all, side["familles"]) if length(e) <= MAX_LENGTH]
         focus_kept, focus_too_long = data.drop_too_long(focus_all, length, MAX_LENGTH)
-        training, session = session_mix(recall_kept, focus_kept,
-                                        session_counts(count, continuation.recall_share)[0])
+        recall_count = session_counts(count, continuation.recall_share)[0]
+        check_recall_floor(kept_families, recall_count, side["minimum"])
+        training, session = session_mix(recall_kept, focus_kept, recall_count)
         too_long = recall_too_long + focus_too_long
     else:
         training, too_long = data.drop_too_long(mixed["civil_training"], length, MAX_LENGTH)
@@ -1616,7 +1669,8 @@ def launch(args: argparse.Namespace) -> dict[str, Any]:
         report["donnees"]["seance"] = session | {
             "familles": continuation.families,
             "part_rappel_demandee": continuation.recall_share,
-            "rappel": f"premiers exemples du jeu graine {TRAINING_SEED}, toutes familles",
+            "rappel": f"jeu graine {TRAINING_SEED} stratifié, au moins "
+                      f"{generator_constants()['RECALL_FLOOR']} exemples par famille, le reste au poids",
             "cible": f"graine {FOCUS_SEED}, familles nommées seules",
         }
     if external is not None:
