@@ -56,13 +56,28 @@ hitl = false
 risk = "medium"
 
 [[entry]]
+id = 9
+type = "story"
+title = "PDF de resultat lisible : cadre sur le resultat, resultat mis en evidence, legende en clair"
+description = "La repetition de la demo d'Annecy (2026-11-12) produit un PDF complet mais ou la reponse ne se voit pas : l'emprise est celle de tout le projet (le departement), les contours des parcelles couvrent tout, le resultat se confond avec les routes, et la legende montre les noms techniques des etapes (« 4-analysis.intersect ») et toutes les couches intermediaires. L'export d'un plan cadre sur l'emprise du resultat final (avec une marge), met le resultat en evidence (style plein et contraste, au-dessus des autres couches), n'affiche pas les couches intermediaires du plan, et nomme les couches de resultat en clair dans la legende. Le choix (couche de resultat, emprise, noms) est fait par le noyau et dicte a l'extension ; le geste n'applique que ce qu'on lui dit. Les couches de l'utilisateur ne sont ni modifiees ni retirees du projet."
+verify = "Sur la phrase de demo d'Annecy, le PDF rendu en PNG et regarde montre les parcelles retenues lisibles autour des gares d'Annecy, une legende sans nom d'etape technique ni couche intermediaire, titre, echelle, nord et sources toujours presents ; un export demande sans plan (projet seul) garde le comportement actuel ; rejeu identique ; recette d'Annecy 20/20 et gros projet tenus ; texte lu par le modele inchange."
+covers = ["D1", "D3"]
+after = ["9.16"]
+hitl = false
+risk = "medium"
+notes = [
+  "Decision: 2026-11-12 — accord du proprietaire (option recommandee) : ticket avant la video malgre le perimetre gele, parce que la video doit montrer la reponse sur la carte.",
+  "Open question: noms lisibles des couches de resultat (derives de la demande, du titre ou de la commande) et place exacte du choix (catalogue fige : identifiants et parametres inchanges, sinon changement de cap) : a trancher par le plan en citant les AD.",
+]
+
+[[entry]]
 id = 6
 type = "story"
 title = "Repetition de la demo sur les donnees reelles d'Annecy"
 description = "Fait la copie du MNT de test en EPSG:2154 dans QGIS, lance la sonde sur le projet reel hors depot, passe en argument comme le prevoit l'entree 1, avec la phrase de demo, la pente et les phrases de repetition A a E, consigne verdicts et durees par phrase, puis le proprietaire refait la demo a la main dans le panneau, machine debranchee du reseau (cable et Wi-Fi coupes)."
 verify = "La sonde rend OK sur le projet reel pour la phrase de demo et la pente, les phrases A a E donnent le comportement attendu (plan ou question), les durees sont consignees, et le proprietaire confirme la demo faite dans le panneau, machine debranchee."
 covers = ["D1", "D2", "D3", "D4"]
-after = [5, "5.50", "9.16"]
+after = [5, "5.50", "9.16", 9]
 hitl = true
 risk = "medium"
 notes = ["Decision: 2026-11-12 — changement de cap approuvé : change-distance-en-metres-sur-couche-en-degres. La repetition et la demo filmee attendent 9.16 (tampon sur la couche des gares en EPSG:4326 d'Annecy)."]
@@ -74,7 +89,7 @@ title = "Refactor sweep"
 description = "Menage de fin d'epic sur la sonde de demo et ses fixtures, a partir des plans et des constats de relecture reportes pendant l'epic."
 verify = "Les constats reportes de l'epic sont traites ou consignes, et la sonde rend toujours OK sur les fixtures."
 covers = []
-after = [1, 2, 3, 4, 5, 6]
+after = [1, 2, 3, 4, 5, 6, 9]
 hitl = false
 risk = "low"
 
