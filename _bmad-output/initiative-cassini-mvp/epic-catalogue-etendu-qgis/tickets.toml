@@ -191,10 +191,10 @@ notes = ["Decision: 2026-11-12 — complément du changement de cap approuvé, a
 id = 8
 type = "story"
 title = "Jeu de phrases reelles et mesure de couverture de depart"
-description = "Le proprietaire fournit le jeu de phrases reelles d'utilisateurs ; un harnais, repris de l'epreuve du modele local, mesure la part couverte (plan valide ou question justifiee) et consigne la mesure de depart, ainsi que le taux de plans conformes de l'epreuve sur le catalogue d'avant l'epic ; la couverture sert a reordonner les primitives suivantes."
+description = "Reprend le jeu de phrases reelles d'utilisateurs ecrit par 7.11 ; le harnais de 7.11, repris de l'epreuve du modele local, mesure la part couverte (plan valide ou question justifiee) et consigne la mesure de depart, ainsi que le taux de plans conformes de l'epreuve sur le catalogue d'avant l'epic ; la couverture sert a reordonner les primitives suivantes."
 verify = "Le harnais tourne hors ligne sur le jeu fourni et ecrit un rapport consigne de la couverture de depart, phrase par phrase, avec la commande manquante pour chaque phrase non couverte, et le taux de plans conformes de depart."
 covers = ["CAP-14"]
-after = [6, 7]
+after = [6, 7, "7.11"]
 hitl = true
 risk = "medium"
 

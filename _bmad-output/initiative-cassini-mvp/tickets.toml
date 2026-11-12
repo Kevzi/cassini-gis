@@ -93,8 +93,11 @@ after = [
 id = 7
 slug = "epic-publication"
 title = "Publication : depot d'extensions QGIS, installeurs, video"
-covers = []
-after = [{ epic = 6, needs = "le scenario de demo complet, a filmer et a documenter" }]
+covers = ["CAP-1", "CAP-4", "CAP-13", "CAP-14"]
+after = [
+  { epic = 6, needs = "la demo repetee et filmee (6.6, fait) et la preuve aucun envoi de la sonde (6.5), pour la page d'accueil et sa FAQ (7.12)" },
+  { epic = 5, needs = "l'empreinte du modele verifiee au lancement (5.51), dont la porte 1 complete (7.4) ecrit la declaration" },
+]
 
 [[epic]]
 id = 10

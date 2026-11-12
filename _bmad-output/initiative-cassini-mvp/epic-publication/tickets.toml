@@ -1,0 +1,159 @@
+# tickets.toml — epic-publication (epic 7). Inception approuvée le 2026-11-12 (party, par délégation du propriétaire).
+# L'ordre des tables est l'ordre de construction. Voies et collisions : Notes de epic-publication.md.
+
+[[entry]]
+id = 1
+type = "story"
+title = "Balle traçante : étiquette, release et installeur en ligne minimal sous Windows"
+description = "Une personne audite tout l'historique du dépôt puis le passe en public (étape hitl) ; une étiquette de version fait construire par la recette le noyau Windows processeur et publier une release avec le manifeste des versions (version et SHA-256) ; un installeur en ligne minimal, Inno Setup après vérification dans sa documentation officielle qu'il télécharge et vérifie une empreinte (sinon le repli décidé), télécharge le noyau, vérifie son SHA-256, le pose dans %LOCALAPPDATA%\\Cassini\\bin et y écrit la version et la date d'installation ; la licence d'Inno Setup est donnée et approuvée avant son adoption, et le commentaire d'en-tête du workflow de recette est remis d'accord avec cargo-deny-action."
+verify = "Sur un poste Windows, l'étiquette produit la release et son manifeste, la garde hors ligne passe sur le binaire livré, l'installeur pose le noyau, l'extension copiée à la main le trouve et exécute une commande, et une empreinte altérée dans le manifeste fait refuser l'installation."
+covers = ["R2", "R3"]
+after = []
+hitl = true
+risk = "high"
+
+[[entry]]
+id = 2
+type = "story"
+title = "Porte 2 sous Windows : un seul fichier installable réseau coupé"
+description = "La recette construit l'archive de l'extension (sans binaire, moins de 25 Mo) et un installeur complet hors ligne, un seul fichier qui contient le noyau, le modèle et cette archive, au-delà de 2 Gio ; l'entrée vérifie d'abord la limite de taille du format retenu, avec repli sur un zip et un install.cmd ; 7.10 complète ensuite cette archive (metadata.txt, icône, LICENSE)."
+verify = "Le propriétaire installe le fichier dans une VM Windows propre, réseau coupé : le noyau et le modèle sont en place, l'archive de l'extension s'installe à la main dans QGIS et la démo y tourne."
+covers = ["R4"]
+after = [1]
+hitl = true
+risk = "high"
+
+[[entry]]
+id = 3
+type = "story"
+title = "Le modèle publié sur Hugging Face, avec sa licence et sa fiche"
+description = "Crée le dépôt public Kevzi/cassini-composition-4b-GGUF (compte et jeton : étape hitl du propriétaire) et y publie le modèle installé, sous un nom de fichier versionné, avec la licence Apache-2.0, la NOTICE de Qwen, la mention des modifications et une fiche qui décrit un usage civil."
+verify = "Le fichier se télécharge depuis son adresse fixe, son SHA-256 égale celui du modèle installé, et la fiche montre la licence, la NOTICE et la mention des modifications."
+covers = ["R5"]
+after = []
+hitl = true
+risk = "low"
+
+[[entry]]
+id = 6
+type = "story"
+title = "Noyau gpu Vulkan construit par la recette Windows"
+description = "Le job Windows du workflow de release construit le noyau avec l'accélération gpu Vulkan, sur un SDK Vulkan à version et empreinte fixées, jamais sur le poste du propriétaire, et la release le livre sous le manifeste de 7.1 comme noyau Windows des deux portes, porte 2 comprise ; la licence du SDK Vulkan est donnée avant son adoption."
+verify = "Le noyau de la release répond sur le GPU du poste du propriétaire et sur processeur dans une VM sans carte graphique, et la garde hors ligne passe sur ce binaire."
+covers = ["R2"]
+after = [1, 2]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 4
+type = "story"
+title = "Porte 1 complète : modèle facultatif, déclaration et empreintes"
+description = "L'installeur en ligne propose le modèle en option, le télécharge depuis Hugging Face, vérifie son SHA-256 et écrit la déclaration *.modele.json avec les empreintes que 5.51 vérifie ; la release dépose aussi sur Hugging Face le fichier de la porte 2 reconstruit avec le modèle publié par 7.3 et sa déclaration à empreintes, et le manifeste gagne les empreintes du modèle et de ce fichier."
+verify = "Sur une VM Windows propre, l'installeur pose le noyau gpu et le modèle, le noyau charge le modèle sans models.tampered et la démo tourne ; sans le modèle, l'installation réussit ; un octet changé dans le modèle téléchargé fait refuser l'installation."
+covers = ["R3", "R4"]
+after = [2, 3, 6, "5.51"]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 5
+type = "story"
+title = "« Mettre à jour Cassini », le même programme que l'installeur en ligne"
+description = "L'installeur en ligne gagne un lancement « Mettre à jour Cassini » (menu Démarrer) qui lit le manifeste, compare à l'installé, propose, télécharge, vérifie l'empreinte, installe, met à jour la version et la date écrites par 7.1, et pose un nouveau modèle à côté des anciens sans jamais en supprimer."
+verify = "Sur une VM où une version plus ancienne est installée, la mise à jour installe la nouvelle, garde l'ancien modèle sélectionnable dans le panneau, et ne fait rien quand l'installé est à jour."
+covers = ["R3"]
+after = [4]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 7
+type = "story"
+title = "Linux : noyau processeur et deux portes en tar et script POSIX"
+description = "La recette construit le noyau Linux processeur (glibc ancienne, sans -march=native) et livre les deux portes en archive tar et script POSIX qui installent dans ~/.local/share/cassini sans droits root, avec la commande de mise à jour de 7.5, et écrivent la version et la date d'installation au format fixé par 7.1."
+verify = "Sur une Ubuntu 22.04 propre (étape hitl), la porte 1 et la porte 2 réseau coupé installent le noyau et le modèle, l'extension les trouve, la démo tourne et la mise à jour garde l'ancien modèle."
+covers = ["R2", "R3", "R4"]
+after = [5, 6]
+hitl = true
+risk = "medium"
+
+[[entry]]
+id = 8
+type = "story"
+title = "Panneau : moteur introuvable, page d'accueil, version et rappel de mise à jour"
+description = "Quand le noyau est introuvable, le panneau dit « Cassini a besoin de son moteur pour fonctionner » et un bouton ouvre la page d'accueil du contrat (AD-17) dans le navigateur, puis retrouve le noyau sans redémarrer QGIS ; il affiche la version installée et, passé le délai, rappelle de lancer « Mettre à jour Cassini », d'après la date écrite par 7.1, sans réseau."
+verify = "Dans QGIS, sans noyau, le message et le bouton apparaissent et le bouton ouvre la page ; après l'installation, le panneau trouve le noyau sans redémarrage ; une date d'installation vieillie à la main fait paraître le rappel ; la garde hors ligne de l'extension reste verte."
+covers = ["R6"]
+after = [1]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 9
+type = "story"
+title = "Licences de tout ce qui est livré et frontière GPL"
+description = "Un outil de génération (licence à faire approuver par le propriétaire avant ajout : étape hitl) liste les licences des crates du noyau, de llama.cpp, de Qwen et de l'outil d'installeur ; la liste et un texte sur la frontière GPL entre l'extension et le noyau entrent dans la release et dans les installeurs des deux systèmes."
+verify = "La release et chaque installeur, Windows et Linux, contiennent la liste des licences et le texte de la frontière GPL ; une crate retirée ou ajoutée change la liste à la release suivante."
+covers = ["R7"]
+after = [7]
+hitl = true
+risk = "low"
+
+[[entry]]
+id = 10
+type = "story"
+title = "L'extension publiée sur le dépôt d'extensions QGIS"
+description = "Complète metadata.txt (version 0.1.0, experimental=False, homepage, repository, tracker, email, description sans « traceur »), ajoute l'icône et le LICENSE à l'archive construite par 7.2, et soumet l'extension au dépôt (compte OSGeo et approbation : étape hitl)."
+verify = "L'extension s'installe depuis le gestionnaire d'extensions de QGIS 3.44 et 4.x, ouvre le panneau et trouve le noyau ; l'archive ne contient aucun binaire et pèse moins de 25 Mo."
+covers = ["R1"]
+after = [2, 8]
+hitl = true
+risk = "medium"
+unknown = "L'adresse e-mail publique de contact du projet, dédiée, que le propriétaire crée, à mettre dans metadata.txt."
+
+[[entry]]
+id = 11
+type = "story"
+title = "Jeu de phrases réelles d'utilisateurs et mesure de couverture"
+description = "Écrit le jeu de phrases réelles d'utilisateurs que CAP-14 mesure, avec la source de chaque phrase, et mesure hors ligne sa couverture par le registre actuel (plan valide ou question justifiée), phrase par phrase, avec le harnais repris de l'épreuve du modèle local ; 10.8 reprend ce jeu et ce harnais."
+verify = "Un rapport consigné donne, pour chaque phrase, sa source, le verdict et la commande manquante si elle n'est pas couverte, et la part couverte."
+covers = ["R9"]
+after = []
+hitl = false
+risk = "medium"
+unknown = "La source du jeu de phrases réelles d'utilisateurs (collecte, communauté QGIS, sources publiques) et la façon de juger la couverture (vrai modèle ou jugement à la main)."
+
+[[entry]]
+id = 12
+type = "story"
+title = "Page d'accueil sur GitHub Pages, avec la vidéo"
+description = "Publie depuis site/ la page https://kevzi.github.io/cassini-gis : deux phrases, la vidéo cassini-presentation.mp4 filmée en 6.6 (hors dépôt, voir le plan de 6.6), réencodée en 1080p sous 25 Mo et hébergée avec la page, l'installation en trois étapes, les liens et empreintes SHA-256 des deux portes, la FAQ, la page SmartScreen et le contact, et le README du dépôt renvoie à cette page pour l'installation ; la relecture est faite par le propriétaire (étape hitl)."
+verify = "La page s'ouvre à son adresse fixe, la vidéo y joue sans service tiers, chaque lien télécharge un fichier dont l'empreinte égale celle affichée, et le propriétaire approuve la relecture."
+covers = ["R8"]
+after = [4, 7, 10, "6.5", "6.6"]
+hitl = true
+risk = "low"
+unknown = "L'adresse e-mail publique de contact du projet, dédiée, que le propriétaire crée, à afficher sur la page."
+
+[[entry]]
+id = 13
+type = "story"
+title = "Refactor sweep"
+description = "Ménage de fin d'epic sur le workflow de release, les installeurs, le panneau et la page, à partir des plans et des constats de relecture reportés pendant l'epic."
+verify = "Les constats reportés de l'epic sont traités ou consignés, et la recette reste verte sur une nouvelle étiquette de version."
+covers = []
+after = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 14
+type = "story"
+title = "Une personne extérieure installe et refait la démo par les deux portes"
+description = "Une personne extérieure au projet installe Cassini par la porte 1 puis par la porte 2 réseau coupé, sur Windows et sur Linux, avec la seule documentation publiée, et refait la démo ; ses blocages sont consignés."
+verify = "Le compte rendu de la personne montre l'installation et la démo réussies par chaque porte sans aide du propriétaire, ou les blocages consignés en entrées nouvelles."
+covers = ["R10"]
+after = [13]
+hitl = true
+risk = "medium"

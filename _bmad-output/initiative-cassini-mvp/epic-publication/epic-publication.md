@@ -2,7 +2,7 @@
 type: epic
 title: "Publication : depot d'extensions QGIS, installeurs, video"
 parent: initiative-cassini-mvp
-covers: []
+covers: ["CAP-1", "CAP-4", "CAP-13", "CAP-14"]
 after: []
 assignee: ""
 risk: low
@@ -20,8 +20,48 @@ Quelqu'un qui découvre Cassini peut l'installer et refaire la démo seul ; le s
 
 ## Requirements
 
-À compléter à l'inception de cet epic. La source est la spec de l'initiative,
-`../spec-cassini-mvp/spec-cassini-mvp.md`, section Capabilities.
+Source : la spec de l'initiative, `../spec-cassini-mvp/spec-cassini-mvp.md`, sections
+Capabilities et Constraints, et le contrat d'architecture, AD-16 et AD-17. Écrites à
+l'inception du 2026-11-12.
+
+- R1 : l'extension est publiée sur le dépôt d'extensions QGIS ; son `metadata.txt` est
+  complet, `homepage` compris ; son archive ne contient aucun binaire et pèse moins de
+  25 Mo. (CAP-13 ; Constraints, distribution en deux artefacts ; AD-17)
+- R2 : sur une étiquette de version, la recette construit le noyau Windows (gpu, Vulkan) et
+  Linux (processeur), publie une release GitHub avec le manifeste des versions (version et
+  SHA-256 de chaque fichier), et la garde hors ligne tourne sur le binaire livré. (CAP-13,
+  CAP-1)
+- R3 : porte 1, l'installeur en ligne, télécharge une seule fois, à des adresses fixes,
+  vérifie le SHA-256 de chaque fichier avant de l'installer, laisse le modèle facultatif et
+  écrit la déclaration `*.modele.json` avec ses empreintes ; « Mettre à jour Cassini » est
+  le même programme et ne supprime jamais un ancien modèle. (CAP-13, CAP-4, CAP-1 ; AD-17)
+- R4 : porte 2, l'installeur complet hors ligne, est un seul fichier qui contient le noyau,
+  le modèle et l'archive de l'extension ; il est hébergé sur Hugging Face et s'installe
+  machine débranchée du réseau. (CAP-1, CAP-13 ; AD-17)
+- R5 : le modèle est publié sur un dépôt public Hugging Face avec la licence Apache-2.0, la
+  NOTICE de Qwen, la mention des modifications et une fiche qui décrit un usage civil.
+  (CAP-4)
+- R6 : quand l'extension ne trouve pas le noyau, le panneau dit « Cassini a besoin de son
+  moteur pour fonctionner » et un bouton ouvre la page d'accueil dans le navigateur ; au
+  retour, le panneau retrouve le noyau sans redémarrer QGIS ; le panneau affiche la version
+  installée et, passé un délai, rappelle de lancer « Mettre à jour Cassini », par un calcul
+  de date local, sans réseau. (CAP-13, CAP-1 ; AD-17)
+- R7 : la release et les installeurs listent les licences de tout ce qui est livré (crates
+  du noyau, llama.cpp, Qwen, outil de l'installeur) et expliquent la frontière GPL entre
+  l'extension et le noyau. (CAP-13 ; AD-16)
+- R8 : une page d'accueil sur GitHub Pages, tirée du dossier `site/`, donne deux phrases de
+  présentation, la vidéo de démo en 1080p hébergée avec la page (pas de YouTube),
+  l'installation en trois étapes, les liens de téléchargement et leurs empreintes SHA-256,
+  une FAQ (données gardées sur le poste, aucun envoi sur le réseau, carte graphique
+  conseillée), une page sur l'avertissement SmartScreen publiée avant le premier
+  téléchargement, et un contact. (CAP-13)
+- R9 : le jeu de phrases réelles d'utilisateurs que CAP-14 mesure, dû au plus tard à la
+  publication, est écrit, et sa couverture par le registre actuel (un plan valide ou une
+  question justifiée) est mesurée et consignée phrase par phrase ; le seuil de 70 % reste
+  à atteindre par l'epic 10, après le catalogue étendu. (CAP-14 ; question ouverte de la
+  spec, `.memlog.md`)
+- R10 : une personne extérieure au projet installe Cassini et refait la démo par chacune des
+  deux portes, avec la seule documentation publiée. (CAP-4, CAP-1)
 
 ## Done when
 
@@ -55,4 +95,32 @@ Frontière par activité : l'empaquetage et la mise en ligne. Le README d'archit
 - Open question: format des installeurs (Windows et Linux) et accélération Vulkan sous Linux, à trancher à l'inception de cet epic (2026-11-10).
 - Decision: une page d'accueil publique, une seule page sur GitHub Pages, sans serveur, est livrée avec la publication (Done when 7). Motif : l'extension seule ne fait rien sans le noyau, l'utilisateur qui l'installe depuis QGIS doit trouver où prendre l'installeur, et un bureau d'études veut voir avant d'installer. Un site plus complet (cas d'usage, tarifs, références) viendra avec la commercialisation, hors de cet epic (propriétaire, 2026-11-10).
 - Decision: quand l'extension ne trouve pas le noyau (ordre d'AD-17), le panneau dit « Cassini a besoin de son moteur pour fonctionner » et offre un bouton « Télécharger l'installeur Cassini » qui ouvre la page d'accueil (Done when 7) dans le navigateur de l'utilisateur ; au retour, le panneau retrouve le noyau sans redémarrer QGIS. L'extension ne télécharge rien elle-même : c'est le navigateur, à la demande de l'utilisateur (AD-17 inchangé). Écarté : un installeur intégré à l'extension, qui mettrait du code réseau dans l'extension de tous les postes, isolés compris, et se heurterait aux antivirus (propriétaire, 2026-11-10).
-- Waits on epic 6 because: il n'y a rien à filmer ni à documenter avant que le scénario de démo passe.
+- Waits on epic 6 because: il n'y a rien à filmer ni à documenter avant que le scénario de démo passe. Depuis l'inception du 2026-11-12, l'attente est portée par les entrées : la page et la vidéo (7.12) attendent la démo répétée et filmée (6.6, fait) et la preuve « aucun envoi » de la sonde (6.5). La méthode garde la déclaration au niveau de l'epic dans le `tickets.toml` de l'initiative ; ce sont les entrées qui l'épinglent.
+- Waits on epic 5 because: la porte 1 complète (7.4) écrit la déclaration `*.modele.json` avec les empreintes que le noyau vérifie ; 5.51 doit être construit avant.
+- Decision: 2026-11-12 — Q1 : l'installeur Windows est fait avec Inno Setup, sous réserve que l'entrée 1 vérifie dans sa documentation officielle (Context7 ou site de l'éditeur) qu'il sait télécharger un fichier et en vérifier l'empreinte SHA-256 ; sinon, repli sur un petit installeur maison dans sa propre crate, hors du noyau et exclue de la garde hors ligne comme `cassini-app` (party du 2026-11-12, par délégation du propriétaire).
+- Decision: 2026-11-12 — Q2 : sous Linux, les deux portes sont une archive tar et un script POSIX qui installent dans `~/.local/share/cassini`, sans droits root (party, par délégation du propriétaire).
+- Decision: 2026-11-12 — Q3 : le noyau Linux est construit pour le processeur seul au départ ; l'accélération Vulkan sous Linux est une entrée ultérieure, hors de cet epic, à mettre sur la liste « après publication » (party, par délégation du propriétaire). Tranche l'Open question du 2026-11-10 sur Vulkan sous Linux.
+- Decision: 2026-11-12 — Q4 : le noyau gpu est construit par GitHub Actions, avec un SDK Vulkan à version et empreinte fixées, jamais sur le poste du propriétaire (party, par délégation du propriétaire).
+- Decision: 2026-11-12 — Q5 : le modèle est publié sur Hugging Face dans `Kevzi/cassini-composition-4b-GGUF`, avec des noms de fichiers versionnés (party, par délégation du propriétaire).
+- Decision: 2026-11-12 — Q6 : les installeurs ne sont pas signés au début ; leurs empreintes SHA-256 sont publiées sur la page d'accueil, et la page sur l'avertissement SmartScreen est en ligne avant le premier téléchargement (party, par délégation du propriétaire). Tranche, avec Q1 et Q2, l'Open question du 2026-11-10 sur le format des installeurs.
+- Decision: 2026-11-12 — Q7 : le dépôt GitHub passe en public à l'entrée 1, après un audit de tout l'historique fait par une personne (étape hitl de l'entrée 1) (party, par délégation du propriétaire).
+- Decision: 2026-11-12 — Q8 : la page d'accueil est `https://kevzi.github.io/cassini-gis`, publiée depuis `site/` ; les adresses fixes sont écrites au contrat d'architecture, sous AD-17 (précision du 2026-11-12) (party, par délégation du propriétaire).
+- Decision: 2026-11-12 — Q9 : le noyau et l'extension partagent la version 0.1.0, étiquette `v0.1.0`, et l'extension passe à `experimental=False` (party, par délégation du propriétaire).
+- Decision: 2026-11-12 — Q10 : l'epic 6 avance en parallèle de l'epic 7, sur des fichiers disjoints ; 6.1 à 6.3 sont fusionnés, 6.5 et 6.4 sont gardés (voir les Notes de `epic-export-et-demo.md`). Dérogation à `CLAUDE.md` §7 approuvée par délégation du propriétaire.
+- Decision: 2026-11-12 — vidéo : `cassini-presentation.mp4` est réencodée en 1080p, sous 25 Mo, et hébergée avec la page d'accueil (party, par délégation du propriétaire).
+- Decision: 2026-11-12 — l'epic garde la « Refactor sweep » (7.13) et une suite de bout en bout faite par une personne extérieure (7.14) ; quatorze entrées, au-delà de la fourchette habituelle, parce qu'elles forment peu de voies et un seul propriétaire (party, par délégation du propriétaire).
+- Tracer bullet : 7.1 — sur un poste Windows, une étiquette de version fait construire le noyau processeur par la recette et publier une release avec son manifeste ; l'installeur en ligne minimal télécharge le noyau, vérifie son SHA-256 et le pose dans `%LOCALAPPDATA%\Cassini\bin` ; l'extension copiée à la main le trouve ; une empreinte altérée fait refuser l'installation.
+- Sequencing: voies. Workflow de release et installeurs, en file : 7.1 → 7.2 → 7.6 → 7.4 → 7.5 → 7.7 → 7.9 (même fichier de workflow et mêmes scripts d'installeur). En parallèle : 7.3 (dépôt Hugging Face), 7.8 puis 7.10 (extension), 7.11 (phrases réelles), puis 7.12 (page d'accueil), 7.13 et 7.14 en fin.
+- Sequencing: 7.6 attend 7.2 et 7.4 attend 7.6 parce qu'ils modifient le même workflow de release (job Windows, manifeste) ; c'est une collision, pas un ordre. 7.4 installe donc le noyau gpu par défaut.
+- Sequencing: 7.4 publie aussi sur Hugging Face le fichier de la porte 2 construit par 7.2, et ajoute au manifeste les empreintes du modèle et de ce fichier.
+- Handoff: l'installeur de 7.1 écrit, à côté du noyau, la version et la date d'installation, dans un format qu'il fixe ; 7.5 les met à jour ; le panneau (7.8) les lit pour afficher la version et calculer le rappel.
+- Handoff: l'archive de l'extension est construite par la recette dès 7.2 (elle entre dans la porte 2) ; 7.10 complète `metadata.txt` et l'icône, et vérifie l'archive contre les exigences du dépôt d'extensions.
+- Handoff: le jeu de phrases réelles écrit par 7.11 est celui que reprend 10.8 pour sa mesure de départ ; 10.8 l'attend dans son `after`.
+- Check outside: 7.1 (risque high) — l'audit de l'historique est fait par une personne avant le passage en public, et la recette GitHub (garde hors ligne) reste verte sur la release.
+- Check outside: 7.2 (risque high) — le propriétaire installe le fichier de la porte 2 dans une VM Windows propre, réseau coupé.
+- Open question: l'adresse e-mail publique de contact du projet, dédiée, que le propriétaire crée ; elle gate l'entrée du dépôt d'extensions (7.10) et figure sur la page d'accueil (7.12) (2026-11-12).
+- Open question: la source du jeu de phrases réelles d'utilisateurs (collecte, communauté QGIS, sources publiques), reprise de l'Open question de l'epic 10 ; portée par 7.11 (2026-11-12).
+- Source conflict: spec Constraints, « Le noyau se compile sur Windows, macOS et Linux » vs `.github/workflows/recette.yml`, qui n'a aucun job macOS (2026-11-12).
+- Source conflict: commentaire d'en-tête de `.github/workflows/recette.yml`, « Rien d'autre que les actions officielles de GitHub » vs le job `noyau`, qui utilise `EmbarkStudios/cargo-deny-action` (2026-11-12). Confié à 7.1, qui touche le même workflow.
+- Source conflict: R1 et AD-17 (dépôt d'extensions) vs `qgis-plugin/cassini_qgis/metadata.txt`, où `email`, `repository` et `tracker` sont vides, `homepage` et `icon` absents, la description dit « (traceur) » et la version est 0.0.1 contre 0.1.0 pour le noyau (2026-11-12). Réglé par 7.10 (Q9).
+- Source conflict: amendement d'AD-15 (2026-11-10), qui fait remplir la déclaration `*.modele.json` par l'installeur vs 5.51 (empreinte du modèle), pas encore construit (2026-11-12). 7.4 attend 5.51. Relais inversé : la description et le `verify` de 5.51 demandent que « l'installeur en ligne » écrive les empreintes, alors que l'installeur n'existe qu'à 7.4 ; la partie installeur revient à 7.4, et 5.51 est à corriger à sa revue pour ne garder que la chaîne d'entraînement.

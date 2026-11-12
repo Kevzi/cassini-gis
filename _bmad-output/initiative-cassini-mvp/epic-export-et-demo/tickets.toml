@@ -3,10 +3,10 @@
 [[entry]]
 id = 1
 type = "story"
-title = "La sonde de demo juge la phrase de demo sur des fixtures synthetiques"
-description = "Ajoute aux fixtures un petit projet de demo synthetique en EPSG:2154 (zones du PLU de type U et N, parcelles, gares) et fait de la sonde de demo existante un juge : elle part de ce projet par defaut, ou d'un projet donne en argument, envoie la phrase de demo au vrai modele, valide le plan, l'execute et rend un verdict OK ou ECHEC avec la raison. Le projet de fixtures et l'argument de projet sont repris par les entrees 4 (MNT ajoute a ces fixtures) et 6 (projet reel passe en argument)."
-verify = "Lancee sous le Python de QGIS sur le poste du proprietaire, la sonde rend OK sur les fixtures : un plan compose, chaque etape reussie, des parcelles en zone U retenues, un PDF qui commence par %PDF ; elle rend ECHEC, code de sortie non nul, quand une etape echoue."
-covers = ["D1", "D5"]
+title = "La sonde de démo juge la phrase, rejoue le journal et vérifie le PDF"
+description = "Ajoute aux fixtures un petit projet de demo synthetique en EPSG:2154 (zones du PLU de type U et N, parcelles, gares) et fait de la sonde de demo existante un juge : elle part de ce projet par defaut, ou d'un projet donne en argument, envoie la phrase de demo au vrai modele, valide le plan, l'execute ; puis elle ferme le projet, le rouvre et rejoue le journal sans le modele en comparant chaque etape ; enfin elle lit la mise en page QGIS apres l'export et controle titre, legende, echelle, fleche du nord et sources, et que le PDF n'est pas vide ; elle rend un verdict OK ou ECHEC avec la raison. Le projet de fixtures et l'argument de projet sont repris par les entrees 4 (MNT ajoute a ces fixtures) et 6 (projet reel passe en argument). Fusion de 6.1, 6.2 et 6.3 (2026-11-12)."
+verify = "Lancee sous le Python de QGIS sur le poste du proprietaire, la sonde rend OK sur les fixtures : un plan compose, chaque etape reussie, des parcelles en zone U retenues, un rejeu identique etape par etape apres reouverture, les cinq elements de mise en page listes et un PDF qui commence par %PDF ; elle rend ECHEC, code de sortie non nul, en nommant la cause quand une etape echoue, quand un journal altere a la main diverge (etape nommee) ou quand la mise en page perd sa legende (legende nommee)."
+covers = ["D1", "D2", "D3", "D5"]
 after = []
 hitl = false
 risk = "medium"
@@ -37,10 +37,10 @@ risk = "low"
 id = 4
 type = "story"
 title = "La demo passe par la pente du MNT"
-description = "Reprend un MNT synthetique deja present dans fixtures/ (mnt-colline-2154.tif ou mnt-plan-incline-2154.tif, en EPSG:2154) et cale les fixtures de demo de l'entree 1 sur son emprise, sans creer de nouvelle source de MNT, et a la sonde une seconde phrase qui demande la pente du MNT en degres et l'ajoute a la carte ; la pente est rejouee par le rejeu de l'entree 2 et son PDF controle par l'entree 3."
+description = "Reprend un MNT synthetique deja present dans fixtures/ (mnt-colline-2154.tif ou mnt-plan-incline-2154.tif, en EPSG:2154) et cale les fixtures de demo de l'entree 1 sur son emprise, sans creer de nouvelle source de MNT, et a la sonde une seconde phrase qui demande la pente du MNT en degres et l'ajoute a la carte ; la pente est rejouee et son PDF controle par la sonde de l'entree 1."
 verify = "Sur les fixtures, la sonde rend OK : la phrase de pente donne un plan avec terrain.slope, la couche de pente apparait dans le projet et dans le PDF, et le rejeu apres reouverture reste identique."
 covers = ["D4", "D5"]
-after = [3]
+after = [1]
 hitl = false
 risk = "medium"
 
@@ -89,7 +89,7 @@ title = "Refactor sweep"
 description = "Menage de fin d'epic sur la sonde de demo et ses fixtures, a partir des plans et des constats de relecture reportes pendant l'epic."
 verify = "Les constats reportes de l'epic sont traites ou consignes, et la sonde rend toujours OK sur les fixtures."
 covers = []
-after = [1, 2, 3, 4, 5, 6, 9]
+after = [1, 4, 5, 6, 9]
 hitl = false
 risk = "low"
 

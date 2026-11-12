@@ -491,6 +491,19 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
 - **Renvoi (2026-11-10, changement de cap `change-empreinte-du-modele-verifiee`) :** AD-17 ne
   change pas : la déclaration remplie par l'installeur est une conséquence de sa règle
   « empreintes vérifiées ». La vérification au lancement est portée par AD-15.
+- **Précision (2026-11-12, inception de l'epic 7) — adresses fixes.** Les adresses
+  fixes de la règle sont celles-ci :
+  - release GitHub du noyau : `https://github.com/Kevzi/cassini-gis/releases` ;
+  - manifeste des versions, à adresse fixe dans la release :
+    `https://github.com/Kevzi/cassini-gis/releases/latest/download/manifeste.json` ;
+  - modèle et installeur complet hors ligne : dépôt Hugging Face
+    `Kevzi/cassini-composition-4b-GGUF`, avec des noms de fichiers versionnés ;
+  - page d'accueil, vers laquelle pointent le champ `homepage` de `metadata.txt` et le
+    bouton du panneau quand le noyau est introuvable : `https://kevzi.github.io/cassini-gis`.
+
+  Elles ne changent plus après la première version publiée : un installeur déjà
+  distribué doit toujours les trouver. La règle, la frontière et l'ordre de recherche
+  ne changent pas.
 
 ### AD-18 — Une seule extension pour les deux séries de QGIS, et aucun import direct de PyQt
 
