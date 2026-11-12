@@ -104,7 +104,8 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `ouverture` | ouvrir un fichier non chargé, CSV à coordonnées compris |
 | `description` | décrire une couche, inventaire du projet, version, modèles installés |
 | `question_couche_absente` | une couche dont rien ne parle dans l'inventaire → question |
-| `question_champ_absent` | un critère qu'aucun champ ne porte → question, jamais un champ voisin deviné |
+| `question_champ_absent` | un critère qu'aucun champ ne porte → question, jamais un champ voisin deviné ; depuis la séance 3 de 5.54 (poids 10), une fois sur quatre dans une demande à plusieurs conditions, et une fois sur quatre la même demande avec le champ présent → le plan |
+| `question_valeur_absente` | depuis la séance 3 de 5.54 : une valeur absente des valeurs connues d'un champ (clé `values`), ou « en zone AU » sans aucune valeur qui commence par AU → question qui nomme la couche, le champ et ses valeurs ; un tiers de contraste, la valeur listée → le plan ; une fois sur six, la valeur dans un champ de nom montré sans `values` → le plan avec la valeur écrite (poids 5) |
 | `refus` | courriel, suppression d'entités, effacement du fichier d'une couche sur le disque (« supprime le fichier de la couche … du disque », depuis 10.27 : retirer la couche du projet est un plan, `retrait_couche` ; le refus dit que les fichiers de l'utilisateur ne sont jamais modifiés), export d'une couche en tableur (Excel, CSV : le refus nomme les formats de `data.convert`, depuis 10.9), couleur choisie à la main (« mets les gares en rouge » : depuis 11.23, le refus dit que le catalogue ne pose pas de couleur choisie mais sait les couleurs topographiques et le dégradé, jamais qu'aucune commande ne change le style), itinéraire sur le réseau routier entre deux objets d'une couche (depuis 11.12, lot 2b-1, le refus dit que le chemin de moindre coût demande un raster de coût et deux points en coordonnées), téléchargement, 3D → refus affirmatif |
 | `refus_hors_registre` | cadrage ou zoom de la carte, PDF dans un format hors de la série du catalogue (A5, lettre US), ou envoyé à une imprimante ou avec un nombre d'exemplaires (« envoie la carte à l'imprimante », « en 3 exemplaires ») ; « imprime la carte » seul reste un export, PDF qui nomme les couches à montrer (« fais une carte PDF A3 des écoles et des gares », depuis 11.23 : l'export met en page la carte affichée sans choisir ses couches, même avec un format ou une orientation connus), trajet depuis plusieurs lieux (« de chaque gare », « de toutes les gares », « des gares ») → refus affirmatif, jamais un plan de substitution. Le point de terrain écrit dans un autre système que le MNT, refusé en 5.41, est un plan depuis 11.12 (`terrain_autre_systeme`). Le champ de vision, la ligne de vue et la pente n'y sont plus depuis 4.6 : le registre les a. Le seuil sur la pente (« où la pente dépasse 15 % »), refusé de 4.6 à 11.12, est un plan depuis 11.12, lot 2a (`pente_seuil`). Le PDF en A3, A0 ou portrait, refusé jusqu'au lot 3 de 11.12 (« seulement une page A4 paysage »), est un plan depuis (`export_pdf_format`) |
 | `refus_stats_raster` | depuis après 5.49, sortie de `refus_hors_registre` (poids 5) : statistiques par zone d'un raster, MNT présent → refus `NO_RASTER_STATS` ; surtout des demandes courtes à une proposition (« Calcule l'altitude moyenne par commune », « Pente médiane de chaque quartier »), deux statistiques à la fois (« l'altitude moyenne et maximale de chaque quartier »), et un dérivé du MNT suivi de sa statistique (pente ou champ de vision, « puis son maximum par commune ») : refus entier depuis 5.41 |
@@ -2991,6 +2992,90 @@ git -C ".../CASSINI-nuit" checkout -q --detach REV && WT=~/cassini-worktrees/5-5
 la séance 1, `nuit-5-54.etat`, reste lisible) dit « VERDICT non-oubli : installable » et que
 `[annecy] SCORE` vaut au moins 16/20 ; B reste installé à côté. Le juge est `non_oubli.py`, contre
 `reference-non-oubli/`.
+
+Écrite, pas lancée : la séance attend la revue et l'accord du propriétaire.
+
+## Séance 3 (5.54, 2026-11-12)
+
+La séance 2 (`ajuste-continu-5-54-2`, depuis B, `SECOND_SESSION_FAMILIES`, rappel stratifié 0,5)
+gagne partout, mais la barre de non-oubli la refuse : `ecart_reel` 39 → 35/40 et `question_reel`
+45 → 43/47. Les causes relevées :
+
+- **plans d'urbanisme à 4 étapes rendus en 3**, une étape de trop, un opérateur faux (`<` pour
+  `<=`, `=` pour `!=`), un refus au lieu d'une question ;
+- **plan au lieu d'une question** quand la valeur demandée manque aux valeurs connues d'un champ, ou
+  quand le champ manque ;
+- **dilution** : le jeu ciblé de la séance 2 n'avait que 6 plans à 4 étapes sur 1 800 et aucune
+  question ; le jeu graine 1, aucune question de valeur absente (aucune famille ne l'apprenait).
+
+La séance 3 repart de B et garde tout l'acquis de la séance 2 (familles, rappel stratifié à 0,5,
+refus rééquilibrés).
+
+**Familles** (`training/src/families.rs`), chacune avec son test :
+
+| Cause | Changement | Test |
+|---|---|---|
+| valeur absente : plan au lieu d'une question | famille neuve `question_valeur_absente` (poids 5) : une couche à champ texte dont toutes les valeurs sont montrées (clé `values`, au plus `MAX_VALUES` = 10), la valeur demandée tirée des valeurs du thème hors des valeurs listées (une listée retirée si toutes le sont ; jamais une valeur dont la forme normalisée contient une valeur listée ou y est contenue) ; trois branches : le filtre seul, la cible filtrée à une distance d'une référence (PDF une fois sur quatre), le zonage « en zone {code} » sans aucune valeur de la catégorie (`in_zone_category` : « zone A » demandée à côté de `AUc` est absente). Deux fois sur trois la question (`missing_value_question` : la couche, le champ, la valeur telle que la demande l'écrit et les valeurs listées, quatre tournures), une fois sur trois la même phrase avec la valeur listée, qui rend le plan. Une question n'est jamais tirée quand une autre couche ou un autre champ du rendu (cible, référence, distraction, champ de nom) porte la valeur, ses formes d'adjectif comprises. Une fois sur six, un contraste : la valeur cherchée dans un champ de nom, montré sans clé `values`, rend le plan avec la valeur écrite (`contains`, `begins_with`), jamais une question | `a_missing_value_asks_with_the_known_values_and_a_listed_one_is_a_plan` (question ⇔ valeur hors des valeurs listées, valeur citée écrite dans la demande et listée nulle part ailleurs, plan ⇔ valeur listée, opérateur du zonage d'après les valeurs montrées, chaque branche vue, champ sans `values` → plan, aucun refus) |
+| champ absent dans un plan long | `question_champ_absent` poids 5 → 10 (la question courte d'avant garde la moitié, soit son poids de 5) ; une fois sur quatre, le champ manque à une demande à plusieurs conditions (cible filtrée et distance, ou parcelles constructibles et distance, PDF une fois sur quatre) → question ; une fois sur quatre, la même demande avec le champ présent → le plan (contraste) ; champ absent, aucun autre champ de la couche ne liste la valeur écrite | `a_missing_field_in_a_long_request_asks_and_a_present_one_plans` |
+| opérateur faux | `numeric` : les quatre opérateurs à parts égales, deux tirages sur huit chacun (avant : `gt` 3/7, `lt` 2/7, `gte` et `lte` 1/7) ; `filtered_target` : la différence (`ne`) à deux tirages sur huit (un sur sept) | `several_conditions_vary_operators_and_lose_no_step` (les six opérateurs vus ; `gt`, `lt`, `gte`, `lte` chacun entre 20 et 30 % des sélections numériques de `conditions_multiples` ; `ne` au-dessus de 33 % des `eq` et `ne` de `filtered_target`, 25 % avant) |
+| étape perdue ou de trop | aucun changement de forme : `conditions_multiples` et `constructible` portent déjà les plans à 3, 4, 5 et 6 étapes ; ils entrent au jeu ciblé | `a_long_plan_has_one_step_per_written_condition_and_no_more` (une sélection par condition d'attribut écrite, comptée par le générateur là où il écrit la tournure (`written_condition`, sans tirage) ; un tampon par distance écrite, le PDF si et seulement si la demande le nomme, chaque étape sert à une suivante, longueurs 2 à 6 vues) |
+| question coupée dans un gros projet | `validate` écarte (rejet compté) un exemple dont la question cite un champ à valeurs que l'inventaire montré ne porte plus avec toutes ses valeurs (`Example::listed`, réécrit par `big` avec les identifiants courts) : la vue triée d'un gros projet peut ôter un champ à valeurs que la demande ne nomme pas | `a_missing_value_question_in_a_big_project_keeps_its_field_or_is_rejected` (gardé : le champ montré avec toutes ses valeurs ; le champ ôté : écarté) ; `no_family_produces_rejected_examples` admet ce motif |
+
+Le refus appris reste une constante de `KNOWN_REFUSALS` au jeu ciblé de la séance 3 aussi
+(`every_learned_refusal_is_a_known_constant_and_line_of_sight_wordings_never_a_viewshed`).
+
+**Poids.** `question_valeur_absente` 5, `question_champ_absent` 5 → 10 : total 570 → 580, `gros_projet`
+(148) et `redemande` (76) inchangés.
+
+**Comptes** (jeu graine 1, 8 600 exemples ; jeu ciblé, graine 3, 1 800 exemples, séance 2 avant,
+séance 3 après ; rappel stratifié, 1 560 tirés, compté sur les 1 500 premiers) :
+
+| | Avant (`51370b1`) | Après |
+|---|---|---|
+| graine 1 : gros projets (famille `gros_projet`) | 2 124 (24,7 %) | 2 064 (24,0 %) |
+| graine 1 : exemples de redemande (avec `retry`) | 428 (4,98 %) | 451 (5,24 %) |
+| graine 1 : plans à 4 étapes (dont `conditions_multiples`, `constructible`, `gros_projet`) | 244 (77, 71, 41) | 264 (66, 77, 51) |
+| graine 1 : plans à 5 étapes | 187 | 185 |
+| graine 1 : questions (famille `question_champ_absent`, `question_valeur_absente`) | 887 (91, 0) | 990 (124, 56) |
+| graine 1 : refus | 464 | 418 |
+| graine 1 : sélections `eq`, `ne`, `gt`, `lt`, `gte`, `lte` | 1 681, 145, 117, 72, 51, 44 | 1 704, 122, 72, 64, 81, 71 |
+| jeu ciblé : plans à 4 étapes (toutes familles, PDF compris) | 6 | 231 (12,8 %) |
+| jeu ciblé : plans à 5 étapes | 0 | 155 |
+| jeu ciblé : questions (de valeur absente, de champ absent) | 0 | 266 (81, 185), 14,8 % |
+| jeu ciblé : refus | 104 | 38 |
+| rappel : plans à 4 étapes, à 5 étapes | 44, 26 | 38, 28 |
+| rappel : `question_champ_absent`, `question_valeur_absente` | 15, — | 26, 15 |
+| rappel : `conditions_multiples`, `constructible` | 38, 22 | 33, 22 |
+| rappel : plus petite famille | 15 | 15 |
+
+Les écarts admis. Au jeu ciblé, les refus passent de 104 à 38 : les cinq familles neuves de la liste
+n'en apprennent pas, et `refus_fonction_absente` y pèse moins (3 sur 71 au lieu de 3 sur 30) ; le
+jeu graine 1 et le rappel gardent chaque refus connu (`every_learned_refusal…`). Au rappel, les plans
+à 4 étapes passent de 44 à 38 : le rappel suit les poids réels du jeu graine 1, que les familles
+neuves diluent, et le jeu ciblé en apporte 231. Au jeu graine 1, `gt` tombe de 117 à 72, au niveau
+de `lt`, `gte` et `lte` : c'est voulu (parts égales, l'a priori 3:1 de `gt` sur `lte` étant la
+cause), et `ne` (122) reste au niveau d'avant. Les rejets de `gros_projet` passent de 124 à 112.
+
+**Liste de la séance.** `THIRD_SESSION_FAMILIES` (`training/src/lib.rs`) : les huit de la séance 2,
+plus `conditions_multiples`, `constructible`, `distance_reference_filtree` (le contraste à trois
+étapes, « pas d'étape de trop »), `question_champ_absent` et `question_valeur_absente`. Poids de la
+liste : 71, dont 42 % aux huit de la séance 2. Le test
+`the_third_session_families_give_the_whole_focused_set_without_a_bar_sentence` vérifie qu'elle
+commence par la liste de la séance 2, rend 1 800 exemples à la graine 3, chacune présente, sans
+aucune phrase de barre, avec au moins 8 % de plans à 4 étapes et 10 % de questions ; le test
+`the_session_command_of_the_doc_names_the_third_session_families` tient égale la commande
+ci-dessous.
+
+**Commande de la séance** (après fusion en avance rapide sur `main`, sans push, `REV` le commit du
+worktree, propre ; GPU libre, `ps` vérifié) :
+
+```
+git -C "/mnt/c/Users/kevin/Downloads/Projet code/CASSINI-nuit" checkout -q --detach REV && WT=~/cassini-worktrees/5-54-seance-3 NOM=ajuste-continu-5-54-3 MES=~/cassini-entrainement/5-54-3-mesures PART_RAPPEL=0.5 setsid nohup bash ~/cassini-entrainement/nuit-5-54.sh export_pdf_echelle_format,refus_fonction_absente,options_ecrites,champ_de_vision_cumule,point_lambert_vers_geo,ordre_nord_est,ligne_de_vue,recoupement,conditions_multiples,constructible,distance_reference_filtree,question_champ_absent,question_valeur_absente
+```
+
+**Installation** : seulement si `nuit-ajuste-continu-5-54-3.etat` dit « VERDICT non-oubli :
+installable » et que `[annecy] SCORE` vaut au moins 16/20 ; B reste installé à côté. Le juge est
+`non_oubli.py`, contre `reference-non-oubli/`.
 
 Écrite, pas lancée : la séance attend la revue et l'accord du propriétaire.
 

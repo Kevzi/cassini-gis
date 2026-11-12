@@ -169,6 +169,9 @@ pub fn validate(registry: &Registry, example: &Example) -> Result<(), String> {
         return Err("demande vide".into());
     }
     reduced_focus(example, &plan)?;
+    if let Some(listed) = &example.listed {
+        listed_shown(example, listed)?;
+    }
     let chars = prompt_text(example).chars().count();
     if chars > MAX_PROMPT_CHARS {
         return Err(format!("prompt trop long : {chars} caractères"));
@@ -253,6 +256,37 @@ fn reduced_focus(example: &Example, plan: &Plan) -> Result<(), String> {
     Ok(())
 }
 
+/// Une question de valeur absente (5.54, séance 3) nomme les valeurs connues d'un champ : la
+/// couche détaillée de l'inventaire montré porte ce champ avec exactement ces valeurs. La vue
+/// triée d'un gros projet, qui plafonne une couche, peut ôter le champ : l'exemple est écarté.
+fn listed_shown(example: &Example, listed: &families::Listed) -> Result<(), String> {
+    let values = example.inventory["layers"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|l| l["layer_id"].as_str() == Some(listed.layer_id.as_str()))
+        .and_then(|l| l["fields"].as_array())
+        .into_iter()
+        .flatten()
+        .find(|f| f["name"].as_str() == Some(listed.field.as_str()))
+        .and_then(|f| f["values"].as_array());
+    let mut shown: Vec<&str> = values
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    shown.sort_unstable();
+    let mut wanted: Vec<&str> = listed.values.iter().map(String::as_str).collect();
+    wanted.sort_unstable();
+    if shown != wanted {
+        return Err(format!(
+            "couche « {} » : champ à valeurs « {} » coupé",
+            listed.layer_id, listed.field
+        ));
+    }
+    Ok(())
+}
+
 /// Un exemple de redemande : la sortie rejetée se relit comme un plan d'appels, `check_plan`
 /// la rejette, les écarts sont ceux du jugement de `cassini-ai`, et la réponse attendue est un
 /// plan d'appels qui diffère de la sortie rejetée.
@@ -326,6 +360,29 @@ pub const SECOND_SESSION_FAMILIES: &[&str] = &[
     "ordre_nord_est",
     "ligne_de_vue",
     "recoupement",
+];
+
+/// Les familles du jeu ciblé de la troisième séance continue (5.54, séance 3) : celles de la
+/// seconde (la séance repart de B), plus les plans d'urbanisme à plusieurs conditions
+/// (`conditions_multiples`, `constructible`), leur contraste à trois étapes
+/// (`distance_reference_filtree`) et les questions d'un champ ou d'une valeur absents, que le
+/// mélange de la séance 2 diluait. Recopiée dans la commande de la séance
+/// (`docs/entrainement-du-modele.md`), que le test
+/// `the_session_command_of_the_doc_names_the_third_session_families` tient égale.
+pub const THIRD_SESSION_FAMILIES: &[&str] = &[
+    "export_pdf_echelle_format",
+    "refus_fonction_absente",
+    "options_ecrites",
+    "champ_de_vision_cumule",
+    "point_lambert_vers_geo",
+    "ordre_nord_est",
+    "ligne_de_vue",
+    "recoupement",
+    "conditions_multiples",
+    "constructible",
+    "distance_reference_filtree",
+    "question_champ_absent",
+    "question_valeur_absente",
 ];
 
 /// Plancher du rappel stratifié d'une séance continue (5.54, séance 2) : au moins autant
@@ -700,6 +757,7 @@ mod tests {
             request: "Tampon de 300 m autour des gares.".into(),
             expected,
             retry: None,
+            listed: None,
             focus: Vec::new(),
         };
         // Référence vers une étape qui n'existe pas : refusée par `check_plan`.
@@ -742,6 +800,7 @@ mod tests {
             expected: json!({"kind": "calls", "calls": [
                 {"command": "terrain.slope", "params": {"dem": dem, "unit": "degrees"}}]}),
             retry: None,
+            listed: None,
             focus: Vec::new(),
         };
         assert_eq!(
@@ -773,6 +832,7 @@ mod tests {
                 {"command": "raster.reclassify",
                     "params": {"raster": raster, "classes": [{"min": 15, "value": 1}]}}]}),
             retry: None,
+            listed: None,
             focus: Vec::new(),
         };
         assert_eq!(validate(&registry, &threshold(json!("step:1"))), Ok(()));
@@ -804,6 +864,7 @@ mod tests {
                     "start": {"x": 652300, "y": 6862100, "epsg": 2154},
                     "end": {"x": 653100, "y": 6861500, "epsg": 2154}}}]}),
             retry: None,
+            listed: None,
             focus: Vec::new(),
         };
         assert_eq!(
@@ -839,6 +900,7 @@ mod tests {
                         {"raster": second, "weight": 1}],
                     "exclusions": [mask]}}]}),
             retry: None,
+            listed: None,
             focus: Vec::new(),
         };
         let good = (json!("rasters/accessibilite.tif"), json!("zi_masque.tif"));
@@ -922,7 +984,8 @@ mod tests {
     fn no_family_produces_rejected_examples() {
         // Un écart signale une famille mal écrite : le filtre est un garde-fou, pas un tamis.
         // Seul `gros_projet` écarte, par construction (5.47) : une couche utile que la vue triée
-        // ne détaille pas, ou un prompt au-delà de la borne.
+        // ne détaille pas, un prompt au-delà de la borne, ou (5.54, séance 3) un champ à valeurs
+        // cité par une question de valeur absente que la vue triée ne montre plus en entier.
         let (_, summary) = generate(DEFAULT_SEED, DEFAULT_COUNT);
         let rejected: usize = summary
             .families
@@ -935,6 +998,8 @@ mod tests {
             assert!(
                 reason.starts_with("gros_projet : couche utile")
                     || reason.starts_with("gros_projet : prompt trop long")
+                    || (reason.starts_with("gros_projet : couche « ")
+                        && reason.contains("champ à valeurs"))
                     || (reason.starts_with("gros_projet : étape")
                         && reason.contains("raster absent")),
                 "{reason}"
@@ -1753,6 +1818,62 @@ mod tests {
     fn the_session_command_of_the_doc_names_the_second_session_families() {
         let doc = include_str!("../../docs/entrainement-du-modele.md");
         let line = format!("nuit-5-54.sh {}", SECOND_SESSION_FAMILIES.join(","));
+        assert!(doc.contains(&format!("{line}\n")), "{line}");
+    }
+
+    #[test]
+    fn the_third_session_families_give_the_whole_focused_set_without_a_bar_sentence() {
+        // 5.54, séance 3 : la liste de la séance 2 plus les plans à plusieurs conditions et les
+        // questions de champ ou de valeur absents ; `FOCUS_COUNT` exemples à `FOCUS_SEED`, chacune
+        // présente, aucune phrase de barre ; plans à 4 étapes et questions plus denses qu'à la
+        // séance 2 (6 plans à 4 étapes et aucune question sur 1 800).
+        assert_eq!(
+            &THIRD_SESSION_FAMILIES[..SECOND_SESSION_FAMILIES.len()],
+            SECOND_SESSION_FAMILIES
+        );
+        assert_eq!(
+            &THIRD_SESSION_FAMILIES[SECOND_SESSION_FAMILIES.len()..],
+            &[
+                "conditions_multiples",
+                "constructible",
+                "distance_reference_filtree",
+                "question_champ_absent",
+                "question_valeur_absente",
+            ]
+        );
+        let (examples, summary) =
+            generate_families(FOCUS_SEED, FOCUS_COUNT, THIRD_SESSION_FAMILIES).unwrap();
+        assert_eq!(examples.len(), FOCUS_COUNT, "{:?}", summary.families);
+        assert!(examples
+            .iter()
+            .all(|e| THIRD_SESSION_FAMILIES.contains(&e.family)));
+        for name in THIRD_SESSION_FAMILIES {
+            let tally = &summary.families[name];
+            assert!(tally.kept > 0 && tally.rejected == 0, "{name} : {tally:?}");
+        }
+        assert_eq!(barres::copies(&examples), Vec::<String>::new());
+        assert!(THIRD_SESSION_FAMILIES
+            .iter()
+            .all(|n| !FOCUS_EXCLUDED.contains(n)));
+        let four = examples
+            .iter()
+            .filter(|e| e.expected["calls"].as_array().is_some_and(|c| c.len() == 4))
+            .count();
+        let questions = examples
+            .iter()
+            .filter(|e| e.expected["kind"] == "question")
+            .count();
+        assert!(four * 100 >= 8 * FOCUS_COUNT, "plans à 4 étapes : {four}");
+        assert!(
+            questions * 100 >= 10 * FOCUS_COUNT,
+            "questions : {questions}"
+        );
+    }
+
+    #[test]
+    fn the_session_command_of_the_doc_names_the_third_session_families() {
+        let doc = include_str!("../../docs/entrainement-du-modele.md");
+        let line = format!("nuit-5-54.sh {}", THIRD_SESSION_FAMILIES.join(","));
         assert!(doc.contains(&format!("{line}\n")), "{line}");
     }
 

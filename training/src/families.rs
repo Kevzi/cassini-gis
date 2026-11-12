@@ -32,6 +32,18 @@ pub struct Example {
     /// distractions exclues) : dans un gros projet, chacune doit être montrée en détail, sauf
     /// une couche qu'un plan d'appels ne cite que comme géométrie (5.47).
     pub focus: Vec<String>,
+    /// Le champ à valeurs dont une question de valeur absente nomme les valeurs (5.54,
+    /// séance 3) : `validate` écarte l'exemple si l'inventaire montré ne le porte plus avec
+    /// toutes ses valeurs (la vue triée d'un gros projet peut ôter un champ). `None` ailleurs.
+    pub listed: Option<Listed>,
+}
+
+/// Un champ à valeurs tel qu'une question le cite : couche, nom du champ, valeurs listées (triées).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Listed {
+    pub layer_id: String,
+    pub field: String,
+    pub values: Vec<String>,
 }
 
 /// Le tour de redemande d'un exemple : la sortie rejetée par `check_plan`, telle que le
@@ -194,10 +206,20 @@ pub static FAMILIES: &[Family] = &[
         weight: 7,
         make: question_couche_absente,
     },
+    // 5.54, séance 3 (plan au lieu d'une question, au long plan d'urbanisme) : 5 → 10, une
+    // demande à plusieurs conditions dont le champ manque (1/4), et son contraste (1/4) ; la
+    // question courte d'avant garde la moitié, soit son poids de 5.
     Family {
         name: "question_champ_absent",
-        weight: 5,
+        weight: 10,
         make: question_champ_absent,
+    },
+    // 5.54, séance 3 : la valeur demandée manque aux valeurs connues d'un champ (clé `values`)
+    // → une question qui les nomme ; un tiers de contraste, la valeur listée → le plan.
+    Family {
+        name: "question_valeur_absente",
+        weight: 5,
+        make: question_valeur_absente,
     },
     // Essais GPU après 11.23 (refus manqués : 3D partielle, tableur filtré) : 7 → 8, et trois
     // branches de plus.
@@ -809,10 +831,12 @@ fn numeric(rng: &mut Rng, def: &FieldDef) -> (&'static str, String, String) {
         unreachable!("numeric sur un champ non numérique")
     };
     let n = min + step * rng.range(0, (max - min) / step);
-    let (op, list): (&str, &[&str]) = match rng.below(7) {
-        0..=2 => ("gt", gt),
-        3 | 4 => ("lt", lt),
-        5 => ("gte", gte),
+    // 5.54, séance 3 (opérateur faux `<` pour `<=`) : les quatre opérateurs à parts égales,
+    // deux tirages chacun ; « au moins », « au plus » sont courants dans un PLU (3:1 avant).
+    let (op, list): (&str, &[&str]) = match rng.below(8) {
+        0 | 1 => ("gt", gt),
+        2 | 3 => ("lt", lt),
+        4 | 5 => ("gte", gte),
         _ => ("lte", lte),
     };
     let shown = if n >= 1000 && rng.chance(1, 2) {
@@ -873,6 +897,7 @@ fn example(
         expected,
         retry: None,
         focus,
+        listed: None,
     }
 }
 
@@ -1310,6 +1335,14 @@ fn distance(rng: &mut Rng) -> Option<Example> {
 /// Référence filtrée par un champ texte : rend la couche, le groupe « des gares de la ligne D »
 /// et le `select` à placer avant le tampon.
 fn filtered_reference(rng: &mut Rng, b: &mut Builder) -> Option<(Layer, String, Value)> {
+    let out = filtered_reference_words(rng, b);
+    if out.is_some() {
+        written_condition();
+    }
+    out
+}
+
+fn filtered_reference_words(rng: &mut Rng, b: &mut Builder) -> Option<(Layer, String, Value)> {
     if rng.chance(1, 4) {
         if let Some(named) = named_reference(rng, b) {
             return Some(named);
@@ -1516,8 +1549,27 @@ fn zone_category(rng: &mut Rng, b: &mut Builder, target: &Noun) -> Option<(Strin
     Some((words, sel))
 }
 
+thread_local! {
+    /// Conditions d'attribut écrites dans la demande (zone, cible ou référence filtrées,
+    /// constructible), comptées là où la tournure est écrite, sans tirage : le test des plans longs
+    /// (5.54, séance 3) les compare aux sélections du plan.
+    static WRITTEN_CONDITIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn written_condition() {
+    WRITTEN_CONDITIONS.with(|c| c.set(c.get() + 1));
+}
+
 /// Pose la condition de zone : rend la tournure et le `select` (à placer en tête du plan).
 fn area(rng: &mut Rng, b: &mut Builder, target: &Noun) -> Option<(String, Value)> {
+    let out = area_words(rng, b, target);
+    if out.is_some() {
+        written_condition();
+    }
+    out
+}
+
+fn area_words(rng: &mut Rng, b: &mut Builder, target: &Noun) -> Option<(String, Value)> {
     let candidates: Vec<&Area> = AREAS
         .iter()
         .filter(|a| !b.free(|t| t.key == a.key).is_empty())
@@ -1713,7 +1765,20 @@ fn filtered_target(
     b: &mut Builder,
     pred: impl Fn(&Theme) -> bool,
 ) -> Option<(Layer, String, Value, &'static str, &'static Noun)> {
-    match rng.below(7) {
+    let out = filtered_target_words(rng, b, pred);
+    if out.is_some() {
+        written_condition();
+    }
+    out
+}
+
+fn filtered_target_words(
+    rng: &mut Rng,
+    b: &mut Builder,
+    pred: impl Fn(&Theme) -> bool,
+) -> Option<(Layer, String, Value, &'static str, &'static Noun)> {
+    // 5.54, séance 3 (`=` pour `!=`) : la différence a deux tirages sur huit (un sur sept).
+    match rng.below(8) {
         0 | 1 => {
             let t = pick_theme(rng, b, |t| pred(t) && !text_fields(t).is_empty())?;
             let def = *rng.pick(&text_fields(t));
@@ -1739,7 +1804,7 @@ fn filtered_target(
                 &t.noun,
             ))
         }
-        4 => {
+        4 | 5 => {
             let t = pick_theme(rng, b, |t| pred(t) && !text_fields(t).is_empty())?;
             let def = *rng.pick(&text_fields(t));
             let Kind::Text { phrases, .. } = &def.kind else {
@@ -1868,7 +1933,9 @@ fn draft_multi(rng: &mut Rng) -> Option<Draft> {
             // Constat durable : la cible dite par une catégorie d'une couche plus large (une
             // fois sur trois ici, en plus du rang de `filtered_target`).
             let (_, head, sel, sep, noun) = if rng.chance(1, 3) {
-                category_target(rng, &mut b, ordinary)?
+                let target = category_target(rng, &mut b, ordinary)?;
+                written_condition();
+                target
             } else {
                 filtered_target(rng, &mut b, ordinary)?
             };
@@ -2143,6 +2210,7 @@ fn draft_constructible(rng: &mut Rng) -> Option<Draft> {
     let zone_field = zonage.field("zone")?;
     let words = fill(words, noun, "");
     let sel = select(&zonage.id, &zone_field.name, "eq", "U");
+    written_condition();
     if rng.chance(1, 4) {
         return Some(Draft {
             calls: vec![sel, intersect(&parcelles.id, &step(1))],
@@ -3632,8 +3700,22 @@ fn question_couche_absente(rng: &mut Rng) -> Option<Example> {
     ))
 }
 
-/// La couche existe, mais aucun de ses champs ne porte le critère de la demande.
+/// La couche existe, mais aucun de ses champs ne porte le critère de la demande. 5.54,
+/// séance 3 : une fois sur quatre, le champ manque à une demande à plusieurs conditions (cible
+/// filtrée et distance, ou constructible et distance) ; une fois sur quatre, la même demande avec
+/// le champ présent donne le plan (contraste) ; la moitié reste la question courte d'avant.
 fn question_champ_absent(rng: &mut Rng) -> Option<Example> {
+    match rng.below(4) {
+        0 => {
+            let constructible = rng.chance(1, 3);
+            return long_field_case(rng, constructible, false).map(|(e, _)| e);
+        }
+        1 => {
+            let constructible = rng.chance(1, 3);
+            return long_field_case(rng, constructible, true).map(|(e, _)| e);
+        }
+        _ => {}
+    }
     let mut b = Builder::new();
     if rng.chance(1, 5) {
         // « Constructible » avec un zonage sans champ de type de zone.
@@ -3682,6 +3764,491 @@ fn question_champ_absent(rng: &mut Rng) -> Option<Example> {
     let request = finish(rng, &head, q, true);
     let expected = question(missing_field_question(rng, &layer.name, def.label));
     Some(example("question_champ_absent", b, rng, request, expected))
+}
+
+/// Une demande à plusieurs conditions dont un critère porte sur un champ (5.54, séance 3) : la
+/// cible filtrée par un champ texte ou numérique à une distance d'une référence, ou les parcelles
+/// constructibles (champ de type de zone du zonage) à une distance d'une référence, avec un PDF
+/// une fois sur quatre. Champ absent (`present` faux) : la question du champ manquant ; présent :
+/// le plan du brouillon. Rend aussi la définition du champ (tests).
+fn long_field_case(
+    rng: &mut Rng,
+    constructible: bool,
+    present: bool,
+) -> Option<(Example, &'static FieldDef)> {
+    let mut b = Builder::new();
+    let (noun, np, owner, def, plan): (
+        &'static Noun,
+        String,
+        String,
+        &'static FieldDef,
+        Vec<Value>,
+    ) = if constructible {
+        let parcelles = b.add(rng, "parcelles", &[], &[], &[]);
+        let noun = &theme("parcelles").noun;
+        let def = theme("zonage").field("zone")?;
+        // Sans libellé : « Zone urbaine » contredirait la question, ou appellerait une
+        // sélection sur ce champ.
+        let zonage = if present {
+            b.add(rng, "zonage", &["zone"], &["libelle"], &[("zone", "U")])
+        } else {
+            b.add(rng, "zonage", &[], &["zone", "libelle"], &[])
+        };
+        let words = *rng.pick(&[
+            "constructibles",
+            "constructibles du PLU",
+            "en zone constructible",
+        ]);
+        let r = pick_theme(rng, &b, |t| {
+            ordinary(t) && matches!(t.geom, Geom::Point | Geom::Line)
+        })?;
+        let reference = b.add(rng, r.key, &[], &[], &[]);
+        let d = dist(rng);
+        let rr = de_ref(rng, &r.noun);
+        let np = format!("les parcelles {words} {}", near(rng, noun, &d, &rr));
+        let plan = match zonage.field("zone") {
+            Some(f) => vec![
+                select(&zonage.id, &f.name, "eq", "U"),
+                buffer(&reference.id, &d, false),
+                intersect(&parcelles.id, &step(1)),
+                intersect(&step(3), &step(2)),
+            ],
+            None => Vec::new(),
+        };
+        (noun, np, zonage.name.clone(), def, plan)
+    } else {
+        let t = pick_theme(rng, &b, |t| {
+            ordinary(t)
+                && t.fields
+                    .iter()
+                    .any(|f| matches!(f.kind, Kind::Text { .. } | Kind::Number { .. }))
+        })?;
+        let defs: Vec<&'static FieldDef> = t
+            .fields
+            .iter()
+            .filter(|f| matches!(f.kind, Kind::Text { .. } | Kind::Number { .. }))
+            .collect();
+        let def = *rng.pick(&defs);
+        let layer = if present {
+            b.add(rng, t.key, &[def.role], &[], &[])
+        } else {
+            b.add(rng, t.key, &[], &[def.role], &[])
+        };
+        let field = layer.field(def.role).cloned();
+        let (head, sel) = match &def.kind {
+            Kind::Number { .. } => {
+                let (op, value, phrase) = numeric(rng, def);
+                let sel = field
+                    .as_ref()
+                    .map(|f| select(&layer.id, &f.name, op, &value));
+                (format!("les {} {phrase}", t.noun.pl), sel)
+            }
+            Kind::Text { values, .. } => {
+                let val: &'static Val = match &field {
+                    Some(f) => f.values[rng.below(f.values.len())],
+                    None => rng.pick(values),
+                };
+                // Champ absent : aucun autre champ de la couche ne liste la valeur, qu'un plan
+                // prendrait à bon droit.
+                if field.is_none()
+                    && layer
+                        .fields
+                        .iter()
+                        .any(|f| f.values.iter().any(|l| same_value(l.v, val)))
+                {
+                    return None;
+                }
+                let sel = field
+                    .as_ref()
+                    .map(|f| select(&layer.id, &f.name, "eq", val.v));
+                (qualified(rng, &t.noun, def, val, Det::Les), sel)
+            }
+            _ => return None,
+        };
+        let r = pick_theme(rng, &b, ordinary)?;
+        let reference = b.add(rng, r.key, &[], &[], &[]);
+        let d = dist(rng);
+        let rr = de_ref(rng, &r.noun);
+        let np = format!("{head} {}", near(rng, &t.noun, &d, &rr));
+        let plan = match sel {
+            Some(sel) => vec![
+                sel,
+                buffer(&reference.id, &d, false),
+                intersect(&step(1), &step(2)),
+            ],
+            None => Vec::new(),
+        };
+        (&t.noun, np, layer.name.clone(), def, plan)
+    };
+    if present == plan.is_empty() {
+        return None;
+    }
+    let mut d = Draft {
+        b,
+        noun,
+        np,
+        calls: plan,
+    };
+    let with_pdf = rng.chance(1, 4);
+    let (mut head, q) = open_find(rng, d.noun, &d.np, !with_pdf);
+    if with_pdf {
+        let (clause, title) = pdf_clause(rng, &d);
+        head.push_str(&clause);
+        d.calls.push(pdf(&title));
+    }
+    let request = finish(rng, &head, q, !with_pdf);
+    let expected = if present {
+        calls(d.calls)
+    } else {
+        question(missing_field_question(rng, &owner, def.label))
+    };
+    Some((
+        example("question_champ_absent", d.b, rng, request, expected),
+        def,
+    ))
+}
+
+/// Deux valeurs voisines : la forme normalisée de l'une contient l'autre (« N » et « Nh »,
+/// « mixte » et « mixte dense »). Une valeur voisine d'une valeur listée n'est jamais « absente ».
+fn overlapping(a: &str, b: &str) -> bool {
+    let (a, b) = (crate::normalize(a), crate::normalize(b));
+    a.contains(&b) || b.contains(&a)
+}
+
+/// Les mots d'un texte normalisé.
+fn norm_words(text: &str) -> Vec<String> {
+    crate::normalize(text)
+        .split(' ')
+        .filter(|w| !w.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// `inner` est une suite de mots entière de `outer` (formes normalisées).
+fn has_words(outer: &str, inner: &str) -> bool {
+    let (o, i) = (norm_words(outer), norm_words(inner));
+    !i.is_empty() && o.windows(i.len()).any(|w| w == i.as_slice())
+}
+
+/// Une valeur `listed` d'un autre champ ou d'une autre couche désigne la valeur demandée : mêmes
+/// mots, l'une dans l'autre, la valeur ou ses formes d'adjectif (« nationale », « nationales »).
+fn same_value(listed: &str, val: &Val) -> bool {
+    let forms = std::iter::once(val.v).chain(val.adj.into_iter().flat_map(|(sg, pl)| [sg, pl]));
+    forms
+        .into_iter()
+        .any(|f| has_words(listed, f) || has_words(f, listed))
+}
+
+/// Une valeur demandée que l'inventaire rendu liste ailleurs que dans le champ visé (autre champ
+/// de la couche, cible, référence ou distraction) : la question serait fausse.
+fn listed_elsewhere(inventory: &Value, layer_id: &str, field: &str, val: &Val) -> bool {
+    inventory["layers"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|l| {
+            l["fields"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(move |f| (l, f))
+        })
+        .filter(|(l, f)| l["layer_id"] != layer_id || f["name"] != field)
+        .flat_map(|(_, f)| f["values"].as_array().into_iter().flatten())
+        .filter_map(Value::as_str)
+        .any(|v| same_value(v, val))
+}
+
+/// Un champ texte dont le noyau montrerait toutes les valeurs (clé `values`) : au plus
+/// `MAX_VALUES` valeurs distinctes, et au moins deux pour qu'une reste listée quand une manque.
+fn listable(def: &FieldDef) -> bool {
+    matches!(&def.kind, Kind::Text { values, .. }
+        if (2..=cassini_core::agent_inventory::MAX_VALUES).contains(&values.len()))
+}
+
+/// La question d'une valeur absente des valeurs connues d'un champ : la couche, le champ, la
+/// valeur demandée et les valeurs listées, pour que l'utilisateur réponde d'un mot.
+fn missing_value_question(
+    rng: &mut Rng,
+    layer: &str,
+    field: &str,
+    value: &str,
+    listed: &[&str],
+) -> String {
+    let list = listed.join(", ");
+    match rng.below(4) {
+        0 => format!(
+            "Le champ {field} de la couche « {layer} » n'a pas de valeur « {value} » (valeurs : \
+             {list}) : laquelle faut-il prendre ?"
+        ),
+        1 => format!(
+            "La couche « {layer} » n'a aucune valeur « {value} » dans son champ {field} \
+             (valeurs : {list}). Laquelle dois-je utiliser ?"
+        ),
+        2 => format!(
+            "Je ne trouve pas la valeur « {value} » dans le champ {field} de la couche \
+             « {layer} », dont les valeurs sont {list}. Laquelle faut-il retenir ?"
+        ),
+        _ => format!(
+            "Aucune valeur « {value} » au champ {field} de la couche « {layer} » (valeurs : \
+             {list}) : laquelle veux-tu ?"
+        ),
+    }
+}
+
+/// 5.54, séance 3 (plan au lieu d'une question) : la valeur demandée manque aux valeurs connues
+/// d'un champ. Trois branches : le filtre seul, la cible filtrée à une distance d'une référence
+/// (PDF une fois sur quatre), le zonage « en zone {code} ». Deux fois sur trois la valeur manque
+/// (question), une fois sur trois elle est listée (le plan, même phrase). Une fois sur six, la
+/// valeur porte sur un champ de nom, montré sans clé `values` : le plan avec la valeur écrite,
+/// jamais une question.
+fn question_valeur_absente(rng: &mut Rng) -> Option<Example> {
+    if rng.chance(1, 6) {
+        return unlisted_name_plan(rng);
+    }
+    let branch = rng.below(3);
+    let ask = rng.chance(2, 3);
+    missing_value_case(rng, branch, ask)
+}
+
+/// Contraste de `question_valeur_absente` : un nom cherché dans un champ de nom, que l'inventaire
+/// montre sans valeurs (trop variées) → `contains` ou `begins_with` sur le fragment écrit.
+fn unlisted_name_plan(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let t = pick_theme(rng, &b, |t| {
+        ordinary(t) && t.fields.iter().any(|f| matches!(f.kind, Kind::Name { .. }))
+    })?;
+    let def = t
+        .fields
+        .iter()
+        .find(|f| matches!(f.kind, Kind::Name { .. }))?;
+    let Kind::Name { fragments } = &def.kind else {
+        return None;
+    };
+    let fragment = *rng.pick(fragments);
+    let layer = b.add(rng, t.key, &[def.role], &[], &[]);
+    let field = layer.field(def.role)?;
+    let (op, phrase) = name_phrase(rng, fragment);
+    let np = format!("les {} {phrase}", t.noun.pl);
+    let (head, q) = open_find(rng, &t.noun, &np, true);
+    let request = finish(rng, &head, q, true);
+    let plan = calls(vec![select(&layer.id, &field.name, op, fragment)]);
+    Some(example("question_valeur_absente", b, rng, request, plan))
+}
+
+/// Une branche de `question_valeur_absente` : 0 filtre seul, 1 cible filtrée et distance, 2
+/// zonage. `ask` : la valeur manque (question) ; sinon elle est listée (plan).
+fn missing_value_case(rng: &mut Rng, branch: usize, ask: bool) -> Option<Example> {
+    let mut b = Builder::new();
+    // `asked` : la valeur demandée ; `value` : sa forme écrite dans la demande, que la question
+    // cite.
+    let (noun, np, sel, layer_id, layer_name, field_name, value, listed, asked): (
+        &'static Noun,
+        String,
+        Value,
+        String,
+        String,
+        String,
+        String,
+        Vec<&'static Val>,
+        Val,
+    );
+    let mut calls_after: Vec<Value> = Vec::new();
+    if branch == 2 {
+        // Le zonage : « en zone AU » est présent dès qu'une valeur est de la catégorie (le code,
+        // ou le code suivi d'un indice en minuscule : `in_zone_category`) ; absent sinon. « Zone A »
+        // demandée à côté de `AUc` est absente.
+        let (_, _, code, category) = *rng.pick(ZONE_CATEGORIES);
+        let t = pick_theme(rng, &b, |t| {
+            ordinary(t) && !AREAS.iter().any(|a| a.key == t.key)
+        })?;
+        let target = b.add(rng, t.key, &[], &[], &[]);
+        let (zonage, shown) = if ask {
+            let z = b.add(rng, "zonage", &["zone"], &["libelle"], &[]);
+            let shown: Vec<&'static Val> = z
+                .field("zone")?
+                .values
+                .iter()
+                .copied()
+                .filter(|v| !in_zone_category(code, v.v))
+                .collect();
+            if shown.is_empty() {
+                return None;
+            }
+            b.set_values(&z.id, "zone", &shown)?;
+            (z, shown)
+        } else {
+            let forced = *rng.pick(category);
+            let z = b.add(rng, "zonage", &["zone"], &["libelle"], &[("zone", forced)]);
+            let mut shown = z.field("zone")?.values.clone();
+            // Le code lui-même forcé : aucune sous-zone de la catégorie (`zone_category_select`).
+            if forced == code {
+                shown.retain(|v| v.v == code || !in_zone_category(code, v.v));
+                b.set_values(&z.id, "zone", &shown)?;
+            }
+            (z, shown)
+        };
+        let field = zonage.field("zone")?.name.clone();
+        let op = zone_operator(code, shown.iter().map(|v| v.v));
+        let words = match rng.below(4) {
+            0 | 1 => format!("en zone {code}"),
+            2 => format!("{} en zone {code}", t.noun.agree("situé")),
+            _ => format!("{} en zone {code} du PLU", t.noun.agree("classé")),
+        };
+        sel = select(&zonage.id, &field, op, code);
+        if rng.chance(1, 2) {
+            let r = pick_theme(rng, &b, ordinary)?;
+            let reference = b.add(rng, r.key, &[], &[], &[]);
+            let d = dist(rng);
+            let rr = de_ref(rng, &r.noun);
+            np = format!("les {} {words} {}", t.noun.pl, near(rng, &t.noun, &d, &rr));
+            calls_after = vec![
+                buffer(&reference.id, &d, false),
+                intersect(&target.id, &step(1)),
+                intersect(&step(3), &step(2)),
+            ];
+        } else {
+            np = format!("les {} {words}", t.noun.pl);
+            calls_after = vec![intersect(&target.id, &step(1))];
+        }
+        noun = &t.noun;
+        layer_id = zonage.id.clone();
+        layer_name = zonage.name.clone();
+        field_name = field;
+        value = code.to_string();
+        listed = shown;
+        asked = Val { v: code, adj: None };
+    } else {
+        let t = pick_theme(rng, &b, |t| {
+            ordinary(t) && text_fields(t).into_iter().any(listable)
+        })?;
+        let defs: Vec<&'static FieldDef> =
+            text_fields(t).into_iter().filter(|d| listable(d)).collect();
+        let def = *rng.pick(&defs);
+        let Kind::Text { values, .. } = &def.kind else {
+            return None;
+        };
+        let layer = b.add(rng, t.key, &[def.role], &[], &[]);
+        let field = layer.field(def.role)?.clone();
+        let mut shown = field.values.clone();
+        let val: &'static Val = if ask {
+            let free: Vec<&'static Val> = values
+                .iter()
+                .filter(|v| shown.iter().all(|l| !overlapping(v.v, l.v)))
+                .collect();
+            if free.is_empty() {
+                // Toutes listées (ou voisines d'une listée) : on en retire une, voisine d'aucune
+                // des autres.
+                let removable: Vec<&'static Val> = shown
+                    .iter()
+                    .copied()
+                    .filter(|v| {
+                        shown
+                            .iter()
+                            .filter(|l| l.v != v.v)
+                            .all(|l| !overlapping(v.v, l.v))
+                    })
+                    .collect();
+                if removable.is_empty() {
+                    return None;
+                }
+                let val = *rng.pick(&removable);
+                shown.retain(|l| l.v != val.v);
+                b.set_values(&layer.id, def.role, &shown)?;
+                val
+            } else {
+                free[rng.below(free.len())]
+            }
+        } else {
+            shown[rng.below(shown.len())]
+        };
+        // Aucun champ de nom de la couche (montré sans valeurs) ne porterait la valeur : un
+        // `contains` y serait un plan.
+        if ask
+            && layer.fields.iter().any(|f| match &f.def.kind {
+                Kind::Name { fragments } => fragments.iter().any(|g| same_value(g, val)),
+                _ => false,
+            })
+        {
+            return None;
+        }
+        let head = qualified(rng, &t.noun, def, val, Det::Les);
+        // La valeur telle que la demande l'écrit : le code, ou sa forme d'adjectif.
+        let forms = std::iter::once(val.v).chain(val.adj.into_iter().flat_map(|(sg, pl)| [pl, sg]));
+        let written = forms
+            .into_iter()
+            .find(|f| has_words(&head, f))
+            .unwrap_or(val.v);
+        sel = select(&layer.id, &field.name, "eq", val.v);
+        if branch == 1 {
+            let r = pick_theme(rng, &b, ordinary)?;
+            let reference = b.add(rng, r.key, &[], &[], &[]);
+            let d = dist(rng);
+            let rr = de_ref(rng, &r.noun);
+            np = format!("{head} {}", near(rng, &t.noun, &d, &rr));
+            calls_after = vec![
+                buffer(&reference.id, &d, false),
+                intersect(&step(1), &step(2)),
+            ];
+        } else {
+            np = head;
+        }
+        noun = &t.noun;
+        layer_id = layer.id.clone();
+        layer_name = layer.name.clone();
+        field_name = field.name.clone();
+        value = written.to_string();
+        listed = shown;
+        asked = Val {
+            v: val.v,
+            adj: val.adj,
+        };
+    }
+    let mut plan = vec![sel];
+    plan.extend(calls_after);
+    let mut d = Draft {
+        b,
+        noun,
+        np,
+        calls: plan,
+    };
+    let with_pdf = branch == 1 && rng.chance(1, 4);
+    let (mut head, q) = open_find(rng, d.noun, &d.np, !with_pdf);
+    if with_pdf {
+        let (clause, title) = pdf_clause(rng, &d);
+        head.push_str(&clause);
+        d.calls.push(pdf(&title));
+    }
+    let request = finish(rng, &head, q, !with_pdf);
+    if !ask {
+        return Some(example(
+            "question_valeur_absente",
+            d.b,
+            rng,
+            request,
+            calls(d.calls),
+        ));
+    }
+    let names: Vec<&str> = listed.iter().map(|v| v.v).collect();
+    let expected = question(missing_value_question(
+        rng,
+        &layer_name,
+        &field_name,
+        &value,
+        &names,
+    ));
+    let mut e = example("question_valeur_absente", d.b, rng, request, expected);
+    // Une autre couche ou un autre champ du rendu (cible, référence, distraction) qui liste la
+    // valeur : la question serait fausse.
+    if listed_elsewhere(&e.inventory, &layer_id, &field_name, &asked) {
+        return None;
+    }
+    e.listed = Some(Listed {
+        layer_id,
+        field: field_name,
+        values: names.iter().map(|v| v.to_string()).collect(),
+    });
+    Some(e)
 }
 
 // -- refus -----------------------------------------------------------------
@@ -8487,7 +9054,7 @@ fn export_pdf_echelle_format(rng: &mut Rng) -> Option<Example> {
             "Sors-moi la carte{t}",
             "Imprime la carte{t}",
             "Fais-moi un PDF de la carte{t}",
-            "Génère la carte en PDF{t}",
+            "Génère-moi la carte en PDF{t}",
             "Mets la carte en page{t}",
             "Prépare un PDF de la carte{t}",
             "Je voudrais la carte en PDF{t}",
@@ -9934,6 +10501,10 @@ pub(crate) fn big(rng: &mut Rng, base: Example, total: usize) -> Option<Example>
         rejected: renamed(&r.rejected, &shown),
         errors: r.errors.iter().map(|e| renamed(e, &shown)).collect(),
     });
+    let listed = base.listed.map(|l| Listed {
+        layer_id: shown.get(&l.layer_id).cloned().unwrap_or(l.layer_id),
+        ..l
+    });
     Some(Example {
         family: "gros_projet",
         inventory,
@@ -9941,6 +10512,7 @@ pub(crate) fn big(rng: &mut Rng, base: Example, total: usize) -> Option<Example>
         expected,
         retry,
         focus,
+        listed,
     })
 }
 
@@ -11986,6 +12558,7 @@ mod tests {
         // Constats H17 à H22 : étapes perdues, mauvais opérateur, mauvaise commande.
         let examples = valid(conditions_multiples, 3000);
         let mut ops = std::collections::BTreeSet::new();
+        let mut counts = std::collections::BTreeMap::new();
         let (mut five, mut whole_layer, mut two_filters) = (0, 0, 0);
         for e in &examples {
             let calls = e.expected["calls"].as_array().unwrap();
@@ -11995,7 +12568,9 @@ mod tests {
                 .collect();
             for c in &chain {
                 if c["command"] == "analysis.select_by_attribute" {
-                    ops.insert(c["params"]["operator"].as_str().unwrap().to_string());
+                    let op = c["params"]["operator"].as_str().unwrap().to_string();
+                    *counts.entry(op.clone()).or_insert(0usize) += 1;
+                    ops.insert(op);
                 }
                 if c["command"] == "analysis.intersect"
                     && !c["params"]["overlay_layer_id"]
@@ -12062,6 +12637,36 @@ mod tests {
         ] {
             assert!(ops.contains(op), "{op} : {ops:?}");
         }
+        // 5.54, séance 3 (opérateur faux) : les quatre opérateurs numériques à parts égales,
+        // chacun entre 20 et 30 % des sélections numériques (avant : `gt` 3/7, `lte` 1/7).
+        let numeric: usize = ["gt", "lt", "gte", "lte"]
+            .iter()
+            .map(|op| counts.get(*op).copied().unwrap_or(0))
+            .sum();
+        for op in ["gt", "lt", "gte", "lte"] {
+            let n = counts.get(op).copied().unwrap_or(0);
+            let share = n as f64 / numeric as f64;
+            assert!(
+                (0.2..=0.3).contains(&share),
+                "{op} : {n} sur {numeric} ({counts:?})"
+            );
+        }
+        // La différence de `filtered_target` : deux tirages sur huit, contre trois égalités
+        // (texte et catégorie), soit 40 % de `eq + ne` (25 % avant, un tirage sur sept).
+        let mut rng = Rng::new(17);
+        let (mut eq, mut ne) = (0usize, 0usize);
+        for _ in 0..4000 {
+            let mut b = Builder::new();
+            if let Some((_, _, sel, _, _)) = filtered_target(&mut rng, &mut b, ordinary) {
+                match sel["params"]["operator"].as_str().unwrap() {
+                    "eq" => eq += 1,
+                    "ne" => ne += 1,
+                    _ => {}
+                }
+            }
+        }
+        let share = ne as f64 / (eq + ne) as f64;
+        assert!(share > 0.33, "ne {ne}, eq {eq}");
         assert!(five > 0 && whole_layer > 0, "{five} {whole_layer}");
     }
 
@@ -14632,6 +15237,56 @@ mod tests {
     }
 
     #[test]
+    fn a_missing_value_question_in_a_big_project_keeps_its_field_or_is_rejected() {
+        // 5.54, séance 3 : la vue triée peut ôter le champ à valeurs que cite la question ;
+        // `validate` écarte alors l'exemple, et garde ceux qui le montrent en entier.
+        let registry = cassini_core::registry::Registry::standard();
+        let (mut kept, mut cut) = (0, 0);
+        for seed in 0..1500 {
+            let Some((_, e, _)) = big_with_raw(question_valeur_absente, seed, 45) else {
+                continue;
+            };
+            let Some(listed) = &e.listed else {
+                continue;
+            };
+            match crate::validate(&registry, &e) {
+                Ok(()) => {
+                    kept += 1;
+                    let layer = e.inventory["layers"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|l| l["layer_id"] == listed.layer_id.as_str())
+                        .unwrap_or_else(|| panic!("{} absente", listed.layer_id));
+                    let field = layer["fields"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|f| f["name"] == listed.field.as_str())
+                        .unwrap();
+                    assert_eq!(field_values(field), listed.values);
+                    // Le même exemple, le champ ôté par la vue (couche plafonnée) : écarté.
+                    let mut shorn = e.clone();
+                    for l in shorn.inventory["layers"].as_array_mut().unwrap() {
+                        if l["layer_id"] == listed.layer_id.as_str() {
+                            l["fields"]
+                                .as_array_mut()
+                                .unwrap()
+                                .retain(|f| f["name"] != listed.field.as_str());
+                        }
+                    }
+                    let reason = crate::validate(&registry, &shorn).unwrap_err();
+                    assert!(reason.contains("champ à valeurs"), "{reason}");
+                    cut += 1;
+                }
+                Err(reason) if reason.contains("champ à valeurs") => cut += 1,
+                Err(_) => {}
+            }
+        }
+        assert!(kept > 0 && cut > 0, "gardés {kept}, coupés {cut}");
+    }
+
+    #[test]
     fn a_big_project_is_the_sorted_view_of_its_raw_inventory() {
         let mut sorted = 0;
         for seed in 0..40 {
@@ -14744,6 +15399,7 @@ mod tests {
             expected,
             retry: None,
             focus: vec!["gares_1".into(), "parcelles_1".into()],
+            listed: None,
         }
     }
 
@@ -15413,15 +16069,17 @@ mod tests {
     }
 
     /// Le jeu graine 1 complet et le jeu ciblé de la séance 2 de 5.54, partagés par ses tests.
-    fn default_and_second_session_sets() -> Vec<Example> {
+    /// Le jeu graine 1 et les jeux ciblés des séances 2 et 3 de 5.54.
+    fn default_and_session_sets() -> Vec<Example> {
         let (mut examples, _) = crate::generate(crate::DEFAULT_SEED, crate::DEFAULT_COUNT);
-        let (focus, _) = crate::generate_families(
-            crate::FOCUS_SEED,
-            crate::FOCUS_COUNT,
+        for families in [
             crate::SECOND_SESSION_FAMILIES,
-        )
-        .unwrap();
-        examples.extend(focus);
+            crate::THIRD_SESSION_FAMILIES,
+        ] {
+            let (focus, _) =
+                crate::generate_families(crate::FOCUS_SEED, crate::FOCUS_COUNT, families).unwrap();
+            examples.extend(focus);
+        }
         examples
     }
 
@@ -15475,8 +16133,8 @@ mod tests {
 
     #[test]
     fn every_learned_refusal_is_a_known_constant_and_line_of_sight_wordings_never_a_viewshed() {
-        // Séance 2 de 5.54 (refus devenus réflexes) : tout refus appris, au jeu graine 1 comme au
-        // jeu ciblé de la séance 2, a pour raison une constante de `KNOWN_REFUSALS` ; chacune est
+        // Séance 2 de 5.54 (refus devenus réflexes) : tout refus appris, au jeu graine 1 comme aux
+        // jeux ciblés des séances 2 et 3, a pour raison une constante de `KNOWN_REFUSALS` ; chacune est
         // une phrase affirmative, sans doublon. « Voit-on B depuis A », « B est-il visible »,
         // « B se voit-il » : une ligne de vue, jamais un champ de vision ; un recoupement ne
         // reprojette jamais ses stations.
@@ -15514,7 +16172,7 @@ mod tests {
         }
         let mut seen = HashSet::new();
         let mut sighted = 0;
-        for e in default_and_second_session_sets() {
+        for e in default_and_session_sets() {
             if e.expected["kind"] == "refusal" {
                 let reason = e.expected["reason"].as_str().unwrap();
                 assert!(known.contains(reason), "{reason} : {}", e.request);
@@ -15652,5 +16310,392 @@ mod tests {
             "{counting} / {}",
             examples.len()
         );
+    }
+
+    // -- séance 3 de 5.54 ------------------------------------------------------
+
+    /// Les textes entre guillemets français d'une question, dans l'ordre.
+    fn quoted(text: &str) -> Vec<String> {
+        text.split('«')
+            .skip(1)
+            .filter_map(|part| part.split_once('»'))
+            .map(|(inside, _)| inside.trim().to_string())
+            .collect()
+    }
+
+    /// La couche de l'inventaire dont le nom est cité entre guillemets dans `question`.
+    fn named_layer<'a>(e: &'a Example, question: &str) -> &'a Value {
+        let names = quoted(question);
+        e.inventory["layers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|l| names.iter().any(|n| l["name"] == n.as_str()))
+            .unwrap_or_else(|| panic!("aucune couche citée : {question}"))
+    }
+
+    fn field_values(field: &Value) -> Vec<&str> {
+        field["values"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|v| v.as_str().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn a_missing_value_asks_with_the_known_values_and_a_listed_one_is_a_plan() {
+        // 5.54, séance 3 : question ⇔ valeur hors des valeurs listées (clé `values`) ; plan ⇔
+        // valeur listée ; chaque branche (filtre seul, cible filtrée et distance, zonage) ; jamais
+        // un refus.
+        let registry = cassini_core::registry::Registry::standard();
+        let mut rng = Rng::new(11);
+        let mut a_beside_au = 0;
+        for branch in 0..3 {
+            for ask in [true, false] {
+                let mut n = 0;
+                for _ in 0..300 {
+                    let Some(e) = missing_value_case(&mut rng, branch, ask) else {
+                        continue;
+                    };
+                    assert_eq!(crate::validate(&registry, &e), Ok(()), "{}", e.request);
+                    n += 1;
+                    if branch == 2 {
+                        assert!(e.request.contains("en zone "), "{}", e.request);
+                    }
+                    if !ask {
+                        assert_eq!(e.expected["kind"], "calls", "{}", e.request);
+                        assert!(e.listed.is_none());
+                        let sel = call(&e, 0);
+                        assert_eq!(sel["command"], "analysis.select_by_attribute");
+                        let p = &sel["params"];
+                        let layer = e.inventory["layers"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .find(|l| l["layer_id"] == p["layer_id"])
+                            .unwrap();
+                        let field = layer["fields"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .find(|f| f["name"] == p["field"])
+                            .unwrap();
+                        let values = field_values(field);
+                        let value = p["value"].as_str().unwrap();
+                        if branch == 2 {
+                            assert_eq!(
+                                p["operator"],
+                                zone_operator(value, values.iter().copied()),
+                                "{}",
+                                e.request
+                            );
+                            assert!(values.iter().any(|v| in_zone_category(value, v)));
+                        } else {
+                            assert_eq!(p["operator"], "eq");
+                            assert!(values.contains(&value), "{}", e.request);
+                        }
+                        let buffered = commands(&e).contains(&"analysis.buffer");
+                        if branch == 0 {
+                            assert_eq!(commands(&e), ["analysis.select_by_attribute"]);
+                        }
+                        if branch == 1 {
+                            assert!(buffered, "{}", e.request);
+                        }
+                        continue;
+                    }
+                    assert_eq!(e.expected["kind"], "question", "{}", e.request);
+                    let q = e.expected["question"].as_str().unwrap();
+                    let layer = named_layer(&e, q);
+                    let quotes = quoted(q);
+                    assert_eq!(quotes.len(), 2, "{q}");
+                    let value = quotes
+                        .iter()
+                        .find(|v| layer["name"] != v.as_str())
+                        .unwrap()
+                        .as_str();
+                    let field = layer["fields"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|f| q.contains(&format!("champ {} ", f["name"].as_str().unwrap())))
+                        .unwrap_or_else(|| panic!("aucun champ cité : {q}"));
+                    // Un champ à valeurs, toutes nommées par la question, sans la valeur demandée.
+                    let values = field_values(field);
+                    assert!(!values.is_empty(), "{q}");
+                    for v in &values {
+                        assert!(q.contains(v), "{v} : {q}");
+                    }
+                    if branch == 2 {
+                        assert!(values.iter().all(|v| !in_zone_category(value, v)), "{q}");
+                        a_beside_au +=
+                            usize::from(value == "A" && values.iter().any(|v| v.starts_with("AU")));
+                    } else {
+                        assert!(values.iter().all(|v| !overlapping(v, value)), "{q}");
+                    }
+                    // La valeur citée est celle que la demande écrit.
+                    assert!(
+                        has_words(&e.request, value),
+                        "{value} : {} / {q}",
+                        e.request
+                    );
+                    // Aucune autre couche ni aucun autre champ du rendu ne la liste.
+                    for l in e.inventory["layers"].as_array().unwrap() {
+                        for f in l["fields"].as_array().unwrap() {
+                            if l["layer_id"] == layer["layer_id"] && f["name"] == field["name"] {
+                                continue;
+                            }
+                            for v in field_values(f) {
+                                assert_ne!(
+                                    crate::normalize(v),
+                                    crate::normalize(value),
+                                    "{q} : {}",
+                                    l["name"]
+                                );
+                            }
+                        }
+                    }
+                    let listed = e.listed.as_ref().unwrap();
+                    assert_eq!(listed.layer_id, layer["layer_id"].as_str().unwrap());
+                    assert_eq!(listed.field, field["name"].as_str().unwrap());
+                    assert_eq!(listed.values, values);
+                }
+                assert!(n > 100, "branche {branch}, question {ask} : {n}");
+            }
+        }
+        // « Zone A » demandée à côté de `AUc` ou `AUs` : une question (`in_zone_category`).
+        assert!(a_beside_au > 0);
+        // Un champ montré sans clé `values` (champ de nom) : le plan avec la valeur écrite,
+        // jamais une question.
+        let mut names = 0;
+        for _ in 0..300 {
+            let Some(e) = unlisted_name_plan(&mut rng) else {
+                continue;
+            };
+            assert_eq!(crate::validate(&registry, &e), Ok(()), "{}", e.request);
+            assert_eq!(e.expected["kind"], "calls", "{}", e.request);
+            let p = &call(&e, 0)["params"];
+            assert!(["contains", "begins_with", "eq"].contains(&p["operator"].as_str().unwrap()));
+            assert!(
+                has_words(&e.request, p["value"].as_str().unwrap()),
+                "{}",
+                e.request
+            );
+            let layer = e.inventory["layers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|l| l["layer_id"] == p["layer_id"])
+                .unwrap();
+            let field = layer["fields"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|f| f["name"] == p["field"])
+                .unwrap();
+            assert!(field.get("values").is_none(), "{}", e.request);
+            names += 1;
+        }
+        assert!(names > 100, "{names}");
+        // La famille : deux questions pour un plan environ, aucun refus.
+        let examples = valid(question_valeur_absente, 1500);
+        let asked = examples
+            .iter()
+            .filter(|e| e.expected["kind"] == "question")
+            .count();
+        assert!(examples.iter().all(|e| e.expected["kind"] != "refusal"));
+        let share = asked as f64 / examples.len() as f64;
+        assert!((0.45..0.7).contains(&share), "{share}");
+        assert!(examples
+            .iter()
+            .any(|e| commands(e).contains(&"layout.export_pdf")));
+    }
+
+    #[test]
+    fn a_missing_field_in_a_long_request_asks_and_a_present_one_plans() {
+        // 5.54, séance 3 : à une demande à plusieurs conditions, question ⇔ champ absent ; le
+        // contraste, champ présent, rend le plan entier (sélection, tampon, intersections).
+        let registry = cassini_core::registry::Registry::standard();
+        let mut rng = Rng::new(13);
+        for constructible in [false, true] {
+            for present in [false, true] {
+                let mut n = 0;
+                for _ in 0..300 {
+                    let Some((e, def)) = long_field_case(&mut rng, constructible, present) else {
+                        continue;
+                    };
+                    assert_eq!(crate::validate(&registry, &e), Ok(()), "{}", e.request);
+                    n += 1;
+                    if present {
+                        assert_eq!(e.expected["kind"], "calls", "{}", e.request);
+                        let sel = &call(&e, 0)["params"];
+                        assert!(def.names.contains(&sel["field"].as_str().unwrap()));
+                        let chain: Vec<&str> = commands(&e)
+                            .into_iter()
+                            .filter(|c| *c != "layout.export_pdf")
+                            .collect();
+                        let expected: &[&str] = if constructible {
+                            &[
+                                "analysis.select_by_attribute",
+                                "analysis.buffer",
+                                "analysis.intersect",
+                                "analysis.intersect",
+                            ]
+                        } else {
+                            &[
+                                "analysis.select_by_attribute",
+                                "analysis.buffer",
+                                "analysis.intersect",
+                            ]
+                        };
+                        assert_eq!(chain, expected, "{}", e.request);
+                        continue;
+                    }
+                    assert_eq!(e.expected["kind"], "question", "{}", e.request);
+                    let q = e.expected["question"].as_str().unwrap();
+                    assert!(q.contains(def.label), "{q}");
+                    let layer = named_layer(&e, q);
+                    for f in layer["fields"].as_array().unwrap() {
+                        assert!(
+                            !def.names.contains(&f["name"].as_str().unwrap()),
+                            "{q} : {}",
+                            e.inventory
+                        );
+                        // Aucun autre champ de la couche cible ne liste la valeur écrite (le
+                        // zonage de « constructible » n'a pas de valeur écrite).
+                        for v in field_values(f) {
+                            if !constructible && crate::normalize(v).len() >= 3 {
+                                assert!(!has_words(&e.request, v), "{v} : {}", e.request);
+                            }
+                        }
+                    }
+                }
+                assert!(n > 100, "{constructible} {present} : {n}");
+            }
+        }
+        // La famille : la branche longue et son contraste vus, aucun refus.
+        let examples = valid(question_champ_absent, 1500);
+        let near_words = |r: &str| r.contains("à moins ") || r.contains("dans un rayon ");
+        let long_questions = examples
+            .iter()
+            .filter(|e| e.expected["kind"] == "question" && near_words(&e.request))
+            .count();
+        let plans = examples
+            .iter()
+            .filter(|e| e.expected["kind"] == "calls")
+            .count();
+        assert!(examples.iter().all(|e| e.expected["kind"] != "refusal"));
+        assert!(long_questions > 100, "{long_questions}");
+        let share = plans as f64 / examples.len() as f64;
+        assert!((0.15..0.35).contains(&share), "{share}");
+    }
+
+    /// Distances écrites dans une demande : ses nombres, moins ceux des valeurs de ses sélections
+    /// et d'un titre donné par l'utilisateur, plus les kilomètres écrits en lettres.
+    fn written_distances(e: &Example) -> usize {
+        let mut numbers = cassini_core::point::request_numbers(&e.request);
+        let mut drop = |text: &str| {
+            for n in cassini_core::point::request_numbers(text) {
+                if let Some(i) = numbers.iter().position(|m| (m - n).abs() < 1e-9) {
+                    numbers.remove(i);
+                }
+            }
+        };
+        for c in e.expected["calls"].as_array().unwrap() {
+            if c["command"] == "analysis.select_by_attribute" {
+                drop(c["params"]["value"].as_str().unwrap());
+                let field = c["params"]["field"].as_str().unwrap();
+                if e.request.contains(field) {
+                    drop(field);
+                }
+            }
+            if c["command"] == "layout.export_pdf" {
+                let title = c["params"]["title"].as_str().unwrap();
+                if USER_TITLES.contains(&title) {
+                    drop(title);
+                }
+            }
+        }
+        for layer in e.inventory["layers"].as_array().unwrap() {
+            let name = layer["name"].as_str().unwrap_or_default();
+            if !name.is_empty() && e.request.contains(name) {
+                drop(name);
+            }
+        }
+        let r = e.request.to_lowercase();
+        let words: usize = ["un kilomètre", "deux kilomètres", "cinq kilomètres"]
+            .iter()
+            .map(|w| r.matches(w).count())
+            .sum();
+        numbers.len() + words
+    }
+
+    #[test]
+    fn a_long_plan_has_one_step_per_written_condition_and_no_more() {
+        // 5.54, séance 3 (plans à 4 étapes rendus en 3, une étape de trop) : aux plans de
+        // `conditions_multiples` et de `constructible`, une sélection par condition d'attribut
+        // écrite, un tampon par distance écrite, le PDF si et seulement si la demande le nomme, et
+        // chaque étape sert à une suivante.
+        let mut lengths = std::collections::BTreeMap::new();
+        for make in [
+            conditions_multiples as fn(&mut Rng) -> Option<Example>,
+            constructible,
+        ] {
+            let registry = cassini_core::registry::Registry::standard();
+            let mut rng = Rng::new(7);
+            for _ in 0..2000 {
+                WRITTEN_CONDITIONS.with(|c| c.set(0));
+                let Some(e) = make(&mut rng) else {
+                    continue;
+                };
+                assert_eq!(crate::validate(&registry, &e), Ok(()), "{}", e.request);
+                // Une sélection par condition d'attribut écrite (zone, cible ou référence
+                // filtrées, constructible), comptée par le générateur là où il l'écrit.
+                let selects = commands(&e)
+                    .iter()
+                    .filter(|c| **c == "analysis.select_by_attribute")
+                    .count();
+                assert_eq!(
+                    selects,
+                    WRITTEN_CONDITIONS.with(|c| c.get()),
+                    "{}",
+                    e.request
+                );
+                let calls = e.expected["calls"].as_array().unwrap();
+                let pdfs = commands(&e)
+                    .iter()
+                    .filter(|c| **c == "layout.export_pdf")
+                    .count();
+                assert_eq!(
+                    pdfs,
+                    usize::from(e.request.contains("PDF")),
+                    "{}",
+                    e.request
+                );
+                if pdfs == 1 {
+                    assert_eq!(calls.last().unwrap()["command"], "layout.export_pdf");
+                }
+                let chain = &calls[..calls.len() - pdfs];
+                for k in 1..chain.len() {
+                    let r = step(k);
+                    assert!(
+                        chain[k..]
+                            .iter()
+                            .any(|c| LAYER_KEYS.iter().any(|key| c["params"][*key] == r.as_str())),
+                        "étape {k} de trop ou perdue : {}",
+                        e.request
+                    );
+                }
+                let buffers = commands(&e)
+                    .iter()
+                    .filter(|c| **c == "analysis.buffer")
+                    .count();
+                assert_eq!(buffers, written_distances(&e), "{}", e.request);
+                *lengths.entry(calls.len()).or_insert(0usize) += 1;
+            }
+        }
+        for n in 2..=6 {
+            assert!(lengths.contains_key(&n), "{n} : {lengths:?}");
+        }
     }
 }

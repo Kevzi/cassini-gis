@@ -244,6 +244,7 @@ mod tests {
             request,
             expected: json!({"kind": "refusal", "reason": "x"}),
             retry: None,
+            listed: None,
             focus: Vec::new(),
         };
         let found = copies(&[example(text.to_uppercase()), example(real_text.clone())]);
