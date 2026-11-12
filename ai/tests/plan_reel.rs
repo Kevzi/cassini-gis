@@ -440,6 +440,8 @@ fn an_invalid_expected_answer_or_a_wrong_refusal_is_named() {
         ("S10", "refus sans `missing`"),
         ("S18", "refus devenu faux"),
         ("PL06", "valeur absente"),
+        ("PL01", "le garde-fou des attributs refuse"),
+        ("PL06", "le garde-fou des attributs refuse"),
     ] {
         assert!(
             errors
@@ -449,7 +451,8 @@ fn an_invalid_expected_answer_or_a_wrong_refusal_is_named() {
         );
     }
     // `contains("")` est toujours vrai : le mot vide est refusé, sans autre refus devenu faux.
-    assert_eq!(errors.len(), 8, "{errors:?}");
+    // PL01 et PL06 comptent deux fois : leur contrôle, et le garde-fou des attributs (5.57).
+    assert_eq!(errors.len(), 10, "{errors:?}");
 }
 
 #[test]

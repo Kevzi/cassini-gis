@@ -3,14 +3,14 @@ title: "Garde-fou : une valeur ou un champ absent de l'inventaire donne une ques
 type: 'feature'
 ticket: '57'
 created: '2026-11-12'
-status: 'ready-for-dev'
+status: 'built'
 baseline_revision: 'b20058dba1420a7bc2cb1f2199c9b70921297c22'
 route: 'full'
 route_source: 'pinned'
 risk: 'high'
 review: 'thorough'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: [blind-hunter, edge-case-hunter, verification-gap, intent-alignment]
 review_loop_iteration: 0
 context: ['{project-root}/_bmad-output/initiative-cassini-mvp/architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md']
 ---
@@ -63,12 +63,12 @@ context: ['{project-root}/_bmad-output/initiative-cassini-mvp/architecture-noyau
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `core/src/attribute_guard.rs`, `core/src/lib.rs` -- `guard_attributes(registry, plan, inventory) -> Plan` et `attribute_question` (tournures des Design Notes), tests de chaque ligne de la matrice (inventaire en JSON, registre standard) -- le cœur de la règle
-- [ ] `core/src/registry.rs`, `core/src/commands/analysis_select_by_attribute.rs`, `core/src/contract.rs` -- déclaration `attribute_filter`, règle de contrat et test de refus -- générique, sans nom de commande dans le garde-fou
-- [ ] `ai/src/plan.rs` -- appel après `guard_coordinates` ; tests sans modèle : valeur absente → question `guard`, valeur présente → plan, un seul appel au générateur -- tous les chemins
-- [ ] `core/src/serve/` (tests de `propose`) -- question `guard` rendue sans `plan_id`, journal sans nouvelle ligne -- trace sans journal (AD-11)
-- [ ] `training/src/families.rs` (tests) -- tout exemple engendré (graine et taille par défaut) passe `guard_attributes` inchangé avec son inventaire, et les exemples de `question_valeur_absente` à question gardent la même couche, le même champ et les mêmes valeurs que la question du noyau -- le modèle n'apprend rien que le noyau bloque
-- [ ] `docs/canal-local.md`, `_bmad-output/initiative-cassini-mvp/architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md` -- `guard` couvre aussi les valeurs et les champs ; sous AD-23, « Précision (2026-11-12, ticket 5.57) » de cinq lignes, acceptée par le propriétaire le 2026-11-12 -- la règle est écrite où on la cite
+- [x] `core/src/attribute_guard.rs`, `core/src/lib.rs` -- `guard_attributes(registry, plan, inventory) -> Plan` et `attribute_question` (tournures des Design Notes), tests de chaque ligne de la matrice (inventaire en JSON, registre standard) -- le cœur de la règle
+- [x] `core/src/registry.rs`, `core/src/commands/analysis_select_by_attribute.rs`, `core/src/contract.rs` -- déclaration `attribute_filter`, règle de contrat et test de refus -- générique, sans nom de commande dans le garde-fou
+- [x] `ai/src/plan.rs` -- appel après `guard_coordinates` ; tests sans modèle : valeur absente → question `guard`, valeur présente → plan, un seul appel au générateur -- tous les chemins
+- [x] `core/src/serve/` (tests de `propose`) -- question `guard` rendue sans `plan_id`, journal sans nouvelle ligne -- trace sans journal (AD-11)
+- [x] `training/src/families.rs` (tests) -- tout exemple engendré (graine et taille par défaut) passe `guard_attributes` inchangé avec son inventaire, et les exemples de `question_valeur_absente` à question gardent la même couche, le même champ et les mêmes valeurs que la question du noyau -- le modèle n'apprend rien que le noyau bloque
+- [x] `docs/canal-local.md`, `_bmad-output/initiative-cassini-mvp/architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md` -- `guard` couvre aussi les valeurs et les champs ; sous AD-23, « Précision (2026-11-12, ticket 5.57) » de cinq lignes, acceptée par le propriétaire le 2026-11-12 -- la règle est écrite où on la cite
 
 **Acceptance Criteria:**
 - Given le modèle installé (`ajuste-continu-5-54-2`) sur GPU, when tournent `plan_reel`, `question_reel`, `ecart_reel`, then aucun score ne baisse, `question_reel` monte ou reste égale, et la ligne `SCORE` compte les questions du garde-fou.
@@ -77,9 +77,42 @@ context: ['{project-root}/_bmad-output/initiative-cassini-mvp/architecture-noyau
 
 ## Implementation Notes
 
+- `core/src/attribute_guard.rs` : `guard_attributes`, `value_question` (forme 0 du générateur, valeurs dans l'ordre de l'inventaire) et `field_question` (la question d'un champ absent cite aussi les champs de la couche, au plus dix, « champs : a, b, c »). Une couche sans clé `fields` (raster) n'est pas contrôlée, comme une couche introuvable. Une couche `step:` est reconnue par `parse_reference` (toute valeur commençant par `step:`).
+- `CommandSpec::attribute_filter` (`registry.rs`, type `AttributeFilter`, `#[serde(skip)]`) ; seul déclarant `analysis.select_by_attribute` ; règle `contract.attribute_filter` (les quatre noms aux propriétés du schéma des paramètres), test de refus `an_attribute_filter_names_existing_params`.
+- `ai/src/plan.rs` : `guard_attributes` chaîné après `guard_coordinates` sur le plan validé seulement ; `guard_rejected` inchangé.
+- Test du canal : `serve::tests::an_attribute_guard_question_has_no_plan_id_and_writes_no_journal_line` (le compositeur de test applique le garde-fou sur la vue reçue, champ `guard_attributes` de `FixedComposer`), dans `core/src/serve.rs` où vivent les tests de `propose`.
+- **Écart aux Design Notes (après relecture)** : `begins_with` et `contains` comparent **sans la casse** (le fournisseur peut appliquer LIKE sans la casse) et ne sont pas contrôlés si la valeur porte `%` ou `_` ; un nom de champ se cherche aussi **sans la casse** (QGIS le fait), et une question n'est posée que si aucun champ ne correspond même ainsi. `eq` et `ne` restent exacts. Ne sont pas contrôlées non plus une valeur vide et une liste `values` de plus de `MAX_VALUES` valeurs (inventaire écrit à la main).
+- Contrat : `contract.attribute_filter` exige aussi un opérateur en énumération des seuls opérateurs connus du garde-fou (`KNOWN_OPERATORS`) et une valeur qui accepte une chaîne.
+- Barres : `ai/tests/common/mod.rs` `invalid` passe aussi chaque plan attendu par `guard_attributes` ; cas cassé `begins_with` ajouté à `an_invalid_expected_answer_is_named` (`par_commande_reel.rs`).
+- Mesures : les lignes `SCORE` de `plan_reel`, `question_reel` et `ecart_reel` comptent déjà les questions du garde-fou (`QuestionSource::Guard`) : rien à changer.
+- Extension : `qgis-plugin/tests/test_values_limit.py` épingle `VALUES_LIMIT == MAX_VALUES + 1`, qui rend complète toute liste montrée.
+- Générateur : `every_generated_example_passes_the_attribute_guard_unchanged` (jeu complet, graine 1, 8 600 exemples) et `a_value_absent_question_matches_the_core_question` (le texte du générateur et celui du noyau portent la même couche, le même champ, la même valeur et la même liste ordonnée ; plan reconstruit avec l'opérateur du plan contraste, `begins_with` pour le zonage à sous-zones) passent sans changer le générateur.
+
 ## Plan Change Log
 
 ## Review Triage Log
+
+Passe 1 (thorough : blind-hunter, edge-case-hunter, verification-gap, intent-alignment). Verdicts : high 0, medium 4, low 9, false 2, maybe-false 0. Corrigés 12 (patch, même implémenteur), rejetés 4, reporté 1.
+
+| Constat | Verdict | Sort | Preuve / action |
+|---|---|---|---|
+| `invalid` des barres n'appelle pas `guard_attributes` (begins_with/contains attendus non contrôlés) | medium | patch | appel ajouté, cas cassé `SEL1b` |
+| Jokers `%`/`_` de LIKE dans begins_with/contains → fausse question | medium | patch | non contrôlé, test |
+| begins_with/contains et nom de champ comparés avec la casse alors que QGIS peut ne pas la voir | medium | patch | sans la casse (eq/ne exacts), écart aux Design Notes consigné |
+| Liste `values` > MAX_VALUES (inventaire écrit à la main) tenue pour complète | low | patch | non contrôlée, test |
+| Valeur vide (le noyau retire "" des valeurs) | low | patch | non contrôlée, test |
+| Question « champ absent » sans les champs de la couche | low | patch | champs cités (≤ 10) |
+| Contrat `attribute_filter` superficiel (opérateurs inconnus ignorés) | low | patch | enum ⊂ `KNOWN_OPERATORS`, valeur chaîne, test de refus |
+| Chemin du compositeur : seul le cas valeur absente testé | medium | patch | champ absent, vue triée, priorité des coordonnées, redemande puis valeur absente |
+| Test de concordance générateur/noyau en partie tautologique, toujours `eq` | low | patch | texte du générateur, opérateur du plan contraste (zonage begins_with) |
+| Rien n'épingle VALUES_LIMIT = MAX_VALUES + 1 (complétude des listes) | low | patch | `test_values_limit.py` |
+| Doc : « carte vide » faux pour `ne` ; phrase maladroite de `compose_plan` ; SCORE non dit | low | patch | corrigés, note |
+| Valeurs non textuelles ignorées → fausse question | false | reject | `agent_inventory::field` ne garde que des chaînes : un champ numérique n'a jamais de clé `values` |
+| Liste de l'extension tronquée prise pour complète | false | reject | l'extension lit 11 valeurs, le noyau ne montre que ≤ 10 |
+| `ne` sur valeur absente → question | low | reject | décision du plan approuvé : le filtre resterait sans effet, la demande est mal comprise |
+| begins_with « A » qui accepte AUc (catégorie de zonage) | low | reject | la règle de zonage bloquerait à tort des préfixes ordinaires (« Saint » sur « Saint-Denis ») ; reste à l'entraînement |
+| Test du canal par le compositeur de test, pas le vrai | low | reject | le vrai chaînage passe par `compose_plan_anchored`, testé dans `ai` |
+| Interaction avec la redemande élargie de 5.48 non testée | low | defer | couches réduites non contrôlées ; à observer en recette |
 
 ## Design Notes
 

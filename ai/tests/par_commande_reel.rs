@@ -169,20 +169,29 @@ fn an_invalid_expected_answer_is_named() {
     q["expected"]["calls"][0]["params"]["layer_id"] = json!("batiments_inconnus");
     let r = broken.iter_mut().find(|p| p["id"] == "LA1").unwrap();
     r["expected"]["calls"][0]["params"]["path"] = json!("donnees/hydrographie.gpkg");
+    // Garde-fou des attributs (5.57) : un `begins_with` qu'aucune valeur montrée ne vérifie.
+    let mut g = broken.iter().find(|p| p["id"] == "SEL1").unwrap().clone();
+    g["id"] = json!("SEL1b");
+    g["expected"]["calls"][0]["params"]["operator"] = json!("begins_with");
+    g["expected"]["calls"][0]["params"]["value"] = json!("Zzz");
     let f = broken.iter_mut().find(|p| p["id"] == "SEL1").unwrap();
     f["expected"]["calls"][0]["params"]["field"] = json!("usages");
+    broken.push(g);
     let h = broken.iter_mut().find(|p| p["id"] == "HS3").unwrap();
     h["expected"]["calls"][0]["params"]["dem"] = json!("donnees/mnt_inconnu.tif");
     let k = broken.iter_mut().find(|p| p["id"] == "PK2").unwrap();
     k["command"] = json!("terrain.slope");
     let errors = invalid(&registry, &inventory(), &broken);
     // L'ordre des erreurs suit le fichier : on les compare comme un ensemble.
-    assert_eq!(errors.len(), 6, "{errors:?}");
+    // SEL1 compte deux fois : champ absent, et le garde-fou des attributs.
+    assert_eq!(errors.len(), 8, "{errors:?}");
     for (id, reason) in [
         ("LD1", "couche absente"),
         ("SL2", "check_plan refuse"),
         ("LA1", "fichier absent"),
         ("SEL1", "champ absent"),
+        ("SEL1", "le garde-fou des attributs refuse"),
+        ("SEL1b", "le garde-fou des attributs refuse"),
         ("HS3", "raster absent"),
         ("PK2", "le plan attendu n'appelle pas"),
     ] {

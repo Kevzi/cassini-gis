@@ -137,6 +137,56 @@ fn check_spec(spec: &CommandSpec, out: &mut Vec<ContractViolation>) {
             "un style de résultat (`result_style`) ne se déclare que sur une commande à une seule sortie.",
         ));
     }
+    if let Some(filter) = &spec.attribute_filter {
+        let properties = spec.params_schema.get("properties");
+        for name in [
+            &filter.layer,
+            &filter.field,
+            &filter.operator,
+            &filter.value,
+        ] {
+            if properties.and_then(|p| p.get(name.as_str())).is_none() {
+                out.push(violation(
+                    "contract.attribute_filter",
+                    id,
+                    &format!(
+                        "`attribute_filter` nomme « {name} », absent des propriétés du schéma des paramètres."
+                    ),
+                ));
+            }
+        }
+        let root = &spec.params_schema;
+        let property = |name: &str| properties.and_then(|p| p.get(name));
+        // L'opérateur parle le vocabulaire que le garde-fou connaît : une énumération fermée.
+        if let Some(operator) = property(&filter.operator) {
+            let known = find(operator, root, 0, &|m| m.get("enum"))
+                .and_then(Value::as_array)
+                .is_some_and(|values| {
+                    !values.is_empty()
+                        && values.iter().all(|v| {
+                            v.as_str().is_some_and(|v| {
+                                crate::attribute_guard::KNOWN_OPERATORS.contains(&v)
+                            })
+                        })
+                });
+            if !known {
+                out.push(violation(
+                    "contract.attribute_filter",
+                    id,
+                    "l'opérateur d'`attribute_filter` doit être une énumération des opérateurs que le garde-fou connaît (eq, ne, lt, lte, gt, gte, contains, begins_with).",
+                ));
+            }
+        }
+        if let Some(value) = property(&filter.value) {
+            if !accepts_string(value, root, 0) {
+                out.push(violation(
+                    "contract.attribute_filter",
+                    id,
+                    "la valeur d'`attribute_filter` doit accepter une chaîne.",
+                ));
+            }
+        }
+    }
     check_path_params(spec, out);
     for (which, schema) in [
         ("des paramètres", &spec.params_schema),
@@ -488,6 +538,36 @@ mod tests {
         .result_style(crate::style::ResultStyle::Slope));
     command!(StyledNoOutput, |s| s
         .result_style(crate::style::ResultStyle::Slope));
+    command!(FilterOnAbsentParams, |s| s
+        .attribute_filter("layer_id", "field", "operator", "value"));
+
+    /// Un filtre dont l'opérateur est une chaîne libre et la valeur un nombre.
+    #[derive(Debug, Deserialize, JsonSchema)]
+    #[allow(dead_code)]
+    struct LooseFilter {
+        layer_id: String,
+        field: String,
+        operator: String,
+        value: u32,
+    }
+
+    struct LooseFilterCommand;
+
+    impl Command for LooseFilterCommand {
+        type Params = LooseFilter;
+        type Output = Output;
+
+        fn spec() -> CommandSpec {
+            let mut spec = good_spec().attribute_filter("layer_id", "field", "operator", "value");
+            spec.params_schema =
+                CommandSpec::new::<LooseFilter, Output>("a.b", "x", "x").params_schema;
+            spec
+        }
+
+        fn run(&self, _params: LooseFilter) -> Result<Output, crate::registry::CommandFailure> {
+            Ok(Output {})
+        }
+    }
     command!(BadIdCapital, |mut s| {
         s.id = "Buffer".into();
         s
@@ -717,6 +797,34 @@ mod tests {
     fn a_complete_command_has_no_violation() {
         assert!(only(Healthy).check_contract().is_empty());
         assert!(only(BoundedGeometries).check_contract().is_empty());
+    }
+
+    #[test]
+    fn an_attribute_filter_names_existing_params() {
+        let got = only(FilterOnAbsentParams);
+        assert_eq!(
+            codes(&got)
+                .iter()
+                .filter(|c| **c == "contract.attribute_filter")
+                .count(),
+            4
+        );
+        // Un opérateur libre et une valeur numérique : deux refus.
+        let messages: Vec<String> = only(LooseFilterCommand)
+            .check_contract()
+            .into_iter()
+            .filter(|v| v.code == "contract.attribute_filter")
+            .map(|v| v.message)
+            .collect();
+        assert_eq!(messages.len(), 2, "{messages:?}");
+        assert!(messages[0].contains("énumération"), "{messages:?}");
+        assert!(messages[1].contains("chaîne"), "{messages:?}");
+        // `analysis.select_by_attribute` déclare un filtre juste.
+        let standard = Registry::standard();
+        assert!(standard
+            .spec("analysis.select_by_attribute")
+            .is_some_and(|s| s.attribute_filter.is_some()));
+        assert!(!codes(&standard).contains(&"contract.attribute_filter"));
     }
 
     #[test]

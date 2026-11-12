@@ -32,6 +32,17 @@ pub enum RunsIn {
     Qgis,
 }
 
+/// Noms des paramètres d'un filtre par attribut neutre (AD-22) : couche, champ, opérateur et
+/// valeur. L'opérateur parle le vocabulaire fermé du filtre (`eq`, `ne`, `lt`, `lte`, `gt`,
+/// `gte`, `contains`, `begins_with`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttributeFilter {
+    pub layer: String,
+    pub field: String,
+    pub operator: String,
+    pub value: String,
+}
+
 /// Description d'une commande, lue par l'IA et les points d'entrée.
 #[derive(Debug, Clone, Serialize)]
 pub struct CommandSpec {
@@ -120,6 +131,12 @@ pub struct CommandSpec {
     /// jamais sérialisée.
     #[serde(skip)]
     pub result_style: Option<crate::style::ResultStyle>,
+    /// Filtre par attribut que porte la commande (ticket 5.57) : les noms de ses paramètres
+    /// couche, champ, opérateur et valeur, que le garde-fou d'AD-23 (`attribute_guard`) contrôle
+    /// contre l'inventaire montré au modèle. Métadonnée interne : jamais sérialisée, le
+    /// catalogue et le prompt ne changent pas.
+    #[serde(skip)]
+    pub attribute_filter: Option<AttributeFilter>,
     /// Schéma JSON des paramètres, engendré depuis le type Rust.
     pub params_schema: Value,
     /// Schéma JSON du résultat, engendré depuis le type Rust.
@@ -155,6 +172,7 @@ impl CommandSpec {
             dictates: Vec::new(),
             output_none: false,
             result_style: None,
+            attribute_filter: None,
             params_schema: schema_value::<P>(),
             output_schema: schema_value::<O>(),
             examples: Vec::new(),
@@ -282,6 +300,24 @@ impl CommandSpec {
     /// Déclare le style dicté après l'ouverture du raster écrit (bogue du fond noir).
     pub fn result_style(mut self, style: crate::style::ResultStyle) -> Self {
         self.result_style = Some(style);
+        self
+    }
+
+    /// Déclare le filtre par attribut de la commande : les noms de ses paramètres couche, champ,
+    /// opérateur et valeur (ticket 5.57).
+    pub fn attribute_filter(
+        mut self,
+        layer: &str,
+        field: &str,
+        operator: &str,
+        value: &str,
+    ) -> Self {
+        self.attribute_filter = Some(AttributeFilter {
+            layer: layer.to_string(),
+            field: field.to_string(),
+            operator: operator.to_string(),
+            value: value.to_string(),
+        });
         self
     }
 

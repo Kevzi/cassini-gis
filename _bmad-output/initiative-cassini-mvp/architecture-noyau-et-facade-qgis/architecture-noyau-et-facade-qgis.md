@@ -667,6 +667,11 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
     - **Hors règle.** Le serveur MCP : le noyau n'y compose aucun plan, l'IA
       externe appelle les commandes une à une ; le risque d'un point inventé par
       elle est accepté.
+  - **Précision (2026-11-12, ticket 5.57) :** le même garde-fou, au même endroit et sans
+    redemande, contrôle chaque filtre par attribut déclaré au registre contre l'inventaire montré
+    au modèle : une valeur absente de la liste complète d'un champ (`values`), ou un champ absent
+    hors de la vue triée, rend une question `guard` qui nomme couche, champ et valeurs connues.
+    Une couche `step:`, un champ sans `values` et les comparaisons d'ordre restent hors contrôle.
   - **Vue triée d'un gros projet (2026-11-10).** Au-delà d'un seuil, le modèle voit un index
     réduit de toutes les couches et le détail de celles que la demande désigne. La vue est une
     fonction pure du noyau (inventaire, demande, journal), jamais journalisée. Si un plan fait

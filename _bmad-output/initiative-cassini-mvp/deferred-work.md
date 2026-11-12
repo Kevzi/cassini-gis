@@ -1087,3 +1087,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
   evidence: constat à la construction de 5.54 lot 1, 2026-11-11 ; le script de nuit refuse de partir sans lui (garde `preparatifs`).
   status: close, 2026-11-11, 5.54 lot 2 (`epic-agent-et-mcp/plan-5-54-lot-2-familles.md`)
   resolution: Script posé hors dépôt, `outils-cassini\scripts\recette-5-54.ps1` (à côté du dépôt) (UTF-8 avec BOM, `-Models -Project -Phrases -Out`, QGIS 3.44.15 sur `probe_recette.py` depuis `CASSINI-nuit`, sortie et `CODE <code>` dans `-Out`) ; `RECETTE_PS1` de `nuit-5-54.sh` pointe dessus par défaut.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-garde-fou-une-valeur-ou-un-champ-absent-de-l-inventaire-donn-plan.md`
+  summary: Tester l'interaction du garde-fou des attributs (5.57) avec la redemande élargie de 5.48 (un premier plan changé en question ne déclenche plus l'élargissement).
+  evidence: `reduced_with_fields` ne s'applique qu'à un `Plan::Calls` ; risque jugé faible (couches réduites non contrôlées), aucun test.

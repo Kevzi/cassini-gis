@@ -49,8 +49,9 @@ pub enum Plan {
     },
 }
 
-/// D'où vient une question : du modèle, ou du garde-fou sur les coordonnées du noyau
-/// (`point::guard_coordinates`). Jamais écrite au journal (AD-11).
+/// D'où vient une question : du modèle, ou d'un garde-fou du noyau, sur les coordonnées
+/// (`point::guard_coordinates`) ou sur les attributs (`attribute_guard::guard_attributes`,
+/// ticket 5.57). Jamais écrite au journal (AD-11).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QuestionSource {

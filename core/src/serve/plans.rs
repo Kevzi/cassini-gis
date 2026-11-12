@@ -235,7 +235,7 @@ pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<V
         ));
     }
     // Une question est une réplique, pas un plan : rien n'est gardé, aucun `plan_id`.
-    // Sa provenance est toujours explicite : `model`, ou `guard` (AD-23, coordonnées).
+    // Sa provenance est toujours explicite : `model`, ou `guard` (AD-23, coordonnées ou attributs).
     if let Plan::Question { question, source } = &plan {
         let question = short_ids.restore_text(question);
         let mut answer = json!({"question": question, "source": source.as_str()});

@@ -1730,12 +1730,15 @@ mod tests {
         seen: std::sync::Arc<std::sync::Mutex<Vec<Value>>>,
         /// Modèle demandé à chaque composition, dans l'ordre.
         chosen: std::sync::Arc<std::sync::Mutex<Vec<Option<String>>>>,
+        /// Applique le garde-fou des attributs au plan rendu, sur la vue reçue, comme le
+        /// compositeur réel (ticket 5.57).
+        guard_attributes: bool,
     }
 
     impl Composer for FixedComposer {
         fn compose(
             &self,
-            _registry: &Registry,
+            registry: &Registry,
             _request: &str,
             model: Option<&str>,
             inventory: &mut dyn FnMut() -> Result<
@@ -1744,6 +1747,7 @@ mod tests {
             >,
         ) -> Result<crate::plan::Plan, ErrorReport> {
             self.chosen.lock().unwrap().push(model.map(str::to_string));
+            let mut shown = Value::Null;
             if self.inventory {
                 let view = inventory()?;
                 assert!(view.inventory["layers"].is_array());
@@ -1755,6 +1759,7 @@ mod tests {
                     .unwrap_or(&view.inventory["layers"]);
                 let users = cut.as_array().unwrap().len();
                 assert!(view.user_layers <= users);
+                shown = view.inventory.clone();
                 self.seen.lock().unwrap().push(view.inventory);
             }
             let next = self.first.borrow_mut().pop_front();
@@ -1772,6 +1777,13 @@ mod tests {
                             }
                         }
                         other => other,
+                    }
+                })
+                .map(|plan| {
+                    if self.guard_attributes {
+                        crate::attribute_guard::guard_attributes(registry, plan, &shown)
+                    } else {
+                        plan
                     }
                 })
         }
@@ -1792,6 +1804,7 @@ mod tests {
             first: Default::default(),
             seen: Default::default(),
             chosen: Default::default(),
+            guard_attributes: false,
         })
     }
 
@@ -2689,6 +2702,7 @@ mod tests {
                 first: Default::default(),
                 seen: Default::default(),
                 chosen: Default::default(),
+                guard_attributes: false,
             };
             let mut c = Client::start_with(CANCEL_GRACE, Some(failing));
             c.hello_with(&ALL);
@@ -2762,6 +2776,44 @@ mod tests {
             r["result"],
             json!({"question": "Quel point ?", "source": "guard"})
         );
+        c.execute(3, "plan-1");
+        assert_eq!(code_of(&c.recv()), "plan.unknown");
+        c.assert_silent();
+        assert!(c.journal().is_empty());
+        c.close().1.unwrap();
+    }
+
+    /// Ticket 5.57 : une valeur absente des valeurs listées de l'inventaire rend la question du
+    /// garde-fou, sans `plan_id`, jamais exécutée ni journalisée (AD-11).
+    #[test]
+    fn an_attribute_guard_question_has_no_plan_id_and_writes_no_journal_line() {
+        let plan = json!({"kind":"calls","calls":[{"command":"analysis.select_by_attribute",
+            "params":{"layer_id":"zonage","field":"typezone","operator":"eq","value":"AU"}}]});
+        let mut composer = composer(plan).unwrap();
+        composer.guard_attributes = true;
+        let mut c = Client::start_with(CANCEL_GRACE, Some(composer));
+        c.hello_with(&ALL);
+        c.send(json!({"jsonrpc":"2.0","id":2,"method":"plan.propose",
+            "params":{"request":"Les zones AU."}}));
+        let order = c.recv();
+        assert_eq!(order["params"]["command"], "project.inventory");
+        c.send(reply(
+            &order["id"],
+            json!({"project_crs": "EPSG:2154", "extent": null, "layers": [
+                {"layer_id": "zonage", "name": "Zonage PLU", "source": "plu.gpkg",
+                 "crs": "EPSG:2154", "kind": "vector", "geometry": "MultiPolygon",
+                 "feature_count": 4,
+                 "fields": [{"name": "typezone", "type": "String", "values": ["U", "N"]}]}
+            ]}),
+        ));
+        let r = c.recv();
+        assert_eq!(
+            r["result"],
+            json!({"question": "Le champ typezone de la couche « Zonage PLU » n'a pas de valeur « AU » (valeurs : N, U) : laquelle faut-il prendre ?",
+                "source": "guard"}),
+            "{r}"
+        );
+        assert!(r["result"].get("plan_id").is_none());
         c.execute(3, "plan-1");
         assert_eq!(code_of(&c.recv()), "plan.unknown");
         c.assert_silent();
@@ -3527,6 +3579,7 @@ mod tests {
             ),
             seen: Default::default(),
             chosen: Default::default(),
+            guard_attributes: false,
         };
         let mut c = Client::start_with(CANCEL_GRACE, Some(composer));
         c.hello_with(&ALL);

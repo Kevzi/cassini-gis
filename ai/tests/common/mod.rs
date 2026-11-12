@@ -350,12 +350,13 @@ pub fn malformed_refusals(registry: &Registry, phrases: &[Value]) -> Vec<String>
 }
 
 /// Les phrases dont l'attendu est invalide, avec la raison : sorte inconnue ; refus mal écrit,
-/// ou dont un mot de `missing` ou une option de `missing_params` est au registre ; plan qui échoue `check_plan`, le garde-fou des coordonnées ou
+/// ou dont un mot de `missing` ou une option de `missing_params` est au registre ; plan qui échoue `check_plan`, le garde-fou des coordonnées ou des attributs, ou
 /// que la complétion change ; point littéral dans un système que sa commande refuse (WGS84 ou
 /// UTM seuls pour `coord.convert` et `geo.*`) ; couche, raster, champ ou fichier non chargé
 /// absents de l'inventaire.
 #[allow(dead_code)]
 pub fn invalid(registry: &Registry, inventory: &Value, phrases: &[Value]) -> Vec<String> {
+    use cassini_core::attribute_guard::guard_attributes;
     use cassini_core::point::guard_coordinates;
     let known = known(inventory);
     let mut out = refusals_now_wrong(&registry_ids(registry), phrases);
@@ -383,6 +384,11 @@ pub fn invalid(registry: &Registry, inventory: &Value, phrases: &[Value]) -> Vec
         if guard_coordinates(registry, plan.clone(), text) != plan {
             out.push(format!(
                 "{id} : le garde-fou des coordonnées refuse le plan attendu"
+            ));
+        }
+        if guard_attributes(registry, plan.clone(), inventory) != plan {
+            out.push(format!(
+                "{id} : le garde-fou des attributs refuse le plan attendu"
             ));
         }
         if complete_with(registry, plan.clone(), inventory) != plan {

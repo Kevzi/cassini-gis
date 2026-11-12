@@ -574,8 +574,8 @@ fn plan_model(
 /// `cassini plan <phrase> --inventory <fichier.json> [--model <fichier.gguf|.modele.json>]` :
 /// compose le plan d'une demande (AD-23) et l'affiche en JSON. `--model` prend un GGUF seul ou
 /// une déclaration de modèle (base, adaptateur, prompt). Rien n'est exécuté. Une question du
-/// modèle ou du garde-fou sur les coordonnées (`{"kind":"question",...}`, `"source":"guard"`
-/// pour le second) est un résultat : affichée sur `out`, code 0. Un plan
+/// modèle ou d'un garde-fou, coordonnées ou attributs (`{"kind":"question",...}`,
+/// `"source":"guard"` pour le second) est un résultat : affichée sur `out`, code 0. Un plan
 /// invalide n'est jamais affiché : l'erreur `agent.plan_invalid` ou `agent.refused` sort sur
 /// `err`.
 fn plan(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {

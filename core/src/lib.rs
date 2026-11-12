@@ -5,6 +5,7 @@
 
 pub mod agent_inventory;
 pub mod angle;
+pub mod attribute_guard;
 pub mod basemap;
 pub mod commands;
 pub mod contract;

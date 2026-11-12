@@ -74,6 +74,7 @@ impl Delegated for AnalysisSelectByAttribute {
         .cancellable(true)
         .output_params(&["out"])
         .output_ext(".gpkg")
+        .attribute_filter("layer_id", "field", "operator", "value")
         .example(serde_json::json!({"layer_id": "zonage_7a8b9c", "field": "typezone", "operator": "eq", "value": "U"}))
         .example(serde_json::json!({"layer_id": "communes_0d1e2f", "field": "population", "operator": "gt", "value": "1000"}))
         .example(serde_json::json!({"layer_id": "gares_1a2b3c", "field": "nom", "operator": "begins_with", "value": "Ville"}))

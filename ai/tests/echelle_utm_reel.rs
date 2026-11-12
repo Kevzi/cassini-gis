@@ -274,6 +274,7 @@ fn an_invalid_expected_answer_or_a_wrong_refusal_is_named() {
         ("EU01", "check_plan refuse"),
         ("U02", "le garde-fou des coordonnées refuse"),
         ("EU17", "valeur absente"),
+        ("EU17", "le garde-fou des attributs refuse"),
         ("EU36", "refus devenu faux"),
     ] {
         assert!(
@@ -283,7 +284,8 @@ fn an_invalid_expected_answer_or_a_wrong_refusal_is_named() {
             "{id} : {errors:?}"
         );
     }
-    assert_eq!(errors.len(), 4, "{errors:?}");
+    // EU17 compte deux fois : la valeur absente, et le garde-fou des attributs (5.57).
+    assert_eq!(errors.len(), 5, "{errors:?}");
 }
 
 #[test]

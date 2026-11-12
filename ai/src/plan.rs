@@ -10,6 +10,7 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use cassini_core::attribute_guard::guard_attributes;
 use cassini_core::commands::model_list::PromptKind;
 use cassini_core::plan::Plan;
 use cassini_core::point::{guard_coordinates, guard_rejected};
@@ -651,7 +652,10 @@ fn judge(registry: &Registry, completion: &Completion) -> Result<Plan, Vec<Strin
 /// l'inventaire) est un résultat, `Ok(Plan::Question)`, rendue sans redemande ; un plan dont
 /// un point ne vient ni de `request` ni d'une étape devient la question du garde-fou
 /// (`cassini_core::point::guard_coordinates`), et une sortie rejetée qui porte un tel point
-/// rend cette question tout de suite, sans redemande (`guard_rejected`) ;
+/// rend cette question tout de suite, sans redemande (`guard_rejected`) ; un plan validé dont un
+/// filtre par attribut est contredit par l'`inventory` montré au modèle (valeur absente de la
+/// liste complète d'un champ, ou champ absent) devient, sans redemande, la question du garde-fou
+/// sur les attributs (`cassini_core::attribute_guard::guard_attributes`, ticket 5.57) ;
 /// sinon deux sorties rejetées rendent `agent.plan_invalid`. Aucun plan invalide n'est
 /// jamais rendu.
 pub fn compose_plan(
@@ -717,9 +721,13 @@ pub fn compose_plan_anchored(
         };
         match judge(registry, &completion) {
             Ok(Plan::Refusal { reason }) => return Err(AgentError::Refused(reason)),
-            // Garde-fou de AD-23 sur les coordonnées, sur le plan validé : un point qui ne vient
-            // ni de la demande ni d'une étape devient une question à provenance `guard`.
-            Ok(plan) => return Ok(guard_coordinates(registry, plan, request)),
+            // Garde-fous de AD-23 sur le plan validé, sans redemande : un point qui ne vient ni
+            // de la demande ni d'une étape, puis une valeur ou un champ que l'inventaire montré
+            // contredit (ticket 5.57), deviennent une question à provenance `guard`.
+            Ok(plan) => {
+                let plan = guard_coordinates(registry, plan, request);
+                return Ok(guard_attributes(registry, plan, inventory));
+            }
             Err(errors) => {
                 // Garde-fou de AD-23 sur une sortie rejetée : un point inventé, même mal formé,
                 // rend la question tout de suite, sans redemande.
@@ -887,6 +895,110 @@ mod tests {
                 source: cassini_core::plan::QuestionSource::Guard,
             }
         );
+    }
+
+    /// Un zonage aux valeurs N et U, et un réseau de routes.
+    fn zoning() -> Value {
+        json!({"layers": [
+            {"layer_id": "zonage_1a2b", "name": "Zonage PLU", "kind": "vector",
+             "geometry": "MultiPolygon",
+             "fields": [{"name": "typezone", "type": "string", "values": ["N", "U"]}]},
+            {"layer_id": "routes_1", "name": "Routes", "kind": "vector", "geometry": "LineString",
+             "fields": []}
+        ]})
+    }
+
+    /// Compose sur `inventory` avec les sorties scriptées du modèle, dans l'ordre ; rend le
+    /// résultat et le nombre d'appels au générateur.
+    fn compose_scripted(inventory: &Value, outputs: &[&str]) -> (Result<Plan, AgentError>, usize) {
+        let mut calls = 0;
+        let result = compose_plan(&registry(), inventory, "Les zones AU.", &mut |_| {
+            calls += 1;
+            Ok(done(
+                outputs.get(calls - 1).expect("plus de sortie scriptée"),
+            ))
+        });
+        (result, calls)
+    }
+
+    fn zoning_select(field: &str, value: &str) -> String {
+        format!(
+            r#"{{"kind":"calls","calls":[{{"command":"analysis.select_by_attribute","params":{{"layer_id":"zonage_1a2b","field":"{field}","operator":"eq","value":"{value}"}}}}]}}"#
+        )
+    }
+
+    fn guard_question(text: &str) -> Plan {
+        Plan::Question {
+            question: text.to_string(),
+            source: cassini_core::plan::QuestionSource::Guard,
+        }
+    }
+
+    const ABSENT_AU: &str = "Le champ typezone de la couche « Zonage PLU » n'a pas de valeur « AU » (valeurs : N, U) : laquelle faut-il prendre ?";
+
+    #[test]
+    fn an_absent_value_becomes_the_attribute_guard_question() {
+        let (got, calls) = compose_scripted(&zoning(), &[&zoning_select("typezone", "AU")]);
+        assert_eq!(got.unwrap(), guard_question(ABSENT_AU));
+        assert_eq!(calls, 1, "le garde-fou ne redemande pas");
+    }
+
+    #[test]
+    fn a_listed_value_leaves_the_plan_to_the_user() {
+        let (got, calls) = compose_scripted(&zoning(), &[&zoning_select("typezone", "U")]);
+        let got = got.unwrap();
+        assert!(
+            matches!(&got, Plan::Calls { calls } if calls.len() == 1),
+            "{got:?}"
+        );
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn an_absent_field_becomes_the_attribute_guard_question() {
+        let (got, calls) = compose_scripted(&zoning(), &[&zoning_select("zone_plu", "U")]);
+        assert_eq!(
+            got.unwrap(),
+            guard_question(
+                "La couche « Zonage PLU » n'a aucun champ « zone_plu » (champs : typezone) : quel champ faut-il utiliser ?"
+            )
+        );
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn an_absent_field_in_a_sorted_view_leaves_the_plan() {
+        let mut inventory = zoning();
+        inventory["index"] = json!([
+            {"layer_id": "zonage_1a2b", "name": "Zonage PLU", "geometry": "MultiPolygon"},
+            {"layer_id": "routes_1", "name": "Routes", "geometry": "LineString"}
+        ]);
+        let output = zoning_select("zone_plu", "U");
+        let (got, calls) = compose_scripted(&inventory, &[&output]);
+        assert_eq!(got.unwrap(), serde_json::from_str::<Plan>(&output).unwrap());
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn a_coordinate_question_is_left_by_the_attribute_guard() {
+        // Une valeur absente et un point inventé : la question des coordonnées passe la
+        // première, inchangée.
+        let output = r#"{"kind":"calls","calls":[{"command":"analysis.select_by_attribute","params":{"layer_id":"zonage_1a2b","field":"typezone","operator":"eq","value":"AU"}},{"command":"analysis.isochrone","params":{"layer_id":"routes_1","origin":{"x":652000,"y":6850000,"epsg":2154},"mode":"walk","duration":{"value":10,"unit":"min"}}}]}"#;
+        let (got, calls) = compose_scripted(&zoning(), &[output]);
+        assert_eq!(
+            got.unwrap(),
+            guard_question(cassini_core::point::GUARD_QUESTION)
+        );
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn a_rejected_output_then_an_absent_value_gives_the_question_without_another_retry() {
+        let rejected = r#"{"kind":"calls","calls":[{"command":"analysis.buffer","params":{"layer_id":"routes_1","distance":{"value":-3,"unit":"m"}}}]}"#;
+        let (got, calls) =
+            compose_scripted(&zoning(), &[rejected, &zoning_select("typezone", "AU")]);
+        assert_eq!(got.unwrap(), guard_question(ABSENT_AU));
+        assert_eq!(calls, 2);
     }
 
     #[test]

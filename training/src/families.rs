@@ -16698,4 +16698,109 @@ mod tests {
             assert!(lengths.contains_key(&n), "{n} : {lengths:?}");
         }
     }
+
+    // -- garde-fou des attributs (5.57) ----------------------------------------
+
+    /// Le modèle n'apprend rien que le noyau bloque : tout exemple du jeu complet (graine et
+    /// taille par défaut) passe `guard_attributes` inchangé avec son inventaire, redemandes
+    /// comprises (le plan attendu après la redemande).
+    #[test]
+    fn every_generated_example_passes_the_attribute_guard_unchanged() {
+        let registry = cassini_core::registry::Registry::standard();
+        let (examples, _) = crate::generate(crate::DEFAULT_SEED, crate::DEFAULT_COUNT);
+        let mut selects = 0;
+        for e in &examples {
+            let plan: cassini_core::plan::Plan =
+                serde_json::from_value(e.expected.clone()).unwrap();
+            selects += commands(e)
+                .iter()
+                .filter(|c| **c == "analysis.select_by_attribute")
+                .count();
+            let guarded = cassini_core::attribute_guard::guard_attributes(
+                &registry,
+                plan.clone(),
+                &e.inventory,
+            );
+            assert_eq!(guarded, plan, "{} : {}", e.family, e.request);
+        }
+        assert!(selects > 500, "{selects}");
+    }
+
+    /// Une question de valeur absente du générateur nomme la même couche, le même champ, la même
+    /// valeur et les mêmes valeurs, dans le même ordre, que la question du noyau sur le plan que
+    /// la famille compose quand la valeur est listée : `eq`, ou `begins_with` pour une catégorie de
+    /// zonage à sous-zones (`zone_operator`), zonage compris.
+    #[test]
+    fn a_value_absent_question_matches_the_core_question() {
+        let registry = cassini_core::registry::Registry::standard();
+        let zonage = theme("zonage");
+        let mut rng = Rng::new(11);
+        let (mut asked, mut zoning) = (0, 0);
+        for _ in 0..1500 {
+            let Some(e) = question_valeur_absente(&mut rng) else {
+                continue;
+            };
+            let Some(listed) = &e.listed else {
+                continue;
+            };
+            asked += 1;
+            let q = e.expected["question"].as_str().unwrap();
+            let layer = e.inventory["layers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|l| l["layer_id"] == listed.layer_id.as_str())
+                .unwrap();
+            let name = layer["name"].as_str().unwrap();
+            // La valeur citée : le segment entre guillemets qui n'est pas le nom de la couche.
+            let value = q
+                .split('«')
+                .skip(1)
+                .filter_map(|s| s.split_once('»').map(|(v, _)| v.trim()))
+                .find(|v| *v != name)
+                .unwrap_or_else(|| panic!("{q}"));
+            let is_zoning = zonage
+                .slugs
+                .iter()
+                .any(|s| listed.layer_id.starts_with(&format!("{s}_")));
+            let operator = match ZONE_CATEGORIES.iter().find(|c| c.2 == value) {
+                Some((_, _, code, category)) if is_zoning => {
+                    zoning += 1;
+                    if category.iter().any(|v| v != code) {
+                        "begins_with"
+                    } else {
+                        "eq"
+                    }
+                }
+                _ => "eq",
+            };
+            let plan: cassini_core::plan::Plan = serde_json::from_value(json!({
+                "kind": "calls",
+                "calls": [select(&listed.layer_id, &listed.field, operator, value)]
+            }))
+            .unwrap();
+            let cassini_core::plan::Plan::Question { question, source } =
+                cassini_core::attribute_guard::guard_attributes(&registry, plan, &e.inventory)
+            else {
+                panic!("aucune question du noyau ({operator}) : {q}");
+            };
+            assert_eq!(source, cassini_core::plan::QuestionSource::Guard);
+            // Les valeurs listées, dans l'ordre de la question du générateur.
+            let list = listed.values.join(", ");
+            for part in [
+                format!("« {name} »"),
+                format!("champ {}", listed.field),
+                format!("« {value} »"),
+                list,
+            ] {
+                assert!(q.contains(&part), "générateur sans {part} : {q}");
+                assert!(
+                    question.contains(&part),
+                    "noyau sans {part} : {question} / {q}"
+                );
+            }
+        }
+        assert!(asked > 300, "{asked}");
+        assert!(zoning > 50, "{zoning}");
+    }
 }
