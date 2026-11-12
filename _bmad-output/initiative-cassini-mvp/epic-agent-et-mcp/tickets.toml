@@ -989,3 +989,20 @@ notes = [
   "Touche la meme grammaire que 52 (commandes connues du modele) : la seconde construite part de la premiere.",
   "Controle hors des criteres : relecture thorough, risque high sur la composition des plans.",
 ]
+
+[[entry]]
+id = 57
+type = "story"
+title = "Garde-fou : une valeur ou un champ absent de l'inventaire donne une question, jamais un plan"
+description = "Le modele compose parfois un plan qui filtre sur une valeur que l'inventaire montre absente des valeurs connues d'un champ (cle values, liste complete jusqu'a MAX_VALUES), ou sur un champ que la couche n'a pas : l'utilisateur recoit une carte vide ou fausse sans le savoir. Apres la composition et avant la validation de l'utilisateur, le noyau controle chaque selection par attribut du plan contre l'inventaire envoye au modele. Une valeur absente d'une liste complete, compte tenu de l'operateur (egalite, difference, debut de valeur pour une categorie de zonage), ou un champ absent de la couche, change le plan en une question qui nomme la couche, le champ et, pour une valeur, les valeurs connues. Un champ sans cle values (liste trop longue ou non montree) n'est jamais controle sur sa valeur. C'est un invariant generique du registre, comme le garde-fou des coordonnees : il vaut pour tout modele, local ou ajuste, et ne connait aucune phrase."
+verify = "Tests du noyau : valeur absente d'une liste complete -> question citant couche, champ et valeurs ; valeur presente, champ sans values, valeur sur une etape intermediaire (resultat d'une etape precedente) -> plan inchange ; champ absent -> question, plus d'erreur de validation montree a l'utilisateur ; zonage « en zone AU » present des qu'une valeur commence par AU ; le journal note la question ; plan_reel, question_reel, ecart_reel et la recette d'Annecy ne baissent pas avec le modele installe, et question_reel monte ou reste egale ; la duree par phrase reste dans la barre de 5.19."
+covers = ["CAP-4"]
+after = []
+hitl = false
+risk = "high"
+notes = [
+  "Decision: 2026-11-12 — tranche en party et approuve par le proprietaire : invariant du registre, pas un pansement par phrase ; s'ajoute a l'entrainement (5.54 seance 3), ne le remplace pas.",
+  "Decision: 2026-11-12 — le candidat 2 (ajuste-continu-5-54-2) est installe pour la video ; ce garde-fou couvre son defaut « valeur absente -> plan ».",
+  "Open question: forme exacte de la question et place du controle (avant ou dans la validation existante) : a fixer par le plan, en citant les AD du contrat d'architecture.",
+  "Controle hors des criteres : relecture thorough, risque high sur la composition des plans ; recette QGIS d'Annecy rejouee avec le modele installe.",
+]
