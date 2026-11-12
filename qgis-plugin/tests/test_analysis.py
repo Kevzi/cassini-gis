@@ -53,6 +53,9 @@ class FakeBackend:
         self.known_calls.append(epsg)
         return epsg in self.known
 
+    def epsg_is_metric(self, epsg):
+        return epsg in (2154, 32631, 32632)
+
     def name_of(self, layer):
         return layer.name
 
@@ -120,6 +123,10 @@ def start(entry, backend, params):
 
 
 class BufferTest(unittest.TestCase):
+    """Tampon : quand le noyau donne `work_epsg` (couche en degrés), reprojection vers ce système
+    puis `native:buffer` sur la couche temporaire ; sans lui (couche en mètres), `native:buffer`
+    seul, comme avant (changement de cap du 2026-11-12, amendement RA06)."""
+
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         self.out = os.path.join(self.dir.name, "1-analysis.buffer.gpkg")
@@ -129,19 +136,38 @@ class BufferTest(unittest.TestCase):
         self.dir.cleanup()
 
     def params(self, **extra):
+        """Paramètres tels que le noyau les dicte pour une couche en mètres : sans `work_epsg`."""
         p = {"layer_id": "g", "distance": {"value": 500, "unit": "m"}, "out": self.out}
         p.update(extra)
         return p
+
+    def degrees(self, **extra):
+        """Paramètres d'une couche en degrés : le noyau donne le système de calcul."""
+        return self.params(**dict({"layer_id": "w", "work_epsg": 2154}, **extra))
 
     def backend(self, **kw):
         layers = [FakeLayer("g"), FakeLayer("w", crs="EPSG:4326", metric=False), FakeLayer("r", vector=False)]
         return FakeBackend(layers, **kw)
 
-    def test_buffer_of_points_in_meters(self):
+    def algorithms(self, b):
+        return [algo for algo, _ in b.calls]
+
+    def reprojected(self, b, params):
+        """Lance le geste et finit la reprojection : rend le geste et ses réponses."""
+        g, calls = start(self.entry, b, params)
+        self.assertEqual(b.calls[0][0], "native:reprojectlayer")
+        b.finished(True, {"OUTPUT": "reprojetee"})
+        return g, calls
+
+    # -- couche en mètres : le tampon seul, comme avant -------------------------------------
+    def test_a_metric_layer_is_buffered_alone(self):
+        # Aucune reprojection : une couche dont des entités sont des collections de géométries
+        # passe comme avant (RA06).
         b = self.backend()
         g, calls = start(self.entry, b, self.params())
+        self.assertEqual(self.algorithms(b), ["native:buffer"])
         algo, p = b.calls[0]
-        self.assertEqual(algo, "native:buffer")
+        self.assertEqual(p["INPUT"].lid, "g")
         self.assertEqual(p["DISTANCE"], 500.0)
         self.assertFalse(p["DISSOLVE"])
         self.assertEqual(p["OUTPUT"], self.out)  # exactement le fichier du noyau
@@ -153,6 +179,7 @@ class BufferTest(unittest.TestCase):
             result, {"layer_id": "out_1", "name": "1-analysis.buffer", "feature_count": 8, "crs": "EPSG:2154"}
         )
         self.assertTrue(os.path.exists(self.out))
+        self.assertEqual(self.algorithms(b), ["native:buffer"])
 
     def test_kilometers_equal_meters(self):
         b = self.backend()
@@ -166,17 +193,26 @@ class BufferTest(unittest.TestCase):
         b.finished(True, {})
         self.assertEqual(calls[0][0]["feature_count"], 1)
 
-    def test_unknown_layer(self):
-        b = self.backend()
-        _, calls = start(self.entry, b, self.params(layer_id="nope"))
-        self.assertEqual(calls[0][1].code, "layer.not_found")
-        self.assertEqual(b.calls, [])
+    def test_an_empty_layer_is_buffered(self):
+        b = self.backend(loaded_count=0)
+        b.items["g"].count = 0
+        _, calls = start(self.entry, b, self.params())
+        self.assertEqual(self.algorithms(b), ["native:buffer"])
+        b.finished(True, {})
+        self.assertIsNone(calls[0][1])
+        self.assertEqual(calls[0][0]["feature_count"], 0)
 
-    def test_degrees_crs_refused(self):
+    def test_without_work_crs_a_layer_in_degrees_is_refused_as_before(self):
         b = self.backend()
         _, calls = start(self.entry, b, self.params(layer_id="w"))
         self.assertEqual(calls[0][1].code, "analysis.crs_not_metric")
         self.assertIn("reprojetez", calls[0][1].message)
+        self.assertEqual(b.calls, [])
+
+    def test_unknown_layer(self):
+        b = self.backend()
+        _, calls = start(self.entry, b, self.params(layer_id="nope"))
+        self.assertEqual(calls[0][1].code, "layer.not_found")
         self.assertEqual(b.calls, [])
 
     def test_raster_refused(self):
@@ -190,6 +226,17 @@ class BufferTest(unittest.TestCase):
         _, calls = start(self.entry, b, p)
         self.assertEqual(calls[0][1].code, "analysis.bad_params")
         self.assertEqual(b.calls, [])
+
+    def test_a_refusal_never_removes_a_file_the_gesture_did_not_write(self):
+        # Un fichier déjà au nom de `out` (écrit par quelqu'un d'autre) survit à un refus.
+        with open(self.out, "wb") as f:
+            f.write(b"autre")
+        for params in (self.params(distance={"value": 1, "unit": "mi"}), self.degrees(work_epsg=4326)):
+            b = self.backend()
+            _, calls = start(self.entry, b, params)
+            self.assertIsNotNone(calls[0][1])
+            self.assertEqual(b.calls, [])
+            self.assertTrue(os.path.exists(self.out))
 
     def test_cancel_stops_the_task_and_leaves_no_file(self):
         b = self.backend()
@@ -234,6 +281,119 @@ class BufferTest(unittest.TestCase):
         b.finished(True, {})
         self.assertEqual(calls[0][1].code, "analysis.failed")
         self.assertFalse(os.path.exists(self.out))
+
+    # -- couche en degrés : reprojection vers `work_epsg`, puis tampon ----------------------
+    def test_a_layer_in_degrees_is_reprojected_then_buffered(self):
+        b = self.backend()
+        _, calls = start(self.entry, b, self.degrees())
+        algo, p = b.calls[0]
+        self.assertEqual(algo, "native:reprojectlayer")
+        self.assertEqual(p["INPUT"].lid, "w")
+        self.assertEqual(p["TARGET_CRS"], "EPSG:2154")  # le système du noyau, jamais un choix du geste
+        self.assertEqual(p["OUTPUT"], "TEMPORARY_OUTPUT")
+        self.assertFalse(os.path.exists(self.out))
+        self.assertEqual(calls, [])
+        b.finished(True, {"OUTPUT": "reprojetee"})
+        algo, p = b.calls[1]
+        self.assertEqual(algo, "native:buffer")
+        self.assertEqual(p["INPUT"].lid, "reprojetee")  # la couche temporaire, pas l'entrée
+        self.assertEqual(p["DISTANCE"], 500.0)
+        self.assertEqual(p["OUTPUT"], self.out)
+        self.assertEqual(len(b.calls), 2)
+        b.finished(True, {})
+        result, error = calls[0]
+        self.assertIsNone(error)
+        self.assertEqual(result["crs"], "EPSG:2154")
+        self.assertTrue(os.path.exists(self.out))
+
+    def test_a_given_work_crs_opens_the_chain_whatever_the_layer(self):
+        # Le choix est dicté par le paramètre du noyau, jamais par un calcul du geste.
+        b = self.backend()
+        self.reprojected(b, self.params(work_epsg=2154))
+        self.assertEqual(b.calls[0][1]["INPUT"].lid, "g")
+        self.assertEqual(self.algorithms(b), ["native:reprojectlayer", "native:buffer"])
+
+    def test_dissolve_and_kilometers_after_the_reprojection(self):
+        b = self.backend()
+        self.reprojected(b, self.degrees(dissolve=True, distance={"value": 0.5, "unit": "km"}))
+        self.assertTrue(b.calls[1][1]["DISSOLVE"])
+        self.assertEqual(b.calls[1][1]["DISTANCE"], 500.0)
+
+    def test_an_empty_reprojected_layer_is_buffered_too(self):
+        b = self.backend()
+        b.temporary_count = 0
+        _, calls = self.reprojected(b, self.degrees())
+        self.assertEqual(b.calls[1][0], "native:buffer")
+        b.finished(True, {})
+        self.assertIsNone(calls[0][1])
+
+    def test_an_unknown_work_crs_is_refused(self):
+        b = self.backend()
+        _, calls = start(self.entry, b, self.degrees(work_epsg=999999))
+        self.assertEqual(calls[0][1].code, "data.unknown_crs")
+        self.assertEqual(b.calls, [])
+
+    def test_a_work_crs_in_degrees_is_refused(self):
+        b = self.backend()
+        _, calls = start(self.entry, b, self.degrees(work_epsg=4326))
+        error = calls[0][1]
+        self.assertEqual(error.code, "analysis.crs_not_metric")
+        self.assertIn("« gares »", error.message)
+        self.assertIn("EPSG:4326", error.message)
+        self.assertIn("reprojetez", error.message)
+        self.assertEqual(b.calls, [])
+
+    def test_a_bad_distance_is_refused_before_any_launch(self):
+        b = self.backend()
+        _, calls = start(self.entry, b, self.degrees(distance={"value": 1, "unit": "mi"}))
+        self.assertEqual(calls[0][1].code, "analysis.bad_params")
+        self.assertEqual(b.calls, [])
+
+    def test_cancel_during_the_reprojection_leaves_no_file(self):
+        b = self.backend()
+        g, calls = start(self.entry, b, self.degrees())
+        g.cancel()
+        self.assertTrue(b.handle.cancelled)
+        self.assertEqual(calls, [])  # la tâche tourne encore : pas de réponse
+        b.finished(False, {})
+        self.assertEqual(calls[0][1].code, "qgis.cancelled")
+        self.assertFalse(os.path.exists(self.out))
+        self.assertEqual(len(b.calls), 1)  # le tampon n'est jamais lancé
+        b.finished(True, {"OUTPUT": "reprojetee"})  # un rappel de plus ne répond pas deux fois
+        self.assertEqual(len(calls), 1)
+
+    def test_cancel_during_the_buffer_after_the_reprojection(self):
+        b = self.backend()
+        g, calls = self.reprojected(b, self.degrees())
+        g.cancel()
+        b.finished(False, {})
+        self.assertEqual(calls[0][1].code, "qgis.cancelled")
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_a_failed_reprojection_leaves_no_file(self):
+        b = self.backend()
+        _, calls = start(self.entry, b, self.degrees())
+        b.finished(False, {})
+        self.assertEqual(calls[0][1].code, "analysis.failed")
+        self.assertEqual(len(b.calls), 1)
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_a_reprojection_without_layer_fails(self):
+        b = self.backend()
+        _, calls = start(self.entry, b, self.degrees())
+        b.finished(True, {})
+        self.assertEqual(calls[0][1].code, "analysis.failed")
+        self.assertEqual(len(b.calls), 1)
+
+    def test_unreadable_output_after_the_reprojection(self):
+        b = self.backend(loadable=False)
+        _, calls = self.reprojected(b, self.degrees())
+        b.finished(True, {})
+        self.assertEqual(calls[0][1].code, "analysis.failed")
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_the_form_never_shows_the_work_crs(self):
+        self.assertIn("work_epsg", form.CORE_FILLED)
 
     def test_adding_a_table_row_is_enough(self):
         entry = {
@@ -715,7 +875,7 @@ class ReprojectTest(unittest.TestCase):
         _, calls = start(
             analysis.ALGORITHMS["analysis.buffer"],
             b,
-            {"layer_id": "w", "distance": {"value": 500, "unit": "m"}, "out": self.out},
+            {"layer_id": "w", "distance": {"value": 500, "unit": "m"}, "out": self.out, "work_epsg": 4326},
         )
         self.assertEqual(calls[0][1].code, "analysis.crs_not_metric")
         self.assertIn("reprojetez", calls[0][1].message)

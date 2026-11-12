@@ -916,9 +916,12 @@ fn hello(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, RpcErro
     state.announced = commands;
     state.style_kinds = style_kinds;
     // Les relais ne voient que les commandes disponibles, sans aucun chemin (AD-25, AD-9).
+    // Le système de calcul en mètres est choisi par le noyau (entrée 9.16) : l'outil du relais ne
+    // le montre pas, comme le modèle et le formulaire.
     let available = catalogue(state)
         .into_iter()
         .filter(|entry| entry["available"] == json!(true))
+        .map(|entry| without_core_filled(state.registry, entry))
         .collect();
     state.link.external.set_catalogue(available);
     let mut result = json!({
@@ -951,6 +954,26 @@ fn is_available(state: &State<'_>, id: &str, runs_in: Option<RunsIn>) -> bool {
         return false;
     }
     runs_in != Some(RunsIn::Qgis) || state.announced.contains(id)
+}
+
+/// Une entrée du catalogue des relais sans le paramètre que le noyau remplit seul du système de
+/// calcul (`CommandSpec::work_crs_param`) : ni dans les propriétés, ni parmi les requis.
+fn without_core_filled(registry: &Registry, mut entry: Value) -> Value {
+    let hidden = entry["id"]
+        .as_str()
+        .and_then(|id| registry.spec(id))
+        .and_then(|spec| spec.work_crs_param.as_ref())
+        .map(|(name, _)| name.clone());
+    if let Some(name) = hidden {
+        let schema = &mut entry["params_schema"];
+        if let Some(props) = schema.get_mut("properties").and_then(Value::as_object_mut) {
+            props.remove(&name);
+        }
+        if let Some(required) = schema.get_mut("required").and_then(Value::as_array_mut) {
+            required.retain(|r| r.as_str() != Some(name.as_str()));
+        }
+    }
+    entry
 }
 
 fn catalogue(state: &State<'_>) -> Vec<Value> {
@@ -1936,6 +1959,31 @@ mod tests {
             order
         }
 
+        /// Comme `expect_step`, pour une étape dont le noyau lit d'abord l'inventaire (le système
+        /// de calcul d'un tampon, entrée 9.16) : répond `inventory` à cette lecture.
+        fn expect_step_reading(
+            &self,
+            plan_id: &str,
+            step: u64,
+            command: &str,
+            inventory: Value,
+        ) -> Value {
+            let notice = self.recv();
+            assert_eq!(notice["method"], "plan.step", "{notice}");
+            assert_eq!(
+                notice["params"],
+                json!({"plan_id": plan_id, "step": step, "command": command})
+            );
+            let read = self.recv();
+            assert_eq!(read["method"], "order.execute", "{read}");
+            assert_eq!(read["params"]["command"], "project.inventory", "{read}");
+            self.send(reply(&read["id"], inventory));
+            let order = self.recv();
+            assert_eq!(order["method"], "order.execute");
+            assert_eq!(order["params"]["command"], command);
+            order
+        }
+
         fn execute(&self, id: u64, plan_id: &str) {
             self.send(json!({"jsonrpc":"2.0","id":id,"method":"plan.execute",
                 "params":{"plan_id":plan_id}}));
@@ -2426,6 +2474,16 @@ mod tests {
         ]})
     }
 
+    /// L'inventaire que la fausse extension rend au noyau avant le tampon : les gares en degrés,
+    /// le projet en Lambert-93, comme le projet d'Annecy.
+    fn demo_inventory() -> Value {
+        json!({"layers": [
+            {"layer_id": "plu", "name": "plu", "crs": "EPSG:2154", "crs_unit": "m"},
+            {"layer_id": "gares", "name": "gares", "crs": "EPSG:4326", "crs_unit": "deg"},
+            {"layer_id": "parcelles", "name": "parcelles", "crs": "EPSG:2154", "crs_unit": "m"}
+        ], "project_crs": "EPSG:2154", "project_crs_unit": "m", "extent": null})
+    }
+
     /// Fausse extension : écrit la sortie que le noyau a nommée, puis rend le résultat typé de
     /// l'étape. `prefix` distingue les ids de couche d'une session à l'autre ; `count` est le
     /// nombre d'entités rendu par chaque analyse.
@@ -2471,7 +2529,16 @@ mod tests {
         let calls = demo_plan()["calls"].as_array().unwrap().clone();
         for (i, call) in calls.iter().enumerate() {
             let step = i as u64 + 1;
-            let order = c.expect_step(&plan_id, step, call["command"].as_str().unwrap());
+            let command = call["command"].as_str().unwrap();
+            let order = if command == "analysis.buffer" {
+                // Les gares sont en degrés, le projet en Lambert-93 : le tampon est calculé en
+                // EPSG:2154, sans étape ajoutée au plan (entrée 9.16).
+                let order = c.expect_step_reading(&plan_id, step, command, demo_inventory());
+                assert_eq!(order["params"]["params"]["work_epsg"], 2154, "{order}");
+                order
+            } else {
+                c.expect_step(&plan_id, step, command)
+            };
             // Un seul ordre à la fois : rien ne part avant la réponse.
             c.assert_silent();
             c.send(demo_answer(&order, step, "l", 7));
@@ -2485,6 +2552,8 @@ mod tests {
         );
         let journal = c.journal();
         assert_eq!(journal.len(), 5);
+        // Le système de calcul est journalisé avec les paramètres du tampon (AD-11).
+        assert_eq!(journal[1]["params"]["work_epsg"], 2154, "{}", journal[1]);
         // Les références `step:N` sont résolues au journal.
         assert_eq!(
             journal[2]["params"]["overlay_layer_id"], "l_1",
@@ -2514,6 +2583,8 @@ mod tests {
         // Les couches sources restent ; chaque référence est liée à l'id neuf de son étape.
         assert_eq!(params[0]["layer_id"], "plu");
         assert_eq!(params[1]["layer_id"], "gares");
+        // Le système de calcul est relu dans le journal, sans relire l'inventaire (AD-11).
+        assert_eq!(params[1]["work_epsg"], 2154);
         assert_eq!(params[2]["layer_id"], "parcelles");
         assert_eq!(params[2]["overlay_layer_id"], "r_1");
         assert_eq!(params[3]["layer_id"], "r_3");

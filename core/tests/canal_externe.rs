@@ -259,6 +259,20 @@ impl Session {
         order
     }
 
+    /// L'ordre d'un tampon : le noyau lit d'abord l'inventaire pour choisir le système de calcul
+    /// (entrée 9.16), lecture à laquelle on répond par une couche en degrés dans un projet en Lambert-93.
+    fn expect_buffer_order(&self) -> Value {
+        let read = self.expect_order("project.inventory");
+        self.reply(
+            &read,
+            json!({"layers": [{"layer_id": "l", "name": "l", "crs": "EPSG:4326", "crs_unit": "deg"}],
+                   "project_crs": "EPSG:2154", "project_crs_unit": "m", "extent": null}),
+        );
+        let order = self.expect_order("analysis.buffer");
+        assert_eq!(order["params"]["params"]["work_epsg"], 2154, "{order}");
+        order
+    }
+
     /// La prochaine demande d'accord `external.approve`, dont la commande est vérifiée.
     fn expect_approve(&self, command: &str) -> Value {
         let request = self.recv();
@@ -535,6 +549,25 @@ fn an_attach_in_another_version_names_the_binary_to_update() {
         .contains("session QGIS"));
     relay.send(json!({"jsonrpc":"2.0","id":2,"method":"external.attach"}));
     assert_eq!(relay.recv()["error"]["code"], -32602);
+}
+
+#[test]
+fn the_relay_tool_of_a_buffer_hides_the_work_crs() {
+    let name = unique_name("tampon");
+    let mut s = Session::start(&name);
+    s.hello(&["analysis.buffer"]);
+    s.switch_on();
+    let mut relay = Relay::connect(&name);
+    let r = relay.attach(u64::from(PROTOCOL_VERSION));
+    let commands = r["result"]["commands"].as_array().unwrap();
+    let buffer = commands
+        .iter()
+        .find(|c| c["id"] == "analysis.buffer")
+        .expect("tampon offert au relais");
+    let props = &buffer["params_schema"]["properties"];
+    assert!(props.get("layer_id").is_some(), "{buffer}");
+    // Le système de calcul est choisi par le noyau (entrée 9.16) : jamais montré au relais.
+    assert!(props.get("work_epsg").is_none(), "{buffer}");
 }
 
 #[test]
@@ -1252,7 +1285,7 @@ fn a_relay_cancels_its_call_by_its_id() {
     let mut other = Relay::attached(&name);
     relay.run(7, "analysis.buffer", buffer_params());
     s.expect_call("started");
-    let order = s.expect_order("analysis.buffer");
+    let order = s.expect_buffer_order();
     // Un autre id, une autre connexion, ou l'id du relais depuis l'extension : rien ne change.
     assert_eq!(code_of(&relay.cancel(8, json!(99))), "request.unknown");
     assert_eq!(code_of(&other.cancel(8, json!(7))), "request.unknown");
@@ -1285,7 +1318,7 @@ fn the_extension_cancels_a_relay_call_by_its_call_id() {
     let mut relay = Relay::attached(&name);
     relay.run(7, "analysis.buffer", buffer_params());
     let call_id = s.expect_call("started")["call_id"].clone();
-    let order = s.expect_order("analysis.buffer");
+    let order = s.expect_buffer_order();
     s.send(json!({"jsonrpc":"2.0","id":80,"method":"request.cancel","params":{"id":call_id}}));
     let notice = s.recv();
     assert_eq!(notice["method"], "request.cancel", "{notice}");
@@ -1327,7 +1360,7 @@ fn switching_off_during_a_call_cancels_it_or_lets_it_finish() {
     let mut relay = Relay::attached(&name);
     relay.run(7, "analysis.buffer", buffer_params());
     s.expect_call("started");
-    let order = s.expect_order("analysis.buffer");
+    let order = s.expect_buffer_order();
     let off = s.switch(json!({"enabled": false}));
     assert_eq!(off["result"], json!({"enabled": false}));
     let notice = s.recv();
@@ -1378,7 +1411,7 @@ fn a_relay_that_leaves_during_a_call_frees_the_session() {
         relay
     };
     s.expect_call("started");
-    let order = s.expect_order("analysis.buffer");
+    let order = s.expect_buffer_order();
     // Le relais part : sa connexion se ferme (sous Windows, le tube l'est au dernier handle).
     relay.out.shutdown();
     relay.assert_closed();
@@ -1404,7 +1437,7 @@ fn closing_the_input_during_a_call_answers_nothing_but_the_loss() {
     let mut relay = Relay::attached(&name);
     relay.run(7, "analysis.buffer", buffer_params());
     s.expect_call("started");
-    s.expect_order("analysis.buffer");
+    s.expect_buffer_order();
     s.close().unwrap();
     let lost = relay.recv();
     assert_eq!(lost["method"], "external.session_lost", "{lost}");
@@ -1500,7 +1533,7 @@ fn a_relay_cannot_cancel_a_call_of_the_extension() {
     let mut relay = Relay::attached(&name);
     s.send(json!({"jsonrpc":"2.0","id":50,"method":"command.run",
         "params":{"command":"analysis.buffer","params":buffer_params()}}));
-    let order = s.expect_order("analysis.buffer");
+    let order = s.expect_buffer_order();
     assert_eq!(code_of(&relay.cancel(9, json!(50))), "request.unknown");
     // Aucune annulation n'est partie vers l'extension.
     s.assert_silent();

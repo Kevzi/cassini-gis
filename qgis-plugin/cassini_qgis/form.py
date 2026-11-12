@@ -16,8 +16,9 @@ ENUM = "enum"
 JSON = "json"
 
 # Paramètres remplis par le noyau (AD-10 ; au rejeu seulement : `leave_out`, ticket 5.36, et
-# `center`, ticket 5.38) : le formulaire ne les montre pas.
-CORE_FILLED = ("out", "leave_out", "center")
+# `center`, ticket 5.38 ; le système de calcul `work_epsg`, entrée 9.16) : le formulaire ne les
+# montre pas.
+CORE_FILLED = ("out", "leave_out", "center", "work_epsg")
 
 
 def offered(catalogue):

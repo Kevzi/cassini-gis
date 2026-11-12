@@ -445,9 +445,7 @@ Inventaire du projet ouvert : couches dans l'ordre de la légende, système du p
 ```json fiche
 {"id": "project.inventory", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
  "params": {},
- "result": ["extent", "layers", "project_crs", "project_name"],
- "planned_by": "epic 9, entrée 16",
- "planned_result": ["project_crs_unit"]}
+ "result": ["extent", "layers", "project_crs", "project_crs_unit", "project_name"]}
 ```
 
 ### `layer.add`
@@ -577,14 +575,18 @@ Erreur : `layer.invalid_source` (fichier illisible ou système non reconnu).
 ### `analysis.buffer`
 
 Zone tampon autour des entités d'une couche, ajoutée comme nouvelle couche. Une couche en
-degrés est d'abord reprojetée par QGIS, dans la même étape, vers le système en mètres
-choisi par le noyau (`work_epsg`) :
-- celui de la couche si elle est déjà en mètres ;
-- sinon celui du projet s'il est en mètres ;
+mètres est entourée telle quelle, sans reprojection : `work_epsg` n'est pas rempli
+(amendement RA06, 2026-11-12). Une couche en degrés est d'abord reprojetée par QGIS, dans
+la même étape, vers le système en mètres choisi par le noyau (`work_epsg`) :
+- celui du projet s'il est en mètres ;
 - sinon le fuseau UTM de l'étendue du projet.
 
 Si aucun ne convient : `analysis.crs_not_metric`, avant tout ordre. Le tampon sort dans ce
-système (`crs` du résultat). Changement de cap du 2026-11-12.
+système (`crs` du résultat). Changement de cap du 2026-11-12. Un système du projet en
+Mercator mondial (EPSG:3857, 3395, 900913, 102100, 102113) n'est pas retenu : le fuseau UTM
+le remplace. Note : la description lue par le modèle et par le client MCP garde « La couche
+d'entrée doit être dans un système de coordonnées en mètres » (décision du propriétaire, le
+modèle ayant été entraîné sur ce texte).
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
@@ -592,7 +594,7 @@ système (`crs` du résultat). Changement de cap du 2026-11-12.
 | `distance` | `Distance` | oui | `m`, `km` | Distance du tampon. |
 | `dissolve` | booléen | non | défaut faux | Fusionner les tampons en une entité, seulement si la phrase le demande. |
 | `out` | chaîne | non | — | Fourni par le noyau. |
-| `work_epsg` | entier | non | code EPSG | Fourni par le noyau : système en mètres du calcul. |
+| `work_epsg` | entier | non | code EPSG | Fourni par le noyau : système en mètres du calcul, pour une couche en degrés seulement ; absent pour une couche en mètres. |
 
 Résultat : `layer_id`, `name`, `crs`, `feature_count` (couche créée).
 
@@ -601,9 +603,8 @@ Résultat : `layer_id`, `name`, `crs`, `feature_count` (couche créée).
  "params": {"layer_id": {"type": "string", "required": true},
             "distance": {"type": "Distance", "required": true},
             "dissolve": {"type": "boolean", "required": false},
-            "out": {"type": "string", "required": false}},
- "planned_params": {"work_epsg": {"type": "integer", "required": false}},
- "planned_by": "epic 9, entrée 16",
+            "out": {"type": "string", "required": false},
+            "work_epsg": {"type": "integer", "required": false}},
  "result": ["crs", "feature_count", "layer_id", "name"]}
 ```
 

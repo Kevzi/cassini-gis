@@ -284,6 +284,8 @@ fn model_params(spec: &CommandSpec) -> Value {
         .iter()
         .chain(spec.leave_out_param.as_ref())
         .chain(spec.replay_param.as_ref().map(|(name, _)| name))
+        // Le système de calcul en mètres, choisi par le noyau (entrée 9.16).
+        .chain(spec.work_crs_param.as_ref().map(|(name, _)| name))
         .collect();
     if let Value::Object(map) = &mut params {
         map.remove("$schema");
@@ -617,11 +619,13 @@ fn judge(registry: &Registry, completion: &Completion) -> Result<Plan, Vec<Strin
                 };
                 if let Value::Object(params) = &call.params {
                     let replay = spec.replay_param.as_ref().map(|(name, _)| name);
+                    let work_crs = spec.work_crs_param.as_ref().map(|(name, _)| name);
                     for name in spec
                         .output_params
                         .iter()
                         .chain(&spec.leave_out_param)
                         .chain(replay)
+                        .chain(work_crs)
                     {
                         if params.contains_key(name) {
                             errors.push(format!(
@@ -1143,6 +1147,18 @@ mod tests {
     }
 
     #[test]
+    fn a_work_crs_chosen_by_the_model_is_rejected() {
+        let bad = r#"{"kind":"calls","calls":[{"command":"analysis.buffer","params":{"layer_id":"gares_1","distance":{"value":300,"unit":"m"},"work_epsg":2154}}]}"#;
+        let (result, seen) = compose(vec![done(bad), done(GOOD)]);
+        assert!(result.is_ok());
+        assert!(
+            seen[1][3].text.contains("« work_epsg »"),
+            "{}",
+            seen[1][3].text
+        );
+    }
+
+    #[test]
     fn a_leave_out_chosen_by_the_model_is_rejected() {
         let bad = r#"{"kind":"calls","calls":[{"command":"layout.export_pdf","params":{"title":"Carte","leave_out":["gares_1"]}}]}"#;
         let (result, seen) = compose(vec![done(bad), done(GOOD)]);
@@ -1219,6 +1235,9 @@ mod tests {
         let buffer = catalog_entry(reg.spec("analysis.buffer").unwrap());
         assert!(buffer["params"]["properties"].get("out").is_none());
         assert!(buffer["params"]["properties"].get("layer_id").is_some());
+        // Le système de calcul, choisi par le noyau, aussi (entrée 9.16).
+        assert!(buffer["params"]["properties"].get("work_epsg").is_none());
+        assert!(!text.contains("work_epsg"));
         // Le paramètre que seul le rejeu remplit reste caché au modèle (ticket 5.36).
         let export = catalog_entry(reg.spec("layout.export_pdf").unwrap());
         assert!(export["params"]["properties"].get("leave_out").is_none());
@@ -1541,6 +1560,11 @@ mod tests {
             (
                 "analysis.buffer",
                 r#"{"distance":{"unit":"m","value":300},"layer_id":"gares_1","out":"x.gpkg"}"#,
+            ),
+            // Le système de calcul, que le noyau choisit (entrée 9.16).
+            (
+                "analysis.buffer",
+                r#"{"distance":{"unit":"m","value":300},"layer_id":"gares_1","work_epsg":2154}"#,
             ),
             // Le paramètre de rejeu et `leave_out`, remplis par le noyau seul.
             (

@@ -543,7 +543,8 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   dans un système en mètres **choisi par le noyau** et passé dans un paramètre rempli par
   lui (`work_epsg`), absent de la grammaire du modèle, du MCP et du formulaire, comme
   `out`.
-  - Couche en mètres : son propre système.
+  - Couche en mètres : `work_epsg` n'est pas rempli, le calcul se fait dans son propre
+    système sans reprojection (amendement du 2026-11-12 après-midi sous AD-24).
   - Couche en degrés : le système du projet s'il est en mètres, sinon le fuseau UTM sur
     WGS84 de l'étendue du projet (`project.utm_epsg`), sinon `analysis.crs_not_metric`
     avant tout ordre.
@@ -792,6 +793,15 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   `work_epsg`, en temporaire), **toujours exécutée**, identité comprise. Ce n'est pas un
   choix entre deux suites. La garde « système en mètres » porte sur `work_epsg`.
   L'ajout incrémente la version de chaîne de la ligne (AD-11).
+- **Amendement (2026-11-12 après-midi, décision du propriétaire après la recette RA06) :**
+  la reprojection n'est exécutée que si le noyau a rempli `work_epsg`. Le noyau ne le
+  remplit pas pour une couche déjà en mètres : la ligne fait alors `native:buffer` seul,
+  comme avant 9.16 (une reprojection d'identité refusait les collections de géométries
+  laissées par un découpage, que le tampon seul accepte). Le choix reste celui du noyau,
+  porté par un paramètre et journalisé : l'extension ne décide rien (AD-5), le rejeu
+  reste identique ; une ligne ancienne sans `work_epsg` se rejoue comme une couche en
+  mètres. Remplace « toujours exécutée, identité comprise » ci-dessus. La garde « système
+  en mètres » porte sur `work_epsg` quand il est rempli, sinon sur la couche.
 
 ### AD-25 — Une commande déléguée n'est annoncée que si toute sa chaîne existe chez l'utilisateur
 

@@ -36,6 +36,36 @@ class LayerCommandsTest(unittest.TestCase):
             "Buffer of 500 m around Gares: new layer Tampon, 8 features.",
         )
 
+    def test_a_buffer_computed_in_another_system_says_so(self):
+        # Les gares sont en degrés : le noyau a fait calculer le tampon en Lambert-93 (9.16) et
+        # l'a journalisé sous `work_epsg`.
+        computed = dict(BUFFER, work_epsg=2154)
+        self.assertEqual(
+            say("analysis.buffer", computed, BUFFER_OUT),
+            "Zone tampon de 500 m autour de Gares, calculée en EPSG:2154 : nouvelle couche Tampon, 8 entités.",
+        )
+        self.assertEqual(
+            say("analysis.buffer", computed, BUFFER_OUT, lang="en"),
+            "Buffer of 500 m around Gares, computed in EPSG:2154: new layer Tampon, 8 features.",
+        )
+        # Sans `work_epsg` (couche en mètres), avec une valeur illisible, ou sans résultat : rien.
+        for params in (BUFFER, dict(BUFFER, work_epsg="2154"), dict(BUFFER, work_epsg=True)):
+            self.assertEqual(
+                say("analysis.buffer", params, BUFFER_OUT),
+                "Zone tampon de 500 m autour de Gares : nouvelle couche Tampon, 8 entités.",
+            )
+        self.assertEqual(say("analysis.buffer", computed), "Zone tampon de 500 m autour de Gares.")
+
+    def test_the_detail_of_a_done_buffer_forwards_the_logged_work_crs(self):
+        class Item:
+            command = "analysis.buffer"
+            params = dict(BUFFER, work_epsg=32632)
+            result = BUFFER_OUT
+            status = summary.runlog.DONE
+
+        text = summary.detail(Item(), "Tampon", "fr", qgis_name)
+        self.assertIn(", calculée en EPSG:32632 :", text)
+
     def test_singular_and_plural(self):
         one = dict(BUFFER_OUT, feature_count=1)
         zero = dict(BUFFER_OUT, feature_count=0)

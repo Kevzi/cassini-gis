@@ -187,6 +187,9 @@ fn check_spec(spec: &CommandSpec, out: &mut Vec<ContractViolation>) {
             }
         }
     }
+    if let Some((param, layer)) = &spec.work_crs_param {
+        check_work_crs_param(spec, param, layer, out);
+    }
     check_path_params(spec, out);
     for (which, schema) in [
         ("des paramètres", &spec.params_schema),
@@ -210,6 +213,52 @@ fn check_spec(spec: &CommandSpec, out: &mut Vec<ContractViolation>) {
                 ),
             ));
         }
+    }
+}
+
+/// Le paramètre du système de calcul (entrée 9.16) : un entier facultatif du schéma, rempli par
+/// le noyau, et le paramètre de la couche d'entrée qu'il lit dans l'inventaire.
+fn check_work_crs_param(
+    spec: &CommandSpec,
+    param: &str,
+    layer: &str,
+    out: &mut Vec<ContractViolation>,
+) {
+    let root = &spec.params_schema;
+    let property = |n: &str| root.get("properties").and_then(|p| p.get(n));
+    let mut fault = |message: String| {
+        out.push(violation("contract.work_crs_param", &spec.id, &message));
+    };
+    for name in [param, layer] {
+        if property(name).is_none() {
+            fault(format!(
+                "`work_crs_param` nomme « {name} », absent des propriétés du schéma des paramètres."
+            ));
+        }
+    }
+    if let Some(p) = property(param) {
+        let integer = find(p, root, 0, &|m| {
+            m.get("type").filter(|t| {
+                t.as_str() == Some("integer")
+                    || t.as_array()
+                        .is_some_and(|a| a.iter().any(|v| v.as_str() == Some("integer")))
+            })
+        })
+        .is_some();
+        if !integer {
+            fault(format!(
+                "`work_crs_param` nomme « {param} », dont le schéma n'est pas un entier (code EPSG)."
+            ));
+        }
+    }
+    let required = root
+        .get("required")
+        .and_then(Value::as_array)
+        .is_some_and(|r| r.iter().any(|v| v.as_str() == Some(param)));
+    if required {
+        fault(format!(
+            "`work_crs_param` nomme « {param} », obligatoire : le noyau le remplit, il doit être facultatif."
+        ));
     }
 }
 
@@ -912,6 +961,52 @@ mod tests {
         assert_eq!(violations[0].code, "contract.path_param");
         assert!(violations[0].message.contains("pth"));
         assert_eq!(codes(&only(OutputParamMissing)), ["contract.output_param"]);
+    }
+
+    command!(WorkCrsWellFormed, |mut s| {
+        s.params_schema = json!({
+            "$schema": DIALECT,
+            "type": "object",
+            "properties": {
+                "layer_id": {"type": "string"},
+                "work_epsg": {"type": ["integer", "null"], "format": "uint32", "minimum": 0}
+            },
+            "required": ["layer_id"]
+        });
+        s.work_crs_param("work_epsg", "layer_id")
+    });
+    command!(WorkCrsMissing, |s| s
+        .work_crs_param("work_epsg", "layer_id"));
+    command!(WorkCrsNotInteger, |mut s| {
+        s.params_schema = json!({
+            "$schema": DIALECT,
+            "type": "object",
+            "properties": {"layer_id": {"type": "string"}, "work_epsg": {"type": "string"}},
+            "required": ["layer_id", "work_epsg"]
+        });
+        s.work_crs_param("work_epsg", "layer_id")
+    });
+
+    #[test]
+    fn a_work_crs_param_is_an_optional_integer_next_to_its_layer() {
+        assert!(only(WorkCrsWellFormed).check_contract().is_empty());
+        // Ni le paramètre ni la couche au schéma : deux violations.
+        assert_eq!(
+            codes(&only(WorkCrsMissing)),
+            ["contract.work_crs_param", "contract.work_crs_param"]
+        );
+        // Une chaîne obligatoire : deux violations, quel que soit leur ordre.
+        let violations = only(WorkCrsNotInteger).check_contract();
+        assert_eq!(violations.len(), 2, "{violations:?}");
+        assert!(violations
+            .iter()
+            .all(|v| v.code == "contract.work_crs_param"));
+        for word in ["entier", "facultatif"] {
+            assert!(
+                violations.iter().any(|v| v.message.contains(word)),
+                "{word} : {violations:?}"
+            );
+        }
     }
 
     #[test]

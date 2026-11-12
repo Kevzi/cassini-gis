@@ -175,6 +175,16 @@ class _Names:
         return value
 
 
+def _computed_in(lang, p, r, names):
+    """` , calculée en EPSG:2154` quand le noyau a fait calculer le tampon dans un système en
+    mètres (`work_epsg` des paramètres journalisés, couche en degrés, changement de cap du
+    2026-11-12) ; sans lui, ou sans résultat lisible : rien."""
+    work = p.get("work_epsg")
+    if not r or isinstance(work, bool) or not isinstance(work, int) or work <= 0:
+        return ""
+    return texts.tr(lang, "sum_computed_in", crs="EPSG:%d" % work)
+
+
 def _out_layer(lang, result):
     """` : nouvelle couche Tampon, 8 entités` ; illisible : rien."""
     name = result.get("name")
@@ -197,6 +207,7 @@ def _buffer(lang, p, r, names):
     )
     if p.get("dissolve") is True:
         text += texts.tr(lang, "sum_dissolved")
+    text += _computed_in(lang, p, r, names)
     return text + (_out_layer(lang, r) if r else "")
 
 

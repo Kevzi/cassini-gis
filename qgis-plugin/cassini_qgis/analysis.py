@@ -62,6 +62,18 @@ def translate_buffer(params, layer):
     }
 
 
+# Reprojection fixe qui ouvre la chaîne d'une ligne `work_crs` quand le noyau donne un système
+# de calcul, c'est-à-dire pour une couche en degrés seulement (changement de cap du 2026-11-12,
+# amendement RA06 d'AD-24) : vers le système que le noyau a choisi, sans autre choix.
+_WORK_CRS_ALGORITHM = "native:reprojectlayer"
+
+
+def translate_work_crs(work_epsg, layer):
+    """Couche d'entrée -> paramètres de `native:reprojectlayer` vers EPSG:`work_epsg`, sans la
+    sortie (temporaire). `OPERATION` est laissé de côté, comme pour `data.reproject`."""
+    return {"INPUT": layer, "TARGET_CRS": "EPSG:%d" % work_epsg, "CONVERT_CURVED_GEOMETRIES": False}
+
+
 def translate_intersect(params, layer):
     """Paramètres neutres de `analysis.intersect` -> paramètres de `native:intersection`.
 
@@ -300,7 +312,15 @@ def summarize_zonal_statistics(backend, layer, params):
 #               projet (le noyau dicte `layer.open_raster`) ; le résultat est `file` et `epsg` ;
 #   assign_crs: (facultatif, avec `raster`) paramètre du noyau qui déclare le code EPSG d'une
 #               source sans système : connu de QGIS (`data.unknown_crs` sinon), et refusé
-#               (`analysis.bad_params`) si la source a déjà un autre système.
+#               (`analysis.bad_params`) si la source a déjà un autre système ;
+#   work_crs  : (facultatif) paramètre du noyau qui porte le système de calcul en mètres, que le
+#               noyau ne remplit que pour une couche en degrés (changement de cap du 2026-11-12,
+#               amendement RA06 d'AD-24). Présent : inconnu de QGIS, `data.unknown_crs` ; pas en
+#               mètres, `analysis.crs_not_metric`, avant tout lancement ; la chaîne commence alors
+#               par `native:reprojectlayer` vers ce système, en sortie temporaire, et l'algorithme
+#               de la ligne travaille sur la couche reprojetée, vide ou non. Absent : l'algorithme
+#               seul, avec la garde `metric`, comme avant. Le choix est dicté par le paramètre du
+#               noyau ; le geste ne calcule ni ne choisit aucun système (AD-5, AD-24).
 ALGORITHMS = {
     "analysis.buffer": {
         "algorithm": "native:buffer",
@@ -308,6 +328,7 @@ ALGORITHMS = {
         "output": "OUTPUT",
         "input": "layer_id",
         "metric": True,
+        "work_crs": "work_epsg",
     },
     "analysis.intersect": {
         "algorithm": "native:intersection",
@@ -391,6 +412,13 @@ class QgisBackend(_ReadBackend):
         from qgis.core import QgsCoordinateReferenceSystem
 
         return QgsCoordinateReferenceSystem("EPSG:%d" % epsg).isValid()
+
+    def epsg_is_metric(self, epsg):
+        """Vrai si le système EPSG:`epsg` a le mètre pour unité, selon QGIS."""
+        from qgis.core import Qgis, QgsCoordinateReferenceSystem
+
+        crs = QgsCoordinateReferenceSystem("EPSG:%d" % epsg)
+        return crs.isValid() and crs.mapUnits() == Qgis.DistanceUnit.Meters
 
     def run_algorithm(self, algorithm_id, parameters, finished, previous=None, encoding=None):
         """Lance l'algorithme en tâche annulable ; `finished(ok, results)` à la fin.
@@ -555,6 +583,9 @@ class _TaskHandle:
 
 
 _TEMPORARY = "TEMPORARY_OUTPUT"
+# Stade de la reprojection qui ouvre une ligne `work_crs` ; 0 et 1 sont l'algorithme de la ligne
+# et l'étape `then`.
+_WORK_CRS_STAGE = "work_crs"
 _GEOMETRY_LABELS = {"Polygon": "de polygones", "Line": "de lignes", "Point": "de points"}
 
 
@@ -602,7 +633,8 @@ class ProcessingGesture:
         self._handle = None
         self._loaded = False
         self._cancelling = False
-        self._stage = 0  # 0 : première étape ; 1 : étape `then`
+        self._stage = 0  # `_WORK_CRS_STAGE` : reprojection ; 0 : algorithme de la ligne ; 1 : `then`
+        self._overlay_layer = None
 
     def start(self, params, done):
         self._done = done
@@ -653,7 +685,12 @@ class ProcessingGesture:
             raise GestureError(
                 NOT_VECTOR, "La couche « %s » n'est pas une couche vecteur." % backend.name_of(layer)
             )
-        if entry.get("metric") and not backend.crs_is_metric(layer):
+        # Le système de calcul, quand le noyau en donne un (couche en degrés) : la garde porte sur
+        # lui ; sinon la garde porte sur la couche, comme avant l'entrée 9.16.
+        work_epsg = params.get(entry["work_crs"]) if entry.get("work_crs") else None
+        if work_epsg is not None:
+            work_epsg = self._check_work_crs(work_epsg, layer)
+        elif entry.get("metric") and not backend.crs_is_metric(layer):
             raise GestureError(
                 CRS_NOT_METRIC,
                 "La couche « %s » est en %s, dont l'unité n'est pas le mètre : "
@@ -688,14 +725,51 @@ class ProcessingGesture:
             overlay = self._overlay(params, layer_id)
         if entry.get("field") and not (entry.get("field_optional") and not params.get(entry["field"])):
             self._check_field(params.get(entry["field"]), layer)
-        algorithm_params = entry["translate"](params, layer)
+        # Traduits dès maintenant, sur la couche d'entrée : un paramètre invalide est refusé avant
+        # tout lancement, même quand une reprojection ouvre la chaîne. `out` n'est à ce geste (et
+        # nettoyé par lui) qu'une fois tous les refus passés.
+        algorithm_params = self._line_parameters(layer, overlay, out)
+        self._out = out
+        if work_epsg is not None:
+            self._overlay_layer = overlay
+            self._stage = _WORK_CRS_STAGE
+            reprojection = translate_work_crs(work_epsg, layer)
+            reprojection["OUTPUT"] = _TEMPORARY
+            return backend.run_algorithm(_WORK_CRS_ALGORITHM, reprojection, self._on_finished)
+        return self._run_line(algorithm_params)
+
+    def _line_parameters(self, source, overlay, out):
+        """Paramètres de l'algorithme de la ligne, sur la couche `source`, vers `out`."""
+        entry = self._entry
+        algorithm_params = entry["translate"](self._params or {}, source)
         if overlay is not None:
             algorithm_params[entry["overlay_key"]] = overlay
         # Avec une étape suivante, la première écrit en sortie temporaire : un seul fichier, `out`.
         algorithm_params[entry["output"]] = _TEMPORARY if entry.get("then") else out
-        self._out = out
+        return algorithm_params
+
+    def _run_line(self, algorithm_params, previous=None):
+        entry = self._entry
         extra = {"encoding": entry["encoding"]} if entry.get("encoding") else {}
-        return backend.run_algorithm(entry["algorithm"], algorithm_params, self._on_finished, **extra)
+        if previous is not None:
+            extra["previous"] = previous
+        return self._backend.run_algorithm(entry["algorithm"], algorithm_params, self._on_finished, **extra)
+
+    def _check_work_crs(self, value, layer):
+        """Système de calcul donné par le noyau : entier, connu de QGIS, en mètres."""
+        backend = self._backend
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise GestureError(BAD_PARAMS, "Le système de calcul doit être un code EPSG entier positif.")
+        if not backend.crs_is_known(value):
+            raise GestureError(UNKNOWN_CRS, "Système inconnu de QGIS : EPSG:%d." % value)
+        if not backend.epsg_is_metric(value):
+            raise GestureError(
+                CRS_NOT_METRIC,
+                "La couche « %s » est en %s et le calcul serait fait en EPSG:%d, dont l'unité n'est "
+                "pas le mètre : reprojetez-la d'abord dans un système en mètres (par exemple EPSG:2154)."
+                % (backend.name_of(layer), backend.crs_of(layer), value),
+            )
+        return value
 
     def _begin_raster(self, params, out):
         """Genre d'entrée `raster` : un fichier désigné par son chemin, jamais une couche."""
@@ -776,6 +850,9 @@ class ProcessingGesture:
         try:
             if not ok:
                 raise GestureError(FAILED, "L'analyse a échoué dans QGIS.")
+            if self._stage == _WORK_CRS_STAGE:
+                self._after_reprojection(results)
+                return
             then = self._entry.get("then")
             if then is not None and self._stage == 0:
                 self._chain(then, results)
@@ -785,6 +862,17 @@ class ProcessingGesture:
             self._fail(exc)
         except Exception:
             self._fail(GestureError(FAILED, "Échec inattendu de l'analyse."))
+
+    def _after_reprojection(self, results):
+        """Lance l'algorithme de la ligne sur la couche reprojetée, vide ou non."""
+        backend = self._backend
+        reference = results.get("OUTPUT")
+        temporary = backend.temporary_layer(self._handle, reference) if reference else None
+        if temporary is None:
+            raise GestureError(FAILED, "La reprojection de la couche d'entrée n'a rien rendu.")
+        parameters = self._line_parameters(temporary, self._overlay_layer, self._out)
+        self._stage = 0
+        self._handle = self._run_line(parameters, previous=self._handle)
 
     def _chain(self, then, results):
         """Lance l'étape suivante sur la sortie temporaire de la première."""

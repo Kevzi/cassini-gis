@@ -635,7 +635,7 @@ fn text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
 }
 
 /// `EPSG:2154` donne `2154` ; un autre SCR (`IGNF:LAMB93`) ne donne rien.
-fn epsg(authid: &str) -> Option<u64> {
+pub(crate) fn epsg(authid: &str) -> Option<u64> {
     let (authority, code) = authid.split_once(':')?;
     if !authority.eq_ignore_ascii_case("EPSG") || code.is_empty() {
         return None;
@@ -797,6 +797,19 @@ mod tests {
                 "unloaded_files": []
             })
         );
+    }
+
+    #[test]
+    fn the_units_of_the_systems_never_reach_the_model() {
+        // Lues par le noyau pour choisir un système de calcul (entrée 9.16), jamais montrées.
+        let mut layer = plu();
+        layer["crs_unit"] = json!("m");
+        let with = json!({"project_name": "projet-test", "project_crs": "EPSG:2154",
+            "project_crs_unit": "m", "extent": null, "layers": [layer]});
+        let without = json!({"project_name": "projet-test", "project_crs": "EPSG:2154",
+            "extent": null, "layers": [plu()]});
+        assert_eq!(agent_inventory(&with), agent_inventory(&without));
+        assert!(!agent_inventory(&with).to_string().contains("unit\""));
     }
 
     fn with_lonlat(west: f64, south: f64, east: f64, north: f64) -> Value {

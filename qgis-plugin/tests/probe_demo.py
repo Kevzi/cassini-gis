@@ -13,7 +13,10 @@ partir sans lui, pour ne jamais prendre en silence le dossier des modèles du po
 d'un noyau construit avec `--features cassini-ai/cuda`, que le Python de QGIS ne voit pas).
 
 La sonde ouvre le projet, lance `cassini serve` par `client.py` avec les vrais gestes de
-l'extension, propose la phrase de démo exacte de `CLAUDE.md`, valide le plan, l'exécute et
+l'extension, propose la phrase de démo exacte de `CLAUDE.md` (territoire d'Annecy, décision du
+propriétaire du 2026-11-10 ; projet `donnees-test-cassini/annecy/projet-test-annecy.qgz`, dont
+les gares sont en EPSG:4326 : le tampon est calculé dans le système du projet, entrée 9.16),
+valide le plan, l'exécute et
 imprime : la durée de `project.inventory`, la durée de la composition, le plan, le résultat de
 chaque étape et le chemin du PDF (qui doit commencer par `%PDF`). Elle ne modifie ni le projet ni
 les fichiers d'origine ; les sorties vont dans le dossier `<projet>.cassini/`, à côté du projet.
@@ -33,7 +36,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 PHRASE = (
     "Trouve les parcelles constructibles du PLU à moins de 500 m d'une gare à "
-    "Villeneuve-le-Roi et sors-moi la carte en PDF."
+    "Annecy et sors-moi la carte en PDF."
 )
 GIVE_UP_MS = 30 * 60 * 1000
 

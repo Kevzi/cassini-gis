@@ -825,7 +825,32 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-second-jeu-de-test-reel-annecy-pret-pour-la-demonstration-plan.md`
   summary: Une couche de points en EPSG:4326, le cas d'un CSV de gares en latitude et longitude, ne passe pas un tampon (`analysis.crs_not_metric`) tant que `data.reproject` reste seulement planifiée ; la phrase de démo transposée à Annecy échoue pour cette raison.
   evidence: Sonde 11.18, phrases 1 et 10, couche `gares` lue depuis `gares-74-4326.csv`. Le jeu de Villeneuve donne ses gares en 2154 et ne montrait pas ce cas.
-  status: à résoudre par 9.16
+  status: résolu par 9.16, 2026-11-12 (`epic-facade-qgis/story-tampon-sur-une-couche-en-degres-calcul-dans-un-systeme-en-me-plan.md`)
+  resolution: Changement de cap `change-distance-en-metres-sur-couche-en-degres`. Le noyau lit l'inventaire avant l'ordre et, pour une couche en degrés, remplit `work_epsg` (`core/src/work_crs.rs`) : système du projet s'il est en mètres, sinon le fuseau UTM de l'étendue du projet, sinon `analysis.crs_not_metric` avant tout ordre. Avec `work_epsg`, la ligne `analysis.buffer` de l'extension reprojette vers lui (`native:reprojectlayer`, temporaire) puis fait le tampon ; sans lui (couche en mètres, amendement RA06), le tampon seul, comme avant. Aucune étape ajoutée au plan ; `work_epsg` journalisé et relu au rejeu.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-facade-qgis/story-tampon-sur-une-couche-en-degres-calcul-dans-un-systeme-en-me-plan.md`
+  summary: La version de chaîne d'une ligne de la table fermée (AD-11, resserrement du 2026-10-18) n'est toujours pas construite : ni la table de l'extension ni `session.hello` n'en portent. La ligne `analysis.buffer` passe à deux algorithmes sans que le rejeu puisse le signaler.
+  evidence: Plan 9.16, décision du propriétaire du 2026-11-12 : ne pas la construire ici, ce qui changerait le protocole. La fidélité du rejeu tient à `work_epsg` journalisé (une ligne qui ne le porte pas, ancienne ou sur une couche en mètres, se rejoue en tampon seul, comme à l'origine). À signaler au propriétaire ; à construire avec la prochaine ligne qui change de chaîne (10.32, 10.33).
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-facade-qgis/story-tampon-sur-une-couche-en-degres-calcul-dans-un-systeme-en-me-plan.md`
+  summary: Une couche en degrés qui porte des collections de géométries (`GeometryCollection` dans une couche de lignes, par exemple) échoue à la reprojection qui ouvre le tampon ; le message doit être clair. À traiter si un utilisateur le rencontre.
+  evidence: Recette 9.16 du 2026-11-12, RA06 : `cours-d-eau-74.gpkg` (en mètres) porte 6 `GeometryCollection` sur 1 105 entités, restes du découpage sur le 74 ; `native:reprojectlayer` vers un temporaire les refuse (« Could not add feature with geometry type GeometryCollection to layer of type MultiLineString ») et l'étape rend `analysis.failed` (« L'analyse a échoué dans QGIS. »). Réglé pour une couche en mètres par l'amendement RA06 (pas de reprojection) ; reste possible pour une couche en degrés.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-facade-qgis/story-tampon-sur-une-couche-en-degres-calcul-dans-un-systeme-en-me-plan.md`
+  summary: Annuler un tampon pendant la lecture cachée de l'inventaire (avant l'ordre du tampon) répond `request.not_cancellable` en nommant `project.inventory`, commande que l'utilisateur n'a pas lancée.
+  evidence: Relecture de 9.16 (2026-11-12). `project.inventory` est déclarée non annulable ; la lecture dure quelques centièmes de seconde sur Annecy (faits gardés par couche), mais jusqu'à 23 s à la première lecture d'un gros projet. À traiter : laisser passer l'annulation à l'ordre du tampon, ou nommer la commande en cours.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-facade-qgis/story-tampon-sur-une-couche-en-degres-calcul-dans-un-systeme-en-me-plan.md`
+  summary: Le client MCP lit toujours, dans la description de `analysis.buffer`, « La couche d'entrée doit être dans un système de coordonnées en mètres », alors qu'une couche en degrés passe désormais.
+  evidence: Décision du propriétaire du 2026-11-12 : le texte lu par le modèle ne change pas (le modèle a été entraîné dessus) ; l'outil MCP reprend la même description. Le catalogue et la fiche disent le comportement réel. À reprendre au prochain ré-entraînement, ou par une description propre au MCP.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-facade-qgis/story-tampon-sur-une-couche-en-degres-calcul-dans-un-systeme-en-me-plan.md`
+  summary: Une couche en mètres dans un Mercator mondial (EPSG:3857 et voisins) est toujours tamponnée dans ce système, où 500 m n'en couvrent qu'environ 350 à 46° N.
+  evidence: Comportement d'avant 9.16, gardé par l'amendement RA06 (on ne reprojette que les couches en degrés). Le noyau écarte déjà ces systèmes comme système de calcul d'une couche en degrés (`work_crs::GLOBAL_MERCATOR`) ; pour une couche en mètres, il faudrait remplir `work_epsg` avec le fuseau UTM, ce que la règle actuelle exclut.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-facade-qgis/story-tampon-sur-une-couche-en-degres-calcul-dans-un-systeme-en-me-plan.md`
+  summary: Le fuseau UTM retenu pour une couche en degrés dans un projet en degrés vient de l'étendue du projet, pas de celle de la couche ; un projet large (plusieurs fuseaux) refuse donc une couche locale.
+  evidence: L'inventaire ne porte pas l'étendue de chaque couche (changement de cap §3.2) ; pour une couche à l'échelle d'une commune ou d'un département dans un projet de même taille, le résultat est le même. À reprendre si l'inventaire gagne l'étendue par couche.
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-second-jeu-de-test-reel-annecy-pret-pour-la-demonstration-plan.md`
   summary: Sur le projet d'Annecy (10 couches, dont BD TOPO aux dizaines de champs), la composition prend 30 à 35 s par phrase sur GPU une fois les communes ramenées au 74 (37 à 60 s au premier passage), contre environ 14 s sur Villeneuve ; l'exigence est de moins de 30 s.

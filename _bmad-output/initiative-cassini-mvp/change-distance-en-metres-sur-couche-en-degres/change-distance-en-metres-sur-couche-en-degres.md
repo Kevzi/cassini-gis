@@ -629,3 +629,14 @@ attend la vidéo y créerait un cycle entre epics (l'epic de démo attend l'epic
 qui attendrait la publication). L'epic 10 attend déjà la démo et la publication. Il porte
 `raster.contour` (10.26) et 10.32, qui applique la même règle à l'isochrone.
 
+
+## 7. Amendement approuvé (2026-11-12 après-midi) : pas de reprojection d'identité
+
+Constat de la recette d'Annecy de 9.16 (19/20) : RA06, tampon de 10 m sur `cours_d_eau`
+(couche déjà en Lambert-93), échoue : 6 objets sur 1 105 sont des collections de géométries,
+restes du découpage, que `native:reprojectlayer` vers une couche temporaire refuse alors que
+`native:buffer` seul les accepte. Décision du propriétaire : on ne reprojette que les couches
+en degrés. Le noyau ne remplit `work_epsg` que si une conversion est nécessaire ; une couche
+en mètres repasse par le tampon seul, comme avant. AD-24 est amendé en conséquence. Reste
+noté : une couche en degrés qui porte de tels restes échoue avec un message clair
+(`deferred-work.md`).

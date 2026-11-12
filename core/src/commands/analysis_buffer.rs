@@ -67,6 +67,10 @@ pub struct AnalysisBufferParams {
     /// Fichier de sortie : fourni par le noyau, dans le dossier de travail.
     #[serde(default)]
     pub out: String,
+    /// Système en mètres du calcul, en code EPSG : fourni par le noyau d'après l'inventaire
+    /// (changement de cap du 2026-11-12), jamais par l'appelant.
+    #[serde(default)]
+    pub work_epsg: Option<u32>,
 }
 
 /// Résultat de `analysis.buffer`.
@@ -99,12 +103,16 @@ impl Delegated for AnalysisBuffer {
         .cancellable(true)
         .output_params(&["out"])
         .output_ext(".gpkg")
+        // Une couche en degrés est reprojetée par QGIS, dans la même étape, vers le système en
+        // mètres que choisit le noyau (`crate::work_crs`, entrée 9.16).
+        .work_crs_param("work_epsg", "layer_id")
         .example(serde_json::json!({"layer_id": "gares_1a2b3c", "distance": {"value": 500, "unit": "m"}}))
         .example(serde_json::json!({"layer_id": "gares_1a2b3c", "distance": {"value": 0.5, "unit": "km"}, "dissolve": true}))
         .tests(&[
             "analysis_buffer_is_delegated",
             "analysis_buffer_refuses_a_non_positive_distance",
             "analysis_buffer_output_is_a_gpkg_named_by_the_core",
+            "analysis_buffer_declares_its_work_crs",
         ])
     }
 }
@@ -166,5 +174,22 @@ mod tests {
         assert_eq!(spec.output_ext, ".gpkg");
         // Les commandes existantes gardent `.out`.
         assert_eq!(registry.spec("layer.describe").unwrap().output_ext, ".out");
+    }
+
+    #[test]
+    fn analysis_buffer_declares_its_work_crs() {
+        let registry = Registry::standard();
+        let spec = registry.spec("analysis.buffer").unwrap();
+        assert_eq!(
+            spec.work_crs_param,
+            Some(("work_epsg".to_string(), "layer_id".to_string()))
+        );
+        // Le code est un entier facultatif ; une valeur négative est refusée par le schéma.
+        let ok = json!({"layer_id": "l1", "distance": {"value": 1, "unit": "m"}, "work_epsg": 2154});
+        assert!(registry.validate_params("analysis.buffer", &ok).is_ok());
+        let bad = json!({"layer_id": "l1", "distance": {"value": 1, "unit": "m"}, "work_epsg": -1});
+        assert!(registry.validate_params("analysis.buffer", &bad).is_err());
+        // Le texte lu par le modèle ne change pas (décision du propriétaire, 2026-11-12).
+        assert!(spec.description_fr.contains("doit être dans un système de coordonnées en mètres"));
     }
 }

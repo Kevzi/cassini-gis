@@ -27,6 +27,7 @@ pub mod registry;
 pub mod serve;
 pub mod style;
 pub mod wmm;
+pub mod work_crs;
 
 /// Version du moteur, alignée sur celle du workspace.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

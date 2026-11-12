@@ -137,6 +137,14 @@ pub struct CommandSpec {
     /// catalogue et le prompt ne changent pas.
     #[serde(skip)]
     pub attribute_filter: Option<AttributeFilter>,
+    /// Système de calcul en mètres que le noyau choisit (changement de cap du 2026-11-12,
+    /// entrée 9.16) : (paramètre rempli, paramètre qui désigne la couche d'entrée). Le noyau ôte
+    /// la valeur de l'appelant, lit l'inventaire auprès de QGIS hors du journal, y choisit le
+    /// code EPSG (`crate::work_crs`) et le journalise avec les paramètres ; le rejeu le relit.
+    /// Caché au modèle, au client MCP et au formulaire, comme `out`. Métadonnée interne : jamais
+    /// sérialisée.
+    #[serde(skip)]
+    pub work_crs_param: Option<(String, String)>,
     /// Schéma JSON des paramètres, engendré depuis le type Rust.
     pub params_schema: Value,
     /// Schéma JSON du résultat, engendré depuis le type Rust.
@@ -173,6 +181,7 @@ impl CommandSpec {
             output_none: false,
             result_style: None,
             attribute_filter: None,
+            work_crs_param: None,
             params_schema: schema_value::<P>(),
             output_schema: schema_value::<O>(),
             examples: Vec::new(),
@@ -300,6 +309,13 @@ impl CommandSpec {
     /// Déclare le style dicté après l'ouverture du raster écrit (bogue du fond noir).
     pub fn result_style(mut self, style: crate::style::ResultStyle) -> Self {
         self.result_style = Some(style);
+        self
+    }
+
+    /// Déclare le paramètre `name` que le noyau remplit du système de calcul en mètres choisi
+    /// pour la couche désignée par le paramètre `layer` (entrée 9.16).
+    pub fn work_crs_param(mut self, name: &str, layer: &str) -> Self {
+        self.work_crs_param = Some((name.to_string(), layer.to_string()));
         self
     }
 

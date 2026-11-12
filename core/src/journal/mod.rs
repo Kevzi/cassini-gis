@@ -407,6 +407,48 @@ impl<'a> Session<'a> {
         Ok(())
     }
 
+    /// Remplit le paramètre `name` du système de calcul en mètres de la couche que désigne le
+    /// paramètre `layer` (`crate::work_crs`). Des paramètres invalides sont refusés tels quels,
+    /// avant toute lecture auprès de QGIS. Sans QGIS : `registry.unavailable`, qui nomme la
+    /// commande, comme avant. Aucun système en mètres : `analysis.crs_not_metric`, avant tout
+    /// ordre et sans ligne au journal. Une couche en mètres ne remplit rien : le geste fait le
+    /// tampon seul (amendement RA06). Une couche absente de l'inventaire non plus : le geste
+    /// répond `layer.not_found`.
+    fn fill_work_crs(
+        &self,
+        id: &str,
+        params: &mut Value,
+        name: &str,
+        layer: &str,
+    ) -> Result<(), ErrorReport> {
+        self.registry.validate_params(id, params)?;
+        let Some(layer_id) = params.get(layer).and_then(Value::as_str) else {
+            return Ok(());
+        };
+        // Une lecture ratée est l'échec de la commande, qu'elle nomme : son code est gardé, son
+        // message dit que l'inventaire n'a pas pu être lu avant elle.
+        let inventory = self
+            .router
+            .call(INVENTORY, json!({}))
+            .map_err(|e| match e {
+                RegistryError::Unavailable(_) => RegistryError::Unavailable(id.to_string()),
+                RegistryError::Cancelled(_) => RegistryError::Cancelled(id.to_string()),
+                other => RegistryError::Delegated {
+                    code: other.code().to_string(),
+                    message: format!(
+                        "La commande « {id} » n'est pas lancée : l'inventaire du projet n'a pas pu \
+                         être lu pour choisir son système de calcul ({other})"
+                    ),
+                },
+            })?;
+        if let Some(code) = crate::work_crs::work_epsg(&inventory, layer_id)? {
+            if let Value::Object(map) = params {
+                map.insert(name.to_string(), json!(code));
+            }
+        }
+        Ok(())
+    }
+
     /// Commande d'ouverture que la session dicte après une étape de `id` : `layer.open_raster`
     /// pour une sortie GeoTIFF, d'une commande du noyau ou d'une commande déléguée qui écrit un
     /// raster (amendement du 2026-11-05 d'AD-24, `data.convert_raster`) ; `layer.open_vector`
@@ -522,12 +564,22 @@ impl<'a> Session<'a> {
             if let Some(name) = &spec.inventory_param {
                 map.remove(name);
             }
+            // Le système de calcul n'est jamais celui de l'appelant : le noyau le choisit (9.16).
+            if let Some((name, _)) = &spec.work_crs_param {
+                map.remove(name);
+            }
         }
         // Un carroyage MGRS : sa zone et ses carrés de 100 km sont ceux du noyau, d'après
         // l'emprise du projet lue auprès de QGIS, jamais ceux de l'appelant ; ils sont
         // journalisés avec les paramètres, et le rejeu les repasse tels quels (epic 10, entrée 31).
         if let Some(name) = &spec.mgrs_grid_param {
             self.fill_mgrs_grid(id, &mut params, name)?;
+        }
+        // Une distance en mètres sur une couche en degrés : le noyau choisit le système en mètres
+        // du calcul d'après l'inventaire lu auprès de QGIS, hors du journal ; il est journalisé
+        // avec les paramètres et le rejeu le relit, sans le recalculer (entrée 9.16, AD-11).
+        if let Some((name, layer)) = &spec.work_crs_param {
+            self.fill_work_crs(id, &mut params, name, layer)?;
         }
         // Une mise en forme sans les gestes qu'elle demande n'est pas exécutée, et rien n'est
         // écrit (AD-25, entrée 11.20).
@@ -1454,6 +1506,9 @@ impl<'a> Replay<'a> {
                     }
                 }
             }
+            // Le système de calcul est repassé tel que journalisé (AD-11) ; une ligne qui ne le
+            // porte pas (couche en mètres, ou ligne d'avant l'entrée 9.16) se rejoue sans lui :
+            // le tampon seul, comme à l'origine (amendement RA06).
             let resolved = resolver
                 .resolve_call(id, spec, step, params, &self.ids[..i])
                 .map_err(|e| e.at_step(step))?;

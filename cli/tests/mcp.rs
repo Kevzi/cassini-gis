@@ -524,7 +524,7 @@ fn a_busy_session_refuses_the_relay_at_once() {
         "command.run",
         json!({"command": "analysis.buffer", "params": buffer_params()}),
     );
-    let order = session.wait_order();
+    let order = session.wait_buffer_order("gares", "gares", "EPSG:4326", "deg");
     let report = tool_report(&client.call_tool("layer_describe", json!({"layer_id": "l1"})));
     assert_eq!(report["code"], "session.busy");
     session.answer(&order, buffered());
@@ -539,7 +539,9 @@ fn a_cancelled_mcp_call_becomes_a_request_cancel_and_a_cancelled_step() {
     let mut session = QgisSession::start(true, &models_dir(), &ANNOUNCED);
     let mut client = McpClient::connect_tagged(&[], &models_dir(), &session.tag);
     let call = client.start_tool("analysis_buffer", buffer_params());
-    let order = session.wait_order();
+    let order = session.wait_buffer_order("gares", "gares", "EPSG:4326", "deg");
+    // Gares en degrés, projet en Lambert-93 : le noyau a choisi le système de calcul (9.16).
+    assert_eq!(order["params"]["params"]["work_epsg"], 2154, "{order}");
     // Le nom sans point arrive à la session sous l'identifiant du registre.
     assert_eq!(order["params"]["command"], "analysis.buffer");
     client.notify(
