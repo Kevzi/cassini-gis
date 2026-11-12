@@ -145,6 +145,13 @@ pub struct CommandSpec {
     /// sérialisée.
     #[serde(skip)]
     pub work_crs_param: Option<(String, String)>,
+    /// Mise en évidence du résultat d'un plan dans son PDF (changement de cap du 2026-11-12,
+    /// entrée 7.9) : paramètre que le noyau remplit, pour un export lancé dans un plan, d'après
+    /// les lignes du plan en cours au journal (`crate::focus`). Ôté des paramètres de l'appelant,
+    /// journalisé, relu au rejeu sans être recalculé. Caché au modèle, au client MCP et au
+    /// formulaire, comme `out`. Métadonnée interne : jamais sérialisée.
+    #[serde(skip)]
+    pub focus_param: Option<String>,
     /// Schéma JSON des paramètres, engendré depuis le type Rust.
     pub params_schema: Value,
     /// Schéma JSON du résultat, engendré depuis le type Rust.
@@ -182,6 +189,7 @@ impl CommandSpec {
             result_style: None,
             attribute_filter: None,
             work_crs_param: None,
+            focus_param: None,
             params_schema: schema_value::<P>(),
             output_schema: schema_value::<O>(),
             examples: Vec::new(),
@@ -316,6 +324,13 @@ impl CommandSpec {
     /// pour la couche désignée par le paramètre `layer` (entrée 9.16).
     pub fn work_crs_param(mut self, name: &str, layer: &str) -> Self {
         self.work_crs_param = Some((name.to_string(), layer.to_string()));
+        self
+    }
+
+    /// Déclare le paramètre `name` de mise en évidence du résultat d'un plan, que le noyau
+    /// remplit pour un export lancé dans un plan (entrée 7.9).
+    pub fn focus_param(mut self, name: &str) -> Self {
+        self.focus_param = Some(name.to_string());
         self
     }
 
@@ -603,6 +618,37 @@ impl Registry {
             (registration.0)(&mut registry);
         }
         registry
+    }
+}
+
+/// Ôte d'un schéma les définitions (`$defs`) que rien de visible n'emploie plus, directement ou
+/// par une autre définition gardée.
+pub fn prune_defs(schema: &mut Value) {
+    let Some(map) = schema.as_object_mut() else {
+        return;
+    };
+    let Some(Value::Object(defs)) = map.remove("$defs") else {
+        return;
+    };
+    let mut reached = vec![Value::Object(map.clone()).to_string()];
+    let mut kept: Vec<String> = Vec::new();
+    loop {
+        let before = kept.len();
+        for (key, def) in &defs {
+            let target = format!("\"#/$defs/{key}\"");
+            if !kept.contains(key) && reached.iter().any(|t| t.contains(&target)) {
+                kept.push(key.clone());
+                reached.push(def.to_string());
+            }
+        }
+        if kept.len() == before {
+            break;
+        }
+    }
+    let defs: serde_json::Map<String, Value> =
+        defs.into_iter().filter(|(k, _)| kept.contains(k)).collect();
+    if !defs.is_empty() {
+        map.insert("$defs".into(), Value::Object(defs));
     }
 }
 

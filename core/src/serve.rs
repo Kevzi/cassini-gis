@@ -956,23 +956,34 @@ fn is_available(state: &State<'_>, id: &str, runs_in: Option<RunsIn>) -> bool {
     runs_in != Some(RunsIn::Qgis) || state.announced.contains(id)
 }
 
-/// Une entrée du catalogue des relais sans le paramètre que le noyau remplit seul du système de
-/// calcul (`CommandSpec::work_crs_param`) : ni dans les propriétés, ni parmi les requis.
+/// Une entrée du catalogue des relais sans les paramètres que le noyau remplit seul : le système
+/// de calcul (`CommandSpec::work_crs_param`, entrée 9.16) et la mise en évidence du résultat d'un
+/// plan (`CommandSpec::focus_param`, entrée 7.9) ; ni dans les propriétés, ni parmi les requis, ni
+/// par les définitions que seuls ils employaient.
 fn without_core_filled(registry: &Registry, mut entry: Value) -> Value {
-    let hidden = entry["id"]
-        .as_str()
-        .and_then(|id| registry.spec(id))
-        .and_then(|spec| spec.work_crs_param.as_ref())
-        .map(|(name, _)| name.clone());
-    if let Some(name) = hidden {
-        let schema = &mut entry["params_schema"];
+    let Some(spec) = entry["id"].as_str().and_then(|id| registry.spec(id)) else {
+        return entry;
+    };
+    let hidden: Vec<String> = spec
+        .work_crs_param
+        .as_ref()
+        .map(|(name, _)| name.clone())
+        .into_iter()
+        .chain(spec.focus_param.clone())
+        .collect();
+    if hidden.is_empty() {
+        return entry;
+    }
+    let schema = &mut entry["params_schema"];
+    for name in &hidden {
         if let Some(props) = schema.get_mut("properties").and_then(Value::as_object_mut) {
-            props.remove(&name);
+            props.remove(name);
         }
         if let Some(required) = schema.get_mut("required").and_then(Value::as_array_mut) {
             required.retain(|r| r.as_str() != Some(name.as_str()));
         }
     }
+    crate::registry::prune_defs(schema);
     entry
 }
 
@@ -2562,6 +2573,13 @@ mod tests {
         );
         assert_eq!(journal[3]["params"]["layer_id"], "l_3");
         assert_eq!(journal[3]["params"]["overlay_layer_id"], "l_2");
+        // L'export du plan met en évidence la dernière intersection et cache les trois autres
+        // sorties ; la mise en évidence est journalisée (entrée 7.9, AD-11).
+        let focus = &journal[4]["params"]["focus"];
+        assert_eq!(focus["results"][0]["layer_id"], "l_4", "{}", journal[4]);
+        assert_eq!(focus["results"][0]["label"], "Parcelles constructibles");
+        assert_eq!(focus["hidden"], json!(["l_1", "l_2", "l_3"]));
+        assert_eq!(focus["frame"], json!(["l_4"]));
         assert!(journal.iter().all(|l| !l.to_string().contains("step:")));
         c.close().1.unwrap();
         c
@@ -2589,6 +2607,9 @@ mod tests {
         assert_eq!(params[2]["overlay_layer_id"], "r_1");
         assert_eq!(params[3]["layer_id"], "r_3");
         assert_eq!(params[3]["overlay_layer_id"], "r_2");
+        // La mise en évidence est relue, ses ids liés aux neufs, jamais recalculée (7.9).
+        assert_eq!(params[4]["focus"]["results"][0]["layer_id"], "r_4");
+        assert_eq!(params[4]["focus"]["hidden"], json!(["r_1", "r_2", "r_3"]));
         assert_eq!(replayed["id"], 3);
         assert_eq!(replayed["result"], json!({"steps": 5, "identical": true}));
         // Le rejeu n'écrit pas le journal : identique octet pour octet.

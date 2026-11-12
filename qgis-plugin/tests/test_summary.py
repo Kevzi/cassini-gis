@@ -170,6 +170,34 @@ class OtherCommandsTest(unittest.TestCase):
         text = say("layout.export_pdf", {"title": "T"}, windows, lang="en")
         self.assertEqual(text, 'Map "T" exported to PDF: file 2-layout.export_pdf.pdf, 2 pages.')
 
+    def test_export_pdf_says_when_an_empty_result_framed_the_inputs(self):
+        out = {"file": "/home/c/5-layout.export_pdf.pdf", "page_count": 1}
+        focus = {"results": [{"layer_id": "d", "label": "Parcelles"}], "hidden": [], "frame": ["plu"],
+                 "framed_on": "inputs", "hide_band_labels": True}
+        self.assertEqual(
+            say("layout.export_pdf", {"title": "Parcelles", "focus": focus}, out),
+            "Carte « Parcelles » exportée en PDF : fichier 5-layout.export_pdf.pdf, 1 page "
+            "(résultat vide, carte cadrée sur les couches d'entrée).",
+        )
+        self.assertEqual(
+            say("layout.export_pdf", {"title": "P", "focus": focus}, out, lang="en"),
+            'Map "P" exported to PDF: file 5-layout.export_pdf.pdf, 1 page (empty result, map framed on the input layers).',
+        )
+        # Tous vides sans couche d'entrée ; une partie des résultats vides.
+        self.assertTrue(say("layout.export_pdf", {"title": "P", "focus": dict(focus, framed_on="visible_layers", frame=[])},
+                            out).endswith("1 page (résultat vide)."))
+        some = dict(focus, framed_on="results", frame=["a"],
+                    results=[{"layer_id": "a", "label": "A"}, {"layer_id": "b", "label": "B"},
+                             {"layer_id": "c", "label": "C"}])
+        self.assertTrue(say("layout.export_pdf", {"title": "P", "focus": some}, out)
+                        .endswith("1 page (2 résultats vides sur 3)."))
+        self.assertTrue(say("layout.export_pdf", {"title": "P", "focus": some}, out, lang="en")
+                        .endswith("1 page (2 empty results out of 3)."))
+        # Cadré sur le résultat, sans mise en évidence, ou illisible : rien de plus.
+        for extra in ({"focus": dict(focus, framed_on="results")}, {}, {"focus": "inputs"}):
+            text = say("layout.export_pdf", dict({"title": "P"}, **extra), out)
+            self.assertEqual(text, "Carte « P » exportée en PDF : fichier 5-layout.export_pdf.pdf, 1 page.")
+
     def test_export_pdf_names_the_scale_held(self):
         out = {"file": "/home/c/3-layout.export_pdf.pdf", "page_count": 1, "scale": 25000}
         self.assertEqual(

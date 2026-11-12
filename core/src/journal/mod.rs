@@ -166,6 +166,9 @@ pub struct Session<'a> {
     style_kinds: HashSet<String>,
     /// Ordres que la dernière étape demande de dicter juste après sa ligne (amendement d'AD-30).
     pending_orders: Vec<(String, Value)>,
+    /// Ligne du journal où la session a commencé le plan en cours (sa première étape, même
+    /// refusée sans ligne) ; `None` hors plan. Borne les lignes lues pour `focus` (entrée 7.9).
+    plan_start: Option<usize>,
 }
 
 impl<'a> Session<'a> {
@@ -208,6 +211,7 @@ impl<'a> Session<'a> {
             gestures: HashSet::new(),
             style_kinds: HashSet::new(),
             pending_orders: Vec::new(),
+            plan_start: None,
         })
     }
 
@@ -351,6 +355,12 @@ impl<'a> Session<'a> {
         plan_step: Option<usize>,
     ) -> Result<Value, ErrorReport> {
         let step = self.next_step;
+        // Un plan commence à sa première étape ; un appel hors plan n'appartient à aucun.
+        match plan_step {
+            Some(1) => self.plan_start = Some(step),
+            None => self.plan_start = None,
+            Some(_) => {}
+        }
         let value = self.call_step(id, params, origin, plan_step)?;
         // Les ordres que l'étape demande (`layer.set_style`, puis `layer.arrange`) : chacun une
         // étape du journal, dans l'ordre, juste après sa ligne ; le premier refus arrête la suite
@@ -444,6 +454,65 @@ impl<'a> Session<'a> {
         if let Some(code) = crate::work_crs::work_epsg(&inventory, layer_id)? {
             if let Value::Object(map) = params {
                 map.insert(name.to_string(), json!(code));
+            }
+        }
+        Ok(())
+    }
+
+    /// Remplit le paramètre `name` de mise en évidence du résultat d'un plan (`crate::focus`)
+    /// pour un export lancé à l'étape `plan_step` d'un plan, d'après les lignes du plan en cours
+    /// au journal. Rien hors plan, à la première étape d'un plan, ni pour un plan qui n'a produit
+    /// aucune couche : l'export garde son comportement d'avant. L'inventaire n'est lu auprès de
+    /// QGIS, hors du journal, que s'il y a plusieurs résultats à nommer ; une lecture ratée est
+    /// l'échec de l'export, nommé, sans ligne au journal.
+    fn fill_focus(
+        &self,
+        id: &str,
+        params: &mut Value,
+        name: &str,
+        plan_step: Option<usize>,
+    ) -> Result<(), ErrorReport> {
+        if plan_step.is_none_or(|n| n <= 1) {
+            return Ok(());
+        }
+        self.registry.validate_params(id, params)?;
+        let lines = current_plan(
+            self.registry,
+            &self.journal_path(),
+            plan_step.unwrap_or_default(),
+            self.plan_start,
+        );
+        if lines.is_empty() {
+            return Ok(());
+        }
+        let inventory = if crate::focus::needs_inventory(self.registry, &lines) {
+            Some(
+                self.router
+                    .call(INVENTORY, json!({}))
+                    .map_err(|e| match e {
+                        RegistryError::Unavailable(_) => RegistryError::Unavailable(id.to_string()),
+                        other => RegistryError::Delegated {
+                            code: other.code().to_string(),
+                            message: format!(
+                                "La commande « {id} » n'est pas lancée : l'inventaire du projet n'a \
+                                 pas pu être lu pour nommer les résultats du plan ({other})"
+                            ),
+                        },
+                    })?,
+            )
+        } else {
+            None
+        };
+        let title = params
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if let Some(focus) =
+            crate::focus::focus_of(self.registry, &lines, title, inventory.as_ref())
+        {
+            let value = crate::focus::focus_value(&focus)?;
+            if let Value::Object(map) = params {
+                map.insert(name.to_string(), value);
             }
         }
         Ok(())
@@ -568,6 +637,10 @@ impl<'a> Session<'a> {
             if let Some((name, _)) = &spec.work_crs_param {
                 map.remove(name);
             }
+            // La mise en évidence du résultat non plus : le noyau la tire du journal (7.9).
+            if let Some(name) = &spec.focus_param {
+                map.remove(name);
+            }
         }
         // Un carroyage MGRS : sa zone et ses carrés de 100 km sont ceux du noyau, d'après
         // l'emprise du projet lue auprès de QGIS, jamais ceux de l'appelant ; ils sont
@@ -580,6 +653,12 @@ impl<'a> Session<'a> {
         // avec les paramètres et le rejeu le relit, sans le recalculer (entrée 9.16, AD-11).
         if let Some((name, layer)) = &spec.work_crs_param {
             self.fill_work_crs(id, &mut params, name, layer)?;
+        }
+        // Un export lancé dans un plan : le noyau désigne le résultat, le nomme, le met en
+        // évidence et cache les couches intermédiaires, d'après les lignes du plan en cours au
+        // journal ; journalisé avec les paramètres, relu au rejeu sans recalcul (7.9, AD-11).
+        if let Some(name) = &spec.focus_param {
+            self.fill_focus(id, &mut params, name, plan_step)?;
         }
         // Une mise en forme sans les gestes qu'elle demande n'est pas exécutée, et rien n'est
         // écrit (AD-25, entrée 11.20).
@@ -965,6 +1044,49 @@ pub fn intermediate_files(registry: &Registry, journal: &Path) -> HashSet<String
         produced.insert(layer_id.to_string(), files);
     }
     hidden
+}
+
+/// Lignes du plan en cours d'après le journal `journal`, pour un export à la place `plan_step`
+/// = k (entrée 7.9), avec leur étape au journal. En remontant depuis la fin du journal, il faut
+/// trouver exactement les étapes k-1, k-2, …, 1 de suite, chacune suivie des seules lignes que le
+/// noyau dicte après elle (ouvertures, mises en forme), toutes à la même place ; la première ligne
+/// doit être au plus tôt `start`, la ligne où la session a commencé ce plan. Sinon (ligne hors
+/// plan ou illisible au milieu, place manquante, plan commencé ailleurs) : aucune ligne.
+fn current_plan(
+    registry: &Registry,
+    journal: &Path,
+    plan_step: usize,
+    start: Option<usize>,
+) -> Vec<(usize, Value)> {
+    let (Some(start), Ok(bytes)) = (start, fs::read(journal)) else {
+        return Vec::new();
+    };
+    let text = String::from_utf8_lossy(&bytes);
+    let all: Vec<&str> = content_lines(&text).collect();
+    let mut lines: Vec<(usize, Value)> = Vec::new();
+    let mut expected = plan_step.saturating_sub(1);
+    for (i, raw) in all.iter().enumerate().rev() {
+        if expected == 0 {
+            break;
+        }
+        let Some(line) = serde_json::from_str::<Value>(raw).ok() else {
+            return Vec::new();
+        };
+        if line.get("plan_step").and_then(Value::as_u64) != Some(expected as u64) {
+            return Vec::new();
+        }
+        let id = line.get("id").and_then(Value::as_str).unwrap_or_default();
+        let dictated = registry.spec(id).is_some_and(|spec| spec.dictated_by_core);
+        lines.push((i + 1, line));
+        if !dictated {
+            expected -= 1;
+        }
+    }
+    lines.reverse();
+    match lines.first() {
+        Some((first, _)) if expected == 0 && *first >= start => lines,
+        _ => Vec::new(),
+    }
 }
 
 /// Le dernier plan exécuté d'après le journal `journal` (ticket 5.48), pour la vue triée : les
@@ -1508,7 +1630,10 @@ impl<'a> Replay<'a> {
             }
             // Le système de calcul est repassé tel que journalisé (AD-11) ; une ligne qui ne le
             // porte pas (couche en mètres, ou ligne d'avant l'entrée 9.16) se rejoue sans lui :
-            // le tampon seul, comme à l'origine (amendement RA06).
+            // le tampon seul, comme à l'origine (amendement RA06). De même pour la mise en
+            // évidence du résultat d'un export de plan (entrée 7.9) : relue telle que journalisée,
+            // ses ids liés aux neufs par la substitution ci-dessus, jamais recalculée ; une ligne
+            // qui ne la porte pas se rejoue sans elle.
             let resolved = resolver
                 .resolve_call(id, spec, step, params, &self.ids[..i])
                 .map_err(|e| e.at_step(step))?;

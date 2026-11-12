@@ -9,6 +9,7 @@ use serde_json::Value;
 
 use crate::angle::Angle;
 use crate::commands::analysis_buffer::Distance;
+use crate::focus::Focus;
 use crate::point::Point;
 use crate::registry::{CommandSpec, Delegated, Registration, RunsIn};
 
@@ -25,6 +26,9 @@ pub const MAX_SQUARES: usize = 12;
 
 /// Paramètre que le noyau complète pour un carroyage MGRS (`epsg`, `squares`).
 pub const GRID_PARAM: &str = "grid";
+
+/// Paramètre que le noyau remplit pour un export lancé dans un plan (entrée 7.9).
+pub const FOCUS_PARAM: &str = "focus";
 
 /// Bornes du dénominateur d'échelle (décision du propriétaire, 2026-11-03).
 pub const MIN_SCALE: u32 = 100;
@@ -240,6 +244,10 @@ pub struct LayoutExportPdfParams {
     /// recopiée de la demande, seulement si elle en donne un.
     #[serde(default, deserialize_with = "margin_text")]
     pub footer: Option<String>,
+    /// Mise en évidence du résultat d'un plan : fournie par le noyau pour un export lancé dans un
+    /// plan (entrée 7.9), jamais par l'appelant. Highlight of a plan's result: given by the core.
+    #[serde(default)]
+    pub focus: Option<Focus>,
 }
 
 // Origine de la date d'une source. Pas de commentaire par variante (même remarque que
@@ -294,6 +302,10 @@ pub struct LayoutExportPdfOutput {
     /// si `scale` a été demandé. Journalisé, il est repassé au geste au rejeu.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub center: Option<Point>,
+    /// Avertissements de la mise en page (entrée 7.9 : un résultat qui n'a pas pu être mis en
+    /// évidence) ; absent quand il n'y en a pas.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 /// `layout.export_pdf` : commande déléguée à QGIS.
@@ -316,6 +328,8 @@ impl Delegated for LayoutExportPdf {
         .leave_out_param("leave_out")
         .replay_param("center", "center")
         .mgrs_grid_param(GRID_PARAM)
+        // Le résultat d'un plan est mis en évidence dans la mise en page seule (entrée 7.9).
+        .focus_param(FOCUS_PARAM)
         .example(serde_json::json!({"title": "Parcelles constructibles à moins de 500 m d'une gare"}))
         .example(serde_json::json!({"title": "Réseau ferré de Villeneuve-le-Roi"}))
         .example(serde_json::json!({"title": "Gares de Villeneuve-le-Roi", "scale": 25000}))
@@ -339,6 +353,7 @@ impl Delegated for LayoutExportPdf {
             "layout_export_pdf_source_details_are_bounded",
             "the_mgrs_grid_of_annecy_is_in_zone_32_with_its_squares",
             "the_mgrs_grid_needs_a_readable_extent",
+            "layout_export_pdf_focus_is_an_optional_hidden_object",
         ])
     }
 }
@@ -473,6 +488,7 @@ mod tests {
             source_details: vec![],
             scale: None,
             center: None,
+            warnings: vec![],
         };
         assert!(serde_json::to_value(&without).unwrap().get("scale").is_none());
         let with = super::LayoutExportPdfOutput {
@@ -529,6 +545,7 @@ mod tests {
                 y: 6850000.0,
                 epsg: 2154,
             }),
+            warnings: vec![],
         };
         assert_eq!(serde_json::to_value(&with).unwrap()["center"], point);
         assert!(registry.check_contract().is_empty());
@@ -706,6 +723,40 @@ mod tests {
             json!({"source": "mnt_5m.tif", "resolution": {"value": 5.0, "unit": "m"},
                    "date": "2025-03-14", "date_origin": "file"})
         );
+        assert!(registry.check_contract().is_empty());
+    }
+
+    #[test]
+    fn layout_export_pdf_focus_is_an_optional_hidden_object() {
+        let registry = Registry::standard();
+        let spec = registry.spec("layout.export_pdf").unwrap();
+        assert_eq!(spec.focus_param.as_deref(), Some(super::FOCUS_PARAM));
+        let required = spec.params_schema["required"].as_array().unwrap();
+        assert!(!required.contains(&json!("focus")));
+        // La forme journalisée par le noyau se relit.
+        let focus = json!({"results": [{"layer_id": "D", "label": "Parcelles constructibles",
+            "style": {"kind": "single", "fill": "#c2187a", "stroke": "#3d0026", "width_mm": 0.5}}],
+            "hidden": ["A", "B", "C"], "frame": ["D"], "framed_on": "results",
+            "hide_band_labels": true});
+        assert!(registry
+            .validate_params("layout.export_pdf", &json!({"title": "Carte", "focus": focus}))
+            .is_ok());
+        for bad in [
+            json!("D"),
+            json!({"results": [], "framed_on": "partout"}),
+            json!({"results": [{"layer_id": "D"}], "framed_on": "results"}),
+            json!({"results": [], "framed_on": "results", "colour": "red"}),
+            json!({"results": [{"layer_id": "D", "label": "x", "style": {"kind": "single"}, "n": 1}],
+                   "framed_on": "results"}),
+        ] {
+            let err = registry
+                .validate_params("layout.export_pdf", &json!({"title": "Carte", "focus": bad}))
+                .unwrap_err();
+            assert_eq!(err.code(), "registry.invalid_params", "{bad}");
+        }
+        // Le texte lu par le modèle ne change pas (décision du propriétaire, 2026-11-12).
+        assert!(!spec.description_fr.contains("focus"));
+        assert!(!spec.description_en.contains("focus"));
         assert!(registry.check_contract().is_empty());
     }
 

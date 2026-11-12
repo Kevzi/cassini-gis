@@ -14,6 +14,7 @@ pub mod dem;
 pub mod error;
 pub mod exec;
 pub mod external;
+pub mod focus;
 pub mod geodesic;
 pub mod geodesy;
 pub mod geojson;

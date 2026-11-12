@@ -1117,3 +1117,23 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-garde-fou-une-valeur-ou-un-champ-absent-de-l-inventaire-donn-plan.md`
   summary: Tester l'interaction du garde-fou des attributs (5.57) avec la redemande élargie de 5.48 (un premier plan changé en question ne déclenche plus l'élargissement).
   evidence: `reduced_with_fields` ne s'applique qu'à un `Plan::Calls` ; risque jugé faible (couches réduites non contrôlées), aucun test.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-export-et-demo/story-pdf-de-resultat-lisible-cadre-sur-le-resultat-resultat-mis-e-plan.md`
+  summary: Légende des MNT de l'utilisateur dans le PDF : avec `focus` (export d'un plan), l'intitulé de bande « Band 1 (Gray) » est ôté et la rampe reste ; hors plan, ou d'un plan sans couche produite, le MNT garde la légende par défaut de QGIS. À trancher : la même lecture pour tout export, ou un style de MNT dicté par le noyau.
+  evidence: décision 3 de la party d'approbation du 2026-11-12 (`hide_band_labels` rempli pour un export de plan seulement) ; sonde `qgis-plugin/tests/probe_layout_focus.py`.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-export-et-demo/story-pdf-de-resultat-lisible-cadre-sur-le-resultat-resultat-mis-e-plan.md`
+  summary: Un résultat ligne est dessiné du seul trait de `StyleSpec::Single` (`#3d0026`, magenta très foncé), pas du magenta de remplissage ; à revoir si un plan de démo rend des lignes (chemin de moindre coût vecteur, isochrone en contour).
+  evidence: `_make_symbol` de `style_gestures.py` : une ligne prend `stroke` ; constante unique du noyau (`core/src/focus.rs`).
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-export-et-demo/story-pdf-de-resultat-lisible-cadre-sur-le-resultat-resultat-mis-e-plan.md`
+  summary: Les noms de plusieurs résultats sont tirés de `description_fr` seule (titre court de la commande) : ils restent en français dans un PDF exporté d'une interface en anglais.
+  evidence: relecture de 7.9 (2026-11-12) ; `focus` est calculé et journalisé par le noyau, qui ne connaît pas la langue du panneau.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-export-et-demo/story-pdf-de-resultat-lisible-cadre-sur-le-resultat-resultat-mis-e-plan.md`
+  summary: `result_label` prend tout mot à majuscule pour un nom propre : un titre en casse de titre (« Bâtiments à Risque Élevé ») peut être coupé à tort avant « à Risque Élevé ».
+  evidence: relecture de 7.9 (2026-11-12) ; règle de la décision 1 de la party d'approbation.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-export-et-demo/story-pdf-de-resultat-lisible-cadre-sur-le-resultat-resultat-mis-e-plan.md`
+  summary: Dans une session enchaînée, les sorties des plans précédents restent visibles dans le PDF d'un nouveau plan, sous leur nom technique (« 4-analysis.intersect ») : `focus` ne lit que le plan en cours.
+  evidence: relecture de 7.9 (2026-11-12) ; `current_plan` borné au plan en cours (`plan_start`).

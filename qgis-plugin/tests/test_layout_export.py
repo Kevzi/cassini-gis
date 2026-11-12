@@ -109,7 +109,10 @@ class FakeBackend:
             # Cadre à l'échelle : 2 km de côté autour du centre reçu ; sinon le rectangle reçu.
             cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
             frame = (cx - 1000.0, cy - 1000.0, cx + 1000.0, cy + 1000.0) if scale is not None else box
-        return {"items": list(layout_export.EXPECTED_ITEMS), "scale": held, "extent": frame}
+        done = {"items": list(layout_export.EXPECTED_ITEMS), "scale": held, "extent": frame}
+        if getattr(self, "warnings", None):
+            done["warnings"] = list(self.warnings)
+        return done
 
 
 def run(backend, params):
@@ -783,6 +786,176 @@ class MgrsHeaderSourcesTest(unittest.TestCase):
         self.assertEqual(layout_export._metres_text(0.5), "0,5 m")
         self.assertEqual(layout_export._metres_text(25.0), "25 m")
         self.assertEqual(layout_export._metres_text(1.25), "1,25 m")
+
+
+# ---- Entrée 7.9 : le résultat d'un plan mis en évidence ----
+
+STYLE = {"kind": "single", "fill": "#c2187a", "stroke": "#3d0026", "width_mm": 0.5}
+
+
+def plan_layers():
+    """Projet après le plan de démo : couches de l'utilisateur, trois intermédiaires, le résultat."""
+    return [
+        FakeLayer("A", "/p/p.cassini/1-analysis.select_by_attribute.gpkg", (0.0, 0.0, 100.0, 100.0)),
+        FakeLayer("B", "/p/p.cassini/2-analysis.buffer.gpkg", (10.0, 10.0, 30.0, 30.0)),
+        FakeLayer("C", "/p/p.cassini/3-analysis.intersect.gpkg", (0.0, 0.0, 90.0, 90.0)),
+        FakeLayer("D", "/p/p.cassini/4-analysis.intersect.gpkg", (20.0, 20.0, 40.0, 30.0)),
+        FakeLayer("plu", "/d/plu.gpkg", (0.0, 0.0, 1000.0, 1000.0)),
+        FakeLayer("routes", "/d/routes.shp", (0.0, 0.0, 1000.0, 1000.0)),
+    ]
+
+
+def demo_focus(**changes):
+    focus = {"results": [{"layer_id": "D", "label": "Parcelles constructibles", "style": dict(STYLE)}],
+             "hidden": ["A", "B", "C"], "frame": ["D"], "framed_on": "results", "hide_band_labels": True}
+    focus.update(changes)
+    return focus
+
+
+class FocusTest(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.out = os.path.join(self.dir.name, "5-layout.export_pdf.pdf")
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def test_the_result_leads_the_intermediates_are_gone_and_the_map_is_framed_on_it(self):
+        backend = FakeBackend(plan_layers())
+        before = [(layer.lid, layer.source, layer.box) for layer in backend.layers]
+        (result, error), _ = run(backend, {"title": "Carte", "out": self.out, "focus": demo_focus()})
+        self.assertIsNone(error)
+        layers, _, sources_text, _, _, box = backend.exported
+        # Résultat en tête, intermédiaires ôtés de la carte, de la légende et des sources.
+        self.assertEqual([layer.lid for layer in layers], ["D", "plu", "routes"])
+        self.assertEqual(result["layer_count"], 3)
+        self.assertEqual(result["sources"], ["4-analysis.intersect.gpkg", "plu.gpkg", "routes.shp"])
+        self.assertNotIn("buffer", sources_text)
+        # Dans la ligne imprimée, le résultat est nommé par son libellé, jamais par son fichier.
+        self.assertEqual(sources_text, "Sources : Parcelles constructibles, plu.gpkg, routes.shp")
+        self.assertNotIn("warnings", result)
+        # Cadre : le résultat seul (20, 20, 40, 30), marge de 5 % du plus grand côté (20 → 1).
+        self.assertEqual(box, (19.0, 19.0, 41.0, 31.0))
+        # Le fond reçoit le résultat, son libellé et son style normalisé, pour la mise en page seule.
+        focus = backend.kwargs["focus"]
+        self.assertTrue(focus["hide_band_labels"])
+        (layer, label, style), = focus["results"]
+        self.assertIs(layer, layers[0])
+        self.assertEqual(label, "Parcelles constructibles")
+        self.assertEqual(style["kind"], "single")
+        self.assertEqual(style["symbol"]["fill"], "#c2187a")
+        # Les couches du projet sont intactes : mêmes couches, même ordre, mêmes sources.
+        self.assertEqual([(layer.lid, layer.source, layer.box) for layer in backend.layers], before)
+
+    def test_without_focus_the_backend_is_called_as_before(self):
+        backend = FakeBackend(plan_layers())
+        (result, error), _ = run(backend, {"title": "Carte", "out": self.out})
+        self.assertIsNone(error)
+        self.assertNotIn("focus", backend.kwargs)
+        self.assertEqual(backend.kwargs, {})
+        self.assertEqual([layer.lid for layer in backend.exported[0]], ["A", "B", "C", "D", "plu", "routes"])
+        self.assertEqual(result["layer_count"], 6)
+
+    def test_an_absent_or_unchecked_layer_is_ignored(self):
+        layers = [layer for layer in plan_layers() if layer.lid not in ("D", "B")]
+        backend = FakeBackend(layers)
+        (result, error), _ = run(backend, {"title": "Carte", "out": self.out, "focus": demo_focus()})
+        self.assertIsNone(error)
+        self.assertEqual([layer.lid for layer in backend.exported[0]], ["plu", "routes"])
+        self.assertEqual(backend.kwargs["focus"]["results"], [])
+        # Aucune couche du cadre visible : le cadrage d'avant (les vecteurs visibles).
+        self.assertEqual(backend.exported[5], (-50.0, -50.0, 1050.0, 1050.0))
+
+    def test_an_empty_result_is_framed_on_the_input_layers(self):
+        layers = plan_layers()[:3] + [FakeLayer("D", "/p/p.cassini/4-analysis.intersect.gpkg", None)] + [
+            FakeLayer("plu", "/d/plu.gpkg", (0.0, 0.0, 200.0, 100.0)),
+            FakeLayer("routes", "/d/routes.shp", (0.0, 0.0, 1000.0, 1000.0)),
+        ]
+        backend = FakeBackend(layers)
+        focus = demo_focus(frame=["plu"], framed_on="inputs")
+        (_, error), _ = run(backend, {"title": "Carte", "out": self.out, "focus": focus})
+        self.assertIsNone(error)
+        self.assertEqual(backend.exported[5], (-10.0, -10.0, 210.0, 110.0))
+
+    def test_several_results_lead_in_the_order_given(self):
+        backend = FakeBackend(plan_layers())
+        focus = demo_focus(results=[
+            {"layer_id": "B", "label": "Tampon — gares", "style": dict(STYLE)},
+            {"layer_id": "D", "label": "Intersection — parcelles"},
+        ], hidden=["A", "C"], frame=["B", "D"])
+        (_, error), _ = run(backend, {"title": "Carte", "out": self.out, "focus": focus})
+        self.assertIsNone(error)
+        self.assertEqual([layer.lid for layer in backend.exported[0]], ["B", "D", "plu", "routes"])
+        labels = [(layer.lid, label, style is None) for layer, label, style in backend.kwargs["focus"]["results"]]
+        self.assertEqual(labels, [("B", "Tampon — gares", False), ("D", "Intersection — parcelles", True)])
+        self.assertEqual(backend.exported[5], (8.5, 8.5, 41.5, 31.5))
+
+    def test_with_a_scale_the_centre_does_not_move(self):
+        backend = FakeBackend(plan_layers(), center=(500.0, 500.0))
+        params = {"title": "Carte", "out": self.out, "scale": 25000, "focus": demo_focus()}
+        (result, error), _ = run(backend, params)
+        self.assertIsNone(error)
+        self.assertEqual(result["center"], {"x": 500.0, "y": 500.0, "epsg": 2154})
+        self.assertEqual(backend.exported[5], (499.0, 499.0, 501.0, 501.0))
+
+    def test_a_raster_result_sits_above_the_user_rasters_below_the_vectors(self):
+        layers = plan_layers() + [
+            FakeLayer("R", "/p/p.cassini/6-terrain.slope.tif", (0.0, 0.0, 50.0, 50.0)),
+            FakeLayer("mnt", "/d/mnt.tif", (0.0, 0.0, 2000.0, 2000.0)),
+        ]
+        backend = FakeBackend(layers)
+        focus = demo_focus(results=[{"layer_id": "R", "label": "Pentes"},
+                                    {"layer_id": "D", "label": "Parcelles", "style": dict(STYLE)}])
+        (_, error), _ = run(backend, {"title": "Carte", "out": self.out, "focus": focus})
+        self.assertIsNone(error)
+        self.assertEqual([layer.lid for layer in backend.exported[0]], ["D", "plu", "routes", "R", "mnt"])
+        # Sans raster de l'utilisateur, le résultat raster va en bas.
+        backend = FakeBackend(layers[:-1])
+        (_, error), _ = run(backend, {"title": "Carte", "out": self.out, "focus": focus})
+        self.assertEqual([layer.lid for layer in backend.exported[0]], ["D", "plu", "routes", "R"])
+
+    def test_the_former_framing_counts_the_layers_before_hiding(self):
+        # Rien du cadre n'est visible : le cadrage d'avant 7.9, intermédiaires compris.
+        layers = [FakeLayer("A", "/p/p.cassini/1-a.gpkg", (-100.0, -100.0, 100.0, 100.0)),
+                  FakeLayer("plu", "/d/plu.gpkg", (0.0, 0.0, 10.0, 10.0))]
+        backend = FakeBackend(layers)
+        focus = demo_focus(hidden=["A"], frame=[], framed_on="visible_layers")
+        (_, error), _ = run(backend, {"title": "Carte", "out": self.out, "focus": focus})
+        self.assertIsNone(error)
+        self.assertEqual([layer.lid for layer in backend.exported[0]], ["plu"])
+        self.assertEqual(backend.exported[5], (-110.0, -110.0, 110.0, 110.0))
+
+    def test_a_clone_that_fails_is_reported_to_the_core(self):
+        backend = FakeBackend(plan_layers())
+        backend.warnings = [layout_export.CLONE_FAILED % "Parcelles constructibles"]
+        (result, error), _ = run(backend, {"title": "Carte", "out": self.out, "focus": demo_focus()})
+        self.assertIsNone(error)
+        self.assertEqual(result["warnings"], [layout_export.CLONE_FAILED % "Parcelles constructibles"])
+
+    def test_an_invalid_focus_is_refused_without_file(self):
+        for bad in (
+            "D",
+            [],
+            {"hidden": [], "framed_on": "results"},
+            demo_focus(framed_on="partout"),
+            demo_focus(hidden="A"),
+            demo_focus(frame=[3]),
+            demo_focus(hide_band_labels="oui"),
+            demo_focus(colour="red"),
+            demo_focus(results=[{"layer_id": "D"}]),
+            demo_focus(results=[{"layer_id": "D", "label": "  "}]),
+            demo_focus(results=[{"layer_id": "D", "label": "x", "n": 1}]),
+            demo_focus(results=[{"layer_id": "D", "label": "x", "style": {"kind": "single"}}]),
+            demo_focus(results=[{"layer_id": "D", "label": "x", "style": {"kind": "hillshade"}}]),
+            demo_focus(results="D"),
+            demo_focus(results=[{"layer_id": "D", "label": "x"}, {"layer_id": "D", "label": "y"}]),
+        ):
+            backend = FakeBackend(plan_layers())
+            (result, error), _ = run(backend, {"title": "Carte", "out": self.out, "focus": bad})
+            self.assertIsNone(result, bad)
+            self.assertEqual(error.code, "layout.bad_params", bad)
+            self.assertIsNone(backend.exported)
+        self.assertFalse(os.path.exists(self.out))
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ use cassini_core::commands::model_list::PromptKind;
 use cassini_core::plan::Plan;
 use cassini_core::point::{guard_coordinates, guard_rejected};
 use cassini_core::registry::{CommandSpec, Registry};
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 
 use crate::grammar::{base_rules, ParamsGrammar};
 use crate::{generate_files, AiError, Completion, ModelFiles, Role, Turn};
@@ -286,6 +286,8 @@ fn model_params(spec: &CommandSpec) -> Value {
         .chain(spec.replay_param.as_ref().map(|(name, _)| name))
         // Le système de calcul en mètres, choisi par le noyau (entrée 9.16).
         .chain(spec.work_crs_param.as_ref().map(|(name, _)| name))
+        // La mise en évidence du résultat d'un plan, remplie par le noyau (entrée 7.9).
+        .chain(spec.focus_param.as_ref())
         .collect();
     if let Value::Object(map) = &mut params {
         map.remove("$schema");
@@ -307,26 +309,10 @@ fn model_params(spec: &CommandSpec) -> Value {
         if spec.mgrs_grid_param.is_some() {
             map.values_mut().for_each(hide_mgrs_core_fields);
         }
-        // Une définition que seul un paramètre caché employait (le `Point` du centre d'un
-        // export) n'a rien à faire dans le long prompt.
-        if let Some(Value::Object(defs)) = map.remove("$defs") {
-            let rest = Value::Object(map.clone()).to_string();
-            let kept: Map<String, Value> = defs
-                .iter()
-                .filter(|(key, _)| {
-                    let target = format!("\"#/$defs/{key}\"");
-                    rest.contains(&target)
-                        || defs
-                            .iter()
-                            .any(|(other, def)| other != *key && def.to_string().contains(&target))
-                })
-                .map(|(key, def)| (key.clone(), def.clone()))
-                .collect();
-            if !kept.is_empty() {
-                map.insert("$defs".into(), Value::Object(kept));
-            }
-        }
     }
+    // Une définition que seul un paramètre caché employait (le `Point` du centre d'un export, la
+    // mise en évidence du résultat, entrée 7.9) n'a rien à faire dans le long prompt.
+    cassini_core::registry::prune_defs(&mut params);
     params
 }
 
@@ -626,6 +612,7 @@ fn judge(registry: &Registry, completion: &Completion) -> Result<Plan, Vec<Strin
                         .chain(&spec.leave_out_param)
                         .chain(replay)
                         .chain(work_crs)
+                        .chain(&spec.focus_param)
                     {
                         if params.contains_key(name) {
                             errors.push(format!(
@@ -1159,6 +1146,14 @@ mod tests {
     }
 
     #[test]
+    fn a_focus_chosen_by_the_model_is_rejected() {
+        let bad = r#"{"kind":"calls","calls":[{"command":"layout.export_pdf","params":{"title":"Carte","focus":{"results":[],"framed_on":"results"}}}]}"#;
+        let (result, seen) = compose(vec![done(bad), done(GOOD)]);
+        assert!(result.is_ok());
+        assert!(seen[1][3].text.contains("« focus »"), "{}", seen[1][3].text);
+    }
+
+    #[test]
     fn a_leave_out_chosen_by_the_model_is_rejected() {
         let bad = r#"{"kind":"calls","calls":[{"command":"layout.export_pdf","params":{"title":"Carte","leave_out":["gares_1"]}}]}"#;
         let (result, seen) = compose(vec![done(bad), done(GOOD)]);
@@ -1241,6 +1236,11 @@ mod tests {
         // Le paramètre que seul le rejeu remplit reste caché au modèle (ticket 5.36).
         let export = catalog_entry(reg.spec("layout.export_pdf").unwrap());
         assert!(export["params"]["properties"].get("leave_out").is_none());
+        // La mise en évidence du résultat, et ses définitions, aussi (entrée 7.9).
+        assert!(export["params"]["properties"].get("focus").is_none());
+        for word in ["focus", "FocusResult", "framed_on", "hide_band_labels"] {
+            assert!(!export.to_string().contains(word), "{word}");
+        }
         // Le centre d'un export à l'échelle, rempli au rejeu seulement, aussi (ticket 5.38).
         assert!(export["params"]["properties"].get("center").is_none());
         assert!(export["params"]["properties"].get("scale").is_some());

@@ -726,6 +726,7 @@ sources. Une page A4 paysage par défaut ; format, orientation et carroyage au c
 | `grid` | union étiquetée par `kind` | non | voir ci-dessous | Carroyage ; absent, aucun. |
 | `header` | chaîne | non | 120 caractères au plus, une ligne | En-tête recopié de la demande (epic 10, entrée 31). |
 | `footer` | chaîne | non | 120 caractères au plus, une ligne | Pied de page recopié de la demande (epic 10, entrée 31). |
+| `focus` | objet | non | voir ci-dessous | Fourni par le noyau pour un export lancé dans un plan : mise en évidence du résultat (entrée 7.9). |
 
 `grid` est l'une de trois formes : `{"kind": "degrees", "interval": Angle}` (graticule en
 WGS84, étiquettes en degrés décimaux), `{"kind": "projected", "epsg": entier, "interval":
@@ -745,6 +746,7 @@ l'impression reste hors du produit.
 | `center` | `Point` ou `null` | Centre employé, si `scale` demandée ; journalisé pour le rejeu. |
 | `skipped_layers` | liste de chaînes | **Epic 10, entrée 15** : couches distantes (WMS, WMTS, XYZ, tuiles vectorielles distantes) écartées de la carte et nommées. |
 | `source_details` | liste d'objets, 50 au plus | **Epic 10, entrée 31** : résolution et date de chaque source (voir ci-dessous). |
+| `warnings` | liste de chaînes, absente si vide | **Entrée 7.9** : un résultat qui n'a pas pu être mis en évidence (dessiné avec son style du projet). |
 
 **Fait (changement de cap du 2026-11-10, epic 10, entrée 31).** `header` et `footer` : une
 ligne libre chacun (120 caractères au plus, sans saut de ligne), imprimée en haut et en bas de
@@ -773,6 +775,28 @@ pas de date. Résolution en mètres seulement : `null` pour un raster en degrés
 ligne écrite avant l'entrée 31, sans `source_details`, ne compare pas ce champ ; une ligne qui le
 porte le compare.
 
+**Fait (changement de cap du 2026-11-12, `change-mise-en-evidence-du-resultat-dans-le-pdf`,
+entrée 7.9).** `focus` est **fourni par le noyau** pour un export lancé dans un plan, jamais
+écrit par le modèle, le formulaire ni le client MCP, et caché à tous trois comme `out` ; le
+texte lu par le modèle ne change pas. Le noyau le tire des lignes du plan en cours au journal
+(`core/src/focus.rs`) : `results`, les couches produites par le plan et qu'aucune étape suivante
+ne consomme, dans l'ordre du plan, chacune avec son `label` (le titre de l'export coupé avant un
+complément de lieu final, 60 caractères au plus, pour un seul résultat ; sinon le titre court de
+sa commande, « — » et le nom de sa première couche d'entrée) et, pour un vecteur, son `style`
+(`StyleSpec` `single` magenta, constante du noyau) ; `hidden`, les couches intermédiaires ;
+`frame`, les couches de cadrage (les résultats non vides ; tous vides, les couches de
+l'utilisateur consommées par le plan, `framed_on: "inputs"` ; sans elles, `framed_on:
+"visible_layers"` et le cadrage d'avant) ; `hide_band_labels`, vrai. Le geste l'applique à la
+seule mise en page : résultats en tête de la carte et de la légende, nommés par `label`,
+dessinés par un clone en mémoire stylé (jamais ajouté au projet) ; couches de `hidden` ôtées de
+la carte, de la légende et des sources ; cadre sur `frame` sans `scale` (avec `scale`, le centre
+ne change pas) ; intitulés de bande des rasters ôtés de la légende ; dans la ligne imprimée des
+sources, un résultat est nommé par son `label`. Un résultat raster est posé juste au-dessus du
+premier raster de l'utilisateur, sous ses vecteurs. Un clone qui échoue est dit dans `warnings`.
+Un id absent des couches visibles est ignoré. Les couches du projet gardent nom, style, visibilité et place. `focus` est
+journalisé et relu au rejeu, ses ids liés aux neufs, jamais recalculé ; une ligne qui ne le porte
+pas se rejoue sans lui. Un export hors plan, ou d'un plan sans couche produite, n'en a pas.
+
 ```json fiche
 {"id": "layout.export_pdf", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
  "params": {"title": {"type": "string", "required": true},
@@ -790,8 +814,18 @@ porte le compare.
                                            "epsg": {"type": "integer", "required": false},
                                            "squares": {"type": "array", "required": false, "items": "string"}}}},
             "header": {"type": "string", "required": false},
-            "footer": {"type": "string", "required": false}},
- "result": ["center", "file", "layer_count", "page_count", "scale", "source_details", "sources", "truncated"],
+            "footer": {"type": "string", "required": false},
+            "focus": {"type": "object", "required": false,
+                      "fields": {"results": {"type": "array", "required": true,
+                                             "items": {"type": "object",
+                                                       "fields": {"layer_id": {"type": "string", "required": true},
+                                                                  "label": {"type": "string", "required": true},
+                                                                  "style": {"type": "StyleSpec", "required": false}}}},
+                                 "hidden": {"type": "array", "required": false, "items": "string"},
+                                 "frame": {"type": "array", "required": false, "items": "string"},
+                                 "framed_on": {"type": "string", "required": true, "enum": ["results", "inputs", "visible_layers"]},
+                                 "hide_band_labels": {"type": "boolean", "required": false}}}},
+ "result": ["center", "file", "layer_count", "page_count", "scale", "source_details", "sources", "truncated", "warnings"],
  "planned_by": "epic 10, entrée 15 (skipped_layers)",
  "planned_result": ["skipped_layers"]}
 ```

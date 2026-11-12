@@ -571,6 +571,34 @@ fn the_relay_tool_of_a_buffer_hides_the_work_crs() {
 }
 
 #[test]
+fn the_relay_tool_of_an_export_hides_the_focus() {
+    let name = unique_name("export");
+    let mut s = Session::start(&name);
+    s.hello(&["layout.export_pdf"]);
+    s.switch_on();
+    let mut relay = Relay::connect(&name);
+    let r = relay.attach(u64::from(PROTOCOL_VERSION));
+    let commands = r["result"]["commands"].as_array().unwrap();
+    let export = commands
+        .iter()
+        .find(|c| c["id"] == "layout.export_pdf")
+        .expect("export offert au relais");
+    let props = &export["params_schema"]["properties"];
+    assert!(props.get("title").is_some(), "{export}");
+    // La mise en évidence du résultat d'un plan est remplie par le noyau (entrée 7.9) : ni le
+    // paramètre, ni ses définitions ne sont montrés au relais.
+    assert!(props.get("focus").is_none(), "{export}");
+    for word in ["FocusResult", "framed_on", "hide_band_labels"] {
+        assert!(!export.to_string().contains(word), "{word} : {export}");
+    }
+    // Les définitions encore employées restent (le centre d'un export à l'échelle).
+    assert!(
+        export["params_schema"]["$defs"].get("Point").is_some(),
+        "{export}"
+    );
+}
+
+#[test]
 fn an_attach_during_an_order_is_answered_at_once() {
     let name = unique_name("ordre");
     let mut s = Session::start(&name);

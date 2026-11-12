@@ -57,6 +57,18 @@ révision, sinon création) ou, à défaut, la dernière modification du fichier
 Cassini (fichier sous le dossier de travail `<projet>.cassini`, réécrit au rejeu) n'a pas de
 date. La ligne des sources imprimée les reprend (« mnt_5m.tif (5 m, fichier du 2025-03-14) »).
 
+Résultat d'un plan mis en évidence (entrée 7.9, changement de cap du 2026-11-12). Pour un export
+lancé dans un plan, le noyau passe `focus` : `results` (id de couche, `label`, `style` facultatif),
+`hidden`, `frame`, `framed_on`, `hide_band_labels`. Ce module l'applique à la seule mise en page,
+sans rien décider : les couches de `hidden` sont ôtées de la carte, de la légende et des sources ;
+les résultats passent en tête de la carte et de la légende, nommés par `label` sur leur nœud de
+légende seul ; un résultat qui porte un `style` est dessiné par un clone en mémoire de sa couche,
+stylé, jamais ajouté au projet ; sans `scale`, la carte est cadrée sur l'union de `frame` (avec
+`scale`, le centre ne change pas) ; avec `hide_band_labels`, l'intitulé de bande d'un raster
+(« Band 1 (Gray) ») est ôté de la légende. Un id absent des couches visibles est ignoré ; sans
+couche de `frame` visible, le cadrage d'avant. La couche du projet garde nom, style, visibilité et
+place dans l'arbre. Sans `focus`, le fond est appelé exactement comme avant.
+
 La mise en page de QGIS ne tourne pas hors du fil principal : l'export est synchrone
 (commande non annulable). Accès à QGIS par un « fond » injectable ; `LayoutBackend` est
 le seul endroit qui touche `qgis.core`, les tests mettent une doublure.
@@ -71,12 +83,14 @@ try:  # importés à plat par les tests, en paquet par QGIS
     from .gestures import GestureError
     from .inventory import QgisBackend, _ReadGesture, _union, source_name
     from .point_transform import UNKNOWN_CRS
-    from .style_gestures import install_legend
+    from .style_gestures import QgisBackend as StyleBackend
+    from .style_gestures import install_legend, normalize_style
 except ImportError:  # pragma: no cover
     from gestures import GestureError
     from inventory import QgisBackend, _ReadGesture, _union, source_name
     from point_transform import UNKNOWN_CRS
-    from style_gestures import install_legend
+    from style_gestures import QgisBackend as StyleBackend
+    from style_gestures import install_legend, normalize_style
 
 BAD_PARAMS = "layout.bad_params"
 EMPTY = "layout.empty"
@@ -275,6 +289,9 @@ def _decimals(interval):
 
 # Bas de la colonne de la légende, en mm sur la page de base : les sources sont en dessous.
 LEGEND_BOTTOM = 195
+# Place, en mm, laissée dans la colonne de la légende autour du symbole et du texte, quand un nom
+# de résultat passe à la ligne (entrée 7.9).
+LEGEND_WRAP_MARGIN = 8.0
 
 # Propriétés posées sur une couche par `layer.set_style` (voir `style_gestures.py`), lues ici
 # pour la légende : le titre de la couche, le libellé de son premier nœud (le nom de bande d'un
@@ -282,6 +299,7 @@ LEGEND_BOTTOM = 195
 LEGEND_TITLE = "cassini/legend_title"
 LEGEND_FIRST_LABEL = "cassini/legend_first_label"
 LEGEND_NODES = "cassini/legend_nodes"
+ELEVATION_SPAN = "cassini/elevation_span"  # même clé que `style_gestures`
 
 
 def apply_legend_labels(node, layer):
@@ -303,6 +321,54 @@ def apply_legend_labels(node, layer):
         QgsMapLayerLegendUtils.setLegendNodeOrder(node, [0])
         QgsMapLayerLegendUtils.setLegendNodeUserLabel(node, 0, str(title or layer.name()))
         QgsLegendRenderer.setNodeLegendStyle(node, QgsLegendStyle.Style.Hidden)
+
+
+def highlighted_clone(layer, style):
+    """Clone en mémoire de la couche vecteur `layer`, au style `style` (normalisé, forme
+    `single`) traduit par `style_gestures` ; None pour une couche sans géométrie ou qui ne se
+    clone pas. Le clone n'est jamais ajouté au projet : la couche d'origine garde son style."""
+    from qgis.core import QgsVectorLayer
+
+    if not isinstance(layer, QgsVectorLayer):
+        return None
+    clone = layer.clone()
+    if clone is None:
+        return None
+    # Le clone reprend les libellés de légende et le seuil d'échelle qu'un `layer.set_style`
+    # antérieur a posés sur la couche : ils ne valent pas pour le style du résultat.
+    for key in (LEGEND_TITLE, LEGEND_FIRST_LABEL, LEGEND_NODES, ELEVATION_SPAN):
+        clone.removeCustomProperty(key)
+    clone.setScaleBasedVisibility(False)
+    styler = StyleBackend()
+    geometry = styler.geometry_of(clone)
+    if geometry is None:
+        return None
+    styler.apply_single(clone, geometry, style["symbol"], style["opacity"])
+    return clone
+
+
+def hide_band_label(model, node, layer):
+    """Ôte du nœud de légende `node` l'intitulé de bande d'un raster (« Band 1 (Gray) ») : son
+    premier nœud quand c'est un simple libellé suivi d'autres nœuds (la rampe). Un libellé posé
+    par Cassini (`LEGEND_FIRST_LABEL`) est gardé ; la couche du projet ne change pas."""
+    from qgis.core import QgsMapLayerLegendUtils, QgsRasterLayer, QgsSimpleLegendNode
+
+    if not isinstance(layer, QgsRasterLayer) or layer.customProperty(LEGEND_FIRST_LABEL):
+        return
+    nodes = model.layerLegendNodes(node)
+    if len(nodes) > 1 and isinstance(nodes[0], QgsSimpleLegendNode):
+        # Les indices d'un ordre sont ceux des nœuds d'origine : l'ordre en place est repris, son
+        # premier nœud ôté.
+        if QgsMapLayerLegendUtils.hasLegendNodeOrder(node):
+            order = list(QgsMapLayerLegendUtils.legendNodeOrder(node))
+        else:
+            order = list(range(len(model.layerOriginalLegendNodes(node))))
+        QgsMapLayerLegendUtils.setLegendNodeOrder(node, order[1:])
+        model.refreshLayerLegend(node)
+
+
+# Avertissement rendu au noyau quand un résultat n'a pas pu être dessiné par son clone stylé.
+CLONE_FAILED = "Le résultat « %s » n'a pas pu être mis en évidence : il est dessiné avec son style du projet."
 
 
 # Éléments que la mise en page doit porter (rendus par le fond, vérifiés par les tests).
@@ -401,12 +467,14 @@ class LayoutBackend(QgisBackend):
         return datetime.datetime.fromtimestamp(stamp, datetime.timezone.utc).strftime("%Y-%m-%d")
 
     def export_pdf(self, layers, title, sources_text, out, authid, box, scale=None, page=None, grid=None,
-                   header=None, footer=None):
+                   header=None, footer=None, focus=None):
         """Monte la mise en page, l'exporte dans `out`, rend `{"items": éléments posés (clés de
         `EXPECTED_ITEMS`, puis de `OPTIONAL_ITEMS` posés), "scale": échelle relue sur la carte,
         "extent": emprise de la carte (xmin, ymin, xmax, ymax)}`. `header`, `footer` : une ligne
         centrée en haut et en bas de la page. Une grille `mgrs` porte `squares`, imprimés dans
-        un cadre au coin bas droit de la carte. Avec `scale`, `box` est un
+        un cadre au coin bas droit de la carte. `focus` (entrée 7.9) : `{"results": [(couche,
+        libellé, style normalisé ou None)], "hide_band_labels": bool}` ; chaque résultat stylé
+        est dessiné par un clone en mémoire, jamais ajouté au projet. Avec `scale`, `box` est un
         petit rectangle centré : la carte y est cadrée puis tenue à 1:`scale` (`setScale` garde
         le centre). `page` : (`size`, `orientation`), A4 paysage si absent. `grid` : `{"authid":
         système de la grille, "interval": écart en unités de ce système}`. Lève `GridError`
@@ -473,9 +541,22 @@ class LayoutBackend(QgisBackend):
             return place(item, x, y, w, h)
 
         # Carte : couches visibles seules, cadrée sur leur emprise (zoomToExtent garde la taille).
+        # Résultats d'un plan (entrée 7.9) : un clone en mémoire stylé remplace la couche dans la
+        # mise en page seule ; la couche du projet n'est jamais touchée.
+        labels, drawn, warnings = {}, list(layers), []
+        if focus is not None:
+            for layer, text, style in focus["results"]:
+                labels[id(layer)] = text
+                if style is not None:
+                    clone = highlighted_clone(layer, style)
+                    if clone is not None:
+                        drawn[layers.index(layer)] = clone
+                    else:
+                        warnings.append(CLONE_FAILED % text)
         carte = QgsLayoutItemMap(layout)
         carte.setCrs(QgsCoordinateReferenceSystem(authid))
-        carte.setLayers(layers)
+        carte.setLayers(drawn)
+        carte.focus_clones = [d for d, o in zip(drawn, layers) if d is not o]  # tenus jusqu'à l'export
         place(carte, 10, 22, 200, 160)
         carte.zoomToExtent(QgsRectangle(*box))
         if scale is not None:
@@ -574,18 +655,29 @@ class LayoutBackend(QgisBackend):
         root = legend.model().rootGroup()
         root.clear()
         map_scale = carte.scale()
-        for layer in layers:
+        hide_bands = focus is not None and focus.get("hide_band_labels")
+        for original, layer in zip(layers, drawn):
             # Une couche que l'échelle de la carte masque n'est pas dessinée : pas de légende.
             if layer.hasScaleBasedVisibility() and not layer.isInScaleRange(map_scale):
                 continue
             install_legend(layer)  # légende de Cassini d'un projet rouvert (style_gestures)
             node = root.addLayer(layer)
             apply_legend_labels(node, layer)
+            text = labels.get(id(original))
+            if text:
+                node.setUseLayerName(False)  # le nœud seul est renommé, jamais la couche
+                node.setName(text)
             legend.model().refreshLayerLegend(node)
+            if hide_bands:
+                hide_band_label(legend.model(), node, layer)
         # Seules les classes présentes dans le cadre de la carte restent à la légende.
         legend.setLegendFilterByMapEnabled(True)
         legend.updateFilterByMap()
         place(legend, 215, 22, 72, LEGEND_BOTTOM - 22)
+        if focus is not None:
+            # Le nom en clair d'un résultat est une phrase : il passe à la ligne dans la colonne au
+            # lieu de faire replier toute la légende sur ses noms (entrée 7.9, relevé sous 3.44).
+            legend.setAutoWrapLinesAfter(max(20.0, 72 * fx - legend.symbolWidth() - LEGEND_WRAP_MARGIN))
         # Relevés par les sondes : l'essai retenu, et s'il tient sans couper la légende.
         self.legend_step, self.legend_fits = fit_legend(
             layout, legend, 72 * fx, (LEGEND_BOTTOM - 22) * fy, family
@@ -644,6 +736,7 @@ class LayoutBackend(QgisBackend):
         frame = carte.extent()
         return {
             "items": placed,
+            "warnings": warnings,
             "scale": carte.scale(),
             "extent": (frame.xMinimum(), frame.yMinimum(), frame.xMaximum(), frame.yMaximum()),
         }
@@ -796,6 +889,67 @@ def _margin_param(params, name):
     return text  # imprimé tel quel (D8)
 
 
+FRAMED_ON = ("results", "inputs", "visible_layers")
+FOCUS_KEYS = {"results", "hidden", "frame", "framed_on", "hide_band_labels"}
+
+
+def _ids(value):
+    return isinstance(value, list) and all(isinstance(i, str) and i for i in value)
+
+
+def _focus_param(params):
+    """`focus` (fourni par le noyau pour un export de plan, entrée 7.9) lu et vérifié : None si
+    absent, sinon `{"results": [(id, libellé, style normalisé ou None)], "hidden": set,
+    "frame": [ids], "hide_band_labels": bool}`. Mal formé : `layout.bad_params`."""
+    focus = params.get("focus")
+    if focus is None:
+        return None
+    bad = GestureError(BAD_PARAMS, "La mise en évidence du résultat, fournie par le noyau, est invalide.")
+    if not isinstance(focus, dict) or not set(focus) <= FOCUS_KEYS or "results" not in focus:
+        raise bad
+    if focus.get("framed_on") not in FRAMED_ON:
+        raise bad
+    hidden, frame = focus.get("hidden", []), focus.get("frame", [])
+    hide_bands = focus.get("hide_band_labels", False)
+    if not _ids(hidden) or not _ids(frame) or not isinstance(hide_bands, bool):
+        raise bad
+    results = []
+    if not isinstance(focus["results"], list):
+        raise bad
+    for item in focus["results"]:
+        if not isinstance(item, dict) or not set(item) <= {"layer_id", "label", "style"}:
+            raise bad
+        layer_id, label = item.get("layer_id"), item.get("label")
+        if not isinstance(layer_id, str) or not layer_id or not isinstance(label, str) or not label.strip():
+            raise bad
+        style = item.get("style")
+        if style is not None:
+            try:
+                style = normalize_style(style)
+            except GestureError:
+                raise bad
+            if style["kind"] != "single":
+                raise bad
+        if any(r[0] == layer_id for r in results):
+            raise bad
+        results.append((layer_id, label.strip(), style))
+    return {"results": results, "hidden": set(hidden), "frame": list(frame), "hide_band_labels": hide_bands}
+
+
+def _focus_order(backend, layers, focus):
+    """Couches de la carte d'un export de plan (entrée 7.9) : intermédiaires ôtés ; résultats
+    vecteur en tête, dans l'ordre du noyau ; résultats raster juste au-dessus du premier raster
+    de l'utilisateur (sous ses vecteurs), sinon en bas. Un id absent des couches est ignoré."""
+    layers = [layer for layer in layers if backend.id_of(layer) not in focus["hidden"]]
+    order = [r[0] for r in focus["results"]]
+    found = [layer for rid in order for layer in layers if backend.id_of(layer) == rid]
+    vectors = [layer for layer in found if backend.is_vector(layer)]
+    rasters = [layer for layer in found if not backend.is_vector(layer)]
+    rest = [layer for layer in layers if layer not in found]
+    at = next((i for i, layer in enumerate(rest) if not backend.is_vector(layer)), len(rest))
+    return vectors + rest[:at] + rasters + rest[at:]
+
+
 def _file_path(raw):
     """Chemin du fichier d'une source de couche (`fichier.gpkg|layername=x` -> `fichier.gpkg`) ;
     None si ce n'est pas un fichier."""
@@ -893,6 +1047,7 @@ class LayoutExportGesture(_ReadGesture):
         grid = _grid_param(params)
         header = _margin_param(params, "header")
         footer = _margin_param(params, "footer")
+        focus = _focus_param(params)
         backend = self._backend
         if grid is not None and grid["projected"] and not backend.knows(grid["epsg"]):
             raise GestureError(UNKNOWN_CRS, "Système de la grille inconnu de QGIS : EPSG:%d." % grid["epsg"])
@@ -900,6 +1055,9 @@ class LayoutExportGesture(_ReadGesture):
         # journal : elles restent dans le projet, intactes, mais hors de la carte (ticket 5.36).
         leave_out = set(leave_out)
         layers = [layer for layer in backend.visible_layers() if backend.id_of(layer) not in leave_out]
+        before_focus = list(layers)
+        if focus is not None:
+            layers = _focus_order(backend, layers, focus)
         if not layers:
             raise GestureError(EMPTY, "Aucune couche visible : il n'y a rien à mettre sur la carte.")
         crs = backend.project_crs()
@@ -914,13 +1072,33 @@ class LayoutExportGesture(_ReadGesture):
         # souvent le monde.
         frame_box = box
         if scale is None:
-            frame_box = _union([e for layer, e in zip(layers, extents) if backend.is_vector(layer)]) or box
+            # Cadrage d'avant 7.9, sur les couches visibles avant que la mise en évidence n'en ôte.
+            if focus is not None:
+                every = [backend.extent_of(layer, crs) for layer in before_focus]
+                fallback = _union(every) or box
+                frame_box = _union(
+                    [e for layer, e in zip(before_focus, every) if backend.is_vector(layer)]
+                ) or fallback
+            else:
+                frame_box = _union([e for layer, e in zip(layers, extents) if backend.is_vector(layer)]) or box
+            # Résultat d'un plan : cadré sur les couches que le noyau nomme, s'il en reste de visibles.
+            if focus is not None and focus["frame"]:
+                wanted = set(focus["frame"])
+                framed = _union([e for layer, e in zip(layers, extents) if backend.id_of(layer) in wanted])
+                if framed is not None:
+                    frame_box = framed
 
         names = []
         details = []
         work_dir = None
         if backend.project_dir() and backend.project_name():
             work_dir = os.path.join(backend.project_dir(), backend.project_name() + ".cassini")
+        # Un résultat mis en évidence est nommé, dans la ligne imprimée des sources, par son nom en
+        # clair au lieu de son fichier technique ; `sources` garde les noms de fichiers.
+        result_labels = {}
+        if focus is not None:
+            result_labels = {rid: label for rid, label, _ in focus["results"]}
+        printed = {}
         for layer in layers:
             raw = backend.source_of(layer)
             name = source_name(raw)
@@ -928,11 +1106,14 @@ class LayoutExportGesture(_ReadGesture):
                 continue
             names.append(name)
             details.append(self._detail(layer, name, _file_path(raw), work_dir))
+            if backend.id_of(layer) in result_labels:
+                printed[name] = result_labels[backend.id_of(layer)]
         if names:
             shown = []
             for detail in details:
                 said = _detail_text(detail)
-                shown.append("%s (%s)" % (detail["source"], said) if said else detail["source"])
+                source = printed.get(detail["source"], detail["source"])
+                shown.append("%s (%s)" % (source, said) if said else source)
             sources_text = "Sources : " + ", ".join(shown)
         else:
             sources_text = "Sources : couches du projet (hors fichier)"
@@ -977,6 +1158,12 @@ class LayoutExportGesture(_ReadGesture):
             extra["header"] = header
         if footer is not None:
             extra["footer"] = footer
+        if focus is not None:
+            by_id = {backend.id_of(layer): layer for layer in layers}
+            extra["focus"] = {
+                "results": [(by_id[rid], label, style) for rid, label, style in focus["results"] if rid in by_id],
+                "hide_band_labels": focus["hide_band_labels"],
+            }
         try:
             framing = _padded(frame_box) if scale is None else _centered(center)
             done = backend.export_pdf(layers, title.strip(), sources_text, out, crs, framing, **extra)
@@ -998,6 +1185,7 @@ class LayoutExportGesture(_ReadGesture):
                 "Aucune couche visible dans le cadre : déplacez la vue de QGIS sur les données, puis recommencez.",
             )
         self.items_placed = list(done["items"])
+        warnings = [w for w in done.get("warnings", []) if isinstance(w, str)]
         result = {
             "file": out,
             "page_count": 1,
@@ -1009,6 +1197,8 @@ class LayoutExportGesture(_ReadGesture):
         if scale is not None:
             result["scale"] = scale
             result["center"] = {"x": center[0], "y": center[1], "epsg": _epsg_of(crs)}
+        if warnings:
+            result["warnings"] = warnings
         return result
 
     def _detail(self, layer, name, path, work_dir):

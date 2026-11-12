@@ -190,6 +190,9 @@ fn check_spec(spec: &CommandSpec, out: &mut Vec<ContractViolation>) {
     if let Some((param, layer)) = &spec.work_crs_param {
         check_work_crs_param(spec, param, layer, out);
     }
+    if let Some(param) = &spec.focus_param {
+        check_focus_param(spec, param, out);
+    }
     check_path_params(spec, out);
     for (which, schema) in [
         ("des paramètres", &spec.params_schema),
@@ -258,6 +261,43 @@ fn check_work_crs_param(
     if required {
         fault(format!(
             "`work_crs_param` nomme « {param} », obligatoire : le noyau le remplit, il doit être facultatif."
+        ));
+    }
+}
+
+/// Le paramètre de mise en évidence du résultat d'un plan (entrée 7.9) : un objet facultatif du
+/// schéma, rempli par le noyau.
+fn check_focus_param(spec: &CommandSpec, param: &str, out: &mut Vec<ContractViolation>) {
+    let root = &spec.params_schema;
+    let mut fault = |message: String| {
+        out.push(violation("contract.focus_param", &spec.id, &message));
+    };
+    let Some(p) = root.get("properties").and_then(|p| p.get(param)) else {
+        fault(format!(
+            "`focus_param` nomme « {param} », absent des propriétés du schéma des paramètres."
+        ));
+        return;
+    };
+    let object = find(p, root, 0, &|m| {
+        m.get("type").filter(|t| {
+            t.as_str() == Some("object")
+                || t.as_array()
+                    .is_some_and(|a| a.iter().any(|v| v.as_str() == Some("object")))
+        })
+    })
+    .is_some();
+    if !object {
+        fault(format!(
+            "`focus_param` nomme « {param} », dont le schéma n'est pas un objet."
+        ));
+    }
+    let required = root
+        .get("required")
+        .and_then(Value::as_array)
+        .is_some_and(|r| r.iter().any(|v| v.as_str() == Some(param)));
+    if required {
+        fault(format!(
+            "`focus_param` nomme « {param} », obligatoire : le noyau le remplit, il doit être facultatif."
         ));
     }
 }
@@ -961,6 +1001,45 @@ mod tests {
         assert_eq!(violations[0].code, "contract.path_param");
         assert!(violations[0].message.contains("pth"));
         assert_eq!(codes(&only(OutputParamMissing)), ["contract.output_param"]);
+    }
+
+    command!(FocusWellFormed, |mut s| {
+        s.params_schema = json!({
+            "$schema": DIALECT,
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "focus": {"anyOf": [{"$ref": "#/$defs/Focus"}, {"type": "null"}]}
+            },
+            "required": ["title"],
+            "$defs": {"Focus": {"type": "object", "properties": {}}}
+        });
+        s.focus_param("focus")
+    });
+    command!(FocusMissing, |s| s.focus_param("focus"));
+    command!(FocusNotObject, |mut s| {
+        s.params_schema = json!({
+            "$schema": DIALECT,
+            "type": "object",
+            "properties": {"focus": {"type": "string"}},
+            "required": ["focus"]
+        });
+        s.focus_param("focus")
+    });
+
+    #[test]
+    fn a_focus_param_is_an_optional_object() {
+        assert!(only(FocusWellFormed).check_contract().is_empty());
+        assert_eq!(codes(&only(FocusMissing)), ["contract.focus_param"]);
+        let violations = only(FocusNotObject).check_contract();
+        assert_eq!(violations.len(), 2, "{violations:?}");
+        assert!(violations.iter().all(|v| v.code == "contract.focus_param"));
+        for word in ["objet", "facultatif"] {
+            assert!(
+                violations.iter().any(|v| v.message.contains(word)),
+                "{word} : {violations:?}"
+            );
+        }
     }
 
     command!(WorkCrsWellFormed, |mut s| {

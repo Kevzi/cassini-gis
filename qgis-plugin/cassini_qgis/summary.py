@@ -332,18 +332,33 @@ def _export_pdf(lang, p, r, names):
         scale = p.get("scale")
     if _is_int(scale) and scale > 0:
         text += texts.tr(lang, "sum_pdf_scale", scale=scale_number(lang, scale))
-    if not r:
-        return text
-    try:
-        file = file_name(r.get("file"))
-    except _Unreadable:
-        return text
-    pages = r.get("page_count")
-    if _is_int(pages):
-        return text + texts.tr(
-            lang, "sum_pdf_file_pages", file=file, pages=count(lang, "pages", pages)
-        )
-    return text + texts.tr(lang, "sum_pdf_file", file=file)
+    if r:
+        try:
+            file = file_name(r.get("file"))
+        except _Unreadable:
+            file = None
+        if file is not None:
+            pages = r.get("page_count")
+            if _is_int(pages):
+                text += texts.tr(lang, "sum_pdf_file_pages", file=file, pages=count(lang, "pages", pages))
+            else:
+                text += texts.tr(lang, "sum_pdf_file", file=file)
+    # Résultat d'un plan vide, en tout ou en partie (entrée 7.9), lu dans les paramètres
+    # journalisés seuls.
+    focus = p.get("focus")
+    if isinstance(focus, dict):
+        framed_on = focus.get("framed_on")
+        results, frame = focus.get("results"), focus.get("frame")
+        if framed_on == "inputs":
+            text += texts.tr(lang, "sum_pdf_framed_on_inputs")
+        elif framed_on == "visible_layers":
+            text += texts.tr(lang, "sum_pdf_empty_result")
+        elif framed_on == "results" and isinstance(results, list) and isinstance(frame, list):
+            # Le cadre ne garde que les résultats non vides : les autres sont vides.
+            empty = len(results) - len(frame)
+            if 0 < empty < len(results):
+                text += texts.tr(lang, "sum_pdf_some_empty", empty=empty, total=len(results))
+    return text
 
 
 def _inventory(lang, p, r, names):

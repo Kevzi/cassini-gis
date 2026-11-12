@@ -802,6 +802,14 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   reste identique ; une ligne ancienne sans `work_epsg` se rejoue comme une couche en
   mètres. Remplace « toujours exécutée, identité comprise » ci-dessus. La garde « système
   en mètres » porte sur `work_epsg` quand il est rempli, sinon sur la couche.
+- **Précision (2026-11-12 soir, changement de cap `change-mise-en-evidence-du-resultat-dans-le-pdf`,
+  entrée 7.9) :** `layout.export_pdf` porte un paramètre `focus`, rempli par le noyau pour un
+  export lancé dans un plan d'après les lignes du plan en cours au journal (couches de résultat,
+  leur nom en clair et leur style, couches intermédiaires à cacher, couches de cadrage,
+  intitulés de bande à ôter). Le geste l'applique à la seule mise en page (clone en mémoire du
+  résultat, jamais ajouté au projet) : aucune suite n'y est choisie, toute valeur vient du
+  paramètre (AD-5). Journalisé, relu au rejeu sans recalcul (AD-11) ; aucune étape ajoutée au
+  plan (AD-23).
 
 ### AD-25 — Une commande déléguée n'est annoncée que si toute sa chaîne existe chez l'utilisateur
 

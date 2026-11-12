@@ -4922,3 +4922,494 @@ fn a_session_buffer_of_a_metric_layer_replays_identically() {
     assert!(buffers.borrow()[0].get("work_epsg").is_none());
     let _ = fs::remove_dir_all(dir);
 }
+
+// ---- Entrée 7.9 : mise en évidence du résultat d'un plan dans son PDF ----
+
+/// QGIS de test du plan de démo : chaque analyse écrit sa sortie et rend une couche neuve, propre
+/// à la génération ; l'export garde les paramètres qu'il reçoit.
+struct FocusQgis {
+    generation: u32,
+    count: std::cell::Cell<u32>,
+    /// Nombre d'entités rendu par la dernière intersection (le résultat).
+    result_count: u64,
+    /// Paramètres reçus par chaque export, dans l'ordre.
+    exports: std::rc::Rc<std::cell::RefCell<Vec<Value>>>,
+    /// Lectures de l'inventaire reçues.
+    inventories: std::rc::Rc<std::cell::Cell<u32>>,
+    /// L'inventaire est refusé (lecture ratée).
+    broken_inventory: bool,
+}
+
+impl FocusQgis {
+    fn new(generation: u32) -> Self {
+        FocusQgis {
+            generation,
+            count: std::cell::Cell::new(0),
+            result_count: 12,
+            exports: Default::default(),
+            inventories: Default::default(),
+            broken_inventory: false,
+        }
+    }
+}
+
+impl Executor for FocusQgis {
+    fn execute(&self, id: &str, p: Value) -> Result<Value, RegistryError> {
+        if id == "project.inventory" {
+            self.inventories.set(self.inventories.get() + 1);
+            if self.broken_inventory {
+                return Err(RegistryError::Delegated {
+                    code: "qgis.failed".into(),
+                    message: "projet illisible".into(),
+                });
+            }
+            return Ok(json!({"layers": [
+                {"layer_id": "plu", "name": "Zonage du PLU", "crs": "EPSG:2154", "crs_unit": "m"},
+                {"layer_id": "gares", "name": "Gares", "crs": "EPSG:2154", "crs_unit": "m"},
+                {"layer_id": "parcelles", "name": "Parcelles", "crs": "EPSG:2154", "crs_unit": "m"}
+            ], "project_crs": "EPSG:2154", "project_crs_unit": "m", "extent": null}));
+        }
+        let n = self.count.get() + 1;
+        self.count.set(n);
+        if id == "layer.open_vector" {
+            return Ok(
+                json!({"layer_id": format!("u_g{}_{n}", self.generation), "name": "u",
+                "crs": "EPSG:2154"}),
+            );
+        }
+        let out = p["out"].as_str().unwrap().to_string();
+        fs::write(&out, format!("sortie-{}", self.generation)).unwrap();
+        match id {
+            "layout.export_pdf" => {
+                self.exports.borrow_mut().push(p.clone());
+                Ok(json!({"file": out, "page_count": 1, "layer_count": 4,
+                    "sources": ["plu.gpkg"], "truncated": false, "source_details": []}))
+            }
+            "analysis.select_by_attribute" | "analysis.buffer" | "analysis.intersect" => {
+                let last = id == "analysis.intersect"
+                    && p["overlay_layer_id"] != json!("parcelles")
+                    && p["layer_id"] != json!("parcelles");
+                let count = if last { self.result_count } else { 5 };
+                Ok(json!({"layer_id": format!("f_g{}_{n}", self.generation),
+                    "name": format!("{n}-{id}"), "feature_count": count, "crs": "EPSG:2154"}))
+            }
+            other => panic!("commande inattendue : {other}"),
+        }
+    }
+}
+
+/// Le plan de démo en cinq étapes (sélection, tampon, intersection, intersection, PDF), dans
+/// une session neuve : rend la session.
+fn demo_plan<'r>(registry: &'r Registry, project: &Path, qgis: FocusQgis) -> Session<'r> {
+    let mut s = Session::open(registry, project).unwrap().with_qgis(qgis);
+    let a = s
+        .call_in_plan(
+            "analysis.select_by_attribute",
+            json!({"layer_id": "plu", "field": "typezone", "operator": "eq", "value": "U"}),
+            1,
+        )
+        .unwrap()["layer_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let b = s
+        .call_in_plan(
+            "analysis.buffer",
+            json!({"layer_id": "gares", "distance": {"value": 500, "unit": "m"}}),
+            2,
+        )
+        .unwrap()["layer_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let c = s
+        .call_in_plan(
+            "analysis.intersect",
+            json!({"layer_id": "parcelles", "overlay_layer_id": a}),
+            3,
+        )
+        .unwrap()["layer_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    s.call_in_plan(
+        "analysis.intersect",
+        json!({"layer_id": c, "overlay_layer_id": b}),
+        4,
+    )
+    .unwrap();
+    // Une mise en évidence écrite par l'appelant est ôtée, puis remplacée par celle du noyau.
+    s.call_in_plan(
+        "layout.export_pdf",
+        json!({
+        "title": "Parcelles constructibles à moins de 500 m d'une gare à Annecy",
+        "focus": {"results": [{"layer_id": "plu", "label": "faux"}], "hidden": ["parcelles"],
+                  "frame": [], "framed_on": "visible_layers"}}),
+        5,
+    )
+    .unwrap();
+    s
+}
+
+fn demo_focus(g: u32) -> Value {
+    json!({"results": [{"layer_id": format!("f_g{g}_4"),
+             "label": "Parcelles constructibles à moins de 500 m d'une gare",
+             "style": {"kind": "single", "stroke": "#3d0026", "fill": "#c2187a", "width_mm": 0.5}}],
+           "hidden": [format!("f_g{g}_1"), format!("f_g{g}_2"), format!("f_g{g}_3")],
+           "frame": [format!("f_g{g}_4")], "framed_on": "results", "hide_band_labels": true})
+}
+
+#[test]
+fn the_demo_plan_journals_its_focus_and_replays_it_with_bound_ids() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis = FocusQgis::new(1);
+    let exports = qgis.exports.clone();
+    let inventories = qgis.inventories.clone();
+    let mut s = demo_plan(&registry, &project, qgis);
+    // Un seul résultat : l'inventaire n'est lu que par le tampon (9.16), pas pour nommer.
+    assert_eq!(inventories.get(), 1);
+    assert_eq!(exports.borrow()[0]["focus"], demo_focus(1));
+    let l = lines(&s);
+    assert_eq!(l.len(), 5, "aucune étape ajoutée au plan (AD-23)");
+    assert_eq!(l[4]["params"]["focus"], demo_focus(1));
+    // Hors plan : aucune mise en évidence, et celle de l'appelant est ôtée.
+    s.call(
+        "layout.export_pdf",
+        json!({"title": "Carte", "focus": demo_focus(1)}),
+    )
+    .unwrap();
+    assert!(
+        exports.borrow()[1].get("focus").is_none(),
+        "{}",
+        exports.borrow()[1]
+    );
+    assert!(lines(&s)[5]["params"].get("focus").is_none());
+    drop(s);
+
+    // Rejeu dans une session neuve : la mise en évidence journalisée, ids liés aux neufs.
+    let again = FocusQgis::new(2);
+    let replayed = again.exports.clone();
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(
+            &Router::new(&registry).with_qgis(again),
+            &mut HashSet::new(),
+        )
+        .unwrap();
+    assert_eq!(
+        report,
+        ReplayReport {
+            steps: 6,
+            identical: true
+        }
+    );
+    assert_eq!(replayed.borrow()[0]["focus"], demo_focus(2));
+    assert!(replayed.borrow()[1].get("focus").is_none());
+
+    // Une ligne d'export plus ancienne, sans `focus`, se rejoue sans lui.
+    let journal = dir.join("p.cassini").join(JOURNAL_FILE);
+    let text = fs::read_to_string(&journal).unwrap();
+    let rows: Vec<Value> = content_lines(&text)
+        .map(|l| {
+            let mut v: Value = serde_json::from_str(l).unwrap();
+            if let Some(p) = v.get_mut("params").and_then(Value::as_object_mut) {
+                p.remove("focus");
+            }
+            v
+        })
+        .collect();
+    hand_journal(&project, &rows);
+    let old = FocusQgis::new(3);
+    let replayed = old.exports.clone();
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(&Router::new(&registry).with_qgis(old), &mut HashSet::new())
+        .unwrap();
+    assert!(report.identical);
+    assert!(replayed.borrow()[0].get("focus").is_none());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_empty_result_is_framed_on_the_input_layers() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let mut qgis = FocusQgis::new(1);
+    qgis.result_count = 0;
+    let exports = qgis.exports.clone();
+    let s = demo_plan(&registry, &project, qgis);
+    let focus = exports.borrow()[0]["focus"].clone();
+    assert_eq!(focus["framed_on"], "inputs");
+    assert_eq!(focus["frame"], json!(["plu", "gares", "parcelles"]));
+    assert_eq!(focus["results"][0]["layer_id"], "f_g1_4");
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn several_results_read_the_inventory_to_be_named() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis = FocusQgis::new(1);
+    let exports = qgis.exports.clone();
+    let inventories = qgis.inventories.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    s.call_in_plan(
+        "analysis.select_by_attribute",
+        json!({"layer_id": "plu", "field": "typezone", "operator": "eq", "value": "U"}),
+        1,
+    )
+    .unwrap();
+    s.call_in_plan(
+        "analysis.select_by_attribute",
+        json!({"layer_id": "parcelles", "field": "x", "operator": "eq", "value": "1"}),
+        2,
+    )
+    .unwrap();
+    s.call_in_plan("layout.export_pdf", json!({"title": "Deux sélections"}), 3)
+        .unwrap();
+    assert_eq!(inventories.get(), 1);
+    let select = crate::focus::short_title(registry.spec("analysis.select_by_attribute").unwrap());
+    let focus = exports.borrow()[0]["focus"].clone();
+    // Titre court de la commande, borné pour laisser la place au nom de l'entrée.
+    for (i, name) in [(0, "Zonage du PLU"), (1, "Parcelles")] {
+        let label = focus["results"][i]["label"].as_str().unwrap();
+        assert!(label.ends_with(&format!(" — {name}")), "{label}");
+        assert!(
+            select.starts_with(label.split(" — ").next().unwrap()),
+            "{label}"
+        );
+        assert!(label.chars().count() <= crate::focus::MAX_LABEL, "{label}");
+    }
+    assert_eq!(focus["frame"], json!(["f_g1_1", "f_g1_2"]));
+    assert_eq!(focus["hidden"], json!([]));
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_failed_inventory_read_stops_the_export_by_name_without_a_line() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let mut qgis = FocusQgis::new(1);
+    qgis.broken_inventory = true;
+    let exports = qgis.exports.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    s.call_in_plan(
+        "analysis.select_by_attribute",
+        json!({"layer_id": "plu", "field": "typezone", "operator": "eq", "value": "U"}),
+        1,
+    )
+    .unwrap();
+    s.call_in_plan(
+        "analysis.select_by_attribute",
+        json!({"layer_id": "parcelles", "field": "x", "operator": "eq", "value": "1"}),
+        2,
+    )
+    .unwrap();
+    let err = s
+        .call_in_plan("layout.export_pdf", json!({"title": "Deux sélections"}), 3)
+        .unwrap_err();
+    assert_eq!(err.code, "qgis.failed");
+    assert!(err.message.contains("layout.export_pdf"), "{}", err.message);
+    assert!(exports.borrow().is_empty());
+    assert_eq!(lines(&s).len(), 2);
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_export_at_the_first_step_of_a_plan_or_after_a_user_file_has_no_focus() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis = FocusQgis::new(1);
+    let exports = qgis.exports.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    // Un plan précédent a produit des couches ; l'export seul d'un nouveau plan ne les voit pas.
+    s.call_in_plan(
+        "analysis.select_by_attribute",
+        json!({"layer_id": "plu", "field": "typezone", "operator": "eq", "value": "U"}),
+        1,
+    )
+    .unwrap();
+    s.call_in_plan("layout.export_pdf", json!({"title": "Seul"}), 1)
+        .unwrap();
+    assert!(exports.borrow()[0].get("focus").is_none());
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_plan_started_mid_journal_reads_only_its_own_lines() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis = FocusQgis::new(1);
+    let exports = qgis.exports.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    // Six lignes d'avant : des appels hors plan, puis un plan de deux étapes resté sans export.
+    for _ in 0..4 {
+        s.call(
+            "analysis.select_by_attribute",
+            json!({"layer_id": "plu", "field": "typezone", "operator": "eq", "value": "U"}),
+        )
+        .unwrap();
+    }
+    s.call_in_plan(
+        "analysis.select_by_attribute",
+        json!({"layer_id": "plu", "field": "typezone", "operator": "eq", "value": "A"}),
+        1,
+    )
+    .unwrap();
+    s.call_in_plan(
+        "analysis.buffer",
+        json!({"layer_id": "gares", "distance": {"value": 1, "unit": "km"}}),
+        2,
+    )
+    .unwrap();
+    drop(s);
+    let qgis = FocusQgis::new(2);
+    let exports2 = qgis.exports.clone();
+    let s = demo_plan(&registry, &project, qgis);
+    let l = lines(&s);
+    assert_eq!(l.len(), 11);
+    let id = |n: usize| l[n - 1]["layer_id"].as_str().unwrap().to_string();
+    let focus = &l[10]["params"]["focus"];
+    assert_eq!(focus["results"][0]["layer_id"], json!(id(10)));
+    assert_eq!(focus["hidden"], json!([id(7), id(8), id(9)]));
+    assert_eq!(exports2.borrow()[0]["focus"], *focus);
+    assert!(exports.borrow().is_empty());
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_new_plan_opening_a_user_file_does_not_take_the_earlier_plan() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis = FocusQgis::new(1);
+    let exports = qgis.exports.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    s.call_in_plan(
+        "analysis.select_by_attribute",
+        json!({"layer_id": "plu", "field": "typezone", "operator": "eq", "value": "U"}),
+        1,
+    )
+    .unwrap();
+    s.call_in_plan(
+        "analysis.buffer",
+        json!({"layer_id": "gares", "distance": {"value": 1, "unit": "km"}}),
+        2,
+    )
+    .unwrap();
+    // Plan suivant : son étape 1 ouvre un fichier de l'utilisateur, puis l'export.
+    s.call_in_plan("layer.open_vector", json!({"path": "gares.geojson"}), 1)
+        .unwrap();
+    s.call_in_plan("layout.export_pdf", json!({"title": "Gares"}), 2)
+        .unwrap();
+    assert!(
+        exports.borrow()[0].get("focus").is_none(),
+        "{}",
+        exports.borrow()[0]
+    );
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_first_step_refused_without_a_line_leaves_the_export_without_focus() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis = FocusQgis::new(1);
+    let exports = qgis.exports.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    // Un plan d'une étape, puis un plan dont l'étape 1 est refusée sans ligne.
+    s.call_in_plan(
+        "analysis.select_by_attribute",
+        json!({"layer_id": "plu", "field": "typezone", "operator": "eq", "value": "U"}),
+        1,
+    )
+    .unwrap();
+    let refused = s.call_in_plan("analysis.buffer", json!({"layer_id": "gares"}), 1);
+    assert!(refused.is_err());
+    assert_eq!(lines(&s).len(), 1);
+    s.call_in_plan("layout.export_pdf", json!({"title": "Carte"}), 2)
+        .unwrap();
+    assert!(
+        exports.borrow()[0].get("focus").is_none(),
+        "{}",
+        exports.borrow()[0]
+    );
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+/// Un plan de pentes dans une session : pente du MNT (raster du noyau, ouverture dictée sur
+/// `out:1.1`), au besoin une pente de la pente, puis l'export. Rend les lignes du journal.
+fn slope_plan(consume: bool) -> Vec<Value> {
+    let (dir, project_file, _) = temp_project();
+    with_dem(&dir);
+    let project = OpenProject::with_base();
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, &project_file)
+        .unwrap()
+        .with_qgis(ProjectQgis::new(&project, 1))
+        .with_raster_opening(true);
+    s.call_in_plan("terrain.slope", slope_params(), 1).unwrap();
+    let mut step = 2;
+    if consume {
+        s.call_in_plan(
+            "terrain.slope",
+            json!({"dem": "out:1.1", "unit": "degrees"}),
+            2,
+        )
+        .unwrap();
+        step = 3;
+    }
+    s.call_in_plan(
+        "layout.export_pdf",
+        json!({"title": "Pentes du secteur"}),
+        step,
+    )
+    .unwrap();
+    let l = lines(&s);
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+    l
+}
+
+#[test]
+fn a_core_raster_result_is_highlighted_without_style() {
+    let l = slope_plan(false);
+    let ids: Vec<&str> = l.iter().map(|l| l["id"].as_str().unwrap()).collect();
+    assert_eq!(
+        ids,
+        ["terrain.slope", "layer.open_raster", "layout.export_pdf"]
+    );
+    let focus = &l[2]["params"]["focus"];
+    assert_eq!(
+        *focus,
+        json!({"results": [{"layer_id": "raster_g1_1", "label": "Pentes du secteur"}],
+               "hidden": [], "frame": ["raster_g1_1"], "framed_on": "results",
+               "hide_band_labels": true})
+    );
+    // Reprise par une seconde pente : la première est intermédiaire.
+    let l = slope_plan(true);
+    let ids: Vec<&str> = l.iter().map(|l| l["id"].as_str().unwrap()).collect();
+    assert_eq!(
+        ids,
+        [
+            "terrain.slope",
+            "layer.open_raster",
+            "terrain.slope",
+            "layer.open_raster",
+            "layout.export_pdf"
+        ]
+    );
+    let focus = &l[4]["params"]["focus"];
+    assert_eq!(focus["results"][0]["layer_id"], l[3]["layer_id"]);
+    assert!(focus["results"][0].get("style").is_none());
+    assert_eq!(focus["hidden"], json!([l[1]["layer_id"]]));
+    assert_eq!(focus["frame"], json!([l[3]["layer_id"]]));
+    assert_eq!(focus["framed_on"], "results");
+}
