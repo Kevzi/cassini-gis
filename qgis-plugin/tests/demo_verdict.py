@@ -8,6 +8,8 @@ Le contrôle est géométrique, pas une liste d'identifiants : il tient quel que
 intersections choisi par le modèle, et attrape un plan qui oublie la zone ou le tampon.
 """
 
+import re
+
 EXPORT = "layout.export_pdf"
 # Seules les analyses créent la couche de réponse ; une étape de style rend la couche qu'elle
 # met en forme, qui n'est pas la réponse.
@@ -238,8 +240,11 @@ def judge_slope(steps, facts):
     sources2 = facts.get("sources2") or []
     if not any(stem in str(source) for source in sources2):
         return "pente : couche absente du PDF (%s ne figure pas dans les sources)" % stem
-    if len(sources2) <= len(sources1):
-        return "pente : le second export n'a pas plus de couches que le premier"
+    # Les sorties du plan 1 (`N-analysis.…`) sont cachées de l'export d'un plan suivant : elles
+    # sont dans le projet mais ne doivent plus recouvrir la pente (décision du 2026-11-13).
+    left_over = [str(s) for s in sources2 if re.match(r"^\d+-analysis\.", _base_name(str(s)))]
+    if left_over:
+        return "pente : sorties du plan 1 encore dans le PDF (%s)" % ", ".join(left_over)
     return None
 
 

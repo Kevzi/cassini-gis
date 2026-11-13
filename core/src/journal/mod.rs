@@ -507,9 +507,15 @@ impl<'a> Session<'a> {
             .get("title")
             .and_then(Value::as_str)
             .unwrap_or_default();
-        if let Some(focus) =
+        if let Some(mut focus) =
             crate::focus::focus_of(self.registry, &lines, title, inventory.as_ref())
         {
+            // Les sorties des plans précédents du journal ne se voient pas dans ce PDF ; un retrait
+            // fait hors plan ou dans ce plan les écarte.
+            let (earlier, mut others) = earlier_plan_lines(&self.journal_path(), self.plan_start);
+            others.extend(lines.iter().cloned());
+            let outputs = crate::focus::earlier_outputs(self.registry, &earlier, &others);
+            crate::focus::merge_hidden(&mut focus.hidden, outputs, &focus.results);
             let value = crate::focus::focus_value(&focus)?;
             if let Value::Object(map) = params {
                 map.insert(name.to_string(), value);
@@ -1044,6 +1050,25 @@ pub fn intermediate_files(registry: &Registry, journal: &Path) -> HashSet<String
         produced.insert(layer_id.to_string(), files);
     }
     hidden
+}
+
+/// Lignes de plan, puis lignes hors plan, d'avant le plan en cours.
+type EarlierLines = (Vec<(usize, Value)>, Vec<(usize, Value)>);
+
+/// Lignes du journal `journal` écrites avant la ligne `start` où le plan en cours a commencé,
+/// avec leur étape : d'abord celles d'un plan (`plan_step` présent, les plans précédents), puis les
+/// autres (hors plan), que seuls les retraits de couche intéressent. Ligne illisible ignorée ;
+/// journal absent ou plan sans début connu : rien.
+fn earlier_plan_lines(journal: &Path, start: Option<usize>) -> EarlierLines {
+    let (Some(start), Ok(bytes)) = (start, fs::read(journal)) else {
+        return (Vec::new(), Vec::new());
+    };
+    let text = String::from_utf8_lossy(&bytes);
+    content_lines(&text)
+        .enumerate()
+        .take_while(|(i, _)| i + 1 < start)
+        .filter_map(|(i, raw)| Some((i + 1, serde_json::from_str::<Value>(raw).ok()?)))
+        .partition(|(_, line)| line.get("plan_step").is_some())
 }
 
 /// Lignes du plan en cours d'après le journal `journal`, pour un export à la place `plan_step`

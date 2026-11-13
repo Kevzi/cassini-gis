@@ -125,9 +125,12 @@ from qgis.core import (  # noqa: E402
     QgsApplication,
     QgsCoordinateReferenceSystem,
     QgsCoordinateTransform,
+    QgsFillSymbol,
     QgsProject,
     QgsRasterLayer,
+    QgsSingleSymbolRenderer,
     QgsVectorLayer,
+    QgsWkbTypes,
 )
 from qgis.PyQt.QtCore import QProcess, QTimer  # noqa: E402
 
@@ -165,6 +168,12 @@ def assemble_demo_project():
         layer = QgsVectorLayer(copy, name, "ogr")
         if not layer.isValid():
             sys.exit("fixture illisible : %s" % copy)
+        if layer.geometryType() == QgsWkbTypes.PolygonGeometry:
+            # Contour seul, comme un fond cadastral : un résultat raster (la pente) est rangé sous
+            # les vecteurs de l'utilisateur (7.9) et un remplissage plein le cacherait.
+            outline = QgsFillSymbol.createSimple(
+                {"color": "0,0,0,0", "outline_color": "#555555", "outline_width": "0.3"})
+            layer.setRenderer(QgsSingleSymbolRenderer(outline))
         project.addMapLayer(layer)
     path = os.path.join(work, "demo.qgz").replace("\\", "/")
     if not project.write(path):

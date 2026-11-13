@@ -796,6 +796,12 @@ premier raster de l'utilisateur, sous ses vecteurs. Un clone qui échoue est dit
 Un id absent des couches visibles est ignoré. Les couches du projet gardent nom, style, visibilité et place. `focus` est
 journalisé et relu au rejeu, ses ids liés aux neufs, jamais recalculé ; une ligne qui ne le porte
 pas se rejoue sans lui. Un export hors plan, ou d'un plan sans couche produite, n'en a pas.
+*Précision du 2026-11-13 (décision du propriétaire).* `hidden` contient aussi les sorties des
+plans précédents du journal du projet (qui persiste d'une réouverture à l'autre ; couches produites
+avant le début du plan en cours, hors celles retirées par `layer.remove`, où que soit ce retrait ;
+les sorties d'un appel fait hors plan ne sont pas cachées ; jamais une couche de l'utilisateur, jamais un résultat du plan) :
+le PDF d'un second plan montre les couches de l'utilisateur et son seul résultat. Ces couches
+restent dans le projet.
 
 ```json fiche
 {"id": "layout.export_pdf", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,

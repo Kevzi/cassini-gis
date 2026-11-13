@@ -230,10 +230,17 @@ class JudgeSlopeTest(unittest.TestCase):
         facts["sources2"] = ["parcelles-2154.geojson", "gares-2154.geojson"]
         self.assertIn("couche absente du PDF", v.judge_slope(slope_steps(), facts))
 
-    def test_second_export_without_more_layers(self):
+    def test_plan_1_outputs_left_in_the_pdf(self):
         facts = slope_facts()
-        facts["sources1"] = ["a", "b"]
-        self.assertIn("pas plus de couches", v.judge_slope(slope_steps(), facts))
+        facts["sources2"] = ["parcelles-2154.geojson", "1-terrain.slope.tif", "2-analysis.buffer.gpkg"]
+        reason = v.judge_slope(slope_steps(), facts)
+        self.assertIn("sorties du plan 1 encore dans le PDF", reason)
+        self.assertIn("2-analysis.buffer.gpkg", reason)
+
+    def test_fewer_layers_in_the_second_export_is_fine(self):
+        facts = slope_facts()
+        facts["sources1"] = ["a", "b", "c", "d"]
+        self.assertIsNone(v.judge_slope(slope_steps(), facts))
 
     def test_missing_dem_layer_in_project(self):
         self.assertIn("MNT", v.missing_layers_reason(True, True, True, has_dem=False))

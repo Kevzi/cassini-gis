@@ -827,6 +827,11 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   résultat, jamais ajouté au projet) : aucune suite n'y est choisie, toute valeur vient du
   paramètre (AD-5). Journalisé, relu au rejeu sans recalcul (AD-11) ; aucune étape ajoutée au
   plan (AD-23).
+- **Précision (2026-11-13, décision du propriétaire) :** les sorties des plans précédents du
+  journal du projet (qui persiste d'une réouverture à l'autre), que le noyau lit avant le début du
+  plan en cours, hors celles d'un appel fait hors plan, sont ajoutées aux
+  couches à cacher de `focus` (carte, légende, sources) ; elles restent dans le projet et ne sont
+  jamais des résultats du plan en cours. Une couche de l'utilisateur n'est jamais cachée.
 
 ### AD-25 — Une commande déléguée n'est annoncée que si toute sa chaîne existe chez l'utilisateur
 

@@ -4969,6 +4969,9 @@ impl Executor for FocusQgis {
                 {"layer_id": "parcelles", "name": "Parcelles", "crs": "EPSG:2154", "crs_unit": "m"}
             ], "project_crs": "EPSG:2154", "project_crs_unit": "m", "extent": null}));
         }
+        if id == "layer.remove" {
+            return Ok(json!({"layer_id": p["layer_id"]}));
+        }
         let n = self.count.get() + 1;
         self.count.set(n);
         if id == "layer.open_vector" {
@@ -5241,7 +5244,7 @@ fn an_export_at_the_first_step_of_a_plan_or_after_a_user_file_has_no_focus() {
 }
 
 #[test]
-fn a_plan_started_mid_journal_reads_only_its_own_lines() {
+fn a_plan_started_mid_journal_hides_its_own_and_the_earlier_plan_outputs() {
     let (dir, project, _) = temp_project();
     let registry = Registry::standard();
     let qgis = FocusQgis::new(1);
@@ -5276,9 +5279,175 @@ fn a_plan_started_mid_journal_reads_only_its_own_lines() {
     let id = |n: usize| l[n - 1]["layer_id"].as_str().unwrap().to_string();
     let focus = &l[10]["params"]["focus"];
     assert_eq!(focus["results"][0]["layer_id"], json!(id(10)));
-    assert_eq!(focus["hidden"], json!([id(7), id(8), id(9)]));
+    // Les intermédiaires du plan, puis les sorties du plan précédent (2026-11-13) ; les appels
+    // hors plan ne comptent pas.
+    assert_eq!(focus["hidden"], json!([id(7), id(8), id(9), id(5), id(6)]));
     assert_eq!(exports2.borrow()[0]["focus"], *focus);
     assert!(exports.borrow().is_empty());
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_second_plan_hides_the_outputs_of_the_first_and_replays_identically() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis = FocusQgis::new(1);
+    let exports = qgis.exports.clone();
+    let mut s = demo_plan(&registry, &project, qgis);
+    // Plan 2 : une sélection, puis l'export.
+    s.call_in_plan(
+        "analysis.select_by_attribute",
+        json!({"layer_id": "plu", "field": "typezone", "operator": "eq", "value": "A"}),
+        1,
+    )
+    .unwrap();
+    s.call_in_plan("layout.export_pdf", json!({"title": "Zones agricoles"}), 2)
+        .unwrap();
+    let focus = exports.borrow()[1]["focus"].clone();
+    let l = lines(&s);
+    let id = |n: usize| l[n - 1]["layer_id"].as_str().unwrap().to_string();
+    assert_eq!(focus["results"].as_array().unwrap().len(), 1);
+    assert_eq!(focus["results"][0]["layer_id"], json!(id(6)));
+    assert_eq!(focus["frame"], json!([id(6)]));
+    assert_eq!(focus["hidden"], json!([id(1), id(2), id(3), id(4)]));
+    assert_eq!(l[6]["params"]["focus"], focus);
+    drop(s);
+
+    let again = FocusQgis::new(2);
+    let replayed = again.exports.clone();
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(
+            &Router::new(&registry).with_qgis(again),
+            &mut HashSet::new(),
+        )
+        .unwrap();
+    assert_eq!(
+        report,
+        ReplayReport {
+            steps: 7,
+            identical: true
+        }
+    );
+    // Le `focus` relu garde la même forme, ids liés aux neufs.
+    let hidden = replayed.borrow()[1]["focus"]["hidden"].clone();
+    assert_eq!(hidden, json!(["f_g2_1", "f_g2_2", "f_g2_3", "f_g2_4"]));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_third_plan_hides_the_outputs_of_the_two_earlier_ones() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis = FocusQgis::new(1);
+    let exports = qgis.exports.clone();
+    let mut s = demo_plan(&registry, &project, qgis);
+    let select = json!({"layer_id": "plu", "field": "typezone", "operator": "eq", "value": "A"});
+    s.call_in_plan("analysis.select_by_attribute", select.clone(), 1)
+        .unwrap();
+    s.call_in_plan("layout.export_pdf", json!({"title": "Deux"}), 2)
+        .unwrap();
+    s.call_in_plan("analysis.select_by_attribute", select, 1)
+        .unwrap();
+    s.call_in_plan("layout.export_pdf", json!({"title": "Trois"}), 2)
+        .unwrap();
+    let l = lines(&s);
+    let id = |n: usize| l[n - 1]["layer_id"].as_str().unwrap().to_string();
+    let focus = exports.borrow()[2]["focus"].clone();
+    assert_eq!(focus["results"].as_array().unwrap().len(), 1);
+    assert_eq!(focus["results"][0]["layer_id"], json!(id(8)));
+    assert_eq!(focus["hidden"], json!([id(1), id(2), id(3), id(4), id(6)]));
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+/// Deux plans dont le second retire une sortie du premier, `remove_in_plan` : dans le plan en
+/// cours, sinon hors plan, entre les deux. Rend les `hidden` du second export et les ids du
+/// premier plan.
+fn hidden_after_a_removal(remove_in_plan: bool) -> (Value, Vec<String>) {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis = FocusQgis::new(1);
+    let exports = qgis.exports.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    let select = json!({"layer_id": "plu", "field": "typezone", "operator": "eq", "value": "U"});
+    let first = s
+        .call_in_plan("analysis.select_by_attribute", select.clone(), 1)
+        .unwrap()["layer_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    s.call_in_plan(
+        "analysis.buffer",
+        json!({"layer_id": "gares", "distance": {"value": 1, "unit": "km"}}),
+        2,
+    )
+    .unwrap();
+    let remove = json!({"layer_id": first});
+    if !remove_in_plan {
+        s.call("layer.remove", remove.clone()).unwrap();
+    }
+    s.call_in_plan("analysis.select_by_attribute", select, 1)
+        .unwrap();
+    let step = if remove_in_plan {
+        s.call_in_plan("layer.remove", remove, 2).unwrap();
+        3
+    } else {
+        2
+    };
+    s.call_in_plan("layout.export_pdf", json!({"title": "Zones"}), step)
+        .unwrap();
+    let ids = lines(&s)
+        .iter()
+        .take(2)
+        .map(|l| l["layer_id"].as_str().unwrap().to_string())
+        .collect();
+    let hidden = exports.borrow()[0]["focus"]["hidden"].clone();
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+    (hidden, ids)
+}
+
+#[test]
+fn an_earlier_output_removed_in_the_current_plan_is_not_hidden() {
+    let (hidden, ids) = hidden_after_a_removal(true);
+    assert_eq!(hidden, json!([ids[1]]));
+}
+
+#[test]
+fn an_earlier_output_removed_outside_any_plan_is_not_hidden() {
+    let (hidden, ids) = hidden_after_a_removal(false);
+    assert_eq!(hidden, json!([ids[1]]));
+}
+
+#[test]
+fn a_user_file_opened_by_an_earlier_plan_is_never_hidden() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis = FocusQgis::new(1);
+    let exports = qgis.exports.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    s.call_in_plan("layer.open_vector", json!({"path": "gares.geojson"}), 1)
+        .unwrap();
+    s.call_in_plan(
+        "analysis.select_by_attribute",
+        json!({"layer_id": "plu", "field": "typezone", "operator": "eq", "value": "U"}),
+        2,
+    )
+    .unwrap();
+    s.call_in_plan(
+        "analysis.select_by_attribute",
+        json!({"layer_id": "plu", "field": "typezone", "operator": "eq", "value": "A"}),
+        1,
+    )
+    .unwrap();
+    s.call_in_plan("layout.export_pdf", json!({"title": "Zones"}), 2)
+        .unwrap();
+    let l = lines(&s);
+    let focus = exports.borrow()[0]["focus"].clone();
+    assert_eq!(focus["hidden"], json!([l[1]["layer_id"]]));
+    assert!(!focus["hidden"].to_string().contains("u_g1_"));
     drop(s);
     let _ = fs::remove_dir_all(dir);
 }

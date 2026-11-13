@@ -34,6 +34,12 @@ doc des paramètres, exemples, prompt) — décision du propriétaire du 2026-11
 l'utilisateur dans le projet ; aucune étape ajoutée au plan (AD-23) ; aucune décision dans
 l'extension (AD-5) ; rejeu identique (AD-11).
 
+**Précision du 2026-11-13 (décision du propriétaire).** Les sorties des plans précédents du
+journal du projet (qui persiste d'une réouverture à l'autre ; les sorties d'un appel fait hors plan
+ne sont pas cachées) sont ajoutées à `focus.hidden` : le PDF d'un plan montre les couches de l'utilisateur et
+le résultat du plan en cours. Elles restent dans le projet et ne sont jamais des `results` du plan
+en cours ; `focus` reste journalisé et relu, jamais recalculé.
+
 ## 4. Propositions d'édition
 
 - **Catalogue** (`spec-cassini-mvp/catalogue-des-commandes.md`, fiche `layout.export_pdf`) :

@@ -21,7 +21,10 @@
 //!   court de leur commande, « — », et le nom de leur première couche d'entrée (inventaire pour
 //!   une couche de l'utilisateur, titre court de l'étape pour une sortie du plan) ;
 //! - le cadre est l'union des résultats non vides ; tous vides, celle des couches de
-//!   l'utilisateur que le plan a consommées ; sans elles, le cadrage d'avant.
+//!   l'utilisateur que le plan a consommées ; sans elles, le cadrage d'avant ;
+//! - précision du 2026-11-13 : les sorties des plans précédents du journal du projet
+//!   ([`earlier_outputs`], hors appels faits hors plan) sont ajoutées à `hidden` par `fill_focus`, sauf si ce sont des résultats
+//!   du plan en cours ; elles restent dans le projet, seul le PDF ne les montre pas.
 
 use std::collections::BTreeSet;
 
@@ -541,6 +544,44 @@ fn bounded_to(text: &str, max: usize) -> String {
         .to_string()
 }
 
+/// Ids des couches que les plans précédents du journal du projet ont produites (`lines` : leurs
+/// lignes, avec leur étape, dans l'ordre), hors celles qu'une étape a retirées du projet, que ce
+/// soit dans ces plans ou dans `others` (les lignes hors plan d'avant le plan en cours, et celles
+/// du plan en cours). Une couche ouverte sur un fichier de l'utilisateur n'en est pas une (même
+/// règle que les couches produites d'un plan), et la sortie d'un appel hors plan non plus.
+/// Précision du 2026-11-13 : le PDF d'un plan les cache.
+pub fn earlier_outputs(
+    registry: &Registry,
+    lines: &[(usize, Value)],
+    others: &[(usize, Value)],
+) -> Vec<String> {
+    produced_layers(registry, lines)
+        .iter()
+        .filter(|p| !removed(lines, p))
+        .filter(|p| {
+            !others.iter().any(|(_, line)| {
+                if failed(line) || line_id(line) != REMOVE {
+                    return false;
+                }
+                let mut found = Vec::new();
+                strings(line.get("params").unwrap_or(&Value::Null), &mut found);
+                found.iter().any(|s| p.tokens.iter().any(|t| t == s))
+            })
+        })
+        .map(|p| p.layer_id.clone())
+        .collect()
+}
+
+/// Ajoute à `hidden` les couches `earlier`, sans doublon et sans jamais y mettre un résultat du
+/// plan en cours ; l'ordre de `hidden` est gardé.
+pub fn merge_hidden(hidden: &mut Vec<String>, earlier: Vec<String>, results: &[FocusResult]) {
+    for layer in earlier {
+        if !hidden.contains(&layer) && !results.iter().any(|r| r.layer_id == layer) {
+            hidden.push(layer);
+        }
+    }
+}
+
 /// `focus` d'un export de plan, d'après les lignes du plan en cours au journal (`lines` : étape
 /// du journal et ligne, dans l'ordre), le titre de l'export et, s'il y a plusieurs résultats,
 /// l'inventaire du projet. `None` si le plan n'a produit aucune couche : l'export garde son
@@ -740,6 +781,63 @@ mod tests {
         assert_eq!(style.target(), crate::style::spec::StyleTarget::Vector);
         let again: Focus = serde_json::from_value(focus_value(&focus).unwrap()).unwrap();
         assert_eq!(again, focus);
+    }
+
+    #[test]
+    fn earlier_outputs_list_analysis_outputs_but_not_user_files_or_removed_layers() {
+        let registry = Registry::standard();
+        let mut lines = vec![ok(
+            1,
+            1,
+            "layer.open_vector",
+            json!({"path": "gares.geojson"}),
+            Some("u"),
+            Some(3),
+        )];
+        lines.extend(demo(5).into_iter().map(|(n, mut l)| {
+            l["step"] = json!(n + 1);
+            (n + 1, l)
+        }));
+        assert_eq!(
+            earlier_outputs(&registry, &lines, &[]),
+            ["A", "B", "C", "D"]
+        );
+        lines.push(ok(
+            12,
+            5,
+            "layer.remove",
+            json!({"layer_id": "B"}),
+            None,
+            None,
+        ));
+        assert_eq!(earlier_outputs(&registry, &lines, &[]), ["A", "C", "D"]);
+        assert!(earlier_outputs(&registry, &[], &[]).is_empty());
+        // Un retrait fait ailleurs (hors plan, ou dans le plan en cours) compte aussi.
+        let elsewhere = vec![ok(
+            20,
+            2,
+            "layer.remove",
+            json!({"layer_id": "A"}),
+            None,
+            None,
+        )];
+        assert_eq!(earlier_outputs(&registry, &lines, &elsewhere), ["C", "D"]);
+    }
+
+    #[test]
+    fn merge_hidden_skips_results_and_duplicates_and_keeps_order() {
+        let mut hidden = vec!["x".to_string(), "y".to_string()];
+        let results = [FocusResult {
+            layer_id: "r".into(),
+            label: "R".into(),
+            style: None,
+        }];
+        merge_hidden(
+            &mut hidden,
+            ["y", "r", "a", "x", "b", "a"].map(String::from).to_vec(),
+            &results,
+        );
+        assert_eq!(hidden, ["x", "y", "a", "b"]);
     }
 
     #[test]
