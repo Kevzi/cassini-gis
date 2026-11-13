@@ -258,8 +258,10 @@ def poll_network():
     if CONNECT:
         state["pids"].add(os.getpid())
     try:
-        out = subprocess.run(["netstat", "-ano"], capture_output=True, text=True,
-                             timeout=20, check=True).stdout
+        # En octets : `netstat` écrit dans la page de code de la console (cp850), pas en UTF-8 ;
+        # seules les colonnes ASCII servent.
+        out = subprocess.run(["netstat", "-ano"], capture_output=True,
+                             timeout=20, check=True).stdout.decode("ascii", errors="replace")
     except (OSError, subprocess.SubprocessError):
         return
     rows = demo_verdict.parse_netstat(out)

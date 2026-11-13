@@ -3,7 +3,7 @@ title: 'La sonde de démo prouve qu''aucune sortie réseau n''a lieu'
 type: 'feature'
 ticket: '5'
 created: '2026-11-13'
-status: 'built'
+status: 'done'
 baseline_revision: '5464414953e55d868a872fcccd8024aa45a56934'
 route: 'full'
 route_source: 'auto'
@@ -61,6 +61,8 @@ context:
 - Given `netstat` introuvable, when la sonde tente un relevé, then elle rend ECHEC « relevé impossible », jamais OK.
 
 ## Implementation Notes
+
+Essais réels du 2026-11-13 (QGIS 3.44.15, noyau gpu local, modèle installé) : nominal `VERDICT : OK` (26 relevés, PID du noyau du plan et du rejeu, 0 connexion, rejeu 9/9 identique) ; `CASSINI_DEMO_CONNECT=192.0.2.1:9` ECHEC « TCP … → 192.0.2.1:9 (SYN_SENT) ». Le premier essai a échoué : `netstat` écrit en cp850 sur ce Windows, lu en UTF-8 il donnait « relevé impossible » ; corrigé en lisant les octets (le garde-fou a bien refusé l'OK).
 
 ## Plan Change Log
 
