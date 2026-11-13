@@ -27,8 +27,10 @@ Le projet de démo reçoit aussi le MNT synthétique `fixtures/mnt-colline-2154.
 une couche raster nommée « MNT ». Après le premier plan jugé et sa mise en page, la sonde propose
 une seconde phrase (`PHRASE2`) : pente du MNT en degrés, ajoutée à la carte, nouvel export. Elle
 juge (`judge_slope`) `terrain.slope` en degrés sur le MNT, la couche de pente dans le projet, et son
-fichier dans les `sources` du second export, qui doit avoir plus de couches que le premier. Le rejeu
-porte alors sur les étapes des deux plans.
+fichier dans les `sources` du second export, où aucune sortie du plan 1 ne doit rester : le noyau les
+cache (`focus.hidden`, décision du 2026-11-13). Les polygones de la démo sont dessinés en contour
+seul, car un résultat raster est rangé sous les vecteurs de l'utilisateur. Le rejeu porte alors sur
+les étapes du journal, qui compte aussi celles que le noyau dicte (`layer.open_raster`, `layer.set_style`).
 
 Après un plan jugé juste, la sonde juge la mise en page (titre, légende, échelle, flèche du nord
 et sources, d'après ce que le geste d'export déclare avoir posé, `items_placed`, et le résultat
@@ -130,7 +132,6 @@ from qgis.core import (  # noqa: E402
     QgsRasterLayer,
     QgsSingleSymbolRenderer,
     QgsVectorLayer,
-    QgsWkbTypes,
 )
 from qgis.PyQt.QtCore import QProcess, QTimer  # noqa: E402
 
@@ -168,7 +169,7 @@ def assemble_demo_project():
         layer = QgsVectorLayer(copy, name, "ogr")
         if not layer.isValid():
             sys.exit("fixture illisible : %s" % copy)
-        if layer.geometryType() == QgsWkbTypes.PolygonGeometry:
+        if layer.geometryType() == Qgis.GeometryType.Polygon:
             # Contour seul, comme un fond cadastral : un résultat raster (la pente) est rangé sous
             # les vecteurs de l'utilisateur (7.9) et un remplissage plein le cacherait.
             outline = QgsFillSymbol.createSimple(
@@ -223,7 +224,7 @@ if missing is not None:
 
 t0 = time.monotonic()
 state = {"reason": None, "done": False, "marks": {}, "calls": [], "steps": [], "phase": "plan",
-         "export": None, "sources1": []}
+         "export": None, "earlier_names": []}
 
 
 def now():
@@ -397,7 +398,11 @@ def slope_in_project(steps):
     if not isinstance(file, str) or not file:
         return False
     stem = os.path.basename(file.replace("\\", "/")).rsplit(".", 1)[0]
-    return any(stem in layer.source() or stem == layer.name() for layer in project.mapLayers().values())
+    def layer_stem(layer):
+        source = layer.source().split("|", 1)[0].replace("\\", "/")
+        return os.path.basename(source).rsplit(".", 1)[0]
+
+    return any(stem == layer_stem(layer) or stem == layer.name() for layer in project.mapLayers().values())
 
 
 def slope_verdict(steps):
@@ -406,7 +411,7 @@ def slope_verdict(steps):
     sources2 = result.get("sources") if isinstance(result, dict) else None
     facts = {"calls": state["calls"], "dem_name": DEM.source(),
              "slope_in_project": slope_in_project(steps),
-             "sources1": state["sources1"], "sources2": sources2 or []}
+             "earlier_names": state["earlier_names"], "sources2": sources2 or []}
     print("  pente : sources du second export %s" % facts["sources2"], flush=True)
     return demo_verdict.judge_slope(steps, facts) or layout_verdict(steps)
 
@@ -523,9 +528,11 @@ def on_event(kind, payload):
         if reason is not None:
             finish(reason)
         else:
-            result = export_result(steps)
             state["steps1"] = steps
-            state["sources1"] = (result.get("sources") if isinstance(result, dict) else None) or []
+            state["earlier_names"] = [
+                s["result"]["name"] for s in steps
+                if isinstance(s, dict) and isinstance(s.get("result"), dict)
+                and isinstance(s["result"].get("name"), str)]
             state["phase"] = "plan2"
             marks["propose"] = time.monotonic()
             print("[%s] seconde phrase : %s" % (now(), PHRASE2), flush=True)

@@ -184,7 +184,7 @@ def slope_facts(unit="degrees", dem="mnt-colline-2154.tif", commands=("terrain.s
         "calls": [{"command": c, "params": {"dem": dem, "unit": unit}} for c in commands],
         "dem_name": "C:/k/mnt-colline-2154.tif",
         "slope_in_project": True,
-        "sources1": ["parcelles-2154.geojson"],
+        "earlier_names": ["1-analysis.select_by_attribute", "2-analysis.buffer"],
         "sources2": ["parcelles-2154.geojson", "1-terrain.slope.tif"],
     }
 
@@ -237,9 +237,16 @@ class JudgeSlopeTest(unittest.TestCase):
         self.assertIn("sorties du plan 1 encore dans le PDF", reason)
         self.assertIn("2-analysis.buffer.gpkg", reason)
 
-    def test_fewer_layers_in_the_second_export_is_fine(self):
+    def test_plan_1_output_of_another_command_is_detected_by_its_name(self):
         facts = slope_facts()
-        facts["sources1"] = ["a", "b", "c", "d"]
+        facts["earlier_names"] = ["3-terrain.hillshade"]
+        facts["sources2"] = ["1-terrain.slope.tif", "3-terrain.hillshade.tif"]
+        self.assertIn("3-terrain.hillshade.tif", v.judge_slope(slope_steps(), facts))
+
+    def test_a_longer_numbered_name_is_not_taken_for_a_plan_1_output(self):
+        facts = slope_facts()
+        facts["earlier_names"] = ["1-analysis.buffer"]
+        facts["sources2"] = ["parcelles-2154.geojson", "1-terrain.slope.tif", "11-analysis.buffer.gpkg"]
         self.assertIsNone(v.judge_slope(slope_steps(), facts))
 
     def test_missing_dem_layer_in_project(self):

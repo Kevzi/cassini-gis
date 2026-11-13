@@ -70,6 +70,8 @@ PDF du second export ouvert (Ghostscript de QGIS) : titre « Pentes en degrés �
 
 ## Plan Change Log
 
+- 2026-11-13, après l'essai réel et la relecture complète : trois lignes du bloc figé ne tiennent plus et ne sont pas réécrites. (1) « le second export a plus de couches que le premier » : remplacé par « aucune sortie du plan 1 dans les `sources` du second export » (le noyau cache ces sorties depuis `plan-pente-cachee-dans-le-pdf`, il y en a donc moins) ; (2) « la pente est visible sous les parcelles » : vrai seulement parce que les polygones de la démo sont maintenant en contour seul (un résultat raster est rangé sous les vecteurs de l'utilisateur depuis 7.9) ; ce choix des fixtures de la sonde n'est pas dans le « Never » mais le complète ; (3) `sources1` n'est plus un fait de `judge_slope`, remplacé par `earlier_names`, les noms des sorties du plan 1.
+
 ## Review Triage Log
 
 Passe 1 (quick) : low 3, false 3, rejet 2.

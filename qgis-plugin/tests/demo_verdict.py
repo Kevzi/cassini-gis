@@ -8,8 +8,6 @@ Le contrôle est géométrique, pas une liste d'identifiants : il tient quel que
 intersections choisi par le modèle, et attrape un plan qui oublie la zone ou le tampon.
 """
 
-import re
-
 EXPORT = "layout.export_pdf"
 # Seules les analyses créent la couche de réponse ; une étape de style rend la couche qu'elle
 # met en forme, qui n'est pas la réponse.
@@ -214,7 +212,8 @@ def judge_slope(steps, facts):
     `steps` : les étapes exécutées du plan 2 (le `result` de `terrain.slope` porte `file`) ;
     `facts` : `calls`, les appels du plan proposé (leurs `params`) ; `dem_name`, le fichier du
     MNT du projet ; `slope_in_project`, vrai si une couche du projet lit le fichier de pente ;
-    `sources1` et `sources2`, les `sources` du premier et du second export.
+    `earlier_names`, les noms des couches rendues par les étapes du plan 1 ; `sources2`, les
+    `sources` du second export.
     """
     calls = facts.get("calls") or []
     call = next((c for c in calls if isinstance(c, dict) and c.get("command") == SLOPE), None)
@@ -236,13 +235,15 @@ def judge_slope(steps, facts):
     if not facts.get("slope_in_project"):
         return "pente : couche absente du projet"
     stem = _base_name(file).rsplit(".", 1)[0]
-    sources1 = facts.get("sources1") or []
+    earlier_names = [n for n in (facts.get("earlier_names") or []) if isinstance(n, str) and n]
     sources2 = facts.get("sources2") or []
     if not any(stem in str(source) for source in sources2):
         return "pente : couche absente du PDF (%s ne figure pas dans les sources)" % stem
-    # Les sorties du plan 1 (`N-analysis.…`) sont cachées de l'export d'un plan suivant : elles
-    # sont dans le projet mais ne doivent plus recouvrir la pente (décision du 2026-11-13).
-    left_over = [str(s) for s in sources2 if re.match(r"^\d+-analysis\.", _base_name(str(s)))]
+    # Les sorties du plan 1 sont cachées de l'export d'un plan suivant : elles sont dans le projet
+    # mais ne doivent plus recouvrir la pente (décision du 2026-11-13). Une source est un fichier
+    # `<nom de la couche>.<extension>`.
+    left_over = [str(s) for s in sources2
+                 if any(_base_name(str(s)).startswith(name + ".") for name in earlier_names)]
     if left_over:
         return "pente : sorties du plan 1 encore dans le PDF (%s)" % ", ".join(left_over)
     return None

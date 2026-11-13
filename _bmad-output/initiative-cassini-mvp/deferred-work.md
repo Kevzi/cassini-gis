@@ -1165,5 +1165,9 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
   evidence: Pascal Script avec avancée par Pos/Copy, aucun test unitaire ; à vérifier au premier `gh workflow run release.yml` (manifeste valide puis altéré, éventuellement une altération sur chaque entrée).
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-export-et-demo/story-la-demo-passe-par-la-pente-du-mnt-plan.md`
-  summary: Dans le PDF du second export (pente du MNT), la pente est dans la légende et les sources mais cachée sur la carte : les couches des étapes 1 à 4 restent visibles et la recouvrent.
+  summary: RÉSOLU le 2026-11-13 (voir `plan-pente-cachee-dans-le-pdf`) : le noyau cache désormais les sorties des plans précédents de l'export suivant ; la pente n'est plus recouverte par elles. Reste vrai : un résultat raster est rangé sous les vecteurs de l'utilisateur (7.9), donc des polygones pleins le cachent encore. Constat d'origine : dans le PDF du second export (pente du MNT), la pente était dans la légende et les sources mais cachée sur la carte.
   evidence: PDF `9-layout.export_pdf.pdf` d'une exécution réelle de la sonde (2026-11-13), ouvert avec Ghostscript : zones jaune (tampon) et orange recouvrent le raster de pente ; la rampe 3,53°–23,29° n'apparaît qu'en légende. À traiter côté extension (ordre ou visibilité des couches à l'export), hors périmètre de 6.4 qui s'interdit de la modifier.
+
+## Deferred from: code review of plan-pente-cachee-dans-le-pdf (2026-11-13)
+
+- Session rouverte en milieu de plan : `Session.plan_start` est `None` (posé seulement à l'étape 1 d'un plan, `core/src/journal/mod.rs:214`), donc `fill_focus` ne calcule aucun `focus` et les sorties des plans précédents restent visibles dans le PDF. Antérieur au correctif, qui ne le change pas ; à traiter en dérivant le début du plan depuis le journal.

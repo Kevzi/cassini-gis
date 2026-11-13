@@ -10,7 +10,7 @@ route_source: 'auto'
 risk: 'high'
 review: 'thorough'
 review_source: 'pinned'
-lenses_ran: ['correctness', 'edge-cases']
+lenses_ran: ['correctness', 'edge-cases', 'blind-hunter', 'edge-case-hunter', 'verification-gap', 'intent-alignment']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-cassini-mvp/change-mise-en-evidence-du-resultat-dans-le-pdf/change-mise-en-evidence-du-resultat-dans-le-pdf.md'
@@ -98,3 +98,27 @@ Il n'existe pas d'identifiant de plan : un plan est une suite de lignes à `plan
 
 **Manual checks (if no CLI):**
 - Ouvrir `9-layout.export_pdf.pdf` (Ghostscript de QGIS) : la pente est visible sur la carte, aucune couche `N-analysis.*` dans la légende ni les sources.
+
+## Code Review
+
+### 2026-11-13 — 0 decision-needed, 4 patch, 1 defer, 11 rejected (relecture complète : blind-hunter, edge-case-hunter, verification-gap, intent-alignment ; branche contre main)
+
+- [x] [Review][Patch] Énumération de géométrie héritée de QGIS 3 : `QgsWkbTypes.PolygonGeometry` alors que le reste de la sonde utilise `Qgis.GeometryType.Polygon` et que le plancher va jusqu'à QGIS 4.99 [qgis-plugin/tests/probe_demo.py:171]
+- [x] [Review][Patch] `slope_in_project` compare par sous-chaîne (`1-terrain.slope` serait trouvé dans `11-terrain.slope`) : comparer le nom de fichier exact [qgis-plugin/tests/probe_demo.py:392]
+- [x] [Review][Patch] `judge_slope` détecte les sorties du plan 1 par un motif de nom (`^\d+-analysis\.`) qui fige le nommage du noyau et rate une sortie d'une autre commande ; `sources1` est relevé mais jamais lu : comparer aux noms réels des sorties de l'étape 1 et retirer `sources1` [qgis-plugin/tests/demo_verdict.py:judge_slope, probe_demo.py]
+- [x] [Review][Patch] Documentation périmée par le changement de contrôle : docstring de la sonde (« doit avoir plus de couches »), plan de 6.4 (matrice figée, polygones en contour non consignés), entrée de `deferred-work.md` sur la pente cachée (en partie résolue), `lenses_ran` du plan [qgis-plugin/tests/probe_demo.py, plan 6.4, deferred-work.md, ce plan]
+- [x] [Review][Defer] Session rouverte en milieu de plan : `plan_start` est `None`, donc aucun `focus` n'est calculé et les sorties précédentes restent visibles [core/src/journal/mod.rs:214] — deferred: antérieur à ce changement (sans `plan_start`, `current_plan` ne rend déjà aucune ligne, donc pas de `focus` du tout) ; le processus du noyau tient la session pendant un plan.
+
+#### Rejected
+
+- Décalage d'une ligne dans `take_while(i + 1 < start)` -- false : lignes numérotées à partir de 1, strictement avant `plan_start`, disjointes de `current_plan` ; les égalités exactes de `hidden` des tests à deux et trois plans le prouvent.
+- Ligne de journal illisible ignorée (`.ok()?`) alors que `current_plan` s'arrête -- low, rejeté : journal corrompu improbable, correction plus lourde que le défaut.
+- Sortie du plan 1 consommée par le plan 2 et cachée -- low, rejeté : règle « intermédiaire » voulue (décision du 2026-11-13), documentée dans le plan.
+- Un `layer.remove` antérieur à la sortie ou visant un jeton partagé annule le masquage -- false : les ids de couche sont uniques par étape (`f_g1_*`, `f_g2_*`).
+- `state["calls"]` accumule les plans 1 et 2 -- false : réaffecté à chaque `PLAN_PROPOSED` (probe_demo.py:492).
+- `export_result` lit le premier export du plan 2 -- low, rejeté : le plan 2 de la démo n'en compose qu'un.
+- `journal_steps` compare le journal à lui-même -- low, rejeté : écart déjà tranché (essai réel : 9 étapes journalisées, le noyau dicte `open_raster` et `set_style`).
+- Journal relu en entier à chaque export -- low, rejeté : taille d'un journal de projet, sans effet mesuré.
+- Garde « hors des `results` » sans test au niveau du journal -- low, rejeté : inatteignable par le journal (une sortie du plan 1 ne peut pas être produite par le plan 2, ids uniques), garde défensive couverte par le test pur `merge_hidden`.
+- `earlier_outputs` : paramètre `others` surchargé, sans test d'un retrait du plan en cours sur un plan antérieur au précédent -- low, rejeté : cas couvert à deux plans, le troisième ne change pas la règle.
+- L'intention vise le PDF rendu, les tests ne vérifient que `focus.hidden` et les `sources` -- rejeté : le rendu ne se teste pas sans QGIS ; le PDF a été ouvert à la main (légende, carte, sources) lors de l'essai réel du 2026-11-13.
