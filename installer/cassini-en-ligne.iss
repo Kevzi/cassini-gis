@@ -116,7 +116,7 @@ end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
-  Manifeste, Json, Reste, Nom, Url, Sha, Dest, Source: String;
+  Manifeste, Json, Reste, Nom, Url, Sha, ShaBrut, Dest, Source: String;
   Brut: AnsiString;
   Nombre, P: Integer;
   AvecNoyau: Boolean;
@@ -162,7 +162,8 @@ begin
     if Nom = '' then
       Break;
     Url := ValeurApres(Reste, 'url', 1);
-    Sha := Lowercase(ValeurApres(Reste, 'sha256', 1));
+    ShaBrut := ValeurApres(Reste, 'sha256', 1);
+    Sha := Lowercase(ShaBrut);
     if (not NomSain(Nom)) or (Url = '') or (Length(Sha) <> 64) then
     begin
       NettoyerNoyau;
@@ -189,9 +190,17 @@ begin
     if Nom = 'cassini.exe' then
       AvecNoyau := True;
     Nombre := Nombre + 1;
-    { Passe à l'entrée suivante. }
-    P := Pos('"nom": "' + Nom + '"', Reste);
-    Reste := Copy(Reste, P + 8 + Length(Nom), Length(Reste));
+    { Passe à l'entrée suivante : après le sha256, dernier champ de l'entrée (ordre nom, url,
+      sha256) ; s'arrêter après le seul nom laisserait l'url et le sha256 de cette entrée
+      devant la suivante. }
+    P := Pos('"sha256": "' + ShaBrut + '"', Reste);
+    if P = 0 then
+    begin
+      NettoyerNoyau;
+      Result := 'La liste des versions de Cassini est incomplète. Aucun fichier n''a été installé.';
+      Exit;
+    end;
+    Reste := Copy(Reste, P + 11 + Length(ShaBrut), Length(Reste));
   end;
 
   if (Nombre = 0) or (not AvecNoyau) then
