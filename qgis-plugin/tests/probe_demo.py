@@ -53,7 +53,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "qgis-plugin", "cassini_qgis"))
 sys.path.insert(0, HERE)
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# `offscreen` ne charge aucune police : le texte du PDF deviendrait des cases noires. Sous Windows,
+# la plateforme normale en a (essai du 2026-11-13 : 154 familles contre 0).
+os.environ.setdefault("QT_QPA_PLATFORM", "windows" if sys.platform == "win32" else "offscreen")
 
 import demo_verdict  # noqa: E402
 
@@ -117,6 +119,12 @@ from qgis.PyQt.QtCore import QProcess, QTimer  # noqa: E402
 
 app = QgsApplication([], False)
 QgsApplication.initQgis()
+from qgis.PyQt.QtGui import QFontDatabase  # noqa: E402
+
+_no_font = demo_verdict.fonts_reason(len(QFontDatabase().families()))
+if _no_font is not None:
+    print(demo_verdict.verdict_line(_no_font), flush=True)
+    sys.exit(1)
 QgsApplication.processingRegistry().addProvider(QgsNativeAlgorithms())
 
 import client  # noqa: E402

@@ -80,6 +80,8 @@ Passe 1 (quick) : medium 1, low 1, false 2, rejet 1.
 
 ## Design Notes
 
+Constat du propriétaire après coup (2026-11-13) : le PDF de la sonde avait tout son texte en cases noires. Cause : la sonde forçait `QT_QPA_PLATFORM=offscreen`, qui ne charge aucune police (0 famille, contre 154 sous la plateforme `windows`) ; le PDF n'a alors ni police ni texte, seulement des contours vides. Le produit n'était pas en cause. `%PDF-` et la taille ne suffisaient pas à le voir. Corrigé : plateforme `windows` par défaut sous Windows, et ECHEC « aucune police dans QGIS » si aucune police n'est chargée. Le PDF rendu a été regardé : titre, carte, flèche, légende, échelle et sources lisibles.
+
 La relecture « vraie » de la mise en page est impossible sans toucher à l'extension : la mise en page n'est jamais ajoutée au gestionnaire du projet. On juge donc ce que le geste d'export déclare avoir posé (`items_placed`), plus les champs du résultat (`sources`, `page_count`) et le PDF. `CASSINI_DEMO_DROP_ITEM` simule la perte d'un élément sur cette liste : il prouve le chemin de jugement, pas l'extension.
 
 ## Verification

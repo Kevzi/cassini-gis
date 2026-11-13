@@ -126,6 +126,13 @@ def judge_done(steps, facts, injected=None):
     return None
 
 
+def fonts_reason(family_count):
+    """Raison d'ECHEC quand QGIS n'a aucune police : le texte du PDF serait des cases noires."""
+    if not family_count:
+        return "aucune police dans QGIS : le texte du PDF serait illisible (QT_QPA_PLATFORM=offscreen ?)"
+    return None
+
+
 def tamper_refused_reason(tamper, project_given):
     """Raison d'ECHEC quand on veut altérer le journal d'un projet donné en argument."""
     if tamper and project_given:

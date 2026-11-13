@@ -168,6 +168,14 @@ class JudgeReplayTest(unittest.TestCase):
         self.assertIsNone(v.tamper_refused_reason(False, True))
 
 
+class FontsTest(unittest.TestCase):
+    def test_no_font_is_refused(self):
+        self.assertIn("aucune police", v.fonts_reason(0))
+
+    def test_fonts_present_is_ok(self):
+        self.assertIsNone(v.fonts_reason(154))
+
+
 class DropItemTest(unittest.TestCase):
     def test_valid_items_and_unset_are_accepted(self):
         for key, _ in v.LAYOUT_ITEMS:
