@@ -63,7 +63,7 @@ pub use sorted_view::{
 };
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::time::SystemTime;
 
 use serde_json::{json, Map, Value};
@@ -413,11 +413,15 @@ impl ShortIds {
 /// `left_out` : les couches de résultat que le budget a laissées hors de sa vue (ticket 5.33),
 /// `{"layer_id", "name"}` aux vrais identifiants QGIS, de la plus ancienne à la plus récente ;
 /// jamais montré au modèle, seulement rendu à l'utilisateur.
+/// `cut_layers` : dans la vue triée d'un gros projet, les identifiants (tels que montrés au
+/// modèle) des couches détaillées dont le plafond a retiré des champs ; vide hors de la vue triée.
+/// Jamais montré au modèle : il ne sert qu'au garde-fou des attributs (ticket 5.57).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModelInventory {
     pub inventory: Value,
     pub user_layers: usize,
     pub left_out: Vec<Value>,
+    pub cut_layers: BTreeSet<String>,
 }
 
 /// De `project.inventory` à l'inventaire montré au modèle, avec la table pour retraduire son plan :
@@ -459,6 +463,7 @@ pub fn model_inventory_learned(
             inventory,
             user_layers,
             left_out,
+            cut_layers: BTreeSet::new(),
         },
         ids,
     )

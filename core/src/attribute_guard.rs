@@ -15,8 +15,10 @@
 //!   chaque commande), ni une couche absente de `layers` (présente seulement dans `index`, ou
 //!   introuvable), ni une couche sans clé `fields` ;
 //! - un champ sans `values` n'est jamais contrôlé sur sa valeur ;
-//! - un champ absent n'est contrôlé que hors de la vue triée d'un gros projet : avec la clé
-//!   `index`, les champs d'une couche détaillée ont pu être coupés sans marque ;
+//! - un champ absent n'est contrôlé que sur une couche dont on sait qu'elle est entière : hors de
+//!   la vue triée d'un gros projet, ou, avec la clé `index`, quand l'appelant donne la liste des
+//!   couches coupées (`guard_attributes_with_cuts`) et que la couche n'y est pas ; sans cette
+//!   liste, les champs d'une couche détaillée ont pu être coupés sans marque ;
 //! - une liste de plus de `MAX_VALUES` valeurs n'est pas tenue pour complète, et une valeur
 //!   vide n'est pas contrôlée (l'inventaire ôte la chaîne vide) ;
 //! - `eq` et `ne` comparent exactement, casse comprise (la valeur est dans la liste) ;
@@ -28,6 +30,8 @@
 //!
 //! La question n'est jamais écrite au journal (AD-11) : sa trace est sa provenance `guard`.
 
+use std::collections::BTreeSet;
+
 use serde_json::Value;
 
 use crate::agent_inventory::MAX_VALUES;
@@ -38,12 +42,25 @@ use crate::registry::{AttributeFilter, Registry};
 /// valeur que `inventory` (la vue montrée au modèle) ne contredit pas ; sinon la question du
 /// garde-fou sur la première faute. Une question ou un refus passe inchangé.
 pub fn guard_attributes(registry: &Registry, plan: Plan, inventory: &Value) -> Plan {
+    guard_attributes_with_cuts(registry, plan, inventory, None)
+}
+
+/// Comme `guard_attributes`, quand l'appelant sait quelles couches détaillées de la vue triée ont
+/// perdu des champs (`ModelInventory::cut_layers`, identifiants tels que montrés au modèle). Avec
+/// `Some`, un champ absent d'une couche détaillée non coupée donne la question ; une couche
+/// coupée n'est jamais contrôlée sur un champ absent. Avec `None`, c'est `guard_attributes`.
+pub fn guard_attributes_with_cuts(
+    registry: &Registry,
+    plan: Plan,
+    inventory: &Value,
+    cut_layers: Option<&BTreeSet<String>>,
+) -> Plan {
     let Plan::Calls { calls } = &plan else {
         return plan;
     };
     let fault = calls.iter().find_map(|call| {
         let filter = registry.spec(&call.command)?.attribute_filter.as_ref()?;
-        fault(filter, &call.params, inventory)
+        fault(filter, &call.params, inventory, cut_layers)
     });
     match fault {
         Some(question) => Plan::Question {
@@ -75,7 +92,12 @@ fn name_of(field: &Value) -> Option<&str> {
 }
 
 /// Ce que l'inventaire contredit dans un filtre, comme question ; `None` si rien.
-fn fault(filter: &AttributeFilter, params: &Value, inventory: &Value) -> Option<String> {
+fn fault(
+    filter: &AttributeFilter,
+    params: &Value,
+    inventory: &Value,
+    cut_layers: Option<&BTreeSet<String>>,
+) -> Option<String> {
     let text = |name: &str| params.get(name).and_then(Value::as_str);
     let layer_id = text(&filter.layer)?;
     let field = text(&filter.field)?;
@@ -104,8 +126,9 @@ fn fault(filter: &AttributeFilter, params: &Value, inventory: &Value) -> Option<
                 .find(|f| name_of(f).is_some_and(|n| n.to_lowercase() == wanted))
         });
     let Some(shown) = shown else {
-        // Vue triée : les champs d'une couche détaillée ont pu être coupés sans marque.
-        if inventory.get("index").is_some() {
+        // Vue triée : les champs d'une couche détaillée ont pu être coupés ; sans la liste des
+        // couches coupées, ou si celle-ci en fait partie, on ne sait pas : pas de question.
+        if inventory.get("index").is_some() && cut_layers.is_none_or(|cut| cut.contains(layer_id)) {
             return None;
         }
         let names: Vec<&str> = fields.iter().filter_map(name_of).collect();
@@ -368,6 +391,91 @@ mod tests {
             guard(vec![select("zonage_1a2b", "typezone", "eq", "AU")], &inv),
             Plan::Question { .. }
         ));
+    }
+
+    fn sorted(inv: &mut Value) {
+        inv["index"] = json!([
+            {"layer_id": "zonage_1a2b", "name": "Zonage PLU", "geometry": "MultiPolygon"},
+            {"layer_id": "gares_3c4d", "name": "Gares", "geometry": "Point"},
+            {"layer_id": "communes_5e6f", "name": "Communes", "geometry": "MultiPolygon"}
+        ]);
+    }
+
+    fn guard_cut(calls: Vec<Value>, inventory: &Value, cut: Option<&[&str]>) -> Plan {
+        let plan = plan(calls);
+        let cut: Option<BTreeSet<String>> = cut.map(|c| c.iter().map(|s| s.to_string()).collect());
+        guard_attributes_with_cuts(&registry(), plan, inventory, cut.as_ref())
+    }
+
+    #[test]
+    fn a_sorted_view_checks_an_absent_field_on_a_whole_layer() {
+        let mut inv = inventory(&["N", "U"]);
+        sorted(&mut inv);
+        let got = guard_cut(
+            vec![select("zonage_1a2b", "zone_plu", "eq", "U")],
+            &inv,
+            Some(&["gares_3c4d"]),
+        );
+        assert_eq!(
+            got,
+            question(
+                "La couche « Zonage PLU » n'a aucun champ « zone_plu » (champs : typezone, surface) : quel champ faut-il utiliser ?"
+            )
+        );
+    }
+
+    #[test]
+    fn a_sorted_view_does_not_check_an_absent_field_on_a_cut_layer() {
+        let mut inv = inventory(&["N", "U"]);
+        sorted(&mut inv);
+        let calls = vec![select("zonage_1a2b", "zone_plu", "eq", "U")];
+        assert_eq!(
+            guard_cut(calls.clone(), &inv, Some(&["zonage_1a2b"])),
+            plan(calls)
+        );
+    }
+
+    #[test]
+    fn a_sorted_view_checks_a_present_field_value_with_cuts() {
+        let mut inv = inventory(&["N", "U"]);
+        sorted(&mut inv);
+        assert!(matches!(
+            guard_cut(
+                vec![select("zonage_1a2b", "typezone", "eq", "AU")],
+                &inv,
+                Some(&[])
+            ),
+            Plan::Question { .. }
+        ));
+    }
+
+    #[test]
+    fn a_sorted_view_without_the_list_keeps_the_current_behaviour() {
+        let mut inv = inventory(&["N", "U"]);
+        sorted(&mut inv);
+        let calls = vec![select("zonage_1a2b", "zone_plu", "eq", "U")];
+        assert_eq!(guard_cut(calls.clone(), &inv, None), plan(calls));
+    }
+
+    #[test]
+    fn without_an_index_the_list_is_ignored() {
+        let inv = inventory(&["N", "U"]);
+        assert!(matches!(
+            guard_cut(
+                vec![select("zonage_1a2b", "zone_plu", "eq", "U")],
+                &inv,
+                Some(&["zonage_1a2b"])
+            ),
+            Plan::Question { .. }
+        ));
+    }
+
+    #[test]
+    fn a_layer_only_in_the_index_is_not_checked_even_with_the_list() {
+        let mut inv = inventory(&["N", "U"]);
+        sorted(&mut inv);
+        let calls = vec![select("communes_5e6f", "nom", "eq", "Annecy")];
+        assert_eq!(guard_cut(calls.clone(), &inv, Some(&[])), plan(calls));
     }
 
     #[test]

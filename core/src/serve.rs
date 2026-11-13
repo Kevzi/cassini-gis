@@ -1782,6 +1782,7 @@ mod tests {
         ) -> Result<crate::plan::Plan, ErrorReport> {
             self.chosen.lock().unwrap().push(model.map(str::to_string));
             let mut shown = Value::Null;
+            let mut cut_layers = std::collections::BTreeSet::new();
             if self.inventory {
                 let view = inventory()?;
                 assert!(view.inventory["layers"].is_array());
@@ -1794,6 +1795,7 @@ mod tests {
                 let users = cut.as_array().unwrap().len();
                 assert!(view.user_layers <= users);
                 shown = view.inventory.clone();
+                cut_layers = view.cut_layers.clone();
                 self.seen.lock().unwrap().push(view.inventory);
             }
             let next = self.first.borrow_mut().pop_front();
@@ -1815,7 +1817,12 @@ mod tests {
                 })
                 .map(|plan| {
                     if self.guard_attributes {
-                        crate::attribute_guard::guard_attributes(registry, plan, &shown)
+                        crate::attribute_guard::guard_attributes_with_cuts(
+                            registry,
+                            plan,
+                            &shown,
+                            Some(&cut_layers),
+                        )
                     } else {
                         plan
                     }

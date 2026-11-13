@@ -287,10 +287,11 @@ impl cassini_core::serve::Composer for ModelComposer {
         let view = inventory()?;
         let mut generator = measured_generator(chosen.files.clone());
         chosen
-            .compose(
+            .compose_cut(
                 registry,
                 &view.inventory,
                 Some(view.user_layers),
+                Some(&view.cut_layers),
                 request,
                 &mut generator,
             )
@@ -373,11 +374,28 @@ impl ChosenModel {
             &cassini_ai::plan::GenerationRequest,
         ) -> Result<cassini_ai::Completion, cassini_ai::AiError>,
     ) -> Result<cassini_core::plan::Plan, cassini_ai::plan::AgentError> {
-        cassini_ai::plan::compose_plan_anchored(
+        self.compose_cut(registry, inventory, user_layers, None, request, generate)
+    }
+
+    /// Comme `compose`, avec la liste des couches coupées de la vue triée (ticket 5.57), que le
+    /// garde-fou des attributs utilise pour contrôler un champ absent d'une couche entière.
+    fn compose_cut(
+        &self,
+        registry: &Registry,
+        inventory: &Value,
+        user_layers: Option<usize>,
+        cut_layers: Option<&std::collections::BTreeSet<String>>,
+        request: &str,
+        generate: &mut dyn FnMut(
+            &cassini_ai::plan::GenerationRequest,
+        ) -> Result<cassini_ai::Completion, cassini_ai::AiError>,
+    ) -> Result<cassini_core::plan::Plan, cassini_ai::plan::AgentError> {
+        cassini_ai::plan::compose_plan_anchored_cut(
             self.style,
             registry,
             inventory,
             user_layers,
+            cut_layers,
             request,
             generate,
         )
@@ -1645,6 +1663,7 @@ mod tests {
                         inventory: json!({}),
                         user_layers: 0,
                         left_out: Vec::new(),
+                        cut_layers: Default::default(),
                     })
                 })
                 .unwrap_err();

@@ -1178,3 +1178,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-recette-realiste-projet-bd-topo-74-plui-mnt-20-phrases-a-pla-plan.md`
   summary: Vérifier dans le GeoPackage BD TOPO les valeurs attendues de GA06 (`type_de_route = Départementale`) et GA09 (`nature = Gare voyageurs et fret`).
   evidence: l'inventaire de test ne liste que 11 valeurs par champ ; ces deux valeurs viennent du schéma, pas des données, et ces deux phrases font partie des six ratés.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-57b-garde-fou-champ-absent-vue-triee.md`
+  summary: Écrire un test d'intégration `cli` qui prouve que `ModelComposer` passe `view.cut_layers` au garde-fou.
+  evidence: aucun test ne l'exerce ; un `None` passé par erreur laisserait la suite verte (relecture 5.57b). Prouvé à la main par la recette réelle du 2026-11-13.

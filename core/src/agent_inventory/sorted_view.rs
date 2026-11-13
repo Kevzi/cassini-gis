@@ -195,13 +195,19 @@ pub fn sorted_view_learned(
     view["layers"] = json!([]);
     let mut size = json_chars(&view);
     let mut chosen: Vec<(usize, Value)> = Vec::new();
+    let mut cut_layers: BTreeSet<String> = BTreeSet::new();
     for i in detail_order(real, &in_index, work_files, last_plan, wanted, &request) {
-        let layer = capped(&short[i], &request, limits);
+        let (layer, was_cut) = capped(&short[i], &request, limits);
         let more = json_chars(&layer) + usize::from(!chosen.is_empty());
         if size + more > limits.sorted_budget {
             continue;
         }
         size += more;
+        if was_cut {
+            if let Some(id) = layer.get("layer_id").and_then(Value::as_str) {
+                cut_layers.insert(id.to_string());
+            }
+        }
         chosen.push((i, layer));
     }
     chosen.sort_by_key(|(i, _)| *i);
@@ -215,6 +221,7 @@ pub fn sorted_view_learned(
             inventory: view,
             user_layers,
             left_out,
+            cut_layers,
         },
         ids,
     )
@@ -354,13 +361,13 @@ fn field_name(field: &Value) -> &str {
 /// Une couche sous les deux plafonds reste intacte. Sinon, les champs sont pris par rang :
 /// désignés par la demande (nom ou valeur), texte à valeurs, numériques, autres ; dans l'ordre de
 /// QGIS à chaque rang ; jusqu'au premier qui dépasse un plafond. Ils sont rendus dans l'ordre de
-/// QGIS.
-fn capped(layer: &Value, request: &Request, limits: &ViewLimits) -> Value {
+/// QGIS. Le booléen rendu dit si des champs ont été retirés.
+fn capped(layer: &Value, request: &Request, limits: &ViewLimits) -> (Value, bool) {
     let Some(fields) = layer.get("fields").and_then(Value::as_array) else {
-        return layer.clone();
+        return (layer.clone(), false);
     };
     if fields.len() <= limits.max_fields && json_chars(layer) <= limits.max_layer_chars {
-        return layer.clone();
+        return (layer.clone(), false);
     }
     let rank = |f: &Value| -> u8 {
         if request.names(field_name(f)) || request.has_value(f) {
@@ -395,8 +402,9 @@ fn capped(layer: &Value, request: &Request, limits: &ViewLimits) -> Value {
         kept.push(i);
     }
     kept.sort_unstable();
+    let was_cut = kept.len() < fields.len();
     out["fields"] = Value::Array(kept.into_iter().map(|i| fields[i].clone()).collect());
-    out
+    (out, was_cut)
 }
 
 /// La demande, prête à la correspondance : ses mots normalisés d'au moins 3 lettres, ses mots
@@ -876,6 +884,86 @@ mod tests {
         let numeric = fields.iter().filter(|f| f.starts_with("largeur")).count();
         assert_eq!(numeric, 20);
         assert_eq!(fields.len(), DETAIL_MAX_FIELDS);
+    }
+
+    #[test]
+    fn a_cut_layer_is_listed_in_cut_layers_and_a_whole_one_is_not() {
+        let raw = project(vec![
+            wide_layer(),
+            qgis_layer("petite", 1, "a.gpkg", vec![text_field("nature", &["Gare"])]),
+        ]);
+        let out = view(&raw, "troncon large, petite", &always());
+        let shown = out.inventory["layers"].as_array().unwrap();
+        let id_of = |name: &str| {
+            shown
+                .iter()
+                .find(|l| l["name"] == name)
+                .unwrap_or_else(|| panic!("{name} détaillée"))["layer_id"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        assert_eq!(out.cut_layers.len(), 1, "{:?}", out.cut_layers);
+        assert!(out.cut_layers.contains(&id_of("troncon_large")));
+        assert!(!out.cut_layers.contains(&id_of("petite")));
+        // Rien de la liste n'est montré au modèle.
+        assert!(out.inventory.get("cut_layers").is_none());
+    }
+
+    /// Ticket 5.57b : la sortie réelle de la vue (identifiants courts, `cut_layers`) mène le
+    /// garde-fou : un champ absent d'une couche entière donne la question, d'une couche coupée
+    /// laisse le plan.
+    #[test]
+    fn the_real_view_drives_the_attribute_guard() {
+        use crate::attribute_guard::guard_attributes_with_cuts;
+        use crate::plan::{Plan, QuestionSource};
+        use crate::registry::Registry;
+        let raw = project(vec![
+            wide_layer(),
+            qgis_layer("petite", 1, "a.gpkg", vec![text_field("nature", &["Gare"])]),
+        ]);
+        let out = view(&raw, "troncon large, petite", &always());
+        assert!(out.inventory.get("index").is_some());
+        let id_of = |name: &str| {
+            out.inventory["layers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|l| l["name"] == name)
+                .unwrap()["layer_id"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let registry = Registry::standard();
+        let guard = |layer: String| {
+            let plan: Plan = serde_json::from_value(json!({"kind": "calls", "calls": [
+                {"command": "analysis.select_by_attribute",
+                 "params": {"layer_id": layer, "field": "champ_inexistant",
+                            "operator": "eq", "value": "x"}}]}))
+            .unwrap();
+            assert_eq!(registry.check_plan(&plan), Ok(()));
+            let got = guard_attributes_with_cuts(
+                &registry,
+                plan.clone(),
+                &out.inventory,
+                Some(&out.cut_layers),
+            );
+            (plan, got)
+        };
+        let (_, got) = guard(id_of("petite"));
+        assert!(
+            matches!(
+                got,
+                Plan::Question {
+                    source: QuestionSource::Guard,
+                    ..
+                }
+            ),
+            "{got:?}"
+        );
+        let (plan, got) = guard(id_of("troncon_large"));
+        assert_eq!(got, plan);
     }
 
     #[test]

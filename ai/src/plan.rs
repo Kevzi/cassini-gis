@@ -10,7 +10,7 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use cassini_core::attribute_guard::guard_attributes;
+use cassini_core::attribute_guard::guard_attributes_with_cuts;
 use cassini_core::commands::model_list::PromptKind;
 use cassini_core::plan::Plan;
 use cassini_core::point::{guard_coordinates, guard_rejected};
@@ -684,6 +684,30 @@ pub fn compose_plan_anchored(
     request: &str,
     generate: &mut dyn FnMut(&GenerationRequest) -> Result<Completion, AiError>,
 ) -> Result<Plan, AgentError> {
+    compose_plan_anchored_cut(
+        style,
+        registry,
+        inventory,
+        user_layers,
+        None,
+        request,
+        generate,
+    )
+}
+
+/// Même composition que `compose_plan_anchored`, quand on sait quelles couches détaillées de la
+/// vue triée ont perdu des champs (`cut_layers`, ticket 5.57) : le garde-fou des attributs
+/// contrôle alors un champ absent d'une couche entière. `None` : comportement de
+/// `compose_plan_anchored`.
+pub fn compose_plan_anchored_cut(
+    style: PromptStyle,
+    registry: &Registry,
+    inventory: &Value,
+    user_layers: Option<usize>,
+    cut_layers: Option<&std::collections::BTreeSet<String>>,
+    request: &str,
+    generate: &mut dyn FnMut(&GenerationRequest) -> Result<Completion, AiError>,
+) -> Result<Plan, AgentError> {
     if request.trim().is_empty() {
         return Err(AiError::EmptyPrompt.into());
     }
@@ -717,7 +741,9 @@ pub fn compose_plan_anchored(
             // contredit (ticket 5.57), deviennent une question à provenance `guard`.
             Ok(plan) => {
                 let plan = guard_coordinates(registry, plan, request);
-                return Ok(guard_attributes(registry, plan, inventory));
+                return Ok(guard_attributes_with_cuts(
+                    registry, plan, inventory, cut_layers,
+                ));
             }
             Err(errors) => {
                 // Garde-fou de AD-23 sur une sortie rejetée : un point inventé, même mal formé,
