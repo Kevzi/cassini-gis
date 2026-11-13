@@ -3,7 +3,7 @@ title: "L'extension publiée sur le dépôt d'extensions QGIS"
 type: 'feature'
 ticket: '10'
 created: '2026-11-13'
-status: 'built'
+status: 'done'
 baseline_revision: 'e6cc90484e50ae794f19f68751a266f9bec0cad7'
 route: 'oneshot'
 route_source: 'auto'
@@ -40,3 +40,5 @@ Voie oneshot : un fichier de métadonnées, un texte de licence, deux garde-fous
 - medium, patché : le script d'archive ne vérifiait pas LICENSE, icône ni clés ; `verifier_publication` ajoutée et appelée par `main`, avec tests.
 - low, rejeté : valeurs exactes de Q8 non comparées, icône hors paquet, LICENSE vide, test par sous-chaîne ; peu probables et le correctif ajouterait plus qu'une simple correction.
 - low, corrigé : le test de l'archive ne fige plus `version=0.1.0`.
+
+- Publié sur plugins.qgis.org en 0.1.2 (0.1.1 bloquée par l'analyse Bandit, six try/except/pass corrigés), confirmé par le propriétaire le 2026-11-13.
