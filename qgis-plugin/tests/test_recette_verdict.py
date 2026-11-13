@@ -12,6 +12,7 @@ import recette_verdict as rv  # noqa: E402
 
 ANNECY = os.path.join(HERE, "recette", "annecy.json")
 GROS = os.path.join(HERE, "recette", "gros-annecy.json")
+GROS_V2 = os.path.join(HERE, "recette", "gros-annecy-v2.json")
 INVENTAIRE_GROS = os.path.join(HERE, "..", "..", "..", "donnees-test-cassini", "annecy",
                                "essais-5-48", "inventaire-gros.json")
 LAYERS = rv.layer_index([("gares_1", "gares"), ("communes_2", "communes")])
@@ -168,8 +169,10 @@ class Summary(unittest.TestCase):
 
 
 class GrosAnnecy(unittest.TestCase):
+    PATH = GROS
+
     def raw(self):
-        with open(GROS, encoding="utf-8") as f:
+        with open(self.PATH, encoding="utf-8") as f:
             return json.load(f)
 
     def test_twenty_phrases_with_unique_ids(self):
@@ -189,10 +192,15 @@ class GrosAnnecy(unittest.TestCase):
             self.skipTest("inventaire-gros.json absent (données hors dépôt)")
         with open(INVENTAIRE_GROS, encoding="utf-8") as f:
             names = [l["name"] for l in json.load(f)["layers"]]
-        with open(GROS, encoding="utf-8") as f:
+        with open(self.PATH, encoding="utf-8") as f:
             text = f.read()
         loaded = rv.load(text, rv.layer_index((n, n) for n in names))
         self.assertEqual(len(loaded), 20)
+
+
+
+class GrosAnnecyV2(GrosAnnecy):
+    PATH = GROS_V2
 
 
 if __name__ == "__main__":

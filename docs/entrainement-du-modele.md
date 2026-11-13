@@ -749,6 +749,32 @@ La barre n'est pas tenue et n'est pas abaissée. La question entre couches proch
 pour les routes (GA07) et manquée pour les voies ferrées (GA08). Même en corrigeant GA13, le score
 resterait à 15/20.
 
+**Recette v2 (2026-11-13, après la première mesure)** : trois phrases de la v1 sont des défauts de
+rédaction, pas des ratés du modèle, et sont réécrites dans `gros-annecy-v2.json` (la v1 reste
+intacte, son 14/20 reste le relevé de départ). GA03 dit la valeur (« zones A du PLUi », la v1
+exigeait de savoir que `A` veut dire agricole) ; GA06 nomme la couche (la v1 était ambiguë entre
+`route_numerotee_ou_nommee` et `troncon_de_route`, dont `cpx_classement_administratif` porte aussi
+`Départementale`) ; GA13 passe à 2 km (3 km dépasse les 500 cellules de rayon du noyau sur le MNT à
+5 m). Les trois phrases neuves rejoignent le garde de recouvrement. **La v2 a été écrite après avoir
+vu les résultats de la v1** : son score est à lire avec cette réserve.
+
+| | Score v2 | Ratés | 1re composition | Médiane | `prompt_too_long` | Rejeu après réouverture |
+|---|---|---|---|---|---|---|
+| CPU | **16/20, barre tenue** | GA06, GA07, GA08, GA09 | 84,8 s | 26,9 s | 0 | identique (24 étapes) |
+| GPU | **15/20, sous la barre** | GA06, GA07, GA08, GA09, GA19 | 41,2 s | 4,1 s | 0 | identique (23 étapes) |
+
+**Durées prises machine chargée** (une partie de jeu tournait pendant les deux mesures) : à refaire
+avant de les citer. Les scores ne dépendent pas de la charge. Ce que la v2 montre :
+- GA03 et GA13 passent sur CPU et GPU ; GA19 passe sur CPU, pas sur GPU (le calcul diffère un peu
+  d'une machine à l'autre, alors que chaque machine rend toujours la même réponse).
+- GA06 reste raté : même avec la couche nommée, le modèle écrit le champ `cpx_classement_administratif`
+  qui n'existe pas sur `route_numerotee_ou_nommee` (vrai raté du modèle).
+- GA07 (question attendue entre `troncon_de_route` et `route_numerotee_ou_nommee`), juste en v1, est
+  ratée en v2 : le modèle compose un tampon sur `troncon_de_route`. Après GA06, la couche des routes
+  numérotées figure parmi les couches citées par le plan précédent, ce qui change ce que le modèle voit.
+- GA08 (voies ferrées) et GA09 (gares) restent ratées : question entre couches proches non posée,
+  couche de gares non trouvée par la valeur.
+
 ### Inventaires larges et jeu de 8 600 exemples (2026-11-10)
 
 Après la nuit du 2026-11-10, deux corrections du générateur décidées par le propriétaire, mêmes

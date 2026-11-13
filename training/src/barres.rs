@@ -25,6 +25,9 @@ const STYLE_REEL: &str = include_str!("../../ai/tests/style_reel.rs");
 const RECETTE_ANNECY: &str = include_str!("../../qgis-plugin/tests/recette/annecy.json");
 /// Les phrases de la recette du gros projet (5.50), écrites à la main, jouées sous QGIS.
 const RECETTE_GROS_ANNECY: &str = include_str!("../../qgis-plugin/tests/recette/gros-annecy.json");
+/// La v2 de cette recette (5.50) : GA03, GA06 et GA13 réécrites après la première mesure.
+const RECETTE_GROS_ANNECY_V2: &str =
+    include_str!("../../qgis-plugin/tests/recette/gros-annecy-v2.json");
 /// Les phrases de la barre par commande (5.53), écrites à la main : `{id, command, phrase, …}`.
 const PAR_COMMANDE: &str = include_str!("../../ai/tests/par_commande/phrases.json");
 /// Les phrases neuves de `plan_reel` (5.53, livrable 3), écrites à la main : `{id, phrase, …}`.
@@ -205,7 +208,15 @@ pub fn real_trials_by_source() -> Vec<(&'static str, Vec<(String, String)>)> {
     all.push(("recette:annecy", annecy));
     let gros = from_json(RECETTE_GROS_ANNECY);
     assert_eq!(gros.len(), 20, "{gros:?}");
-    all.push(("recette:gros-annecy", gros));
+    all.push(("recette:gros-annecy", gros.clone()));
+    // La v2 ne garde de neuf que les phrases réécrites ; les autres sont celles de la v1.
+    let gros_v2: Vec<(String, String)> = from_json(RECETTE_GROS_ANNECY_V2)
+        .into_iter()
+        .filter(|(_, text)| !gros.iter().any(|(_, old)| old == text))
+        .map(|(id, text)| (format!("{id}:v2"), text))
+        .collect();
+    assert_eq!(gros_v2.len(), 3, "{gros_v2:?}");
+    all.push(("recette:gros-annecy-v2", gros_v2));
     for (name, text, count) in HAND_WRITTEN {
         let phrases = from_phrases(text);
         assert_eq!(phrases.len(), count, "{name} : {phrases:?}");
