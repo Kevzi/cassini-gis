@@ -273,6 +273,95 @@ class DropItemTest(unittest.TestCase):
             self.assertIn("élément inconnu", v.drop_item_refused_reason(bad))
 
 
+NETSTAT = """
+Connexions actives
+
+  Proto  Adresse locale         Adresse distante       État            PID
+  TCP    127.0.0.1:5000         0.0.0.0:0              LISTENING       1234
+  TCP    [::1]:49700            [::]:0                 LISTENING       1234
+  TCP    192.168.1.5:50000      192.0.2.1:9            SYN_SENT        1234
+  TCP    [::ffff:127.0.0.1]:6000 [::ffff:127.0.0.1]:6001 ESTABLISHED    77
+  UDP    0.0.0.0:5353           *:*                                    4321
+  UDP    [fe80::1%12]:1900      *:*                                    4321
+"""
+
+
+def conn(remote, pid=1234, proto="TCP", state="ESTABLISHED"):
+    return {"proto": proto, "local": "192.168.1.5:50000", "remote": remote, "state": state, "pid": pid}
+
+
+class NetstatParseTest(unittest.TestCase):
+    def test_tcp_udp_and_ipv6_lines_are_parsed(self):
+        rows = v.parse_netstat(NETSTAT)
+        self.assertEqual(len(rows), 6)
+        self.assertEqual(rows[2], {"proto": "TCP", "local": "192.168.1.5:50000",
+                                   "remote": "192.0.2.1:9", "state": "SYN_SENT", "pid": 1234})
+        self.assertEqual(rows[4], {"proto": "UDP", "local": "0.0.0.0:5353", "remote": "*:*",
+                                   "state": "", "pid": 4321})
+        self.assertEqual(rows[5]["local"], "[fe80::1%12]:1900")
+
+    def test_garbage_and_empty_give_nothing(self):
+        self.assertEqual(v.parse_netstat(""), [])
+        self.assertEqual(v.parse_netstat(None), [])
+        self.assertEqual(v.parse_netstat("'netstat' n'est pas reconnu\nTCP a b c d\n"), [])
+
+    def test_local_addresses(self):
+        for addr in ("127.0.0.1:80", "127.5.5.5:1", "[::1]:80", "[::ffff:127.0.0.1]:80",
+                     "0.0.0.0:0", "[::]:0", "*:*", "[::1%3]:9"):
+            self.assertTrue(v.is_local_address(addr), addr)
+
+    def test_remote_addresses(self):
+        for addr in ("192.0.2.1:9", "10.0.0.1:443", "[2001:db8::1]:443", "[fe80::1%12]:1900",
+                     "[::ffff:192.0.2.1]:80"):
+            self.assertFalse(v.is_local_address(addr), addr)
+
+
+class JudgeNetworkTest(unittest.TestCase):
+    def test_only_local_connections_is_ok(self):
+        conns = [conn("127.0.0.1:5000"), conn("[::1]:9"), conn("0.0.0.0:0", state="LISTENING")]
+        self.assertIsNone(v.judge_network(conns, [1234], 3))
+
+    def test_external_connection_is_named(self):
+        reason = v.judge_network([conn("192.0.2.1:9", state="SYN_SENT")], [1234], 2)
+        self.assertEqual(reason, "réseau : TCP 192.168.1.5:50000 → 192.0.2.1:9 (SYN_SENT) du noyau pid 1234")
+
+    def test_other_pid_is_ignored(self):
+        self.assertIsNone(v.judge_network([conn("192.0.2.1:9", pid=99)], [1234], 2))
+
+    def test_second_watched_pid_is_judged(self):
+        reason = v.judge_network([conn("192.0.2.1:9", pid=55)], [1234, 55], 2)
+        self.assertIn("pid 55", reason)
+
+    def test_external_udp_and_ipv6_are_named(self):
+        udp = v.judge_network([dict(conn("198.51.100.7:53"), proto="UDP", state="")], [1234], 1)
+        self.assertIn("UDP", udp)
+        self.assertIn("198.51.100.7:53", udp)
+        six = v.judge_network([conn("[2001:db8::1]:443", state="ESTABLISHED")], [1234], 1)
+        self.assertIn("[2001:db8::1]:443", six)
+
+    def test_unwatched_pid_before_watched_one(self):
+        conns = [conn("192.0.2.1:9", pid=99), conn("198.51.100.7:80", pid=1234)]
+        self.assertIn("198.51.100.7:80", v.judge_network(conns, [1234], 1))
+
+    def test_no_poll_is_impossible_never_ok(self):
+        self.assertEqual(v.judge_network([], [1234], 0), "réseau : relevé impossible")
+
+    def test_no_watched_pid_is_impossible(self):
+        self.assertEqual(v.judge_network([], [], 3), "réseau : relevé impossible")
+
+
+class ConnectRefusedTest(unittest.TestCase):
+    def test_valid_and_unset_are_accepted(self):
+        for value in (None, "", "192.0.2.1:9", "[::1]:80", "exemple.test:443"):
+            self.assertIsNone(v.connect_refused_reason(value), value)
+        self.assertEqual(v.parse_connect("192.0.2.1:9"), ("192.0.2.1", 9))
+
+    def test_invalid_is_refused(self):
+        for bad in ("abc", "192.0.2.1", ":9", "h:", "h:0", "h:99999", "h:x"):
+            self.assertEqual(v.connect_refused_reason(bad),
+                             "CASSINI_DEMO_CONNECT : <hôte:port> attendu", bad)
+
+
 class JudgeReplayEdgeTest(unittest.TestCase):
     def test_unexpected_kind(self):
         self.assertIn("inattendu", v.judge_replay("autre", {}, steps()))

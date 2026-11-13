@@ -20,7 +20,17 @@ d'un noyau construit avec `--features cassini-ai/cuda`, que le Python de QGIS ne
 commande, pour voir la sonde rendre ECHEC ; `CASSINI_DEMO_TAMPER=1`, qui change le `result` d'une
 étape d'analyse du journal avant le rejeu (refusé avec un projet donné en argument) ;
 `CASSINI_DEMO_DROP_ITEM=<élément>` (title, legend, scalebar, northarrow, sources), qui retire
-cet élément de la liste relevée sur la mise en page, pour voir la sonde rendre ECHEC.
+cet élément de la liste relevée sur la mise en page, pour voir la sonde rendre ECHEC ;
+`CASSINI_DEMO_CONNECT=<hôte:port>` (par exemple 192.0.2.1:9), qui fait ouvrir par la sonde une
+connexion non bloquante vers cette adresse et surveiller aussi son propre PID, pour voir le verdict
+réseau rendre ECHEC.
+
+Hors ligne (exigence D1) : pendant toute la sonde, un relevé de `netstat -ano` filtré sur le PID du
+noyau (celui du plan, puis celui du rejeu) est fait chaque seconde et une dernière fois avant le
+verdict final. Une connexion dont l'adresse distante n'est ni de bouclage ni générique rend ECHEC en
+la nommant ; un relevé impossible (pas de `netstat`, sortie illisible) rend ECHEC, jamais OK. Les
+connexions de QGIS ne sont pas surveillées, et une connexion plus brève qu'une seconde peut passer
+entre deux relevés.
 
 Le projet de démo reçoit aussi le MNT synthétique `fixtures/mnt-colline-2154.tif` (copié, couche
 « MNT », ajoutée sous les couches vectorielles pour ne rien cacher) ; avec un projet donné, il faut
@@ -54,6 +64,8 @@ import json
 import os
 import re
 import shutil
+import socket
+import subprocess
 import sys
 import tempfile
 import time
@@ -115,6 +127,8 @@ TAMPER = bool(os.environ.get("CASSINI_DEMO_TAMPER"))
 DROP_ITEM = os.environ.get("CASSINI_DEMO_DROP_ITEM") or None
 _refused = demo_verdict.tamper_refused_reason(TAMPER, len(sys.argv) == 2)
 _refused = _refused or demo_verdict.drop_item_refused_reason(DROP_ITEM)
+CONNECT = os.environ.get("CASSINI_DEMO_CONNECT") or None
+_refused = _refused or demo_verdict.connect_refused_reason(CONNECT)
 if _refused is not None:
     print(demo_verdict.verdict_line(_refused), flush=True)
     sys.exit(1)
@@ -224,11 +238,75 @@ if missing is not None:
 
 t0 = time.monotonic()
 state = {"reason": None, "done": False, "marks": {}, "calls": [], "steps": [], "phase": "plan",
-         "export": None, "earlier_names": []}
+         "export": None, "earlier_names": [],
+         "net": [], "net_keys": set(), "pids": set(), "polls": 0}
+POLL_MS = 1000
 
 
 def now():
     return "%.2f" % (time.monotonic() - t0)
+
+
+def poll_network():
+    """Un relevé de `netstat -ano` pour les PID surveillés (noyau en cours, sonde si CONNECT).
+
+    Un relevé qui échoue ou dont la sortie n'a aucune ligne reconnue n'est pas compté : sans
+    relevé compté, le verdict réseau est ECHEC."""
+    process_id = int(process.processId() or 0)
+    if process_id:
+        state["pids"].add(process_id)
+    if CONNECT:
+        state["pids"].add(os.getpid())
+    try:
+        out = subprocess.run(["netstat", "-ano"], capture_output=True, text=True,
+                             timeout=20, check=True).stdout
+    except (OSError, subprocess.SubprocessError):
+        return
+    rows = demo_verdict.parse_netstat(out)
+    if not rows:
+        return
+    if state["pids"]:
+        state["polls"] += 1
+    for row in rows:
+        key = (row["proto"], row["local"], row["remote"], row["state"], row["pid"])
+        if row["pid"] in state["pids"] and key not in state["net_keys"]:
+            state["net_keys"].add(key)
+            state["net"].append(row)
+
+
+def guarded_poll():
+    try:
+        poll_network()
+    except Exception:
+        traceback.print_exc()
+
+
+def network_verdict():
+    """Dernier relevé, puis jugement de toutes les connexions vues du noyau."""
+    guarded_poll()
+    print("  réseau : %d relevé(s), PID surveillés %s, %d connexion(s) vue(s)" % (
+        state["polls"], sorted(state["pids"]), len(state["net"])), flush=True)
+    if CONNECT and not any(row["pid"] == os.getpid() for row in state["net"]):
+        # La connexion de test n'a jamais été relevée (refusée d'emblée, hors ligne) : un OK
+        # laisserait croire que le jugement l'a vue.
+        return "réseau : connexion de test vers %s jamais relevée" % CONNECT
+    return demo_verdict.judge_network(state["net"], state["pids"], state["polls"])
+
+
+_test_socket = None
+
+
+def open_test_connection():
+    """`CASSINI_DEMO_CONNECT` : connexion non bloquante de la sonde vers l'adresse donnée."""
+    global _test_socket
+    host, port = demo_verdict.parse_connect(CONNECT)
+    _test_socket = socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET, socket.SOCK_STREAM)
+    _test_socket.setblocking(False)
+    try:
+        _test_socket.connect((host, port))
+    except (BlockingIOError, OSError):
+        pass  # en cours (SYN_SENT) ou refusée d'emblée : le jugement n'en dépend pas
+    print("connexion de test ouverte vers %s" % CONNECT, flush=True)
 
 
 class Timed:
@@ -470,11 +548,13 @@ def start_replay():
 def on_replay_event(kind, payload):
     if kind == client.READY:
         print("[%s] nouveau noyau prêt ; rejeu du journal" % now(), flush=True)
+        guarded_poll()  # le noyau du rejeu est court : son PID est relevé dès qu'il est prêt
         if not core.replay():
             finish("rejeu : l'extension n'a pas pu le lancer")
     elif kind in (client.REPLAY_DONE, client.REPLAY_FAILED):
         print("[%s] %s %s" % (now(), kind, json.dumps(payload, ensure_ascii=False)), flush=True)
-        finish(demo_verdict.judge_replay(kind, payload, state["steps"]))
+        reason = demo_verdict.judge_replay(kind, payload, state["steps"])
+        finish(reason if reason is not None else network_verdict())
     elif kind in (client.FAILED, client.DIED):
         finish("rejeu : noyau %s" % payload)
 
@@ -486,6 +566,7 @@ def on_event(kind, payload):
     marks = state["marks"]
     if kind == client.READY:
         print("[%s] noyau prêt ; phrase : %s" % (now(), PHRASE), flush=True)
+        guarded_poll()
         if FAIL_STEP:
             print("échec injecté sur : %s" % FAIL_STEP, flush=True)
         marks["propose"] = time.monotonic()
@@ -564,6 +645,11 @@ def start_replay_guarded():
 process = QProcess()
 core = client.CoreClient(process, guarded, registry)
 core.start(CORE, PROJECT)
+if CONNECT:
+    open_test_connection()
+poll_timer = QTimer()
+poll_timer.timeout.connect(guarded_poll)
+poll_timer.start(POLL_MS)
 QTimer.singleShot(GIVE_UP_MS, lambda: finish("délai dépassé"))
 app.exec_() if hasattr(app, "exec_") else app.exec()
 core.stop()

@@ -8,6 +8,8 @@ Le contrôle est géométrique, pas une liste d'identifiants : il tient quel que
 intersections choisi par le modèle, et attrape un plan qui oublie la zone ou le tampon.
 """
 
+import ipaddress
+
 EXPORT = "layout.export_pdf"
 # Seules les analyses créent la couche de réponse ; une étape de style rend la couche qu'elle
 # met en forme, qui n'est pas la réponse.
@@ -195,6 +197,82 @@ def judge_layout(items, facts):
         return "mise en page : PDF illisible"
     if not facts.get("pdf_size"):
         return "mise en page : PDF vide"
+    return None
+
+
+def _split_host(address):
+    """Hôte d'une adresse `hôte:port` de netstat (IPv6 entre crochets, `%zone` retirée)."""
+    address = str(address).strip()
+    if address.startswith("["):
+        host = address[1:].split("]", 1)[0]
+    else:
+        host = address.rsplit(":", 1)[0] if ":" in address else address
+    return host.split("%", 1)[0]
+
+
+def parse_netstat(text):
+    """Connexions lues dans la sortie de `netstat -ano` (Windows).
+
+    Rend une liste de {"proto", "local", "remote", "state", "pid"} : lignes TCP à cinq colonnes,
+    lignes UDP à quatre (pas d'état). Toute autre ligne (en-têtes, blancs) est ignorée.
+    """
+    rows = []
+    for line in str(text or "").splitlines():
+        parts = line.split()
+        if len(parts) == 5 and parts[0].upper() in ("TCP", "TCPV6") and parts[4].isdigit():
+            rows.append({"proto": "TCP", "local": parts[1], "remote": parts[2],
+                         "state": parts[3], "pid": int(parts[4])})
+        elif len(parts) == 4 and parts[0].upper() in ("UDP", "UDPV6") and parts[3].isdigit():
+            rows.append({"proto": "UDP", "local": parts[1], "remote": parts[2],
+                         "state": "", "pid": int(parts[3])})
+    return rows
+
+
+def is_local_address(address):
+    """Vrai pour le bouclage (127.0.0.0/8, ::1, IPv4 mappée) et les adresses génériques."""
+    host = _split_host(address)
+    if host in ("", "*", "0.0.0.0", "::"):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    mapped = getattr(ip, "ipv4_mapped", None)
+    if mapped is not None:
+        ip = mapped
+    return ip.is_loopback or ip.is_unspecified
+
+
+def judge_network(connections, watched_pids, polls):
+    """Verdict réseau : aucune connexion du noyau vers une adresse distante non locale.
+
+    `connections` : relevés cumulés (voir `parse_netstat`) ; `watched_pids` : PID du noyau
+    surveillés ; `polls` : nombre de relevés lisibles. Sans relevé ni PID, rien n'est prouvé.
+    """
+    watched = set(watched_pids or [])
+    if not watched or not polls:
+        return "réseau : relevé impossible"
+    for conn in connections or []:
+        if conn.get("pid") not in watched or is_local_address(conn.get("remote", "")):
+            continue
+        return "réseau : %s %s → %s (%s) du noyau pid %s" % (
+            conn.get("proto"), conn.get("local"), conn.get("remote"),
+            conn.get("state") or "sans état", conn.get("pid"))
+    return None
+
+
+def parse_connect(value):
+    """(hôte, port) de `CASSINI_DEMO_CONNECT`, ou `None` si la valeur n'est pas `hôte:port`."""
+    host, sep, port = str(value).strip().rpartition(":")
+    if not sep or not host or not port.isdigit() or not 1 <= int(port) <= 65535:
+        return None
+    return host.strip("[]"), int(port)
+
+
+def connect_refused_reason(value):
+    """Raison d'ECHEC quand `CASSINI_DEMO_CONNECT` n'est pas de la forme `hôte:port`."""
+    if value and parse_connect(value) is None:
+        return "CASSINI_DEMO_CONNECT : <hôte:port> attendu"
     return None
 
 
