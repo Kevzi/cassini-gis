@@ -100,6 +100,7 @@ end;
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   Manifeste, Json, Url, Sha: String;
+  Brut: AnsiString;
   Pos0: Integer;
   Source: String;
 begin
@@ -116,11 +117,12 @@ begin
   end;
 
   Manifeste := ExpandConstant('{tmp}\manifeste.json');
-  if not LoadStringFromFile(Manifeste, Json) then
+  if not LoadStringFromFile(Manifeste, Brut) then
   begin
     Result := 'La liste des versions de Cassini est illisible. Aucun fichier n''a été installé.';
     Exit;
   end;
+  Json := String(Brut);
 
   Pos0 := PositionFichier(Json, 'cassini.exe');
   Url := '';

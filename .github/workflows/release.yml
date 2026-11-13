@@ -15,6 +15,9 @@ on:
       # Versions complètes seulement : une étiquette de préversion ne doit jamais devenir
       # la « dernière » release, vers laquelle pointent les adresses fixes d'AD-17.
       - 'v[0-9]+.[0-9]+.[0-9]+'
+  # Essai à blanc, lancé à la main sur une branche : tout se construit et se prouve comme sur
+  # une étiquette (version de Cargo.toml), mais rien n'est publié.
+  workflow_dispatch:
 
 # Seul workflow à écrire : la publication de la release.
 permissions:
@@ -28,13 +31,20 @@ jobs:
       # Chemin de build court : CMake échoue au-delà de MAX_PATH.
       CARGO_TARGET_DIR: C:\ct
       LIBCLANG_PATH: C:\Program Files\LLVM\bin
-      TAG: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
+
+      # TAG : l'étiquette poussée ; pour un essai à blanc, `v` + la version de Cargo.toml.
+      - name: Étiquette visée
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq 'tag') { $t = $env:GITHUB_REF_NAME }
+          else { $t = 'v' + (python -I -c "import sys; sys.path.insert(0, 'installer'); import manifeste; print(manifeste.version_cargo(manifeste.RACINE / 'Cargo.toml'))") }
+          "TAG=$t" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
 
       # Rien n'est construit ni publié si l'étiquette diffère de la version de Cargo.toml.
       - name: Étiquette égale à la version Cargo
@@ -140,6 +150,7 @@ jobs:
 
       # Dernière étape : tout ce qui précède est vert.
       - name: Publication de la release
+        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
