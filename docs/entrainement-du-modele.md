@@ -734,11 +734,16 @@ restent sous 10 s (maximum 9,8 s, relevé dans la sortie brute).
 | Phrase | Raté |
 |---|---|
 | GA03 « zones agricoles du PLUi » | question (« aucune valeur *zones agricoles* dans TYPEZONE ») au lieu de `TYPEZONE = A` |
-| GA06 « routes départementales » | deux sélections, dont une sur `troncon_de_route` avec un champ inventé (`cpx_classement_administratif`) |
+| GA06 « routes départementales » | deux sélections : `troncon_de_route` sur `cpx_classement_administratif` (champ réel, 32 917 tronçons départementaux) et la couche attendue ; la phrase est ambiguë entre deux couches valides, plan attendu trop étroit |
 | GA08 « voies ferrées » | plan sur `voie_ferree_nommee` au lieu de la question entre couches proches |
 | GA09 « gares de voyageurs et de fret » | question « aucune couche de gares » : `equipement_de_transport` n'est pas trouvée par la valeur |
 | GA13 « depuis le Mont Veyrier » | plan conforme, mais `terrain.viewshed_too_large` (3 km sur le MNT à 5 m) : défaut de la phrase, pas du modèle |
 | GA19 « exporte les communes » | `commune_associee_ou_deleguee` au lieu de `commune` |
+
+Valeurs vérifiées dans le GeoPackage BD TOPO le 2026-11-13 : `Départementale` (490 routes de
+`route_numerotee_ou_nommee.type_de_route`) et `Gare voyageurs et fret` (18 équipements de
+`equipement_de_transport.nature`) existent, écrites ainsi, et figurent dans l'inventaire montré au
+modèle. GA09 est donc un vrai raté du modèle ; GA06 est en partie un défaut du plan attendu.
 
 La barre n'est pas tenue et n'est pas abaissée. La question entre couches proches est juste
 pour les routes (GA07) et manquée pour les voies ferrées (GA08). Même en corrigeant GA13, le score
