@@ -26,7 +26,9 @@ permissions:
 jobs:
   release:
     name: Release Windows (noyau gpu, installeurs)
-    runs-on: windows-latest
+    # windows-2022 (Visual Studio 2022) : sur windows-latest (VS 18, CMake 4.4) l'étape install de
+    # vulkan-shaders-gen passe avant sa construction et la compilation Vulkan échoue (essai à blanc 7.6).
+    runs-on: windows-2022
     env:
       # Chemin de build court : CMake échoue au-delà de MAX_PATH.
       CARGO_TARGET_DIR: C:\ct
