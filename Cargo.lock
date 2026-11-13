@@ -304,7 +304,7 @@ dependencies = [
 
 [[package]]
 name = "cassini"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cassini-ai",
  "cassini-core",
@@ -316,7 +316,7 @@ dependencies = [
 
 [[package]]
 name = "cassini-ai"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cassini-core",
  "cassini-training",
@@ -329,7 +329,7 @@ dependencies = [
 
 [[package]]
 name = "cassini-app"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cassini-core",
  "serde",
@@ -340,7 +340,7 @@ dependencies = [
 
 [[package]]
 name = "cassini-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "inventory",
  "libm",
@@ -353,7 +353,7 @@ dependencies = [
 
 [[package]]
 name = "cassini-training"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cassini-core",
  "serde_json",

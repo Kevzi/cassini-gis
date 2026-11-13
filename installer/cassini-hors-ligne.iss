@@ -11,12 +11,12 @@
 ; installer/verifier_taille.py fait echouer la recette si le fichier approche la limite.
 ;
 ; Compilation (depuis la racine du depot) :
-;   ISCC.exe /DVersion=0.1.0 installer\cassini-hors-ligne.iss
+;   ISCC.exe /DVersion=0.1.1 installer\cassini-hors-ligne.iss
 ; avec le paquet du noyau dans dist\noyau, modele\cassini-composition-4b-Q4_K_M.gguf et
-; dist\cassini_qgis-0.1.0.zip deja produits par la recette.
+; dist\cassini_qgis-0.1.1.zip deja produits par la recette.
 
 #ifndef Version
-  #define Version "0.1.0"
+  #define Version "0.1.1"
 #endif
 #ifndef Noyau
   #define Noyau "..\dist\noyau"

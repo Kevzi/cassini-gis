@@ -4,14 +4,14 @@
 ; fois, pendant l'installation. Il lit le manifeste de la release, télécharge le
 ; paquet du noyau, VERIFIE le SHA-256 de chaque fichier et ne pose rien si l'une diffère.
 ;
-; Compilation :  ISCC.exe /DVersion=0.1.0 installer\cassini-en-ligne.iss
+; Compilation :  ISCC.exe /DVersion=0.1.1 installer\cassini-en-ligne.iss
 ; Test local  :  cassini-installeur-en-ligne.exe /VERYSILENT /MANIFESTE=http://127.0.0.1:8000/manifeste.json
 ;
 ; Le manifeste a la mise en forme fixée par installer/manifeste.py (un champ par ligne) :
 ; Inno Setup n'a pas d'analyseur JSON, on y cherche du texte.
 
 #ifndef Version
-  #define Version "0.1.0"
+  #define Version "0.1.1"
 #endif
 
 #define ManifesteParDefaut "https://github.com/Kevzi/cassini-gis/releases/latest/download/manifeste.json"
