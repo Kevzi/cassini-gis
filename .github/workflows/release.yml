@@ -4,8 +4,8 @@
 # ligne sur CE binaire, compile l'installeur en ligne, prouve l'installation (manifeste
 # valide, puis manifeste altéré) et seulement alors publie la release : `cassini.exe`,
 # l'installeur et `manifeste.json`. Construit par GitHub Actions, jamais sur le poste du
-# propriétaire. Actions officielles de GitHub seulement ; Inno Setup vient de Chocolatey,
-# à version fixée (voir docs/publier-une-version.md).
+# propriétaire. Actions officielles de GitHub seulement ; Inno Setup est celui du poste de GitHub
+# (voir docs/publier-une-version.md).
 
 name: Release
 
@@ -58,9 +58,13 @@ jobs:
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item C:\ct\release\cassini.exe dist\cassini.exe
 
-      # Inno Setup : licence permissive propre (voir docs/publier-une-version.md).
-      - name: Inno Setup
-        run: choco install innosetup --version=6.4.3 --no-progress -y
+      # Inno Setup est déjà installé sur le poste de GitHub (licence permissive propre, voir
+      # docs/publier-une-version.md) : on affiche sa version dans le journal, sans rien installer.
+      - name: Inno Setup (version du poste)
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "Inno Setup 6 absent du poste" }
+          (Get-Item $iscc).VersionInfo.ProductVersion
 
       - name: Compilation de l'installeur en ligne
         run: |

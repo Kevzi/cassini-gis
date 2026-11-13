@@ -8,7 +8,7 @@ propriétaire.
 
 ## Licence d'Inno Setup (outil de l'installeur)
 
-L'installeur est compilé avec Inno Setup 6 (`choco install innosetup --version=6.4.3`). Sa
+L'installeur est compilé avec Inno Setup 6, celui déjà installé sur le poste GitHub (6.7.1 au premier essai ; le journal de la release affiche la version). Sa
 licence est permissive : usage commercial permis, redistribution libre des installeurs produits,
 et une copie modifiée d'Inno Setup doit être marquée comme telle. Cassini l'utilise sans le
 modifier. Les installeurs produits embarquent un petit lanceur d'Inno Setup sous cette licence,
