@@ -30,6 +30,10 @@ The SDK itself is not licensed. » Ce que Cassini livre venant du SDK passe par 
 (shaders compilés par `glslc`, de licence permissive) ; à lister dans les licences de la release
 (R7).
 
+La compilation Vulkan se fait avec le générateur **Ninja** (`CMAKE_GENERATOR=Ninja`, comme sur le
+poste du propriétaire) : avec le générateur Visual Studio, le sous-projet `vulkan-shaders-gen` de
+llama.cpp échoue (`MSB8066`), à un ou plusieurs jobs, sur Visual Studio 2022 comme 2026.
+
 ### Essai du propriétaire du noyau gpu (étape hitl)
 
 1. Lancer la recette à blanc (`gh workflow run release.yml`) et récupérer l'artefact de

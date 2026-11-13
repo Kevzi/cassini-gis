@@ -67,6 +67,8 @@ context:
 
 ## Implementation Notes
 
+Essai à blanc `release.yml` sur la branche (run 43427703726) : vert, paquet assemblé, installation prouvée (valide, altérée, sans manifeste, installeur complet). Trois défauts trouvés par l'essai : compilation Vulkan en échec avec le générateur Visual Studio (corrigé : `CMAKE_GENERATOR=Ninja`) ; boucle de l'installeur en ligne qui avançait après le `nom` au lieu du `sha256` (les DLL recevaient le contenu de `cassini.exe`, code 0xC000007B ; corrigé) ; sorties de la preuve rendues bavardes. Reste à faire par le propriétaire : l'essai sur sa carte graphique et sans carte.
+
 ## Plan Change Log
 
 ## Review Triage Log
