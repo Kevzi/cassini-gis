@@ -17,7 +17,15 @@ partir sans lui, pour ne jamais prendre en silence le dossier des modèles du po
 `CASSINI_PROBE_PATH`, dossiers ajoutés en tête du `PATH` du noyau (par exemple les DLL de CUDA
 d'un noyau construit avec `--features cassini-ai/cuda`, que le Python de QGIS ne voit pas) ;
 `CASSINI_DEMO_FAIL_STEP=<id de commande>`, qui fait répondre une erreur au geste de cette
-commande, pour voir la sonde rendre ECHEC.
+commande, pour voir la sonde rendre ECHEC ; `CASSINI_DEMO_TAMPER=1`, qui change le `result` d'une
+étape d'analyse du journal avant le rejeu (refusé avec un projet donné en argument) ;
+`CASSINI_DEMO_DROP_ITEM=<élément>` (title, legend, scalebar, northarrow, sources), qui retire
+cet élément de la liste relevée sur la mise en page, pour voir la sonde rendre ECHEC.
+
+Après un plan jugé juste, la sonde juge la mise en page (titre, légende, échelle, flèche du nord
+et sources, d'après ce que le geste d'export déclare avoir posé, `items_placed`, et le résultat
+de l'export ; PDF non vide), puis ferme le projet, le rouvre, lance un nouveau noyau sans
+`CASSINI_MODELS` et rejoue le journal : `identical` et autant d'étapes que d'exécutées.
 
 La sonde propose la phrase de démo exacte de `CLAUDE.md`, valide le plan, l'exécute, puis juge
 (`demo_verdict.py`) : la couche retenue (dernière analyse avant l'export) n'est pas vide, porte un
@@ -86,6 +94,13 @@ if not os.environ.get("CASSINI_MODELS"):
 check_phrase()
 CORE = core_path()
 FAIL_STEP = os.environ.get("CASSINI_DEMO_FAIL_STEP") or None
+TAMPER = bool(os.environ.get("CASSINI_DEMO_TAMPER"))
+DROP_ITEM = os.environ.get("CASSINI_DEMO_DROP_ITEM") or None
+_refused = demo_verdict.tamper_refused_reason(TAMPER, len(sys.argv) == 2)
+_refused = _refused or demo_verdict.drop_item_refused_reason(DROP_ITEM)
+if _refused is not None:
+    print(demo_verdict.verdict_line(_refused), flush=True)
+    sys.exit(1)
 if os.environ.get("CASSINI_PROBE_PATH"):
     os.environ["PATH"] = os.environ["CASSINI_PROBE_PATH"] + os.pathsep + os.environ.get("PATH", "")
 
@@ -165,7 +180,8 @@ if missing is not None:
     sys.exit(1)
 
 t0 = time.monotonic()
-state = {"reason": None, "done": False, "marks": {}, "calls": []}
+state = {"reason": None, "done": False, "marks": {}, "calls": [], "steps": [], "phase": "plan",
+         "export": None}
 
 
 def now():
@@ -177,6 +193,8 @@ class Timed:
 
     def __init__(self, command, inner):
         self.command, self.inner = command, inner
+        if command == demo_verdict.EXPORT:
+            state["export"] = inner  # sa liste `items_placed` est relevée après l'export
 
     def start(self, params, done):
         started = time.monotonic()
@@ -290,19 +308,92 @@ def parcel_fields(layer_id):
     return bool(own & set(layer.fields().names()))
 
 
-def pdf_head(steps):
+def pdf_facts(steps):
+    """Cinq premiers octets et taille du PDF d'export, `(None, 0)` s'il n'est pas lisible."""
     file = demo_verdict.pdf_file(steps)
     if file is None:
-        return None
+        return None, 0
     path = file if os.path.isabs(file) else os.path.join(OUTPUT_DIR, file)
     try:
         with open(path, "rb") as f:
-            return f.read(5)
+            head = f.read(5)
+        return head, os.path.getsize(path)
     except OSError:
-        return None
+        return None, 0
+
+
+def pdf_head(steps):
+    return pdf_facts(steps)[0]
+
+
+def layout_verdict(steps):
+    """Éléments posés d'après le geste d'export, `CASSINI_DEMO_DROP_ITEM` appliqué."""
+    gesture = state["export"]
+    items = list(getattr(gesture, "items_placed", []) or [])
+    if DROP_ITEM:
+        items = [item for item in items if item != DROP_ITEM]
+    print("  mise en page : éléments posés %s" % items, flush=True)
+    result = next((s.get("result") for s in steps
+                   if isinstance(s, dict) and s.get("command") == demo_verdict.EXPORT), None)
+    result = result if isinstance(result, dict) else {}
+    head, size = pdf_facts(steps)
+    facts = {"sources": result.get("sources"), "page_count": result.get("page_count"),
+             "pdf_head": head, "pdf_size": size}
+    return demo_verdict.judge_layout(items, facts)
+
+
+def tamper_journal():
+    """Change le `result` de la première étape d'analyse du journal, avant le rejeu."""
+    path = os.path.join(OUTPUT_DIR, "journal.jsonl")
+    with open(path, encoding="utf-8") as f:
+        rows = [json.loads(line) for line in f if line.strip()]
+    for index, row in enumerate(rows):
+        if str(row.get("id", "")).startswith(demo_verdict.ANSWER_PREFIX) and isinstance(row.get("result"), dict):
+            result = row["result"]
+            count = result.get("feature_count")
+            result["feature_count"] = count + 1 if isinstance(count, int) else 999999
+            break
+    else:
+        raise RuntimeError("aucune étape d'analyse à altérer dans le journal")
+    with open(path, "w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    print("  journal altéré : étape %d %s" % (index + 1, rows[index]["id"]), flush=True)
+
+
+def start_replay():
+    """Ferme le projet, le rouvre, lance un nouveau noyau sans modèle (rejeu : aucune IA)."""
+    global core, process
+    core.stop()
+    project.clear()
+    if not project.read(PROJECT):
+        finish("projet illisible à la réouverture : %s" % PROJECT)
+        return
+    if TAMPER:
+        tamper_journal()
+    state["phase"] = "replay"
+    os.environ.pop("CASSINI_MODELS", None)
+    process = QProcess()
+    core = client.CoreClient(process, guarded, registry)
+    core.start(CORE, PROJECT)
+
+
+def on_replay_event(kind, payload):
+    if kind == client.READY:
+        print("[%s] nouveau noyau prêt ; rejeu du journal" % now(), flush=True)
+        if not core.replay():
+            finish("rejeu : l'extension n'a pas pu le lancer")
+    elif kind in (client.REPLAY_DONE, client.REPLAY_FAILED):
+        print("[%s] %s %s" % (now(), kind, json.dumps(payload, ensure_ascii=False)), flush=True)
+        finish(demo_verdict.judge_replay(kind, payload, state["steps"]))
+    elif kind in (client.FAILED, client.DIED):
+        finish("rejeu : noyau %s" % payload)
 
 
 def on_event(kind, payload):
+    if state["phase"] == "replay":
+        on_replay_event(kind, payload)
+        return
     marks = state["marks"]
     if kind == client.READY:
         print("[%s] noyau prêt ; phrase : %s" % (now(), PHRASE), flush=True)
@@ -334,7 +425,14 @@ def on_event(kind, payload):
             "parcel_fields": parcel_fields(layer_id) if layer_id else False,
             "pdf_head": pdf_head(steps),
         }
-        finish(demo_verdict.judge_done(steps, facts, injected=FAIL_STEP))
+        reason = demo_verdict.judge_done(steps, facts, injected=FAIL_STEP)
+        if reason is None:
+            reason = layout_verdict(steps)
+        if reason is not None:
+            finish(reason)
+        else:
+            state["steps"] = steps
+            QTimer.singleShot(0, start_replay_guarded)
     else:
         reason = demo_verdict.failure_reason(kind, payload, state["calls"])
         if reason is not None:
@@ -346,6 +444,14 @@ def guarded(kind, payload):
     """Une exception dans un rappel de Qt abattrait QGIS sans message : on la montre."""
     try:
         on_event(kind, payload)
+    except Exception as error:
+        traceback.print_exc()
+        finish("exception dans la sonde : %s" % error)
+
+
+def start_replay_guarded():
+    try:
+        start_replay()
     except Exception as error:
         traceback.print_exc()
         finish("exception dans la sonde : %s" % error)

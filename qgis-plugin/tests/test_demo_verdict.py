@@ -132,6 +132,104 @@ class JudgeDoneTest(unittest.TestCase):
             self.assertTrue(v.verdict_line(reason).startswith("VERDICT : ECHEC — "))
 
 
+ITEMS = ["map", "title", "legend", "scalebar", "northarrow", "sources"]
+
+
+def layout_facts():
+    return {"sources": ["Parcelles cadastrales"], "page_count": 1, "pdf_head": b"%PDF-", "pdf_size": 1234}
+
+
+class JudgeReplayTest(unittest.TestCase):
+    def test_identical_replay_is_ok(self):
+        self.assertIsNone(v.judge_replay(v.REPLAY_DONE, {"steps": 5, "identical": True}, steps()))
+
+    def test_diverged_names_step_and_command(self):
+        payload = {"code": "replay.diverged", "message": "x", "step": 2}
+        self.assertEqual(
+            v.judge_replay(v.REPLAY_FAILED, payload, steps()),
+            "rejeu : étape 2 analysis.buffer diverge",
+        )
+
+    def test_other_failure_code(self):
+        payload = {"code": "replay.core_died", "message": "x", "step": 3}
+        self.assertEqual(v.judge_replay(v.REPLAY_FAILED, payload, steps()), "rejeu : replay.core_died étape 3")
+
+    def test_not_identical(self):
+        self.assertIn("identique", v.judge_replay(v.REPLAY_DONE, {"steps": 5, "identical": False}, steps()))
+
+    def test_wrong_step_count(self):
+        reason = v.judge_replay(v.REPLAY_DONE, {"steps": 3, "identical": True}, steps())
+        self.assertIn("3 étapes refaites, 5 exécutées", reason)
+
+    def test_tamper_refused_on_given_project(self):
+        self.assertEqual(
+            v.tamper_refused_reason(True, True), "altération refusée sur un projet donné")
+        self.assertIsNone(v.tamper_refused_reason(True, False))
+        self.assertIsNone(v.tamper_refused_reason(False, True))
+
+
+class DropItemTest(unittest.TestCase):
+    def test_valid_items_and_unset_are_accepted(self):
+        for key, _ in v.LAYOUT_ITEMS:
+            self.assertIsNone(v.drop_item_refused_reason(key))
+        self.assertIsNone(v.drop_item_refused_reason(None))
+
+    def test_typo_and_map_are_refused(self):
+        for bad in ("legende", "legend ", "map"):
+            self.assertIn("élément inconnu", v.drop_item_refused_reason(bad))
+
+
+class JudgeReplayEdgeTest(unittest.TestCase):
+    def test_unexpected_kind(self):
+        self.assertIn("inattendu", v.judge_replay("autre", {}, steps()))
+
+    def test_diverged_without_a_usable_step_falls_back(self):
+        for payload in ({"code": "replay.diverged"}, {"code": "replay.diverged", "step": 99}):
+            self.assertIn("diverge", v.judge_replay(v.REPLAY_FAILED, payload, steps()))
+        self.assertEqual(
+            v.judge_replay(v.REPLAY_FAILED, {"code": "replay.diverged"}, steps()),
+            "rejeu : étape ? ? diverge")
+
+    def test_non_dict_payload(self):
+        self.assertIn("identique", v.judge_replay(v.REPLAY_DONE, None, steps()))
+
+
+class JudgeLayoutTest(unittest.TestCase):
+    def test_all_five_items_are_ok(self):
+        self.assertIsNone(v.judge_layout(ITEMS, layout_facts()))
+
+    def test_each_missing_item_is_named(self):
+        for key, label in v.LAYOUT_ITEMS:
+            reason = v.judge_layout([i for i in ITEMS if i != key], layout_facts())
+            self.assertEqual(reason, "mise en page : %s absente" % label)
+
+    def test_legend_message(self):
+        self.assertEqual(
+            v.judge_layout([i for i in ITEMS if i != "legend"], layout_facts()),
+            "mise en page : légende absente",
+        )
+
+    def test_wrong_page_count(self):
+        facts = layout_facts()
+        facts["page_count"] = 2
+        self.assertEqual(v.judge_layout(ITEMS, facts), "mise en page : 2 page(s) au lieu d'une")
+
+    def test_empty_sources(self):
+        facts = layout_facts()
+        facts["sources"] = []
+        self.assertIn("sources", v.judge_layout(ITEMS, facts))
+
+    def test_pdf_not_a_pdf(self):
+        facts = layout_facts()
+        facts["pdf_head"] = b"<html"
+        self.assertIn("illisible", v.judge_layout(ITEMS, facts))
+
+    def test_empty_pdf(self):
+        facts = layout_facts()
+        facts["pdf_size"] = 0
+        self.assertIn("vide", v.judge_layout(ITEMS, facts))
+
+
 class FailureReasonTest(unittest.TestCase):
     def test_failed_step_names_step_command_and_code(self):
         payload = {"code": "qgis.demo_injected", "message": "x", "step": 5, "outputs": {}}

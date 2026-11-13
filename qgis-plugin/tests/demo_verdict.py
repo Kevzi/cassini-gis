@@ -25,6 +25,17 @@ PLAN_EXEC_FAILED = "plan_exec_failed"
 PLAN_CANCELLED = "plan_cancelled"
 FAILED = "failed"
 DIED = "died"
+REPLAY_DONE = "replay_done"
+REPLAY_FAILED = "replay_failed"
+
+# Les cinq éléments de la mise en page de démo (clé de `items_placed`, nom pour le verdict).
+LAYOUT_ITEMS = (
+    ("title", "titre"),
+    ("legend", "légende"),
+    ("scalebar", "échelle"),
+    ("northarrow", "flèche du nord"),
+    ("sources", "sources"),
+)
 
 
 def verdict_line(reason):
@@ -112,6 +123,69 @@ def judge_done(steps, facts, injected=None):
         return "aucun PDF : le plan n'a pas d'étape %s" % EXPORT
     if facts.get("pdf_head") != b"%PDF-":
         return "PDF %s illisible ou absent" % file
+    return None
+
+
+def tamper_refused_reason(tamper, project_given):
+    """Raison d'ECHEC quand on veut altérer le journal d'un projet donné en argument."""
+    if tamper and project_given:
+        return "altération refusée sur un projet donné"
+    return None
+
+
+def drop_item_refused_reason(item):
+    """Raison d'ECHEC quand `CASSINI_DEMO_DROP_ITEM` ne nomme pas l'un des cinq éléments jugés."""
+    valid = [key for key, _ in LAYOUT_ITEMS]
+    if item and item not in valid:
+        return "élément inconnu pour CASSINI_DEMO_DROP_ITEM : %s (attendu : %s)" % (item, ", ".join(valid))
+    return None
+
+
+def judge_replay(kind, payload, executed):
+    """Verdict du rejeu du journal après réouverture du projet.
+
+    `kind` : REPLAY_DONE ou REPLAY_FAILED de `client.py` ; `payload` : sa charge ;
+    `executed` : les étapes du plan exécuté (le rejeu doit en refaire autant).
+    """
+    payload = payload if isinstance(payload, dict) else {}
+    if kind == REPLAY_FAILED:
+        step = payload.get("step")
+        code = payload.get("code")
+        if code == "replay.diverged":
+            command = "?"
+            if isinstance(step, int) and 1 <= step <= len(executed):
+                entry = executed[step - 1]
+                if isinstance(entry, dict) and isinstance(entry.get("command"), str):
+                    command = entry["command"]
+            return "rejeu : étape %s %s diverge" % (step if step is not None else "?", command)
+        return "rejeu : %s étape %s" % (code, step if step is not None else "?")
+    if kind != REPLAY_DONE:
+        return "rejeu : événement inattendu %s" % kind
+    if payload.get("identical") is not True:
+        return "rejeu : le résultat n'est pas identique"
+    if payload.get("steps") != len(executed):
+        return "rejeu : %s étapes refaites, %d exécutées" % (payload.get("steps"), len(executed))
+    return None
+
+
+def judge_layout(items, facts):
+    """Verdict de la mise en page : éléments posés déclarés par le geste d'export, plus le PDF.
+
+    `items` : liste des éléments posés (`LayoutExportGesture.items_placed`) ; `facts` :
+    `sources` (liste du résultat de l'export), `page_count`, `pdf_head` et `pdf_size`.
+    """
+    items = items if isinstance(items, (list, tuple)) else []
+    for key, label in LAYOUT_ITEMS:
+        if key not in items:
+            return "mise en page : %s absente" % label
+    if not facts.get("sources"):
+        return "mise en page : sources absentes du résultat de l'export"
+    if facts.get("page_count") != 1:
+        return "mise en page : %s page(s) au lieu d'une" % facts.get("page_count")
+    if facts.get("pdf_head") != b"%PDF-":
+        return "mise en page : PDF illisible"
+    if not facts.get("pdf_size"):
+        return "mise en page : PDF vide"
     return None
 
 
