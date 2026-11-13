@@ -3,7 +3,7 @@ title: 'Balle traçante : étiquette, release et installeur en ligne minimal sou
 type: 'feature'
 ticket: '1'
 created: '2026-11-13'
-status: 'built'
+status: 'done'
 baseline_revision: '15ccd9d2184af9497d1e1c4ab577b4f52a8c8a63'
 route: 'full'
 route_source: 'auto'
