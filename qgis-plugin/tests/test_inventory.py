@@ -515,6 +515,51 @@ class FactsKeyTest(unittest.TestCase):
         self.assertEqual(key[-1][0][0], "gares é.csv")
 
 
+class UnitBackend(FakeBackend):
+    """Fond qui lit l'unité des systèmes, comme QGIS (`mapUnits`) : mètres pour EPSG:2154,
+    degrés pour EPSG:4326, autre sinon."""
+
+    UNITS = {"EPSG:2154": "m", "EPSG:4326": "deg"}
+
+    def crs_unit_of(self, layer):
+        return self.UNITS.get(layer.crs, "other")
+
+    def project_crs_unit(self):
+        return self.UNITS.get(self.project_crs_value, "other")
+
+
+class CrsUnitTest(unittest.TestCase):
+    """Unité du système de chaque couche et du projet, lue par le noyau pour choisir le système
+    de calcul d'une distance en mètres (entrée 9.16)."""
+
+    def test_each_layer_and_the_project_carry_their_unit(self):
+        layers = TWO + [FakeLayer("c_3", "lieux", "/x/lieux.gpkg", "", (0.0, 0.0, 1.0, 1.0))]
+        result, error = run(inventory.ProjectInventoryGesture, UnitBackend(layers), {})
+        self.assertIsNone(error)
+        self.assertEqual([l["crs_unit"] for l in result["layers"]], ["m", "deg", "other"])
+        self.assertEqual(result["project_crs_unit"], "m")
+        result, _ = run(inventory.ProjectInventoryGesture, UnitBackend(TWO, project_crs="EPSG:4326"), {})
+        self.assertEqual(result["project_crs_unit"], "deg")
+
+    def test_an_unreadable_unit_is_other_and_the_inventory_still_answers(self):
+        class Broken(UnitBackend):
+            def crs_unit_of(self, layer):
+                raise RuntimeError("SCR illisible")
+
+            def project_crs_unit(self):
+                return "pieds"
+
+        result, error = run(inventory.ProjectInventoryGesture, Broken(TWO), {})
+        self.assertIsNone(error)
+        self.assertEqual([l["crs_unit"] for l in result["layers"]], ["other", "other"])
+        self.assertEqual(result["project_crs_unit"], "other")
+
+    def test_a_backend_without_units_gives_none(self):
+        result, _ = run(inventory.ProjectInventoryGesture, FakeBackend(TWO), {})
+        self.assertNotIn("crs_unit", result["layers"][0])
+        self.assertNotIn("project_crs_unit", result)
+
+
 class DescribeTest(unittest.TestCase):
     def test_vector_layer(self):
         layer = FakeLayer(

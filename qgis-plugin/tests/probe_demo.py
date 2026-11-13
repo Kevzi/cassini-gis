@@ -25,6 +25,11 @@ champ propre à la couche des parcelles, chacune de ses entités a son point int
 `typezone = U` et est à 500 m au plus de la gare la plus proche, et le PDF commence par `%PDF-`.
 Les gestes sont ceux de l'extension (`delegated.build_registry`), style compris. Elle imprime les durées, le plan,
 le résultat de chaque étape, puis `VERDICT : OK` (code 0) ou `VERDICT : ECHEC — <raison>` (code 1).
+Avec un argument, elle ouvre le projet donné, par exemple celui d'Annecy (territoire de la démo,
+décision du propriétaire du 2026-11-10 ; `donnees-test-cassini/annecy/projet-test-annecy.qgz`) dont
+les gares sont en EPSG:4326 : le tampon est calculé dans le système du projet (entrée 9.16). Elle
+ne modifie ni le projet ni les fichiers d'origine. Aucune donnée réelle n'est versionnée : le projet
+vient de l'utilisateur (voir CLAUDE.md §5).
 """
 
 import json
@@ -46,7 +51,7 @@ import demo_verdict  # noqa: E402
 
 PHRASE = (
     "Trouve les parcelles constructibles du PLU à moins de 500 m d'une gare à "
-    "Villeneuve-le-Roi et sors-moi la carte en PDF."
+    "Annecy et sors-moi la carte en PDF."
 )
 GIVE_UP_MS = 30 * 60 * 1000
 DEMO_FIXTURES = os.path.join(ROOT, "fixtures", "demo")

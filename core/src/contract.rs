@@ -137,6 +137,62 @@ fn check_spec(spec: &CommandSpec, out: &mut Vec<ContractViolation>) {
             "un style de résultat (`result_style`) ne se déclare que sur une commande à une seule sortie.",
         ));
     }
+    if let Some(filter) = &spec.attribute_filter {
+        let properties = spec.params_schema.get("properties");
+        for name in [
+            &filter.layer,
+            &filter.field,
+            &filter.operator,
+            &filter.value,
+        ] {
+            if properties.and_then(|p| p.get(name.as_str())).is_none() {
+                out.push(violation(
+                    "contract.attribute_filter",
+                    id,
+                    &format!(
+                        "`attribute_filter` nomme « {name} », absent des propriétés du schéma des paramètres."
+                    ),
+                ));
+            }
+        }
+        let root = &spec.params_schema;
+        let property = |name: &str| properties.and_then(|p| p.get(name));
+        // L'opérateur parle le vocabulaire que le garde-fou connaît : une énumération fermée.
+        if let Some(operator) = property(&filter.operator) {
+            let known = find(operator, root, 0, &|m| m.get("enum"))
+                .and_then(Value::as_array)
+                .is_some_and(|values| {
+                    !values.is_empty()
+                        && values.iter().all(|v| {
+                            v.as_str().is_some_and(|v| {
+                                crate::attribute_guard::KNOWN_OPERATORS.contains(&v)
+                            })
+                        })
+                });
+            if !known {
+                out.push(violation(
+                    "contract.attribute_filter",
+                    id,
+                    "l'opérateur d'`attribute_filter` doit être une énumération des opérateurs que le garde-fou connaît (eq, ne, lt, lte, gt, gte, contains, begins_with).",
+                ));
+            }
+        }
+        if let Some(value) = property(&filter.value) {
+            if !accepts_string(value, root, 0) {
+                out.push(violation(
+                    "contract.attribute_filter",
+                    id,
+                    "la valeur d'`attribute_filter` doit accepter une chaîne.",
+                ));
+            }
+        }
+    }
+    if let Some((param, layer)) = &spec.work_crs_param {
+        check_work_crs_param(spec, param, layer, out);
+    }
+    if let Some(param) = &spec.focus_param {
+        check_focus_param(spec, param, out);
+    }
     check_path_params(spec, out);
     for (which, schema) in [
         ("des paramètres", &spec.params_schema),
@@ -160,6 +216,89 @@ fn check_spec(spec: &CommandSpec, out: &mut Vec<ContractViolation>) {
                 ),
             ));
         }
+    }
+}
+
+/// Le paramètre du système de calcul (entrée 9.16) : un entier facultatif du schéma, rempli par
+/// le noyau, et le paramètre de la couche d'entrée qu'il lit dans l'inventaire.
+fn check_work_crs_param(
+    spec: &CommandSpec,
+    param: &str,
+    layer: &str,
+    out: &mut Vec<ContractViolation>,
+) {
+    let root = &spec.params_schema;
+    let property = |n: &str| root.get("properties").and_then(|p| p.get(n));
+    let mut fault = |message: String| {
+        out.push(violation("contract.work_crs_param", &spec.id, &message));
+    };
+    for name in [param, layer] {
+        if property(name).is_none() {
+            fault(format!(
+                "`work_crs_param` nomme « {name} », absent des propriétés du schéma des paramètres."
+            ));
+        }
+    }
+    if let Some(p) = property(param) {
+        let integer = find(p, root, 0, &|m| {
+            m.get("type").filter(|t| {
+                t.as_str() == Some("integer")
+                    || t.as_array()
+                        .is_some_and(|a| a.iter().any(|v| v.as_str() == Some("integer")))
+            })
+        })
+        .is_some();
+        if !integer {
+            fault(format!(
+                "`work_crs_param` nomme « {param} », dont le schéma n'est pas un entier (code EPSG)."
+            ));
+        }
+    }
+    let required = root
+        .get("required")
+        .and_then(Value::as_array)
+        .is_some_and(|r| r.iter().any(|v| v.as_str() == Some(param)));
+    if required {
+        fault(format!(
+            "`work_crs_param` nomme « {param} », obligatoire : le noyau le remplit, il doit être facultatif."
+        ));
+    }
+}
+
+/// Le paramètre de mise en évidence du résultat d'un plan (entrée 7.9) : un objet facultatif du
+/// schéma, rempli par le noyau.
+fn check_focus_param(spec: &CommandSpec, param: &str, out: &mut Vec<ContractViolation>) {
+    let root = &spec.params_schema;
+    let mut fault = |message: String| {
+        out.push(violation("contract.focus_param", &spec.id, &message));
+    };
+    let Some(p) = root.get("properties").and_then(|p| p.get(param)) else {
+        fault(format!(
+            "`focus_param` nomme « {param} », absent des propriétés du schéma des paramètres."
+        ));
+        return;
+    };
+    let object = find(p, root, 0, &|m| {
+        m.get("type").filter(|t| {
+            t.as_str() == Some("object")
+                || t.as_array()
+                    .is_some_and(|a| a.iter().any(|v| v.as_str() == Some("object")))
+        })
+    })
+    .is_some();
+    if !object {
+        fault(format!(
+            "`focus_param` nomme « {param} », dont le schéma n'est pas un objet."
+        ));
+    }
+    let required = root
+        .get("required")
+        .and_then(Value::as_array)
+        .is_some_and(|r| r.iter().any(|v| v.as_str() == Some(param)));
+    if required {
+        fault(format!(
+            "`focus_param` nomme « {param} », obligatoire : le noyau le remplit, il doit être facultatif."
+        ));
     }
 }
 
@@ -488,6 +627,36 @@ mod tests {
         .result_style(crate::style::ResultStyle::Slope));
     command!(StyledNoOutput, |s| s
         .result_style(crate::style::ResultStyle::Slope));
+    command!(FilterOnAbsentParams, |s| s
+        .attribute_filter("layer_id", "field", "operator", "value"));
+
+    /// Un filtre dont l'opérateur est une chaîne libre et la valeur un nombre.
+    #[derive(Debug, Deserialize, JsonSchema)]
+    #[allow(dead_code)]
+    struct LooseFilter {
+        layer_id: String,
+        field: String,
+        operator: String,
+        value: u32,
+    }
+
+    struct LooseFilterCommand;
+
+    impl Command for LooseFilterCommand {
+        type Params = LooseFilter;
+        type Output = Output;
+
+        fn spec() -> CommandSpec {
+            let mut spec = good_spec().attribute_filter("layer_id", "field", "operator", "value");
+            spec.params_schema =
+                CommandSpec::new::<LooseFilter, Output>("a.b", "x", "x").params_schema;
+            spec
+        }
+
+        fn run(&self, _params: LooseFilter) -> Result<Output, crate::registry::CommandFailure> {
+            Ok(Output {})
+        }
+    }
     command!(BadIdCapital, |mut s| {
         s.id = "Buffer".into();
         s
@@ -720,6 +889,34 @@ mod tests {
     }
 
     #[test]
+    fn an_attribute_filter_names_existing_params() {
+        let got = only(FilterOnAbsentParams);
+        assert_eq!(
+            codes(&got)
+                .iter()
+                .filter(|c| **c == "contract.attribute_filter")
+                .count(),
+            4
+        );
+        // Un opérateur libre et une valeur numérique : deux refus.
+        let messages: Vec<String> = only(LooseFilterCommand)
+            .check_contract()
+            .into_iter()
+            .filter(|v| v.code == "contract.attribute_filter")
+            .map(|v| v.message)
+            .collect();
+        assert_eq!(messages.len(), 2, "{messages:?}");
+        assert!(messages[0].contains("énumération"), "{messages:?}");
+        assert!(messages[1].contains("chaîne"), "{messages:?}");
+        // `analysis.select_by_attribute` déclare un filtre juste.
+        let standard = Registry::standard();
+        assert!(standard
+            .spec("analysis.select_by_attribute")
+            .is_some_and(|s| s.attribute_filter.is_some()));
+        assert!(!codes(&standard).contains(&"contract.attribute_filter"));
+    }
+
+    #[test]
     fn a_result_style_needs_exactly_one_output() {
         assert!(codes(&only(StyledTwoOutputs)).contains(&"contract.result_style"));
         assert!(codes(&only(StyledNoOutput)).contains(&"contract.result_style"));
@@ -804,6 +1001,91 @@ mod tests {
         assert_eq!(violations[0].code, "contract.path_param");
         assert!(violations[0].message.contains("pth"));
         assert_eq!(codes(&only(OutputParamMissing)), ["contract.output_param"]);
+    }
+
+    command!(FocusWellFormed, |mut s| {
+        s.params_schema = json!({
+            "$schema": DIALECT,
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "focus": {"anyOf": [{"$ref": "#/$defs/Focus"}, {"type": "null"}]}
+            },
+            "required": ["title"],
+            "$defs": {"Focus": {"type": "object", "properties": {}}}
+        });
+        s.focus_param("focus")
+    });
+    command!(FocusMissing, |s| s.focus_param("focus"));
+    command!(FocusNotObject, |mut s| {
+        s.params_schema = json!({
+            "$schema": DIALECT,
+            "type": "object",
+            "properties": {"focus": {"type": "string"}},
+            "required": ["focus"]
+        });
+        s.focus_param("focus")
+    });
+
+    #[test]
+    fn a_focus_param_is_an_optional_object() {
+        assert!(only(FocusWellFormed).check_contract().is_empty());
+        assert_eq!(codes(&only(FocusMissing)), ["contract.focus_param"]);
+        let violations = only(FocusNotObject).check_contract();
+        assert_eq!(violations.len(), 2, "{violations:?}");
+        assert!(violations.iter().all(|v| v.code == "contract.focus_param"));
+        for word in ["objet", "facultatif"] {
+            assert!(
+                violations.iter().any(|v| v.message.contains(word)),
+                "{word} : {violations:?}"
+            );
+        }
+    }
+
+    command!(WorkCrsWellFormed, |mut s| {
+        s.params_schema = json!({
+            "$schema": DIALECT,
+            "type": "object",
+            "properties": {
+                "layer_id": {"type": "string"},
+                "work_epsg": {"type": ["integer", "null"], "format": "uint32", "minimum": 0}
+            },
+            "required": ["layer_id"]
+        });
+        s.work_crs_param("work_epsg", "layer_id")
+    });
+    command!(WorkCrsMissing, |s| s
+        .work_crs_param("work_epsg", "layer_id"));
+    command!(WorkCrsNotInteger, |mut s| {
+        s.params_schema = json!({
+            "$schema": DIALECT,
+            "type": "object",
+            "properties": {"layer_id": {"type": "string"}, "work_epsg": {"type": "string"}},
+            "required": ["layer_id", "work_epsg"]
+        });
+        s.work_crs_param("work_epsg", "layer_id")
+    });
+
+    #[test]
+    fn a_work_crs_param_is_an_optional_integer_next_to_its_layer() {
+        assert!(only(WorkCrsWellFormed).check_contract().is_empty());
+        // Ni le paramètre ni la couche au schéma : deux violations.
+        assert_eq!(
+            codes(&only(WorkCrsMissing)),
+            ["contract.work_crs_param", "contract.work_crs_param"]
+        );
+        // Une chaîne obligatoire : deux violations, quel que soit leur ordre.
+        let violations = only(WorkCrsNotInteger).check_contract();
+        assert_eq!(violations.len(), 2, "{violations:?}");
+        assert!(violations
+            .iter()
+            .all(|v| v.code == "contract.work_crs_param"));
+        for word in ["entier", "facultatif"] {
+            assert!(
+                violations.iter().any(|v| v.message.contains(word)),
+                "{word} : {violations:?}"
+            );
+        }
     }
 
     #[test]

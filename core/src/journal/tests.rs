@@ -336,6 +336,171 @@ fn an_unknown_command_fails_by_name_and_executes_nothing() {
 }
 
 #[test]
+fn a_magnetic_azimuth_replays_with_its_journaled_date() {
+    let registry = Registry::standard();
+    let from = json!({"x": 6.1294, "y": 45.8992, "epsg": 4326});
+    let to = json!({"x": 6.2118, "y": 45.8586, "epsg": 4326});
+
+    // Date absente : le noyau prend celle du jour, la rend, la journalise sous `replay` ; les
+    // paramètres journalisés restent ceux de l'appelant.
+    let (dir, project, _) = temp_project();
+    let mut s = Session::open(&registry, &project).unwrap();
+    // La date du jour lue avant et après l'appel : l'exécution peut franchir minuit UTC.
+    let before = crate::wmm::Date::today_utc().to_string();
+    let out = s
+        .call(
+            "geo.distance_azimuth",
+            json!({"from": from, "to": to, "north": "magnetic"}),
+        )
+        .unwrap();
+    let after = crate::wmm::Date::today_utc().to_string();
+    let today = out["date"].as_str().unwrap().to_string();
+    assert!(today == before || today == after, "{out}");
+    // Date écrite : gardée telle quelle, et journalisée aussi.
+    s.call(
+        "geo.destination_point",
+        json!({"from": from, "azimuth": {"value": 120}, "distance": {"value": 2, "unit": "km"},
+            "north": "magnetic", "date": "2027-06-01"}),
+    )
+    .unwrap();
+    let l = lines(&s);
+    assert!(l[0]["params"].get("date").is_none(), "{}", l[0]);
+    assert_eq!(l[0]["replay"], json!({"date": today}));
+    assert_eq!(l[1]["params"]["date"], "2027-06-01");
+    assert_eq!(l[1]["replay"], json!({"date": "2027-06-01"}));
+    let (report, _) = replay_of(&registry, &project).unwrap();
+    assert_eq!(
+        report,
+        ReplayReport {
+            steps: 2,
+            identical: true
+        }
+    );
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+
+    // Journal écrit à la main, il y a un an : la date journalisée est repassée, et la même
+    // déclinaison est retrouvée ; une ligne à date écrite sans clé `replay`, et une ligne d'avant
+    // l'entrée 28 (sans `north`), se rejouent telles quelles.
+    let old = json!({"from": from, "to": to, "north": "magnetic", "date": "2025-11-10"});
+    let result = registry.call("geo.distance_azimuth", old).unwrap();
+    let written = json!({"from": from, "to": to, "north": "magnetic", "date": "2026-02-01"});
+    let written_result = registry
+        .call("geo.distance_azimuth", written.clone())
+        .unwrap();
+    let plain = json!({"from": from, "to": to});
+    let plain_result = registry
+        .call("geo.distance_azimuth", plain.clone())
+        .unwrap();
+    let now = registry
+        .call(
+            "geo.distance_azimuth",
+            json!({"from": from, "to": to, "north": "magnetic"}),
+        )
+        .unwrap();
+    assert_ne!(
+        result["declination"], now["declination"],
+        "la déclinaison change"
+    );
+    let (dir, project, _) = temp_project();
+    hand_journal(
+        &project,
+        &[
+            json!({"step": 1, "id": "geo.distance_azimuth",
+                "params": {"from": from, "to": to, "north": "magnetic"}, "inputs": [],
+                "result": summarize(&result), "replay": {"date": "2025-11-10"}}),
+            json!({"step": 2, "id": "geo.distance_azimuth", "params": written, "inputs": [],
+                "result": summarize(&written_result)}),
+            json!({"step": 3, "id": "geo.distance_azimuth", "params": plain, "inputs": [],
+                "result": summarize(&plain_result)}),
+        ],
+    );
+    let (report, _) = replay_of(&registry, &project).unwrap();
+    assert_eq!(
+        report,
+        ReplayReport {
+            steps: 3,
+            identical: true
+        }
+    );
+    let _ = fs::remove_dir_all(dir);
+
+    // Sans la clé `replay`, la date du jour serait prise : le rejeu diverge, il ne se tait pas.
+    let (dir, project, _) = temp_project();
+    hand_journal(
+        &project,
+        &[json!({"step": 1, "id": "geo.distance_azimuth",
+            "params": {"from": from, "to": to, "north": "magnetic"}, "inputs": [],
+            "result": summarize(&result)})],
+    );
+    let err = replay_of(&registry, &project).unwrap_err();
+    assert_eq!(err.code, "replay.diverged");
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_old_geometry_journal_and_a_grid_bearing_replay_identically() {
+    // Journal écrit avant le gisement (epic 10, entrée 28) : ni `north` dans les paramètres, ni
+    // `north` ni `convergence` dans les résultats, valeurs rendues par le noyau d'alors.
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    hand_journal(
+        &project,
+        &[
+            json!({"step":1,"id":"geo.distance_azimuth","params":{"from":{"x":448251.0,"y":5411750.0,"epsg":32631},"to":{"x":2.3522,"y":48.8566,"epsg":4326},"unit":"gon"},"inputs":[],"result":{"azimuth":{"unit":"gon","value":99.903482441},"back_azimuth":{"unit":"gon","value":299.951752024},"distance":{"unit":"m","value":4233.225}}}),
+            json!({"step":2,"id":"geo.destination_point","params":{"from":{"x":448251.0,"y":5411750.0,"epsg":32631},"azimuth":{"value":100,"unit":"gon"},"distance":{"value":1500,"unit":"m"}},"inputs":[],"result":{"point":{"epsg":32631,"x":449750.383,"y":5411736.096}}}),
+        ],
+    );
+    let (report, _) = replay_of(&registry, &project).unwrap();
+    assert_eq!(
+        report,
+        ReplayReport {
+            steps: 2,
+            identical: true
+        }
+    );
+    let _ = fs::remove_dir_all(dir);
+
+    // Journal neuf : gisements, zone imposée comprise.
+    let (dir, project, _) = temp_project();
+    let mut s = Session::open(&registry, &project).unwrap();
+    let from = json!({"x": 650000.0, "y": 5400000.0, "epsg": 32631});
+    let out = s
+        .call(
+            "geo.distance_azimuth",
+            json!({"from": from, "to": {"x": 4.9, "y": 48.95, "epsg": 4326}, "north": "grid"}),
+        )
+        .unwrap();
+    assert_eq!(out["north"], "grid");
+    s.call(
+        "geo.destination_point",
+        json!({"from": from, "azimuth": {"value": 250, "unit": "gon"},
+            "distance": {"value": 800, "unit": "m"}, "north": "grid", "utm_zone": 32}),
+    )
+    .unwrap();
+    let l = lines(&s);
+    assert_eq!(l[0]["params"]["north"], "grid");
+    // Un résultat de plus de 200 octets est journalisé par son empreinte : le rejeu la compare.
+    assert!(
+        out["convergence"]["value"]
+            .as_f64()
+            .is_some_and(|c| c > 0.0),
+        "{out}"
+    );
+    assert_eq!(l[1]["params"]["utm_zone"], 32);
+    let (report, _) = replay_of(&registry, &project).unwrap();
+    assert_eq!(
+        report,
+        ReplayReport {
+            steps: 2,
+            identical: true
+        }
+    );
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn a_qgis_command_without_executor_is_unavailable_on_replay() {
     let (dir, project, _) = temp_project();
     let registry = Registry::standard();
@@ -574,7 +739,7 @@ impl SessionQgis {
         }
         for (id, source) in created {
             layers.push(if self.short_inventory {
-                json!({"layer_id": id, "feature_count": self.inventory_feature_count})
+                json!({"layer_id": id, "crs": "EPSG:2154", "feature_count": self.inventory_feature_count})
             } else {
                 json!({
                     "layer_id": id, "name": "couche", "source": source,
@@ -592,6 +757,11 @@ impl SessionQgis {
 
 impl Executor for SessionQgis {
     fn execute(&self, id: &str, p: Value) -> Result<Value, RegistryError> {
+        // Une lecture de l'inventaire (celle du noyau avant un tampon, entrée 9.16, comprise)
+        // ne pose aucune couche : elle ne compte pas dans les ids.
+        if id == "project.inventory" {
+            return Ok(self.inventory());
+        }
         let n = self.count.get() + 1;
         self.count.set(n);
         match id {
@@ -686,7 +856,8 @@ fn replay_inventory(
     let kept = inventory_journal(&project, short);
     assert_eq!(kept.get("truncated") == Some(&json!(true)), !short);
     if short {
-        assert!(kept.to_string().contains("couche_g1_3"));
+        // L'inventaire ne compte pas dans les ids (lecture du noyau avant le tampon, 9.16).
+        assert!(kept.to_string().contains("couche_g1_2"));
     }
     let mut qgis = SessionQgis::new(2);
     qgis.short_inventory = short;
@@ -730,6 +901,122 @@ fn an_inventory_with_another_feature_count_diverges() {
         assert_eq!(err.step, Some(4));
         assert!(err.message.contains("project.inventory"));
     }
+}
+
+/// Une vraie divergence garde le motif ordinaire, sans le remède de la même session.
+#[test]
+fn a_true_divergence_keeps_the_plain_reason() {
+    for short in [false, true] {
+        for tweak in [
+            (|q: &mut SessionQgis| q.stranger = true) as fn(&mut SessionQgis),
+            |q| q.inventory_feature_count = 5,
+        ] {
+            let err = replay_inventory(short, tweak).unwrap_err();
+            let context = format!("inventaire court : {short} ; {}", err.message);
+            assert_eq!(err.code, "replay.diverged", "{context}");
+            assert_eq!(err.step, Some(4), "{context}");
+            assert!(
+                err.message.contains("ne redonne pas le même résultat"),
+                "{context}"
+            );
+            assert!(!err.message.contains("Rouvrez"), "{context}");
+            assert!(!err.message.contains("exécution précédente"), "{context}");
+        }
+    }
+}
+
+/// Rejeu dans la session d'origine : le projet porte encore les couches de la génération 1,
+/// que l'inventaire de l'étape 1 voit. Le motif nomme la couche et dit le remède.
+#[test]
+fn a_replay_in_the_same_session_names_the_earlier_layer() {
+    for short in [false, true] {
+        let err = replay_inventory(short, |q| {
+            q.created.borrow_mut().extend([
+                ("couche_g1_2".to_string(), "pts.csv".to_string()),
+                ("couche_g1_3".to_string(), "tampon.gpkg".to_string()),
+            ]);
+        })
+        .unwrap_err();
+        assert_eq!(err.code, "replay.diverged");
+        assert_eq!(err.step, Some(1));
+        assert!(err.message.contains("project.inventory"), "{}", err.message);
+        assert!(err.message.contains("« couche_g1_2 »"), "{}", err.message);
+        assert!(
+            err.message.contains("exécution précédente"),
+            "{}",
+            err.message
+        );
+        assert!(err.message.contains("Rouvrez"), "{}", err.message);
+    }
+}
+
+/// Même session, lecture après les créations : le résultat gardé nomme déjà les couches g1,
+/// mais le rejeu en pose de neuves (g2) à côté ; l'inventaire voit les g1, motif nommé.
+#[test]
+fn a_read_after_the_creations_in_the_same_session_names_the_earlier_layer() {
+    for short in [false, true] {
+        let (dir, project, _) = temp_project();
+        let registry = Registry::standard();
+        let mut kept = SessionQgis::new(1);
+        kept.short_inventory = short;
+        let mut s = Session::open(&registry, &project).unwrap().with_qgis(kept);
+        let added = s
+            .call("layer.add", json!({"path": "pts.csv", "crs": "EPSG:2154"}))
+            .unwrap();
+        let first = added["layer_id"].as_str().unwrap().to_string();
+        s.call(
+            "analysis.buffer",
+            json!({"layer_id": first, "distance": {"value": 500, "unit": "m"}}),
+        )
+        .unwrap();
+        s.call("project.inventory", json!({})).unwrap();
+        drop(s);
+        let mut qgis = SessionQgis::new(2);
+        qgis.short_inventory = short;
+        qgis.created.borrow_mut().extend([
+            ("couche_g1_1".to_string(), "pts.csv".to_string()),
+            ("couche_g1_2".to_string(), "tampon.gpkg".to_string()),
+        ]);
+        let err = Replay::load(&registry, &project)
+            .unwrap()
+            .run(&Router::new(&registry).with_qgis(qgis), &mut HashSet::new())
+            .unwrap_err();
+        let _ = fs::remove_dir_all(dir);
+        let context = format!("inventaire court : {short} ; {}", err.message);
+        assert_eq!(err.code, "replay.diverged", "{context}");
+        assert_eq!(err.step, Some(3), "{context}");
+        assert!(err.message.contains("« couche_g1_"), "{context}");
+        assert!(err.message.contains("exécution précédente"), "{context}");
+        assert!(err.message.contains("Rouvrez"), "{context}");
+    }
+}
+
+/// Une couche posée par un rejeu antérieur (`replayed_layers`), vue par la lecture : même motif.
+#[test]
+fn a_layer_of_an_earlier_replay_is_named_too() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    inventory_journal(&project, true);
+    let mut qgis = SessionQgis::new(3);
+    qgis.short_inventory = true;
+    qgis.created
+        .borrow_mut()
+        .push(("couche_g2_2".to_string(), "pts.csv".to_string()));
+    let mut earlier: HashSet<String> = ["couche_g2_2".to_string()].into();
+    let err = Replay::load(&registry, &project)
+        .unwrap()
+        .run(&Router::new(&registry).with_qgis(qgis), &mut earlier)
+        .unwrap_err();
+    let _ = fs::remove_dir_all(dir);
+    assert_eq!(err.code, "replay.diverged");
+    assert_eq!(err.step, Some(1));
+    assert!(err.message.contains("« couche_g2_2 »"), "{}", err.message);
+    assert!(
+        err.message.contains("exécution précédente"),
+        "{}",
+        err.message
+    );
+    assert!(err.message.contains("Rouvrez"), "{}", err.message);
 }
 
 #[test]
@@ -1220,6 +1507,24 @@ impl Executor for ProjectQgis {
                 self.project.layers.borrow_mut().push((layer.clone(), file));
                 let name = path.file_stem().unwrap().to_string_lossy().into_owned();
                 Ok(json!({"layer_id": layer, "name": name, "crs": "EPSG:2154"}))
+            }
+            // Comme le geste de `data.convert_raster` : QGIS écrit le GeoTIFF à l'emplacement
+            // que le noyau donne (ici, une copie du MNT de test), l'original est intact, et
+            // rien n'entre au projet : l'ouverture est l'étape que le noyau dicte ensuite.
+            "data.convert_raster" => {
+                let source = Path::new(p["raster"].as_str().unwrap());
+                assert!(
+                    source.is_absolute() && source.is_file(),
+                    "{}",
+                    source.display()
+                );
+                let out = p["out"].as_str().unwrap().to_string();
+                assert!(out.ends_with(".tif"), "{out}");
+                let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../fixtures/mnt-plan-incline-2154.tif");
+                fs::copy(fixture, &out).unwrap();
+                Ok(json!({"file": out, "epsg": p.get("assign_epsg").cloned()
+                    .unwrap_or(json!(2154))}))
             }
             "layout.export_pdf" => {
                 self.seen
@@ -3619,4 +3924,1492 @@ fn a_conversion_after_a_plan_layer_does_not_hide_it() {
     fs::write(&journal, text).unwrap();
     assert!(intermediate_files(&registry, &journal).is_empty());
     let _ = fs::remove_dir_all(dir);
+}
+
+// -- layer.remove : retrait du projet, jamais du fichier (epic 10, entrée 27) ----------------
+
+/// Couches d'un projet QGIS de test, partagées entre l'exécutant d'une session et celui d'un
+/// rejeu dans la même session.
+type ProjectLayers = std::rc::Rc<std::cell::RefCell<HashSet<String>>>;
+
+/// Projet ouvert avec la seule couche `routes_1`, comme à la réouverture du fichier de projet.
+fn project_with_roads() -> ProjectLayers {
+    std::rc::Rc::new(std::cell::RefCell::new(HashSet::from([
+        "routes_1".to_string()
+    ])))
+}
+
+/// QGIS de test avec état : `analysis.buffer` pose une couche d'id neuf à chaque appel (préfixé
+/// de la génération, comme une session QGIS neuve), `layer.remove` retire une couche du projet
+/// sans erreur si elle est déjà absente, et le tampon d'une couche absente échoue par
+/// `layer.not_found`, qui la nomme. Les couches de `unsaved` (en mémoire ou en édition
+/// modifiée) sont refusées par `layer.unsaved` et restent au projet.
+struct RemoveQgis {
+    generation: u32,
+    count: std::cell::Cell<u32>,
+    layers: ProjectLayers,
+    unsaved: HashSet<String>,
+    seen: std::rc::Rc<std::cell::RefCell<Vec<(String, Value)>>>,
+}
+
+impl RemoveQgis {
+    fn new(generation: u32, layers: &ProjectLayers) -> Self {
+        RemoveQgis {
+            generation,
+            count: std::cell::Cell::new(0),
+            layers: layers.clone(),
+            unsaved: HashSet::new(),
+            seen: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
+        }
+    }
+
+    fn with_unsaved(mut self, layer_id: &str) -> Self {
+        self.unsaved.insert(layer_id.to_string());
+        self
+    }
+}
+
+impl Executor for RemoveQgis {
+    fn execute(&self, id: &str, p: Value) -> Result<Value, RegistryError> {
+        // La lecture de l'inventaire que le noyau fait avant un tampon (entrée 9.16) : les
+        // couches du projet, toutes en Lambert-93. Elle n'est pas un ordre vu par le test.
+        if id == "project.inventory" {
+            let layers: Vec<Value> = self
+                .layers
+                .borrow()
+                .iter()
+                .map(|l| json!({"layer_id": l, "name": l, "crs": "EPSG:2154", "crs_unit": "m"}))
+                .collect();
+            return Ok(
+                json!({"layers": layers, "project_crs": "EPSG:2154", "project_crs_unit": "m"}),
+            );
+        }
+        self.seen.borrow_mut().push((id.to_string(), p.clone()));
+        let layer = p["layer_id"].as_str().unwrap().to_string();
+        match id {
+            "analysis.buffer" => {
+                if !self.layers.borrow().contains(&layer) {
+                    return Err(RegistryError::Delegated {
+                        code: "layer.not_found".into(),
+                        message: format!("la couche {layer} n'est pas dans le projet"),
+                    });
+                }
+                let n = self.count.get() + 1;
+                self.count.set(n);
+                fs::write(
+                    p["out"].as_str().unwrap(),
+                    format!("gpkg-{}", self.generation),
+                )
+                .unwrap();
+                let new = format!("tampon_g{}_{n}", self.generation);
+                self.layers.borrow_mut().insert(new.clone());
+                Ok(json!({"layer_id": new, "feature_count": 2}))
+            }
+            "layer.remove" => {
+                if self.layers.borrow().contains(&layer) && self.unsaved.contains(&layer) {
+                    return Err(RegistryError::Delegated {
+                        code: "layer.unsaved".into(),
+                        message: format!("la couche {layer} n'est pas enregistrée"),
+                    });
+                }
+                // Idempotente : une couche absente rend le même résultat, sans erreur.
+                self.layers.borrow_mut().remove(&layer);
+                Ok(json!({"layer_id": layer}))
+            }
+            other => panic!("commande inattendue : {other}"),
+        }
+    }
+}
+
+fn identical(steps: usize) -> ReplayReport {
+    ReplayReport {
+        steps,
+        identical: true,
+    }
+}
+
+#[test]
+fn a_removed_layer_leaves_the_project_and_replays_identically_in_the_same_and_a_new_session() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let layers = project_with_roads();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(RemoveQgis::new(1, &layers));
+    let out = s
+        .call("layer.remove", json!({"layer_id": "routes_1"}))
+        .unwrap();
+    assert_eq!(out, json!({"layer_id": "routes_1"}));
+    assert!(layers.borrow().is_empty());
+    // Une couche absente rend le même résultat, sans erreur.
+    let again = s
+        .call("layer.remove", json!({"layer_id": "routes_1"}))
+        .unwrap();
+    assert_eq!(again, out);
+    // Paramètres hors de la fiche : refus avant QGIS, rien n'est journalisé.
+    for bad in [
+        json!({}),
+        json!({"layer_id": "routes_1", "delete_file": true}),
+    ] {
+        let err = s.call("layer.remove", bad).unwrap_err();
+        assert_eq!(err.code, "registry.invalid_params");
+    }
+    let l = lines(&s);
+    assert_eq!(l.len(), 2);
+    for line in &l {
+        assert_eq!(line["params"], json!({"layer_id": "routes_1"}));
+        assert_eq!(line["result"], json!({"layer_id": "routes_1"}));
+        // Sortie `none` : le `layer_id` du résultat n'est pas une couche posée.
+        assert!(
+            line.get("layer_id").is_none(),
+            "aucune couche posée : {line}"
+        );
+    }
+    assert!(intermediate_files(&registry, &s.journal_path()).is_empty());
+    drop(s);
+
+    // Rejeu dans la même session : la couche est déjà retirée, le rejeu reste identique.
+    let qgis = RemoveQgis::new(1, &layers);
+    let seen = qgis.seen.clone();
+    let mut replayed = HashSet::new();
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(&Router::new(&registry).with_qgis(qgis), &mut replayed)
+        .unwrap();
+    assert_eq!(report, identical(2));
+    // Rejouée, jamais sautée.
+    assert_eq!(seen.borrow().len(), 2);
+    assert!(replayed.is_empty(), "un retrait ne pose aucune couche");
+
+    // Rejeu dans une session neuve : le projet rouvert porte la couche, le rejeu la retire.
+    let reopened = project_with_roads();
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(
+            &Router::new(&registry).with_qgis(RemoveQgis::new(2, &reopened)),
+            &mut HashSet::new(),
+        )
+        .unwrap();
+    assert_eq!(report, identical(2));
+    assert!(reopened.borrow().is_empty());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn removing_an_analysis_result_replays_on_the_layer_the_replay_created() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let layers = project_with_roads();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(RemoveQgis::new(1, &layers));
+    let buffer = s
+        .call(
+            "analysis.buffer",
+            json!({"layer_id": "routes_1", "distance": {"value": 50, "unit": "m"}}),
+        )
+        .unwrap();
+    assert_eq!(buffer["layer_id"], "tampon_g1_1");
+    s.call("layer.remove", json!({"layer_id": "tampon_g1_1"}))
+        .unwrap();
+    assert_eq!(*layers.borrow(), HashSet::from(["routes_1".to_string()]));
+    let l = lines(&s);
+    assert_eq!(l[0]["layer_id"], "tampon_g1_1");
+    assert!(l[1].get("layer_id").is_none());
+    drop(s);
+
+    // Session neuve : le tampon rejoué a un id neuf, que le retrait reçoit par la liaison.
+    let reopened = project_with_roads();
+    let qgis = RemoveQgis::new(2, &reopened);
+    let seen = qgis.seen.clone();
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(&Router::new(&registry).with_qgis(qgis), &mut HashSet::new())
+        .unwrap();
+    assert_eq!(report, identical(2));
+    assert_eq!(seen.borrow()[1].1, json!({"layer_id": "tampon_g2_1"}));
+    assert_eq!(*reopened.borrow(), HashSet::from(["routes_1".to_string()]));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_step_that_cites_a_removed_layer_fails_naming_it_and_replays_identically() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let layers = project_with_roads();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(RemoveQgis::new(1, &layers));
+    s.call("layer.remove", json!({"layer_id": "routes_1"}))
+        .unwrap();
+    let err = s
+        .call(
+            "analysis.buffer",
+            json!({"layer_id": "routes_1", "distance": {"value": 50, "unit": "m"}}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "layer.not_found");
+    assert!(err.message.contains("routes_1"), "{}", err.message);
+    assert_eq!(lines(&s)[1]["error"], "layer.not_found");
+    drop(s);
+
+    // Même erreur au rejeu, en même session comme en session neuve : identique.
+    for state in [layers.clone(), project_with_roads()] {
+        let report = Replay::load(&registry, &project)
+            .unwrap()
+            .run(
+                &Router::new(&registry).with_qgis(RemoveQgis::new(2, &state)),
+                &mut HashSet::new(),
+            )
+            .unwrap();
+        assert_eq!(report, identical(2));
+        assert!(state.borrow().is_empty());
+    }
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn replaying_in_the_same_session_an_analysis_of_a_layer_removed_after_diverges_at_the_analysis() {
+    // Limite connue (AD-11) : la couche analysée puis retirée n'est plus au projet de la même
+    // session, et le rejeu s'arrête à l'analyse, nommée ; il ne saute aucune étape.
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let layers = project_with_roads();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(RemoveQgis::new(1, &layers));
+    s.call(
+        "analysis.buffer",
+        json!({"layer_id": "routes_1", "distance": {"value": 50, "unit": "m"}}),
+    )
+    .unwrap();
+    s.call("layer.remove", json!({"layer_id": "routes_1"}))
+        .unwrap();
+    drop(s);
+    let err = Replay::load(&registry, &project)
+        .unwrap()
+        .run(
+            &Router::new(&registry).with_qgis(RemoveQgis::new(1, &layers)),
+            &mut HashSet::new(),
+        )
+        .unwrap_err();
+    assert_eq!((err.code.as_str(), err.step), ("replay.diverged", Some(1)));
+    // En session neuve, le même journal rejoue à l'identique.
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(
+            &Router::new(&registry).with_qgis(RemoveQgis::new(2, &project_with_roads())),
+            &mut HashSet::new(),
+        )
+        .unwrap();
+    assert_eq!(report, identical(2));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_removal_refused_for_an_unsaved_layer_keeps_it_and_replays_identically_while_unsaved() {
+    // Changement de cap du 2026-11-10 : une couche en mémoire ou en édition modifiée n'est pas
+    // retirée (`layer.unsaved`). Le rejeu passe par le chemin générique d'une étape QGIS
+    // refusée : refusée de nouveau, identique ; retirée au rejeu, divergente, rien de sauté.
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let layers = project_with_roads();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(RemoveQgis::new(1, &layers).with_unsaved("routes_1"));
+    let err = s
+        .call("layer.remove", json!({"layer_id": "routes_1"}))
+        .unwrap_err();
+    assert_eq!(err.code, "layer.unsaved");
+    assert!(
+        layers.borrow().contains("routes_1"),
+        "la couche reste au projet"
+    );
+    let l = lines(&s);
+    assert_eq!(l.len(), 1);
+    assert_eq!(l[0]["error"], "layer.unsaved");
+    assert!(l[0].get("result").is_none(), "{}", l[0]);
+    drop(s);
+
+    // Même session, couche toujours non enregistrée : même refus, rejeu identique.
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(
+            &Router::new(&registry).with_qgis(RemoveQgis::new(1, &layers).with_unsaved("routes_1")),
+            &mut HashSet::new(),
+        )
+        .unwrap();
+    assert_eq!(report, identical(1));
+    assert!(layers.borrow().contains("routes_1"));
+
+    // Couche enregistrée entre-temps : le retrait réussit au rejeu, qui diverge à l'étape.
+    let err = Replay::load(&registry, &project)
+        .unwrap()
+        .run(
+            &Router::new(&registry).with_qgis(RemoveQgis::new(1, &layers)),
+            &mut HashSet::new(),
+        )
+        .unwrap_err();
+    assert_eq!((err.code.as_str(), err.step), ("replay.diverged", Some(1)));
+
+    // Session neuve sans la couche (une couche en mémoire ne survit pas) : même divergence.
+    let empty: ProjectLayers = std::rc::Rc::new(std::cell::RefCell::new(HashSet::new()));
+    let err = Replay::load(&registry, &project)
+        .unwrap()
+        .run(
+            &Router::new(&registry).with_qgis(RemoveQgis::new(2, &empty)),
+            &mut HashSet::new(),
+        )
+        .unwrap_err();
+    assert_eq!((err.code.as_str(), err.step), ("replay.diverged", Some(1)));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn the_last_plan_is_read_from_the_last_first_step() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let rows = [
+        // Plan 1 : une sélection ; il n'est plus le dernier.
+        json!({"id": "analysis.select_by_attribute", "plan_step": 1,
+            "params": {"layer_id": "ancien", "field": "f", "operator": "eq", "value": "U"},
+            "layer_id": "r1", "result": {}}),
+        // Plan 2 : pente, ouverture dictée (même place, ne commence pas de plan), statistiques.
+        json!({"id": "terrain.slope", "plan_step": 1,
+            "params": {"dem": "dem/plan.tif", "unit": "degrees", "out": "2-terrain.slope.tif"},
+            "result": {}}),
+        json!({"id": "layer.open_raster", "plan_step": 1, "params": {"path": "out:2.1"},
+            "layer_id": "R", "result": {}}),
+        json!({"id": "analysis.zonal_statistics", "plan_step": 2,
+            "params": {"layer_id": "R", "points_layer_id": {"layer_id": "gares", "n": 3}},
+            "layer_id": "S", "result": {}}),
+        // Une étape en échec : elle cite, mais ne laisse aucun fichier.
+        json!({"id": "analysis.buffer", "plan_step": 3,
+            "params": {"layer_id": "communes"}, "error": {"code": "x"}}),
+        // Hors plan : ignorée.
+        json!({"id": "analysis.buffer", "params": {"layer_id": "hors_plan"}, "result": {}}),
+    ];
+    hand_journal(&project, &rows);
+    let journal = dir.join("p.cassini").join(JOURNAL_FILE);
+    let plan = last_plan(&registry, &journal);
+    let mut results: Vec<&str> = plan.results.iter().map(String::as_str).collect();
+    results.sort_unstable();
+    assert_eq!(
+        results,
+        ["2-terrain.slope.tif", "4-analysis.zonal_statistics.gpkg"]
+    );
+    // Les couches produites par le plan (R, S) n'y sont pas ; la sortie entière cite sa couche.
+    for id in ["gares", "communes", "dem/plan.tif"] {
+        assert!(plan.cited.contains(id), "{id} : {:?}", plan.cited);
+    }
+    for id in ["R", "S", "ancien", "hors_plan"] {
+        assert!(!plan.cited.contains(id), "{id} : {:?}", plan.cited);
+    }
+    // Journal absent : plan vide.
+    assert_eq!(
+        last_plan(&registry, &dir.join("absent.jsonl")),
+        crate::agent_inventory::LastPlan::default()
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+// ---- Epic 10, entrée 30 : `data.convert_raster`, puis l'ouverture dictée et la pente ----
+
+/// Session d'origine : un ASCII Grid converti par QGIS, ouvert par l'étape dictée, puis la
+/// pente calculée par le noyau sur la sortie de la conversion (`out:1.1`, le repère d'un
+/// `step:1` de plan).
+fn convert_raster_journal(project_file: &Path, project: &std::rc::Rc<OpenProject>) -> String {
+    let dir = project_file.parent().unwrap();
+    fs::create_dir_all(dir.join("mnt")).unwrap();
+    let source = dir.join("mnt/dalle.asc");
+    fs::write(&source, "ncols 2\nnrows 2\n").unwrap();
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, project_file)
+        .unwrap()
+        .with_qgis(ProjectQgis::new(project, 1))
+        .with_raster_opening(true);
+    let converted = s
+        .call(
+            "data.convert_raster",
+            json!({"raster": "mnt/dalle.asc", "assign_epsg": 2154}),
+        )
+        .unwrap();
+    assert!(converted["file"]
+        .as_str()
+        .unwrap()
+        .ends_with("1-data.convert_raster.tif"));
+    s.call(
+        "terrain.slope",
+        json!({"dem": "out:1.1", "unit": "degrees"}),
+    )
+    .unwrap();
+    let l = lines(&s);
+    let ids: Vec<&str> = l.iter().map(|l| l["id"].as_str().unwrap()).collect();
+    assert_eq!(
+        ids,
+        [
+            "data.convert_raster",
+            "layer.open_raster",
+            "terrain.slope",
+            "layer.open_raster"
+        ]
+    );
+    // La source est journalisée relative, avec son empreinte ; la sortie par son repère.
+    assert_eq!(l[0]["params"]["raster"], json!("mnt/dalle.asc"));
+    assert_eq!(l[0]["inputs"].as_array().unwrap().len(), 1);
+    assert_eq!(l[1]["params"], json!({"path": "out:1.1"}));
+    assert_eq!(l[1]["layer_id"], json!("raster_g1_2"));
+    assert_eq!(l[2]["params"]["dem"], json!("out:1.1"));
+    assert_eq!(l[3]["params"], json!({"path": "out:3.1"}));
+    // L'original n'est pas touché.
+    assert_eq!(fs::read_to_string(&source).unwrap(), "ncols 2\nnrows 2\n");
+    fs::read_to_string(s.journal_path()).unwrap()
+}
+
+#[test]
+fn a_converted_raster_is_opened_by_the_core_and_feeds_a_slope() {
+    let (dir, project_file, token) = temp_project();
+    let journal = convert_raster_journal(&project_file, &OpenProject::with_base());
+    assert!(!journal.contains(&token), "aucun chemin absolu au journal");
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_converted_raster_replays_identically_in_a_new_session_and_twice_in_the_same() {
+    let (dir, project_file, _) = temp_project();
+    let project = OpenProject::with_base();
+    let before = convert_raster_journal(&project_file, &project);
+    let identical = ReplayReport {
+        steps: 4,
+        identical: true,
+    };
+    let mut replayed = HashSet::new();
+    let (outcome, _) = replay_in(&project_file, &project, 2, &mut replayed);
+    assert_eq!(outcome.unwrap(), identical);
+    let (outcome, _) = replay_in(&project_file, &project, 3, &mut replayed);
+    assert_eq!(outcome.unwrap(), identical);
+    // Projet rouvert sans les rasters : la conversion est rejouée, puis rouverte, puis la pente.
+    let reopened = OpenProject::with_base();
+    let (outcome, _) = replay_in(&project_file, &reopened, 4, &mut HashSet::new());
+    assert_eq!(outcome.unwrap(), identical);
+    let files: Vec<String> = reopened
+        .layers
+        .borrow()
+        .iter()
+        .map(|(_, f)| f.clone())
+        .collect();
+    assert_eq!(
+        files,
+        [
+            "communes.gpkg",
+            "1-data.convert_raster.tif",
+            "3-terrain.slope.tif"
+        ]
+    );
+    let work = project_file.parent().unwrap().join("p.cassini");
+    assert!(work.join("replay/1-data.convert_raster.tif").is_file());
+    assert_eq!(fs::read_to_string(work.join(JOURNAL_FILE)).unwrap(), before);
+    let _ = fs::remove_dir_all(dir);
+}
+
+// ---- Epic 10, entrée 31 : carroyage MGRS complété par le noyau, sources détaillées ----
+
+/// QGIS de test de la mise en page : un inventaire d'emprise donnée (`None` : aucune), un export
+/// qui note ses paramètres et rend, ou non, `source_details` ; `sources` longues ou courtes.
+struct ExportQgis {
+    extent: Option<Value>,
+    details: bool,
+    many_sources: bool,
+    seen: std::rc::Rc<std::cell::RefCell<Vec<(String, Value)>>>,
+}
+
+impl ExportQgis {
+    fn new(extent: Option<Value>, details: bool, many_sources: bool) -> Self {
+        ExportQgis {
+            extent,
+            details,
+            many_sources,
+            seen: Default::default(),
+        }
+    }
+}
+
+impl Executor for ExportQgis {
+    fn execute(&self, id: &str, p: Value) -> Result<Value, RegistryError> {
+        self.seen.borrow_mut().push((id.to_string(), p.clone()));
+        match id {
+            INVENTORY => Ok(match &self.extent {
+                Some(lonlat) => json!({"layers": [], "extent": {"lonlat": lonlat}}),
+                None => json!({"layers": []}),
+            }),
+            "layout.export_pdf" => {
+                let out = p["out"].as_str().unwrap().to_string();
+                fs::write(&out, "pdf").unwrap();
+                let sources: Vec<String> = if self.many_sources {
+                    (1..=12).map(|n| format!("couche_{n:02}.gpkg")).collect()
+                } else {
+                    vec!["gares.gpkg".into()]
+                };
+                let mut result = json!({"file": out, "page_count": 1, "layer_count": sources.len(),
+                    "sources": sources, "truncated": false});
+                if self.details {
+                    result["source_details"] = json!(sources
+                        .iter()
+                        .map(|s| json!({"source": s, "resolution": null,
+                            "date": "2026-10-15", "date_origin": "file"}))
+                        .collect::<Vec<_>>());
+                }
+                Ok(result)
+            }
+            other => panic!("commande inattendue : {other}"),
+        }
+    }
+}
+
+fn annecy_lonlat() -> Value {
+    json!({"west": 6.05, "south": 45.78, "east": 6.25, "north": 45.95, "crs": "EPSG:4326"})
+}
+
+#[test]
+fn an_mgrs_grid_is_filled_by_the_core_journaled_and_replayed_as_is() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis = ExportQgis::new(Some(annecy_lonlat()), true, false);
+    let seen = qgis.seen.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    // Ce que l'appelant écrit de la zone et des carrés est ôté : le noyau les pose.
+    s.call(
+        "layout.export_pdf",
+        json!({"title": "Secteur", "header": "Document de travail",
+            "grid": {"kind": "mgrs", "interval": {"value": 1, "unit": "km"},
+                     "epsg": 32631, "squares": ["31T ZZ"]}}),
+    )
+    .unwrap();
+    let (expected_epsg, expected_squares) = crate::commands::layout_export_pdf::mgrs_grid_of(
+        &json!({"extent": {"lonlat": annecy_lonlat()}}),
+    )
+    .unwrap();
+    assert_eq!(expected_epsg, 32632);
+    {
+        let seen = seen.borrow();
+        let ids: Vec<&str> = seen.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids, [INVENTORY, "layout.export_pdf"]);
+        let grid = &seen[1].1["grid"];
+        assert_eq!(grid["epsg"], json!(32632));
+        assert_eq!(grid["squares"], json!(expected_squares));
+        assert_eq!(seen[1].1["header"], json!("Document de travail"));
+    }
+    let l = lines(&s);
+    assert_eq!(l.len(), 1, "l'inventaire n'est pas une étape du journal");
+    assert_eq!(l[0]["params"]["grid"]["epsg"], json!(32632));
+    assert_eq!(l[0]["params"]["grid"]["squares"], json!(expected_squares));
+    drop(s);
+    // Au rejeu, l'emprise a changé (ou manque) : la zone et les carrés journalisés sont
+    // repassés tels quels, sans relire l'inventaire.
+    let qgis = ExportQgis::new(None, true, false);
+    let seen = qgis.seen.clone();
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(&Router::new(&registry).with_qgis(qgis), &mut HashSet::new())
+        .unwrap();
+    assert!(report.identical);
+    let seen = seen.borrow();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].1["grid"]["epsg"], json!(32632));
+    assert_eq!(seen[0].1["grid"]["squares"], json!(expected_squares));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_mgrs_grid_without_a_readable_extent_is_refused_before_the_export() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis = ExportQgis::new(None, true, false);
+    let seen = qgis.seen.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    let err = s
+        .call(
+            "layout.export_pdf",
+            json!({"title": "Secteur", "grid": {"kind": "mgrs", "interval": {"value": 10, "unit": "km"}}}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "layout.no_extent");
+    assert!(lines(&s).is_empty());
+    assert_eq!(seen.borrow().len(), 1, "seul l'inventaire est lu");
+    // Un intervalle hors liste est refusé par le noyau avant toute lecture auprès de QGIS.
+    let err = s
+        .call(
+            "layout.export_pdf",
+            json!({"title": "Secteur", "grid": {"kind": "mgrs", "interval": {"value": 5, "unit": "km"}}}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "registry.invalid_params");
+    assert_eq!(seen.borrow().len(), 1, "l'inventaire n'est pas relu");
+    // Les autres carroyages ne lisent pas l'inventaire.
+    s.call(
+        "layout.export_pdf",
+        json!({"title": "Carte", "grid": {"kind": "projected", "epsg": 32631,
+            "interval": {"value": 1, "unit": "km"}}}),
+    )
+    .unwrap();
+    assert_eq!(seen.borrow().last().unwrap().0, "layout.export_pdf");
+    assert_eq!(seen.borrow().len(), 2);
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_export_journaled_before_source_details_replays_identically() {
+    for many in [false, true] {
+        let (dir, project, _) = temp_project();
+        let registry = Registry::standard();
+        // Journal d'avant l'entrée 31 : le résultat ne porte pas `source_details`.
+        let mut s = Session::open(&registry, &project)
+            .unwrap()
+            .with_qgis(ExportQgis::new(None, false, many));
+        s.call("layout.export_pdf", json!({"title": "Carte"}))
+            .unwrap();
+        let kept = lines(&s)[0]["result"].clone();
+        assert_eq!(kept.get("truncated") == Some(&json!(true)), many, "{kept}");
+        drop(s);
+        // Le geste d'aujourd'hui rend `source_details` : la ligne ancienne se rejoue à l'identique.
+        let report = Replay::load(&registry, &project)
+            .unwrap()
+            .run(
+                &Router::new(&registry).with_qgis(ExportQgis::new(None, true, many)),
+                &mut HashSet::new(),
+            )
+            .unwrap();
+        assert!(report.identical, "résumé : {many}");
+        let _ = fs::remove_dir_all(dir);
+    }
+}
+
+#[test]
+fn an_export_journaled_with_source_details_compares_them() {
+    for many in [false, true] {
+        let (dir, project, _) = temp_project();
+        let registry = Registry::standard();
+        let mut s = Session::open(&registry, &project)
+            .unwrap()
+            .with_qgis(ExportQgis::new(None, true, many));
+        s.call("layout.export_pdf", json!({"title": "Carte"}))
+            .unwrap();
+        drop(s);
+        // Un rejeu qui ne les rend plus diverge : le champ, journalisé, est comparé.
+        let err = Replay::load(&registry, &project)
+            .unwrap()
+            .run(
+                &Router::new(&registry).with_qgis(ExportQgis::new(None, false, many)),
+                &mut HashSet::new(),
+            )
+            .unwrap_err();
+        assert_eq!(err.code, "replay.diverged", "résumé : {many}");
+        let _ = fs::remove_dir_all(dir);
+    }
+}
+
+// -- Système de calcul d'un tampon sur une couche en degrés (entrée 9.16) ----------------------
+
+/// Projet QGIS de test pour le système de calcul : couches (id, SCR, unité), SCR du projet et son
+/// unité, étendue. Partagé entre l'exécutant de la session et celui du rejeu, pour changer le
+/// système du projet entre les deux.
+#[derive(Clone)]
+struct CrsProject {
+    layers: Vec<(String, String, String)>,
+    project: (String, String),
+    extent: Value,
+}
+
+/// QGIS de test : rend l'inventaire du projet ; le tampon refuse une couche absente
+/// (`layer.not_found`) ou un système de calcul qui n'est pas en mètres (`analysis.crs_not_metric`),
+/// et sinon pose une couche neuve dans ce système. Sans système de calcul, comme le geste avant
+/// l'entrée 9.16 : tampon seul dans le système de la couche, refusé si elle n'est pas en mètres. Garde les
+/// paramètres de chaque ordre de tampon et compte les lectures de l'inventaire.
+struct CrsQgis {
+    /// La lecture de l'inventaire échoue par une erreur de l'extension.
+    broken_inventory: bool,
+    generation: u32,
+    count: std::cell::Cell<u32>,
+    project: std::rc::Rc<std::cell::RefCell<CrsProject>>,
+    buffers: std::rc::Rc<std::cell::RefCell<Vec<Value>>>,
+    reads: std::rc::Rc<std::cell::Cell<u32>>,
+}
+
+/// Codes que ce QGIS de test tient pour des systèmes en mètres.
+const METRIC_CODES: [u64; 2] = [2154, 32632];
+
+impl CrsQgis {
+    fn new(generation: u32, project: &std::rc::Rc<std::cell::RefCell<CrsProject>>) -> Self {
+        CrsQgis {
+            broken_inventory: false,
+            generation,
+            count: std::cell::Cell::new(0),
+            project: project.clone(),
+            buffers: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
+            reads: std::rc::Rc::new(std::cell::Cell::new(0)),
+        }
+    }
+}
+
+impl Executor for CrsQgis {
+    fn execute(&self, id: &str, p: Value) -> Result<Value, RegistryError> {
+        let project = self.project.borrow();
+        match id {
+            "project.inventory" => {
+                self.reads.set(self.reads.get() + 1);
+                if self.broken_inventory {
+                    return Err(RegistryError::Delegated {
+                        code: "qgis.gesture_failed".into(),
+                        message: "Échec inattendu de l'inventaire du projet.".into(),
+                    });
+                }
+                let layers: Vec<Value> = project
+                    .layers
+                    .iter()
+                    .map(|(id, crs, unit)| {
+                        json!({"layer_id": id, "name": id, "crs": crs, "crs_unit": unit})
+                    })
+                    .collect();
+                Ok(json!({"layers": layers, "project_crs": project.project.0,
+                          "project_crs_unit": project.project.1, "extent": project.extent}))
+            }
+            "analysis.buffer" => {
+                self.buffers.borrow_mut().push(p.clone());
+                let layer = p["layer_id"].as_str().unwrap_or_default();
+                let Some((_, crs, unit)) = project.layers.iter().find(|(l, _, _)| l == layer)
+                else {
+                    return Err(RegistryError::Delegated {
+                        code: "layer.not_found".into(),
+                        message: format!("la couche {layer} n'est pas dans le projet"),
+                    });
+                };
+                let work = match p.get("work_epsg").and_then(Value::as_u64) {
+                    Some(work) => work,
+                    None if unit == "m" => crs.trim_start_matches("EPSG:").parse().unwrap(),
+                    None => 4326,
+                };
+                if !METRIC_CODES.contains(&work) {
+                    return Err(RegistryError::Delegated {
+                        code: "analysis.crs_not_metric".into(),
+                        message: format!("EPSG:{work} n'est pas en mètres"),
+                    });
+                }
+                let n = self.count.get() + 1;
+                self.count.set(n);
+                fs::write(p["out"].as_str().unwrap(), "gpkg").unwrap();
+                Ok(
+                    json!({"layer_id": format!("tampon_g{}_{n}", self.generation),
+                          "name": "tampon", "feature_count": 3, "crs": format!("EPSG:{work}")}),
+                )
+            }
+            other => panic!("commande inattendue : {other}"),
+        }
+    }
+}
+
+/// Projet d'Annecy en petit : gares en degrés, zonage en Lambert-93, projet en Lambert-93.
+fn annecy_project() -> std::rc::Rc<std::cell::RefCell<CrsProject>> {
+    std::rc::Rc::new(std::cell::RefCell::new(CrsProject {
+        layers: vec![
+            ("gares".into(), "EPSG:4326".into(), "deg".into()),
+            ("zonage".into(), "EPSG:2154".into(), "m".into()),
+        ],
+        project: ("EPSG:2154".into(), "m".into()),
+        extent: json!({"xmin": 0, "ymin": 0, "xmax": 1, "ymax": 1, "crs": "EPSG:2154",
+                       "lonlat": {"west": 5.8, "south": 45.7, "east": 6.4, "north": 46.1,
+                                  "crs": "EPSG:4326"}}),
+    }))
+}
+
+fn buffer_of(layer: &str) -> Value {
+    json!({"layer_id": layer, "distance": {"value": 500, "unit": "m"}})
+}
+
+#[test]
+fn a_buffer_of_a_layer_in_degrees_logs_the_metric_project_system() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let qgis = CrsQgis::new(1, &qgis_project);
+    let buffers = qgis.buffers.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    let out = s.call("analysis.buffer", buffer_of("gares")).unwrap();
+    assert_eq!(out["crs"], "EPSG:2154");
+    // Couche déjà en mètres, avec une valeur de l'appelant.
+    let mut forced = buffer_of("zonage");
+    forced["work_epsg"] = json!(4326);
+    s.call("analysis.buffer", forced).unwrap();
+    let l = lines(&s);
+    assert_eq!(l[0]["params"]["work_epsg"], 2154, "{}", l[0]);
+    assert_eq!(buffers.borrow()[0]["work_epsg"], 2154);
+    // La couche en mètres : rien n'est rempli ni journalisé, le geste fait le tampon seul
+    // (amendement RA06) ; la valeur de l'appelant est ôtée quand même.
+    assert!(l[1]["params"].get("work_epsg").is_none(), "{}", l[1]);
+    assert!(buffers.borrow()[1].get("work_epsg").is_none());
+    // Une couche absente : rien n'est rempli, la valeur de l'appelant ôtée, et le geste répond.
+    let mut absent = buffer_of("autre");
+    absent["work_epsg"] = json!(2154);
+    let err = s.call("analysis.buffer", absent).unwrap_err();
+    assert_eq!(err.code, "layer.not_found");
+    assert!(buffers.borrow()[2].get("work_epsg").is_none());
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_project_in_degrees_takes_the_utm_zone_and_without_one_refuses_before_any_order() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    qgis_project.borrow_mut().project = ("EPSG:4326".into(), "deg".into());
+    let qgis = CrsQgis::new(1, &qgis_project);
+    let buffers = qgis.buffers.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    let out = s.call("analysis.buffer", buffer_of("gares")).unwrap();
+    assert_eq!(out["crs"], "EPSG:32632");
+    assert_eq!(lines(&s)[0]["params"]["work_epsg"], 32632);
+    // Sans étendue lisible : aucun système en mètres, refus clair, ni ordre ni ligne.
+    qgis_project.borrow_mut().extent = Value::Null;
+    let err = s.call("analysis.buffer", buffer_of("gares")).unwrap_err();
+    assert_eq!(err.code, "analysis.crs_not_metric");
+    assert!(err.message.contains("« gares »"), "{}", err.message);
+    assert!(err.message.contains("EPSG:4326"), "{}", err.message);
+    assert_eq!(buffers.borrow().len(), 1);
+    assert_eq!(lines(&s).len(), 1);
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_failed_inventory_read_names_the_buffer_and_sends_no_order() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let mut qgis = CrsQgis::new(1, &annecy_project());
+    qgis.broken_inventory = true;
+    let buffers = qgis.buffers.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    let err = s.call("analysis.buffer", buffer_of("gares")).unwrap_err();
+    assert_eq!(err.code, "qgis.gesture_failed");
+    assert!(
+        err.message.contains("« analysis.buffer »"),
+        "{}",
+        err.message
+    );
+    assert!(
+        err.message.contains("Échec inattendu de l'inventaire"),
+        "{}",
+        err.message
+    );
+    assert!(buffers.borrow().is_empty());
+    assert!(lines(&s).is_empty());
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_buffer_without_qgis_stays_unavailable() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, &project).unwrap();
+    let err = s.call("analysis.buffer", buffer_of("gares")).unwrap_err();
+    assert_eq!(err.code, "registry.unavailable");
+    assert!(err.message.contains("analysis.buffer"), "{}", err.message);
+    assert!(lines(&s).is_empty());
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_logged_work_crs_is_replayed_as_is_after_the_project_changed_its_system() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    {
+        let mut s = Session::open(&registry, &project)
+            .unwrap()
+            .with_qgis(CrsQgis::new(1, &qgis_project));
+        s.call("analysis.buffer", buffer_of("gares")).unwrap();
+    }
+    // Le projet est passé en degrés depuis : le rejeu ne redécide pas (AD-11).
+    qgis_project.borrow_mut().project = ("EPSG:4326".into(), "deg".into());
+    let mut replayed = HashSet::new();
+    for generation in [2, 3] {
+        // Deux rejeux de suite : session neuve, puis même session (couches déjà rejouées).
+        let qgis = CrsQgis::new(generation, &qgis_project);
+        let (buffers, reads) = (qgis.buffers.clone(), qgis.reads.clone());
+        let report = Replay::load(&registry, &project)
+            .unwrap()
+            .run(&Router::new(&registry).with_qgis(qgis), &mut replayed)
+            .unwrap();
+        assert_eq!(report, identical(1));
+        assert_eq!(buffers.borrow()[0]["work_epsg"], 2154);
+        // La ligne porte son système : l'inventaire n'est pas relu.
+        assert_eq!(reads.get(), 0);
+    }
+    let _ = fs::remove_dir_all(dir);
+}
+
+/// Écrit un journal d'avant l'entrée 9.16 : un tampon de `layer` sans `work_epsg`, réussi ou
+/// refusé comme une couche en degrés l'était.
+fn old_buffer_journal(project: &Path, layer: &str, refused: bool) {
+    let work = project.with_extension("cassini");
+    fs::create_dir_all(&work).unwrap();
+    let mut line = json!({"step": 1, "id": "analysis.buffer",
+        "params": {"layer_id": layer, "distance": {"value": 500, "unit": "m"},
+                   "out": "1-analysis.buffer.gpkg"},
+        "inputs": []});
+    if refused {
+        line["error"] = json!("analysis.crs_not_metric");
+    } else {
+        line["layer_id"] = json!("tampon_g1_1");
+        line["result"] = json!({"layer_id": "tampon_g1_1", "name": "tampon",
+                                "feature_count": 3, "crs": "EPSG:2154"});
+        fs::write(work.join("1-analysis.buffer.gpkg"), "gpkg").unwrap();
+    }
+    fs::write(work.join("journal.jsonl"), format!("{line}\n")).unwrap();
+}
+
+#[test]
+fn a_line_without_work_crs_replays_the_buffer_alone() {
+    let registry = Registry::standard();
+    // Couche en mètres (ligne neuve ou ancienne) : même succès, sans système de calcul.
+    let (dir, project, _) = temp_project();
+    old_buffer_journal(&project, "zonage", false);
+    let qgis = CrsQgis::new(2, &annecy_project());
+    let (buffers, reads) = (qgis.buffers.clone(), qgis.reads.clone());
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(&Router::new(&registry).with_qgis(qgis), &mut HashSet::new())
+        .unwrap();
+    assert_eq!(report, identical(1));
+    assert!(buffers.borrow()[0].get("work_epsg").is_none());
+    assert_eq!(reads.get(), 0);
+    let _ = fs::remove_dir_all(dir);
+    // Ligne ancienne sur une couche en degrés : même refus, sans compléter le système.
+    let (dir, project, _) = temp_project();
+    old_buffer_journal(&project, "gares", true);
+    let qgis = CrsQgis::new(2, &annecy_project());
+    let (buffers, reads) = (qgis.buffers.clone(), qgis.reads.clone());
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(&Router::new(&registry).with_qgis(qgis), &mut HashSet::new())
+        .unwrap();
+    assert_eq!(report, identical(1));
+    assert!(buffers.borrow()[0].get("work_epsg").is_none());
+    assert_eq!(reads.get(), 0);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_session_buffer_of_a_metric_layer_replays_identically() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    {
+        let mut s = Session::open(&registry, &project)
+            .unwrap()
+            .with_qgis(CrsQgis::new(1, &qgis_project));
+        s.call("analysis.buffer", buffer_of("zonage")).unwrap();
+        assert!(lines(&s)[0]["params"].get("work_epsg").is_none());
+    }
+    let qgis = CrsQgis::new(2, &qgis_project);
+    let buffers = qgis.buffers.clone();
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(&Router::new(&registry).with_qgis(qgis), &mut HashSet::new())
+        .unwrap();
+    assert_eq!(report, identical(1));
+    assert!(buffers.borrow()[0].get("work_epsg").is_none());
+    let _ = fs::remove_dir_all(dir);
+}
+
+// ---- Entrée 7.9 : mise en évidence du résultat d'un plan dans son PDF ----
+
+/// QGIS de test du plan de démo : chaque analyse écrit sa sortie et rend une couche neuve, propre
+/// à la génération ; l'export garde les paramètres qu'il reçoit.
+struct FocusQgis {
+    generation: u32,
+    count: std::cell::Cell<u32>,
+    /// Nombre d'entités rendu par la dernière intersection (le résultat).
+    result_count: u64,
+    /// Paramètres reçus par chaque export, dans l'ordre.
+    exports: std::rc::Rc<std::cell::RefCell<Vec<Value>>>,
+    /// Lectures de l'inventaire reçues.
+    inventories: std::rc::Rc<std::cell::Cell<u32>>,
+    /// L'inventaire est refusé (lecture ratée).
+    broken_inventory: bool,
+}
+
+impl FocusQgis {
+    fn new(generation: u32) -> Self {
+        FocusQgis {
+            generation,
+            count: std::cell::Cell::new(0),
+            result_count: 12,
+            exports: Default::default(),
+            inventories: Default::default(),
+            broken_inventory: false,
+        }
+    }
+}
+
+impl Executor for FocusQgis {
+    fn execute(&self, id: &str, p: Value) -> Result<Value, RegistryError> {
+        if id == "project.inventory" {
+            self.inventories.set(self.inventories.get() + 1);
+            if self.broken_inventory {
+                return Err(RegistryError::Delegated {
+                    code: "qgis.failed".into(),
+                    message: "projet illisible".into(),
+                });
+            }
+            return Ok(json!({"layers": [
+                {"layer_id": "plu", "name": "Zonage du PLU", "crs": "EPSG:2154", "crs_unit": "m"},
+                {"layer_id": "gares", "name": "Gares", "crs": "EPSG:2154", "crs_unit": "m"},
+                {"layer_id": "parcelles", "name": "Parcelles", "crs": "EPSG:2154", "crs_unit": "m"}
+            ], "project_crs": "EPSG:2154", "project_crs_unit": "m", "extent": null}));
+        }
+        let n = self.count.get() + 1;
+        self.count.set(n);
+        if id == "layer.open_vector" {
+            return Ok(
+                json!({"layer_id": format!("u_g{}_{n}", self.generation), "name": "u",
+                "crs": "EPSG:2154"}),
+            );
+        }
+        let out = p["out"].as_str().unwrap().to_string();
+        fs::write(&out, format!("sortie-{}", self.generation)).unwrap();
+        match id {
+            "layout.export_pdf" => {
+                self.exports.borrow_mut().push(p.clone());
+                Ok(json!({"file": out, "page_count": 1, "layer_count": 4,
+                    "sources": ["plu.gpkg"], "truncated": false, "source_details": []}))
+            }
+            "analysis.select_by_attribute" | "analysis.buffer" | "analysis.intersect" => {
+                let last = id == "analysis.intersect"
+                    && p["overlay_layer_id"] != json!("parcelles")
+                    && p["layer_id"] != json!("parcelles");
+                let count = if last { self.result_count } else { 5 };
+                Ok(json!({"layer_id": format!("f_g{}_{n}", self.generation),
+                    "name": format!("{n}-{id}"), "feature_count": count, "crs": "EPSG:2154"}))
+            }
+            other => panic!("commande inattendue : {other}"),
+        }
+    }
+}
+
+/// Le plan de démo en cinq étapes (sélection, tampon, intersection, intersection, PDF), dans
+/// une session neuve : rend la session.
+fn demo_plan<'r>(registry: &'r Registry, project: &Path, qgis: FocusQgis) -> Session<'r> {
+    let mut s = Session::open(registry, project).unwrap().with_qgis(qgis);
+    let a = s
+        .call_in_plan(
+            "analysis.select_by_attribute",
+            json!({"layer_id": "plu", "field": "typezone", "operator": "eq", "value": "U"}),
+            1,
+        )
+        .unwrap()["layer_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let b = s
+        .call_in_plan(
+            "analysis.buffer",
+            json!({"layer_id": "gares", "distance": {"value": 500, "unit": "m"}}),
+            2,
+        )
+        .unwrap()["layer_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let c = s
+        .call_in_plan(
+            "analysis.intersect",
+            json!({"layer_id": "parcelles", "overlay_layer_id": a}),
+            3,
+        )
+        .unwrap()["layer_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    s.call_in_plan(
+        "analysis.intersect",
+        json!({"layer_id": c, "overlay_layer_id": b}),
+        4,
+    )
+    .unwrap();
+    // Une mise en évidence écrite par l'appelant est ôtée, puis remplacée par celle du noyau.
+    s.call_in_plan(
+        "layout.export_pdf",
+        json!({
+        "title": "Parcelles constructibles à moins de 500 m d'une gare à Annecy",
+        "focus": {"results": [{"layer_id": "plu", "label": "faux"}], "hidden": ["parcelles"],
+                  "frame": [], "framed_on": "visible_layers"}}),
+        5,
+    )
+    .unwrap();
+    s
+}
+
+fn demo_focus(g: u32) -> Value {
+    json!({"results": [{"layer_id": format!("f_g{g}_4"),
+             "label": "Parcelles constructibles à moins de 500 m d'une gare",
+             "style": {"kind": "single", "stroke": "#3d0026", "fill": "#c2187a", "width_mm": 0.5}}],
+           "hidden": [format!("f_g{g}_1"), format!("f_g{g}_2"), format!("f_g{g}_3")],
+           "frame": [format!("f_g{g}_4")], "framed_on": "results", "hide_band_labels": true})
+}
+
+#[test]
+fn the_demo_plan_journals_its_focus_and_replays_it_with_bound_ids() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis = FocusQgis::new(1);
+    let exports = qgis.exports.clone();
+    let inventories = qgis.inventories.clone();
+    let mut s = demo_plan(&registry, &project, qgis);
+    // Un seul résultat : l'inventaire n'est lu que par le tampon (9.16), pas pour nommer.
+    assert_eq!(inventories.get(), 1);
+    assert_eq!(exports.borrow()[0]["focus"], demo_focus(1));
+    let l = lines(&s);
+    assert_eq!(l.len(), 5, "aucune étape ajoutée au plan (AD-23)");
+    assert_eq!(l[4]["params"]["focus"], demo_focus(1));
+    // Hors plan : aucune mise en évidence, et celle de l'appelant est ôtée.
+    s.call(
+        "layout.export_pdf",
+        json!({"title": "Carte", "focus": demo_focus(1)}),
+    )
+    .unwrap();
+    assert!(
+        exports.borrow()[1].get("focus").is_none(),
+        "{}",
+        exports.borrow()[1]
+    );
+    assert!(lines(&s)[5]["params"].get("focus").is_none());
+    drop(s);
+
+    // Rejeu dans une session neuve : la mise en évidence journalisée, ids liés aux neufs.
+    let again = FocusQgis::new(2);
+    let replayed = again.exports.clone();
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(
+            &Router::new(&registry).with_qgis(again),
+            &mut HashSet::new(),
+        )
+        .unwrap();
+    assert_eq!(
+        report,
+        ReplayReport {
+            steps: 6,
+            identical: true
+        }
+    );
+    assert_eq!(replayed.borrow()[0]["focus"], demo_focus(2));
+    assert!(replayed.borrow()[1].get("focus").is_none());
+
+    // Une ligne d'export plus ancienne, sans `focus`, se rejoue sans lui.
+    let journal = dir.join("p.cassini").join(JOURNAL_FILE);
+    let text = fs::read_to_string(&journal).unwrap();
+    let rows: Vec<Value> = content_lines(&text)
+        .map(|l| {
+            let mut v: Value = serde_json::from_str(l).unwrap();
+            if let Some(p) = v.get_mut("params").and_then(Value::as_object_mut) {
+                p.remove("focus");
+            }
+            v
+        })
+        .collect();
+    hand_journal(&project, &rows);
+    let old = FocusQgis::new(3);
+    let replayed = old.exports.clone();
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(&Router::new(&registry).with_qgis(old), &mut HashSet::new())
+        .unwrap();
+    assert!(report.identical);
+    assert!(replayed.borrow()[0].get("focus").is_none());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_empty_result_is_framed_on_the_input_layers() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let mut qgis = FocusQgis::new(1);
+    qgis.result_count = 0;
+    let exports = qgis.exports.clone();
+    let s = demo_plan(&registry, &project, qgis);
+    let focus = exports.borrow()[0]["focus"].clone();
+    assert_eq!(focus["framed_on"], "inputs");
+    assert_eq!(focus["frame"], json!(["plu", "gares", "parcelles"]));
+    assert_eq!(focus["results"][0]["layer_id"], "f_g1_4");
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn several_results_read_the_inventory_to_be_named() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis = FocusQgis::new(1);
+    let exports = qgis.exports.clone();
+    let inventories = qgis.inventories.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    s.call_in_plan(
+        "analysis.select_by_attribute",
+        json!({"layer_id": "plu", "field": "typezone", "operator": "eq", "value": "U"}),
+        1,
+    )
+    .unwrap();
+    s.call_in_plan(
+        "analysis.select_by_attribute",
+        json!({"layer_id": "parcelles", "field": "x", "operator": "eq", "value": "1"}),
+        2,
+    )
+    .unwrap();
+    s.call_in_plan("layout.export_pdf", json!({"title": "Deux sélections"}), 3)
+        .unwrap();
+    assert_eq!(inventories.get(), 1);
+    let select = crate::focus::short_title(registry.spec("analysis.select_by_attribute").unwrap());
+    let focus = exports.borrow()[0]["focus"].clone();
+    // Titre court de la commande, borné pour laisser la place au nom de l'entrée.
+    for (i, name) in [(0, "Zonage du PLU"), (1, "Parcelles")] {
+        let label = focus["results"][i]["label"].as_str().unwrap();
+        assert!(label.ends_with(&format!(" — {name}")), "{label}");
+        assert!(
+            select.starts_with(label.split(" — ").next().unwrap()),
+            "{label}"
+        );
+        assert!(label.chars().count() <= crate::focus::MAX_LABEL, "{label}");
+    }
+    assert_eq!(focus["frame"], json!(["f_g1_1", "f_g1_2"]));
+    assert_eq!(focus["hidden"], json!([]));
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_failed_inventory_read_stops_the_export_by_name_without_a_line() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let mut qgis = FocusQgis::new(1);
+    qgis.broken_inventory = true;
+    let exports = qgis.exports.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    s.call_in_plan(
+        "analysis.select_by_attribute",
+        json!({"layer_id": "plu", "field": "typezone", "operator": "eq", "value": "U"}),
+        1,
+    )
+    .unwrap();
+    s.call_in_plan(
+        "analysis.select_by_attribute",
+        json!({"layer_id": "parcelles", "field": "x", "operator": "eq", "value": "1"}),
+        2,
+    )
+    .unwrap();
+    let err = s
+        .call_in_plan("layout.export_pdf", json!({"title": "Deux sélections"}), 3)
+        .unwrap_err();
+    assert_eq!(err.code, "qgis.failed");
+    assert!(err.message.contains("layout.export_pdf"), "{}", err.message);
+    assert!(exports.borrow().is_empty());
+    assert_eq!(lines(&s).len(), 2);
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_export_at_the_first_step_of_a_plan_or_after_a_user_file_has_no_focus() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis = FocusQgis::new(1);
+    let exports = qgis.exports.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    // Un plan précédent a produit des couches ; l'export seul d'un nouveau plan ne les voit pas.
+    s.call_in_plan(
+        "analysis.select_by_attribute",
+        json!({"layer_id": "plu", "field": "typezone", "operator": "eq", "value": "U"}),
+        1,
+    )
+    .unwrap();
+    s.call_in_plan("layout.export_pdf", json!({"title": "Seul"}), 1)
+        .unwrap();
+    assert!(exports.borrow()[0].get("focus").is_none());
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_plan_started_mid_journal_reads_only_its_own_lines() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis = FocusQgis::new(1);
+    let exports = qgis.exports.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    // Six lignes d'avant : des appels hors plan, puis un plan de deux étapes resté sans export.
+    for _ in 0..4 {
+        s.call(
+            "analysis.select_by_attribute",
+            json!({"layer_id": "plu", "field": "typezone", "operator": "eq", "value": "U"}),
+        )
+        .unwrap();
+    }
+    s.call_in_plan(
+        "analysis.select_by_attribute",
+        json!({"layer_id": "plu", "field": "typezone", "operator": "eq", "value": "A"}),
+        1,
+    )
+    .unwrap();
+    s.call_in_plan(
+        "analysis.buffer",
+        json!({"layer_id": "gares", "distance": {"value": 1, "unit": "km"}}),
+        2,
+    )
+    .unwrap();
+    drop(s);
+    let qgis = FocusQgis::new(2);
+    let exports2 = qgis.exports.clone();
+    let s = demo_plan(&registry, &project, qgis);
+    let l = lines(&s);
+    assert_eq!(l.len(), 11);
+    let id = |n: usize| l[n - 1]["layer_id"].as_str().unwrap().to_string();
+    let focus = &l[10]["params"]["focus"];
+    assert_eq!(focus["results"][0]["layer_id"], json!(id(10)));
+    assert_eq!(focus["hidden"], json!([id(7), id(8), id(9)]));
+    assert_eq!(exports2.borrow()[0]["focus"], *focus);
+    assert!(exports.borrow().is_empty());
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_new_plan_opening_a_user_file_does_not_take_the_earlier_plan() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis = FocusQgis::new(1);
+    let exports = qgis.exports.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    s.call_in_plan(
+        "analysis.select_by_attribute",
+        json!({"layer_id": "plu", "field": "typezone", "operator": "eq", "value": "U"}),
+        1,
+    )
+    .unwrap();
+    s.call_in_plan(
+        "analysis.buffer",
+        json!({"layer_id": "gares", "distance": {"value": 1, "unit": "km"}}),
+        2,
+    )
+    .unwrap();
+    // Plan suivant : son étape 1 ouvre un fichier de l'utilisateur, puis l'export.
+    s.call_in_plan("layer.open_vector", json!({"path": "gares.geojson"}), 1)
+        .unwrap();
+    s.call_in_plan("layout.export_pdf", json!({"title": "Gares"}), 2)
+        .unwrap();
+    assert!(
+        exports.borrow()[0].get("focus").is_none(),
+        "{}",
+        exports.borrow()[0]
+    );
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_first_step_refused_without_a_line_leaves_the_export_without_focus() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis = FocusQgis::new(1);
+    let exports = qgis.exports.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    // Un plan d'une étape, puis un plan dont l'étape 1 est refusée sans ligne.
+    s.call_in_plan(
+        "analysis.select_by_attribute",
+        json!({"layer_id": "plu", "field": "typezone", "operator": "eq", "value": "U"}),
+        1,
+    )
+    .unwrap();
+    let refused = s.call_in_plan("analysis.buffer", json!({"layer_id": "gares"}), 1);
+    assert!(refused.is_err());
+    assert_eq!(lines(&s).len(), 1);
+    s.call_in_plan("layout.export_pdf", json!({"title": "Carte"}), 2)
+        .unwrap();
+    assert!(
+        exports.borrow()[0].get("focus").is_none(),
+        "{}",
+        exports.borrow()[0]
+    );
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+/// Un plan de pentes dans une session : pente du MNT (raster du noyau, ouverture dictée sur
+/// `out:1.1`), au besoin une pente de la pente, puis l'export. Rend les lignes du journal.
+fn slope_plan(consume: bool) -> Vec<Value> {
+    let (dir, project_file, _) = temp_project();
+    with_dem(&dir);
+    let project = OpenProject::with_base();
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, &project_file)
+        .unwrap()
+        .with_qgis(ProjectQgis::new(&project, 1))
+        .with_raster_opening(true);
+    s.call_in_plan("terrain.slope", slope_params(), 1).unwrap();
+    let mut step = 2;
+    if consume {
+        s.call_in_plan(
+            "terrain.slope",
+            json!({"dem": "out:1.1", "unit": "degrees"}),
+            2,
+        )
+        .unwrap();
+        step = 3;
+    }
+    s.call_in_plan(
+        "layout.export_pdf",
+        json!({"title": "Pentes du secteur"}),
+        step,
+    )
+    .unwrap();
+    let l = lines(&s);
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+    l
+}
+
+#[test]
+fn a_core_raster_result_is_highlighted_without_style() {
+    let l = slope_plan(false);
+    let ids: Vec<&str> = l.iter().map(|l| l["id"].as_str().unwrap()).collect();
+    assert_eq!(
+        ids,
+        ["terrain.slope", "layer.open_raster", "layout.export_pdf"]
+    );
+    let focus = &l[2]["params"]["focus"];
+    assert_eq!(
+        *focus,
+        json!({"results": [{"layer_id": "raster_g1_1", "label": "Pentes du secteur"}],
+               "hidden": [], "frame": ["raster_g1_1"], "framed_on": "results",
+               "hide_band_labels": true})
+    );
+    // Reprise par une seconde pente : la première est intermédiaire.
+    let l = slope_plan(true);
+    let ids: Vec<&str> = l.iter().map(|l| l["id"].as_str().unwrap()).collect();
+    assert_eq!(
+        ids,
+        [
+            "terrain.slope",
+            "layer.open_raster",
+            "terrain.slope",
+            "layer.open_raster",
+            "layout.export_pdf"
+        ]
+    );
+    let focus = &l[4]["params"]["focus"];
+    assert_eq!(focus["results"][0]["layer_id"], l[3]["layer_id"]);
+    assert!(focus["results"][0].get("style").is_none());
+    assert_eq!(focus["hidden"], json!([l[1]["layer_id"]]));
+    assert_eq!(focus["frame"], json!([l[3]["layer_id"]]));
+    assert_eq!(focus["framed_on"], "results");
 }

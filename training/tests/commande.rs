@@ -100,3 +100,119 @@ fn missing_or_wrong_arguments_give_a_non_zero_code() {
     }
     assert!(!std::path::Path::new("jamais.jsonl").exists());
 }
+
+#[test]
+fn the_families_option_draws_only_the_named_families_and_refuses_an_unknown_one() {
+    // 5.54 : le jeu ciblé d'une séance continue. Le résumé par famille, sur la sortie d'erreur,
+    // ne nomme que les familles demandées ; le fichier n'a que des exemples de celles-ci.
+    let dir = scratch("familles");
+    let out = dir.join("cible.jsonl");
+    let status = Command::new(BIN)
+        .args(["--seed", "3", "--count", "60", "--format", "chat"])
+        .args(["--familles", "tampon,refus", "--out"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&status.stderr);
+    assert!(status.status.success(), "{stderr}");
+    assert_eq!(std::fs::read_to_string(&out).unwrap().lines().count(), 60);
+    let table: Vec<&str> = stderr
+        .lines()
+        .skip_while(|l| !l.starts_with("famille "))
+        .skip(1)
+        .filter_map(|l| l.split_whitespace().next())
+        .collect();
+    assert_eq!(table, ["refus", "tampon"], "{stderr}");
+    let known: Vec<&str> = cassini_training::families::FAMILIES
+        .iter()
+        .map(|f| f.name)
+        .collect();
+    // Une famille de `FOCUS_EXCLUDED` est refusée au jeu ciblé ; la liste est vide depuis 5.54,
+    // lot 2 (le contrôle reste pour les familles futures).
+    let mut refusals = vec![("tampon,nexiste_pas", "nexiste_pas")];
+    if let Some(excluded) = cassini_training::FOCUS_EXCLUDED.first() {
+        refusals.push((excluded, "refusée au jeu ciblé"));
+    }
+    for (families, needle) in refusals {
+        let refused = dir.join("refuse.jsonl");
+        let status = Command::new(BIN)
+            .args(["--count", "10", "--familles", families, "--out"])
+            .arg(&refused)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&status.stderr);
+        assert_eq!(status.status.code(), Some(2), "{families} : {stderr}");
+        assert!(stderr.contains(needle), "{stderr}");
+        assert!(!refused.exists());
+    }
+    let listed = Command::new(BIN)
+        .arg("--familles-connues")
+        .output()
+        .unwrap();
+    assert!(listed.status.success());
+    assert_eq!(
+        String::from_utf8(listed.stdout)
+            .unwrap()
+            .lines()
+            .collect::<Vec<_>>(),
+        known
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_stratified_recall_is_written_as_the_library_draws_it_and_refused_out_of_its_bounds() {
+    // 5.54, séance 2 : le chemin `--rappel-stratifie` du binaire écrit, octet pour octet, le
+    // rappel de `stratified_recall`, et à côté la famille de chaque ligne et le plancher.
+    let dir = scratch("rappel");
+    let args = [
+        "--seed",
+        "1",
+        "--count",
+        "1560",
+        "--rappel-stratifie",
+        "15",
+        "--format",
+        "chat",
+    ];
+    let bytes = run(&dir, "rappel.jsonl", &args);
+    let recall = cassini_training::stratified_recall(1560, 15).unwrap();
+    assert_eq!(bytes, cassini_training::to_chat_jsonl(&recall).into_bytes());
+    assert_eq!(String::from_utf8_lossy(&bytes).lines().count(), 1560);
+    let side: Value =
+        serde_json::from_slice(&std::fs::read(dir.join("rappel.jsonl.familles.json")).unwrap())
+            .unwrap();
+    assert_eq!(side["plancher"], 15);
+    let families: Vec<&str> = recall.iter().map(|e| e.family).collect();
+    assert_eq!(side["familles"], serde_json::json!(families));
+    assert!(side["minimum"]
+        .as_object()
+        .unwrap()
+        .values()
+        .all(|n| (1..=15).contains(&n.as_u64().unwrap())));
+    // Hors de ses bornes : code 2, rien d'écrit.
+    for wrong in [
+        &["--seed", "2", "--count", "1560", "--rappel-stratifie", "15"][..],
+        &[
+            "--familles",
+            "tampon",
+            "--count",
+            "1560",
+            "--rappel-stratifie",
+            "15",
+        ],
+        &["--count", "8601", "--rappel-stratifie", "15"],
+        &["--count", "1560", "--rappel-stratifie", "0"],
+    ] {
+        let out = dir.join("refuse.jsonl");
+        let status = Command::new(BIN)
+            .args(wrong)
+            .arg("--out")
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert_eq!(status.status.code(), Some(2), "{wrong:?}");
+        assert!(!out.exists(), "{wrong:?}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

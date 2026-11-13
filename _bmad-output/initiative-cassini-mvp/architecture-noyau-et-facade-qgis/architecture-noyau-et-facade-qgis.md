@@ -7,13 +7,16 @@ paradigm: 'hexagonal (ports et adaptateurs), avec un adaptateur sortant distant'
 scope: "Invariants du MVP Cassini : frontière entre le noyau Rust Apache-2.0 et l'extension QGIS GPL, contrat du registre de commandes, journal rejouable, agent local et serveur MCP, moteur de terrain, distribution et recette ; géométrie et terrain étendu dans le noyau (CAP-15) ; après le MVP, extension du catalogue par le cadre de traitement de QGIS (CAP-14)"
 status: final
 created: '2026-10-14'
-updated: '2026-11-05'
+updated: '2026-11-10'
 binds: [CAP-1, CAP-3, CAP-4, CAP-5, CAP-6, CAP-7, CAP-8, CAP-9, CAP-10, CAP-11, CAP-13, CAP-14, CAP-15]
 sources:
   - ../spec-cassini-mvp/spec-cassini-mvp.md
   - ../change-facade-qgis-avant-app-autonome/change-facade-qgis-avant-app-autonome.md
   - ../change-ia-externe-pilote-la-session-qgis-ouverte/change-ia-externe-pilote-la-session-qgis-ouverte.md
   - ../change-geometrie-et-terrain-avant-la-demo/change-geometrie-et-terrain-avant-la-demo.md
+  - ../change-journal-chaine-par-empreinte/change-journal-chaine-par-empreinte.md
+  - ../change-empreinte-du-modele-verifiee/change-empreinte-du-modele-verifiee.md
+  - ../change-commandes-d-un-module-exterieur/change-commandes-d-un-module-exterieur.md
   - ../initiative-cassini-mvp.md
 companions:
   - ../../../CLAUDE.md
@@ -153,6 +156,18 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   figure avec les mêmes identifiant, paramètres et résultat ; une entrée du
   catalogue absente du registre y est marquée planifiée ou réservée. Un écart
   fait échouer la recette ; le catalogue ne change que par un changement de cap.
+
+- **Amendement (2026-11-10, changement de cap `change-commandes-d-un-module-exterieur`, approuvé
+  par le propriétaire le 2026-11-10) —
+  commandes ajoutées.** Un programme construit sur la bibliothèque du noyau peut enregistrer
+  des commandes `runs_in: core` hors des familles du catalogue ; le registre refuse toute
+  collision au démarrage. Ces commandes sont annoncées, offertes, journalisées et rejouées
+  comme les autres ; le catalogue public fait foi sur le registre officiel seul. Le modèle
+  local ne les voit que si sa déclaration les nomme. L'extension n'en connaît aucune.
+  Conditions de l'approbation (changement de cap, Statut) : rien n'est construit avant la
+  publication et l'epic 10 ; pas de chargement dynamique ; le panneau affiche le programme
+  branché et demande confirmation au premier branchement ; `cassini/core_path` est rendu
+  visible (entrées 2.14, 9.15, 5.52).
 
 ### AD-7 — Annonce au branchement : refus net sur le protocole, dégradation sur les commandes
 
@@ -299,6 +314,16 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   intermédiaires cachées au modèle, reconnues par leur fichier de sortie ; le
   rejeu ne la lit pas. Une ligne sans la clé (journal ancien, appel hors plan)
   ne cache rien.
+- **Amendement (2026-11-10, changement de cap `change-journal-chaine-par-empreinte`, approuvé
+  par le propriétaire le 2026-11-10) —
+  journal chaîné.** Chaque ligne écrite porte `prev`, l'empreinte SHA-256 des octets de la
+  ligne précédente (`null` pour la première), et `chain`, la version du chaînage. Le noyau
+  vérifie la chaîne à l'ouverture de la session et en rend l'état ; une chaîne rompue est
+  signalée avant le rejeu, sans refuser. Le rejeu ne lit pas ces clés ; une ligne qui ne les
+  porte pas (journal ancien) est non chaînée et se rejoue à l'identique. Le chaînage prouve
+  l'intégrité du journal, pas son auteur.
+  Conditions de l'approbation (changement de cap, Statut) : construit après la démo ;
+  l'empreinte de tête au pied du PDF est une décision séparée, non prise (entrée 2.13).
 
 ### AD-12 — Toute étape est annulable par message, jamais en tuant le processus
 
@@ -333,6 +358,10 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   Un appel commencé en relais ne finit jamais en autonome. En mode autonome, le
   verrou du projet n'est pris que le temps d'un appel, comme `cassini run` :
   `mcp` n'empêche jamais une session QGIS de s'ouvrir en écriture.
+- **Précision (2026-11-10, changement de cap `change-commandes-d-un-module-exterieur`, approuvé
+  par le propriétaire le 2026-11-10) :** un programme dérivé garde un binaire, un registre et
+  les quatre points d'entrée ; aucune commande propre à un point d'entrée. Rien n'y est chargé
+  dynamiquement : le programme est composé à la compilation (entrée 2.14).
 
 ### AD-14 — Le réseau est absent par construction, et prouvé des deux côtés
 
@@ -386,6 +415,15 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   commande, et ne rend aucun chemin absolu (AD-9). Passer par `command.run`
   journaliserait la liste, et le rejeu divergerait dès qu'un fichier de modèle
   change.
+- **Amendement (2026-11-10, changement de cap `change-empreinte-du-modele-verifiee`, approuvé
+  par le propriétaire le 2026-11-10) —
+  modèle vérifié.** Une déclaration `*.modele.json` porte l'empreinte SHA-256 de chaque
+  fichier qu'elle nomme. Le noyau la vérifie au premier chargement dans la session et refuse
+  un fichier qui ne correspond pas (`models.tampered`), sans jamais rien télécharger. Les
+  empreintes viennent du manifeste des versions des deux portes d'AD-17. Une déclaration
+  sans empreintes ou un GGUF seul sont acceptés et signalés.
+  Conditions de l'approbation (changement de cap, Statut) : temps de lancement mesuré sur
+  l'i5 ; empreinte facultative pendant une version (entrée 5.51).
 
 ### AD-16 — Licences : le noyau reste propre, l'extension est en GPL, et la frontière se tient par ce qui circule
 
@@ -417,6 +455,59 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   d'environnement `CASSINI_CORE`, emplacement d'installation du paquet, `PATH`.
   Introuvable, elle explique quoi installer et propose de désigner le fichier à
   la main. Elle ne télécharge jamais rien.
+- **Amendement (2026-11-10, changement de cap `change-distribution-deux-portes`) —
+  deux portes d'installation.** La règle ci-dessus ne change pas : l'extension ne
+  télécharge jamais rien, le noyau non plus. Le paquet Cassini existe sous deux
+  formes, l'une et l'autre **programmes séparés du noyau et de l'extension** :
+  - **porte 1, installeur léger en ligne** (quelques Mo) : il télécharge le noyau
+    depuis une release GitHub et le modèle depuis un dépôt public Hugging Face,
+    à des **adresses fixes**, et vérifie l'**empreinte SHA-256** de chaque fichier
+    avant de l'installer ;
+  - **porte 2, installeur complet hors ligne** : un seul fichier qui contient le
+    noyau et le modèle, pour les postes isolés du réseau.
+
+  Frontière : seul un installeur peut télécharger, **une fois, pendant
+  l'installation**, à des adresses fixes, empreintes vérifiées. Jamais le noyau
+  ni l'extension, jamais à l'exécution, et jamais pour « réparer » une
+  installation : un noyau ou un modèle introuvable se signale comme avant
+  (l'extension explique quoi installer), il ne déclenche aucun téléchargement.
+  Après l'installation, Cassini ne touche plus au réseau (AD-14 inchangé). Le
+  noyau, l'extension et l'ordre de recherche ne changent pas.
+
+  Complément du même jour (2026-11-10) : l'installeur hors ligne, qui dépasse
+  2 Gio, est hébergé sur Hugging Face à côté du modèle, et il contient aussi
+  l'archive de l'extension, installable à la main. Dans l'installeur en ligne,
+  le modèle reste facultatif. Les empreintes de référence viennent d'un
+  **manifeste des versions** publié dans la release GitHub, à adresse fixe
+  (version et SHA-256 de chaque fichier). **« Mettre à jour Cassini »** est le
+  même programme que l'installeur en ligne et obéit à la **même frontière** :
+  séparé du noyau et de l'extension, lancé à la main par l'utilisateur, adresses
+  fixes, empreintes vérifiées ; aucune vérification automatique en arrière-plan.
+  Un nouveau modèle s'installe à côté des autres, l'ancien n'est jamais supprimé.
+  Le panneau affiche la version installée et, passé un délai depuis
+  l'installation ou la dernière mise à jour, rappelle de lancer « Mettre à jour
+  Cassini » : ce rappel est un calcul de date local et **ne touche pas au
+  réseau**.
+- **Renvoi (2026-11-10, changement de cap `change-empreinte-du-modele-verifiee`) :** AD-17 ne
+  change pas : la déclaration remplie par l'installeur est une conséquence de sa règle
+  « empreintes vérifiées ». La vérification au lancement est portée par AD-15.
+- **Précision (2026-11-12, inception de l'epic 7) — adresses fixes.** Les adresses
+  fixes de la règle sont celles-ci :
+  - release GitHub du noyau : `https://github.com/Kevzi/cassini-gis/releases` ;
+  - manifeste des versions, à adresse fixe dans la release :
+    `https://github.com/Kevzi/cassini-gis/releases/latest/download/manifeste.json` ;
+  - modèle et installeur complet hors ligne : dépôt Hugging Face
+    `KevziFar/cassini-composition-4b-GGUF`, avec des noms de fichiers versionnés ;
+  - page d'accueil, vers laquelle pointent le champ `homepage` de `metadata.txt` et le
+    bouton du panneau quand le noyau est introuvable : `https://kevzi.github.io/cassini-gis`.
+
+  Rectificatif (2026-11-13, avant toute publication) : le compte Hugging Face du propriétaire
+  est `KevziFar`, pas `Kevzi` (nom de son compte GitHub) ; le dépôt du modèle est donc
+  `KevziFar/cassini-composition-4b-GGUF`. Aucune adresse n'avait encore été distribuée.
+
+  Elles ne changent plus après la première version publiée : un installeur déjà
+  distribué doit toujours les trouver. La règle, la frontière et l'ordre de recherche
+  ne changent pas.
 
 ### AD-18 — Une seule extension pour les deux séries de QGIS, et aucun import direct de PyQt
 
@@ -464,6 +555,42 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   montré, exécuté et journalisé comme un plan ordinaire. Un appel direct
   (`command.run`, MCP, CLI `run`) ou un rejeu n'est jamais complété : il reste
   refusé par `terrain.crs_mismatch`.
+- **Précision (2026-11-12, changement de cap `change-distance-en-metres-sur-couche-en-degres`) :**
+  une commande déléguée qui applique une distance en mètres à une couche vecteur calcule
+  dans un système en mètres **choisi par le noyau** et passé dans un paramètre rempli par
+  lui (`work_epsg`), absent de la grammaire du modèle, du MCP et du formulaire, comme
+  `out`.
+  - Couche en mètres : `work_epsg` n'est pas rempli, le calcul se fait dans son propre
+    système sans reprojection (amendement du 2026-11-12 après-midi sous AD-24).
+  - Couche en degrés : le système du projet s'il est en mètres, sinon le fuseau UTM sur
+    WGS84 de l'étendue du projet (`project.utm_epsg`), sinon `analysis.crs_not_metric`
+    avant tout ordre.
+  - Unité inconnue : le système de la couche, que la garde de l'extension refuse s'il
+    n'est pas en mètres.
+
+  La reprojection est faite par QGIS dans la chaîne fixe de la ligne de table (AD-24). Le
+  noyau ne reprojette rien.
+
+  Ce n'est pas une conversion « en silence » au sens de l'amendement du 2026-11-05 :
+  - elle est déclarée par la description de la commande ;
+  - elle est journalisée dans les paramètres ;
+  - elle est rendue par le `crs` du résultat.
+
+  Aucune étape n'est ajoutée au plan (AD-23). L'unité du système est un fait lu par QGIS et
+  rendu par `project.inventory`. Le rejeu relit `work_epsg` ; une ligne qui ne le porte
+  pas est complétée par le système de la couche. Première commande : `analysis.buffer`
+  (entrée 9.16). Les autres suivent par leurs propres entrées.
+- **Précision (2026-11-12, complément du changement de cap
+  `change-distance-en-metres-sur-couche-en-degres`) :** la même règle vaut pour un MNT en
+  degrés lu par une commande du noyau (`terrain.*`, `raster.reclassify`,
+  `raster.weighted_overlay`) ou déléguée (`raster.contour`). Le noyau choisit `work_epsg`
+  (système du MNT s'il est en mètres, sinon celui du projet s'il est en mètres, sinon le
+  fuseau UTM de l'étendue du projet, sinon `dem.not_projected` avant tout ordre) ;
+  l'extension reprojette le MNT dans ce système par un geste fixe de QGIS, en fichier
+  temporaire à l'emplacement décidé par le noyau (AD-10), avant que le noyau le lise. Le
+  noyau ne reprojette rien. Aucune étape n'est ajoutée au plan (AD-23) ; `work_epsg` est
+  journalisé et relu au rejeu (AD-11). Les points en WGS84 restent convertis par la
+  complétion de 11.22, vers `work_epsg`. Entrée 10.33, après la vidéo.
 
 ### AD-20 — Le noyau lit ses rasters lui-même, derrière un seul module remplaçable
 
@@ -500,6 +627,10 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   taille × √2 en diagonale). Le coût cumulé rendu est dans l'unité du raster
   multipliée par des mètres. La ligne de moindre coût va du départ à l'arrivée,
   dans cet ordre.
+- **Précision (2026-11-12, même complément) :** le module unique ne lit toujours qu'un MNT
+  projeté en mètres et garde son refus `dem.not_projected`. Un MNT en degrés lui parvient
+  déjà reprojeté par QGIS dans `work_epsg` (AD-19, précision du 2026-11-12) ; le noyau ne
+  lie ni GDAL ni PROJ.
 
 ### AD-21 — Une seule forme d'erreur, et aucun échec silencieux [ADOPTED]
 
@@ -593,6 +724,23 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
     - **Hors règle.** Le serveur MCP : le noyau n'y compose aucun plan, l'IA
       externe appelle les commandes une à une ; le risque d'un point inventé par
       elle est accepté.
+  - **Précision (2026-11-12, ticket 5.57) :** le même garde-fou, au même endroit et sans
+    redemande, contrôle chaque filtre par attribut déclaré au registre contre l'inventaire montré
+    au modèle : une valeur absente de la liste complète d'un champ (`values`), ou un champ absent
+    hors de la vue triée, rend une question `guard` qui nomme couche, champ et valeurs connues.
+    Une couche `step:`, un champ sans `values` et les comparaisons d'ordre restent hors contrôle.
+  - **Vue triée d'un gros projet (2026-11-10).** Au-delà d'un seuil, le modèle voit un index
+    réduit de toutes les couches et le détail de celles que la demande désigne. La vue est une
+    fonction pure du noyau (inventaire, demande, journal), jamais journalisée. Si un plan fait
+    porter un paramètre de champ sur une couche montrée réduite, le noyau recompose une fois
+    avec cette couche détaillée : c'est une redemande, pas une réparation. Le plan rendu passe
+    par les mêmes schémas et le même garde-fou, et le rejeu (AD-11) n'en dépend pas.
+  - **Précision (2026-11-10, changement de cap `change-commandes-d-un-module-exterieur`,
+    approuvé par le propriétaire le 2026-11-10) :** la grammaire du modèle ne contient que les
+    commandes que sa déclaration connaît. La grammaire du modèle local n'inclut une commande
+    ajoutée que si la déclaration du modèle (`*.modele.json`) la nomme parmi les commandes qu'il
+    connaît ; sinon elle est exclue de la grammaire et le modèle ne peut pas l'inventer. Elle
+    reste offerte par le formulaire du panneau et par le MCP (entrée 5.52).
 
 ### AD-24 — Une primitive de QGIS est une commande écrite à la main, exécutée par une ligne d'une table fermée
 
@@ -657,6 +805,28 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   exactement les commandes déclarées `runs_in: qgis` du registre, ni plus ni
   moins : une ligne pour une commande calculée par le noyau (par exemple
   `raster.reclassify`) la fait échouer.
+- **Précision (2026-11-12, même changement de cap) :** une ligne dont la commande porte
+  `work_epsg` commence par une reprojection fixe (`native:reprojectlayer` vers
+  `work_epsg`, en temporaire), **toujours exécutée**, identité comprise. Ce n'est pas un
+  choix entre deux suites. La garde « système en mètres » porte sur `work_epsg`.
+  L'ajout incrémente la version de chaîne de la ligne (AD-11).
+- **Amendement (2026-11-12 après-midi, décision du propriétaire après la recette RA06) :**
+  la reprojection n'est exécutée que si le noyau a rempli `work_epsg`. Le noyau ne le
+  remplit pas pour une couche déjà en mètres : la ligne fait alors `native:buffer` seul,
+  comme avant 9.16 (une reprojection d'identité refusait les collections de géométries
+  laissées par un découpage, que le tampon seul accepte). Le choix reste celui du noyau,
+  porté par un paramètre et journalisé : l'extension ne décide rien (AD-5), le rejeu
+  reste identique ; une ligne ancienne sans `work_epsg` se rejoue comme une couche en
+  mètres. Remplace « toujours exécutée, identité comprise » ci-dessus. La garde « système
+  en mètres » porte sur `work_epsg` quand il est rempli, sinon sur la couche.
+- **Précision (2026-11-12 soir, changement de cap `change-mise-en-evidence-du-resultat-dans-le-pdf`,
+  entrée 7.9) :** `layout.export_pdf` porte un paramètre `focus`, rempli par le noyau pour un
+  export lancé dans un plan d'après les lignes du plan en cours au journal (couches de résultat,
+  leur nom en clair et leur style, couches intermédiaires à cacher, couches de cadrage,
+  intitulés de bande à ôter). Le geste l'applique à la seule mise en page (clone en mémoire du
+  résultat, jamais ajouté au projet) : aucune suite n'y est choisie, toute valeur vient du
+  paramètre (AD-5). Journalisé, relu au rejeu sans recalcul (AD-11) ; aucune étape ajoutée au
+  plan (AD-23).
 
 ### AD-25 — Une commande déléguée n'est annoncée que si toute sa chaîne existe chez l'utilisateur
 
@@ -900,6 +1070,17 @@ flowchart LR
   se rapportent au nord du quadrillage du MNT, en degrés ; une cellule plate a
   l'exposition NoData. Une même commande ne change jamais d'unité selon la
   demande sans le paramètre `unit`.
+- **Amendement (2026-11-10, changement de cap
+  `change-complements-geometrie-et-mise-en-page`, approuvé par le propriétaire le
+  2026-11-10) — nord choisi.** Un azimut se compte depuis le nord vrai, sauf quand la
+  commande reçoit `north` : `grid` (nord du quadrillage UTM, par la convergence des
+  méridiens calculée d'après la publication, ce qui n'est pas une conversion de
+  coordonnées au sens d'AD-19) ou `magnetic` (déclinaison du modèle magnétique mondial
+  embarqué, à une date journalisée). Le nord employé est toujours rendu dans le résultat ;
+  une commande ne change jamais de nord sans ce paramètre. Les coefficients du modèle
+  magnétique sont une donnée compilée dans le noyau, mise à jour par une nouvelle version
+  du noyau (AD-17), jamais lue par le réseau. Le gisement ne se calcule qu'en UTM
+  (décision du propriétaire du 2026-11-10 : pas de Lambert-93, AD-19 inchangé).
 
 ## Consistency Conventions
 

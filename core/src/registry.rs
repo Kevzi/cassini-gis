@@ -32,6 +32,17 @@ pub enum RunsIn {
     Qgis,
 }
 
+/// Noms des paramètres d'un filtre par attribut neutre (AD-22) : couche, champ, opérateur et
+/// valeur. L'opérateur parle le vocabulaire fermé du filtre (`eq`, `ne`, `lt`, `lte`, `gt`,
+/// `gte`, `contains`, `begins_with`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttributeFilter {
+    pub layer: String,
+    pub field: String,
+    pub operator: String,
+    pub value: String,
+}
+
 /// Description d'une commande, lue par l'IA et les points d'entrée.
 #[derive(Debug, Clone, Serialize)]
 pub struct CommandSpec {
@@ -77,12 +88,26 @@ pub struct CommandSpec {
     /// Métadonnée interne : jamais sérialisée.
     #[serde(skip)]
     pub replay_param: Option<(String, String)>,
+    /// Paramètre facultatif que la commande remplit elle-même quand l'appelant le tait, et rend
+    /// au champ `field` de son résultat : (paramètre, champ). À la différence de
+    /// `replay_param`, la valeur de l'appelant est gardée ; la valeur rendue est journalisée
+    /// sous la clé `replay` de la ligne et repassée au rejeu, qui ne redécide pas (décision M4 de
+    /// l'entrée 10.29 : la date d'un azimut magnétique). Une ligne sans clé `replay` se rejoue
+    /// telle quelle. Métadonnée interne : jamais sérialisée.
+    #[serde(skip)]
+    pub filled_param: Option<(String, String)>,
     /// Vrai pour une commande que seul le noyau appelle, de lui-même, après une autre étape
     /// (ticket 4.9 : `layer.open_raster`). Elle n'est offerte ni au modèle, ni au client MCP, ni
     /// au formulaire du panneau, et `command.run` la refuse. Sérialisé seulement quand il est
     /// vrai : le catalogue des autres commandes reste celui d'avant.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub dictated_by_core: bool,
+    /// Paramètre de carroyage que le noyau complète quand sa forme est `mgrs` (epic 10,
+    /// entrée 31) : `epsg` et `squares`, calculés d'après l'emprise du projet lue auprès de QGIS,
+    /// ôtés des paramètres de l'appelant et journalisés pour le rejeu. Métadonnée interne :
+    /// jamais sérialisée.
+    #[serde(skip)]
+    pub mgrs_grid_param: Option<String>,
     /// Paramètre qui reçoit l'inventaire du projet, lu par le noyau auprès de QGIS juste avant
     /// l'exécution, hors du journal (amendement d'AD-30, entrée 11.20). Ôté des paramètres de
     /// l'appelant, jamais journalisé ; même lecture au rejeu. Métadonnée interne : jamais sérialisée.
@@ -106,6 +131,27 @@ pub struct CommandSpec {
     /// jamais sérialisée.
     #[serde(skip)]
     pub result_style: Option<crate::style::ResultStyle>,
+    /// Filtre par attribut que porte la commande (ticket 5.57) : les noms de ses paramètres
+    /// couche, champ, opérateur et valeur, que le garde-fou d'AD-23 (`attribute_guard`) contrôle
+    /// contre l'inventaire montré au modèle. Métadonnée interne : jamais sérialisée, le
+    /// catalogue et le prompt ne changent pas.
+    #[serde(skip)]
+    pub attribute_filter: Option<AttributeFilter>,
+    /// Système de calcul en mètres que le noyau choisit (changement de cap du 2026-11-12,
+    /// entrée 9.16) : (paramètre rempli, paramètre qui désigne la couche d'entrée). Le noyau ôte
+    /// la valeur de l'appelant, lit l'inventaire auprès de QGIS hors du journal, y choisit le
+    /// code EPSG (`crate::work_crs`) et le journalise avec les paramètres ; le rejeu le relit.
+    /// Caché au modèle, au client MCP et au formulaire, comme `out`. Métadonnée interne : jamais
+    /// sérialisée.
+    #[serde(skip)]
+    pub work_crs_param: Option<(String, String)>,
+    /// Mise en évidence du résultat d'un plan dans son PDF (changement de cap du 2026-11-12,
+    /// entrée 7.9) : paramètre que le noyau remplit, pour un export lancé dans un plan, d'après
+    /// les lignes du plan en cours au journal (`crate::focus`). Ôté des paramètres de l'appelant,
+    /// journalisé, relu au rejeu sans être recalculé. Caché au modèle, au client MCP et au
+    /// formulaire, comme `out`. Métadonnée interne : jamais sérialisée.
+    #[serde(skip)]
+    pub focus_param: Option<String>,
     /// Schéma JSON des paramètres, engendré depuis le type Rust.
     pub params_schema: Value,
     /// Schéma JSON du résultat, engendré depuis le type Rust.
@@ -134,11 +180,16 @@ impl CommandSpec {
             output_ext_by: None,
             leave_out_param: None,
             replay_param: None,
+            filled_param: None,
             dictated_by_core: false,
             inventory_param: None,
+            mgrs_grid_param: None,
             dictates: Vec::new(),
             output_none: false,
             result_style: None,
+            attribute_filter: None,
+            work_crs_param: None,
+            focus_param: None,
             params_schema: schema_value::<P>(),
             output_schema: schema_value::<O>(),
             examples: Vec::new(),
@@ -226,9 +277,22 @@ impl CommandSpec {
         self
     }
 
+    /// Déclare le paramètre facultatif que la commande remplit elle-même et rend au champ
+    /// `field` de son résultat ; le rejeu le repasse depuis la ligne journalisée (M4, 10.29).
+    pub fn filled_param(mut self, name: &str, field: &str) -> Self {
+        self.filled_param = Some((name.to_string(), field.to_string()));
+        self
+    }
+
     /// Déclare la commande dictée par le noyau seul (ticket 4.9).
     pub fn dictated_by_core(mut self) -> Self {
         self.dictated_by_core = true;
+        self
+    }
+
+    /// Déclare le paramètre de carroyage que le noyau complète pour la forme `mgrs`.
+    pub fn mgrs_grid_param(mut self, name: &str) -> Self {
+        self.mgrs_grid_param = Some(name.to_string());
         self
     }
 
@@ -253,6 +317,38 @@ impl CommandSpec {
     /// Déclare le style dicté après l'ouverture du raster écrit (bogue du fond noir).
     pub fn result_style(mut self, style: crate::style::ResultStyle) -> Self {
         self.result_style = Some(style);
+        self
+    }
+
+    /// Déclare le paramètre `name` que le noyau remplit du système de calcul en mètres choisi
+    /// pour la couche désignée par le paramètre `layer` (entrée 9.16).
+    pub fn work_crs_param(mut self, name: &str, layer: &str) -> Self {
+        self.work_crs_param = Some((name.to_string(), layer.to_string()));
+        self
+    }
+
+    /// Déclare le paramètre `name` de mise en évidence du résultat d'un plan, que le noyau
+    /// remplit pour un export lancé dans un plan (entrée 7.9).
+    pub fn focus_param(mut self, name: &str) -> Self {
+        self.focus_param = Some(name.to_string());
+        self
+    }
+
+    /// Déclare le filtre par attribut de la commande : les noms de ses paramètres couche, champ,
+    /// opérateur et valeur (ticket 5.57).
+    pub fn attribute_filter(
+        mut self,
+        layer: &str,
+        field: &str,
+        operator: &str,
+        value: &str,
+    ) -> Self {
+        self.attribute_filter = Some(AttributeFilter {
+            layer: layer.to_string(),
+            field: field.to_string(),
+            operator: operator.to_string(),
+            value: value.to_string(),
+        });
         self
     }
 
@@ -522,6 +618,37 @@ impl Registry {
             (registration.0)(&mut registry);
         }
         registry
+    }
+}
+
+/// Ôte d'un schéma les définitions (`$defs`) que rien de visible n'emploie plus, directement ou
+/// par une autre définition gardée.
+pub fn prune_defs(schema: &mut Value) {
+    let Some(map) = schema.as_object_mut() else {
+        return;
+    };
+    let Some(Value::Object(defs)) = map.remove("$defs") else {
+        return;
+    };
+    let mut reached = vec![Value::Object(map.clone()).to_string()];
+    let mut kept: Vec<String> = Vec::new();
+    loop {
+        let before = kept.len();
+        for (key, def) in &defs {
+            let target = format!("\"#/$defs/{key}\"");
+            if !kept.contains(key) && reached.iter().any(|t| t.contains(&target)) {
+                kept.push(key.clone());
+                reached.push(def.to_string());
+            }
+        }
+        if kept.len() == before {
+            break;
+        }
+    }
+    let defs: serde_json::Map<String, Value> =
+        defs.into_iter().filter(|(k, _)| kept.contains(k)).collect();
+    if !defs.is_empty() {
+        map.insert("$defs".into(), Value::Object(defs));
     }
 }
 

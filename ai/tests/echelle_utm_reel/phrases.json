@@ -1,0 +1,707 @@
+[
+  {
+    "id": "EU01",
+    "phrase": "Fais-moi une carte en PDF à l'échelle 1 : 2 500.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 2500
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU02",
+    "phrase": "Exporte la carte en PDF au vingt-cinq millième.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 25000
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU03",
+    "phrase": "Produis un PDF de la carte au 1:20k.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 20000
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU04",
+    "phrase": "Génère la carte en PDF au 1/50 000e, format A3.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 50000,
+            "page_size": "a3"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU05",
+    "phrase": "Exporte en PDF une carte au 1:15 000 en portrait.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 15000,
+            "orientation": "portrait"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU06",
+    "phrase": "Sors un PDF A2 de la carte au 1:100 000.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 100000,
+            "page_size": "a2"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU07",
+    "phrase": "Je veux la carte au 1:5000 en PDF, titrée « Plan de situation ».",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 5000,
+            "title": "Plan de situation"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU08",
+    "phrase": "Exporte la carte en PDF au 1:12 500 avec pour titre « Secteur des gares ».",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 12500,
+            "title": "Secteur des gares"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU09",
+    "phrase": "Fais un PDF de la carte au 1/10 000, page A1 en portrait.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 10000,
+            "page_size": "a1",
+            "orientation": "portrait"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU10",
+    "phrase": "Mets la carte en PDF au 75 000e.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 75000
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU11",
+    "phrase": "Crée le PDF de la carte à l'échelle 1/2000.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 2000
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU12",
+    "phrase": "Il me faut la carte en PDF au 1:40k, format A0.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 40000,
+            "page_size": "a0"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU13",
+    "phrase": "Exporte un PDF de la carte au 1 : 30 000, intitulé « Réseau routier ».",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 30000,
+            "title": "Réseau routier"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU14",
+    "phrase": "Tire-moi la carte en PDF au 1:8 000, page en portrait.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 8000,
+            "orientation": "portrait"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU15",
+    "phrase": "Un PDF de la carte au 1:200 000, s'il te plaît.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 200000
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU16",
+    "phrase": "Peux-tu exporter la carte en PDF au 1/25 000e en A3 portrait ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 25000,
+            "page_size": "a3",
+            "orientation": "portrait"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU17",
+    "phrase": "Sélectionne les routes nationales puis exporte la carte en PDF au 1:25 000.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67",
+            "field": "classe",
+            "operator": "eq",
+            "value": "nationale"
+          }
+        },
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 25000
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU18",
+    "phrase": "Garde les bâtiments industriels et fais-en une carte PDF au 1:5 000.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649",
+            "field": "usage",
+            "operator": "eq",
+            "value": "industriel"
+          }
+        },
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 5000
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU19",
+    "phrase": "Trace un tampon de 200 m autour des gares, puis sors la carte en PDF au 1:10 000.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.buffer",
+          "params": {
+            "layer_id": "gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1",
+            "distance": {
+              "value": 200,
+              "unit": "m"
+            }
+          }
+        },
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 10000
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU20",
+    "phrase": "Isole les zones AUc du PLU et exporte le tout en PDF au 1/20 000.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "plu_zonage_a81d5c06_2e9f_4a37_b6c4_5f13e07d92a8",
+            "field": "typezone",
+            "operator": "eq",
+            "value": "AUc"
+          }
+        },
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 20000
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU21",
+    "phrase": "Tampon de 1 000 m autour des gares de la ligne C, puis PDF de la carte au 1:50 000.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1",
+            "field": "ligne",
+            "operator": "eq",
+            "value": "C"
+          }
+        },
+        {
+          "command": "analysis.buffer",
+          "params": {
+            "layer_id": "step:1.layer_id",
+            "distance": {
+              "value": 1000,
+              "unit": "m"
+            }
+          }
+        },
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 50000
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU22",
+    "phrase": "Calcule l'isochrone de 15 min à pied depuis le point 448 900 / 5 402 300 (UTM 31N), puis exporte la carte en PDF au 1:25 000.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.isochrone",
+          "params": {
+            "layer_id": "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67",
+            "origin": {
+              "x": 448900,
+              "y": 5402300,
+              "epsg": 32631
+            },
+            "mode": "walk",
+            "duration": {
+              "value": 15,
+              "unit": "min"
+            }
+          }
+        },
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 25000
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU23",
+    "phrase": "Prends les parcelles de la section AC, puis la carte en PDF au 1:2 500 titrée « Section AC ».",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3",
+            "field": "section",
+            "operator": "eq",
+            "value": "AC"
+          }
+        },
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 2500,
+            "title": "Section AC"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU24",
+    "phrase": "Sélectionne les communes de plus de 20 000 habitants et sors un PDF A3 au 1:100 000.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946",
+            "field": "population",
+            "operator": "gt",
+            "value": "20000"
+          }
+        },
+        {
+          "command": "layout.export_pdf",
+          "params": {
+            "scale": 100000,
+            "page_size": "a3"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU25",
+    "phrase": "Zone accessible en voiture en 20 minutes depuis E 457 200 / N 5 397 600, UTM 31N.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.isochrone",
+          "params": {
+            "layer_id": "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67",
+            "origin": {
+              "x": 457200,
+              "y": 5397600,
+              "epsg": 32631
+            },
+            "mode": "car",
+            "duration": {
+              "value": 20,
+              "unit": "min"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU26",
+    "phrase": "Depuis N 5 412 400, E 463 900 (UTM 31N), jusqu'où peut-on marcher en un quart d'heure ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.isochrone",
+          "params": {
+            "layer_id": "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67",
+            "origin": {
+              "x": 463900,
+              "y": 5412400,
+              "epsg": 32631
+            },
+            "mode": "walk",
+            "duration": {
+              "value": 15,
+              "unit": "min"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU27",
+    "phrase": "Isochrone en voiture d'une demi-heure au départ du point 301 500 / 5 095 200 en EPSG:32632.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.isochrone",
+          "params": {
+            "layer_id": "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67",
+            "origin": {
+              "x": 301500,
+              "y": 5095200,
+              "epsg": 32632
+            },
+            "mode": "car",
+            "duration": {
+              "value": 30,
+              "unit": "min"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU28",
+    "phrase": "Relevé GPS : 455 800 / 5 405 100 en UTM 31N. Montre ce qu'on couvre à pied en 25 min.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.isochrone",
+          "params": {
+            "layer_id": "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67",
+            "origin": {
+              "x": 455800,
+              "y": 5405100,
+              "epsg": 32631
+            },
+            "mode": "walk",
+            "duration": {
+              "value": 25,
+              "unit": "min"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU29",
+    "phrase": "Dessine la zone couverte en une heure à pied depuis X = 612 400, Y = 5 418 000 en UTM 31 N.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.isochrone",
+          "params": {
+            "layer_id": "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67",
+            "origin": {
+              "x": 612400,
+              "y": 5418000,
+              "epsg": 32631
+            },
+            "mode": "walk",
+            "duration": {
+              "value": 60,
+              "unit": "min"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU30",
+    "phrase": "Accessibilité en voiture à 10 min depuis le point UTM31N 470 050 ; 5 390 700.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.isochrone",
+          "params": {
+            "layer_id": "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67",
+            "origin": {
+              "x": 470050,
+              "y": 5390700,
+              "epsg": 32631
+            },
+            "mode": "car",
+            "duration": {
+              "value": 10,
+              "unit": "min"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU31",
+    "phrase": "Depuis 350 200 / 5 381 500 en UTM zone 32 Nord, trace l'isochrone piéton de 12 minutes.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.isochrone",
+          "params": {
+            "layer_id": "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67",
+            "origin": {
+              "x": 350200,
+              "y": 5381500,
+              "epsg": 32632
+            },
+            "mode": "walk",
+            "duration": {
+              "value": 12,
+              "unit": "min"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU32",
+    "phrase": "Montre le territoire atteint en 45 minutes de voiture en partant de E 462 000, N 5 400 000 (EPSG:32631).",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.isochrone",
+          "params": {
+            "layer_id": "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67",
+            "origin": {
+              "x": 462000,
+              "y": 5400000,
+              "epsg": 32631
+            },
+            "mode": "car",
+            "duration": {
+              "value": 45,
+              "unit": "min"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "EU33",
+    "phrase": "Fais un atlas PDF avec une page par commune au 1:25 000.",
+    "expected": {
+      "kind": "refusal",
+      "missing": [
+        "atlas"
+      ]
+    }
+  },
+  {
+    "id": "EU34",
+    "phrase": "Calcule l'itinéraire le plus court par les routes entre 452 000 / 5 410 000 et 458 500 / 5 404 000 en UTM 31N.",
+    "expected": {
+      "kind": "refusal",
+      "missing": [
+        "shortest_path"
+      ]
+    }
+  },
+  {
+    "id": "EU35",
+    "phrase": "Enregistre la carte en image PNG ou JPEG au 1:25 000.",
+    "expected": {
+      "kind": "refusal",
+      "missing": [
+        "export_image",
+        "image"
+      ]
+    }
+  },
+  {
+    "id": "EU36",
+    "phrase": "Donne le temps de trajet en voiture entre le point 451 000 / 5 409 000 et le point 457 000 / 5 401 000, UTM 31N.",
+    "expected": {
+      "kind": "refusal",
+      "missing": [
+        "distance_matrix"
+      ]
+    }
+  }
+]

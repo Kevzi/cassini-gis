@@ -9,7 +9,9 @@
 use schemars::JsonSchema;
 use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
 
-use super::geo_point::{check_grid_latitude, out_of_range, read_point, utm_point, wgs84_point};
+use super::geo_point::{
+    check_grid_latitude, out_of_range, read_point, utm_point, utm_zone_param, wgs84_point,
+};
 use crate::geodesy::{self, Mgrs};
 use crate::point::{MgrsRef, Point};
 use crate::registry::{Command, CommandFailure, CommandSpec, Registration, RunsIn};
@@ -43,7 +45,7 @@ pub struct CoordConvertParams {
     #[schemars(length(min = 1, max = 3))]
     pub to: Vec<Form>,
     /// Zone UTM imposée, seulement si la demande la nomme.
-    #[serde(default, deserialize_with = "utm_zone")]
+    #[serde(default, deserialize_with = "utm_zone_param")]
     #[schemars(range(min = 1, max = 60))]
     pub utm_zone: Option<u8>,
     /// Chiffres MGRS par axe, seulement si la demande les fixe.
@@ -63,14 +65,6 @@ fn forms<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<Form>, D::Error> {
         return Err(D::Error::custom("`to` ne répète pas une forme"));
     }
     Ok(forms)
-}
-
-fn utm_zone<'de, D: Deserializer<'de>>(d: D) -> Result<Option<u8>, D::Error> {
-    let zone = Option::<u8>::deserialize(d)?;
-    if zone.is_some_and(|z| !(1..=60).contains(&z)) {
-        return Err(D::Error::custom("`utm_zone` va de 1 à 60"));
-    }
-    Ok(zone)
 }
 
 fn precision<'de, D: Deserializer<'de>>(d: D) -> Result<Option<u8>, D::Error> {

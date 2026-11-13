@@ -55,6 +55,11 @@ pub struct InventoryLayer {
     pub source: Option<String>,
     /// SCR de la couche, en code explicite.
     pub crs: String,
+    /// Unité du SCR de la couche, lue par QGIS : `m`, `deg` ou `other` ; absente d'une extension
+    /// antérieure. Lue par le noyau pour choisir un système de calcul en mètres (entrée 9.16),
+    /// jamais montrée au modèle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crs_unit: Option<String>,
     /// Sorte de couche : `vector`, `raster`, ou `other` pour une autre sorte de QGIS.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
@@ -94,6 +99,10 @@ pub struct ProjectInventoryOutput {
     pub layers: Vec<InventoryLayer>,
     /// SCR du projet, en code explicite.
     pub project_crs: String,
+    /// Unité du SCR du projet, lue par QGIS : `m`, `deg` ou `other` ; absente d'une extension
+    /// antérieure (entrée 9.16).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_crs_unit: Option<String>,
     /// Étendue de l'ensemble des couches, dans le SCR du projet ; `null` si aucune couche n'a d'étendue.
     pub extent: Option<InventoryExtent>,
 }

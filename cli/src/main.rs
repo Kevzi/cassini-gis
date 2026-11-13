@@ -336,14 +336,17 @@ fn measured_generator(
         )?;
         if report {
             eprintln!(
-                "cassini-timings chargement={:.2}s lecture={:.2}s jetons={} repris={} ecriture={:.2}s ecrits={} fils={}",
+                "cassini-timings chargement={:.2}s lecture={:.2}s jetons={} repris={} ecriture={:.2}s ecrits={} fils={} grammaire={:.3}s echantillonneur={:.3}s replis={}",
                 t.load.as_secs_f64(),
                 t.prompt.as_secs_f64(),
                 t.prompt_tokens,
                 t.cached_tokens,
                 t.write.as_secs_f64(),
                 t.written_tokens,
-                n
+                n,
+                request.grammar_build.as_secs_f64(),
+                t.sampler.as_secs_f64(),
+                request.grammar_fallbacks
             );
         }
         Ok(completion)
@@ -571,8 +574,8 @@ fn plan_model(
 /// `cassini plan <phrase> --inventory <fichier.json> [--model <fichier.gguf|.modele.json>]` :
 /// compose le plan d'une demande (AD-23) et l'affiche en JSON. `--model` prend un GGUF seul ou
 /// une déclaration de modèle (base, adaptateur, prompt). Rien n'est exécuté. Une question du
-/// modèle ou du garde-fou sur les coordonnées (`{"kind":"question",...}`, `"source":"guard"`
-/// pour le second) est un résultat : affichée sur `out`, code 0. Un plan
+/// modèle ou d'un garde-fou, coordonnées ou attributs (`{"kind":"question",...}`,
+/// `"source":"guard"` pour le second) est un résultat : affichée sur `out`, code 0. Un plan
 /// invalide n'est jamais affiché : l'erreur `agent.plan_invalid` ou `agent.refused` sort sur
 /// `err`.
 fn plan(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
@@ -622,15 +625,71 @@ fn plan(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         Ok(c) => c,
         Err(e) => return fail(err, &e.code, e.message),
     };
+    // Comme dans le canal (ticket 5.48) : le fichier, dans la forme apprise, passe par la vue du
+    // modèle (ordre stable, identifiants courts, vue triée d'un gros projet par la demande), et le
+    // plan rendu est retraduit aux identifiants du fichier avant d'être affiché.
+    let (view, ids) = shown_view(inventory, request);
     let mut generator = cassini_ai::plan::model_files_generator(chosen.files.clone());
-    match chosen.compose(&registry, &inventory, None, request, &mut generator) {
+    let composed = chosen.compose(
+        &registry,
+        &view.inventory,
+        Some(view.user_layers),
+        request,
+        &mut generator,
+    );
+    match composed {
         // Les fichiers du modèle ne sont nommés que par leur nom, le dossier par une mention
         // neutre, comme dans le canal.
         Err(e) => {
             let e = scrub(report(e.code(), e.to_string()), &hidden);
             fail(err, &e.code, e.message)
         }
-        ok => print_composed(ok, out, err),
+        ok => print_composed(ok.map(|plan| restored(plan, &ids)), out, err),
+    }
+}
+
+/// La vue du modèle pour `request`, depuis un inventaire écrit dans la forme apprise, et la table
+/// de ses identifiants courts : sans fichier de travail ni journal, comme pour un projet neuf.
+fn shown_view(
+    inventory: Value,
+    request: &str,
+) -> (
+    cassini_core::agent_inventory::ModelInventory,
+    cassini_core::agent_inventory::ShortIds,
+) {
+    use cassini_core::agent_inventory::{sorted_view_learned, LastPlan, ViewLimits};
+    sorted_view_learned(
+        inventory,
+        &[],
+        &std::collections::HashSet::new(),
+        &LastPlan::default(),
+        request,
+        &[],
+        &ViewLimits::default(),
+    )
+}
+
+/// Le plan composé, ses identifiants courts retraduits par `ids` ; une question ou un refus le
+/// sont dans leur texte, comme `plan.propose` le fait.
+fn restored(
+    plan: cassini_core::plan::Plan,
+    ids: &cassini_core::agent_inventory::ShortIds,
+) -> cassini_core::plan::Plan {
+    use cassini_core::plan::Plan;
+    match plan {
+        Plan::Calls { mut calls } => {
+            for call in &mut calls {
+                ids.restore(&mut call.params);
+            }
+            Plan::Calls { calls }
+        }
+        Plan::Question { question, source } => Plan::Question {
+            question: ids.restore_text(&question),
+            source,
+        },
+        Plan::Refusal { reason } => Plan::Refusal {
+            reason: ids.restore_text(&reason),
+        },
     }
 }
 
@@ -1502,6 +1561,67 @@ mod tests {
         let system = seen.expect("le générateur est appelé");
         assert_eq!(system.cached_parts.len(), 3);
         assert_eq!(system.anchor, Some(view.user_layers - 1));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Ticket 5.48 : la vue triée d'un gros projet arrive au modèle coupée à chaque entrée de son
+    /// index, l'ancrage sur la dernière couche de l'utilisateur de l'index ; les couches
+    /// détaillées, qui changent avec la demande, ne sont pas coupées.
+    #[test]
+    fn a_sorted_view_reaches_the_model_cut_per_index_entry_with_the_user_anchor() {
+        use cassini_core::agent_inventory::{sorted_view, LastPlan, ViewLimits, WorkFile};
+        let (dir, _) = temp_project();
+        let decl = dir.join("ajuste.modele.json");
+        std::fs::write(&decl, r#"{"model":"base.gguf","prompt":"short"}"#).unwrap();
+        let layer = |id: &str, source: &str| {
+            json!({"layer_id": id, "name": id, "source": source, "crs": "EPSG:2154",
+                "kind": "vector", "geometry": "MultiPolygon", "feature_count": 3,
+                "fields": [{"name": "typezone", "type": "String", "values": ["U", "N"]}]})
+        };
+        let raw = json!({"project_name": "p", "project_crs": "EPSG:2154", "layers": [
+            layer("1_analysis_buffer_e63fa196_c4d5_4255_9a08_203c73df1f96", "1-analysis.buffer.gpkg"),
+            layer("plu_zones_5a071b18_e012_4e1f_9c1c_250bbfb7550c", "plu.gpkg"),
+            layer("gares_83d935aa_ca33_431d_966f_dbbf0fb7ac0f", "gares.gpkg")
+        ]});
+        let files = [WorkFile {
+            name: "1-analysis.buffer.gpkg".to_string(),
+            modified: std::time::SystemTime::now(),
+        }];
+        // Seuil nul : la vue est toujours triée.
+        let limits = ViewLimits {
+            threshold: 0,
+            ..ViewLimits::default()
+        };
+        let (view, _) = sorted_view(
+            &raw,
+            &files,
+            &std::collections::HashSet::new(),
+            &LastPlan::default(),
+            "Ouvre les gares.",
+            &limits,
+        );
+        assert_eq!(view.inventory["index"].as_array().unwrap().len(), 3);
+        assert_eq!(view.user_layers, 2);
+        let registry = Registry::standard();
+        let mut seen = None;
+        let _ = resolve_model(&decl).unwrap().compose(
+            &registry,
+            &view.inventory,
+            Some(view.user_layers),
+            "Ouvre les gares.",
+            &mut |r| {
+                seen.get_or_insert_with(|| r.turns[0].clone());
+                Ok(cassini_ai::Completion {
+                    text: r#"{"kind":"question","question":"Laquelle ?"}"#.to_string(),
+                    truncated: false,
+                })
+            },
+        );
+        let system = seen.expect("le générateur est appelé");
+        assert_eq!(system.cached_parts.len(), 3);
+        assert_eq!(system.anchor, Some(1));
+        // La fin de l'index, puis `layers` : la partie qui se relit quand la demande change.
+        assert!(system.text.contains("\"layers\":["), "{}", system.text);
         let _ = std::fs::remove_dir_all(dir);
     }
 

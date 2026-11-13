@@ -4,7 +4,8 @@
 //! Provenance, écrite d'après les seules publications, sans reprendre de code :
 //! - Mercator transverse : C. F. F. Karney, « Transverse Mercator with an accuracy of a few
 //!   nanometers », *Journal of Geodesy*, 85(8), 2011, p. 475-485 (séries de Krüger à l'ordre
-//!   6 en n, éq. 35 et 36 ; latitude conforme, éq. 7 à 9 ; inversion de Newton, éq. 19 à 21).
+//!   6 en n, éq. 35 et 36 ; latitude conforme, éq. 7 à 9 ; inversion de Newton, éq. 19 à 21 ;
+//!   convergence des méridiens, éq. 23 à 27).
 //! - Zones UTM, bandes de latitude, carrés de 100 km (schéma AA du WGS84) et exceptions 32V et
 //!   31X à 37X : NGA, *The Universal Grids and the Transverse Mercator and Polar Stereographic
 //!   Map Projections*, NGA.SIG.0012_2.0.0_UTMUPS, 2014.
@@ -136,6 +137,36 @@ pub fn tm_forward(lat: f64, dlon: f64) -> (f64, f64) {
         eta += a * libm::cos(k * xip) * libm::sinh(k * etap);
     }
     (UTM_K0 * s.rectifying * eta, UTM_K0 * s.rectifying * xi)
+}
+
+/// Convergence des méridiens γ en un point, en degrés, depuis sa latitude et son écart de
+/// longitude au méridien central (éq. 23 à 27) : γ′ = atan(tan ξ′ · tanh η′) sur la sphère
+/// conforme, plus la correction γ″ = atan2(q, p) des séries de Krüger. γ est l'angle du nord
+/// vrai au nord du quadrillage, compté dans le sens horaire : positif à l'est du méridien
+/// central dans l'hémisphère nord, négatif à l'ouest, et de signe opposé au sud. Le facteur
+/// d'échelle n'y entre pas.
+pub fn tm_convergence(lat: f64, dlon: f64) -> f64 {
+    let s = series();
+    let phi = lat.to_radians();
+    let lam = dlon.to_radians();
+    let taup = conformal_tan(libm::tan(phi), s.e);
+    let (sin_lam, cos_lam) = (libm::sin(lam), libm::cos(lam));
+    let xip = libm::atan2(taup, cos_lam);
+    let etap = libm::asinh(sin_lam / libm::sqrt(taup * taup + cos_lam * cos_lam));
+    let gamma1 = libm::atan(libm::tan(xip) * libm::tanh(etap));
+    let (mut p, mut q) = (1.0, 0.0);
+    for (j, a) in s.alpha.iter().enumerate() {
+        let k = 2.0 * (j + 1) as f64;
+        p += k * a * libm::cos(k * xip) * libm::cosh(k * etap);
+        q += k * a * libm::sin(k * xip) * libm::sinh(k * etap);
+    }
+    (gamma1 + libm::atan2(q, p)).to_degrees()
+}
+
+/// Convergence des méridiens d'un point WGS84 (degrés) dans le quadrillage de la zone UTM
+/// `zone`, en degrés (voir [`tm_convergence`]).
+pub fn grid_convergence(lat: f64, lon: f64, zone: u8) -> f64 {
+    tm_convergence(lat, wrap_longitude(lon - central_meridian(zone)))
 }
 
 /// Projection inverse de [`tm_forward`] : (latitude, écart de longitude), en degrés.
@@ -495,6 +526,30 @@ impl Mgrs {
         })
     }
 
+    /// Désignation de zone et de carré de 100 km (`31T GL`) d'un point WGS84 rapporté à la
+    /// zone UTM `zone` imposée, celle du carroyage d'une carte (epic 10, entrée 31) : la bande
+    /// de latitude du point, puis les lettres de colonne et de rang de la case de 100 km qui le
+    /// contient dans cette zone. `None` hors de [-80, 84] de latitude ou hors des huit colonnes.
+    pub fn square_in_zone(lat: f64, lon: f64, zone: u8) -> Option<String> {
+        if !(1..=60).contains(&zone) || !lon.is_finite() {
+            return None;
+        }
+        let band = latitude_band(lat)?;
+        let utm = to_utm(lat, lon, zone);
+        let easting = (utm.easting + TRUNCATION_SLACK).floor() as i64;
+        let northing = (utm.northing + TRUNCATION_SLACK).floor() as i64;
+        let column = easting.div_euclid(100_000);
+        if !(1..=8).contains(&column) || northing < 0 {
+            return None;
+        }
+        let row = (northing.div_euclid(100_000) as usize + row_offset(zone)) % ROWS.len();
+        Some(format!(
+            "{zone:02}{band} {}{}",
+            char::from(column_letters(zone)[column as usize - 1]),
+            char::from(ROWS[row])
+        ))
+    }
+
     /// Coin sud-ouest de la case désignée, en UTM dans la zone de la référence (convention de
     /// la NGA). Le cycle de 2 000 km des rangs est levé par la bande : la case doit toucher la
     /// bande annoncée, sinon la bande est incohérente (`MgrsPart::Band`).
@@ -595,6 +650,70 @@ mod tests {
         }
     }
 
+    // Jeu de référence — C. F. F. Karney, « Test data for the transverse Mercator projection »,
+    // Zenodo, doi:10.5281/zenodo.32470 (CC0), fichier TMcoords.dat : méridien central 0,
+    // k0 = 0,9996, colonnes lat lon x y γ k, γ exacte à 1e-18°. Quinze lignes (n° cités) à
+    // λ ≤ 9,5°, latitudes de 3° à 83° : (n° de ligne, latitude, longitude, γ).
+    // Valeurs recopiées telles que publiées, au-delà de la précision d'un f64.
+    #[allow(clippy::excessive_precision)]
+    const TMCOORDS: [(u32, f64, f64, f64); 15] = [
+        (218, 3.58204121273, 1.137286307295, 0.071064512019013209),
+        (107, 9.916090592983, 2.895277339837, 0.499003720919636014),
+        (479, 18.499869819449, 4.36173460809, 1.386442498701511471),
+        (50, 20.166741997072, 3.143947731274, 1.084863297347176706),
+        (19, 27.203894742072, 7.440229319956, 3.416801681625375868),
+        (81, 33.028801664026, 0.765842683855, 0.417448360256695198),
+        (23, 40.552052236608, 3.10605643618, 2.020523080004668331),
+        (22, 42.701376407719, 7.572738186139, 5.152021939103753522),
+        (137, 49.495348846691, 6.087551111735, 4.636103927615996534),
+        (161, 55.753535712331, 3.471798114123, 2.870992737838008847),
+        (121, 57.367533447896, 8.260865981663, 6.970955082495557851),
+        (180, 65.513347930022, 9.039528600078, 8.238231681111888838),
+        (210, 69.499593633291, 1.928335626092, 1.806297402204658786),
+        (780, 73.936537513799, 4.450229062659, 4.277132269858771057),
+        (784, 81.142797694809, 3.094175514897, 3.057348400144222894),
+    ];
+
+    #[test]
+    fn the_convergence_matches_karney_reference_points() {
+        for (line, lat, dlon, gamma) in TMCOORDS {
+            let got = tm_convergence(lat, dlon);
+            assert!(
+                (got - gamma).abs() <= 1e-12,
+                "ligne {line} : {got} / {gamma}"
+            );
+            // Symétries : de signe opposé à l'ouest du méridien central et dans l'hémisphère
+            // sud, la même au sud-ouest.
+            assert!(
+                (tm_convergence(lat, -dlon) + gamma).abs() <= 1e-12,
+                "ligne {line}"
+            );
+            assert!(
+                (tm_convergence(-lat, dlon) + gamma).abs() <= 1e-12,
+                "ligne {line}"
+            );
+            assert!(
+                (tm_convergence(-lat, -dlon) - gamma).abs() <= 1e-12,
+                "ligne {line}"
+            );
+        }
+        // Sur le méridien central et sur l'équateur, le quadrillage suit le nord vrai.
+        assert_eq!(tm_convergence(45.0, 0.0), 0.0);
+        assert_eq!(tm_convergence(0.0, 3.0), 0.0);
+    }
+
+    // Référence publiée de l'hémisphère sud — NOAA et BGS, *The US/UK World Magnetic Model for
+    // 2025-2030: Technical Report*, doi:10.25923/prbc-s316 (domaine public), table 3d
+    // « Grivation calculations for WMM2025 » : à 80° S, 240° E (120° O), « TrueN-to-GridN »
+    // vaut −2,9545046801° en zone UTM 10 et +2,9545046801° en zone 11 (dix décimales).
+    #[test]
+    fn the_convergence_matches_the_wmm2025_grivation_table() {
+        let gamma10 = grid_convergence(-80.0, 240.0, 10);
+        let gamma11 = grid_convergence(-80.0, -120.0, 11);
+        assert!((gamma10 + 2.954_504_680_1).abs() <= 1e-10, "{gamma10}");
+        assert!((gamma11 - 2.954_504_680_1).abs() <= 1e-10, "{gamma11}");
+    }
+
     #[test]
     fn the_zones_follow_the_nga_exceptions() {
         assert_eq!(utm_zone(48.7, 2.4), 31);
@@ -610,6 +729,30 @@ mod tests {
         assert_eq!(latitude_band(84.0), Some('X'));
         assert_eq!(latitude_band(-80.0), Some('C'));
         assert_eq!(latitude_band(84.1), None);
+    }
+
+    #[test]
+    fn a_square_in_a_forced_zone_matches_the_reference_of_its_normal_zone() {
+        // Paris (31U DQ) et Annecy (32T LR en zone normale, 31T GL en zone 31 imposée : le carré
+        // d'un point de 32 lu dans la grille de 31).
+        let paris = Mgrs::from_lat_lon(48.8566, 2.3522, 1).unwrap();
+        assert_eq!(
+            Mgrs::square_in_zone(48.8566, 2.3522, 31).unwrap(),
+            format!("31{} {}{}", paris.band, paris.column, paris.row)
+        );
+        let annecy = Mgrs::from_lat_lon(45.8992, 6.1294, 1).unwrap();
+        assert_eq!(annecy.zone, 32);
+        assert_eq!(
+            Mgrs::square_in_zone(45.8992, 6.1294, 32).unwrap(),
+            format!("32{} {}{}", annecy.band, annecy.column, annecy.row)
+        );
+        assert!(Mgrs::square_in_zone(45.8992, 6.1294, 31)
+            .unwrap()
+            .starts_with("31T "));
+        assert_eq!(Mgrs::square_in_zone(85.0, 6.0, 32), None);
+        assert_eq!(Mgrs::square_in_zone(45.0, 6.0, 0), None);
+        // Loin du méridien central, hors des huit colonnes de la zone imposée.
+        assert_eq!(Mgrs::square_in_zone(45.0, 30.0, 31), None);
     }
 
     #[test]

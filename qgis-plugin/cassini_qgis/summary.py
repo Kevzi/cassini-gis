@@ -175,6 +175,16 @@ class _Names:
         return value
 
 
+def _computed_in(lang, p, r, names):
+    """` , calculée en EPSG:2154` quand le noyau a fait calculer le tampon dans un système en
+    mètres (`work_epsg` des paramètres journalisés, couche en degrés, changement de cap du
+    2026-11-12) ; sans lui, ou sans résultat lisible : rien."""
+    work = p.get("work_epsg")
+    if not r or isinstance(work, bool) or not isinstance(work, int) or work <= 0:
+        return ""
+    return texts.tr(lang, "sum_computed_in", crs="EPSG:%d" % work)
+
+
 def _out_layer(lang, result):
     """` : nouvelle couche Tampon, 8 entités` ; illisible : rien."""
     name = result.get("name")
@@ -197,6 +207,7 @@ def _buffer(lang, p, r, names):
     )
     if p.get("dissolve") is True:
         text += texts.tr(lang, "sum_dissolved")
+    text += _computed_in(lang, p, r, names)
     return text + (_out_layer(lang, r) if r else "")
 
 
@@ -321,18 +332,33 @@ def _export_pdf(lang, p, r, names):
         scale = p.get("scale")
     if _is_int(scale) and scale > 0:
         text += texts.tr(lang, "sum_pdf_scale", scale=scale_number(lang, scale))
-    if not r:
-        return text
-    try:
-        file = file_name(r.get("file"))
-    except _Unreadable:
-        return text
-    pages = r.get("page_count")
-    if _is_int(pages):
-        return text + texts.tr(
-            lang, "sum_pdf_file_pages", file=file, pages=count(lang, "pages", pages)
-        )
-    return text + texts.tr(lang, "sum_pdf_file", file=file)
+    if r:
+        try:
+            file = file_name(r.get("file"))
+        except _Unreadable:
+            file = None
+        if file is not None:
+            pages = r.get("page_count")
+            if _is_int(pages):
+                text += texts.tr(lang, "sum_pdf_file_pages", file=file, pages=count(lang, "pages", pages))
+            else:
+                text += texts.tr(lang, "sum_pdf_file", file=file)
+    # Résultat d'un plan vide, en tout ou en partie (entrée 7.9), lu dans les paramètres
+    # journalisés seuls.
+    focus = p.get("focus")
+    if isinstance(focus, dict):
+        framed_on = focus.get("framed_on")
+        results, frame = focus.get("results"), focus.get("frame")
+        if framed_on == "inputs":
+            text += texts.tr(lang, "sum_pdf_framed_on_inputs")
+        elif framed_on == "visible_layers":
+            text += texts.tr(lang, "sum_pdf_empty_result")
+        elif framed_on == "results" and isinstance(results, list) and isinstance(frame, list):
+            # Le cadre ne garde que les résultats non vides : les autres sont vides.
+            empty = len(results) - len(frame)
+            if 0 < empty < len(results):
+                text += texts.tr(lang, "sum_pdf_some_empty", empty=empty, total=len(results))
+    return text
 
 
 def _inventory(lang, p, r, names):
@@ -529,31 +555,95 @@ def _data_convert(lang, p, r, names):
     return text + texts.tr(lang, "sum_file", file=file)
 
 
-def _distance_azimuth(lang, p, r, names):
-    """Distance et azimuts rendus ; affichage seul (AD-5)."""
+def _convert_raster(lang, p, r, names):
+    """Le raster écrit en GeoTIFF par QGIS ; affichage seul (AD-5). Un GeoTIFF sans système est
+    signalé : les commandes de terrain le refuseront (`dem.no_epsg`)."""
+    value = p.get("raster")
+    if isinstance(value, str) and _STEP_REF.match(value):
+        raster = names.layer(value)
+    else:
+        raster = file_name(value)
+    key = "sum_convert_raster_ask" if names.ahead else "sum_convert_raster"
+    text = texts.tr(lang, key, raster=raster)
+    assign = p.get("assign_epsg")
+    if assign is not None:
+        if not _is_int(assign):
+            raise _Unreadable()
+        text += texts.tr(lang, "sum_convert_raster_assign", epsg=assign)
     if not r:
-        return texts.tr(lang, "sum_geo_measure")
+        return text
+    text += _file_part(lang, r)
+    epsg = r.get("epsg")
+    if epsg is None and "epsg" in r:
+        text += texts.tr(lang, "sum_convert_raster_no_crs")
+    elif _is_int(epsg) and assign is None:
+        text += texts.tr(lang, "sum_convert_raster_epsg", epsg=epsg)
+    return text
+
+
+def _layer_remove(lang, p, r, names):
+    """La couche retirée du projet, aucun fichier effacé ; affichage seul (AD-5)."""
+    key = "sum_layer_remove_ask" if names.ahead else "sum_layer_remove"
+    return texts.tr(lang, key, layer=names.layer(p.get("layer_id")))
+
+
+def _grid(p):
+    """Suffixe des textes du nord employé : `_grid` pour un gisement (`north` vaut `grid`),
+    `_magnetic` pour un azimut magnétique ; affichage seul (AD-5)."""
+    north = p.get("north")
+    if not isinstance(north, str):
+        return ""
+    return {"grid": "_grid", "magnetic": "_magnetic"}.get(north, "")
+
+
+def _magnetic_tail(lang, r):
+    """Déclinaison et date d'un azimut magnétique, puis l'avertissement du noyau s'il y en a
+    un, recopié tel quel (date hors de la validité du WMM2025, pôle magnétique proche) ;
+    affichage seul (AD-5)."""
+    text = ""
+    if isinstance(r.get("date"), str) and isinstance(r.get("declination"), dict):
+        text += texts.tr(
+            lang,
+            "sum_geo_declination",
+            declination=_angle(lang, r.get("declination")),
+            date=r["date"],
+        )
+    warning = r.get("warning")
+    if isinstance(warning, str) and warning.strip():
+        text += texts.tr(lang, "sum_geo_warning", warning=warning.strip().rstrip("."))
+    return text
+
+
+def _distance_azimuth(lang, p, r, names):
+    """Distance et azimuts rendus, « gisement » pour le nord du quadrillage, « azimut
+    magnétique » pour le nord magnétique ; affichage seul (AD-5)."""
+    grid = _grid(p)
+    if not r:
+        return texts.tr(lang, "sum_geo_measure" + grid)
     return texts.tr(
         lang,
-        "sum_geo_measured",
+        "sum_geo_measured" + grid,
         distance=_length(lang, r.get("distance")),
         azimuth=_angle(lang, r.get("azimuth")),
         back=_angle(lang, r.get("back_azimuth")),
-    )
+    ) + _magnetic_tail(lang, r)
 
 
 def _destination_point(lang, p, r, names):
+    grid = _grid(p)
     distance = _length(lang, p.get("distance"))
     azimuth = _angle(lang, p.get("azimuth"))
     if not r:
-        return texts.tr(lang, "sum_geo_destination", distance=distance, azimuth=azimuth)
+        return texts.tr(
+            lang, "sum_geo_destination" + grid, distance=distance, azimuth=azimuth
+        )
     return texts.tr(
         lang,
-        "sum_geo_reached",
+        "sum_geo_reached" + grid,
         distance=distance,
         azimuth=azimuth,
         point=_point(lang, r.get("point")),
-    )
+    ) + _magnetic_tail(lang, r)
 
 
 def _bearing_intersection(lang, p, r, names):
@@ -829,6 +919,8 @@ _SENTENCES = {
     "data.transform_point": _transform_point,
     "data.reproject": _reproject,
     "data.convert": _data_convert,
+    "data.convert_raster": _convert_raster,
+    "layer.remove": _layer_remove,
     "analysis.buffer": _buffer,
     "analysis.intersect": _intersect,
     "analysis.select_by_attribute": _select,

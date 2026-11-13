@@ -41,6 +41,26 @@
 //! 5.34 : elles restent cachées après une relance ou un rejeu, sous de nouveaux ids), et
 //! `results_without_values` ôte la clé `values` des champs des résultats. Les couches de
 //! l'utilisateur ne changent pas ; QGIS, le journal et le plan gardé non plus.
+//!
+//! **Vue triée d'un gros projet** (ticket 5.46, changement de cap du 2026-11-10). Le budget ne
+//! retire que des résultats : un projet d'une soixantaine de couches de l'utilisateur ne tient
+//! jamais. `sorted_view` garde la vue de `model_inventory` tant que les couches de l'utilisateur
+//! tiennent sous un seuil ; au-dessus, elle rend un `index` réduit (`{layer_id, name,
+//! geometry}`) de toutes les couches, stable d'une demande à l'autre pour un même état du
+//! projet, et dans `layers` le détail
+//! des couches que la demande désigne, puis des résultats et des couches cités par le dernier
+//! plan exécuté, puis des rasters, jusqu'au budget de la vue triée. Elle est le seul chemin de
+//! composition (ticket 5.48) : `plan.propose`, `cassini plan` et les mesures de `ai/tests` lui
+//! passent la demande ; le noyau y ajoute le dernier plan lu dans le journal, et, pour une
+//! redemande élargie, les couches à détailler en plus. L'IA externe, elle, lit `project.inventory`
+//! brut (AD-29).
+
+mod sorted_view;
+
+pub use sorted_view::{
+    sorted_view, sorted_view_learned, LastPlan, ViewLimits, DETAIL_MAX_CHARS, DETAIL_MAX_FIELDS,
+    INDEX_BUDGET_CHARS, INDEX_LOW_CHARS, SORTED_BUDGET_CHARS, SORT_THRESHOLD_CHARS,
+};
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -105,43 +125,17 @@ pub fn within_budget_by_batches(
     let Some(layers) = inventory.get("layers").and_then(Value::as_array) else {
         return inventory;
     };
-    let mut results = results_of(layers, work_files);
-    results.sort_by(|a, b| newest_first(b, a));
-    let mut is_result = vec![false; layers.len()];
-    for (index, _, _) in &results {
-        is_result[*index] = true;
-    }
     // Taille de la vue : l'inventaire sans couche, plus chaque couche et une virgule entre deux.
     let mut empty = inventory.clone();
     empty["layers"] = json!([]);
-    let users: Vec<usize> = (0..layers.len()).filter(|&i| !is_result[i]).collect();
-    let mut count = users.len();
-    let mut size = json_chars(&empty)
-        + users.iter().map(|&i| json_chars(&layers[i])).sum::<usize>()
-        + count.saturating_sub(1);
-    let mut kept: std::collections::VecDeque<usize> = std::collections::VecDeque::new();
-    for (index, _, _) in &results {
-        size += json_chars(&layers[*index]) + usize::from(count > 0);
-        count += 1;
-        kept.push_back(*index);
-        if size > budget {
-            // Le plus récent reste, même si les couches de l'utilisateur dépassent déjà `low`.
-            while size > low && kept.len() > 1 {
-                let oldest = kept.pop_front().expect("au moins deux résultats gardés");
-                count -= 1;
-                size -= json_chars(&layers[oldest]) + usize::from(count > 0);
-            }
-            if size > budget {
-                kept.pop_back();
-                count -= 1;
-                size -= json_chars(&layers[*index]) + usize::from(count > 0);
-            }
-        }
-    }
-    let mut keep = vec![false; layers.len()];
-    for &i in users.iter().chain(&kept) {
-        keep[i] = true;
-    }
+    let sizes: Vec<usize> = layers.iter().map(json_chars).collect();
+    let keep = kept_by_batches(
+        json_chars(&empty),
+        &sizes,
+        &results_oldest_first(layers, work_files),
+        budget,
+        low,
+    );
     let mut out = inventory.clone();
     out["layers"] = layers
         .iter()
@@ -150,6 +144,57 @@ pub fn within_budget_by_batches(
         .map(|(l, _)| l.clone())
         .collect();
     out
+}
+
+/// La règle des paquets (ticket 5.19), sur des tailles seulement : `sizes[i]` est la taille de
+/// l'élément `i` d'une liste JSON, `base` celle du conteneur vide, `results` les rangs des
+/// résultats du plus ancien au plus récent (tout autre rang est une couche de l'utilisateur,
+/// toujours gardée). Rend, pour chaque rang, s'il est gardé.
+pub(crate) fn kept_by_batches(
+    base: usize,
+    sizes: &[usize],
+    results: &[usize],
+    budget: usize,
+    low: usize,
+) -> Vec<bool> {
+    let mut is_result = vec![false; sizes.len()];
+    for &index in results {
+        is_result[index] = true;
+    }
+    let users: Vec<usize> = (0..sizes.len()).filter(|&i| !is_result[i]).collect();
+    let mut count = users.len();
+    let mut size = base + users.iter().map(|&i| sizes[i]).sum::<usize>() + count.saturating_sub(1);
+    let mut kept: std::collections::VecDeque<usize> = std::collections::VecDeque::new();
+    for &index in results {
+        size += sizes[index] + usize::from(count > 0);
+        count += 1;
+        kept.push_back(index);
+        if size > budget {
+            // Le plus récent reste, même si les couches de l'utilisateur dépassent déjà `low`.
+            while size > low && kept.len() > 1 {
+                let oldest = kept.pop_front().expect("au moins deux résultats gardés");
+                count -= 1;
+                size -= sizes[oldest] + usize::from(count > 0);
+            }
+            if size > budget {
+                kept.pop_back();
+                count -= 1;
+                size -= sizes[index] + usize::from(count > 0);
+            }
+        }
+    }
+    let mut keep = vec![false; sizes.len()];
+    for &i in users.iter().chain(&kept) {
+        keep[i] = true;
+    }
+    keep
+}
+
+/// Les rangs des couches de résultat de `layers`, du plus ancien au plus récent.
+pub(crate) fn results_oldest_first(layers: &[Value], work_files: &[WorkFile]) -> Vec<usize> {
+    let mut results = results_of(layers, work_files);
+    results.sort_by(|a, b| newest_first(b, a));
+    results.into_iter().map(|(index, _, _)| index).collect()
 }
 
 /// Une couche de résultat : rang dans l'inventaire, date et nom de son fichier.
@@ -388,7 +433,20 @@ pub fn model_inventory(
     budget: usize,
     low: usize,
 ) -> (ModelInventory, ShortIds) {
-    let (ordered, user_layers) = stable_order(agent_inventory(raw), work_files);
+    model_inventory_learned(agent_inventory(raw), work_files, intermediates, budget, low)
+}
+
+/// `model_inventory` depuis un inventaire déjà dans la forme apprise (`learned`, sortie
+/// d'`agent_inventory`) : ordre stable, identifiants courts, intermédiaires retirés, résultats sans
+/// valeurs, budget par paquets.
+pub fn model_inventory_learned(
+    learned: Value,
+    work_files: &[WorkFile],
+    intermediates: &HashSet<String>,
+    budget: usize,
+    low: usize,
+) -> (ModelInventory, ShortIds) {
+    let (ordered, user_layers) = stable_order(learned, work_files);
     let ids = ShortIds::of_inventory(&ordered);
     let lighter = results_without_values(
         without_intermediates(ordered, work_files, intermediates),
@@ -539,7 +597,7 @@ pub fn agent_inventory(raw: &Value) -> Value {
 /// Largeur en longitude au-delà de laquelle l'emprise couvre plus de deux fuseaux UTM.
 const MAX_UTM_SPAN_DEGREES: f64 = 12.0;
 
-fn utm_epsg(extent: &Value) -> Option<u32> {
+pub(crate) fn utm_epsg(extent: &Value) -> Option<u32> {
     use crate::geodesy::{utm_zone, MAX_LATITUDE, MIN_LATITUDE};
     let lonlat = extent.get("lonlat")?;
     if !lonlat
@@ -577,7 +635,7 @@ fn text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
 }
 
 /// `EPSG:2154` donne `2154` ; un autre SCR (`IGNF:LAMB93`) ne donne rien.
-fn epsg(authid: &str) -> Option<u64> {
+pub(crate) fn epsg(authid: &str) -> Option<u64> {
     let (authority, code) = authid.split_once(':')?;
     if !authority.eq_ignore_ascii_case("EPSG") || code.is_empty() {
         return None;
@@ -739,6 +797,19 @@ mod tests {
                 "unloaded_files": []
             })
         );
+    }
+
+    #[test]
+    fn the_units_of_the_systems_never_reach_the_model() {
+        // Lues par le noyau pour choisir un système de calcul (entrée 9.16), jamais montrées.
+        let mut layer = plu();
+        layer["crs_unit"] = json!("m");
+        let with = json!({"project_name": "projet-test", "project_crs": "EPSG:2154",
+            "project_crs_unit": "m", "extent": null, "layers": [layer]});
+        let without = json!({"project_name": "projet-test", "project_crs": "EPSG:2154",
+            "extent": null, "layers": [plu()]});
+        assert_eq!(agent_inventory(&with), agent_inventory(&without));
+        assert!(!agent_inventory(&with).to_string().contains("unit\""));
     }
 
     fn with_lonlat(west: f64, south: f64, east: f64, north: f64) -> Value {

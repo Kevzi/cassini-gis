@@ -24,6 +24,9 @@ covers = ["CAP-6", "CAP-7"]
 after = [
   { epic = 1, needs = "le workspace, le verrou hors ligne dans le moteur et la recette automatique" },
   { epic = 8, needs = "le verdict sur la capacite d'un modele local a composer des commandes, qui dicte la forme des descriptions et des schemas de parametres" },
+  { epic = 6, needs = "la demo faite, avant le journal chaine par empreinte (2.13, changement de cap change-journal-chaine-par-empreinte du 2026-11-10)" },
+  { epic = 7, needs = "la publication faite, avant l'API publique du registre (2.14, changement de cap change-commandes-d-un-module-exterieur du 2026-11-10)" },
+  { epic = 10, needs = "le catalogue etendu stabilise, avant l'API publique du registre (2.14, meme changement de cap)" },
 ]
 
 [[epic]]
@@ -43,6 +46,7 @@ after = [
   { epic = 8, needs = "le modele, la quantification et la forme de sollicitation retenus par l'epreuve" },
   { epic = 9, needs = "le panneau ou afficher le plan etape par etape et le faire valider" },
   { epic = 4, needs = "les familles du generateur pour les trois commandes de terrain (4.6), apprises au re-entrainement groupe 5.41" },
+  { epic = 10, needs = "les familles du generateur des entrees 10.28 a 10.31 (gisement, azimut magnetique, conversion d'un raster, mise en page), apprises au re-entrainement groupe 5.49" },
 ]
 
 [[epic]]
@@ -89,8 +93,11 @@ after = [
 id = 7
 slug = "epic-publication"
 title = "Publication : depot d'extensions QGIS, installeurs, video"
-covers = []
-after = [{ epic = 6, needs = "le scenario de demo complet, a filmer et a documenter" }]
+covers = ["CAP-1", "CAP-4", "CAP-13", "CAP-14"]
+after = [
+  { epic = 6, needs = "la demo repetee et filmee (6.6, fait) et la preuve aucun envoi de la sonde (6.5), pour la page d'accueil et sa FAQ (7.12)" },
+  { epic = 5, needs = "l'empreinte du modele verifiee au lancement (5.51), dont la porte 1 complete (7.4) ecrit la declaration" },
+]
 
 [[epic]]
 id = 10
@@ -102,6 +109,7 @@ after = [
   { epic = 4, needs = "les MNT de recette (4.1) et l'inventaire des rasters (4.3), pour l'entree 20" },
   { epic = 6, needs = "le MVP complet et la demo, qui figent le registre et l'agent sur lesquels le catalogue s'etend" },
   { epic = 7, needs = "la chaine de publication de l'extension et du paquet, par laquelle le catalogue etendu est livre" },
+  { epic = 9, needs = "le tampon en metres sur une couche en degres (9.16), dont l'isochrone de 10.32 reprend la regle (changement de cap change-distance-en-metres-sur-couche-en-degres du 2026-11-12)" },
 ]
 
 # ---- Retire ----

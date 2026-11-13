@@ -1,9 +1,10 @@
 //! Angle partagé des commandes `geo.*` (AD-31, CAP-15) : une valeur et son unité, degrés
 //! (par défaut) ou grades.
 //!
-//! Un azimut se compte depuis le nord vrai, dans le sens horaire ; un azimut rendu est ramené à
-//! [0, 360) degrés ou [0, 400) grades, et arrondi au milliardième d'unité, pour que le JSON écrit
-//! au journal se relise à l'identique (AD-11).
+//! Un azimut se compte depuis le nord vrai, dans le sens horaire, sauf quand la commande reçoit
+//! `north` (AD-31 amendée, nord choisi) ; un azimut rendu est ramené à [0, 360) degrés ou
+//! [0, 400) grades, et arrondi au milliardième d'unité, pour que le JSON écrit au journal se
+//! relise à l'identique (AD-11).
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -34,6 +35,18 @@ impl AngleUnit {
             AngleUnit::Gon => " gon",
         }
     }
+}
+
+// Nord de référence d'un azimut (AD-31 amendée) : nord vrai (défaut), nord du quadrillage UTM
+// (gisement) ou nord magnétique (WMM2025, entrée 29). Sans commentaire de documentation sur les
+// valeurs, comme `AngleUnit`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum North {
+    #[default]
+    True,
+    Grid,
+    Magnetic,
 }
 
 /// Angle avec son unité ; azimut depuis le nord vrai, sens horaire.
@@ -87,6 +100,20 @@ impl Angle {
             unit,
         }
     }
+
+    /// Un angle signé en degrés (une convergence, une déclinaison), rendu dans `unit` sans le ramener dans un
+    /// tour, arrondi au milliardième d'unité.
+    pub fn signed(degrees: f64, unit: AngleUnit) -> Angle {
+        let value = match unit {
+            AngleUnit::Deg => degrees,
+            AngleUnit::Gon => degrees * 10.0 / 9.0,
+        };
+        // `-0.0` s'écrirait « -0.0 » au journal.
+        Angle {
+            value: libm::round(value * 1e9) / 1e9 + 0.0,
+            unit,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -108,6 +135,30 @@ mod tests {
             let r: Result<f64, serde::de::value::Error> = finite(v.into_deserializer());
             assert!(r.is_err(), "{v}");
         }
+    }
+
+    #[test]
+    fn a_signed_angle_keeps_its_sign_and_the_north_reads_in_lowercase() {
+        assert_eq!(
+            Angle::signed(-1.234_567_890_4, AngleUnit::Deg).value,
+            -1.234_567_89
+        );
+        assert_eq!(Angle::signed(-0.9, AngleUnit::Gon).value, -1.0);
+        assert_eq!(Angle::signed(-1e-12, AngleUnit::Deg).value.to_string(), "0");
+        assert_eq!(serde_json::to_value(North::Grid).unwrap(), json!("grid"));
+        assert_eq!(
+            serde_json::from_value::<North>(json!("true")).unwrap(),
+            North::True
+        );
+        assert_eq!(
+            serde_json::from_value::<North>(json!("magnetic")).unwrap(),
+            North::Magnetic
+        );
+        assert_eq!(
+            serde_json::to_value(North::Magnetic).unwrap(),
+            json!("magnetic")
+        );
+        assert!(serde_json::from_value::<North>(json!("magnétique")).is_err());
     }
 
     #[test]

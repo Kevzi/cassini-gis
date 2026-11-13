@@ -370,6 +370,8 @@ donne l'esquisse.
 | `analysis.difference` | planifiée | qgis | epic 10, entrée 21 |
 | `analysis.area` | planifiée | qgis | epic 10, entrée 22 |
 | `data.convert` | faite | qgis | epic 10, entrée 9 |
+| `data.convert_raster` | faite | qgis | epic 10, entrée 30 |
+| `layer.remove` | faite | qgis | epic 10, entrée 27 |
 | `analysis.nearest` | planifiée | qgis | epic 10, entrée 10 |
 | `analysis.distance_matrix` | planifiée | qgis | epic 10, entrée 10 |
 | `analysis.statistics_by_category` | planifiée | qgis | epic 10, entrée 11 |
@@ -435,14 +437,15 @@ Inventaire du projet ouvert : couches dans l'ordre de la légende, système du p
 | Résultat | Type | Sens |
 |---|---|---|
 | `extent` | emprise ou `null` | Étendue de l'ensemble, dans le système du projet ; porte aussi `lonlat` (`west`, `south`, `east`, `north`, `crs` = `EPSG:4326`), la même étendue en degrés WGS84 reprojetée par QGIS, absente quand aucune couche ne se reprojette en degrés valides. Le noyau en déduit le fuseau UTM du projet vu par le modèle (`project.utm_epsg`). |
-| `layers` | liste de couches | `layer_id`, `name`, `crs`, `kind`, `source`, `geometry`, `feature_count`, `fields`. |
+| `layers` | liste de couches | `layer_id`, `name`, `crs`, `crs_unit`, `kind`, `source`, `geometry`, `feature_count`, `fields`. `crs_unit` : `m`, `deg` ou `other`, unité du système lue par QGIS ; lue par le noyau, jamais montrée au modèle. |
 | `project_crs` | chaîne | Système du projet, code explicite. |
+| `project_crs_unit` | chaîne | Unité du système du projet : `m`, `deg` ou `other`. |
 | `project_name` | chaîne ou `null` | Nom du fichier de projet sans extension. |
 
 ```json fiche
 {"id": "project.inventory", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
  "params": {},
- "result": ["extent", "layers", "project_crs", "project_name"]}
+ "result": ["extent", "layers", "project_crs", "project_crs_unit", "project_name"]}
 ```
 
 ### `layer.add`
@@ -571,8 +574,19 @@ Erreur : `layer.invalid_source` (fichier illisible ou système non reconnu).
 
 ### `analysis.buffer`
 
-Zone tampon autour des entités d'une couche, ajoutée comme nouvelle couche. La couche doit
-être dans un système en mètres (`analysis.crs_not_metric` sinon).
+Zone tampon autour des entités d'une couche, ajoutée comme nouvelle couche. Une couche en
+mètres est entourée telle quelle, sans reprojection : `work_epsg` n'est pas rempli
+(amendement RA06, 2026-11-12). Une couche en degrés est d'abord reprojetée par QGIS, dans
+la même étape, vers le système en mètres choisi par le noyau (`work_epsg`) :
+- celui du projet s'il est en mètres ;
+- sinon le fuseau UTM de l'étendue du projet.
+
+Si aucun ne convient : `analysis.crs_not_metric`, avant tout ordre. Le tampon sort dans ce
+système (`crs` du résultat). Changement de cap du 2026-11-12. Un système du projet en
+Mercator mondial (EPSG:3857, 3395, 900913, 102100, 102113) n'est pas retenu : le fuseau UTM
+le remplace. Note : la description lue par le modèle et par le client MCP garde « La couche
+d'entrée doit être dans un système de coordonnées en mètres » (décision du propriétaire, le
+modèle ayant été entraîné sur ce texte).
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
@@ -580,6 +594,7 @@ Zone tampon autour des entités d'une couche, ajoutée comme nouvelle couche. La
 | `distance` | `Distance` | oui | `m`, `km` | Distance du tampon. |
 | `dissolve` | booléen | non | défaut faux | Fusionner les tampons en une entité, seulement si la phrase le demande. |
 | `out` | chaîne | non | — | Fourni par le noyau. |
+| `work_epsg` | entier | non | code EPSG | Fourni par le noyau : système en mètres du calcul, pour une couche en degrés seulement ; absent pour une couche en mètres. |
 
 Résultat : `layer_id`, `name`, `crs`, `feature_count` (couche créée).
 
@@ -588,7 +603,8 @@ Résultat : `layer_id`, `name`, `crs`, `feature_count` (couche créée).
  "params": {"layer_id": {"type": "string", "required": true},
             "distance": {"type": "Distance", "required": true},
             "dissolve": {"type": "boolean", "required": false},
-            "out": {"type": "string", "required": false}},
+            "out": {"type": "string", "required": false},
+            "work_epsg": {"type": "integer", "required": false}},
  "result": ["crs", "feature_count", "layer_id", "name"]}
 ```
 
@@ -708,11 +724,14 @@ sources. Une page A4 paysage par défaut ; format, orientation et carroyage au c
 | `page_size` | chaîne | non | `a4` (défaut), `a3`, `a2`, `a1`, `a0` | Format de page. |
 | `orientation` | chaîne | non | `landscape` (défaut), `portrait` | Orientation de la page. |
 | `grid` | union étiquetée par `kind` | non | voir ci-dessous | Carroyage ; absent, aucun. |
+| `header` | chaîne | non | 120 caractères au plus, une ligne | En-tête recopié de la demande (epic 10, entrée 31). |
+| `footer` | chaîne | non | 120 caractères au plus, une ligne | Pied de page recopié de la demande (epic 10, entrée 31). |
+| `focus` | objet | non | voir ci-dessous | Fourni par le noyau pour un export lancé dans un plan : mise en évidence du résultat (entrée 7.9). |
 
-`grid` est l'une de deux formes : `{"kind": "degrees", "interval": Angle}` (graticule en
-WGS84, étiquettes en degrés décimaux) ou `{"kind": "projected", "epsg": entier, "interval":
-Distance}` (quadrillage dans le système nommé ; un carroyage UTM au kilomètre trace les
-lignes MGRS, sans leurs étiquettes, la grille de QGIS n'en ayant pas). Un `epsg` de grille
+`grid` est l'une de trois formes : `{"kind": "degrees", "interval": Angle}` (graticule en
+WGS84, étiquettes en degrés décimaux), `{"kind": "projected", "epsg": entier, "interval":
+Distance}` (quadrillage dans le système nommé, étiquettes en décimal) ou `{"kind": "mgrs",
+"interval": Distance}` (carroyage MGRS étiqueté, epic 10, entrée 31, voir ci-dessous). Un `epsg` de grille
 inconnu de QGIS rend l'erreur `data.unknown_crs`. Pas de nombre d'exemplaires :
 l'impression reste hors du produit.
 
@@ -726,6 +745,57 @@ l'impression reste hors du produit.
 | `scale` | entier ou `null` | Échelle tenue, si demandée. |
 | `center` | `Point` ou `null` | Centre employé, si `scale` demandée ; journalisé pour le rejeu. |
 | `skipped_layers` | liste de chaînes | **Epic 10, entrée 15** : couches distantes (WMS, WMTS, XYZ, tuiles vectorielles distantes) écartées de la carte et nommées. |
+| `source_details` | liste d'objets, 50 au plus | **Epic 10, entrée 31** : résolution et date de chaque source (voir ci-dessous). |
+| `warnings` | liste de chaînes, absente si vide | **Entrée 7.9** : un résultat qui n'a pas pu être mis en évidence (dessiné avec son style du projet). |
+
+**Fait (changement de cap du 2026-11-10, epic 10, entrée 31).** `header` et `footer` : une
+ligne libre chacun (120 caractères au plus, sans saut de ligne), imprimée en haut et en bas de
+page. `grid` gagne la forme `{"kind": "mgrs", "interval": Distance}` (1 km, 10 km ou 100 km) :
+quadrillage UTM étiqueté par les deux chiffres principaux de chaque ligne, et cadre de légende
+des désignations de zone et de carré de 100 km couverts ; `epsg` et `squares` sont **fournis par
+le noyau** d'après `extent.lonlat` de l'inventaire, jamais écrits par le modèle ni par
+l'utilisateur, et journalisés pour le rejeu ; sans emprise lisible, `layout.no_extent`.
+`source_details`, tronquée comme `sources` : pour chaque source `source` (nom du fichier),
+`resolution` (`Distance` ou `null`), `date` (AAAA-MM-JJ ou `null`) et `date_origin`
+(`metadata`, `file` ou `null`) ; la ligne des sources imprimée les reprend (« mnt_5m.tif (5 m,
+fichier du 2025-03-14) »). `sources` ne change pas.
+
+Détails de l'entrée 31, tranchés en party le 2026-11-10, à confirmer par le propriétaire : à
+1 km et 10 km, chaque ligne porte les deux chiffres du kilomètre (format de grille fixe de QGIS,
+une expression constante de l'extension) ; à 100 km, ils vaudraient toujours 00 : aucune
+étiquette, le cadre des carrés suffit ; au-delà de 60 lignes sur un côté de la carte, les
+étiquettes se chevaucheraient et ne sont pas posées. Une emprise sur deux fuseaux, dont des
+points sortent de la zone retenue, finit la liste des carrés par « … ». Le cadre est posé au coin bas droit de la carte ; la zone
+est celle du centre de l'emprise (règle de `utm_epsg`), les carrés ceux que l'emprise touche dans
+cette zone, 12 au plus puis « … ». En-tête centré en haut de page au-dessus du titre, pied centré
+tout en bas, sous les sources (7 pt). Date des métadonnées : publication, sinon révision, sinon
+création (« données du AAAA-MM-JJ ») ; sinon la date du fichier (« fichier du AAAA-MM-JJ ») ; une
+sortie de Cassini (fichier sous le dossier de travail `<projet>.cassini`, réécrit au rejeu) n'a
+pas de date. Résolution en mètres seulement : `null` pour un raster en degrés. Le rejeu d'une
+ligne écrite avant l'entrée 31, sans `source_details`, ne compare pas ce champ ; une ligne qui le
+porte le compare.
+
+**Fait (changement de cap du 2026-11-12, `change-mise-en-evidence-du-resultat-dans-le-pdf`,
+entrée 7.9).** `focus` est **fourni par le noyau** pour un export lancé dans un plan, jamais
+écrit par le modèle, le formulaire ni le client MCP, et caché à tous trois comme `out` ; le
+texte lu par le modèle ne change pas. Le noyau le tire des lignes du plan en cours au journal
+(`core/src/focus.rs`) : `results`, les couches produites par le plan et qu'aucune étape suivante
+ne consomme, dans l'ordre du plan, chacune avec son `label` (le titre de l'export coupé avant un
+complément de lieu final, 60 caractères au plus, pour un seul résultat ; sinon le titre court de
+sa commande, « — » et le nom de sa première couche d'entrée) et, pour un vecteur, son `style`
+(`StyleSpec` `single` magenta, constante du noyau) ; `hidden`, les couches intermédiaires ;
+`frame`, les couches de cadrage (les résultats non vides ; tous vides, les couches de
+l'utilisateur consommées par le plan, `framed_on: "inputs"` ; sans elles, `framed_on:
+"visible_layers"` et le cadrage d'avant) ; `hide_band_labels`, vrai. Le geste l'applique à la
+seule mise en page : résultats en tête de la carte et de la légende, nommés par `label`,
+dessinés par un clone en mémoire stylé (jamais ajouté au projet) ; couches de `hidden` ôtées de
+la carte, de la légende et des sources ; cadre sur `frame` sans `scale` (avec `scale`, le centre
+ne change pas) ; intitulés de bande des rasters ôtés de la légende ; dans la ligne imprimée des
+sources, un résultat est nommé par son `label`. Un résultat raster est posé juste au-dessus du
+premier raster de l'utilisateur, sous ses vecteurs. Un clone qui échoue est dit dans `warnings`.
+Un id absent des couches visibles est ignoré. Les couches du projet gardent nom, style, visibilité et place. `focus` est
+journalisé et relu au rejeu, ses ids liés aux neufs, jamais recalculé ; une ligne qui ne le porte
+pas se rejoue sans lui. Un export hors plan, ou d'un plan sans couche produite, n'en a pas.
 
 ```json fiche
 {"id": "layout.export_pdf", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
@@ -739,8 +809,23 @@ l'impression reste hors du produit.
             "grid": {"type": "union", "required": false, "tag": "kind",
                      "variants": {"degrees": {"interval": {"type": "Angle", "required": true}},
                                   "projected": {"epsg": {"type": "integer", "required": true},
-                                                "interval": {"type": "Distance", "required": true}}}}},
- "result": ["center", "file", "layer_count", "page_count", "scale", "sources", "truncated"],
+                                                "interval": {"type": "Distance", "required": true}},
+                                  "mgrs": {"interval": {"type": "Distance", "required": true},
+                                           "epsg": {"type": "integer", "required": false},
+                                           "squares": {"type": "array", "required": false, "items": "string"}}}},
+            "header": {"type": "string", "required": false},
+            "footer": {"type": "string", "required": false},
+            "focus": {"type": "object", "required": false,
+                      "fields": {"results": {"type": "array", "required": true,
+                                             "items": {"type": "object",
+                                                       "fields": {"layer_id": {"type": "string", "required": true},
+                                                                  "label": {"type": "string", "required": true},
+                                                                  "style": {"type": "StyleSpec", "required": false}}}},
+                                 "hidden": {"type": "array", "required": false, "items": "string"},
+                                 "frame": {"type": "array", "required": false, "items": "string"},
+                                 "framed_on": {"type": "string", "required": true, "enum": ["results", "inputs", "visible_layers"]},
+                                 "hide_band_labels": {"type": "boolean", "required": false}}}},
+ "result": ["center", "file", "layer_count", "page_count", "scale", "source_details", "sources", "truncated", "warnings"],
  "planned_by": "epic 10, entrée 15 (skipped_layers)",
  "planned_result": ["skipped_layers"]}
 ```
@@ -901,12 +986,20 @@ Distance géodésique et azimuts entre deux points, sur l'ellipsoïde WGS84 (Kar
 | `from` | `Point` | oui | EPSG 4326, 326NN ou 327NN | Point de départ. |
 | `to` | `Point` | oui | EPSG 4326, 326NN ou 327NN | Point d'arrivée ; peut être dans un autre système de la liste que `from`. |
 | `unit` | chaîne | non | `deg` (défaut), `gon` | Unité des angles rendus. |
+| `north` | chaîne | non | `true` (défaut), `grid`, `magnetic` | Nord des azimuts : vrai, du quadrillage UTM (gisement) ou magnétique (boussole). |
+| `utm_zone` | entier | non | 1 à 60 | Zone du quadrillage, avec `north: "grid"` seulement ; sans lui (`north` absent, `true` ou `magnetic`), refusé par `geo.zone_unused`. |
+| `date` | chaîne | non | AAAA-MM-JJ | Date de la déclinaison, avec `north: "magnetic"` seulement ; absente, la date du jour (UTC), fixée par le noyau. |
 
 | Résultat | Type | Sens |
 |---|---|---|
 | `distance` | `Distance` | Distance géodésique, toujours en `m`. |
-| `azimuth` | `Angle` | Azimut au départ, de `from` vers `to`, nord vrai, sens horaire. |
+| `azimuth` | `Angle` | Azimut au départ, de `from` vers `to`, depuis le nord employé, sens horaire. |
 | `back_azimuth` | `Angle` | Azimut à l'arrivée, de `to` vers `from`. |
+| `north` | chaîne | Nord employé, recopié de `north` ; absent si `north` l'est. |
+| `convergence` | `Angle` | Convergence des méridiens au départ, dans `unit` ; pour `grid` seulement. |
+| `declination` | `Angle` | Déclinaison magnétique au départ, positive à l'est, dans `unit` ; pour `magnetic` seulement. |
+| `date` | chaîne | Date de la déclinaison (AAAA-MM-JJ), recopiée ou fixée par le noyau ; pour `magnetic` seulement. |
+| `warning` | chaîne | Avertissement en français : date hors de la validité du WMM2025, ou point près d'un pôle magnétique ; absent sinon. |
 
 Distance rendue au millimètre, azimuts au milliardième d'unité, dans [0, 360) degrés ou
 [0, 400) grades ; `back_azimuth` est l'azimut de marche à l'arrivée augmenté d'un demi-tour.
@@ -917,12 +1010,68 @@ deux points confondus, à moins d'un demi-millimètre : l'azimut n'est pas défi
 `coord.out_of_range` (point d'entrée invalide : WGS84 hors de [-90, 90] ou [-180, 180],
 point UTM hors de sa zone, coordonnées non finies).
 
+**Nord de référence (changement de cap du 2026-11-10, epic 10, entrées 28 et 29 ; `true` et `grid` livrés par l'entrée 28, `magnetic` par l'entrée 29).**
+`north` vaut `true` (défaut : nord vrai), `grid` (gisement : nord du quadrillage UTM de `from`,
+ou de la zone `utm_zone` ; convergence des méridiens d'après les formules publiées de Krüger et
+de Karney) ou `magnetic` (azimut magnétique : déclinaison du modèle magnétique mondial WMM2025,
+domaine public, à l'altitude 0 m, à la date `date`, AAAA-MM-JJ ; absente, la date du jour, fixée
+par le noyau et repassée au rejeu). Chaque azimut est corrigé au point où il est mesuré ; le
+gisement est celui de la géodésique, pas celui de la corde sur le plan. Résultats ajoutés :
+`north` (nord employé), `convergence` (`Angle`, au départ, pour `grid`), `declination`
+(`Angle`, au départ, pour `magnetic`), `date` (pour `magnetic`), `warning` (texte : date hors de
+la validité du WMM2025, du 2025-01-01 au 2029-12-31, ou zone que le rapport du WMM déclare peu
+fiable ; le calcul est rendu quand même) ; chacun est absent du résultat quand il ne s'applique
+pas. Erreurs ajoutées : `geo.invalid_date`,
+`geo.date_unused` (`date` sans `north: "magnetic"`), `geo.zone_unused` (`utm_zone` sans
+`north: "grid"`, ou avec `north: "magnetic"`), `coord.out_of_range` hors de la grille UTM pour
+`grid`. L'entrée 28 a livré `north` (`true`, `grid`), `utm_zone` et `convergence` ; l'entrée 29
+`magnetic`, `date`, `declination` et `warning`.
+
+**Gisement (livré par l'entrée 28, `core/src/geodesy.rs`, `tm_convergence`).** Le quadrillage
+est celui de la zone `utm_zone` si elle est donnée, à condition d'être la zone normale du point
+de départ ou une voisine (règle de `coord.convert`) ; sinon la zone de `from` s'il est en UTM,
+sinon sa zone normale. Le contre-azimut est corrigé de la convergence au point d'arrivée, dans le même quadrillage : `to` à plus d'une zone de la zone du quadrillage, ou hors de 80° S – 84° N, est refusé (`coord.out_of_range`, message qui renvoie au nord vrai). La convergence γ (Karney 2011, éq. 23 à 27) est l'angle du nord vrai au
+nord du quadrillage, sens horaire : positive à l'est du méridien central dans l'hémisphère nord,
+négative à l'ouest, de signe opposé au sud. Gisement = azimut vrai − γ au point où il est mesuré.
+`north` absent : résultat identique, octet pour octet, à celui d'avant l'entrée 28 ; `north`
+écrit est recopié au résultat ; `convergence` n'est rendue que pour `grid`. Refus :
+`geo.zone_unused` (`utm_zone` sans `north: "grid"`) ; `coord.out_of_range` (départ hors de 80° S
+– 84° N, zone imposée à plus d'une zone du point).
+**Correction de corde.** Le gisement rendu est celui de la géodésique, pas celui de la corde
+(ΔE, ΔN) sur le plan ; l'écart vaut environ ΔN·(2E₁ + E₂) / (6 k0² R²), E comptés depuis le
+méridien central : pour un segment de 1 km à 300 km du méridien central, au plus 0,76″ (plein
+nord, à 45° N), nul plein est ; il croît avec la longueur et l'éloignement du méridien central.
+
+**Azimut magnétique (livré par l'entrée 29, `core/src/wmm.rs`).** Champ du modèle magnétique
+mondial WMM2025 (NOAA et BGS, données du gouvernement des États-Unis, 17 U.S.C. 403), calculé
+d'après le rapport technique (doi:10.25923/prbc-s316, §1.2) ; coefficients compilés dans le
+binaire du noyau (`core/data/wmm2025/`), aucun fichier lu à l'exécution, rien de téléchargé.
+Déclinaison D au point de mesure, à l'altitude 0 m sur l'ellipsoïde WGS84, positive à l'est.
+**M1** : année décimale = année + (jour de l'année − 1) / nombre de jours de l'année, date à
+0 h UTC. **M2** : toute date grégorienne valide AAAA-MM-JJ est acceptée ; hors du 2025-01-01 au
+2029-12-31, le calcul est rendu avec un `warning` ; une date mal formée ou inexistante
+(`2026-13-01`, `2026-02-30`, `10/05/2026`) est refusée (`geo.invalid_date`). **M3** : à chaque
+point où un azimut est mesuré, `warning` de zone d'ombre si la composante horizontale H est
+sous 2 000 nT, de prudence sous 6 000 nT (seuils du rapport, §1.8) ; plusieurs avertissements
+forment un seul texte. **M4** : la date de l'appelant est gardée ; la date rendue est
+journalisée sous la clé `replay` de la ligne et repassée au rejeu (`CommandSpec::filled_param`) :
+le rejeu d'un azimut magnétique à date du jour est identique des années plus tard ; une ligne
+sans clé `replay` se rejoue telle quelle. **Précision mesurée** : sur les 100 valeurs de test
+publiées, Y et Z à 1e-5 nT, X, H et F à 1e-3 nT, D à 1e-5° de atan2(Y, X) publiés et à 0,005° de la valeur publiée de D (arrondie au
+centième) ; table 3b du
+rapport retrouvée au dernier chiffre, table 3d (« TrueN-to-MagN » 67,9316432316°,
+« GridN-to-MagN » en zone UTM 10 70,8861479117°) à 1e-9°. Azimut magnétique = azimut vrai − D au point où il
+est mesuré : `azimuth` en `from`, `back_azimuth` en `to` ; `declination` est D(`from`).
+
 ```json fiche
 {"id": "geo.distance_azimuth", "status": "faite", "runs_in": "core", "dictated_by_core": false,
  "params": {"from": {"type": "Point", "required": true},
             "to": {"type": "Point", "required": true},
-            "unit": {"type": "string", "required": false, "enum": ["deg", "gon"]}},
- "result": ["distance", "azimuth", "back_azimuth"]}
+            "unit": {"type": "string", "required": false, "enum": ["deg", "gon"]},
+            "north": {"type": "string", "required": false, "enum": ["true", "grid", "magnetic"]},
+            "utm_zone": {"type": "integer", "required": false},
+            "date": {"type": "string", "required": false}},
+ "result": ["distance", "azimuth", "back_azimuth", "north", "convergence", "declination", "date", "warning"]}
 ```
 
 ### `geo.destination_point`
@@ -933,12 +1082,20 @@ de Karney), AD-31.
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
 | `from` | `Point` | oui | EPSG 4326, 326NN ou 327NN | Point de départ. |
-| `azimuth` | `Angle` | oui | nord vrai, sens horaire | Azimut de départ. |
+| `azimuth` | `Angle` | oui | nord choisi (vrai par défaut), sens horaire | Azimut de départ. |
 | `distance` | `Distance` | oui | `m`, `km` | Distance géodésique à parcourir. |
+| `north` | chaîne | non | `true` (défaut), `grid`, `magnetic` | Nord de `azimuth` : vrai, du quadrillage UTM (gisement) ou magnétique (boussole). |
+| `utm_zone` | entier | non | 1 à 60 | Zone du quadrillage, avec `north: "grid"` seulement ; sans lui (`north` absent, `true` ou `magnetic`), refusé par `geo.zone_unused`. |
+| `date` | chaîne | non | AAAA-MM-JJ | Date de la déclinaison, avec `north: "magnetic"` seulement ; absente, la date du jour (UTC), fixée par le noyau. |
 
 | Résultat | Type | Sens |
 |---|---|---|
 | `point` | `Point` | Point d'arrivée, dans la zone UTM de `from` (l'hémisphère suit la latitude), ou en WGS84 si `from` l'est. |
+| `north` | chaîne | Nord employé, recopié de `north` ; absent si `north` l'est. |
+| `convergence` | `Angle` | Convergence des méridiens au départ, dans l'unité de `azimuth` ; pour `grid` seulement. |
+| `declination` | `Angle` | Déclinaison magnétique au départ, positive à l'est, dans l'unité de `azimuth` ; pour `magnetic` seulement. |
+| `date` | chaîne | Date de la déclinaison (AAAA-MM-JJ), recopiée ou fixée par le noyau ; pour `magnetic` seulement. |
+| `warning` | chaîne | Avertissement en français : date hors de la validité du WMM2025, ou départ près d'un pôle magnétique ; absent sinon. |
 
 Un départ UTM donne une arrivée dans la même zone, l'hémisphère suivant la latitude (comme
 `coord.convert`) ; WGS84 au milliardième de degré, UTM au millimètre. Un azimut hors de
@@ -948,12 +1105,69 @@ Un départ UTM donne une arrivée dans la même zone, l'hémisphère suivant la 
 ou de la grille UTM (80° S à 84° N), ou si `from` est invalide (WGS84 hors de [-90, 90] ou
 [-180, 180], point UTM hors de sa zone, coordonnées non finies).
 
+**Nord de référence (changement de cap du 2026-11-10, epic 10, entrées 28 et 29 ; `true` et `grid` livrés par l'entrée 28, `magnetic` par l'entrée 29).**
+`north` vaut `true` (défaut : nord vrai), `grid` (gisement : nord du quadrillage UTM de `from`,
+ou de la zone `utm_zone` ; convergence des méridiens d'après les formules publiées de Krüger et
+de Karney) ou `magnetic` (azimut magnétique : déclinaison du modèle magnétique mondial WMM2025,
+domaine public, à l'altitude 0 m, à la date `date`, AAAA-MM-JJ ; absente, la date du jour, fixée
+par le noyau et repassée au rejeu). `azimuth` en entrée est alors compté depuis le nord choisi. Chaque azimut est corrigé au point où il est mesuré ; le
+gisement est celui de la géodésique, pas celui de la corde sur le plan. Résultats ajoutés :
+`north` (nord employé), `convergence` (`Angle`, au départ, pour `grid`), `declination`
+(`Angle`, au départ, pour `magnetic`), `date` (pour `magnetic`), `warning` (texte : date hors de
+la validité du WMM2025, du 2025-01-01 au 2029-12-31, ou zone que le rapport du WMM déclare peu
+fiable ; le calcul est rendu quand même) ; chacun est absent du résultat quand il ne s'applique
+pas. Erreurs ajoutées : `geo.invalid_date`,
+`geo.date_unused` (`date` sans `north: "magnetic"`), `geo.zone_unused` (`utm_zone` sans
+`north: "grid"`, ou avec `north: "magnetic"`), `coord.out_of_range` hors de la grille UTM pour
+`grid`. L'entrée 28 a livré `north` (`true`, `grid`), `utm_zone` et `convergence` ; l'entrée 29
+`magnetic`, `date`, `declination` et `warning`.
+
+**Gisement (livré par l'entrée 28, `core/src/geodesy.rs`, `tm_convergence`).** Le quadrillage
+est celui de la zone `utm_zone` si elle est donnée, à condition d'être la zone normale du point
+de départ ou une voisine (règle de `coord.convert`) ; sinon la zone de `from` s'il est en UTM,
+sinon sa zone normale. La convergence γ (Karney 2011, éq. 23 à 27) est l'angle du nord vrai au
+nord du quadrillage, sens horaire : positive à l'est du méridien central dans l'hémisphère nord,
+négative à l'ouest, de signe opposé au sud. `azimuth` d'entrée est le gisement ; l'azimut vrai de départ vaut gisement + γ(`from`).
+`north` absent : résultat identique, octet pour octet, à celui d'avant l'entrée 28 ; `north`
+écrit est recopié au résultat ; `convergence` n'est rendue que pour `grid`. Refus :
+`geo.zone_unused` (`utm_zone` sans `north: "grid"`) ; `coord.out_of_range` (départ hors de 80° S
+– 84° N, zone imposée à plus d'une zone du point).
+**Correction de corde.** Le gisement rendu est celui de la géodésique, pas celui de la corde
+(ΔE, ΔN) sur le plan ; l'écart vaut environ ΔN·(2E₁ + E₂) / (6 k0² R²), E comptés depuis le
+méridien central : pour un segment de 1 km à 300 km du méridien central, au plus 0,76″ (plein
+nord, à 45° N), nul plein est ; il croît avec la longueur et l'éloignement du méridien central.
+
+**Azimut magnétique (livré par l'entrée 29, `core/src/wmm.rs`).** Champ du modèle magnétique
+mondial WMM2025 (NOAA et BGS, données du gouvernement des États-Unis, 17 U.S.C. 403), calculé
+d'après le rapport technique (doi:10.25923/prbc-s316, §1.2) ; coefficients compilés dans le
+binaire du noyau (`core/data/wmm2025/`), aucun fichier lu à l'exécution, rien de téléchargé.
+Déclinaison D au point de mesure, à l'altitude 0 m sur l'ellipsoïde WGS84, positive à l'est.
+**M1** : année décimale = année + (jour de l'année − 1) / nombre de jours de l'année, date à
+0 h UTC. **M2** : toute date grégorienne valide AAAA-MM-JJ est acceptée ; hors du 2025-01-01 au
+2029-12-31, le calcul est rendu avec un `warning` ; une date mal formée ou inexistante
+(`2026-13-01`, `2026-02-30`, `10/05/2026`) est refusée (`geo.invalid_date`). **M3** : à chaque
+point où un azimut est mesuré, `warning` de zone d'ombre si la composante horizontale H est
+sous 2 000 nT, de prudence sous 6 000 nT (seuils du rapport, §1.8) ; plusieurs avertissements
+forment un seul texte. **M4** : la date de l'appelant est gardée ; la date rendue est
+journalisée sous la clé `replay` de la ligne et repassée au rejeu (`CommandSpec::filled_param`) :
+le rejeu d'un azimut magnétique à date du jour est identique des années plus tard ; une ligne
+sans clé `replay` se rejoue telle quelle. **Précision mesurée** : sur les 100 valeurs de test
+publiées, Y et Z à 1e-5 nT, X, H et F à 1e-3 nT, D à 1e-5° de atan2(Y, X) publiés et à 0,005° de la valeur publiée de D (arrondie au
+centième) ; table 3b du
+rapport retrouvée au dernier chiffre, table 3d (« TrueN-to-MagN » 67,9316432316°,
+« GridN-to-MagN » en zone UTM 10 70,8861479117°) à 1e-9°. `azimuth` d'entrée est l'azimut magnétique ;
+l'azimut vrai de départ vaut azimut + D(`from`), et l'avertissement de zone ne regarde que
+`from`.
+
 ```json fiche
 {"id": "geo.destination_point", "status": "faite", "runs_in": "core", "dictated_by_core": false,
  "params": {"from": {"type": "Point", "required": true},
             "azimuth": {"type": "Angle", "required": true},
-            "distance": {"type": "Distance", "required": true}},
- "result": ["point"]}
+            "distance": {"type": "Distance", "required": true},
+            "north": {"type": "string", "required": false, "enum": ["true", "grid", "magnetic"]},
+            "utm_zone": {"type": "integer", "required": false},
+            "date": {"type": "string", "required": false}},
+ "result": ["point", "north", "convergence", "declination", "date", "warning"]}
 ```
 
 ### `geo.bearing_intersection`
@@ -1579,8 +1793,9 @@ Résultat : `layer_id`, `name`, `crs`, `feature_count`.
 ### `analysis.area`
 
 Ajoute un champ de surface plane (dans le système projeté de la couche, formule fixe de la
-ligne de table) sur une couche nouvelle (epic 10, entrée 22). Couche en degrés :
-`analysis.crs_not_metric`.
+ligne de table) sur une couche nouvelle (epic 10, entrée 22). Couche en degrés : calcul
+dans le système en mètres choisi par le noyau (`work_epsg`), comme `analysis.buffer`
+(changement de cap du 2026-11-12).
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
@@ -1643,6 +1858,80 @@ un tableur Excel ou CSV, champ en trop).
             "format": {"type": "string", "required": true, "enum": ["gpkg", "shp", "geojson"]},
             "out": {"type": "string", "required": false}},
  "result": ["feature_count", "file", "format"]}
+```
+
+### `data.convert_raster`
+
+Écrit un raster lisible par QGIS (ASCII Grid `.asc`, ERDAS `.img`, JPEG 2000 `.jp2`, GeoTIFF,
+VRT…) en GeoTIFF Float32, sans-donnée -9999, première bande, pour que les commandes du noyau le
+lisent (AD-20) ; l'original est intact (changement de cap du 2026-11-10, epic 10, entrée 30).
+Algorithme retenu au ticket (QGIS 3.44, paramètres vérifiés par la sonde) : `gdal:warpreproject`
+seul, sans système d'arrivée, sans résolution ni emprise imposées, au plus proche voisin, type
+Float32, sans-donnée -9999, bande 1 (`-srcband 1 -dstband 1`), compression DEFLATE. Pas
+`gdal:translate` : il change l'étiquette du sans-donnée sans réécrire les cellules (le -99999
+d'un ASCII Grid de l'IGN deviendrait une altitude), et une chaîne fixe ne choisit pas entre deux
+algorithmes (AD-24). La grille écrite est celle de la source. Le noyau dicte ensuite
+`layer.open_raster` (amendement du 2026-11-05 d'AD-24). Jamais de reprojection (AD-19).
+
+| Paramètre | Type | Oblig. | Unité / valeurs | Sens |
+|---|---|---|---|---|
+| `raster` | `RasterPath` | oui | — | Raster à convertir. |
+| `assign_epsg` | entier | non | — | Système à déclarer, seulement pour une source qui n'en a pas (ASCII Grid sans `.prj`). |
+| `out` | chaîne | non | — | Fourni par le noyau. |
+
+| Résultat | Type | Sens |
+|---|---|---|
+| `file` | chaîne | GeoTIFF écrit. |
+| `epsg` | entier ou `null` | Système du GeoTIFF écrit, s'il en a un. |
+
+Erreurs : `layer.not_found` (fichier absent) ; `layer.invalid_source` (fichier que QGIS ne lit
+pas comme un raster, comme `layer.open_raster`) ; `analysis.bad_params` (`assign_epsg` pour une source qui a déjà un autre
+système) ; `data.unknown_crs` ; `analysis.failed` ; `qgis.cancelled`. Un GeoTIFF sans système
+reste lisible par QGIS mais est refusé ensuite par les commandes du noyau (`dem.no_epsg`) : le
+résumé le dit.
+
+```json fiche
+{"id": "data.convert_raster", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
+ "params": {"raster": {"type": "RasterPath", "required": true},
+            "assign_epsg": {"type": "integer", "required": false},
+            "out": {"type": "string", "required": false}},
+ "result": ["epsg", "file"]}
+```
+
+### `layer.remove`
+
+Retire une couche du projet QGIS ouvert (changement de cap du 2026-11-10). Le fichier de la
+couche n'est ni effacé ni modifié. Une couche déjà absente n'est pas une erreur : le résultat
+est le même. Entrée `project`, sortie `none` (amendement du 2026-11-08 d'AD-24).
+
+| Paramètre | Type | Oblig. | Unité / valeurs | Sens |
+|---|---|---|---|---|
+| `layer_id` | chaîne | oui | — | Couche à retirer du projet. |
+
+Résultat : `layer_id`. Erreurs : `layer.unsaved` — la couche est en mémoire (sans fichier) ou a
+des modifications non enregistrées : le retrait est refusé, la couche reste au projet, intacte
+(changement de cap du 2026-11-10, `change-refus-retrait-couche-non-enregistree`) ;
+`registry.invalid_params` (paramètre absent, champ en trop). Rejoué, un retrait refusé redonne
+le même refus tant que la couche n'est pas enregistrée ; retiré au rejeu (couche enregistrée
+entre-temps, ou couche en mémoire absente d'une session neuve), il diverge à cette étape. Une
+étape suivante qui cite la couche retirée échoue en la nommant, par le code de son propre geste
+(`layer.not_found` pour une analyse, `qgis.layer_missing` pour un geste de style), au plan
+comme au rejeu.
+
+Le geste est `QgsProject.removeMapLayer`, dans l'extension ; il ne touche jamais au fichier
+(principe 6). Le résultat ne pose pas de couche (sortie `none`) : son `layer_id` n'est ni lié
+au rejeu ni compté parmi les couches posées. La commande est rejouée comme toute étape (AD-11),
+jamais sautée : dans la même session, la couche déjà retirée rend le même résultat. Rejouer
+dans la même session une étape qui a lu la couche avant son retrait diverge à cette étape, en
+la nommant (la couche n'est plus au projet) ; en session neuve, le rejeu est identique. Non
+dictée : offerte au modèle, au client MCP et au formulaire. Livrée par l'entrée 27 de l'epic 10
+(`core/src/commands/layer_remove.rs`, `qgis-plugin/cassini_qgis/layer_remove.py`, ligne de la
+table fermée de `qgis-plugin/cassini_qgis/delegated.py`).
+
+```json fiche
+{"id": "layer.remove", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
+ "params": {"layer_id": {"type": "string", "required": true}},
+ "result": ["layer_id"]}
 ```
 
 ### `analysis.nearest`
@@ -1733,7 +2022,8 @@ Compte et somme par valeur d'un champ de catégorie (epic 10, entrée 11). Chaqu
 ### `analysis.sum_line_lengths`
 
 Longueur des lignes contenues dans chaque polygone (epic 10, entrée 11). Couche en degrés :
-`analysis.crs_not_metric`.
+calcul dans le système en mètres choisi par le noyau (`work_epsg`), comme `analysis.buffer`
+(changement de cap du 2026-11-12).
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|

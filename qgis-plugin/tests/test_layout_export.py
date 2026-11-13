@@ -27,7 +27,7 @@ class FakeBackend:
         self.frame = frame  # emprise de la carte de mise en page ; None : voir `export_pdf`
         self.crs = crs
         self.grid_frame = grid_frame  # cadre de la carte dans le système de la grille
-        self.known = {2154, 4326, 32631}
+        self.known = {2154, 4326, 32631, 32632}
         self.exported = None
         self.scale = "jamais passée"
         self.center_asked = []
@@ -67,6 +67,25 @@ class FakeBackend:
     def is_vector(self, layer):
         return not layer.source.lower().endswith((".tif", ".tiff", ".asc", ".vrt"))
 
+    # Détail des sources (epic 10, entrée 31) : rien par défaut, comme QGIS qui ne sait pas.
+    project_folder, project_stem = "", ""
+    resolutions, metadata_dates, file_dates = {}, {}, {}
+
+    def project_dir(self):
+        return self.project_folder
+
+    def project_name(self):
+        return self.project_stem
+
+    def resolution_of(self, layer):
+        return self.resolutions.get(layer.lid)
+
+    def metadata_date(self, layer):
+        return self.metadata_dates.get(layer.lid)
+
+    def file_date(self, path):
+        return self.file_dates.get(path)
+
     def export_pdf(self, layers, title, sources_text, out, authid, box, **kwargs):
         self.exported = (layers, title, sources_text, out, authid, box)
         self.kwargs = kwargs
@@ -90,7 +109,10 @@ class FakeBackend:
             # Cadre à l'échelle : 2 km de côté autour du centre reçu ; sinon le rectangle reçu.
             cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
             frame = (cx - 1000.0, cy - 1000.0, cx + 1000.0, cy + 1000.0) if scale is not None else box
-        return {"items": list(layout_export.EXPECTED_ITEMS), "scale": held, "extent": frame}
+        done = {"items": list(layout_export.EXPECTED_ITEMS), "scale": held, "extent": frame}
+        if getattr(self, "warnings", None):
+            done["warnings"] = list(self.warnings)
+        return done
 
 
 def run(backend, params):
@@ -124,7 +146,11 @@ class LayoutExportTest(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual(
             result,
-            {"file": self.out, "page_count": 1, "layer_count": 2, "sources": ["gares.gpkg", "communes.shp"], "truncated": False},
+            {"file": self.out, "page_count": 1, "layer_count": 2, "sources": ["gares.gpkg", "communes.shp"], "truncated": False,
+             "source_details": [
+                 {"source": "gares.gpkg", "resolution": None, "date": None, "date_origin": None},
+                 {"source": "communes.shp", "resolution": None, "date": None, "date_origin": None},
+             ]},
         )
         with open(self.out, "rb") as f:
             self.assertTrue(f.read().startswith(b"%PDF"))
@@ -428,7 +454,7 @@ class LayoutExportTest(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual(backend.kwargs, {})
         self.assertEqual(layout_export.page_dimensions(None), (297.0, 210.0))
-        self.assertEqual(set(result), {"file", "page_count", "layer_count", "sources", "truncated"})
+        self.assertEqual(set(result), {"file", "page_count", "layer_count", "sources", "truncated", "source_details"})
         for extra in ({"page_size": None}, {"orientation": None}, {"grid": None}):
             backend = FakeBackend(TWO)
             (_, error), _ = run(backend, dict({"title": "Carte", "out": self.out}, **extra))
@@ -632,6 +658,304 @@ class LegendFitTest(unittest.TestCase):
             layout_export.choose_legend_step(measure, 72, 173), layout_export.LEGEND_STEPS[-1]
         )
         self.assertEqual(layout_export.LEGEND_STEPS[-1], (0.4, 3, True))
+
+
+
+class MgrsHeaderSourcesTest(unittest.TestCase):
+    """Epic 10, entrée 31 : carroyage MGRS, en-tête et pied de page, sources détaillées."""
+
+    MGRS = {"kind": "mgrs", "interval": {"value": 1, "unit": "km"}, "epsg": 32632, "squares": ["32T KR", "32T LR"]}
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.out = os.path.join(self.dir.name, "3-layout.export_pdf.pdf")
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def params(self, **extra):
+        return dict({"title": "Secteur de recherche", "out": self.out}, **extra)
+
+    def test_the_mgrs_grid_goes_to_the_backend_with_the_core_squares(self):
+        backend = FakeBackend(TWO)
+        (result, error), _ = run(backend, self.params(grid=self.MGRS))
+        self.assertIsNone(error)
+        self.assertEqual(
+            backend.kwargs["grid"],
+            {"authid": "EPSG:32632", "interval": 1000.0, "projected": True, "mgrs": True,
+             "squares": ["32T KR", "32T LR"]},
+        )
+        # 10 km et 100 km en mètres.
+        for value, unit, metres in ((10, "km", 10000.0), (100000, "m", 100000.0)):
+            backend = FakeBackend(TWO)
+            grid = dict(self.MGRS, interval={"value": value, "unit": unit})
+            (_, error), _ = run(backend, self.params(grid=grid))
+            self.assertIsNone(error)
+            self.assertEqual(backend.kwargs["grid"]["interval"], metres)
+
+    def test_an_mgrs_grid_without_the_core_fields_or_at_another_interval_is_refused(self):
+        bad = [
+            {"kind": "mgrs", "interval": {"value": 1, "unit": "km"}},
+            dict(self.MGRS, squares="32T LR"),
+            dict(self.MGRS, epsg="32632"),
+            dict(self.MGRS, interval={"value": 5, "unit": "km"}),
+            dict(self.MGRS, zone="32T"),
+        ]
+        for grid in bad:
+            backend = FakeBackend(TWO)
+            (result, error), _ = run(backend, self.params(grid=grid))
+            self.assertIsNone(result, grid)
+            self.assertEqual(error.code, "layout.bad_params", grid)
+            self.assertIsNone(backend.exported)
+            self.assertFalse(os.path.exists(self.out))
+
+    def test_the_mgrs_labels_are_a_fixed_format(self):
+        # Une expression constante de QGIS, les deux chiffres du kilomètre ; aucun calcul MGRS.
+        self.assertIn("@grid_number", layout_export.MGRS_LABEL_EXPRESSION)
+        self.assertIn("% 100", layout_export.MGRS_LABEL_EXPRESSION)
+        for word in ("square", "zone", "letter"):
+            self.assertNotIn(word, layout_export.MGRS_LABEL_EXPRESSION)
+
+    def test_header_and_footer_are_passed_as_written(self):
+        backend = FakeBackend(TWO)
+        (_, error), _ = run(backend, self.params(header="Document de travail", footer="Bureau Lac et Monts — confidentiel"))
+        self.assertIsNone(error)
+        self.assertEqual(backend.kwargs, {"header": "Document de travail", "footer": "Bureau Lac et Monts — confidentiel"})
+        backend = FakeBackend(TWO)
+        (_, error), _ = run(backend, self.params(header="  Pièce n° 4  "))
+        self.assertEqual(backend.kwargs["header"], "  Pièce n° 4  ")
+
+    def test_a_long_or_multiline_margin_text_is_refused(self):
+        for extra in ({"header": "x" * 121}, {"footer": "deux\nlignes"}, {"header": "  "}, {"footer": 3},
+                      {"header": "a\u2028b"}, {"footer": "a\tb"}):
+            backend = FakeBackend(TWO)
+            (result, error), _ = run(backend, self.params(**extra))
+            self.assertEqual(error.code, "layout.bad_params", extra)
+            self.assertIsNone(backend.exported)
+        backend = FakeBackend(TWO)
+        (_, error), _ = run(backend, self.params(header="é" * 120))
+        self.assertIsNone(error)
+
+    def test_source_details_give_resolution_and_date_with_their_origin(self):
+        project = os.path.join(self.dir.name, "projet")
+        layers = [
+            FakeLayer("m", os.path.join(project, "mnt", "mnt_5m.tif"), (0.0, 0.0, 10.0, 10.0)),
+            FakeLayer("c", os.path.join(project, "communes.gpkg") + "|layername=communes", (0.0, 0.0, 5.0, 5.0)),
+            FakeLayer("p", os.path.join(project, "projet.cassini", "1-terrain.slope.tif"), (0.0, 0.0, 10.0, 10.0)),
+            FakeLayer("z", os.path.join(project, "zonage.shp"), (0.0, 0.0, 5.0, 5.0)),
+        ]
+        backend = FakeBackend(layers)
+        backend.project_folder, backend.project_stem = project, "projet"
+        backend.resolutions = {"m": 5.0, "p": 5.0}
+        backend.metadata_dates = {"z": "2024-05-01"}
+        backend.file_dates = {
+            os.path.join(project, "mnt", "mnt_5m.tif"): "2025-03-14",
+            os.path.join(project, "communes.gpkg"): "2026-10-15",
+            os.path.join(project, "projet.cassini", "1-terrain.slope.tif"): "2026-11-10",
+            os.path.join(project, "zonage.shp"): "2026-01-02",
+        }
+        (result, error), _ = run(backend, self.params())
+        self.assertIsNone(error)
+        self.assertEqual(result["sources"], ["mnt_5m.tif", "communes.gpkg", "1-terrain.slope.tif", "zonage.shp"])
+        self.assertEqual(result["source_details"], [
+            {"source": "mnt_5m.tif", "resolution": {"value": 5.0, "unit": "m"}, "date": "2025-03-14", "date_origin": "file"},
+            {"source": "communes.gpkg", "resolution": None, "date": "2026-10-15", "date_origin": "file"},
+            # Sortie de Cassini, réécrite au rejeu : pas de date (P3).
+            {"source": "1-terrain.slope.tif", "resolution": {"value": 5.0, "unit": "m"}, "date": None, "date_origin": None},
+            # Les métadonnées priment sur la date du fichier.
+            {"source": "zonage.shp", "resolution": None, "date": "2024-05-01", "date_origin": "metadata"},
+        ])
+        sources_text = backend.exported[2]
+        self.assertEqual(
+            sources_text,
+            "Sources : mnt_5m.tif (5 m, fichier du 2025-03-14), communes.gpkg (fichier du 2026-10-15), "
+            "1-terrain.slope.tif (5 m), zonage.shp (données du 2024-05-01)",
+        )
+        self.assertNotIn(self.dir.name, sources_text)
+
+    def test_a_csv_uri_gives_its_decoded_file_path(self):
+        self.assertEqual(
+            layout_export._file_path("file:///C:/Mes%20donn%C3%A9es/gares.csv?type=csv&xField=X"),
+            "C:/Mes données/gares.csv",
+        )
+        self.assertEqual(layout_export._file_path("file:///home/x/gares.csv?type=csv"), "/home/x/gares.csv")
+        self.assertEqual(layout_export._file_path("/d/communes.gpkg|layername=communes"), "/d/communes.gpkg")
+        self.assertIsNone(layout_export._file_path("memory?geometry=Point"))
+
+    def test_a_decimal_resolution_is_written_with_a_comma(self):
+        self.assertEqual(layout_export._metres_text(0.5), "0,5 m")
+        self.assertEqual(layout_export._metres_text(25.0), "25 m")
+        self.assertEqual(layout_export._metres_text(1.25), "1,25 m")
+
+
+# ---- Entrée 7.9 : le résultat d'un plan mis en évidence ----
+
+STYLE = {"kind": "single", "fill": "#c2187a", "stroke": "#3d0026", "width_mm": 0.5}
+
+
+def plan_layers():
+    """Projet après le plan de démo : couches de l'utilisateur, trois intermédiaires, le résultat."""
+    return [
+        FakeLayer("A", "/p/p.cassini/1-analysis.select_by_attribute.gpkg", (0.0, 0.0, 100.0, 100.0)),
+        FakeLayer("B", "/p/p.cassini/2-analysis.buffer.gpkg", (10.0, 10.0, 30.0, 30.0)),
+        FakeLayer("C", "/p/p.cassini/3-analysis.intersect.gpkg", (0.0, 0.0, 90.0, 90.0)),
+        FakeLayer("D", "/p/p.cassini/4-analysis.intersect.gpkg", (20.0, 20.0, 40.0, 30.0)),
+        FakeLayer("plu", "/d/plu.gpkg", (0.0, 0.0, 1000.0, 1000.0)),
+        FakeLayer("routes", "/d/routes.shp", (0.0, 0.0, 1000.0, 1000.0)),
+    ]
+
+
+def demo_focus(**changes):
+    focus = {"results": [{"layer_id": "D", "label": "Parcelles constructibles", "style": dict(STYLE)}],
+             "hidden": ["A", "B", "C"], "frame": ["D"], "framed_on": "results", "hide_band_labels": True}
+    focus.update(changes)
+    return focus
+
+
+class FocusTest(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.out = os.path.join(self.dir.name, "5-layout.export_pdf.pdf")
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def test_the_result_leads_the_intermediates_are_gone_and_the_map_is_framed_on_it(self):
+        backend = FakeBackend(plan_layers())
+        before = [(layer.lid, layer.source, layer.box) for layer in backend.layers]
+        (result, error), _ = run(backend, {"title": "Carte", "out": self.out, "focus": demo_focus()})
+        self.assertIsNone(error)
+        layers, _, sources_text, _, _, box = backend.exported
+        # Résultat en tête, intermédiaires ôtés de la carte, de la légende et des sources.
+        self.assertEqual([layer.lid for layer in layers], ["D", "plu", "routes"])
+        self.assertEqual(result["layer_count"], 3)
+        self.assertEqual(result["sources"], ["4-analysis.intersect.gpkg", "plu.gpkg", "routes.shp"])
+        self.assertNotIn("buffer", sources_text)
+        # Dans la ligne imprimée, le résultat est nommé par son libellé, jamais par son fichier.
+        self.assertEqual(sources_text, "Sources : Parcelles constructibles, plu.gpkg, routes.shp")
+        self.assertNotIn("warnings", result)
+        # Cadre : le résultat seul (20, 20, 40, 30), marge de 5 % du plus grand côté (20 → 1).
+        self.assertEqual(box, (19.0, 19.0, 41.0, 31.0))
+        # Le fond reçoit le résultat, son libellé et son style normalisé, pour la mise en page seule.
+        focus = backend.kwargs["focus"]
+        self.assertTrue(focus["hide_band_labels"])
+        (layer, label, style), = focus["results"]
+        self.assertIs(layer, layers[0])
+        self.assertEqual(label, "Parcelles constructibles")
+        self.assertEqual(style["kind"], "single")
+        self.assertEqual(style["symbol"]["fill"], "#c2187a")
+        # Les couches du projet sont intactes : mêmes couches, même ordre, mêmes sources.
+        self.assertEqual([(layer.lid, layer.source, layer.box) for layer in backend.layers], before)
+
+    def test_without_focus_the_backend_is_called_as_before(self):
+        backend = FakeBackend(plan_layers())
+        (result, error), _ = run(backend, {"title": "Carte", "out": self.out})
+        self.assertIsNone(error)
+        self.assertNotIn("focus", backend.kwargs)
+        self.assertEqual(backend.kwargs, {})
+        self.assertEqual([layer.lid for layer in backend.exported[0]], ["A", "B", "C", "D", "plu", "routes"])
+        self.assertEqual(result["layer_count"], 6)
+
+    def test_an_absent_or_unchecked_layer_is_ignored(self):
+        layers = [layer for layer in plan_layers() if layer.lid not in ("D", "B")]
+        backend = FakeBackend(layers)
+        (result, error), _ = run(backend, {"title": "Carte", "out": self.out, "focus": demo_focus()})
+        self.assertIsNone(error)
+        self.assertEqual([layer.lid for layer in backend.exported[0]], ["plu", "routes"])
+        self.assertEqual(backend.kwargs["focus"]["results"], [])
+        # Aucune couche du cadre visible : le cadrage d'avant (les vecteurs visibles).
+        self.assertEqual(backend.exported[5], (-50.0, -50.0, 1050.0, 1050.0))
+
+    def test_an_empty_result_is_framed_on_the_input_layers(self):
+        layers = plan_layers()[:3] + [FakeLayer("D", "/p/p.cassini/4-analysis.intersect.gpkg", None)] + [
+            FakeLayer("plu", "/d/plu.gpkg", (0.0, 0.0, 200.0, 100.0)),
+            FakeLayer("routes", "/d/routes.shp", (0.0, 0.0, 1000.0, 1000.0)),
+        ]
+        backend = FakeBackend(layers)
+        focus = demo_focus(frame=["plu"], framed_on="inputs")
+        (_, error), _ = run(backend, {"title": "Carte", "out": self.out, "focus": focus})
+        self.assertIsNone(error)
+        self.assertEqual(backend.exported[5], (-10.0, -10.0, 210.0, 110.0))
+
+    def test_several_results_lead_in_the_order_given(self):
+        backend = FakeBackend(plan_layers())
+        focus = demo_focus(results=[
+            {"layer_id": "B", "label": "Tampon — gares", "style": dict(STYLE)},
+            {"layer_id": "D", "label": "Intersection — parcelles"},
+        ], hidden=["A", "C"], frame=["B", "D"])
+        (_, error), _ = run(backend, {"title": "Carte", "out": self.out, "focus": focus})
+        self.assertIsNone(error)
+        self.assertEqual([layer.lid for layer in backend.exported[0]], ["B", "D", "plu", "routes"])
+        labels = [(layer.lid, label, style is None) for layer, label, style in backend.kwargs["focus"]["results"]]
+        self.assertEqual(labels, [("B", "Tampon — gares", False), ("D", "Intersection — parcelles", True)])
+        self.assertEqual(backend.exported[5], (8.5, 8.5, 41.5, 31.5))
+
+    def test_with_a_scale_the_centre_does_not_move(self):
+        backend = FakeBackend(plan_layers(), center=(500.0, 500.0))
+        params = {"title": "Carte", "out": self.out, "scale": 25000, "focus": demo_focus()}
+        (result, error), _ = run(backend, params)
+        self.assertIsNone(error)
+        self.assertEqual(result["center"], {"x": 500.0, "y": 500.0, "epsg": 2154})
+        self.assertEqual(backend.exported[5], (499.0, 499.0, 501.0, 501.0))
+
+    def test_a_raster_result_sits_above_the_user_rasters_below_the_vectors(self):
+        layers = plan_layers() + [
+            FakeLayer("R", "/p/p.cassini/6-terrain.slope.tif", (0.0, 0.0, 50.0, 50.0)),
+            FakeLayer("mnt", "/d/mnt.tif", (0.0, 0.0, 2000.0, 2000.0)),
+        ]
+        backend = FakeBackend(layers)
+        focus = demo_focus(results=[{"layer_id": "R", "label": "Pentes"},
+                                    {"layer_id": "D", "label": "Parcelles", "style": dict(STYLE)}])
+        (_, error), _ = run(backend, {"title": "Carte", "out": self.out, "focus": focus})
+        self.assertIsNone(error)
+        self.assertEqual([layer.lid for layer in backend.exported[0]], ["D", "plu", "routes", "R", "mnt"])
+        # Sans raster de l'utilisateur, le résultat raster va en bas.
+        backend = FakeBackend(layers[:-1])
+        (_, error), _ = run(backend, {"title": "Carte", "out": self.out, "focus": focus})
+        self.assertEqual([layer.lid for layer in backend.exported[0]], ["D", "plu", "routes", "R"])
+
+    def test_the_former_framing_counts_the_layers_before_hiding(self):
+        # Rien du cadre n'est visible : le cadrage d'avant 7.9, intermédiaires compris.
+        layers = [FakeLayer("A", "/p/p.cassini/1-a.gpkg", (-100.0, -100.0, 100.0, 100.0)),
+                  FakeLayer("plu", "/d/plu.gpkg", (0.0, 0.0, 10.0, 10.0))]
+        backend = FakeBackend(layers)
+        focus = demo_focus(hidden=["A"], frame=[], framed_on="visible_layers")
+        (_, error), _ = run(backend, {"title": "Carte", "out": self.out, "focus": focus})
+        self.assertIsNone(error)
+        self.assertEqual([layer.lid for layer in backend.exported[0]], ["plu"])
+        self.assertEqual(backend.exported[5], (-110.0, -110.0, 110.0, 110.0))
+
+    def test_a_clone_that_fails_is_reported_to_the_core(self):
+        backend = FakeBackend(plan_layers())
+        backend.warnings = [layout_export.CLONE_FAILED % "Parcelles constructibles"]
+        (result, error), _ = run(backend, {"title": "Carte", "out": self.out, "focus": demo_focus()})
+        self.assertIsNone(error)
+        self.assertEqual(result["warnings"], [layout_export.CLONE_FAILED % "Parcelles constructibles"])
+
+    def test_an_invalid_focus_is_refused_without_file(self):
+        for bad in (
+            "D",
+            [],
+            {"hidden": [], "framed_on": "results"},
+            demo_focus(framed_on="partout"),
+            demo_focus(hidden="A"),
+            demo_focus(frame=[3]),
+            demo_focus(hide_band_labels="oui"),
+            demo_focus(colour="red"),
+            demo_focus(results=[{"layer_id": "D"}]),
+            demo_focus(results=[{"layer_id": "D", "label": "  "}]),
+            demo_focus(results=[{"layer_id": "D", "label": "x", "n": 1}]),
+            demo_focus(results=[{"layer_id": "D", "label": "x", "style": {"kind": "single"}}]),
+            demo_focus(results=[{"layer_id": "D", "label": "x", "style": {"kind": "hillshade"}}]),
+            demo_focus(results="D"),
+            demo_focus(results=[{"layer_id": "D", "label": "x"}, {"layer_id": "D", "label": "y"}]),
+        ):
+            backend = FakeBackend(plan_layers())
+            (result, error), _ = run(backend, {"title": "Carte", "out": self.out, "focus": bad})
+            self.assertIsNone(result, bad)
+            self.assertEqual(error.code, "layout.bad_params", bad)
+            self.assertIsNone(backend.exported)
+        self.assertFalse(os.path.exists(self.out))
 
 
 if __name__ == "__main__":

@@ -825,6 +825,32 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-second-jeu-de-test-reel-annecy-pret-pour-la-demonstration-plan.md`
   summary: Une couche de points en EPSG:4326, le cas d'un CSV de gares en latitude et longitude, ne passe pas un tampon (`analysis.crs_not_metric`) tant que `data.reproject` reste seulement planifiée ; la phrase de démo transposée à Annecy échoue pour cette raison.
   evidence: Sonde 11.18, phrases 1 et 10, couche `gares` lue depuis `gares-74-4326.csv`. Le jeu de Villeneuve donne ses gares en 2154 et ne montrait pas ce cas.
+  status: résolu par 9.16, 2026-11-12 (`epic-facade-qgis/story-tampon-sur-une-couche-en-degres-calcul-dans-un-systeme-en-me-plan.md`)
+  resolution: Changement de cap `change-distance-en-metres-sur-couche-en-degres`. Le noyau lit l'inventaire avant l'ordre et, pour une couche en degrés, remplit `work_epsg` (`core/src/work_crs.rs`) : système du projet s'il est en mètres, sinon le fuseau UTM de l'étendue du projet, sinon `analysis.crs_not_metric` avant tout ordre. Avec `work_epsg`, la ligne `analysis.buffer` de l'extension reprojette vers lui (`native:reprojectlayer`, temporaire) puis fait le tampon ; sans lui (couche en mètres, amendement RA06), le tampon seul, comme avant. Aucune étape ajoutée au plan ; `work_epsg` journalisé et relu au rejeu.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-facade-qgis/story-tampon-sur-une-couche-en-degres-calcul-dans-un-systeme-en-me-plan.md`
+  summary: La version de chaîne d'une ligne de la table fermée (AD-11, resserrement du 2026-10-18) n'est toujours pas construite : ni la table de l'extension ni `session.hello` n'en portent. La ligne `analysis.buffer` passe à deux algorithmes sans que le rejeu puisse le signaler.
+  evidence: Plan 9.16, décision du propriétaire du 2026-11-12 : ne pas la construire ici, ce qui changerait le protocole. La fidélité du rejeu tient à `work_epsg` journalisé (une ligne qui ne le porte pas, ancienne ou sur une couche en mètres, se rejoue en tampon seul, comme à l'origine). À signaler au propriétaire ; à construire avec la prochaine ligne qui change de chaîne (10.32, 10.33).
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-facade-qgis/story-tampon-sur-une-couche-en-degres-calcul-dans-un-systeme-en-me-plan.md`
+  summary: Une couche en degrés qui porte des collections de géométries (`GeometryCollection` dans une couche de lignes, par exemple) échoue à la reprojection qui ouvre le tampon ; le message doit être clair. À traiter si un utilisateur le rencontre.
+  evidence: Recette 9.16 du 2026-11-12, RA06 : `cours-d-eau-74.gpkg` (en mètres) porte 6 `GeometryCollection` sur 1 105 entités, restes du découpage sur le 74 ; `native:reprojectlayer` vers un temporaire les refuse (« Could not add feature with geometry type GeometryCollection to layer of type MultiLineString ») et l'étape rend `analysis.failed` (« L'analyse a échoué dans QGIS. »). Réglé pour une couche en mètres par l'amendement RA06 (pas de reprojection) ; reste possible pour une couche en degrés.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-facade-qgis/story-tampon-sur-une-couche-en-degres-calcul-dans-un-systeme-en-me-plan.md`
+  summary: Annuler un tampon pendant la lecture cachée de l'inventaire (avant l'ordre du tampon) répond `request.not_cancellable` en nommant `project.inventory`, commande que l'utilisateur n'a pas lancée.
+  evidence: Relecture de 9.16 (2026-11-12). `project.inventory` est déclarée non annulable ; la lecture dure quelques centièmes de seconde sur Annecy (faits gardés par couche), mais jusqu'à 23 s à la première lecture d'un gros projet. À traiter : laisser passer l'annulation à l'ordre du tampon, ou nommer la commande en cours.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-facade-qgis/story-tampon-sur-une-couche-en-degres-calcul-dans-un-systeme-en-me-plan.md`
+  summary: Le client MCP lit toujours, dans la description de `analysis.buffer`, « La couche d'entrée doit être dans un système de coordonnées en mètres », alors qu'une couche en degrés passe désormais.
+  evidence: Décision du propriétaire du 2026-11-12 : le texte lu par le modèle ne change pas (le modèle a été entraîné dessus) ; l'outil MCP reprend la même description. Le catalogue et la fiche disent le comportement réel. À reprendre au prochain ré-entraînement, ou par une description propre au MCP.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-facade-qgis/story-tampon-sur-une-couche-en-degres-calcul-dans-un-systeme-en-me-plan.md`
+  summary: Une couche en mètres dans un Mercator mondial (EPSG:3857 et voisins) est toujours tamponnée dans ce système, où 500 m n'en couvrent qu'environ 350 à 46° N.
+  evidence: Comportement d'avant 9.16, gardé par l'amendement RA06 (on ne reprojette que les couches en degrés). Le noyau écarte déjà ces systèmes comme système de calcul d'une couche en degrés (`work_crs::GLOBAL_MERCATOR`) ; pour une couche en mètres, il faudrait remplir `work_epsg` avec le fuseau UTM, ce que la règle actuelle exclut.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-facade-qgis/story-tampon-sur-une-couche-en-degres-calcul-dans-un-systeme-en-me-plan.md`
+  summary: Le fuseau UTM retenu pour une couche en degrés dans un projet en degrés vient de l'étendue du projet, pas de celle de la couche ; un projet large (plusieurs fuseaux) refuse donc une couche locale.
+  evidence: L'inventaire ne porte pas l'étendue de chaque couche (changement de cap §3.2) ; pour une couche à l'échelle d'une commune ou d'un département dans un projet de même taille, le résultat est le même. À reprendre si l'inventaire gagne l'étendue par couche.
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-second-jeu-de-test-reel-annecy-pret-pour-la-demonstration-plan.md`
   summary: Sur le projet d'Annecy (10 couches, dont BD TOPO aux dizaines de champs), la composition prend 30 à 35 s par phrase sur GPU une fois les communes ramenées au 74 (37 à 60 s au premier passage), contre environ 14 s sur Villeneuve ; l'exigence est de moins de 30 s.
@@ -920,3 +946,220 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `plan-memoire-entrainement.md`
   summary: Deux pistes d'accélération de l'entraînement reportées par le propriétaire le 2026-11-09 : (a) lot 2 avec accumulation 8 (même lot effectif de 16), à garder seulement s'il reste sous 8 Go sur l'échantillon « longs d'abord » et s'il est plus rapide ; (b) le coût fixe d'environ 10 min autour de l'entraînement (garder la base GGUF f16 et Q4_K_M convertie, ne pas reconstruire `llama-server` quand seul le chemin du venv change, `llama-completion` sur CUDA pour l'essai final, caches de compilation d'Unsloth et de torch hors de `/tmp`).
   evidence: Mesure partielle avant le report : lot 2 sur les exemples les plus longs, 28 s par pas sur les 10 premiers (contre 19 s en lot 1, compilation comprise), pic 5,89 Gio : plus lent. Dans `regroupe-11-23c`, `llama-server` a été reconstruit (6,5 min) parce que le chemin de nvcc avait changé, et la conversion puis la quantification de la base ont coûté 1 min 40. Une ébauche du code des deux pistes est gardée hors dépôt, non relue : `~/cassini-entrainement/pipeline-differe-memoire.py`.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-retirer-une-couche-du-projet-layer-remove-plan.md`
+  summary: décision du propriétaire — `layer.remove` sur une couche en mémoire (son contenu est perdu sans recours) ou en cours d'édition (modifications non enregistrées perdues) : refuser par un code nommé, prévenir dans le plan, ou laisser faire comme aujourd'hui.
+  evidence: `QgsProject.removeMapLayer` détruit la couche ; la fiche du 2026-11-10 n'admet aucune erreur propre. Cassini n'ouvre ses couches qu'en lecture seule et écrit ses résultats en fichiers : le cas vient d'une couche créée ou éditée à la main.
+  status: close, 2026-11-10, entrée 27 de l'epic 10 (`plan-10-27-refus-retrait-couche-non-enregistree.md`)
+  resolution: Refus par `layer.unsaved` (changement de cap `change-refus-retrait-couche-non-enregistree`, approuvé le 2026-11-10) : la couche en mémoire ou en édition modifiée reste au projet, intacte ; sonde QGIS 37/37.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-retirer-une-couche-du-projet-layer-remove-plan.md`
+  summary: `check_plan` admet `step:k.layer_id` d'une étape `layer.remove` (sortie `none`) : l'enchaînement sur une couche retirée n'échoue qu'à l'exécution, par `layer.not_found`.
+  evidence: le schéma de sortie de `layer.remove` porte `layer_id` ; une règle sur les sorties `none` toucherait aussi `map.graduated_style`, dont `step:k.layer_id` désigne une couche existante : décision d'architecture.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-retirer-une-couche-du-projet-layer-remove-plan.md`
+  summary: famille `retrait_couche` à compléter avant le prochain entraînement groupé, avec le propriétaire : retrait d'un raster (« retire le MNT du projet »), de plusieurs couches (une étape par couche), verbe nu sans « du projet » ni « de la carte ».
+  evidence: la famille tire des couches vecteur seulement et toujours avec « du projet » ou « de la carte » ; le modèle n'a aucun exemple de ces formes.
+  status: close, 2026-11-10, générateur après les quatre causes (`plan-generateur-apres-quatre-causes.md`)
+  resolution: `retrait_couche` gagne le raster, plusieurs couches (une étape par couche) et le verbe seul → question ; poids 3 → 6, décision du propriétaire du 2026-11-10.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-vue-triee-de-l-inventaire-d-un-gros-projet-index-reduit-et-c-plan.md`
+  summary: Pour 5.48 — sur le vrai projet de 63 couches, des mots communs de la demande (« carte », « parcelle », « pdf », « calcule ») désignent par une valeur des couches sans rapport, qui remplissent le budget des détails avant la couche utile (la phrase de démo ne détaille pas le zonage du PLUi, désigné seulement par la valeur `.pdf`) ; et « PLU » ne trouve pas « PLUi ».
+  evidence: mesure du 2026-11-10 hors dépôt (sorted_view sur l'inventaire réel) : phrase de démo → adresse_ban, bassin_versant_topographique, lien_adresse_vers_bdtopo, noeud_hydrographique, surface_hydrographique ; ZONE_URBA reste dans l'index seul. Pistes à mesurer en 48 : compter le nombre de mots trouvés, écarter les valeurs comme désignation de couche quand elles désignent trop de couches, passer à la couche suivante au lieu de s'arrêter, redemande élargie (point 5).
+  status: close, 2026-11-10, entrée 48 (`epic-agent-et-mcp/story-vue-triee-branchee-a-la-composition-cache-place-a-la-fin-de-plan.md`)
+  resolution: Règle générique : un mot compte une fois par couche, priorité au nombre de mots qui désignent par le nom, puis au nombre de mots, puis aux champs ; un sigle en capitales trouve un mot qu'il commence, d'un signe de plus (« PLU » → « PLUi »). Mesuré sur l'inventaire réel pris dans QGIS : la phrase de démo détaille ZONE_URBA ; « bâtiments par commune » détaille batiment et commune. Une couche ratée par le tri relève de la redemande élargie.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-vue-triee-de-l-inventaire-d-un-gros-projet-index-reduit-et-c-plan.md`
+  summary: Pour 5.48 — l'arrêt à la première couche qui ne tient pas peut priver les rasters (dernière priorité, petits) et laisser du budget libre ; une demande qui ne désigne rien ne détaille que les rasters.
+  evidence: règle « on s'arrête au budget » du changement de cap, appliquée à la lettre par 5.46 et figée par le test the_details_stop_at_the_first_layer_that_does_not_fit ; à trancher sur les mesures de 48 (seuils déjà « à revoir en 48 »).
+  status: close, 2026-11-10, entrée 48
+  resolution: Une couche qui ne tient pas est sautée, la suivante essayée (test `a_layer_that_does_not_fit_is_skipped_and_the_next_one_tried`).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-vue-triee-de-l-inventaire-d-un-gros-projet-index-reduit-et-c-plan.md`
+  summary: Pour 5.48 — `LastPlan.cited` porte des identifiants QGIS complets ; si QGIS renouvelle l'id d'une couche citée à la réouverture du projet, la couche citée n'est plus détaillée (non vérifié, gravité medium).
+  evidence: les couches de l'utilisateur gardent leur id dans le .qgz, les résultats sont reconnus par leur fichier ; à vérifier en 48 en construisant LastPlan depuis le journal après une relance.
+  status: close, 2026-11-10, entrée 48 (constat, sans changement)
+  resolution: `last_plan` lit le journal à chaque proposition, donc après une relance ; une couche de l'utilisateur garde l'id écrit dans le .qgz (le rejeu après réouverture de 5.45 et 2.12 en dépend déjà), un résultat est reconnu par son fichier. Seule une couche ajoutée à la main et non enregistrée changerait d'id : elle n'est alors plus détaillée comme citée, sans autre effet.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-vue-triee-de-l-inventaire-d-un-gros-projet-index-reduit-et-c-plan.md`
+  summary: Pour 5.48 — au-delà d'environ 150 couches de l'utilisateur, l'index seul dépasse le budget et la vue sort hors budget sans détail ; c'est alors le contrôle exact de cassini-ai qui refuse, avec le nouveau message de 48.
+  evidence: kept_by_batches ne retire jamais une couche de l'utilisateur (voulu, matrice du plan) ; 63 couches font 5 700 caractères d'index.
+  status: close, 2026-11-10, entrée 48
+  resolution: Voulu : le contrôle exact de `cassini-ai` refuse, avec le message « Le projet a trop de couches pour le modèle ».
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-recette-qgis-d-annecy-portee-a-20-phrases-barre-16-20-plan.md`
+  summary: le rejeu d'un journal qui porte `project.inventory` (ou toute lecture du projet) diverge dès l'étape 1 quand il est lancé en fin de session : l'inventaire voit les couches de résultat ajoutées depuis, son empreinte change (`replay.diverged`).
+  evidence: recette d'Annecy à 20 phrases du 2026-11-10, deux passages : `replay.diverged` à l'étape 1, `project.inventory` ; les recettes à 5 et 10 phrases n'avaient pas de lecture du projet. Décision au propriétaire : rejouer sur une copie neuve du projet (fermeture et réouverture), ne pas comparer le résultat des lectures du projet, ou ne pas journaliser ces lectures.
+  status: close, 2026-11-10, tranchée en party le 2026-11-10, à confirmer par le propriétaire ; entrée 12 de l'epic 2 (`epic-registre-projet-import/bug-le-rejeu-dans-la-meme-session-diverge-sur-une-lecture-du-projet-sans-dire-pourquoi.md`)
+  resolution: Les lectures restent journalisées, rejouées et comparées (AD-11 inchangé ; ne pas comparer ou ne pas journaliser écartés). Le rejeu identique promis part de l'état d'ouverture du projet (R5, « après fermeture et réouverture ») : dans la même session, une lecture voit les couches posées, rangées ou retirées depuis, et sa divergence est honnête. Le noyau en dit la cause (une couche posée par une exécution précédente, nommée) et le remède (rouvrir le projet sans l'enregistrer) ; la sonde de recette rejoue dans la session (indicatif) puis après réouverture de la copie (compté). Option laissée au propriétaire : `leave_out` passé à `project.inventory` pour une lecture identique en même session (paramètre nouveau, changement de cap).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-recette-qgis-d-annecy-portee-a-20-phrases-barre-16-20-plan.md`
+  summary: décision du propriétaire — RA13 (« coordonnées UTM d'un point WGS84 ») : accepter aussi `data.transform_point` vers 32632, qui rend le même point, à côté de `coord.convert` `to: ["utm"]`, ou garder un seul plan attendu.
+  evidence: mesure de référence du 2026-11-10 (17/20) : le modèle installé rend `data.transform_point` vers 32632, compté raté par la règle stricte.
+  status: close, 2026-11-10, tranchée en party le 2026-11-10, à confirmer par le propriétaire
+  resolution: Règle stricte gardée : RA13 attend `coord.convert` `to: ["utm"]` seul. La recette est la barre d'installation et doit mesurer ce que le générateur enseigne (règle du catalogue : entre WGS84, UTM et MGRS, `coord.convert`) ; `coord.convert` choisit le fuseau dans le noyau d'après le point, alors que `data.transform_point` vers 326NN laisse le modèle deviner le fuseau, juste ici, faux près d'une limite de fuseau ; accepter le raté serait un pansement côté mesure. `annecy.json` et la doc inchangés.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-generateur-gros-projets-de-20-a-60-couches-rendus-par-la-vue-plan.md`
+  summary: le test `the_whole_generated_set_is_cut_at_every_layer` (`ai/src/plan.rs`) ne contrôle plus les inventaires à `index` (≈ 25 % du jeu) ; les découpes de la vue triée sont à tester en 5.48.
+  evidence: relecture quick de 5.47 ; le filtre du test écarte toute clé `index`, et le placement du cache à la fin de l'index est l'objet de 5.48.
+  status: close, 2026-11-10, entrée 48
+  resolution: Une coupe par entrée de l'index (`layer_cuts`) ; le test vérifie tout le jeu engendré, vues triées comprises.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-vue-triee-branchee-a-la-composition-cache-place-a-la-fin-de-plan.md`
+  summary: Pour 5.49 — sous le seuil du tri (17 000 caractères depuis 48), une vue peut dépasser la borne des prompts de l'entraînement (12 900 caractères) : Annecy, pris dans QGIS, fait 16 597 caractères ; les petits projets du générateur n'en approchent jamais.
+  evidence: mesure du 2026-11-10 (`inventaire-qgis.py`, hors dépôt) ; le modèle installé tient pourtant Annecy à 17/20. À regarder en 5.49 : familles à couches larges (une couche de 86 champs) jusqu'à ≈ 16 000 caractères, ou garder l'écart mesuré.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-vue-triee-branchee-a-la-composition-cache-place-a-la-fin-de-plan.md`
+  summary: le mot « zonage » ne trouve pas la couche ZONE_URBA (« zone ») : la phrase « Mets le zonage du PLUi aux couleurs du CNIG » ne la détaille pas sur le gros projet, la redemande élargie la rattrape si le plan prend un champ.
+  evidence: mesure du 2026-11-10 sur l'inventaire réel ; une racinisation du français (« zonage » → « zon ») toucherait aussi « garage » → « gare » ; laissé à la redemande et à l'apprentissage (5.49, 5.50).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-vue-triee-branchee-a-la-composition-cache-place-a-la-fin-de-plan.md`
+  summary: sur le projet de 63 couches, la première lecture de `project.inventory` par QGIS prend 39 s (Annecy : 30 s) : elle s'ajoute à la première phrase de la session.
+  evidence: `inventaire-qgis.py` du 2026-11-10, hors dépôt ; c'est l'inventaire en tâche de fond à l'ouverture déjà reporté (mémoire du 2026-11-08).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-vue-triee-branchee-a-la-composition-cache-place-a-la-fin-de-plan.md`
+  summary: Pour 5.49 — depuis le seuil de 17 000, les gros projets du générateur dont les couches de l'utilisateur tiennent sous ce seuil sont vus en entier et, au-delà de 12 900 caractères de prompt, écartés (443 au jeu par défaut) : le modèle ne voit aucun projet moyen entre ≈ 11 500 et 17 000 caractères, la taille d'Annecy.
+  evidence: régénération du 2026-11-10 (graine 1, 8 600) : `gros_projet` 2 033 gardés (23,6 %, la barre de 23 % tient de peu), 443 écartés ; à trancher avant l'entraînement : borne de prompt plus haute pour ces exemples (`MAX_LENGTH`), ou remplissages plus légers.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-conversion-d-un-raster-en-geotiff-data-convert-raster-plan.md`
+  summary: `data.convert_raster` fixe `DATA_TYPE` à l'index 6 (Float32) de `gdal:warpreproject`, relu sous QGIS 3.44 seulement ; à vérifier sous QGIS 4.x.
+  evidence: non vérifié (medium s'il change) ; la sonde `probe_convert_raster.py` sous un QGIS 4.x le tranche (type du GeoTIFF écrit).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-conversion-d-un-raster-en-geotiff-data-convert-raster-plan.md`
+  summary: l'annulation d'un gdalwarp en cours par `data.convert_raster` n'est jouée que par la doublure, pas sous le vrai QGIS.
+  evidence: la sonde annule avant le lancement ; une conversion d'un gros MNT annulée en cours sous QGIS 3.44 le tranche (aucun .tif ni .aux.xml laissé).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-mise-en-page-carroyage-mgrs-etiquete-en-tete-et-pied-de-page-plan.md`
+  summary: le rejeu d'un export compare `source_details`, dont la date de fichier d'une source qui n'est pas une entrée journalisée : une source réenregistrée fait diverger l'export sans message « source modifiée ».
+  evidence: `check_inputs` ne suit que les `inputs` des paramètres de chemin ; `layout.export_pdf` n'en a pas. À trancher : journaliser les sources de l'export comme entrées, ou nommer la cause dans le message de divergence.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-mise-en-page-carroyage-mgrs-etiquete-en-tete-et-pied-de-page-plan.md`
+  summary: le cadre des carrés de 100 km liste les carrés de l'emprise du projet (D7), pas ceux du cadre d'un export à l'échelle : à 1:25 000 sur Annecy, quatre carrés listés pour deux visibles.
+  evidence: relevé sur la sonde du 2026-11-10 (`probe_mgrs_layout.py`, export 2) ; trancher avec le propriétaire si le noyau doit recevoir le cadre de la carte.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-re-entrainement-groupe-grands-inventaires-gros-projets-couch-plan.md`
+  summary: après le jeu de 5.49, le refus des statistiques par zone d'un raster recule (S15 réponse coupée pour les trois candidats ; S23, S24 plan rendu pour b et la fusion) ; RA05 (`begins_with` au lieu de l'égalité) et RA09 (tampon sans distance → 10 m au lieu d'une question) restent ratés par les trois candidats.
+  evidence: nuit du 2026-11-10 au 11, `~/cassini-entrainement/5-49-mesures/` ; à corriger par le générateur (exemples de refus des statistiques par zone d'un raster, question du tampon sans distance) avant le prochain entraînement, jamais par un pansement.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-generateur-apres-5-49.md`
+  summary: `refus_stats_raster`, branche du champ de vision puis statistique (venue de 5.41) : une demande à un mot de S24 (« de hauteur » contre « de haut ») reste possible au tirage.
+  evidence: relecture adversariale du 2026-11-11 (graines 3 à 10) ; `recouvrement` ne compare qu'à un nombre ou une commune près.
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-generateur-apres-5-49.md`
+  summary: `dissolve_words` accorde au masculin (« fusionné en une seule zone ») après « une zone tampon ».
+  evidence: relecture adversariale du 2026-11-11 : « Dessine une zone tampon autour de la couche des gares, fusionné en une seule zone. » ; antérieur, partagé par `tampon`.
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-generateur-apres-5-49.md`
+  summary: `grid_zone_words` force parfois une zone UTM à 6–7° du point (« zone 32 » à 2,46 E), plus fréquente depuis D5.
+  evidence: relecture adversariale du 2026-11-11 ; accepté par le schéma, discutable comme leçon de gisement.
+
+- source_plan: none
+  summary: 5.53, livrable 2 — barre de non-oubli : comparer un nouveau modèle à celui qu'il remplace, barre par barre, à une phrase près ; verdict par barre (essai réel ajuste-5-49-a contre la fusion de la nuit du 11-10).
+  evidence: 5.53 découpé le 2026-11-11 avec le propriétaire (« 1 puis 2 ») ; à construire juste après le livrable 1, avant toute installation d'un candidat de la nuit après 5.49.
+- source_plan: none
+  summary: 5.53, livrable 3 — barres existantes portées à 40-50 phrases écrites à la main.
+  evidence: 5.53 découpé le 2026-11-11 avec le propriétaire ; après les livrables 1 et 2, avant le prochain entraînement.
+- source_plan: none
+  summary: 5.53, livrable 4 — formulations de terrain fournies par le propriétaire (gisement, relevé, intersection, carroyage…) transformées en listes de synonymes du générateur, jamais en phrases.
+  evidence: 5.53 découpé le 2026-11-11 avec le propriétaire ; dépend des formulations que le propriétaire dictera.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-barre-de-mesure-par-commande-phrases-ecrites-a-la-main-plan.md`
+  summary: Barre par commande : aucune phrase n'attend un refus ; la sorte `refusal` est prise en charge mais jamais mesurée (S15, refus coupé, en relève).
+  evidence: relecture thorough du 2026-11-11 (blind-hunter, intent-alignment) ; 97 plans, 2 questions, 0 refus. À ajouter avec le livrable 3 (barres à 40-50 phrases).
+  resolution: Clos par 5.53, livrable 3, lot 1 (décision D3 du 2026-11-11) : la barre par commande n'est pas touchée ; la sorte `refusal` est mesurée par `plan_reel` (4 refus neufs, 9 en tout) et `question_reel` (4 refus neufs), chacun avec `missing`, contrôlé contre le registre.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-barre-de-mesure-par-commande-phrases-ecrites-a-la-main-plan.md`
+  summary: Comparaison de l'essai réel stricte sur les paramètres par défaut (`dissolve: false`, `north` implicite) et l'ordre des listes de type ensemble (`layers`, `leave_out`, `observers`).
+  evidence: relecture du 2026-11-11 (edge-case-hunter, blind-hunter) ; même rigueur que les autres barres (epic11_reel, style_reel), donc comparaison juste entre modèles ; à trancher avec le livrable 2 si un modèle juste est sous-noté.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-barre-de-mesure-par-commande-phrases-ecrites-a-la-main-plan.md`
+  summary: Le test relit le filtre « offerte » (`!dictated_by_core`) au lieu d'appeler `offered` d'`ai/src/plan.rs`, privé ; un changement du filtre du produit ne serait pas suivi.
+  evidence: relecture intent-alignment du 2026-11-11 ; les deux coïncident à f574fff ; rendre `offered` public ajoute une surface d'API, hors d'un correctif.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-barre-de-mesure-par-commande-phrases-ecrites-a-la-main-plan.md`
+  summary: Le relevé de l'essai réel (lignes `SCORE` sur la sortie d'erreur, sans nom ni empreinte du modèle) doit être fixé dans un format lisible par la barre de non-oubli ; un pas raté d'un enchaînement compte contre la commande étiquette seule.
+  evidence: relecture blind-hunter du 2026-11-11 ; à décider dans le livrable 2, qui lit ces relevés.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-53-2-barre-de-non-oubli.md`
+  summary: Barre de non-oubli : deux relevés de même total sur des phrases différentes se comparent (recettes QGIS, et essais GPU dont le test a changé) ; porter dans le relevé l'empreinte du fichier de phrases, ou la révision git du test.
+  evidence: relecture edge-case du 2026-11-11 ; la ligne `phrases :` ne donne que le chemin, pas le contenu, et un essai GPU ne dit pas de quelle révision du test il vient.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-53-2-barre-de-non-oubli.md`
+  summary: Brancher `non_oubli.py` sur les scripts de nuit (hors dépôt) pour qu'un candidat refusé ne soit jamais proposé à l'installation.
+  evidence: relecture intent-alignment du 2026-11-11 : l'outil rend un code de sortie, rien ne l'applique encore.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-53-3-barres-elargies.md`
+  summary: 5.53, livrable 3, lot 2 — `echelle_utm_reel` et `terrain_reel` portées à 40-50 phrases écrites à la main (`phrases.json` par barre, élargies en place), au moins 3 refus chacune, seuils proportionnels arrondis vers le bas (7/8 → 35/40).
+  evidence: livrable 3 découpé en trois lots par le propriétaire le 2026-11-11 (décisions D1-D6 du plan du lot 1) ; une tâche courte par session (§8).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-53-3-barres-elargies.md`
+  summary: 5.53, livrable 3, lot 3 — `epic11_reel` et `style_reel` portées à 40-50 phrases écrites à la main, au moins 3 refus chacune, seuils proportionnels ; puis remesure du parent installé au commit du lot 3 (Design Notes du lot 1), pour que la barre de non-oubli redevienne comparable.
+  evidence: livrable 3 découpé en trois lots par le propriétaire le 2026-11-11 ; les totaux changés rendent « non comparable » tant que le parent n'est pas remesuré.
+  resolution: Barres construites par le lot 3 (`plan-5-53-3-lot-3.md`) : `epic11_reel` 28 + F03 + 20 = 49 (14 plans, 3 questions, 3 refus neufs ; seuil 47/49), `style_reel` 10 + 32 = 42 (25 plans, 3 questions, 4 refus neufs ; seuil 37/42). Entrée laissée ouverte jusqu'à la remesure du parent, écrite et non jouée : `~/cassini-entrainement/mesures-5-53-3.sh REV`, à lancer sur la révision où les lots 1 à 3 sont réunis, GPU libre.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-53-4-formulations-terrain.md`
+  summary: Gisement compté dans le quadrillage Lambert-93 (`north` grid sur un système projeté autre que l'UTM), usage courant des géomètres.
+  evidence: décision D2 du 2026-11-11 ; le gisement du noyau est UTM seul, la tournure « gisement Lambert » est évitée au générateur en attendant.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-53-4-formulations-terrain.md`
+  summary: Déclinaison magnétique ou convergence des méridiens demandée en un seul point, sans second point.
+  evidence: décision D3 du 2026-11-11 ; `geo.distance_azimuth` les rend mais exige deux points, aucune commande ne prend un point seul.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-53-4-formulations-terrain.md`
+  summary: Paramètre `north` (magnétique, quadrillage) sur `geo.bearing_intersection`, pour un recoupement de visées prises à la boussole.
+  evidence: décision D4 du 2026-11-11 ; l'intersection ne connaît que le nord vrai, la tournure « à la boussole » est évitée au générateur.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-53-4-formulations-terrain.md`
+  summary: Relèvement inverse : retrouver sa propre position à partir de visées prises vers deux repères connus.
+  evidence: décision D5 du 2026-11-11 ; il faudrait le contre-azimut corrigé de la convergence, que le modèle ne doit pas calculer lui-même ; tournure évitée au générateur.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-grammaire-des-parametres-tiree-des-schemas-du-registre-texte-plan.md`
+  summary: Test fragile `an_autonomous_call_while_another_session_holds_the_lock_is_read_only` (cli/tests/mcp.rs) : l'appel qui suit la libération du verrou peut encore voir le journal tenu sous forte charge.
+  evidence: un échec le 2026-11-11 pendant la fusion du modèle et une autre recette ; vert 3/3 seul et à la relance.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-grammaire-des-parametres-tiree-des-schemas-du-registre-texte-plan.md`
+  summary: Vérifier en CI que llama.cpp accepte la grammaire des paramètres (aujourd'hui seul l'essai ignoré `grammaire_reel` le fait).
+  evidence: relecture verification-gap du 2026-11-11 ; il faut un petit vocabulaire GGUF au dépôt ou en cache de CI.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-ajustement-continu-l-entrainement-repart-de-l-adaptateur-du-plan.md`
+  summary: 5.54 lot 2 (after lot 1) — contenu du jeu de la première séance continue : familles neuves `page_size` avec échelle, courbure, N/E inversé, `data.transform_point` vers 4326 avant `geo.*`/`coord.convert` ; renforcement des refus de fonctions absentes, des options non par défaut et du champ de vision cumulé ; sans recopier de phrase de barre (`recouvrement.rs`).
+  evidence: décision D1 du propriétaire, 2026-11-11 ; plan de 5.54 au-dessus de 1 600 jetons, mécanique de reprise et contenu du jeu sont deux livrables, la vraie séance attend ce lot (D4).
+  status: close, 2026-11-11, 5.54 lot 2 (`epic-agent-et-mcp/plan-5-54-lot-2-familles.md`)
+  resolution: Six familles neuves ou renforcées au générateur (`export_pdf_echelle_format`, `refus_fonction_absente`, `options_ecrites`, `point_lambert_vers_geo`, `ordre_nord_est`, `champ_de_vision_cumule` à deux à six points et poids 6), chacune avec son test ; leur liste est `FIRST_SESSION_FAMILIES` (`training/src/lib.rs`), tirée seule à la graine 3 sans aucune phrase de barre. Comptes avant/après du jeu graine 1 dans `docs/entrainement-du-modele.md` (« Familles de la première séance continue »). La séance elle-même reste à lancer, après revue et accord du propriétaire.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-ajustement-continu-l-entrainement-repart-de-l-adaptateur-du-plan.md`
+  summary: 5.54 lot 2 — reprendre les tournures des cinq familles de `FOCUS_EXCLUDED` (`training/src/lib.rs` : `filtre_numerique`, `pente`, `reprojection_couche`, `retrait_couche`, `carroyage_mgrs`) qui, tirées seules à la graine 3 jusqu'à 1 800 exemples, engendrent une phrase de barre à un nombre ou une commune près ; les retirer de la liste une fois réparées (le test `no_family_drawn_alone_at_the_focus_seed_copies_a_held_out_or_real_trial_sentence` la tient exacte).
+  evidence: relevé du nouveau contrôle de `training/tests/recouvrement.rs`, 2026-11-11 (identifiants : SEL2, PL15, RP2, LR1, PDF3) ; le jeu complet graine 1 ne les tire pas, la garde du jeu ciblé les a vues.
+  status: close, 2026-11-11, 5.54 lot 2 (`epic-agent-et-mcp/plan-5-54-lot-2-familles.md`)
+  resolution: Les cinq tournures engendrées fautives reprises sans tirage de plus (« Montre-moi sur la carte … m² », « … calculées en … » après « donne-moi les pentes », « Fais passer la couche des … », « Enlève-moi les … », « Sors-moi la carte en PDF » devant un carroyage MGRS) ; `FOCUS_EXCLUDED` est vide, la garde par famille de `recouvrement.rs` passe sans changement du test.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-ajustement-continu-l-entrainement-repart-de-l-adaptateur-du-plan.md`
+  summary: 5.54 — recréer le script Windows de recette (`RECETTE_PS1` de `~/cassini-entrainement/nuit-5-54.sh`, par défaut `%TEMP%\recette-5-54.ps1`, sur le modèle de `recette-5-56.ps1`, qui lançait `qgis-plugin/tests/probe_recette.py`) avant la première séance : ni `recette-5-49\recette.ps1` ni `recette-5-56.ps1` ne sont plus dans `%TEMP%`.
+  evidence: constat à la construction de 5.54 lot 1, 2026-11-11 ; le script de nuit refuse de partir sans lui (garde `preparatifs`).
+  status: close, 2026-11-11, 5.54 lot 2 (`epic-agent-et-mcp/plan-5-54-lot-2-familles.md`)
+  resolution: Script posé hors dépôt, `outils-cassini\scripts\recette-5-54.ps1` (à côté du dépôt) (UTF-8 avec BOM, `-Models -Project -Phrases -Out`, QGIS 3.44.15 sur `probe_recette.py` depuis `CASSINI-nuit`, sortie et `CODE <code>` dans `-Out`) ; `RECETTE_PS1` de `nuit-5-54.sh` pointe dessus par défaut.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-garde-fou-une-valeur-ou-un-champ-absent-de-l-inventaire-donn-plan.md`
+  summary: Tester l'interaction du garde-fou des attributs (5.57) avec la redemande élargie de 5.48 (un premier plan changé en question ne déclenche plus l'élargissement).
+  evidence: `reduced_with_fields` ne s'applique qu'à un `Plan::Calls` ; risque jugé faible (couches réduites non contrôlées), aucun test.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-export-et-demo/story-pdf-de-resultat-lisible-cadre-sur-le-resultat-resultat-mis-e-plan.md`
+  summary: Légende des MNT de l'utilisateur dans le PDF : avec `focus` (export d'un plan), l'intitulé de bande « Band 1 (Gray) » est ôté et la rampe reste ; hors plan, ou d'un plan sans couche produite, le MNT garde la légende par défaut de QGIS. À trancher : la même lecture pour tout export, ou un style de MNT dicté par le noyau.
+  evidence: décision 3 de la party d'approbation du 2026-11-12 (`hide_band_labels` rempli pour un export de plan seulement) ; sonde `qgis-plugin/tests/probe_layout_focus.py`.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-export-et-demo/story-pdf-de-resultat-lisible-cadre-sur-le-resultat-resultat-mis-e-plan.md`
+  summary: Un résultat ligne est dessiné du seul trait de `StyleSpec::Single` (`#3d0026`, magenta très foncé), pas du magenta de remplissage ; à revoir si un plan de démo rend des lignes (chemin de moindre coût vecteur, isochrone en contour).
+  evidence: `_make_symbol` de `style_gestures.py` : une ligne prend `stroke` ; constante unique du noyau (`core/src/focus.rs`).
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-export-et-demo/story-pdf-de-resultat-lisible-cadre-sur-le-resultat-resultat-mis-e-plan.md`
+  summary: Les noms de plusieurs résultats sont tirés de `description_fr` seule (titre court de la commande) : ils restent en français dans un PDF exporté d'une interface en anglais.
+  evidence: relecture de 7.9 (2026-11-12) ; `focus` est calculé et journalisé par le noyau, qui ne connaît pas la langue du panneau.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-export-et-demo/story-pdf-de-resultat-lisible-cadre-sur-le-resultat-resultat-mis-e-plan.md`
+  summary: `result_label` prend tout mot à majuscule pour un nom propre : un titre en casse de titre (« Bâtiments à Risque Élevé ») peut être coupé à tort avant « à Risque Élevé ».
+  evidence: relecture de 7.9 (2026-11-12) ; règle de la décision 1 de la party d'approbation.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-export-et-demo/story-pdf-de-resultat-lisible-cadre-sur-le-resultat-resultat-mis-e-plan.md`
+  summary: Dans une session enchaînée, les sorties des plans précédents restent visibles dans le PDF d'un nouveau plan, sous leur nom technique (« 4-analysis.intersect ») : `focus` ne lit que le plan en cours.
+  evidence: relecture de 7.9 (2026-11-12) ; `current_plan` borné au plan en cours (`plan_start`).
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-publication/story-balle-tracante-etiquette-release-et-installeur-en-ligne-mini-plan.md`
+  summary: La release ne rejoue pas la recette complète (fmt, clippy, tests) avant de publier.
+  evidence: release.yml ne lance que le manifeste, la construction et la garde hors ligne ; une étiquette peut tomber sur un commit jamais vert (Edge Case Hunter, Blind Hunter). Contrôle manuel dans docs/publier-une-version.md.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-publication/story-balle-tracante-etiquette-release-et-installeur-en-ligne-mini-plan.md`
+  summary: Prouver l'installeur et le manifeste sans étiquette (déclencheur workflow_dispatch sans publication).
+  evidence: seule une étiquette exécute le .iss ; une erreur coûte une étiquette publique à supprimer (Verification Gap, Intent Alignment).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-publication/story-balle-tracante-etiquette-release-et-installeur-en-ligne-mini-plan.md`
+  summary: Publier l'empreinte SHA-256 de l'installeur lui-même sur la page d'accueil et la release (7.12).
+  evidence: l'avertissement SmartScreen demande de confiance sans moyen de vérifier ; Q6 de l'epic place les empreintes sur la page (Blind Hunter).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-publication/story-balle-tracante-etiquette-release-et-installeur-en-ligne-mini-plan.md`
+  summary: Preuves de refus plus strictes : lire le journal de l'installeur (/LOG=) pour la cause du refus. Non vérifié, maybe-false.
+  evidence: code de sortie non nul seulement ; se règle au premier passage réel sur Windows (Edge Case Hunter, Blind Hunter).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-publication/story-balle-tracante-etiquette-release-et-installeur-en-ligne-mini-plan.md`
+  summary: Champ de schéma dans manifeste.json et fichier du noyau verrouillé lors d'une mise à jour, pour 7.5.
+  evidence: le format du manifeste est lu par recherche de texte ; « Mettre à jour Cassini » le fera évoluer (Blind Hunter, Edge Case Hunter).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-publication/story-porte-2-sous-windows-un-seul-fichier-installable-reseau-coup-plan.md`
+  summary: Nouvelle tentative avec attente croissante pour le téléchargement du modèle (2,8 Go) dans la release.
+  evidence: un incident passager de Hugging Face fait échouer toute la release, à relancer à la main (Blind Hunter, Edge Case Hunter).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-publication/story-porte-2-sous-windows-un-seul-fichier-installable-reseau-coup-plan.md`
+  summary: Limiter l'adresse du modèle à https, ajouter un délai global au téléchargement et durcir la détection de binaire de l'archive d'extension.
+  evidence: les tests utilisent file:// ; un serveur qui goutte à goutte bloque la CI ; un zip imbriqué passerait pour « sans binaire » (Edge Case Hunter).
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-publication/story-noyau-gpu-vulkan-construit-par-la-recette-windows-plan.md`
+  summary: La boucle multi-entrées de l'installeur en ligne (cassini-en-ligne.iss) n'est prouvée que par l'essai à blanc de la release, et la preuve n'altère que la dernière empreinte.
+  evidence: Pascal Script avec avancée par Pos/Copy, aucun test unitaire ; à vérifier au premier `gh workflow run release.yml` (manifeste valide puis altéré, éventuellement une altération sur chaque entrée).

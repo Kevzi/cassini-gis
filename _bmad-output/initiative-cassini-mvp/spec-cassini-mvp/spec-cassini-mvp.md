@@ -32,11 +32,11 @@ CAP-2 a été retirée (préparation des données d'une commune par code INSEE) 
 
 - **CAP-3** — Analyses vectorielles
   - **intent:** l'utilisateur répond à une question spatiale en combinant des analyses élémentaires sur les couches de son projet.
-  - **success:** zone tampon, intersection, sélection par attribut, statistiques par zone et isochrones à pied et en voiture sont chacune une commande du registre, **exécutée par le cadre de traitement de QGIS**, et donnent un résultat vérifiable par un test, hors ligne.
+  - **success:** zone tampon, intersection, sélection par attribut, statistiques par zone et isochrones à pied et en voiture sont chacune une commande du registre, **exécutée par le cadre de traitement de QGIS**, et donnent un résultat vérifiable par un test, hors ligne. Une distance donnée en mètres s'applique aussi à une couche en degrés : la commande calcule dans un système en mètres choisi par le noyau, sans étape ajoutée au plan (changement de cap du 2026-11-12, tampon d'abord).
 
 - **CAP-4** — Agent en langage naturel
   - **intent:** l'utilisateur formule sa demande en français et obtient le travail fait, sans connaître les commandes.
-  - **success:** sur un projet où les couches nécessaires sont déjà ouvertes, la phrase de démo de CLAUDE.md §1 produit une suite de commandes affichée étape par étape dans le panneau Cassini de QGIS, que l'utilisateur valide avant exécution et peut rejouer ensuite à l'identique.
+  - **success:** sur un projet où les couches nécessaires sont déjà ouvertes, la phrase de démo de CLAUDE.md §1 produit une suite de commandes affichée étape par étape dans le panneau Cassini de QGIS, que l'utilisateur valide avant exécution et peut rejouer ensuite à l'identique ; sur un projet réel d'environ 60 couches (une BD TOPO départementale et un PLU), au moins 80 % des phrases de la recette réaliste donnent le plan attendu, sans `ai.prompt_too_long` (changement de cap du 2026-11-10).
 
 - **CAP-5** — Export PDF
   - **intent:** l'utilisateur sort une carte présentable à un tiers depuis ce qu'il voit à l'écran.
@@ -99,7 +99,7 @@ CAP-2 a été retirée (préparation des données d'une commune par code INSEE) 
 - Indépendance des fournisseurs d'IA : le code ne dépend d'aucune IA en particulier. IA locale par défaut, IA externes via MCP.
 - Les fichiers d'origine de l'utilisateur ne sont jamais modifiés ni déplacés.
 - Petit et solide : à effort égal, la fiabilité passe avant le nombre de fonctions.
-- Le noyau se compile sur Windows, macOS et Linux ; l'extension cible les plateformes où QGIS tourne.
+- Le noyau se compile sur Windows et Linux, macOS plus tard, quand un Mac est disponible (amendé le 2026-11-12, inception de l'epic 7, décision du propriétaire du 2026-11-10) ; l'extension cible les plateformes où QGIS tourne.
 - Chaque nouvelle commande est livrée avec au moins un test.
 - Tout seuil d'une commande de CAP-14 (distance réglementaire, pente, surface minimale) est un paramètre, jamais une constante.
 - Les fournisseurs de traitement sous GPL (GRASS, extensions tierces) ne s'exécutent que dans le processus de QGIS, jamais liés au noyau. Le géocodeur intégré de QGIS interroge un service en ligne : il est exclu.
@@ -140,6 +140,7 @@ Sur une machine débranchée du réseau, l'utilisateur ouvre QGIS sur un projet 
 - Le dérisquage précède l'engagement : qu'un modèle local quantifié sache composer une suite de commandes typées correcte est vérifié sur un registre factice avant que le registre réel ne soit écrit.
 - « Compléter QGIS pour les usages courants » signifie couvrir par le registre CAP-3, CAP-5, CAP-9 à CAP-11 et CAP-15 au MVP, puis CAP-14 après le MVP, sans objectif de parité. Le signal de succès ci-dessus reste celui du MVP ; CAP-14 porte son propre seuil de couverture.
 - Villeneuve-le-Roi reste le territoire de référence de la démo, avec des données apportées par l'utilisateur et non livrées.
+- 2026-11-10, décision du propriétaire : la démo filmée se fait sur Annecy (PLUi, cadastre, gares et relief, données apportées et non livrées), qui permet d'enchaîner une analyse de terrain ; Villeneuve-le-Roi devient le jeu de réserve. Les tests automatiques restent sur des fixtures synthétiques.
 
 ## Open Questions
 

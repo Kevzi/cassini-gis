@@ -202,6 +202,29 @@ impl QgisSession {
         self.wait_for("order.execute", |m| m["method"] == "order.execute")
     }
 
+    /// L'ordre d'un tampon : le noyau lit d'abord l'inventaire pour choisir le système de calcul
+    /// (entrée 9.16) ; la lecture reçoit la seule couche `layer_id`, de nom `name`, de système
+    /// `crs` et d'unité `unit`, dans un projet en Lambert-93. Rend l'ordre du tampon.
+    #[allow(dead_code)]
+    pub fn wait_buffer_order(
+        &mut self,
+        layer_id: &str,
+        name: &str,
+        crs: &str,
+        unit: &str,
+    ) -> Value {
+        let read = self.wait_order();
+        assert_eq!(read["params"]["command"], "project.inventory", "{read}");
+        self.answer(
+            &read,
+            json!({"layers": [{"layer_id": layer_id, "name": name, "crs": crs, "crs_unit": unit}],
+                   "project_crs": "EPSG:2154", "project_crs_unit": "m", "extent": null}),
+        );
+        let order = self.wait_order();
+        assert_eq!(order["params"]["command"], "analysis.buffer", "{order}");
+        order
+    }
+
     pub fn answer(&mut self, order: &Value, outcome: Value) {
         let mut reply = json!({"jsonrpc": "2.0", "id": order["id"]});
         let key = if outcome.get("code").is_some() && outcome.get("data").is_some() {

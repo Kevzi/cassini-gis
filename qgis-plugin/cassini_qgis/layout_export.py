@@ -43,6 +43,32 @@ l'échelle masque en sont absentes, et le filtre de QGIS sur le contenu de la ca
 absentes du cadre (2026-11-08). Textes en `MAP_FONT` (Helvetica) quand elle est installée, sinon
 dans la police par défaut de QGIS.
 
+Carroyage MGRS, en-tête, pied de page, sources détaillées (epic 10, entrée 31, changement de cap
+du 2026-11-10). `grid` `{"kind": "mgrs", "interval": Distance, "epsg": n, "squares": [...]}` :
+quadrillage dans la zone UTM `epsg`, chaque ligne étiquetée par les deux chiffres du kilomètre
+dans le carré de 100 km, par un format de grille fixe de QGIS (une expression constante de ce
+module, jamais calculée) ; à 100 km, ces deux chiffres valent toujours 00 : aucune étiquette, le
+cadre suffit. `epsg` et `squares` (désignations « 32T LR ») sont fournis par le noyau, imprimés
+tels quels dans un cadre posé dans le coin bas droit de la carte : aucun calcul MGRS ici.
+`header` et `footer` : une ligne libre, 120 caractères au plus, centrée en haut (au-dessus du
+titre) et en bas de la page (sous les sources). `source_details` : pour chaque source, la taille
+de cellule d'un raster en mètres, la date des métadonnées de la couche (publication, sinon
+révision, sinon création) ou, à défaut, la dernière modification du fichier ; une sortie de
+Cassini (fichier sous le dossier de travail `<projet>.cassini`, réécrit au rejeu) n'a pas de
+date. La ligne des sources imprimée les reprend (« mnt_5m.tif (5 m, fichier du 2025-03-14) »).
+
+Résultat d'un plan mis en évidence (entrée 7.9, changement de cap du 2026-11-12). Pour un export
+lancé dans un plan, le noyau passe `focus` : `results` (id de couche, `label`, `style` facultatif),
+`hidden`, `frame`, `framed_on`, `hide_band_labels`. Ce module l'applique à la seule mise en page,
+sans rien décider : les couches de `hidden` sont ôtées de la carte, de la légende et des sources ;
+les résultats passent en tête de la carte et de la légende, nommés par `label` sur leur nœud de
+légende seul ; un résultat qui porte un `style` est dessiné par un clone en mémoire de sa couche,
+stylé, jamais ajouté au projet ; sans `scale`, la carte est cadrée sur l'union de `frame` (avec
+`scale`, le centre ne change pas) ; avec `hide_band_labels`, l'intitulé de bande d'un raster
+(« Band 1 (Gray) ») est ôté de la légende. Un id absent des couches visibles est ignoré ; sans
+couche de `frame` visible, le cadrage d'avant. La couche du projet garde nom, style, visibilité et
+place dans l'arbre. Sans `focus`, le fond est appelé exactement comme avant.
+
 La mise en page de QGIS ne tourne pas hors du fil principal : l'export est synchrone
 (commande non annulable). Accès à QGIS par un « fond » injectable ; `LayoutBackend` est
 le seul endroit qui touche `qgis.core`, les tests mettent une doublure.
@@ -50,17 +76,21 @@ le seul endroit qui touche `qgis.core`, les tests mettent une doublure.
 
 import math
 import os
+import re
+import unicodedata
 
 try:  # importés à plat par les tests, en paquet par QGIS
     from .gestures import GestureError
     from .inventory import QgisBackend, _ReadGesture, _union, source_name
     from .point_transform import UNKNOWN_CRS
-    from .style_gestures import install_legend
+    from .style_gestures import QgisBackend as StyleBackend
+    from .style_gestures import install_legend, normalize_style
 except ImportError:  # pragma: no cover
     from gestures import GestureError
     from inventory import QgisBackend, _ReadGesture, _union, source_name
     from point_transform import UNKNOWN_CRS
-    from style_gestures import install_legend
+    from style_gestures import QgisBackend as StyleBackend
+    from style_gestures import install_legend, normalize_style
 
 BAD_PARAMS = "layout.bad_params"
 EMPTY = "layout.empty"
@@ -76,6 +106,14 @@ PAGE_SIZES = {"a4": (297.0, 210.0), "a3": (420.0, 297.0), "a2": (594.0, 420.0), 
 ORIENTATIONS = ("landscape", "portrait")
 BASE_PAGE = (297.0, 210.0)  # page pour laquelle les positions des éléments sont écrites
 MAX_GRID_LINES = 200  # lignes de grille par axe, au plus (AD-8)
+MAX_MARGIN_TEXT = 120  # longueur d'un en-tête ou d'un pied de page, la même que le noyau
+MGRS_INTERVALS = (1000.0, 10000.0, 100000.0)  # intervalles d'un carroyage MGRS, en mètres
+# Au-delà de ce nombre de lignes sur un côté de la carte, les étiquettes MGRS se chevaucheraient
+# (2 à 3 mm d'écart en 6 pt) : les lignes restent, sans étiquette, le cadre des carrés aussi.
+MAX_LABELLED_LINES = 60
+# Format de grille fixe des étiquettes MGRS : les deux chiffres du kilomètre dans le carré de
+# 100 km (`@grid_number` est la coordonnée UTM de la ligne, en mètres).
+MGRS_LABEL_EXPRESSION = "lpad(to_string(to_int(floor(@grid_number / 1000)) % 100), 2, '0')"
 
 
 class GridError(Exception):
@@ -251,6 +289,9 @@ def _decimals(interval):
 
 # Bas de la colonne de la légende, en mm sur la page de base : les sources sont en dessous.
 LEGEND_BOTTOM = 195
+# Place, en mm, laissée dans la colonne de la légende autour du symbole et du texte, quand un nom
+# de résultat passe à la ligne (entrée 7.9).
+LEGEND_WRAP_MARGIN = 8.0
 
 # Propriétés posées sur une couche par `layer.set_style` (voir `style_gestures.py`), lues ici
 # pour la légende : le titre de la couche, le libellé de son premier nœud (le nom de bande d'un
@@ -258,6 +299,7 @@ LEGEND_BOTTOM = 195
 LEGEND_TITLE = "cassini/legend_title"
 LEGEND_FIRST_LABEL = "cassini/legend_first_label"
 LEGEND_NODES = "cassini/legend_nodes"
+ELEVATION_SPAN = "cassini/elevation_span"  # même clé que `style_gestures`
 
 
 def apply_legend_labels(node, layer):
@@ -281,8 +323,58 @@ def apply_legend_labels(node, layer):
         QgsLegendRenderer.setNodeLegendStyle(node, QgsLegendStyle.Style.Hidden)
 
 
+def highlighted_clone(layer, style):
+    """Clone en mémoire de la couche vecteur `layer`, au style `style` (normalisé, forme
+    `single`) traduit par `style_gestures` ; None pour une couche sans géométrie ou qui ne se
+    clone pas. Le clone n'est jamais ajouté au projet : la couche d'origine garde son style."""
+    from qgis.core import QgsVectorLayer
+
+    if not isinstance(layer, QgsVectorLayer):
+        return None
+    clone = layer.clone()
+    if clone is None:
+        return None
+    # Le clone reprend les libellés de légende et le seuil d'échelle qu'un `layer.set_style`
+    # antérieur a posés sur la couche : ils ne valent pas pour le style du résultat.
+    for key in (LEGEND_TITLE, LEGEND_FIRST_LABEL, LEGEND_NODES, ELEVATION_SPAN):
+        clone.removeCustomProperty(key)
+    clone.setScaleBasedVisibility(False)
+    styler = StyleBackend()
+    geometry = styler.geometry_of(clone)
+    if geometry is None:
+        return None
+    styler.apply_single(clone, geometry, style["symbol"], style["opacity"])
+    return clone
+
+
+def hide_band_label(model, node, layer):
+    """Ôte du nœud de légende `node` l'intitulé de bande d'un raster (« Band 1 (Gray) ») : son
+    premier nœud quand c'est un simple libellé suivi d'autres nœuds (la rampe). Un libellé posé
+    par Cassini (`LEGEND_FIRST_LABEL`) est gardé ; la couche du projet ne change pas."""
+    from qgis.core import QgsMapLayerLegendUtils, QgsRasterLayer, QgsSimpleLegendNode
+
+    if not isinstance(layer, QgsRasterLayer) or layer.customProperty(LEGEND_FIRST_LABEL):
+        return
+    nodes = model.layerLegendNodes(node)
+    if len(nodes) > 1 and isinstance(nodes[0], QgsSimpleLegendNode):
+        # Les indices d'un ordre sont ceux des nœuds d'origine : l'ordre en place est repris, son
+        # premier nœud ôté.
+        if QgsMapLayerLegendUtils.hasLegendNodeOrder(node):
+            order = list(QgsMapLayerLegendUtils.legendNodeOrder(node))
+        else:
+            order = list(range(len(model.layerOriginalLegendNodes(node))))
+        QgsMapLayerLegendUtils.setLegendNodeOrder(node, order[1:])
+        model.refreshLayerLegend(node)
+
+
+# Avertissement rendu au noyau quand un résultat n'a pas pu être dessiné par son clone stylé.
+CLONE_FAILED = "Le résultat « %s » n'a pas pu être mis en évidence : il est dessiné avec son style du projet."
+
+
 # Éléments que la mise en page doit porter (rendus par le fond, vérifiés par les tests).
 EXPECTED_ITEMS = ("map", "title", "legend", "scalebar", "northarrow", "sources")
+# Éléments posés seulement quand la demande les donne (epic 10, entrée 31).
+OPTIONAL_ITEMS = ("header", "footer", "grid_squares")
 
 
 class LayoutBackend(QgisBackend):
@@ -340,10 +432,49 @@ class LayoutBackend(QgisBackend):
         center = rect.center()
         return self.reproject_point(center.x(), center.y(), canvas.mapSettings().destinationCrs().authid(), authid)
 
-    def export_pdf(self, layers, title, sources_text, out, authid, box, scale=None, page=None, grid=None):
+    def resolution_of(self, layer):
+        """Taille de cellule d'un raster, en mètres, si son système est en mètres ; None pour
+        un vecteur ou un raster en degrés."""
+        from qgis.core import Qgis, QgsMapLayerType
+
+        if layer.type() != QgsMapLayerType.RasterLayer:
+            return None
+        if layer.crs().mapUnits() != Qgis.DistanceUnit.Meters:
+            return None
+        size = layer.rasterUnitsPerPixelX()
+        return float(size) if size and math.isfinite(size) and size > 0 else None
+
+    def metadata_date(self, layer):
+        """Date (AAAA-MM-JJ) que les métadonnées de la couche dans QGIS portent : publication,
+        sinon révision, sinon création ; None sinon."""
+        from qgis.core import Qgis
+
+        metadata = layer.metadata()
+        for kind in (Qgis.MetadataDateType.Published, Qgis.MetadataDateType.Revised, Qgis.MetadataDateType.Created):
+            moment = metadata.dateTime(kind)
+            if moment is not None and moment.isValid():
+                return moment.date().toString("yyyy-MM-dd")
+        return None
+
+    def file_date(self, path):
+        """Date (AAAA-MM-JJ, UTC) de la dernière modification du fichier ; None s'il manque."""
+        import datetime
+
+        try:
+            stamp = os.path.getmtime(path)
+        except OSError:
+            return None
+        return datetime.datetime.fromtimestamp(stamp, datetime.timezone.utc).strftime("%Y-%m-%d")
+
+    def export_pdf(self, layers, title, sources_text, out, authid, box, scale=None, page=None, grid=None,
+                   header=None, footer=None, focus=None):
         """Monte la mise en page, l'exporte dans `out`, rend `{"items": éléments posés (clés de
-        `EXPECTED_ITEMS`), "scale": échelle relue sur la carte, "extent": emprise de la carte
-        (xmin, ymin, xmax, ymax)}`. Avec `scale`, `box` est un
+        `EXPECTED_ITEMS`, puis de `OPTIONAL_ITEMS` posés), "scale": échelle relue sur la carte,
+        "extent": emprise de la carte (xmin, ymin, xmax, ymax)}`. `header`, `footer` : une ligne
+        centrée en haut et en bas de la page. Une grille `mgrs` porte `squares`, imprimés dans
+        un cadre au coin bas droit de la carte. `focus` (entrée 7.9) : `{"results": [(couche,
+        libellé, style normalisé ou None)], "hide_band_labels": bool}` ; chaque résultat stylé
+        est dessiné par un clone en mémoire, jamais ajouté au projet. Avec `scale`, `box` est un
         petit rectangle centré : la carte y est cadrée puis tenue à 1:`scale` (`setScale` garde
         le centre). `page` : (`size`, `orientation`), A4 paysage si absent. `grid` : `{"authid":
         système de la grille, "interval": écart en unités de ce système}`. Lève `GridError`
@@ -394,7 +525,7 @@ class LayoutBackend(QgisBackend):
             # Taille de police entière quand le facteur vaut 1 : rendu d'avant à l'identique.
             return size if ff == 1 else max(1, int(round(size * ff)))
 
-        def label(text, x, y, w, h, size, bold=False):
+        def label(text, x, y, w, h, size, bold=False, centered=False):
             item = QgsLayoutItemLabel(layout)
             item.setText(text)
             font = QFont()
@@ -403,12 +534,29 @@ class LayoutBackend(QgisBackend):
             font.setPointSize(points(size))
             font.setBold(bold)
             item.setFont(font)
+            if centered:
+                from qgis.PyQt.QtCore import Qt
+
+                item.setHAlign(Qt.AlignmentFlag.AlignHCenter)
             return place(item, x, y, w, h)
 
         # Carte : couches visibles seules, cadrée sur leur emprise (zoomToExtent garde la taille).
+        # Résultats d'un plan (entrée 7.9) : un clone en mémoire stylé remplace la couche dans la
+        # mise en page seule ; la couche du projet n'est jamais touchée.
+        labels, drawn, warnings = {}, list(layers), []
+        if focus is not None:
+            for layer, text, style in focus["results"]:
+                labels[id(layer)] = text
+                if style is not None:
+                    clone = highlighted_clone(layer, style)
+                    if clone is not None:
+                        drawn[layers.index(layer)] = clone
+                    else:
+                        warnings.append(CLONE_FAILED % text)
         carte = QgsLayoutItemMap(layout)
         carte.setCrs(QgsCoordinateReferenceSystem(authid))
-        carte.setLayers(layers)
+        carte.setLayers(drawn)
+        carte.focus_clones = [d for d, o in zip(drawn, layers) if d is not o]  # tenus jusqu'à l'export
         place(carte, 10, 22, 200, 160)
         carte.zoomToExtent(QgsRectangle(*box))
         if scale is not None:
@@ -429,6 +577,7 @@ class LayoutBackend(QgisBackend):
             except Exception:  # QgsCsException : cadre hors du domaine du système
                 in_grid = None
             check_grid_density(in_grid, grid["interval"])
+            dense = max(in_grid[2] - in_grid[0], in_grid[3] - in_grid[1]) / grid["interval"] > MAX_LABELLED_LINES
             # Carroyage porté par une seconde carte, sans fond, posée sur la première : une couche
             # en mode de fusion fait rastériser la carte, et QGIS coupe alors ce qui dépasse du
             # cadre, donc les étiquettes de la grille. La seconde carte reste vectorielle. Une
@@ -448,9 +597,15 @@ class LayoutBackend(QgisBackend):
             map_grid.setIntervalX(grid["interval"])
             map_grid.setIntervalY(grid["interval"])
             map_grid.setStyle(QgsLayoutItemMapGrid.GridStyle.Solid)
-            map_grid.setAnnotationEnabled(True)
-            map_grid.setAnnotationFormat(QgsLayoutItemMapGrid.AnnotationFormat.Decimal)
-            map_grid.setAnnotationPrecision(_decimals(grid["interval"]))
+            if grid.get("mgrs"):
+                # Les deux chiffres du kilomètre ; à 100 km, toujours 00 : pas d'étiquette.
+                map_grid.setAnnotationEnabled(grid["interval"] < 100000.0 and not dense)
+                map_grid.setAnnotationFormat(QgsLayoutItemMapGrid.AnnotationFormat.CustomFormat)
+                map_grid.setAnnotationExpression(MGRS_LABEL_EXPRESSION)
+            else:
+                map_grid.setAnnotationEnabled(True)
+                map_grid.setAnnotationFormat(QgsLayoutItemMapGrid.AnnotationFormat.Decimal)
+                map_grid.setAnnotationPrecision(_decimals(grid["interval"]))
             # Étiquettes à gauche et en bas seulement : à droite, elles mordraient sur la légende,
             # en haut sur le titre. Un seul axe par bord (Y à gauche, X en bas) : sur une grille
             # inclinée, les deux se superposeraient dans les coins.
@@ -469,6 +624,30 @@ class LayoutBackend(QgisBackend):
             map_grid.setEnabled(True)
 
         title_label = label(title, 10, 6, 277, 14, 18, bold=True)
+        header_label = label(header, 10, 0.8, 277, 4.8, 7, centered=True) if header else None
+        footer_label = label(footer, 10, 205, 277, 4.6, 7, centered=True) if footer else None
+        squares_label = None
+        if grid is not None and grid.get("mgrs"):
+            km = int(round(grid["interval"] / 1000.0))
+            squares_label = label(
+                "Carroyage MGRS (USNG) de %d km\nCarrés de 100 km : %s" % (km, ", ".join(grid["squares"])),
+                142, 167, 66, 14, 7,
+            )
+            squares_label.setBackgroundEnabled(True)
+            squares_label.setBackgroundColor(QColor(255, 255, 255, 230))
+            squares_label.setFrameEnabled(True)
+            squares_label.setMarginX(1.5)
+            squares_label.setMarginY(1.0)
+            # Cadre ajusté à son texte, calé dans le coin bas droit de la carte.
+            # Le calcul de QGIS rogne la dernière lettre sous Windows (relevé sur le rendu A3) :
+            # une marge de largeur de 15 % et 3 mm.
+            squares_label.adjustSizeToText()
+            fitted = squares_label.sizeWithUnits()
+            squares_label.attemptResize(QgsLayoutSize(fitted.width() * 1.15 + 3.0, fitted.height()))
+            size = squares_label.sizeWithUnits()
+            squares_label.attemptMove(
+                QgsLayoutPoint((10 + 200) * fx - size.width() - 1.5, (22 + 160) * fy - size.height() - 1.5)
+            )
 
         legend = QgsLayoutItemLegend(layout)
         legend.setLinkedMap(carte)
@@ -476,18 +655,29 @@ class LayoutBackend(QgisBackend):
         root = legend.model().rootGroup()
         root.clear()
         map_scale = carte.scale()
-        for layer in layers:
+        hide_bands = focus is not None and focus.get("hide_band_labels")
+        for original, layer in zip(layers, drawn):
             # Une couche que l'échelle de la carte masque n'est pas dessinée : pas de légende.
             if layer.hasScaleBasedVisibility() and not layer.isInScaleRange(map_scale):
                 continue
             install_legend(layer)  # légende de Cassini d'un projet rouvert (style_gestures)
             node = root.addLayer(layer)
             apply_legend_labels(node, layer)
+            text = labels.get(id(original))
+            if text:
+                node.setUseLayerName(False)  # le nœud seul est renommé, jamais la couche
+                node.setName(text)
             legend.model().refreshLayerLegend(node)
+            if hide_bands:
+                hide_band_label(legend.model(), node, layer)
         # Seules les classes présentes dans le cadre de la carte restent à la légende.
         legend.setLegendFilterByMapEnabled(True)
         legend.updateFilterByMap()
         place(legend, 215, 22, 72, LEGEND_BOTTOM - 22)
+        if focus is not None:
+            # Le nom en clair d'un résultat est une phrase : il passe à la ligne dans la colonne au
+            # lieu de faire replier toute la légende sur ses noms (entrée 7.9, relevé sous 3.44).
+            legend.setAutoWrapLinesAfter(max(20.0, 72 * fx - legend.symbolWidth() - LEGEND_WRAP_MARGIN))
         # Relevés par les sondes : l'essai retenu, et s'il tient sans couper la légende.
         self.legend_step, self.legend_fits = fit_legend(
             layout, legend, 72 * fx, (LEGEND_BOTTOM - 22) * fy, family
@@ -518,7 +708,12 @@ class LayoutBackend(QgisBackend):
         arrow.setBackgroundColor(QColor(255, 255, 255, 210))
         place(arrow, 193, 24, 15, 15)
 
-        sources_label = label(sources_text, 10, 198, 277, 10, 8)
+        # Avec un pied de page, la ligne des sources lui laisse le bas de la page, en 7 pt : trois
+        # lignes de sources détaillées tiennent au-dessus du pied (relevé sur le rendu A3).
+        if footer:
+            sources_label = label(sources_text, 10, 197, 277, 7.6, 7)
+        else:
+            sources_label = label(sources_text, 10, 198, 277, 10, 8)
 
         # Relu depuis la mise en page elle-même : un élément absent ne peut pas être annoncé.
         by_type = {type(i): i for i in layout.items()}
@@ -530,7 +725,10 @@ class LayoutBackend(QgisBackend):
             "northarrow": QgsLayoutItemPicture in by_type and bool(arrow.evaluatedPath()),
             "sources": sources_label in layout.items() and bool(sources_label.text()),
         }
-        placed = [key for key in EXPECTED_ITEMS if present[key]]
+        present["header"] = header_label is not None and bool(header_label.text())
+        present["footer"] = footer_label is not None and bool(footer_label.text())
+        present["grid_squares"] = squares_label is not None and bool(squares_label.text())
+        placed = [key for key in EXPECTED_ITEMS + OPTIONAL_ITEMS if present[key]]
 
         result = QgsLayoutExporter(layout).exportToPdf(out, QgsLayoutExporter.PdfExportSettings())
         if result != QgsLayoutExporter.ExportResult.Success:
@@ -538,6 +736,7 @@ class LayoutBackend(QgisBackend):
         frame = carte.extent()
         return {
             "items": placed,
+            "warnings": warnings,
             "scale": carte.scale(),
             "extent": (frame.xMinimum(), frame.yMinimum(), frame.xMaximum(), frame.yMaximum()),
         }
@@ -649,7 +848,161 @@ def _grid_param(params):
             raise bad
         metres = interval["value"] * (1000.0 if interval["unit"] == "km" else 1.0)
         return {"authid": "EPSG:%d" % epsg, "interval": float(metres), "projected": True, "epsg": epsg}
+    if kind == "mgrs":
+        epsg = grid.get("epsg")
+        squares = grid.get("squares")
+        if (
+            set(grid) != {"kind", "interval", "epsg", "squares"}
+            or set(interval) != {"value", "unit"}
+            or interval["unit"] not in ("m", "km")
+            or not isinstance(epsg, int)
+            or isinstance(epsg, bool)
+            or not isinstance(squares, list)
+            or not all(isinstance(q, str) and q for q in squares)
+        ):
+            raise GestureError(
+                BAD_PARAMS,
+                "Le carroyage MGRS doit porter son intervalle, et la zone et les carrés fournis par le noyau.",
+            )
+        metres = float(interval["value"] * (1000.0 if interval["unit"] == "km" else 1.0))
+        if metres not in MGRS_INTERVALS:
+            raise GestureError(BAD_PARAMS, "Un carroyage MGRS se trace à 1, 10 ou 100 km.")
+        return {"authid": "EPSG:%d" % epsg, "interval": metres, "projected": True, "epsg": epsg,
+                "mgrs": True, "squares": list(squares)}
     raise bad
+
+
+def _margin_param(params, name):
+    """`header` ou `footer` lu et vérifié : None si absent, sinon la ligne telle qu'écrite."""
+    text = params.get(name)
+    if text is None:
+        return None
+    if (
+        not isinstance(text, str)
+        or not text.strip()
+        or any(unicodedata.category(c) == "Cc" or c in "\u2028\u2029" for c in text)
+        or len(text) > MAX_MARGIN_TEXT
+    ):
+        raise GestureError(
+            BAD_PARAMS, "L'en-tête et le pied de page tiennent sur une ligne de 120 caractères au plus."
+        )
+    return text  # imprimé tel quel (D8)
+
+
+FRAMED_ON = ("results", "inputs", "visible_layers")
+FOCUS_KEYS = {"results", "hidden", "frame", "framed_on", "hide_band_labels"}
+
+
+def _ids(value):
+    return isinstance(value, list) and all(isinstance(i, str) and i for i in value)
+
+
+def _focus_param(params):
+    """`focus` (fourni par le noyau pour un export de plan, entrée 7.9) lu et vérifié : None si
+    absent, sinon `{"results": [(id, libellé, style normalisé ou None)], "hidden": set,
+    "frame": [ids], "hide_band_labels": bool}`. Mal formé : `layout.bad_params`."""
+    focus = params.get("focus")
+    if focus is None:
+        return None
+    bad = GestureError(BAD_PARAMS, "La mise en évidence du résultat, fournie par le noyau, est invalide.")
+    if not isinstance(focus, dict) or not set(focus) <= FOCUS_KEYS or "results" not in focus:
+        raise bad
+    if focus.get("framed_on") not in FRAMED_ON:
+        raise bad
+    hidden, frame = focus.get("hidden", []), focus.get("frame", [])
+    hide_bands = focus.get("hide_band_labels", False)
+    if not _ids(hidden) or not _ids(frame) or not isinstance(hide_bands, bool):
+        raise bad
+    results = []
+    if not isinstance(focus["results"], list):
+        raise bad
+    for item in focus["results"]:
+        if not isinstance(item, dict) or not set(item) <= {"layer_id", "label", "style"}:
+            raise bad
+        layer_id, label = item.get("layer_id"), item.get("label")
+        if not isinstance(layer_id, str) or not layer_id or not isinstance(label, str) or not label.strip():
+            raise bad
+        style = item.get("style")
+        if style is not None:
+            try:
+                style = normalize_style(style)
+            except GestureError:
+                raise bad
+            if style["kind"] != "single":
+                raise bad
+        if any(r[0] == layer_id for r in results):
+            raise bad
+        results.append((layer_id, label.strip(), style))
+    return {"results": results, "hidden": set(hidden), "frame": list(frame), "hide_band_labels": hide_bands}
+
+
+def _focus_order(backend, layers, focus):
+    """Couches de la carte d'un export de plan (entrée 7.9) : intermédiaires ôtés ; résultats
+    vecteur en tête, dans l'ordre du noyau ; résultats raster juste au-dessus du premier raster
+    de l'utilisateur (sous ses vecteurs), sinon en bas. Un id absent des couches est ignoré."""
+    layers = [layer for layer in layers if backend.id_of(layer) not in focus["hidden"]]
+    order = [r[0] for r in focus["results"]]
+    found = [layer for rid in order for layer in layers if backend.id_of(layer) == rid]
+    vectors = [layer for layer in found if backend.is_vector(layer)]
+    rasters = [layer for layer in found if not backend.is_vector(layer)]
+    rest = [layer for layer in layers if layer not in found]
+    at = next((i for i, layer in enumerate(rest) if not backend.is_vector(layer)), len(rest))
+    return vectors + rest[:at] + rasters + rest[at:]
+
+
+def _file_path(raw):
+    """Chemin du fichier d'une source de couche (`fichier.gpkg|layername=x` -> `fichier.gpkg`) ;
+    None si ce n'est pas un fichier."""
+    if source_name(raw) is None:
+        return None
+    text = raw.split("|", 1)[0].split("?", 1)[0]
+    if text.startswith("file://"):
+        # URI d'un CSV (`file:///C:/Mes%20donn%C3%A9es/gares.csv?type=csv`) : chemin décodé.
+        text = _percent_decoded(text[len("file://"):])
+        if re.match(r"^/[A-Za-z]:", text):
+            text = text[1:]
+    return text
+
+
+def _percent_decoded(text):
+    """Décode les `%XX` d'une URI de fichier (UTF-8), sans module réseau (AD-14)."""
+    out = bytearray()
+    i = 0
+    raw = text.encode("utf-8")
+    while i < len(raw):
+        if raw[i:i + 1] == b"%" and re.match(rb"[0-9A-Fa-f]{2}", raw[i + 1:i + 3] or b""):
+            out.append(int(raw[i + 1:i + 3], 16))
+            i += 3
+        else:
+            out.append(raw[i])
+            i += 1
+    return out.decode("utf-8", "replace")
+
+
+def _under(path, folder):
+    """Vrai si `path` est dans le dossier `folder` (casse ignorée sous Windows)."""
+    if not path or not folder:
+        return False
+    a = os.path.normcase(os.path.abspath(path))
+    b = os.path.normcase(os.path.abspath(folder))
+    return a == b or a.startswith(b.rstrip("\\/") + os.sep)
+
+
+def _metres_text(value):
+    """« 5 m », « 0,5 m », « 25 m » : la taille de cellule, deux décimales au plus."""
+    text = ("%.2f" % value).rstrip("0").rstrip(".")
+    return text.replace(".", ",") + " m"
+
+
+def _detail_text(detail):
+    """« 5 m, fichier du 2025-03-14 », « données du 2024-05-01 » ; vide sans rien à dire."""
+    parts = []
+    if detail["resolution"] is not None:
+        parts.append(_metres_text(detail["resolution"]["value"]))
+    if detail["date"] is not None:
+        word = "données du" if detail["date_origin"] == "metadata" else "fichier du"
+        parts.append("%s %s" % (word, detail["date"]))
+    return ", ".join(parts)
 
 
 def _rounded(center):
@@ -692,6 +1045,9 @@ class LayoutExportGesture(_ReadGesture):
         given_center = _center_param(params)
         page = _page_param(params)
         grid = _grid_param(params)
+        header = _margin_param(params, "header")
+        footer = _margin_param(params, "footer")
+        focus = _focus_param(params)
         backend = self._backend
         if grid is not None and grid["projected"] and not backend.knows(grid["epsg"]):
             raise GestureError(UNKNOWN_CRS, "Système de la grille inconnu de QGIS : EPSG:%d." % grid["epsg"])
@@ -699,6 +1055,9 @@ class LayoutExportGesture(_ReadGesture):
         # journal : elles restent dans le projet, intactes, mais hors de la carte (ticket 5.36).
         leave_out = set(leave_out)
         layers = [layer for layer in backend.visible_layers() if backend.id_of(layer) not in leave_out]
+        before_focus = list(layers)
+        if focus is not None:
+            layers = _focus_order(backend, layers, focus)
         if not layers:
             raise GestureError(EMPTY, "Aucune couche visible : il n'y a rien à mettre sur la carte.")
         crs = backend.project_crs()
@@ -713,14 +1072,51 @@ class LayoutExportGesture(_ReadGesture):
         # souvent le monde.
         frame_box = box
         if scale is None:
-            frame_box = _union([e for layer, e in zip(layers, extents) if backend.is_vector(layer)]) or box
+            # Cadrage d'avant 7.9, sur les couches visibles avant que la mise en évidence n'en ôte.
+            if focus is not None:
+                every = [backend.extent_of(layer, crs) for layer in before_focus]
+                fallback = _union(every) or box
+                frame_box = _union(
+                    [e for layer, e in zip(before_focus, every) if backend.is_vector(layer)]
+                ) or fallback
+            else:
+                frame_box = _union([e for layer, e in zip(layers, extents) if backend.is_vector(layer)]) or box
+            # Résultat d'un plan : cadré sur les couches que le noyau nomme, s'il en reste de visibles.
+            if focus is not None and focus["frame"]:
+                wanted = set(focus["frame"])
+                framed = _union([e for layer, e in zip(layers, extents) if backend.id_of(layer) in wanted])
+                if framed is not None:
+                    frame_box = framed
 
         names = []
+        details = []
+        work_dir = None
+        if backend.project_dir() and backend.project_name():
+            work_dir = os.path.join(backend.project_dir(), backend.project_name() + ".cassini")
+        # Un résultat mis en évidence est nommé, dans la ligne imprimée des sources, par son nom en
+        # clair au lieu de son fichier technique ; `sources` garde les noms de fichiers.
+        result_labels = {}
+        if focus is not None:
+            result_labels = {rid: label for rid, label, _ in focus["results"]}
+        printed = {}
         for layer in layers:
-            name = source_name(backend.source_of(layer))
-            if name is not None and name not in names:
-                names.append(name)
-        sources_text = "Sources : " + (", ".join(names) if names else "couches du projet (hors fichier)")
+            raw = backend.source_of(layer)
+            name = source_name(raw)
+            if name is None or name in names:
+                continue
+            names.append(name)
+            details.append(self._detail(layer, name, _file_path(raw), work_dir))
+            if backend.id_of(layer) in result_labels:
+                printed[name] = result_labels[backend.id_of(layer)]
+        if names:
+            shown = []
+            for detail in details:
+                said = _detail_text(detail)
+                source = printed.get(detail["source"], detail["source"])
+                shown.append("%s (%s)" % (source, said) if said else source)
+            sources_text = "Sources : " + ", ".join(shown)
+        else:
+            sources_text = "Sources : couches du projet (hors fichier)"
 
         center = None
         if scale is not None:
@@ -756,6 +1152,18 @@ class LayoutExportGesture(_ReadGesture):
             extra["page"] = page
         if grid is not None:
             extra["grid"] = {"authid": grid["authid"], "interval": grid["interval"], "projected": grid["projected"]}
+            if grid.get("mgrs"):
+                extra["grid"].update(mgrs=True, squares=grid["squares"])
+        if header is not None:
+            extra["header"] = header
+        if footer is not None:
+            extra["footer"] = footer
+        if focus is not None:
+            by_id = {backend.id_of(layer): layer for layer in layers}
+            extra["focus"] = {
+                "results": [(by_id[rid], label, style) for rid, label, style in focus["results"] if rid in by_id],
+                "hide_band_labels": focus["hide_band_labels"],
+            }
         try:
             framing = _padded(frame_box) if scale is None else _centered(center)
             done = backend.export_pdf(layers, title.strip(), sources_text, out, crs, framing, **extra)
@@ -777,17 +1185,44 @@ class LayoutExportGesture(_ReadGesture):
                 "Aucune couche visible dans le cadre : déplacez la vue de QGIS sur les données, puis recommencez.",
             )
         self.items_placed = list(done["items"])
+        warnings = [w for w in done.get("warnings", []) if isinstance(w, str)]
         result = {
             "file": out,
             "page_count": 1,
             "layer_count": len(layers),
             "sources": names[:MAX_SOURCES],
             "truncated": len(names) > MAX_SOURCES,
+            "source_details": details[:MAX_SOURCES],
         }
         if scale is not None:
             result["scale"] = scale
             result["center"] = {"x": center[0], "y": center[1], "epsg": _epsg_of(crs)}
+        if warnings:
+            result["warnings"] = warnings
         return result
+
+    def _detail(self, layer, name, path, work_dir):
+        """Résolution et date d'une source (D9) : rien d'inventé quand QGIS ne sait pas ; une
+        sortie de Cassini, réécrite au rejeu, n'a pas de date (décision P3 de la party du
+        2026-11-10, à confirmer par le propriétaire)."""
+        backend = self._backend
+        size = backend.resolution_of(layer)
+        detail = {
+            "source": name,
+            "resolution": {"value": round(size, 6), "unit": "m"} if size is not None else None,
+            "date": None,
+            "date_origin": None,
+        }
+        if path is not None and _under(path, work_dir):
+            return detail
+        date = backend.metadata_date(layer)
+        if date is not None:
+            detail["date"], detail["date_origin"] = date, "metadata"
+        elif path is not None:
+            date = backend.file_date(path)
+            if date is not None:
+                detail["date"], detail["date_origin"] = date, "file"
+        return detail
 
     @staticmethod
     def _discard(path):

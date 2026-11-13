@@ -166,6 +166,9 @@ pub struct Session<'a> {
     style_kinds: HashSet<String>,
     /// Ordres que la dernière étape demande de dicter juste après sa ligne (amendement d'AD-30).
     pending_orders: Vec<(String, Value)>,
+    /// Ligne du journal où la session a commencé le plan en cours (sa première étape, même
+    /// refusée sans ligne) ; `None` hors plan. Borne les lignes lues pour `focus` (entrée 7.9).
+    plan_start: Option<usize>,
 }
 
 impl<'a> Session<'a> {
@@ -208,6 +211,7 @@ impl<'a> Session<'a> {
             gestures: HashSet::new(),
             style_kinds: HashSet::new(),
             pending_orders: Vec::new(),
+            plan_start: None,
         })
     }
 
@@ -351,6 +355,12 @@ impl<'a> Session<'a> {
         plan_step: Option<usize>,
     ) -> Result<Value, ErrorReport> {
         let step = self.next_step;
+        // Un plan commence à sa première étape ; un appel hors plan n'appartient à aucun.
+        match plan_step {
+            Some(1) => self.plan_start = Some(step),
+            None => self.plan_start = None,
+            Some(_) => {}
+        }
         let value = self.call_step(id, params, origin, plan_step)?;
         // Les ordres que l'étape demande (`layer.set_style`, puis `layer.arrange`) : chacun une
         // étape du journal, dans l'ordre, juste après sa ligne ; le premier refus arrête la suite
@@ -376,18 +386,154 @@ impl<'a> Session<'a> {
         Ok(value)
     }
 
+    /// Complète un carroyage `mgrs` du paramètre `name` : ôte `epsg` et `squares` de
+    /// l'appelant, lit l'inventaire auprès de QGIS et y pose la zone UTM et les carrés de
+    /// 100 km de l'emprise du projet. Sans emprise lisible, `layout.no_extent`, avant tout ordre
+    /// d'export et sans ligne au journal. Les autres formes de carroyage ne lisent rien.
+    fn fill_mgrs_grid(&self, id: &str, params: &mut Value, name: &str) -> Result<(), ErrorReport> {
+        let Some(grid) = params.get_mut(name).and_then(Value::as_object_mut) else {
+            return Ok(());
+        };
+        if grid.get("kind").and_then(Value::as_str) != Some("mgrs") {
+            return Ok(());
+        }
+        grid.remove("epsg");
+        grid.remove("squares");
+        // Des paramètres invalides (intervalle hors liste, champ en trop) sont refusés tels quels,
+        // avant toute lecture auprès de QGIS.
+        self.registry.validate_params(id, params)?;
+        let inventory = self.router.call(INVENTORY, json!({}))?;
+        let (epsg, squares) = crate::commands::layout_export_pdf::mgrs_grid_of(&inventory)
+            .ok_or_else(|| RegistryError::Delegated {
+                code: "layout.no_extent".into(),
+                message: "Le projet n'a pas d'emprise lisible en degrés (couches vides, ou plus \
+                          de deux fuseaux UTM) : aucun carroyage MGRS ne peut être posé."
+                    .into(),
+            })?;
+        if let Some(grid) = params.get_mut(name).and_then(Value::as_object_mut) {
+            grid.insert("epsg".into(), json!(epsg));
+            grid.insert("squares".into(), json!(squares));
+        }
+        Ok(())
+    }
+
+    /// Remplit le paramètre `name` du système de calcul en mètres de la couche que désigne le
+    /// paramètre `layer` (`crate::work_crs`). Des paramètres invalides sont refusés tels quels,
+    /// avant toute lecture auprès de QGIS. Sans QGIS : `registry.unavailable`, qui nomme la
+    /// commande, comme avant. Aucun système en mètres : `analysis.crs_not_metric`, avant tout
+    /// ordre et sans ligne au journal. Une couche en mètres ne remplit rien : le geste fait le
+    /// tampon seul (amendement RA06). Une couche absente de l'inventaire non plus : le geste
+    /// répond `layer.not_found`.
+    fn fill_work_crs(
+        &self,
+        id: &str,
+        params: &mut Value,
+        name: &str,
+        layer: &str,
+    ) -> Result<(), ErrorReport> {
+        self.registry.validate_params(id, params)?;
+        let Some(layer_id) = params.get(layer).and_then(Value::as_str) else {
+            return Ok(());
+        };
+        // Une lecture ratée est l'échec de la commande, qu'elle nomme : son code est gardé, son
+        // message dit que l'inventaire n'a pas pu être lu avant elle.
+        let inventory = self
+            .router
+            .call(INVENTORY, json!({}))
+            .map_err(|e| match e {
+                RegistryError::Unavailable(_) => RegistryError::Unavailable(id.to_string()),
+                RegistryError::Cancelled(_) => RegistryError::Cancelled(id.to_string()),
+                other => RegistryError::Delegated {
+                    code: other.code().to_string(),
+                    message: format!(
+                        "La commande « {id} » n'est pas lancée : l'inventaire du projet n'a pas pu \
+                         être lu pour choisir son système de calcul ({other})"
+                    ),
+                },
+            })?;
+        if let Some(code) = crate::work_crs::work_epsg(&inventory, layer_id)? {
+            if let Value::Object(map) = params {
+                map.insert(name.to_string(), json!(code));
+            }
+        }
+        Ok(())
+    }
+
+    /// Remplit le paramètre `name` de mise en évidence du résultat d'un plan (`crate::focus`)
+    /// pour un export lancé à l'étape `plan_step` d'un plan, d'après les lignes du plan en cours
+    /// au journal. Rien hors plan, à la première étape d'un plan, ni pour un plan qui n'a produit
+    /// aucune couche : l'export garde son comportement d'avant. L'inventaire n'est lu auprès de
+    /// QGIS, hors du journal, que s'il y a plusieurs résultats à nommer ; une lecture ratée est
+    /// l'échec de l'export, nommé, sans ligne au journal.
+    fn fill_focus(
+        &self,
+        id: &str,
+        params: &mut Value,
+        name: &str,
+        plan_step: Option<usize>,
+    ) -> Result<(), ErrorReport> {
+        if plan_step.is_none_or(|n| n <= 1) {
+            return Ok(());
+        }
+        self.registry.validate_params(id, params)?;
+        let lines = current_plan(
+            self.registry,
+            &self.journal_path(),
+            plan_step.unwrap_or_default(),
+            self.plan_start,
+        );
+        if lines.is_empty() {
+            return Ok(());
+        }
+        let inventory = if crate::focus::needs_inventory(self.registry, &lines) {
+            Some(
+                self.router
+                    .call(INVENTORY, json!({}))
+                    .map_err(|e| match e {
+                        RegistryError::Unavailable(_) => RegistryError::Unavailable(id.to_string()),
+                        other => RegistryError::Delegated {
+                            code: other.code().to_string(),
+                            message: format!(
+                                "La commande « {id} » n'est pas lancée : l'inventaire du projet n'a \
+                                 pas pu être lu pour nommer les résultats du plan ({other})"
+                            ),
+                        },
+                    })?,
+            )
+        } else {
+            None
+        };
+        let title = params
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if let Some(focus) =
+            crate::focus::focus_of(self.registry, &lines, title, inventory.as_ref())
+        {
+            let value = crate::focus::focus_value(&focus)?;
+            if let Value::Object(map) = params {
+                map.insert(name.to_string(), value);
+            }
+        }
+        Ok(())
+    }
+
     /// Commande d'ouverture que la session dicte après une étape de `id` : `layer.open_raster`
-    /// pour une sortie GeoTIFF, `layer.open_vector` pour une sortie GeoJSON, d'une commande du
-    /// noyau seulement, et si l'extension annonce le geste ; `None` sinon.
+    /// pour une sortie GeoTIFF, d'une commande du noyau ou d'une commande déléguée qui écrit un
+    /// raster (amendement du 2026-11-05 d'AD-24, `data.convert_raster`) ; `layer.open_vector`
+    /// pour une sortie GeoJSON d'une commande du noyau seulement (une couche vecteur déléguée
+    /// est posée au projet par son geste) ; et si l'extension annonce le geste ; `None` sinon.
     fn opener_of(&self, id: &str) -> Option<&'static str> {
         let spec = self.registry.spec(id)?;
-        if spec.runs_in != Some(crate::registry::RunsIn::Core) {
-            return None;
-        }
+        let core = match spec.runs_in {
+            Some(crate::registry::RunsIn::Core) => true,
+            Some(crate::registry::RunsIn::Qgis) => false,
+            None => return None,
+        };
         let ext = spec.output_ext.as_str();
         let opener = if RASTER_EXTENSIONS.contains(&ext) && self.opens_rasters {
             OPEN_RASTER
-        } else if VECTOR_EXTENSIONS.contains(&ext) && self.opens_vectors {
+        } else if core && VECTOR_EXTENSIONS.contains(&ext) && self.opens_vectors {
             OPEN_VECTOR
         } else {
             return None;
@@ -487,6 +633,32 @@ impl<'a> Session<'a> {
             if let Some(name) = &spec.inventory_param {
                 map.remove(name);
             }
+            // Le système de calcul n'est jamais celui de l'appelant : le noyau le choisit (9.16).
+            if let Some((name, _)) = &spec.work_crs_param {
+                map.remove(name);
+            }
+            // La mise en évidence du résultat non plus : le noyau la tire du journal (7.9).
+            if let Some(name) = &spec.focus_param {
+                map.remove(name);
+            }
+        }
+        // Un carroyage MGRS : sa zone et ses carrés de 100 km sont ceux du noyau, d'après
+        // l'emprise du projet lue auprès de QGIS, jamais ceux de l'appelant ; ils sont
+        // journalisés avec les paramètres, et le rejeu les repasse tels quels (epic 10, entrée 31).
+        if let Some(name) = &spec.mgrs_grid_param {
+            self.fill_mgrs_grid(id, &mut params, name)?;
+        }
+        // Une distance en mètres sur une couche en degrés : le noyau choisit le système en mètres
+        // du calcul d'après l'inventaire lu auprès de QGIS, hors du journal ; il est journalisé
+        // avec les paramètres et le rejeu le relit, sans le recalculer (entrée 9.16, AD-11).
+        if let Some((name, layer)) = &spec.work_crs_param {
+            self.fill_work_crs(id, &mut params, name, layer)?;
+        }
+        // Un export lancé dans un plan : le noyau désigne le résultat, le nomme, le met en
+        // évidence et cache les couches intermédiaires, d'après les lignes du plan en cours au
+        // journal ; journalisé avec les paramètres, relu au rejeu sans recalcul (7.9, AD-11).
+        if let Some(name) = &spec.focus_param {
+            self.fill_focus(id, &mut params, name, plan_step)?;
         }
         // Une mise en forme sans les gestes qu'elle demande n'est pas exécutée, et rien n'est
         // écrit (AD-25, entrée 11.20).
@@ -554,7 +726,9 @@ impl<'a> Session<'a> {
                 // Ce que le rejeu repassera est gardé à part, sous la clé réservée `replay` :
                 // un résultat résumé (plus de 200 octets) n'en garderait que taille et empreinte.
                 let mut replay = Map::new();
-                if let Some((name, field)) = &spec.replay_param {
+                // Le paramètre que la commande a rempli elle-même (la date d'un azimut magnétique,
+                // M4) est gardé de même, que l'appelant l'ait donné ou non.
+                for (name, field) in spec.replay_param.iter().chain(&spec.filled_param) {
                     if let Some(kept) = value.get(field) {
                         replay.insert(name.clone(), kept.clone());
                     }
@@ -870,6 +1044,113 @@ pub fn intermediate_files(registry: &Registry, journal: &Path) -> HashSet<String
         produced.insert(layer_id.to_string(), files);
     }
     hidden
+}
+
+/// Lignes du plan en cours d'après le journal `journal`, pour un export à la place `plan_step`
+/// = k (entrée 7.9), avec leur étape au journal. En remontant depuis la fin du journal, il faut
+/// trouver exactement les étapes k-1, k-2, …, 1 de suite, chacune suivie des seules lignes que le
+/// noyau dicte après elle (ouvertures, mises en forme), toutes à la même place ; la première ligne
+/// doit être au plus tôt `start`, la ligne où la session a commencé ce plan. Sinon (ligne hors
+/// plan ou illisible au milieu, place manquante, plan commencé ailleurs) : aucune ligne.
+fn current_plan(
+    registry: &Registry,
+    journal: &Path,
+    plan_step: usize,
+    start: Option<usize>,
+) -> Vec<(usize, Value)> {
+    let (Some(start), Ok(bytes)) = (start, fs::read(journal)) else {
+        return Vec::new();
+    };
+    let text = String::from_utf8_lossy(&bytes);
+    let all: Vec<&str> = content_lines(&text).collect();
+    let mut lines: Vec<(usize, Value)> = Vec::new();
+    let mut expected = plan_step.saturating_sub(1);
+    for (i, raw) in all.iter().enumerate().rev() {
+        if expected == 0 {
+            break;
+        }
+        let Some(line) = serde_json::from_str::<Value>(raw).ok() else {
+            return Vec::new();
+        };
+        if line.get("plan_step").and_then(Value::as_u64) != Some(expected as u64) {
+            return Vec::new();
+        }
+        let id = line.get("id").and_then(Value::as_str).unwrap_or_default();
+        let dictated = registry.spec(id).is_some_and(|spec| spec.dictated_by_core);
+        lines.push((i + 1, line));
+        if !dictated {
+            expected -= 1;
+        }
+    }
+    lines.reverse();
+    match lines.first() {
+        Some((first, _)) if expected == 0 && *first >= start => lines,
+        _ => Vec::new(),
+    }
+}
+
+/// Le dernier plan exécuté d'après le journal `journal` (ticket 5.48), pour la vue triée : les
+/// fichiers de sortie de ses étapes réussies (`results`, noms de `output_file`, que le rejeu reprend
+/// sous `replay/`) et les couches qu'il cite (`cited` : valeurs texte de premier niveau de ses
+/// `params`, et `layer_id` d'une sortie entière, hors couches qu'il a produites lui-même).
+///
+/// Le dernier plan est la suite de lignes à `plan_step` qui part de la dernière ligne à
+/// `plan_step` 1 ; l'ouverture dictée d'une sortie (`layer.open_raster`, `layer.open_vector`), qui
+/// porte la place de l'étape qu'elle suit, n'en commence pas un. Une ligne hors plan est ignorée.
+/// Journal absent ou illisible : plan vide ; une ligne illisible ne compte pas.
+pub fn last_plan(registry: &Registry, journal: &Path) -> crate::agent_inventory::LastPlan {
+    let mut plan = crate::agent_inventory::LastPlan::default();
+    let Ok(bytes) = fs::read(journal) else {
+        return plan;
+    };
+    let text = String::from_utf8_lossy(&bytes);
+    let mut lines: Vec<(usize, Value)> = Vec::new();
+    for (i, raw) in content_lines(&text).enumerate() {
+        let Some(line) = serde_json::from_str::<Value>(raw).ok() else {
+            continue;
+        };
+        let Some(plan_step) = line.get("plan_step").and_then(Value::as_u64) else {
+            continue;
+        };
+        let id = line.get("id").and_then(Value::as_str).unwrap_or_default();
+        if plan_step <= 1 && !matches!(id, OPEN_RASTER | OPEN_VECTOR) {
+            lines.clear();
+        }
+        lines.push((i + 1, line));
+    }
+    let produced: HashSet<&str> = lines
+        .iter()
+        .filter_map(|(_, l)| l.get("layer_id").and_then(Value::as_str))
+        .collect();
+    for (step, line) in &lines {
+        if let Some(Value::Object(params)) = line.get("params") {
+            for value in params.values() {
+                let cited = match value {
+                    Value::String(s) => Some(s.as_str()),
+                    Value::Object(output) => output.get("layer_id").and_then(Value::as_str),
+                    _ => None,
+                };
+                if let Some(id) = cited.filter(|id| !produced.contains(id)) {
+                    plan.cited.insert(id.to_string());
+                }
+            }
+        }
+        if line.get("error").is_some() || line.get("cancelled").is_some() {
+            continue;
+        }
+        let Some(id) = line.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        if let Some(spec) = registry.spec(id) {
+            let ext = spec.output_ext_for(line.get("params").unwrap_or(&Value::Null));
+            plan.results.extend(
+                spec.output_params
+                    .iter()
+                    .map(|name| output_file(*step, id, &spec.output_params, name, ext)),
+            );
+        }
+    }
+    plan
 }
 
 /// Nom du fichier de sortie désigné par le repère `out:<k>.<n>`, d'après `prior`, les ids des
@@ -1338,7 +1619,21 @@ impl<'a> Replay<'a> {
                         map.insert(name.clone(), kept.clone());
                     }
                 }
+                // Le paramètre rempli par la commande (M4) : la valeur journalisée sous `replay`
+                // remplace celle de la ligne ; sans clé `replay` (journal ancien, ou résultat
+                // sans ce champ), les paramètres de la ligne sont rejoués tels quels.
+                if let Some((name, _)) = &spec.filled_param {
+                    if let Some(kept) = line.get("replay").and_then(|r| r.get(name)) {
+                        map.insert(name.clone(), kept.clone());
+                    }
+                }
             }
+            // Le système de calcul est repassé tel que journalisé (AD-11) ; une ligne qui ne le
+            // porte pas (couche en mètres, ou ligne d'avant l'entrée 9.16) se rejoue sans lui :
+            // le tampon seul, comme à l'origine (amendement RA06). De même pour la mise en
+            // évidence du résultat d'un export de plan (entrée 7.9) : relue telle que journalisée,
+            // ses ids liés aux neufs par la substitution ci-dessus, jamais recalculée ; une ligne
+            // qui ne la porte pas se rejoue sans elle.
             let resolved = resolver
                 .resolve_call(id, spec, step, params, &self.ids[..i])
                 .map_err(|e| e.at_step(step))?;
@@ -1392,9 +1687,23 @@ impl<'a> Replay<'a> {
                 _ => false,
             };
             if !same {
-                return Err(diverged(format!(
-                    "la commande {id} ne redonne pas le même résultat ou la même erreur"
-                )));
+                // Une lecture qui voit une couche d'une exécution précédente : le projet n'est
+                // plus dans l'état de son ouverture. On en dit la cause et le remède.
+                let stale = outcome
+                    .as_ref()
+                    .ok()
+                    .and_then(|value| earlier_layer(value, &leave_out));
+                return Err(diverged(match stale {
+                    Some(layer) => format!(
+                        "la commande {id} voit la couche « {layer} », posée par une exécution \
+                         précédente : le projet n'est plus dans l'état où le journal l'a \
+                         trouvé. Rouvrez le projet tel qu'il était avant ces étapes, sans \
+                         l'enregistrer, puis rejouez"
+                    ),
+                    None => format!(
+                        "la commande {id} ne redonne pas le même résultat ou la même erreur"
+                    ),
+                }));
             }
             if let (Ok(value), Some(old), false) = (
                 &outcome,
@@ -1434,6 +1743,31 @@ impl<'a> Replay<'a> {
             identical: true,
         })
     }
+}
+
+/// Premier id de `leave_out` (couches d'une exécution précédente) que nomme le résultat brut
+/// `value` d'une étape : la lecture voit une couche qu'aucune étape de ce rejeu n'a posée (les
+/// ids de ce rejeu sont neufs). `None` pour une vraie divergence.
+fn earlier_layer(value: &Value, leave_out: &Value) -> Option<String> {
+    fn strings<'a>(value: &'a Value, out: &mut Vec<&'a str>) {
+        match value {
+            Value::String(s) => out.push(s),
+            Value::Array(items) => items.iter().for_each(|v| strings(v, out)),
+            Value::Object(map) => map.values().for_each(|v| strings(v, out)),
+            _ => {}
+        }
+    }
+    let earlier: HashSet<&str> = leave_out
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    let mut seen = Vec::new();
+    strings(value, &mut seen);
+    seen.into_iter()
+        .find(|s| earlier.contains(s))
+        .map(str::to_string)
 }
 
 /// L'inventaire sans les couches dont l'id est dans `leave_out` (un tableau d'ids) : au rejeu, la

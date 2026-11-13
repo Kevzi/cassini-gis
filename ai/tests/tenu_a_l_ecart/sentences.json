@@ -738,7 +738,15 @@
     "id": "H35",
     "text": "Supprime la couche des routes du projet, elle ne sert plus.",
     "expected": {
-      "kind": "refusal"
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layer.remove",
+          "params": {
+            "layer_id": "routes_bdt_25af7c60_9b14_4d83_a2e7_6c0d58f1b935"
+          }
+        }
+      ]
     },
     "family": "retrait de couche"
   },

@@ -104,6 +104,7 @@ sorti en PDF — il traverse les epics 2, 9 et 5.
 - Open question: la forme du canal local entre l'extension et le noyau porte l'argument juridique de la frontière GPL. À régler par `bmad-architecture` avant l'epic 9.
 - Unknown: la maturité de `whitebox_next_gen` comme bibliothèque réutilisable ; l'epic 4 l'attend et doit la trancher avant de s'engager.
 - Unknown: le chemin de livraison du modèle GGUF sur un poste isolé, le dépôt d'extensions QGIS n'acceptant pas plusieurs Go. Les epics 5 et 7 l'attendent.
+- Decision: le chemin de livraison du modèle est tranché par le changement de cap `change-distribution-deux-portes` (AD-17 amendé) : installeur léger en ligne qui télécharge le modèle une fois depuis Hugging Face, empreinte vérifiée, ou installeur complet hors ligne, hébergé sur Hugging Face, pour les postes isolés du réseau (propriétaire, 2026-11-10).
 - Decision: ajout de l'epic 10, catalogue étendu par les algorithmes de traitement de QGIS, après la démo (epic 6) : le propriétaire veut à terme un outil complet, sans parité revendiquée ; objectif d'au moins 70 % des demandes réelles couvertes (2026-10-17).
 - Decision: changement de cap du 2026-11-05 (`change-geometrie-et-terrain-avant-la-demo/`), approuvé par le propriétaire : un epic 11, géométrie et terrain étendu (CAP-15), s'insère avant la démo (epic 6) ; le catalogue des commandes est figé en une fois ; hydrologie et couverture radio sont réservées après la démo.
 - Waits on epic 1 because: le registre a besoin du workspace, du verrou hors ligne et de la recette.

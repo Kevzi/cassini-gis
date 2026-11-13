@@ -3,7 +3,8 @@
 # Les cinq contrôles que le README décrit, à chaque poussée : tests du noyau,
 # `cargo fmt`, `cargo clippy`, typage strict et garde hors ligne. Chaque étape
 # est une commande ordinaire : si elle sort en erreur, son job échoue et le run
-# passe au rouge. Rien d'autre que les actions officielles de GitHub (MIT).
+# passe au rouge. Actions officielles de GitHub (MIT), plus une seule exception,
+# `EmbarkStudios/cargo-deny-action` (garde AD-14, licences et dépendances).
 
 name: Recette
 
@@ -150,3 +151,7 @@ jobs:
       # torch ni GPU. L'entraînement lui-même ne tourne jamais en CI.
       - name: Tests de la chaîne d'entraînement
         run: python -I -m unittest discover -s training/entrainement/tests
+
+      # Installeur en ligne (7.1) : manifeste des versions et refus d'une étiquette fausse.
+      - name: Tests de l'installeur
+        run: python -I -m unittest discover -s installer/tests

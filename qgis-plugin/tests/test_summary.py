@@ -36,6 +36,36 @@ class LayerCommandsTest(unittest.TestCase):
             "Buffer of 500 m around Gares: new layer Tampon, 8 features.",
         )
 
+    def test_a_buffer_computed_in_another_system_says_so(self):
+        # Les gares sont en degrés : le noyau a fait calculer le tampon en Lambert-93 (9.16) et
+        # l'a journalisé sous `work_epsg`.
+        computed = dict(BUFFER, work_epsg=2154)
+        self.assertEqual(
+            say("analysis.buffer", computed, BUFFER_OUT),
+            "Zone tampon de 500 m autour de Gares, calculée en EPSG:2154 : nouvelle couche Tampon, 8 entités.",
+        )
+        self.assertEqual(
+            say("analysis.buffer", computed, BUFFER_OUT, lang="en"),
+            "Buffer of 500 m around Gares, computed in EPSG:2154: new layer Tampon, 8 features.",
+        )
+        # Sans `work_epsg` (couche en mètres), avec une valeur illisible, ou sans résultat : rien.
+        for params in (BUFFER, dict(BUFFER, work_epsg="2154"), dict(BUFFER, work_epsg=True)):
+            self.assertEqual(
+                say("analysis.buffer", params, BUFFER_OUT),
+                "Zone tampon de 500 m autour de Gares : nouvelle couche Tampon, 8 entités.",
+            )
+        self.assertEqual(say("analysis.buffer", computed), "Zone tampon de 500 m autour de Gares.")
+
+    def test_the_detail_of_a_done_buffer_forwards_the_logged_work_crs(self):
+        class Item:
+            command = "analysis.buffer"
+            params = dict(BUFFER, work_epsg=32632)
+            result = BUFFER_OUT
+            status = summary.runlog.DONE
+
+        text = summary.detail(Item(), "Tampon", "fr", qgis_name)
+        self.assertIn(", calculée en EPSG:32632 :", text)
+
     def test_singular_and_plural(self):
         one = dict(BUFFER_OUT, feature_count=1)
         zero = dict(BUFFER_OUT, feature_count=0)
@@ -139,6 +169,34 @@ class OtherCommandsTest(unittest.TestCase):
         windows = dict(out, file="C:\\Projets\\out\\2-layout.export_pdf.pdf", page_count=2)
         text = say("layout.export_pdf", {"title": "T"}, windows, lang="en")
         self.assertEqual(text, 'Map "T" exported to PDF: file 2-layout.export_pdf.pdf, 2 pages.')
+
+    def test_export_pdf_says_when_an_empty_result_framed_the_inputs(self):
+        out = {"file": "/home/c/5-layout.export_pdf.pdf", "page_count": 1}
+        focus = {"results": [{"layer_id": "d", "label": "Parcelles"}], "hidden": [], "frame": ["plu"],
+                 "framed_on": "inputs", "hide_band_labels": True}
+        self.assertEqual(
+            say("layout.export_pdf", {"title": "Parcelles", "focus": focus}, out),
+            "Carte « Parcelles » exportée en PDF : fichier 5-layout.export_pdf.pdf, 1 page "
+            "(résultat vide, carte cadrée sur les couches d'entrée).",
+        )
+        self.assertEqual(
+            say("layout.export_pdf", {"title": "P", "focus": focus}, out, lang="en"),
+            'Map "P" exported to PDF: file 5-layout.export_pdf.pdf, 1 page (empty result, map framed on the input layers).',
+        )
+        # Tous vides sans couche d'entrée ; une partie des résultats vides.
+        self.assertTrue(say("layout.export_pdf", {"title": "P", "focus": dict(focus, framed_on="visible_layers", frame=[])},
+                            out).endswith("1 page (résultat vide)."))
+        some = dict(focus, framed_on="results", frame=["a"],
+                    results=[{"layer_id": "a", "label": "A"}, {"layer_id": "b", "label": "B"},
+                             {"layer_id": "c", "label": "C"}])
+        self.assertTrue(say("layout.export_pdf", {"title": "P", "focus": some}, out)
+                        .endswith("1 page (2 résultats vides sur 3)."))
+        self.assertTrue(say("layout.export_pdf", {"title": "P", "focus": some}, out, lang="en")
+                        .endswith("1 page (2 empty results out of 3)."))
+        # Cadré sur le résultat, sans mise en évidence, ou illisible : rien de plus.
+        for extra in ({"focus": dict(focus, framed_on="results")}, {}, {"focus": "inputs"}):
+            text = say("layout.export_pdf", dict({"title": "P"}, **extra), out)
+            self.assertEqual(text, "Carte « P » exportée en PDF : fichier 5-layout.export_pdf.pdf, 1 page.")
 
     def test_export_pdf_names_the_scale_held(self):
         out = {"file": "/home/c/3-layout.export_pdf.pdf", "page_count": 1, "scale": 25000}
@@ -289,6 +347,83 @@ class GeoTest(unittest.TestCase):
             "Mesure de la distance et de l'azimut entre deux points.",
         )
 
+    def test_a_grid_bearing_says_gisement(self):
+        grid = dict(MEASURE, north="grid")
+        out = dict(MEASURE_OUT, north="grid",
+                   convergence={"value": 1.2, "unit": "deg"})
+        self.assertEqual(
+            say("geo.distance_azimuth", grid, out),
+            "Distance géodésique : 660,504 km, gisement 157,9574°, contre-gisement 340,1°.",
+        )
+        self.assertEqual(
+            say("geo.distance_azimuth", grid, out, lang="en"),
+            "Geodesic distance: 660.504 km, grid bearing 157.9574°, back grid bearing 340.1°.",
+        )
+        self.assertEqual(
+            say("geo.distance_azimuth", grid),
+            "Mesure de la distance et du gisement entre deux points.",
+        )
+        # `north: "true"` écrit reste un azimut.
+        self.assertEqual(
+            say("geo.distance_azimuth", dict(MEASURE, north="true"), MEASURE_OUT),
+            "Distance géodésique : 660,504 km, azimut 157,9574°, contre-azimut 340,1°.",
+        )
+        point = dict(DESTINATION, north="grid", utm_zone=31)
+        self.assertEqual(
+            say("geo.destination_point", point, DESTINATION_OUT),
+            "Point atteint à 1,5 km, gisement 100 gon : UTM 31N 449750 E, 5411751 N.",
+        )
+        self.assertEqual(
+            say("geo.destination_point", point, {}, lang="en"),
+            "Point at 1.5 km, grid bearing 100 gon.",
+        )
+
+    def test_a_magnetic_azimuth_says_so_with_its_declination_and_warning(self):
+        magnetic = dict(MEASURE, north="magnetic")
+        out = dict(MEASURE_OUT, north="magnetic", date="2026-05-01",
+                   declination={"value": 2.95, "unit": "deg"})
+        self.assertEqual(
+            say("geo.distance_azimuth", magnetic, out),
+            "Distance géodésique : 660,504 km, azimut magnétique 157,9574°, "
+            "contre-azimut magnétique 340,1° (déclinaison 2,95° au 2026-05-01).",
+        )
+        self.assertEqual(
+            say("geo.distance_azimuth", magnetic, out, lang="en"),
+            "Geodesic distance: 660.504 km, magnetic azimuth 157.9574°, "
+            "back magnetic azimuth 340.1° (declination 2.95° on 2026-05-01).",
+        )
+        self.assertEqual(
+            say("geo.distance_azimuth", magnetic),
+            "Mesure de la distance et de l'azimut magnétique entre deux points.",
+        )
+        # L'avertissement du noyau est affiché tel quel, sans double point final.
+        late = dict(out, date="2031-03-01",
+                    warning="La date du 2031-03-01 est hors de la période de validité.")
+        self.assertEqual(
+            say("geo.distance_azimuth", magnetic, late),
+            "Distance géodésique : 660,504 km, azimut magnétique 157,9574°, "
+            "contre-azimut magnétique 340,1° (déclinaison 2,95° au 2031-03-01). "
+            "Attention : La date du 2031-03-01 est hors de la période de validité.",
+        )
+        # Un `north` illisible (plan pas encore validé) : l'azimut ordinaire, sans exception.
+        for odd in (["magnetic"], {"x": 1}, 3):
+            self.assertEqual(
+                say("geo.distance_azimuth", dict(MEASURE, north=odd), MEASURE_OUT),
+                "Distance géodésique : 660,504 km, azimut 157,9574°, contre-azimut 340,1°.",
+            )
+        point = dict(DESTINATION, north="magnetic", date="2026-05-01")
+        reached = dict(DESTINATION_OUT, north="magnetic", date="2026-05-01",
+                       declination={"value": 1.5, "unit": "gon"})
+        self.assertEqual(
+            say("geo.destination_point", point, reached),
+            "Point atteint à 1,5 km, azimut magnétique 100 gon : UTM 31N 449750 E, "
+            "5411751 N (déclinaison 1,5 gon au 2026-05-01).",
+        )
+        self.assertEqual(
+            say("geo.destination_point", point, {}, lang="en"),
+            "Point at 1.5 km, magnetic azimuth 100 gon.",
+        )
+
     def test_the_reached_point_is_shown(self):
         self.assertEqual(
             say("geo.destination_point", DESTINATION, DESTINATION_OUT),
@@ -372,6 +507,38 @@ class ReprojectTest(unittest.TestCase):
             )
 
 
+CONVERT_RASTER = {"raster": "mnt/dalle.asc", "assign_epsg": 2154}
+CONVERT_RASTER_OUT = {"file": "C:/d/cassini/1-data.convert_raster.tif", "epsg": 2154}
+
+
+class ConvertRasterTest(unittest.TestCase):
+    def test_the_file_is_named_without_its_folder(self):
+        self.assertEqual(
+            say("data.convert_raster", CONVERT_RASTER, CONVERT_RASTER_OUT),
+            "Raster dalle.asc converti en GeoTIFF, système déclaré EPSG:2154 : fichier 1-data.convert_raster.tif.",
+        )
+        self.assertEqual(
+            say("data.convert_raster", CONVERT_RASTER, CONVERT_RASTER_OUT, lang="en"),
+            "Raster dalle.asc converted to GeoTIFF, system declared EPSG:2154: file 1-data.convert_raster.tif.",
+        )
+
+    def test_the_kept_system_is_said(self):
+        self.assertEqual(
+            say("data.convert_raster", {"raster": "mnt.img"}, dict(CONVERT_RASTER_OUT, epsg=32632)),
+            "Raster mnt.img converti en GeoTIFF : fichier 1-data.convert_raster.tif, en EPSG:32632.",
+        )
+
+    def test_a_tif_without_system_is_signalled(self):
+        text = say("data.convert_raster", {"raster": "dalle.asc"}, dict(CONVERT_RASTER_OUT, epsg=None))
+        self.assertIn("sans code EPSG : les commandes de terrain le refuseront", text)
+
+    def test_label_before_running(self):
+        self.assertEqual(
+            summary.label("data.convert_raster", CONVERT_RASTER, "fr", qgis_name),
+            "Conversion du raster dalle.asc en GeoTIFF, système déclaré EPSG:2154",
+        )
+
+
 DATA_CONVERT = {"layer_id": "gares_1", "format": "gpkg"}
 DATA_CONVERT_OUT = {"file": "C:/d/cassini/2-data.convert.gpkg", "format": "gpkg", "feature_count": 5}
 
@@ -420,6 +587,41 @@ class DataConvertTest(unittest.TestCase):
             self.assertEqual(
                 say("data.convert", dict(DATA_CONVERT, format=bad), catalogue=catalogue),
                 "Écrit une couche dans un autre format. Terminée.",
+            )
+
+
+class LayerRemoveTest(unittest.TestCase):
+    def test_the_removed_layer_is_named_and_no_file_said_deleted(self):
+        result = {"layer_id": "gares_1"}
+        self.assertEqual(
+            say("layer.remove", {"layer_id": "gares_1"}, result),
+            "Couche Gares retirée du projet, aucun fichier effacé.",
+        )
+        self.assertEqual(
+            say("layer.remove", {"layer_id": "gares_1"}, result, lang="en"),
+            "Layer Gares removed from the project, no file deleted.",
+        )
+
+    def test_label_and_step_reference(self):
+        self.assertEqual(
+            summary.label("layer.remove", {"layer_id": "gares_1"}, "fr", qgis_name),
+            "Retrait de la couche Gares du projet",
+        )
+        self.assertEqual(
+            summary.label("layer.remove", {"layer_id": "gares_1"}, "en", qgis_name),
+            "Removal of layer Gares from the project",
+        )
+        self.assertEqual(
+            say("layer.remove", {"layer_id": "step:1"}, {"layer_id": "tampon_3"}, step_names={1: BUFFER_OUT}),
+            "Couche Tampon retirée du projet, aucun fichier effacé.",
+        )
+
+    def test_a_missing_layer_id_falls_back_to_the_description(self):
+        catalogue = [{"id": "layer.remove", "description_fr": "Retire une couche du projet QGIS ouvert, sans effacer son fichier."}]
+        for bad in ({}, {"layer_id": ""}, {"layer_id": 3}):
+            self.assertEqual(
+                say("layer.remove", bad, catalogue=catalogue),
+                "Retire une couche du projet QGIS ouvert, sans effacer son fichier. Terminée.",
             )
 
 
@@ -670,8 +872,11 @@ SAMPLES = {
                              {"point": {"x": 652000.0, "y": 6862000.0, "epsg": 2154}}),
     "data.reproject": ({"layer_id": "gares_1", "target_epsg": 2154},
                        {"layer_id": "gares_2", "name": "Gares 2154", "feature_count": 3}),
+    "data.convert_raster": ({"raster": "C:/d/mnt.asc", "assign_epsg": 2154},
+                            {"file": "C:/d/1-data.convert_raster.tif", "epsg": 2154}),
     "data.convert": ({"layer_id": "gares_1", "format": "shp"},
                      {"file": "C:/d/3-data.convert.shp", "format": "shp", "feature_count": 3}),
+    "layer.remove": ({"layer_id": "gares_1"}, {"layer_id": "gares_1"}),
     "terrain.aspect": ({"dem": DEM}, {"file": "C:/d/expo.tif", "flat_cells": 12,
                                       "nodata_cells": 0}),
     "terrain.hillshade": ({"dem": DEM}, {"file": "C:/d/ombrage.tif", "nodata_cells": 0}),

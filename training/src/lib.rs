@@ -8,6 +8,7 @@
 //! enregistrements sont structurés ; leur mise en forme en prompt court (tâche 2) vit dans
 //! `prompt`, seul endroit qui décide du texte vu par le modèle.
 
+pub mod barres;
 pub mod families;
 pub mod inventories;
 pub mod prompt;
@@ -19,16 +20,25 @@ use cassini_core::plan::Plan;
 use cassini_core::registry::Registry;
 use serde_json::json;
 
-use families::{Example, Retry, FAMILIES};
+use families::{Example, Family, Retry, FAMILIES};
 use rng::Rng;
 
 /// Graine par défaut : celle de la commande documentée et du test de recouvrement (le jeu
 /// engendré n'est pas versionné, il se régénère).
 pub const DEFAULT_SEED: u64 = 1;
-/// Nombre d'exemples par défaut : celui de l'entraînement (décision du propriétaire, 5.15).
-pub const DEFAULT_COUNT: usize = 8000;
+/// Nombre d'exemples par défaut : celui de l'entraînement (décision du propriétaire, 5.15 ;
+/// 8 600 depuis le 2026-11-10, pour que les familles ajoutées ne diluent plus les autres).
+pub const DEFAULT_COUNT: usize = 8600;
 /// Plafond d'étapes d'un plan, celui de `cassini-ai` (`MAX_STEPS`).
 const MAX_STEPS: usize = 12;
+/// Borne du texte vu par le modèle, en caractères de `prompt_text` (5.47, décision 5 du
+/// 2026-11-10) : un exemple plus long est écarté ici, pour que la chaîne d'entraînement, qui
+/// écarte toute séquence de plus de `MAX_LENGTH` = 5 632 jetons (prompt et réponse), n'en écarte
+/// aucun. 19 000 depuis 5.49 (tranchée en party le 2026-11-10, à confirmer par le propriétaire) :
+/// les gros projets vus en entier, sous le seuil du tri du noyau (17 000 caractères, la taille
+/// d'Annecy), ne sont plus écartés. Réglée sur la mesure au tokeniseur de Qwen3.5
+/// (`docs/entrainement-du-modele.md`).
+pub const MAX_PROMPT_CHARS: usize = 19_000;
 
 /// Décompte d'une famille : exemples gardés, écartés par la validation, doublons.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -76,10 +86,12 @@ pub fn validate(registry: &Registry, example: &Example) -> Result<(), String> {
             if calls.is_empty() || calls.len() > MAX_STEPS {
                 return Err(format!("{} étapes", calls.len()));
             }
+            // Une couche de l'index d'un gros projet (5.47) existe, même montrée réduite.
             let ids: HashSet<&str> = example.inventory["layers"]
                 .as_array()
                 .into_iter()
                 .flatten()
+                .chain(example.inventory["index"].as_array().into_iter().flatten())
                 .filter_map(|l| l["layer_id"].as_str())
                 .collect();
             // Le MNT d'une commande de terrain est un chemin recopié de l'inventaire : la
@@ -97,6 +109,15 @@ pub fn validate(registry: &Registry, example: &Example) -> Result<(), String> {
                 .flatten()
                 .filter_map(|f| f["path"].as_str())
                 .collect();
+            // Un raster d'un autre format, non ouvert, que `data.convert_raster` cite par son
+            // chemin (epic 10, entrée 30).
+            let raster_files: HashSet<&str> = example.inventory["unloaded_files"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|f| f["kind"] == "raster")
+                .filter_map(|f| f["path"].as_str())
+                .collect();
             for (index, call) in calls.iter().enumerate() {
                 for name in LAYER_PARAMS {
                     if let Some(id) = call.params[name].as_str() {
@@ -110,9 +131,12 @@ pub fn validate(registry: &Registry, example: &Example) -> Result<(), String> {
                 // la référence et son type raster.
                 for name in RASTER_PARAMS {
                     if let Some(raster) = call.params.get(name) {
-                        let known = raster
-                            .as_str()
-                            .is_some_and(|r| dems.contains(r) || r.starts_with("step:"));
+                        let known = raster.as_str().is_some_and(|r| {
+                            dems.contains(r)
+                                || r.starts_with("step:")
+                                || (call.command == "data.convert_raster"
+                                    && raster_files.contains(r))
+                        });
                         if !known {
                             return Err(format!(
                                 "étape {} : raster absent « {raster} »",
@@ -144,8 +168,121 @@ pub fn validate(registry: &Registry, example: &Example) -> Result<(), String> {
     if example.request.trim().is_empty() {
         return Err("demande vide".into());
     }
+    reduced_focus(example, &plan)?;
+    if let Some(listed) = &example.listed {
+        listed_shown(example, listed)?;
+    }
+    let chars = prompt_text(example).chars().count();
+    if chars > MAX_PROMPT_CHARS {
+        return Err(format!("prompt trop long : {chars} caractères"));
+    }
     if let Some(retry) = &example.retry {
         validate_retry(registry, &plan, retry)?;
+    }
+    Ok(())
+}
+
+/// Dans un gros projet montré trié (clé `index`, 5.47), chaque couche utile de l'exemple est
+/// détaillée dans `layers`, sauf une couche qu'un plan d'appels ne cite que comme géométrie : citée
+/// par un paramètre de couche, et sans paramètre de champ (`field`, `fields`, `label_field`...)
+/// dans aucun des appels qui la citent. Un raster cité par sa source n'a pas d'identifiant dans le
+/// plan : sa source manquerait, ce que `validate` écarte déjà.
+fn reduced_focus(example: &Example, plan: &Plan) -> Result<(), String> {
+    if example.inventory.get("index").is_none() {
+        return Ok(());
+    }
+    let detailed: HashSet<&str> = example.inventory["layers"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|l| l["layer_id"].as_str())
+        .collect();
+    let geometry_only = |id: &str| -> bool {
+        let Plan::Calls { calls } = plan else {
+            return false;
+        };
+        let citing: Vec<_> = calls
+            .iter()
+            .filter(|c| {
+                LAYER_PARAMS
+                    .iter()
+                    .any(|k| c.params[*k].as_str() == Some(id))
+            })
+            .collect();
+        // Une reprojection dépend du système de la couche, que l'index ne montre pas.
+        !citing.is_empty()
+            && citing.iter().all(|c| {
+                c.command != "data.reproject"
+                    && c.params
+                        .as_object()
+                        .is_none_or(|m| m.keys().all(|k| !k.contains("field")))
+            })
+    };
+    for id in &example.focus {
+        if !detailed.contains(id.as_str()) && !geometry_only(id) {
+            return Err(format!("couche utile « {id} » montrée réduite"));
+        }
+    }
+    // Une couche détaillée plafonnée (30 champs ou 3 000 caractères, `sorted_view`) peut perdre
+    // un champ : le champ que cite le plan doit rester visible.
+    if let Plan::Calls { calls } = plan {
+        for call in calls {
+            let Some(id) = call.params["layer_id"].as_str() else {
+                continue;
+            };
+            let Some(layer) = example.inventory["layers"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|l| l["layer_id"].as_str() == Some(id))
+            else {
+                continue;
+            };
+            let shown: HashSet<&str> = layer["fields"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|f| f["name"].as_str())
+                .collect();
+            for key in ["field", "label_field", "x_field", "y_field"] {
+                if let Some(field) = call.params[key].as_str() {
+                    if !shown.contains(field) {
+                        return Err(format!("couche utile « {id} » : champ « {field} » coupé"));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Une question de valeur absente (5.54, séance 3) nomme les valeurs connues d'un champ : la
+/// couche détaillée de l'inventaire montré porte ce champ avec exactement ces valeurs. La vue
+/// triée d'un gros projet, qui plafonne une couche, peut ôter le champ : l'exemple est écarté.
+fn listed_shown(example: &Example, listed: &families::Listed) -> Result<(), String> {
+    let values = example.inventory["layers"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|l| l["layer_id"].as_str() == Some(listed.layer_id.as_str()))
+        .and_then(|l| l["fields"].as_array())
+        .into_iter()
+        .flatten()
+        .find(|f| f["name"].as_str() == Some(listed.field.as_str()))
+        .and_then(|f| f["values"].as_array());
+    let mut shown: Vec<&str> = values
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    shown.sort_unstable();
+    let mut wanted: Vec<&str> = listed.values.iter().map(String::as_str).collect();
+    wanted.sort_unstable();
+    if shown != wanted {
+        return Err(format!(
+            "couche « {} » : champ à valeurs « {} » coupé",
+            listed.layer_id, listed.field
+        ));
     }
     Ok(())
 }
@@ -173,20 +310,291 @@ fn validate_retry(registry: &Registry, expected: &Plan, retry: &Retry) -> Result
 /// suite, à l'octet près. S'arrête plus tôt (et le résumé le montre) si les familles ne
 /// rendent plus d'exemples neufs.
 pub fn generate(seed: u64, count: usize) -> (Vec<Example>, Summary) {
+    let all: Vec<&'static Family> = FAMILIES.iter().collect();
+    generate_from(seed, count, &all)
+}
+
+/// Graine du jeu ciblé d'une séance d'ajustement continu (5.54) : autre que celle de
+/// l'entraînement (1) et de la validation (2). `training/tests/recouvrement.rs` garde chaque
+/// famille tirée seule à cette graine.
+pub const FOCUS_SEED: u64 = 3;
+/// Exemples ciblés d'une séance continue par défaut : 3 000 exemples, dont 1 200 de rappel
+/// (décision D2 du propriétaire, 2026-11-11).
+pub const FOCUS_COUNT: usize = 1800;
+/// Familles qui, tirées seules à `FOCUS_SEED` jusqu'à `FOCUS_COUNT` exemples, engendrent une
+/// phrase d'une barre à un nombre ou une commune près (relevé de
+/// `training/tests/recouvrement.rs`) : le jeu complet ne la tire pas, un jeu ciblé le pourrait.
+/// Refusées au jeu ciblé tant que leurs tournures ne sont pas reprises ; le test tient cette liste
+/// exacte, dans les deux sens. Vide depuis 5.54, lot 2 : les cinq familles du premier relevé
+/// (`filtre_numerique`, `pente`, `reprojection_couche`, `retrait_couche`, `carroyage_mgrs`) ont
+/// perdu leur tournure fautive. La liste reste le contrôle des familles futures.
+pub const FOCUS_EXCLUDED: &[&str] = &[];
+
+/// Les familles du jeu ciblé de la première séance continue (5.54, lot 2) : les six familles
+/// neuves ou renforcées d'après les leçons de la remesure du 2026-11-11 (format gardé avec
+/// l'échelle, fonctions absentes du registre, options écrites, champ de vision cumulé, point en
+/// Lambert-93 vers `geo.*` ou `coord.convert`, nord écrit avant l'est). Recopiée dans la commande
+/// de la séance (`docs/entrainement-du-modele.md`), que le test
+/// `the_session_command_of_the_doc_names_the_first_session_families` tient égale ; le rappel tient
+/// le reste.
+pub const FIRST_SESSION_FAMILIES: &[&str] = &[
+    "export_pdf_echelle_format",
+    "refus_fonction_absente",
+    "options_ecrites",
+    "champ_de_vision_cumule",
+    "point_lambert_vers_geo",
+    "ordre_nord_est",
+];
+
+/// Les familles du jeu ciblé de la seconde séance continue (5.54, séance 2) : celles de la
+/// première (la séance repart de B, ses gains se réapprennent), plus la ligne de vue et le
+/// recoupement, que le champ de vision et la reprojection vers 4326 attiraient (contraste).
+/// Recopiée dans la commande de la séance (`docs/entrainement-du-modele.md`), que le test
+/// `the_session_command_of_the_doc_names_the_second_session_families` tient égale.
+pub const SECOND_SESSION_FAMILIES: &[&str] = &[
+    "export_pdf_echelle_format",
+    "refus_fonction_absente",
+    "options_ecrites",
+    "champ_de_vision_cumule",
+    "point_lambert_vers_geo",
+    "ordre_nord_est",
+    "ligne_de_vue",
+    "recoupement",
+];
+
+/// Les familles du jeu ciblé de la troisième séance continue (5.54, séance 3) : celles de la
+/// seconde (la séance repart de B), plus les plans d'urbanisme à plusieurs conditions
+/// (`conditions_multiples`, `constructible`), leur contraste à trois étapes
+/// (`distance_reference_filtree`) et les questions d'un champ ou d'une valeur absents, que le
+/// mélange de la séance 2 diluait. Recopiée dans la commande de la séance
+/// (`docs/entrainement-du-modele.md`), que le test
+/// `the_session_command_of_the_doc_names_the_third_session_families` tient égale.
+pub const THIRD_SESSION_FAMILIES: &[&str] = &[
+    "export_pdf_echelle_format",
+    "refus_fonction_absente",
+    "options_ecrites",
+    "champ_de_vision_cumule",
+    "point_lambert_vers_geo",
+    "ordre_nord_est",
+    "ligne_de_vue",
+    "recoupement",
+    "conditions_multiples",
+    "constructible",
+    "distance_reference_filtree",
+    "question_champ_absent",
+    "question_valeur_absente",
+];
+
+/// Plancher du rappel stratifié d'une séance continue (5.54, séance 2) : au moins autant
+/// d'exemples de chaque famille (ou tous ceux du jeu complet, s'il en a moins). 15 garde les gros
+/// projets vers 22 % d'un rappel de 1 500 ; 20 les ferait tomber vers 5 %. Lu par `pipeline.py`.
+pub const RECALL_FLOOR: usize = 15;
+/// Version de l'algorithme de `stratified_recall` : la lignée l'écrit (`rappel_version`) et
+/// `pipeline.py` refuse de reprendre une séance commencée sous une autre. À relever à chaque
+/// changement de l'algorithme (quotas, ordre rendu) ; lue par `pipeline.py`.
+pub const RECALL_VERSION: usize = 1;
+
+/// Le rappel stratifié d'une séance continue (5.54, séance 2) : `count` exemples du jeu graine 1
+/// complet (`generate(DEFAULT_SEED, DEFAULT_COUNT)`, que `training/tests/recouvrement.rs` garde),
+/// au moins `min(floor, n_f)` de chaque famille `f` (`n_f` ses exemples dans le jeu complet), le
+/// reste au poids réel des familles dans le jeu complet (rejets de `gros_projet` compris).
+///
+/// Quota de `f` : `q_f = min(n_f, max(min(floor, n_f), ⌊λ·n_f⌋))`, λ le plus grand tel que
+/// Σ q_f ≤ `count` ; chaque famille prend ses `q_f` premiers exemples (ordre du jeu complet), et le
+/// reliquat se comble par les premiers exemples non pris. Ordre rendu : le plancher (les
+/// `min(floor, n_f)` premiers de chaque famille, dans l'ordre du jeu complet), puis le surplus
+/// (dans l'ordre du jeu complet) : un rappel coupé à la fin (marge de `pipeline.py`) ne perd que du
+/// surplus. Refusé si `count` dépasse `DEFAULT_COUNT` ou si le plancher n'y tient pas.
+pub fn stratified_recall(count: usize, floor: usize) -> Result<Vec<Example>, String> {
+    stratified_recall_with_floor(count, floor).map(|(recall, _)| recall)
+}
+
+/// `stratified_recall`, plus le plancher de chaque famille, `min(floor, n_f)` : ce que la chaîne
+/// vérifie encore après avoir écarté les exemples trop longs et coupé la marge.
+pub fn stratified_recall_with_floor(
+    count: usize,
+    floor: usize,
+) -> Result<(Vec<Example>, BTreeMap<&'static str, usize>), String> {
+    if floor == 0 {
+        return Err("rappel stratifié sans plancher : --rappel-stratifie vaut au moins 1".into());
+    }
+    if count > DEFAULT_COUNT {
+        return Err(format!(
+            "rappel stratifié de {count} exemples : au plus {DEFAULT_COUNT} (DEFAULT_COUNT, le jeu \
+             graine {DEFAULT_SEED} gardé par recouvrement.rs)"
+        ));
+    }
+    let (full, _) = generate(DEFAULT_SEED, DEFAULT_COUNT);
+    if full.len() < count {
+        return Err(format!(
+            "jeu graine {DEFAULT_SEED} de {} exemples seulement, {count} demandés",
+            full.len()
+        ));
+    }
+    let mut sizes: BTreeMap<&'static str, usize> = BTreeMap::new();
+    for e in &full {
+        *sizes.entry(e.family).or_default() += 1;
+    }
+    let minimum: BTreeMap<&'static str, usize> =
+        sizes.iter().map(|(f, &n)| (*f, n.min(floor))).collect();
+    let quota = |lambda: f64, n: usize| -> usize {
+        let share = (lambda * n as f64).floor() as usize;
+        n.min(floor.min(n).max(share))
+    };
+    let total = |lambda: f64| -> usize { sizes.values().map(|&n| quota(lambda, n)).sum() };
+    let base = total(0.0);
+    if base > count {
+        return Err(format!(
+            "plancher de {floor} exemples par famille : {base} exemples, plus que les {count} \
+             demandés"
+        ));
+    }
+    // λ le plus grand tel que Σ q_f ≤ count, par dichotomie : Σ q_f croît avec λ, et vaut à
+    // λ = 1 le jeu complet entier, au moins `count`.
+    let (mut lo, mut hi) = (0.0_f64, 1.0_f64);
+    for _ in 0..64 {
+        let mid = (lo + hi) / 2.0;
+        if total(mid) <= count {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    let quotas: BTreeMap<&str, usize> = sizes.iter().map(|(f, &n)| (*f, quota(lo, n))).collect();
+    // Pris : les `q_f` premiers de chaque famille, puis le reliquat dans l'ordre du jeu complet.
+    // Le plancher (`r < floor`) est toujours pris : `q_f ≥ min(floor, n_f)`.
+    let mut taken = vec![false; full.len()];
+    let mut in_floor = vec![false; full.len()];
+    let mut rank: BTreeMap<&str, usize> = BTreeMap::new();
+    for (i, e) in full.iter().enumerate() {
+        let r = rank.entry(e.family).or_default();
+        taken[i] = *r < quotas[e.family];
+        in_floor[i] = *r < floor;
+        *r += 1;
+    }
+    let mut left = count - taken.iter().filter(|t| **t).count();
+    for t in taken.iter_mut() {
+        if left == 0 {
+            break;
+        }
+        if !*t {
+            *t = true;
+            left -= 1;
+        }
+    }
+    let (taken, in_floor, full) = (&taken, &in_floor, &full);
+    let pick = |floor_part: bool| {
+        full.iter()
+            .enumerate()
+            .filter(move |(i, _)| taken[*i] && in_floor[*i] == floor_part)
+            .map(|(_, e)| e.clone())
+    };
+    Ok((pick(true).chain(pick(false)).collect(), minimum))
+}
+
+/// Les familles nommées, dans l'ordre fixe de `FAMILIES` (le tirage ne dépend pas de l'ordre
+/// de la liste donnée). Un nom inconnu, un nom en double ou une liste vide sont refusés, avec
+/// la liste des noms connus.
+pub fn select_families(names: &[&str]) -> Result<Vec<&'static Family>, String> {
+    let known = || {
+        FAMILIES
+            .iter()
+            .map(|f| f.name)
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    if names.is_empty() {
+        return Err(format!(
+            "aucune famille nommée ; familles connues : {}",
+            known()
+        ));
+    }
+    let mut asked = HashSet::new();
+    for name in names {
+        if !FAMILIES.iter().any(|f| f.name == *name) {
+            return Err(format!(
+                "famille inconnue : {name:?} ; familles connues : {}",
+                known()
+            ));
+        }
+        if !asked.insert(*name) {
+            return Err(format!("famille nommée deux fois : {name:?}"));
+        }
+    }
+    Ok(select_unchecked(&asked))
+}
+
+/// Les familles du jeu ciblé, refusées si l'une d'elles est dans `FOCUS_EXCLUDED`.
+fn check_focus(families: Vec<&'static Family>) -> Result<Vec<&'static Family>, String> {
+    check_focus_against(families, FOCUS_EXCLUDED)
+}
+
+/// `check_focus` contre une liste d'exclusion donnée (le test l'essaie sur une liste non vide).
+fn check_focus_against(
+    families: Vec<&'static Family>,
+    excluded_names: &[&str],
+) -> Result<Vec<&'static Family>, String> {
+    let excluded: Vec<&str> = families
+        .iter()
+        .map(|f| f.name)
+        .filter(|n| excluded_names.contains(n))
+        .collect();
+    if excluded.is_empty() {
+        Ok(families)
+    } else {
+        Err(format!(
+            "famille refusée au jeu ciblé : {} (tirée seule, elle engendre une phrase d'une \
+             barre ; voir FOCUS_EXCLUDED)",
+            excluded.join(", ")
+        ))
+    }
+}
+
+fn select_unchecked(asked: &HashSet<&str>) -> Vec<&'static Family> {
+    FAMILIES.iter().filter(|f| asked.contains(f.name)).collect()
+}
+
+/// Comme `generate`, sur les seules familles nommées (jeu ciblé d'une séance continue, 5.54) :
+/// même tirage pondéré, restreint à leurs poids. Une famille de `FOCUS_EXCLUDED` est refusée.
+pub fn generate_families(
+    seed: u64,
+    count: usize,
+    names: &[&str],
+) -> Result<(Vec<Example>, Summary), String> {
+    Ok(generate_from(
+        seed,
+        count,
+        &check_focus(select_families(names)?)?,
+    ))
+}
+
+/// Comme `generate_families`, sans le refus de `FOCUS_EXCLUDED` : pour le relevé de
+/// `training/tests/recouvrement.rs` et les tests, jamais pour un jeu d'entraînement.
+pub fn generate_families_unchecked(
+    seed: u64,
+    count: usize,
+    names: &[&str],
+) -> Result<(Vec<Example>, Summary), String> {
+    Ok(generate_from(seed, count, &select_families(names)?))
+}
+
+/// Le tirage pondéré sur `families`, dans leur ordre ; `generate` le fait sur toutes, à
+/// l'octet près comme avant 5.54.
+fn generate_from(seed: u64, count: usize, families: &[&'static Family]) -> (Vec<Example>, Summary) {
     let registry = Registry::standard();
     let mut rng = Rng::new(seed);
     let mut summary = Summary::default();
-    for family in FAMILIES {
+    for family in families {
         summary.families.insert(family.name, Tally::default());
     }
-    let total: u64 = FAMILIES.iter().map(|f| f.weight).sum();
+    let total: u64 = families.iter().map(|f| f.weight).sum();
     let mut seen = HashSet::new();
     let mut out = Vec::with_capacity(count);
     let mut attempts = 0usize;
     while out.len() < count && attempts < count.saturating_mul(50).max(1000) {
         attempts += 1;
         let mut roll = rng.below(total as usize) as u64;
-        let family = FAMILIES
+        let family = families
             .iter()
             .find(|f| {
                 if roll < f.weight {
@@ -349,6 +757,8 @@ mod tests {
             request: "Tampon de 300 m autour des gares.".into(),
             expected,
             retry: None,
+            listed: None,
+            focus: Vec::new(),
         };
         // Référence vers une étape qui n'existe pas : refusée par `check_plan`.
         let bad = make(json!({"kind": "calls", "calls": [
@@ -390,6 +800,8 @@ mod tests {
             expected: json!({"kind": "calls", "calls": [
                 {"command": "terrain.slope", "params": {"dem": dem, "unit": "degrees"}}]}),
             retry: None,
+            listed: None,
+            focus: Vec::new(),
         };
         assert_eq!(
             validate(&registry, &slope(json!("donnees/mnt_5m.tif"))),
@@ -420,6 +832,8 @@ mod tests {
                 {"command": "raster.reclassify",
                     "params": {"raster": raster, "classes": [{"min": 15, "value": 1}]}}]}),
             retry: None,
+            listed: None,
+            focus: Vec::new(),
         };
         assert_eq!(validate(&registry, &threshold(json!("step:1"))), Ok(()));
         assert_eq!(
@@ -450,6 +864,8 @@ mod tests {
                     "start": {"x": 652300, "y": 6862100, "epsg": 2154},
                     "end": {"x": 653100, "y": 6861500, "epsg": 2154}}}]}),
             retry: None,
+            listed: None,
+            focus: Vec::new(),
         };
         assert_eq!(
             validate(&registry, &path(json!("donnees/friction.tif"))),
@@ -484,6 +900,8 @@ mod tests {
                         {"raster": second, "weight": 1}],
                     "exclusions": [mask]}}]}),
             retry: None,
+            listed: None,
+            focus: Vec::new(),
         };
         let good = (json!("rasters/accessibilite.tif"), json!("zi_masque.tif"));
         assert_eq!(
@@ -518,11 +936,75 @@ mod tests {
     }
 
     #[test]
+    fn the_default_set_holds_a_quarter_of_big_projects_and_close_layers() {
+        // 5.47 : 23 à 27 % de gros projets de 20 à 60 couches, dont au moins 70 % vus triés ;
+        // aucun prompt au-delà de la borne ; au moins 100 couches proches, un tiers environ en plan.
+        let (examples, _) = generate(DEFAULT_SEED, DEFAULT_COUNT);
+        let big: Vec<&Example> = examples
+            .iter()
+            .filter(|e| e.family == "gros_projet")
+            .collect();
+        assert!(
+            big.len() * 100 >= examples.len() * 23 && big.len() * 100 <= examples.len() * 27,
+            "{} gros projets",
+            big.len()
+        );
+        let mut sorted = 0;
+        for e in &big {
+            let layers = match e.inventory.get("index") {
+                Some(index) => {
+                    sorted += 1;
+                    index.as_array().unwrap().len()
+                }
+                None => e.inventory["layers"].as_array().unwrap().len(),
+            };
+            assert!((20..=60).contains(&layers), "{layers} couches");
+        }
+        assert!(sorted * 10 >= big.len() * 7, "{sorted} / {}", big.len());
+        assert!(examples
+            .iter()
+            .all(|e| prompt_text(e).chars().count() <= MAX_PROMPT_CHARS));
+        let close: Vec<&Example> = examples
+            .iter()
+            .filter(|e| e.family == "couches_proches")
+            .collect();
+        let planned = close
+            .iter()
+            .filter(|e| e.expected["kind"] == "calls")
+            .count();
+        assert!(close.len() >= 100, "{}", close.len());
+        assert!(
+            planned * 5 >= close.len() && planned * 2 <= close.len(),
+            "{planned} / {}",
+            close.len()
+        );
+    }
+
+    #[test]
     fn no_family_produces_rejected_examples() {
         // Un écart signale une famille mal écrite : le filtre est un garde-fou, pas un tamis.
+        // Seul `gros_projet` écarte, par construction (5.47) : une couche utile que la vue triée
+        // ne détaille pas, un prompt au-delà de la borne, ou (5.54, séance 3) un champ à valeurs
+        // cité par une question de valeur absente que la vue triée ne montre plus en entier.
         let (_, summary) = generate(DEFAULT_SEED, DEFAULT_COUNT);
-        let rejected: usize = summary.families.values().map(|t| t.rejected).sum();
+        let rejected: usize = summary
+            .families
+            .iter()
+            .filter(|(name, _)| **name != "gros_projet")
+            .map(|(_, t)| t.rejected)
+            .sum();
         assert_eq!(rejected, 0, "{:#?}", summary.reasons);
+        for reason in &summary.reasons {
+            assert!(
+                reason.starts_with("gros_projet : couche utile")
+                    || reason.starts_with("gros_projet : prompt trop long")
+                    || (reason.starts_with("gros_projet : couche « ")
+                        && reason.contains("champ à valeurs"))
+                    || (reason.starts_with("gros_projet : étape")
+                        && reason.contains("raster absent")),
+                "{reason}"
+            );
+        }
     }
 
     #[test]
@@ -546,14 +1028,17 @@ mod tests {
 
     #[test]
     fn the_geometry_families_of_the_default_set_cover_every_command_and_pass_the_guard() {
-        // 11.12, lot 1 : au jeu par défaut, chacune des six familles est là, chacune des cinq
+        // 11.12, lot 1 : au jeu par défaut, chacune des huit familles (dont `gisement`, 10.28, et
+        // `azimut_magnetique`, 10.29) est là, chacune des cinq
         // commandes de géométrie figure dans un plan, chaque plan passe `check_plan` puis le
         // garde-fou inchangé, et aucun refus ne dit qu'aucune commande ne reprojette un point.
-        const GEOMETRY: [&str; 6] = [
+        const GEOMETRY: [&str; 8] = [
             "conversion_coordonnees",
             "reprojection_point",
             "distance_azimut",
             "point_projete",
+            "gisement",
+            "azimut_magnetique",
             "recoupement",
             "terrain_autre_systeme",
         ];
@@ -1074,9 +1559,10 @@ mod tests {
             // Depuis 4.6, une vue depuis un lieu nommé demande aussi son point (`question_terrain`),
             // et depuis 11.12, lot 2b-1, un coût de déplacement depuis un lieu nommé.
             if asks_point {
+                // Un gros projet (5.47) emballe aussi ces familles-là.
                 let terrain = matches!(
                     e.family,
-                    "question_terrain" | "cout_cumule" | "chemin_moindre_cout"
+                    "question_terrain" | "cout_cumule" | "chemin_moindre_cout" | "gros_projet"
                 );
                 assert!(
                     (travel || terrain) && !has_distance(&e.request),
@@ -1122,6 +1608,273 @@ mod tests {
             let n = e.expected["calls"].as_array().map_or(0, Vec::len);
             assert!(n <= 6, "{n} étapes : {}", e.request);
         }
+    }
+
+    #[test]
+    fn a_focused_set_draws_only_the_named_families_and_the_full_set_is_unchanged() {
+        // 5.54 : le jeu ciblé vient du même générateur, restreint aux familles nommées.
+        let names = ["tampon", "refus"];
+        let (examples, summary) = generate_families(FOCUS_SEED, 200, &names).unwrap();
+        assert_eq!(examples.len(), 200, "{:?}", summary.families);
+        assert!(examples.iter().all(|e| names.contains(&e.family)));
+        assert!(names
+            .iter()
+            .all(|n| examples.iter().any(|e| e.family == *n)));
+        assert_eq!(
+            summary.families.keys().copied().collect::<Vec<_>>(),
+            vec!["refus", "tampon"]
+        );
+        // Même graine, même suite ; l'ordre de la liste donnée ne compte pas.
+        let (again, _) = generate_families(FOCUS_SEED, 200, &["refus", "tampon"]).unwrap();
+        assert_eq!(to_jsonl(&examples), to_jsonl(&again));
+        // Toutes les familles nommées : le jeu complet, à l'octet près.
+        let all: Vec<&str> = FAMILIES.iter().map(|f| f.name).collect();
+        let (full, _) = generate_families_unchecked(DEFAULT_SEED, 500, &all).unwrap();
+        assert_eq!(to_jsonl(&full), to_jsonl(&generate(DEFAULT_SEED, 500).0));
+    }
+
+    #[test]
+    fn the_stratified_recall_is_a_subset_of_the_full_set_with_a_floor_per_family() {
+        // 5.54, séance 2 : le rappel d'une séance continue est fait d'exemples du jeu graine 1
+        // complet (que `recouvrement.rs` garde), au moins `RECALL_FLOOR` par famille (ou tous ceux
+        // du jeu complet), le reste au poids ; le plancher vient d'abord, la marge coupée ne mord
+        // que le surplus.
+        let (full, _) = generate(DEFAULT_SEED, DEFAULT_COUNT);
+        let lines: Vec<String> = full.iter().map(to_line).collect();
+        let index: std::collections::HashMap<&str, usize> = lines
+            .iter()
+            .enumerate()
+            .map(|(i, l)| (l.as_str(), i))
+            .collect();
+        let mut sizes: BTreeMap<&str, usize> = BTreeMap::new();
+        for e in &full {
+            *sizes.entry(e.family).or_default() += 1;
+        }
+        let recall = stratified_recall(1560, RECALL_FLOOR).unwrap();
+        assert_eq!(recall.len(), 1560);
+        // Chaque exemple est un exemple distinct du jeu complet.
+        let positions: Vec<usize> = recall.iter().map(|e| index[to_line(e).as_str()]).collect();
+        assert_eq!(positions.iter().collect::<HashSet<_>>().len(), 1560);
+        let count = |examples: &[Example], family: &str| {
+            examples.iter().filter(|e| e.family == family).count()
+        };
+        for (family, &n) in &sizes {
+            let floor = n.min(RECALL_FLOOR);
+            assert!(count(&recall, family) >= floor, "{family}");
+            // Coupé aux 1 500 premiers (la marge de 60 de `pipeline.py`), le plancher reste.
+            assert!(count(&recall[..1500], family) >= floor, "{family}");
+        }
+        // Les gros projets, sur les 1 500 réellement entraînés.
+        let big = count(&recall[..1500], "gros_projet");
+        assert!(big * 100 >= 1500 * 20, "{big} gros projets");
+        // Le plancher puis le surplus, chacun dans l'ordre du jeu complet.
+        let floor_len: usize = sizes.values().map(|&n| n.min(RECALL_FLOOR)).sum();
+        assert!(positions[..floor_len].windows(2).all(|w| w[0] < w[1]));
+        assert!(positions[floor_len..].windows(2).all(|w| w[0] < w[1]));
+        // Déterministe, et le jeu complet entier à son compte.
+        let again = stratified_recall(1560, RECALL_FLOOR).unwrap();
+        assert_eq!(to_jsonl(&recall), to_jsonl(&again));
+        let all = stratified_recall(DEFAULT_COUNT, RECALL_FLOOR).unwrap();
+        let mut all_lines: Vec<String> = all.iter().map(to_line).collect();
+        let mut sorted = lines.clone();
+        all_lines.sort();
+        sorted.sort();
+        assert_eq!(all_lines, sorted);
+        // Au-delà du jeu complet, ou un plancher qui n'y tient pas : refusé.
+        assert!(stratified_recall(DEFAULT_COUNT + 1, RECALL_FLOOR).is_err());
+        assert!(stratified_recall(100, RECALL_FLOOR).is_err());
+        assert!(stratified_recall(1560, 0).is_err());
+        // Le plancher rendu : `min(RECALL_FLOOR, n_f)` par famille.
+        let (_, minimum) = stratified_recall_with_floor(1560, RECALL_FLOOR).unwrap();
+        let expected: BTreeMap<&str, usize> = sizes
+            .iter()
+            .map(|(f, &n)| (*f, n.min(RECALL_FLOOR)))
+            .collect();
+        assert_eq!(minimum, expected);
+    }
+
+    #[test]
+    fn the_pipeline_reads_the_family_names_and_constants_as_written_here() {
+        // `pipeline.py` lit, avant le GPU, les noms (`Family {` puis `name: "…"` dans
+        // `families.rs`), `FOCUS_EXCLUDED`, `FOCUS_SEED`, `FOCUS_COUNT` et `DEFAULT_COUNT` dans
+        // le texte des sources : la forme qu'il cherche doit rendre exactement ces valeurs.
+        let source = include_str!("families.rs");
+        let read: Vec<&str> = source
+            .split("Family {")
+            .skip(1)
+            .filter_map(|block| {
+                // Les lignes de commentaire entre `Family {` et `name:` sont sautées.
+                let line = block
+                    .lines()
+                    .map(str::trim)
+                    .find(|l| !l.is_empty() && !l.starts_with("//"))?;
+                line.strip_prefix("name: \"")?.split('"').next()
+            })
+            .collect();
+        let names: Vec<&str> = FAMILIES.iter().map(|f| f.name).collect();
+        assert_eq!(read, names);
+        let lib = include_str!("lib.rs");
+        for line in [
+            format!("pub const FOCUS_SEED: u64 = {FOCUS_SEED};"),
+            format!("pub const FOCUS_COUNT: usize = {FOCUS_COUNT};"),
+            format!("pub const DEFAULT_COUNT: usize = {DEFAULT_COUNT};"),
+            format!("pub const RECALL_FLOOR: usize = {RECALL_FLOOR};"),
+            format!("pub const RECALL_VERSION: usize = {RECALL_VERSION};"),
+            format!("pub const FOCUS_EXCLUDED: &[&str] = &{}", "["),
+        ] {
+            assert_eq!(lib.matches(line.as_str()).count(), 1, "{line}");
+        }
+    }
+
+    #[test]
+    fn an_unknown_twice_named_or_empty_family_list_is_refused_with_the_known_names() {
+        let err = generate_families(FOCUS_SEED, 10, &["tampon", "nexiste_pas"]).unwrap_err();
+        assert!(err.contains("nexiste_pas"), "{err}");
+        assert!(
+            FAMILIES.iter().all(|f| err.contains(f.name)),
+            "liste des noms connus : {err}"
+        );
+        let err = generate_families(FOCUS_SEED, 10, &["tampon", "tampon"]).unwrap_err();
+        assert!(err.contains("deux fois"), "{err}");
+        assert!(generate_families(FOCUS_SEED, 10, &[]).is_err());
+        assert!(generate_families(FOCUS_SEED, 10, &[""]).is_err());
+        // Une famille qui, tirée seule, engendre une phrase de barre est refusée au jeu ciblé
+        // (`FOCUS_EXCLUDED`, vide depuis 5.54, lot 2 : le contrôle reste pour les familles futures).
+        if let Some(excluded) = FOCUS_EXCLUDED.first() {
+            let err = generate_families(FOCUS_SEED, 10, &["tampon", excluded]).unwrap_err();
+            assert!(err.contains(excluded), "{err}");
+            assert!(generate_families_unchecked(FOCUS_SEED, 10, &[excluded]).is_ok());
+        }
+        // La branche de refus, sur une liste d'exclusion donnée au test.
+        let asked = select_unchecked(&HashSet::from(["tampon", "refus"]));
+        let Err(err) = check_focus_against(asked.clone(), &["refus"]) else {
+            panic!("refus attendu");
+        };
+        assert!(
+            err.contains("refus") && err.contains("refusée au jeu ciblé"),
+            "{err}"
+        );
+        let kept = check_focus_against(asked, &["pente"]).map(|f| f.len());
+        assert_eq!(kept, Ok(2));
+    }
+
+    #[test]
+    fn the_first_session_families_give_the_whole_focused_set_without_a_bar_sentence() {
+        // 5.54, lot 2 : la liste de la première séance est acceptée par le générateur, rend
+        // exactement `FOCUS_COUNT` exemples à `FOCUS_SEED`, tous de ses familles, chacune présente,
+        // et ne reprend aucune phrase de barre.
+        let (examples, summary) =
+            generate_families(FOCUS_SEED, FOCUS_COUNT, FIRST_SESSION_FAMILIES).unwrap();
+        assert_eq!(examples.len(), FOCUS_COUNT, "{:?}", summary.families);
+        assert!(examples
+            .iter()
+            .all(|e| FIRST_SESSION_FAMILIES.contains(&e.family)));
+        for name in FIRST_SESSION_FAMILIES {
+            let tally = &summary.families[name];
+            assert!(tally.kept > 0 && tally.rejected == 0, "{name} : {tally:?}");
+        }
+        assert_eq!(barres::copies(&examples), Vec::<String>::new());
+        // Aucune n'est refusée au jeu ciblé.
+        assert!(FIRST_SESSION_FAMILIES
+            .iter()
+            .all(|n| !FOCUS_EXCLUDED.contains(n)));
+    }
+
+    #[test]
+    fn the_session_command_of_the_doc_names_the_first_session_families() {
+        // La commande de la séance, recopiée dans la doc, nomme exactement `FIRST_SESSION_FAMILIES`.
+        let doc = include_str!("../../docs/entrainement-du-modele.md");
+        let line = format!("nuit-5-54.sh {}", FIRST_SESSION_FAMILIES.join(","));
+        assert!(doc.contains(&format!("{line}\n")), "{line}");
+    }
+
+    #[test]
+    fn the_second_session_families_give_the_whole_focused_set_without_a_bar_sentence() {
+        // 5.54, séance 2 : la liste de la première séance plus la ligne de vue et le recoupement ;
+        // `FOCUS_COUNT` exemples à `FOCUS_SEED`, chacune présente, aucune phrase de barre.
+        let first: Vec<&str> = SECOND_SESSION_FAMILIES[..FIRST_SESSION_FAMILIES.len()].to_vec();
+        assert_eq!(first, FIRST_SESSION_FAMILIES);
+        assert_eq!(
+            &SECOND_SESSION_FAMILIES[FIRST_SESSION_FAMILIES.len()..],
+            &["ligne_de_vue", "recoupement"]
+        );
+        let (examples, summary) =
+            generate_families(FOCUS_SEED, FOCUS_COUNT, SECOND_SESSION_FAMILIES).unwrap();
+        assert_eq!(examples.len(), FOCUS_COUNT, "{:?}", summary.families);
+        assert!(examples
+            .iter()
+            .all(|e| SECOND_SESSION_FAMILIES.contains(&e.family)));
+        for name in SECOND_SESSION_FAMILIES {
+            let tally = &summary.families[name];
+            assert!(tally.kept > 0 && tally.rejected == 0, "{name} : {tally:?}");
+        }
+        assert_eq!(barres::copies(&examples), Vec::<String>::new());
+        assert!(SECOND_SESSION_FAMILIES
+            .iter()
+            .all(|n| !FOCUS_EXCLUDED.contains(n)));
+    }
+
+    #[test]
+    fn the_session_command_of_the_doc_names_the_second_session_families() {
+        let doc = include_str!("../../docs/entrainement-du-modele.md");
+        let line = format!("nuit-5-54.sh {}", SECOND_SESSION_FAMILIES.join(","));
+        assert!(doc.contains(&format!("{line}\n")), "{line}");
+    }
+
+    #[test]
+    fn the_third_session_families_give_the_whole_focused_set_without_a_bar_sentence() {
+        // 5.54, séance 3 : la liste de la séance 2 plus les plans à plusieurs conditions et les
+        // questions de champ ou de valeur absents ; `FOCUS_COUNT` exemples à `FOCUS_SEED`, chacune
+        // présente, aucune phrase de barre ; plans à 4 étapes et questions plus denses qu'à la
+        // séance 2 (6 plans à 4 étapes et aucune question sur 1 800).
+        assert_eq!(
+            &THIRD_SESSION_FAMILIES[..SECOND_SESSION_FAMILIES.len()],
+            SECOND_SESSION_FAMILIES
+        );
+        assert_eq!(
+            &THIRD_SESSION_FAMILIES[SECOND_SESSION_FAMILIES.len()..],
+            &[
+                "conditions_multiples",
+                "constructible",
+                "distance_reference_filtree",
+                "question_champ_absent",
+                "question_valeur_absente",
+            ]
+        );
+        let (examples, summary) =
+            generate_families(FOCUS_SEED, FOCUS_COUNT, THIRD_SESSION_FAMILIES).unwrap();
+        assert_eq!(examples.len(), FOCUS_COUNT, "{:?}", summary.families);
+        assert!(examples
+            .iter()
+            .all(|e| THIRD_SESSION_FAMILIES.contains(&e.family)));
+        for name in THIRD_SESSION_FAMILIES {
+            let tally = &summary.families[name];
+            assert!(tally.kept > 0 && tally.rejected == 0, "{name} : {tally:?}");
+        }
+        assert_eq!(barres::copies(&examples), Vec::<String>::new());
+        assert!(THIRD_SESSION_FAMILIES
+            .iter()
+            .all(|n| !FOCUS_EXCLUDED.contains(n)));
+        let four = examples
+            .iter()
+            .filter(|e| e.expected["calls"].as_array().is_some_and(|c| c.len() == 4))
+            .count();
+        let questions = examples
+            .iter()
+            .filter(|e| e.expected["kind"] == "question")
+            .count();
+        assert!(four * 100 >= 8 * FOCUS_COUNT, "plans à 4 étapes : {four}");
+        assert!(
+            questions * 100 >= 10 * FOCUS_COUNT,
+            "questions : {questions}"
+        );
+    }
+
+    #[test]
+    fn the_session_command_of_the_doc_names_the_third_session_families() {
+        let doc = include_str!("../../docs/entrainement-du-modele.md");
+        let line = format!("nuit-5-54.sh {}", THIRD_SESSION_FAMILIES.join(","));
+        assert!(doc.contains(&format!("{line}\n")), "{line}");
     }
 
     #[test]

@@ -342,8 +342,9 @@ fn the_held_out_set_is_well_formed() {
         ),
         // H36 (« Reprojette les bâtiments en WGS84 et enregistre-les. ») attend un plan
         // `data.reproject` depuis 10.7 : attendu périmé corrigé le 2026-11-09, pas une
-        // correction du modèle.
-        (40, 27, 8, 5)
+        // correction du modèle. H35 (« Supprime la couche des routes du projet, … ») attend un
+        // plan `layer.remove` depuis 10.27 : attendu périmé corrigé le 2026-11-10, même raison.
+        (40, 28, 8, 4)
     );
     for s in &sentences {
         let id = s["id"].as_str().expect("id");
@@ -385,7 +386,8 @@ fn ecart_reel_score_on_the_held_out_set() {
     let registry = Registry::standard();
     let inventory: Value = serde_json::from_str(INVENTORY).unwrap();
     // Comme dans le produit : identifiants courts montrés, plan retraduit (ticket 5.19).
-    let (inventory, ids) = common::shown_inventory(&inventory);
+    let full = inventory.clone();
+    let (_, ids) = common::shown_inventory(&full);
     let sentences: Vec<Value> = serde_json::from_str(SENTENCES).unwrap();
     let mut model = model_files_generator(files);
     // Une issue par phrase : (sorte attendue, juste, appels au générateur).
@@ -406,7 +408,13 @@ fn ecart_reel_score_on_the_held_out_set() {
                 model(r)
             };
             common::restored(
-                compose_plan_with(style, &registry, &inventory, text, &mut generator),
+                compose_plan_with(
+                    style,
+                    &registry,
+                    &common::view(&full, text),
+                    text,
+                    &mut generator,
+                ),
                 &ids,
             )
         };

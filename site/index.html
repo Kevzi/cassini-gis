@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cassini</title>
+<style>
+  :root { --fond: #fff; --texte: #1b1f24; --lien: #0b5cad; --bord: #d0d7de; }
+  @media (prefers-color-scheme: dark) { :root { --fond: #14171a; --texte: #e6e8ea; --lien: #6cb0f5; --bord: #3a4046; } }
+  body { background: var(--fond); color: var(--texte); font: 1.0625rem/1.55 system-ui, sans-serif; margin: 0; }
+  main { max-width: 42rem; margin: 0 auto; padding: 2rem 1rem; }
+  a { color: var(--lien); }
+  .telecharger { display: inline-block; padding: .6rem 1.1rem; border: 1px solid var(--bord); border-radius: .4rem; font-weight: 600; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Cassini</h1>
+  <p>Cassini est l'interface en français d'un SIG qui fonctionne entièrement hors ligne : vous décrivez ce que vous voulez, il propose les opérations, vous les validez, il les exécute et les journalise.</p>
+  <p>C'est une extension pour QGIS, posée sur un moteur indépendant ; vos données restent sur votre poste et rien n'est envoyé sur le réseau.</p>
+
+  <h2>Télécharger</h2>
+  <p><a class="telecharger" href="https://github.com/Kevzi/cassini-gis/releases/latest/download/cassini-installeur-en-ligne.exe">Installeur Cassini pour Windows</a></p>
+  <p>Windows affichera sans doute un avertissement à l'ouverture : l'installeur n'est pas encore signé. <a href="avertissement-windows.html">Pourquoi, et comment continuer sans risque</a>.</p>
+
+  <p>Contact : <a href="mailto:cassini-sig@proton.me">cassini-sig@proton.me</a></p>
+</main>
+</body>
+</html>

@@ -19,3 +19,13 @@ http://www.apache.org/licenses/LICENSE-2.0. Unless required by applicable law or
 in writing, software distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
 for the specific language governing permissions and limitations under the License.
+
+------------------------------------------------------------------------------------------
+World Magnetic Model (WMM2025)
+
+The magnetic declination of `geo.distance_azimuth` and `geo.destination_point`
+(core/src/wmm.rs) uses the WMM2025 coefficients (core/data/wmm2025/), published by the
+NOAA National Centers for Environmental Information and the British Geological Survey
+(https://www.ncei.noaa.gov/products/world-magnetic-model; technical report
+doi:10.25923/prbc-s316). Data of the United States Government, not subject to copyright
+protection in the United States (17 U.S.C. 403).

@@ -207,7 +207,12 @@ fn the_demo_sentence_runs_on_the_real_model_and_replays_without_it() {
     let execute = session.start_request("plan.execute", json!({"plan_id": plan_id}));
     let calls = plan["calls"].as_array().unwrap().clone();
     for call in &calls {
-        let order = session.wait_order();
+        // Le tampon : le noyau lit d'abord l'inventaire (système de calcul, entrée 9.16).
+        let order = if call["command"] == "analysis.buffer" {
+            session.wait_buffer_order(GARES, "gares", "EPSG:4326", "deg")
+        } else {
+            session.wait_order()
+        };
         assert_eq!(order["params"]["command"], call["command"], "{order}");
         answer_step(&mut session, &order, "l");
     }

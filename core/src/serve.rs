@@ -916,9 +916,12 @@ fn hello(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, RpcErro
     state.announced = commands;
     state.style_kinds = style_kinds;
     // Les relais ne voient que les commandes disponibles, sans aucun chemin (AD-25, AD-9).
+    // Le système de calcul en mètres est choisi par le noyau (entrée 9.16) : l'outil du relais ne
+    // le montre pas, comme le modèle et le formulaire.
     let available = catalogue(state)
         .into_iter()
         .filter(|entry| entry["available"] == json!(true))
+        .map(|entry| without_core_filled(state.registry, entry))
         .collect();
     state.link.external.set_catalogue(available);
     let mut result = json!({
@@ -951,6 +954,37 @@ fn is_available(state: &State<'_>, id: &str, runs_in: Option<RunsIn>) -> bool {
         return false;
     }
     runs_in != Some(RunsIn::Qgis) || state.announced.contains(id)
+}
+
+/// Une entrée du catalogue des relais sans les paramètres que le noyau remplit seul : le système
+/// de calcul (`CommandSpec::work_crs_param`, entrée 9.16) et la mise en évidence du résultat d'un
+/// plan (`CommandSpec::focus_param`, entrée 7.9) ; ni dans les propriétés, ni parmi les requis, ni
+/// par les définitions que seuls ils employaient.
+fn without_core_filled(registry: &Registry, mut entry: Value) -> Value {
+    let Some(spec) = entry["id"].as_str().and_then(|id| registry.spec(id)) else {
+        return entry;
+    };
+    let hidden: Vec<String> = spec
+        .work_crs_param
+        .as_ref()
+        .map(|(name, _)| name.clone())
+        .into_iter()
+        .chain(spec.focus_param.clone())
+        .collect();
+    if hidden.is_empty() {
+        return entry;
+    }
+    let schema = &mut entry["params_schema"];
+    for name in &hidden {
+        if let Some(props) = schema.get_mut("properties").and_then(Value::as_object_mut) {
+            props.remove(name);
+        }
+        if let Some(required) = schema.get_mut("required").and_then(Value::as_array_mut) {
+            required.retain(|r| r.as_str() != Some(name.as_str()));
+        }
+    }
+    crate::registry::prune_defs(schema);
+    entry
 }
 
 fn catalogue(state: &State<'_>) -> Vec<Value> {
@@ -1730,12 +1764,15 @@ mod tests {
         seen: std::sync::Arc<std::sync::Mutex<Vec<Value>>>,
         /// Modèle demandé à chaque composition, dans l'ordre.
         chosen: std::sync::Arc<std::sync::Mutex<Vec<Option<String>>>>,
+        /// Applique le garde-fou des attributs au plan rendu, sur la vue reçue, comme le
+        /// compositeur réel (ticket 5.57).
+        guard_attributes: bool,
     }
 
     impl Composer for FixedComposer {
         fn compose(
             &self,
-            _registry: &Registry,
+            registry: &Registry,
             _request: &str,
             model: Option<&str>,
             inventory: &mut dyn FnMut() -> Result<
@@ -1744,11 +1781,19 @@ mod tests {
             >,
         ) -> Result<crate::plan::Plan, ErrorReport> {
             self.chosen.lock().unwrap().push(model.map(str::to_string));
+            let mut shown = Value::Null;
             if self.inventory {
                 let view = inventory()?;
                 assert!(view.inventory["layers"].is_array());
-                let users = view.inventory["layers"].as_array().unwrap().len();
+                // Les couches de l'utilisateur sont en tête de l'index d'une vue triée (5.48),
+                // sinon en tête de `layers`.
+                let cut = view
+                    .inventory
+                    .get("index")
+                    .unwrap_or(&view.inventory["layers"]);
+                let users = cut.as_array().unwrap().len();
                 assert!(view.user_layers <= users);
+                shown = view.inventory.clone();
                 self.seen.lock().unwrap().push(view.inventory);
             }
             let next = self.first.borrow_mut().pop_front();
@@ -1766,6 +1811,13 @@ mod tests {
                             }
                         }
                         other => other,
+                    }
+                })
+                .map(|plan| {
+                    if self.guard_attributes {
+                        crate::attribute_guard::guard_attributes(registry, plan, &shown)
+                    } else {
+                        plan
                     }
                 })
         }
@@ -1786,6 +1838,7 @@ mod tests {
             first: Default::default(),
             seen: Default::default(),
             chosen: Default::default(),
+            guard_attributes: false,
         })
     }
 
@@ -1911,6 +1964,31 @@ mod tests {
                 notice["params"],
                 json!({"plan_id": plan_id, "step": step, "command": command})
             );
+            let order = self.recv();
+            assert_eq!(order["method"], "order.execute");
+            assert_eq!(order["params"]["command"], command);
+            order
+        }
+
+        /// Comme `expect_step`, pour une étape dont le noyau lit d'abord l'inventaire (le système
+        /// de calcul d'un tampon, entrée 9.16) : répond `inventory` à cette lecture.
+        fn expect_step_reading(
+            &self,
+            plan_id: &str,
+            step: u64,
+            command: &str,
+            inventory: Value,
+        ) -> Value {
+            let notice = self.recv();
+            assert_eq!(notice["method"], "plan.step", "{notice}");
+            assert_eq!(
+                notice["params"],
+                json!({"plan_id": plan_id, "step": step, "command": command})
+            );
+            let read = self.recv();
+            assert_eq!(read["method"], "order.execute", "{read}");
+            assert_eq!(read["params"]["command"], "project.inventory", "{read}");
+            self.send(reply(&read["id"], inventory));
             let order = self.recv();
             assert_eq!(order["method"], "order.execute");
             assert_eq!(order["params"]["command"], command);
@@ -2407,6 +2485,16 @@ mod tests {
         ]})
     }
 
+    /// L'inventaire que la fausse extension rend au noyau avant le tampon : les gares en degrés,
+    /// le projet en Lambert-93, comme le projet d'Annecy.
+    fn demo_inventory() -> Value {
+        json!({"layers": [
+            {"layer_id": "plu", "name": "plu", "crs": "EPSG:2154", "crs_unit": "m"},
+            {"layer_id": "gares", "name": "gares", "crs": "EPSG:4326", "crs_unit": "deg"},
+            {"layer_id": "parcelles", "name": "parcelles", "crs": "EPSG:2154", "crs_unit": "m"}
+        ], "project_crs": "EPSG:2154", "project_crs_unit": "m", "extent": null})
+    }
+
     /// Fausse extension : écrit la sortie que le noyau a nommée, puis rend le résultat typé de
     /// l'étape. `prefix` distingue les ids de couche d'une session à l'autre ; `count` est le
     /// nombre d'entités rendu par chaque analyse.
@@ -2452,7 +2540,16 @@ mod tests {
         let calls = demo_plan()["calls"].as_array().unwrap().clone();
         for (i, call) in calls.iter().enumerate() {
             let step = i as u64 + 1;
-            let order = c.expect_step(&plan_id, step, call["command"].as_str().unwrap());
+            let command = call["command"].as_str().unwrap();
+            let order = if command == "analysis.buffer" {
+                // Les gares sont en degrés, le projet en Lambert-93 : le tampon est calculé en
+                // EPSG:2154, sans étape ajoutée au plan (entrée 9.16).
+                let order = c.expect_step_reading(&plan_id, step, command, demo_inventory());
+                assert_eq!(order["params"]["params"]["work_epsg"], 2154, "{order}");
+                order
+            } else {
+                c.expect_step(&plan_id, step, command)
+            };
             // Un seul ordre à la fois : rien ne part avant la réponse.
             c.assert_silent();
             c.send(demo_answer(&order, step, "l", 7));
@@ -2466,6 +2563,8 @@ mod tests {
         );
         let journal = c.journal();
         assert_eq!(journal.len(), 5);
+        // Le système de calcul est journalisé avec les paramètres du tampon (AD-11).
+        assert_eq!(journal[1]["params"]["work_epsg"], 2154, "{}", journal[1]);
         // Les références `step:N` sont résolues au journal.
         assert_eq!(
             journal[2]["params"]["overlay_layer_id"], "l_1",
@@ -2474,6 +2573,13 @@ mod tests {
         );
         assert_eq!(journal[3]["params"]["layer_id"], "l_3");
         assert_eq!(journal[3]["params"]["overlay_layer_id"], "l_2");
+        // L'export du plan met en évidence la dernière intersection et cache les trois autres
+        // sorties ; la mise en évidence est journalisée (entrée 7.9, AD-11).
+        let focus = &journal[4]["params"]["focus"];
+        assert_eq!(focus["results"][0]["layer_id"], "l_4", "{}", journal[4]);
+        assert_eq!(focus["results"][0]["label"], "Parcelles constructibles");
+        assert_eq!(focus["hidden"], json!(["l_1", "l_2", "l_3"]));
+        assert_eq!(focus["frame"], json!(["l_4"]));
         assert!(journal.iter().all(|l| !l.to_string().contains("step:")));
         c.close().1.unwrap();
         c
@@ -2495,10 +2601,15 @@ mod tests {
         // Les couches sources restent ; chaque référence est liée à l'id neuf de son étape.
         assert_eq!(params[0]["layer_id"], "plu");
         assert_eq!(params[1]["layer_id"], "gares");
+        // Le système de calcul est relu dans le journal, sans relire l'inventaire (AD-11).
+        assert_eq!(params[1]["work_epsg"], 2154);
         assert_eq!(params[2]["layer_id"], "parcelles");
         assert_eq!(params[2]["overlay_layer_id"], "r_1");
         assert_eq!(params[3]["layer_id"], "r_3");
         assert_eq!(params[3]["overlay_layer_id"], "r_2");
+        // La mise en évidence est relue, ses ids liés aux neufs, jamais recalculée (7.9).
+        assert_eq!(params[4]["focus"]["results"][0]["layer_id"], "r_4");
+        assert_eq!(params[4]["focus"]["hidden"], json!(["r_1", "r_2", "r_3"]));
         assert_eq!(replayed["id"], 3);
         assert_eq!(replayed["result"], json!({"steps": 5, "identical": true}));
         // Le rejeu n'écrit pas le journal : identique octet pour octet.
@@ -2683,6 +2794,7 @@ mod tests {
                 first: Default::default(),
                 seen: Default::default(),
                 chosen: Default::default(),
+                guard_attributes: false,
             };
             let mut c = Client::start_with(CANCEL_GRACE, Some(failing));
             c.hello_with(&ALL);
@@ -2756,6 +2868,44 @@ mod tests {
             r["result"],
             json!({"question": "Quel point ?", "source": "guard"})
         );
+        c.execute(3, "plan-1");
+        assert_eq!(code_of(&c.recv()), "plan.unknown");
+        c.assert_silent();
+        assert!(c.journal().is_empty());
+        c.close().1.unwrap();
+    }
+
+    /// Ticket 5.57 : une valeur absente des valeurs listées de l'inventaire rend la question du
+    /// garde-fou, sans `plan_id`, jamais exécutée ni journalisée (AD-11).
+    #[test]
+    fn an_attribute_guard_question_has_no_plan_id_and_writes_no_journal_line() {
+        let plan = json!({"kind":"calls","calls":[{"command":"analysis.select_by_attribute",
+            "params":{"layer_id":"zonage","field":"typezone","operator":"eq","value":"AU"}}]});
+        let mut composer = composer(plan).unwrap();
+        composer.guard_attributes = true;
+        let mut c = Client::start_with(CANCEL_GRACE, Some(composer));
+        c.hello_with(&ALL);
+        c.send(json!({"jsonrpc":"2.0","id":2,"method":"plan.propose",
+            "params":{"request":"Les zones AU."}}));
+        let order = c.recv();
+        assert_eq!(order["params"]["command"], "project.inventory");
+        c.send(reply(
+            &order["id"],
+            json!({"project_crs": "EPSG:2154", "extent": null, "layers": [
+                {"layer_id": "zonage", "name": "Zonage PLU", "source": "plu.gpkg",
+                 "crs": "EPSG:2154", "kind": "vector", "geometry": "MultiPolygon",
+                 "feature_count": 4,
+                 "fields": [{"name": "typezone", "type": "String", "values": ["U", "N"]}]}
+            ]}),
+        ));
+        let r = c.recv();
+        assert_eq!(
+            r["result"],
+            json!({"question": "Le champ typezone de la couche « Zonage PLU » n'a pas de valeur « AU » (valeurs : N, U) : laquelle faut-il prendre ?",
+                "source": "guard"}),
+            "{r}"
+        );
+        assert!(r["result"].get("plan_id").is_none());
         c.execute(3, "plan-1");
         assert_eq!(code_of(&c.recv()), "plan.unknown");
         c.assert_silent();
@@ -2957,6 +3107,190 @@ mod tests {
         // Le modèle ne voit rien du constat : l'inventaire n'a pas de clé `left_out`.
         assert!(inventory.get("left_out").is_none());
         drop(seen);
+        c.close().1.unwrap();
+    }
+
+    /// Ticket 5.48 : un gros projet (couches de l'utilisateur au-delà du seuil du tri), dont aucune
+    /// couche n'est désignée par la demande « Fais-le. » : `zonage` n'est montrée que dans l'index.
+    fn big_project_inventory() -> Value {
+        let fields: Vec<Value> = (0..12)
+            .map(|i| {
+                json!({"name": format!("attribut_{i:02}"), "type": "String",
+                "values": ["valeur_a", "valeur_b", "valeur_c"]})
+            })
+            .collect();
+        let mut layers: Vec<Value> = (0..30)
+            .map(|k| {
+                json!({"layer_id": format!("objet_{k:02}"), "name": format!("objet_{k:02}"),
+                    "source": "fond.gpkg", "crs": "EPSG:2154", "kind": "vector",
+                    "geometry": "MultiPolygon", "feature_count": 3, "fields": fields})
+            })
+            .collect();
+        layers.push(
+            json!({"layer_id": "zonage", "name": "zonage", "source": "plu.shp",
+            "crs": "EPSG:2154", "kind": "vector", "geometry": "MultiPolygon",
+            "feature_count": 3,
+            "fields": [{"name": "typezone", "type": "String", "values": ["U", "N"]}]}),
+        );
+        json!({"project_name": "p", "project_crs": "EPSG:2154", "extent": null, "layers": layers})
+    }
+
+    /// `plan.propose` sur le gros projet ; le compositeur rend d'abord les plans de `first`.
+    fn propose_big(first: Vec<Value>, then: Value) -> (Value, Vec<Value>, Vec<Value>) {
+        let composer = composer(then).unwrap();
+        composer.first.borrow_mut().extend(first);
+        let seen = composer.seen.clone();
+        let mut c = Client::start_with(CANCEL_GRACE, Some(composer));
+        c.hello_with(&ALL);
+        c.send(json!({"jsonrpc":"2.0","id":2,"method":"plan.propose",
+            "params":{"request":"Fais-le."}}));
+        let order = c.recv();
+        assert_eq!(order["params"]["command"], "project.inventory");
+        c.send(reply(&order["id"], big_project_inventory()));
+        let answer = c.recv();
+        // La redemande ne redemande pas l'inventaire à l'extension.
+        c.assert_silent();
+        let journal = c.journal();
+        c.close().1.unwrap();
+        let seen = seen.lock().unwrap().clone();
+        (answer, seen, journal)
+    }
+
+    fn detailed(view: &Value) -> Vec<&str> {
+        view["layers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|l| l["layer_id"].as_str().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn a_field_on_a_reduced_layer_recomposes_once_with_that_layer_detailed() {
+        let field_plan = json!({"kind":"calls","calls":[
+            {"command":"analysis.select_by_attribute",
+             "params":{"layer_id":"zonage","field":"typezone","operator":"eq","value":"U"}}]});
+        let question = json!({"kind":"question","question":"Laquelle ?"});
+        // Le second plan prend encore un champ : il est gardé tel quel, sans troisième composition.
+        let (answer, seen, journal) = propose_big(vec![field_plan.clone(), field_plan], question);
+        assert_eq!(seen.len(), 2, "une seule redemande");
+        assert!(seen[0].get("index").is_some());
+        assert!(!detailed(&seen[0]).contains(&"zonage"));
+        assert!(detailed(&seen[1]).contains(&"zonage"));
+        // Même index, même table : seule la partie détaillée change.
+        assert_eq!(seen[0]["index"], seen[1]["index"]);
+        // Le second plan, jugé comme un premier : ici il ne vérifie pas (commande non annoncée),
+        // et c'est son erreur qui sort, jamais une troisième composition.
+        assert_eq!(code_of(&answer), "agent.plan_invalid", "{answer}");
+        // Ni l'inventaire ni la redemande ne sont journalisés.
+        assert!(journal.is_empty());
+    }
+
+    /// Ticket 5.48 : le dernier plan exécuté est lu dans le journal du projet à chaque proposition ;
+    /// la couche qu'il cite est détaillée, même si la demande ne la désigne pas.
+    #[test]
+    fn the_layer_cited_by_the_last_plan_of_the_journal_is_detailed() {
+        let composer = composer(json!({"kind":"question","question":"?"})).unwrap();
+        let seen = composer.seen.clone();
+        let mut c = Client::start_with(CANCEL_GRACE, Some(composer));
+        c.hello_with(&ALL);
+        let line = json!({"id": "analysis.select_by_attribute", "plan_step": 1,
+            "params": {"layer_id": "zonage", "field": "typezone", "operator": "eq", "value": "U"},
+            "layer_id": "r1", "result": {}});
+        std::fs::write(c.dir.join("p.cassini/journal.jsonl"), format!("{line}\n")).unwrap();
+        c.send(json!({"jsonrpc":"2.0","id":2,"method":"plan.propose",
+            "params":{"request":"Fais-le."}}));
+        let order = c.recv();
+        c.send(reply(&order["id"], big_project_inventory()));
+        let answer = c.recv();
+        assert_eq!(answer["result"]["question"], "?", "{answer}");
+        c.close().1.unwrap();
+        let seen = seen.lock().unwrap();
+        assert!(seen[0].get("index").is_some());
+        assert_eq!(detailed(&seen[0]), ["zonage"]);
+    }
+
+    #[test]
+    fn the_plan_of_the_recomposition_is_kept_and_shown_like_a_first_one() {
+        let field_plan = json!({"kind":"calls","calls":[
+            {"command":"analysis.select_by_attribute",
+             "params":{"layer_id":"zonage","field":"typezone","operator":"eq","value":"U"}}]});
+        let valid = json!({"kind":"calls","calls":[
+            {"command":"test.fixed","params":{"layer":"zonage"}}]});
+        let (answer, seen, journal) = propose_big(vec![field_plan], valid);
+        assert_eq!(seen.len(), 2);
+        assert_eq!(answer["result"]["plan_id"], "plan-1", "{answer}");
+        assert_eq!(
+            answer["result"]["plan"]["calls"][0]["command"],
+            "test.fixed"
+        );
+        assert!(journal.is_empty());
+    }
+
+    #[test]
+    fn a_field_reached_through_a_step_reference_recomposes_too() {
+        let plan = json!({"kind":"calls","calls":[
+            {"command":"analysis.buffer","params":{"layer_id":"zonage",
+                "distance":{"value":10,"unit":"m"}}},
+            {"command":"analysis.select_by_attribute",
+             "params":{"layer_id":"step:1.layer_id","field":"typezone","operator":"eq","value":"U"}}]});
+        let question = json!({"kind":"question","question":"Laquelle ?"});
+        let (answer, seen, _) = propose_big(vec![plan], question);
+        assert_eq!(seen.len(), 2);
+        assert!(detailed(&seen[1]).contains(&"zonage"));
+        assert_eq!(answer["result"]["question"], "Laquelle ?", "{answer}");
+    }
+
+    #[test]
+    fn a_reduced_layer_taken_as_geometry_only_does_not_recompose() {
+        let question = json!({"kind":"question","question":"Laquelle ?"});
+        let plan = json!({"kind":"calls","calls":[
+            {"command":"test.fixed","params":{"layer_id":"zonage"}}]});
+        let (_, seen, _) = propose_big(vec![plan], question.clone());
+        assert_eq!(seen.len(), 1);
+        // Une question ou un champ sur une couche détaillée ne recomposent pas non plus.
+        let (_, seen, _) = propose_big(vec![], question);
+        assert_eq!(seen.len(), 1);
+        let on_detailed = json!({"kind":"calls","calls":[
+            {"command":"analysis.select_by_attribute",
+             "params":{"layer_id":"step:9.layer_id","field":"typezone","operator":"eq","value":"U"}}]});
+        let (_, seen, _) =
+            propose_big(vec![on_detailed], json!({"kind":"question","question":"?"}));
+        assert_eq!(seen.len(), 1, "référence sans étape : aucune couche");
+    }
+
+    #[test]
+    fn under_the_threshold_a_field_never_recomposes() {
+        let plan = json!({"kind":"calls","calls":[
+            {"command":"analysis.select_by_attribute",
+             "params":{"layer_id":"plu","field":"typezone","operator":"eq","value":"U"}}]});
+        let composer = composer(json!({"kind":"question","question":"?"})).unwrap();
+        composer.first.borrow_mut().push_back(plan);
+        let seen = composer.seen.clone();
+        let mut c = Client::start_with(CANCEL_GRACE, Some(composer));
+        c.hello_with(&ALL);
+        propose_over_the_budget(&mut c, 2);
+        c.close().1.unwrap();
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert!(seen[0].get("index").is_none());
+    }
+
+    /// Ticket 5.48 (AD-29) : l'IA externe et `command.run` lisent `project.inventory` brut, même
+    /// pour un gros projet ; la vue triée ne sert qu'à `plan.propose`.
+    #[test]
+    fn command_run_returns_the_raw_inventory_of_a_big_project() {
+        let mut c = Client::start_with(CANCEL_GRACE, composer(three_steps()));
+        c.hello_with(&ALL);
+        c.send(json!({"jsonrpc":"2.0","id":2,"method":"command.run",
+            "params":{"command":"project.inventory","params":{}}}));
+        let order = c.recv();
+        assert_eq!(order["params"]["command"], "project.inventory");
+        let raw = big_project_inventory();
+        c.send(reply(&order["id"], raw.clone()));
+        let answer = c.recv();
+        assert_eq!(answer["result"], raw, "{answer}");
+        assert!(answer["result"].get("index").is_none());
         c.close().1.unwrap();
     }
 
@@ -3337,6 +3671,7 @@ mod tests {
             ),
             seen: Default::default(),
             chosen: Default::default(),
+            guard_attributes: false,
         };
         let mut c = Client::start_with(CANCEL_GRACE, Some(composer));
         c.hello_with(&ALL);

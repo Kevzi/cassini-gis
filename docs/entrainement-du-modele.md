@@ -12,12 +12,13 @@ document).
 Une seule commande, depuis la racine du dépôt :
 
 ```
-cargo run -p cassini-training --release -- --seed 1 --count 8000 --out exemples.jsonl
+cargo run -p cassini-training --release -- --seed 1 --count 8600 --out exemples.jsonl
 ```
 
 - `--seed` (par défaut 1) : la graine. Même graine, même fichier, à l'octet près, sous
   Windows comme sous Linux.
-- `--count` (par défaut 8000 depuis 5.15, 5000 avant) : le nombre d'exemples.
+- `--count` (par défaut 8600 depuis le 2026-11-10, 8000 depuis 5.15, 5000 avant) : le nombre
+  d'exemples.
 - `--out` : le fichier écrit. Le jeu n'est pas versionné : il se régénère.
 
 Le résumé par famille (exemples gardés, écartés, doublons) s'imprime sur la sortie
@@ -77,33 +78,37 @@ standards publics et ne sont tirées d'aucun fichier réel.
 
 | Famille | Ce qu'elle enseigne |
 |---|---|
-| `filtre_egalite` | « les gares de la ligne D », « les routes nationales » → sélection par attribut ; depuis après 11.23, une fois sur huit, les zones du PLU d'une catégorie dite en mots (« les zones agricoles du PLU ») → une sélection sur `typezone`, `eq` `A` ou `U`, `begins_with` `N` ou `AU`, la couche sans champ de libellé |
+| `filtre_egalite` | « les gares de la ligne D », « les routes nationales » → sélection par attribut ; depuis après 11.23, une fois sur huit, les zones du PLU d'une catégorie dite en mots (« les zones agricoles du PLU ») → une sélection sur `typezone`, `eq` `A` ou `U`, `begins_with` `AU`, et pour `N` l'opérateur déduit des valeurs montrées depuis après 5.49 (`eq` quand aucune autre valeur commençant par `N` n'est montrée, `begins_with` à côté de `Nh`), la couche sans champ de libellé |
 | `garde_seulement` | « garde seulement », « ne garde que », « conserve uniquement » → une sélection, jamais une suppression |
 | `filtre_numerique` | « bâtiments de plus de 12 m de haut », « communes de moins de 12 500 habitants » → `gt`, `lt`, `gte`, `lte` |
 | `filtre_texte` | « dont le nom contient », « commence par » → `contains`, `begins_with` |
 | `filtre_different` | « sauf celles de la section AB », « qui ne sont pas » → `ne` |
-| `tampon` | zone tampon en m ou en km, fusionnée sur demande seulement |
-| `tampon_filtre` | tampon autour d'une couche filtrée |
+| `tampon` | zone tampon en m ou en km, fusionnée sur demande seulement ; depuis l'analyse après 11.23, la fusion se dit aussi dans une proposition à part (« …, puis fusionne le résultat ») → `dissolve: true` |
+| `question_tampon_sans_distance` | depuis après 5.49 (RA09), « Crée un tampon autour des … », « Trace un périmètre autour de la couche « … » » sans distance écrite → une question qui demande la distance du tampon autour de la couche nommée, jamais une distance devinée ; mêmes verbes que `tampon`, son contrepoids ; jamais la tête « Fais un tampon autour » (poids 3) |
+| `tampon_filtre` | tampon autour d'une couche filtrée ; depuis l'analyse après 11.23 (poids 6), une fois sur trois, une valeur dite par son adjectif au pluriel (« des routes départementales ») à côté d'une valeur voisine du même champ, elle aussi à adjectif → `select` sur la valeur dite |
 | `distance` | « à moins de 500 m d'une gare » → tampon sur la référence, puis intersection |
-| `distance_reference_filtree` | distance à une référence filtrée (« des gares de la ligne D ») |
+| `distance_reference_filtree` | distance à une référence filtrée (« des gares de la ligne D ») ; depuis l'analyse après 11.23, une fois sur quatre, une référence dite par son nom propre (« de la gare Les Saules ») → `select` `eq` sur son champ de nom, qui liste ce nom |
 | `dans_une_zone` | « en zone N », « en zone inondable d'aléa fort » → sélection de la zone, puis intersection |
 | `intersection` | « situés dans une zone humide », « croise la couche A avec la couche B » |
+| `toutes_zones_confondues` | « situées en zone inondable, tous aléas confondus », « dans une zone d'exposition au bruit (toutes zones confondues) » → une intersection avec la couche de zones entière, sans `select`, bien que la couche porte son champ de catégorie |
 | `conditions_multiples` | zone et distance, cible filtrée et distance, deux distances, inclusion dans une couche entière : intersections successives ; depuis après 11.23, la cible filtrée près d'une référence filtrée (`select` de la cible, `select` de la référence, tampon sur `step:2`, intersection de `step:1` avec `step:3`), et les plans à deux sélections tirés deux fois plus souvent |
 | `constructible` | vocabulaire d'urbanisme : « parcelles constructibles », avec ou sans distance et PDF |
 | `export_pdf` | « sors-moi la carte en PDF », titre donné par l'utilisateur ou déduit de la demande |
 | `export_pdf_scale` | « exporte la carte en PDF au 1:25 000 » → `scale: 25000`, l'entier écrit ; échelles courantes de 1:1 000 à 1:250 000, écrites « au 1:25 000 », « au 1/25000 », « au 25 000e », « au 1:25k » (multiple de 1 000 seulement) ou « à l'échelle 1/25 000 » ; la carte seule ou au bout d'une recherche (5.38) ; depuis 5.40, aussi sans le mot « PDF » (« imprime la carte au 1/50000 », « sors-moi la carte au 25 000e »), un export et jamais un refus de format |
 | `export_pdf_format` | « exporte la carte en PDF au format A3 » → `page_size: "a3"`, « en portrait » ou « à la française » → `orientation: "portrait"` (« paysage », « à l'italienne » → `landscape`), « avec un carroyage Lambert-93 tous les 1 km » → `grid: {kind: projected, epsg: 2154, interval: {value: 1, unit: km}}`, « avec un graticule tous les 0,01° » → `grid: {kind: degrees, interval: {value: 0.01, unit: deg}}` (grades → `gon`) ; seuls les paramètres écrits, jamais `scale` ; la carte seule ou au bout d'une recherche ; un carroyage « UTM » sans fuseau (« carroyage UTM au kilomètre ») → `epsg` = `project.utm_epsg` de l'inventaire, question quand il n'y en a pas ; un carroyage sans système (« quadrillage tous les 500 m ») → question qui demande le système (11.12, lot 3 ; fuseau de l'inventaire, 2026-11-08 ; renforcé par `carroyage_utm_projet` en 11.23) |
-| `carroyage_utm_projet` | le carroyage UTM d'un export, le fuseau du projet en main (11.23) : « avec un carroyage UTM tous les 2 km », « avec une grille UTM de 1 km », « avec un quadrillage UTM au kilomètre » → `grid` projeté sur `project.utm_epsg`, recopié ; sans `utm_epsg`, la question du système ; un fuseau écrit l'emporte même quand l'inventaire en porte un autre, dans les deux sens (« UTM 31N » avec 32632, « UTM 32N » avec 32631) ; aucun système → la question, jamais un refus (constat F03 de 11.16) ; depuis le second essai de 11.23, poids 4, trois recopies pour deux questions sans `utm_epsg` (constat F03 du premier essai : fuseau inventé) ; jamais la tête « Fais un PDF de la carte » (celle de F03) |
+| `carroyage_utm_projet` | le carroyage UTM d'un export, le fuseau du projet en main (11.23) : « avec un carroyage UTM tous les 2 km », « avec une grille UTM de 1 km », « avec un quadrillage UTM au kilomètre » → `grid` projeté sur `project.utm_epsg`, recopié ; sans `utm_epsg`, la question du système ; un fuseau écrit l'emporte même quand l'inventaire en porte un autre, dans les deux sens (« UTM 31N » avec 32632, « UTM 32N » avec 32631) ; aucun système → la question, jamais un refus (constat F03 de 11.16) ; depuis le second essai de 11.23, poids 4 (6 depuis 5.54, lot 2), trois recopies pour deux questions sans `utm_epsg` (constat F03 du premier essai : fuseau inventé) ; jamais la tête « Fais un PDF de la carte » (celle de F03) |
 | `isochrone` | « zone atteinte en 10 minutes à pied depuis le point ... (Lambert-93) » |
 | `isochrone_utm` | « zone atteinte en 10 minutes à pied depuis le point 412 300 / 5 412 000 (UTM 31N) » → même isochrone, code 32631 ou 32632 ; zone 31N ou 32N, écrite « UTM 31N », « UTM 31 N », « UTM zone 31 Nord » ou « UTM31N » (5.37) |
 | `isochrone_vers_cible` | « les écoles à 10 min à pied du point ... (Lambert-93) » → isochrone, puis intersection de la cible avec l'étape 1 ; la couche du lieu (gares, écoles...) est souvent dans l'inventaire, seules les coordonnées donnent l'origine ; une fois sur trois, le lieu est nommé avec ses coordonnées (« de la gare de X (652 000 / 6 862 000, Lambert-93) ») et reste un plan |
-| `decompte_par_zone` | « nombre d'écoles par commune », nom des zones sur demande seulement |
+| `decompte_par_zone` | « nombre d'écoles par commune », nom des zones sur demande seulement (trois fois sur quatre depuis les quatre causes, poids 8), `label_field` recopié de l'inventaire : un nom du pool commun `NAME_FIELDS` (`nom`, `nom_officiel`, `NOM`, `libelle`…), jamais déduit du thème, à côté de ses leurres (majuscules, code) |
 | `ouverture` | ouvrir un fichier non chargé, CSV à coordonnées compris |
 | `description` | décrire une couche, inventaire du projet, version, modèles installés |
 | `question_couche_absente` | une couche dont rien ne parle dans l'inventaire → question |
-| `question_champ_absent` | un critère qu'aucun champ ne porte → question, jamais un champ voisin deviné |
-| `refus` | courriel, suppression, export d'une couche en tableur (Excel, CSV : le refus nomme les formats de `data.convert`, depuis 10.9), couleur choisie à la main (« mets les gares en rouge » : depuis 11.23, le refus dit que le catalogue ne pose pas de couleur choisie mais sait les couleurs topographiques et le dégradé, jamais qu'aucune commande ne change le style), itinéraire sur le réseau routier entre deux objets d'une couche (depuis 11.12, lot 2b-1, le refus dit que le chemin de moindre coût demande un raster de coût et deux points en coordonnées), téléchargement, 3D → refus affirmatif |
-| `refus_hors_registre` | cadrage ou zoom de la carte, PDF dans un format hors de la série du catalogue (A5, lettre US), ou envoyé à une imprimante ou avec un nombre d'exemplaires (« envoie la carte à l'imprimante », « en 3 exemplaires ») ; « imprime la carte » seul reste un export, PDF qui nomme les couches à montrer (« fais une carte PDF A3 des écoles et des gares », depuis 11.23 : l'export met en page la carte affichée sans choisir ses couches, même avec un format ou une orientation connus), altitude moyenne par zone (statistiques sur un raster ; depuis 5.41 aussi après une pente ou un champ de vision : « la pente puis sa moyenne par commune » est un refus entier), MNT présent pour l'altitude par zone, trajet depuis plusieurs lieux (« de chaque gare », « de toutes les gares », « des gares ») → refus affirmatif, jamais un plan de substitution. Le point de terrain écrit dans un autre système que le MNT, refusé en 5.41, est un plan depuis 11.12 (`terrain_autre_systeme`). Le champ de vision, la ligne de vue et la pente n'y sont plus depuis 4.6 : le registre les a. Le seuil sur la pente (« où la pente dépasse 15 % »), refusé de 4.6 à 11.12, est un plan depuis 11.12, lot 2a (`pente_seuil`). Le PDF en A3, A0 ou portrait, refusé jusqu'au lot 3 de 11.12 (« seulement une page A4 paysage »), est un plan depuis (`export_pdf_format`) |
+| `question_champ_absent` | un critère qu'aucun champ ne porte → question, jamais un champ voisin deviné ; depuis la séance 3 de 5.54 (poids 10), une fois sur quatre dans une demande à plusieurs conditions, et une fois sur quatre la même demande avec le champ présent → le plan |
+| `question_valeur_absente` | depuis la séance 3 de 5.54 : une valeur absente des valeurs connues d'un champ (clé `values`), ou « en zone AU » sans aucune valeur qui commence par AU → question qui nomme la couche, le champ et ses valeurs ; un tiers de contraste, la valeur listée → le plan ; une fois sur six, la valeur dans un champ de nom montré sans `values` → le plan avec la valeur écrite (poids 5) |
+| `refus` | courriel, suppression d'entités, effacement du fichier d'une couche sur le disque (« supprime le fichier de la couche … du disque », depuis 10.27 : retirer la couche du projet est un plan, `retrait_couche` ; le refus dit que les fichiers de l'utilisateur ne sont jamais modifiés), export d'une couche en tableur (Excel, CSV : le refus nomme les formats de `data.convert`, depuis 10.9), couleur choisie à la main (« mets les gares en rouge » : depuis 11.23, le refus dit que le catalogue ne pose pas de couleur choisie mais sait les couleurs topographiques et le dégradé, jamais qu'aucune commande ne change le style), itinéraire sur le réseau routier entre deux objets d'une couche (depuis 11.12, lot 2b-1, le refus dit que le chemin de moindre coût demande un raster de coût et deux points en coordonnées), téléchargement, 3D → refus affirmatif |
+| `refus_hors_registre` | cadrage ou zoom de la carte, PDF dans un format hors de la série du catalogue (A5, lettre US), ou envoyé à une imprimante ou avec un nombre d'exemplaires (« envoie la carte à l'imprimante », « en 3 exemplaires ») ; « imprime la carte » seul reste un export, PDF qui nomme les couches à montrer (« fais une carte PDF A3 des écoles et des gares », depuis 11.23 : l'export met en page la carte affichée sans choisir ses couches, même avec un format ou une orientation connus), trajet depuis plusieurs lieux (« de chaque gare », « de toutes les gares », « des gares ») → refus affirmatif, jamais un plan de substitution. Le point de terrain écrit dans un autre système que le MNT, refusé en 5.41, est un plan depuis 11.12 (`terrain_autre_systeme`). Le champ de vision, la ligne de vue et la pente n'y sont plus depuis 4.6 : le registre les a. Le seuil sur la pente (« où la pente dépasse 15 % »), refusé de 4.6 à 11.12, est un plan depuis 11.12, lot 2a (`pente_seuil`). Le PDF en A3, A0 ou portrait, refusé jusqu'au lot 3 de 11.12 (« seulement une page A4 paysage »), est un plan depuis (`export_pdf_format`) |
+| `refus_stats_raster` | depuis après 5.49, sortie de `refus_hors_registre` (poids 5) : statistiques par zone d'un raster, MNT présent → refus `NO_RASTER_STATS` ; surtout des demandes courtes à une proposition (« Calcule l'altitude moyenne par commune », « Pente médiane de chaque quartier »), deux statistiques à la fois (« l'altitude moyenne et maximale de chaque quartier »), et un dérivé du MNT suivi de sa statistique (pente ou champ de vision, « puis son maximum par commune ») : refus entier depuis 5.41 |
 | `pente` | « fais la carte des pentes du MNT en pourcentage » → `terrain.slope`, `dem` recopié de la `source` du raster de l'inventaire, `unit` telle qu'écrite (`degrees` : « en degrés », « en ° » ; `percent` : « en pourcentage », « en % », « en pour cent ») (4.6) |
 | `ligne_de_vue` | « y a-t-il une ligne de vue entre le point (... ; ...) en Lambert-93 et le point (... ; ...) en Lambert-93, œil à 2 m » → `terrain.line_of_sight`, deux points écrits en Lambert-93 ou en UTM 31N/32N, le système écrit à chaque point (le garde-fou en demande une occurrence par point), le MNT dans ce même système ; `observer_height` et `target_height` seulement s'ils sont écrits, jamais courbure ni réfraction (4.6) ; depuis le second essai de 11.23, une fois sur quatre, une même hauteur pour les deux bouts (« , 2 m de hauteur de chaque côté », « observateur et cible à 5 m du sol », « de part et d'autre ») → les deux hauteurs (constat S21) |
 | `champ_de_vision` | « calcule le champ de vision depuis le point ... (UTM 31N) sur 2 km » → `terrain.viewshed`, même règle de points et de MNT ; hauteurs et `radius` seulement s'ils sont écrits (4.6) ; depuis 5.41, le rayon aussi avant le point (« dans un rayon de 800 m autour du point … ») ; depuis 11.23, une fois sur six, un lieu nommé suivi de ses coordonnées (« depuis le château d'eau de Thiais (652 000 ; 6 862 000, Lambert-93) ») reste un plan, jamais une question (constat S20 de 11.16) |
@@ -114,16 +119,22 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `conversion_coordonnees` | « donne la référence MGRS du point 48,8566 N, 2,3522 E (WGS84) », « convertis 31U DQ 52000 12000 en latitude et longitude » → `coord.convert` entre WGS84, UTM et MGRS, une ou deux formes demandées ; `mgrs_precision` (« à 3 chiffres ») et `utm_zone` (« dans le fuseau 32 ») seulement s'ils sont écrits ; un point en Lambert-93 vers l'UTM ou le MGRS → `data.transform_point` vers 4326, puis `coord.convert` sur `step:1.point` (11.12) ; depuis 11.23, un point UTM vers le fuseau voisin (« … (UTM 31N) en UTM dans le fuseau 32 ») → `coord.convert` vers `utm`, `utm_zone` écrit (report de 11.16) ; depuis après 11.23, ce passage une fois sur deux pour un point UTM (une sur quatre avant), et le fuseau d'arrivée écrit de six façons : « dans le fuseau 32 », « dans la zone 32 », « fuseau 32 », « dans le fuseau UTM 32 », « en UTM zone 32 », « vers l'UTM 32N » |
 | `reprojection_point` | « reprojette le point … (Lambert-93) en WGS84 », « donne les coordonnées du point … (UTM 31N) en Lambert-93 », « … en Web Mercator (EPSG:3857) » → une étape `data.transform_point`, le système d'arrivée écrit (11.12) |
 | `reprojection_couche` | « reprojette la couche « Gares » en Lambert-93 », « convertis les écoles en WGS84 », « passe la couche des parcelles en UTM 32N » → une étape `data.reproject`, le système d'arrivée écrit ; la couche est tirée dans un autre système que la cible. Remplace le refus « aucune commande ne reprojette une couche » (10.7) |
-| `reprojection_avant_analyse` | tampon ou recherche à distance (« les écoles à moins de 500 m des gares ») sur une couche en degrés (`epsg: 4326` dans l'inventaire), sans que la demande parle de reprojection → `data.reproject` de cette couche, puis l'analyse sur `step:1.layer_id` (les étapes suivantes décalées d'un rang) ; cible : le système des autres couches vecteur en mètres de l'inventaire (Lambert-93, UTM 31N ou 32N), le système du projet, en mètres, quand toutes sont en degrés (depuis le ré-entraînement après 11.23 ; 2154 avant) ; l'`epsg` des couches n'est jamais effacé de ces inventaires (10.7) ; depuis après 11.23 (recette d'Annecy), poids 6 : une seconde couche en degrés, non citée et jamais reprojetée, deux fois sur trois ; la couche analysée en `.csv` une fois sur deux si elle est ponctuelle ; un inventaire long (quatre à six couches de plus) une fois sur deux ; quand toutes les couches sont en degrés, le projet est en 2154, 31N ou 32N et la cible est ce système |
-| `analyse_couche_metrique` | la même analyse (tampon ou recherche à distance) sur une couche déjà en mètres (Lambert-93, UTM 31N ou 32N), dans un inventaire qui porte aussi une couche vecteur en degrés qu'aucun plan ne cite → l'analyse seule, jamais un `data.reproject` (second essai de 11.23, constat S07) ; depuis après 11.23, la couche analysée en `.csv` une fois sur quatre, la couche en degrés en `.csv` une fois sur trois si elle est ponctuelle, un inventaire long (quatre à six couches de plus) une fois sur trois |
+| `reprojection_avant_analyse` | tampon ou recherche à distance (« les écoles à moins de 500 m des gares ») sur une couche en degrés (`epsg: 4326` dans l'inventaire), sans que la demande parle de reprojection → `data.reproject` de cette couche, puis l'analyse sur `step:1.layer_id` (les étapes suivantes décalées d'un rang) ; cible : le système des autres couches vecteur en mètres de l'inventaire (Lambert-93, UTM 31N ou 32N), le système du projet, en mètres, quand toutes sont en degrés (depuis le ré-entraînement après 11.23 ; 2154 avant) ; l'`epsg` des couches n'est jamais effacé de ces inventaires (10.7) ; depuis après 11.23 (recette d'Annecy), poids 6 (8 depuis les quatre causes) : une seconde couche en degrés, non citée et jamais reprojetée, deux fois sur trois ; la couche analysée en `.csv` une fois sur deux si elle est ponctuelle ; un inventaire long (quatre à six couches de plus) une fois sur deux ; quand toutes les couches sont en degrés, le projet est en 2154, 31N ou 32N et la cible est ce système |
+| `analyse_couche_metrique` | la même analyse (tampon ou recherche à distance) sur une couche déjà en mètres (Lambert-93, UTM 31N ou 32N), dans un inventaire qui porte aussi une couche vecteur en degrés qu'aucun plan ne cite → l'analyse seule, jamais un `data.reproject` (second essai de 11.23, constat S07 ; poids 5 depuis les quatre causes, contrepoids de la reprojection) ; depuis après 11.23, la couche analysée en `.csv` une fois sur quatre, la couche en degrés en `.csv` une fois sur trois si elle est ponctuelle, un inventaire long (quatre à six couches de plus) une fois sur trois |
 | `conversion_format` | « exporte les gares en shapefile », « convertis la couche « Écoles » en GeoPackage », « enregistre les parcelles au format GeoJSON » → une étape `data.convert`, `format` tel qu'écrit (`gpkg` : « GeoPackage », « gpkg » ; `shp` : « shapefile », « shp » ; `geojson` : « GeoJSON »), jamais un système de coordonnées dans la demande ; `out` n'est jamais écrit (le noyau le fournit). Remplace le refus « aucune commande n'exporte une couche vers un fichier » ; un tableur (Excel, CSV) reste un refus (10.9) |
-| `distance_azimut` | « quelle distance sépare le point … du point … », « distance et azimut entre les points … et … (UTM 31N) » → `geo.distance_azimuth` ; `unit` seulement si elle est écrite (`gon` : « en grades », `deg` : « en degrés ») ; deux points en Lambert-93 → deux `data.transform_point` vers 4326, puis le calcul sur `step:1.point` et `step:2.point` ; système écrit à chaque point ou une fois pour les deux (11.12) |
-| `point_projete` | « quel point atteint-on à 3 km du point …, azimut 45° » → `geo.destination_point`, l'azimut toujours avec son unité (« 45° », « 45 degrés » → `deg` ; « 50 gr », « 50 grades » → `gon`) et la distance tels qu'écrits ; « résultat en MGRS » → `coord.convert` sur `step:1.point` (11.12) |
-| `recoupement` | « recoupe la visée du point … à l'azimut 40° avec celle du point … à l'azimut 310° » → `geo.bearing_intersection`, chaque station avec son azimut ; même suite MGRS que `point_projete` (11.12) |
+| `retrait_couche` | « retire la couche « Routes » du projet », « enlève les gares de la carte », « peux-tu retirer la couche « Écoles » du projet ? » → une étape `layer.remove`, `layer_id` seul ; la couche se dit par son nom entre guillemets ou par « les <pluriel> », jamais « la couche des <pluriel> … du projet » ; la couche quitte le projet, son fichier reste. Remplace le refus « aucune commande ne retire de couche du projet » (10.27). Depuis les quatre causes (poids 6) : un raster (« retire le MNT du projet »), plusieurs couches d'un coup (« retire les couches « A » et « B » du projet », une étape par couche dans l'ordre de la phrase) et le verbe seul, sans « du projet » ni « de la carte » (« supprime les gares ») → une question qui demande s'il faut retirer la couche du projet, son fichier n'étant jamais effacé |
+| `conversion_raster` | « convertis le fichier donnees/mnt.asc en GeoTIFF, il est en Lambert-93 », « passe le MNT en GeoTIFF », « le MNT est en ASCII Grid : passe-le en GeoTIFF et calcule la pente en degrés », « calcule la pente en degrés » sur un MNT ouvert depuis un `.asc` → `data.convert_raster` (`raster` : chemin d'un fichier non ouvert ou `source` du MNT ; `assign_epsg` seulement si la demande écrit le système d'un fichier, ou le système que l'inventaire donne au MNT ouvert), suivie de la commande de terrain sur `step:1` quand la demande en dit une (pente, exposition, ombrage). Poids 4, environ 1 % du jeu de 8 600 (85 exemples à la graine 1). Epic 10, entrée 30 ; apprise au ré-entraînement groupé 5.49 |
+| `carroyage_mgrs` | « exporte la carte en PDF avec un carroyage MGRS au kilomètre », « prépare la carte pour l'équipe de recherche avec la grille USNG de 1 km », « … carroyée en MGRS de 10 km » → `layout.export_pdf` avec `grid` `{"kind": "mgrs", "interval": …}` (1, 10 ou 100 km, toujours écrit), jamais `epsg` ni `squares` (le noyau les fournit d'après l'emprise). Usage : secours et recherche de personnes. Poids 4. Epic 10, entrée 31 ; apprise au ré-entraînement groupé 5.49 |
+| `entete_pied_de_page` | « exporte la carte en PDF avec l'en-tête « Document de travail » », « … avec « Bureau d'études Lac et Monts » en pied de page », les deux, parfois avec un titre → `header`, `footer` recopiés tels qu'écrits entre guillemets, jamais inventés ; le titre reste distinct. Usage : bureaux d'études et collectivités. Poids 4. Epic 10, entrée 31 ; la ligne des sources détaillée est automatique, sans famille |
+| `distance_azimut` | « quelle distance sépare le point … du point … », « combien de kilomètres séparent … de … », « donne la distance à vol d'oiseau et l'azimut vrai entre les points … et … (UTM 31N) », « calcule l'azimut et le contre-azimut du point … au point … » → `geo.distance_azimuth`, `north` absent (nord géographique) ; `unit` seulement si elle est écrite (`gon` : « en grades », `deg` : « en degrés ») ; deux points en Lambert-93 → deux `data.transform_point` vers 4326, puis le calcul sur `step:1.point` et `step:2.point` ; système écrit à chaque point ou une fois pour les deux (11.12) ; tournures en listes depuis 5.53 (« Formulations de terrain ») |
+| `point_projete` | « reporte un point à 3 km du point …, à l'azimut vrai 45° », « depuis le point …, avance de 2 km à 50 gr par rapport au nord géographique », « quel point atteint-on à … du point …, à l'azimut 45° » → `geo.destination_point`, `north` absent, l'azimut toujours avec son unité (« 45° », « 45 degrés » → `deg` ; « 50 gr », « 50 grades » → `gon`) et la distance tels qu'écrits ; « résultat en MGRS » → `coord.convert` sur `step:1.point` (11.12) ; tournures en listes depuis 5.53 |
+| `gisement` | « donne le gisement du point … au point … (en grades) », « implante un point à 800 m du point …, au gisement de 250 gr », « calcule l'azimut en nord du quadrillage entre … et … », « place un point à … du point …, à 120° par rapport au quadrillage UTM », « quel gisement faut-il prendre depuis … pour aller au … » → `geo.distance_azimuth` ou `geo.destination_point` avec `north: "grid"` ; `utm_zone` seulement si la zone du quadrillage est écrite (« dans le quadrillage de la zone 32 ») ; même suite MGRS que `point_projete` (10.28) ; depuis après 5.49 (D5, poids 5), des points en WGS84 deux fois sur trois, dont un sur trois nommé devant ses coordonnées (« le refuge du col (48,1234 N, 7,1234 E, WGS84) ») ; jamais « nord Lambert » ni « gisement Lambert » ; tournures en listes depuis 5.53 |
+| `azimut_magnetique` | « quel est l'azimut magnétique du point … vers le point … », « donne l'azimut à la boussole … », « calcule le cap magnétique entre … et … », « je pars du point … et je marche 2 km à 120° à la boussole : quel est le point d'arrivée », « … en tenant compte de la déclinaison magnétique » → `geo.distance_azimuth` ou `geo.destination_point` avec `north: "magnetic"` ; `date` (AAAA-MM-JJ) seulement si la date est écrite (« le 1er mai 2026 », « à la date du 2027-06-14 »), absente sinon : le noyau prend la date du jour ; même suite MGRS que `point_projete` (10.29) ; tournures en listes depuis 5.53 |
+| `recoupement` | « recoupe la visée du point … à l'azimut 40° avec celle du point … à l'azimut 310° », « calcule le recoupement : 40° depuis le point …, 310° depuis le point … », « l'intersection des relèvements pris depuis le point … à 40° et depuis le point … à 310° » → `geo.bearing_intersection`, chaque station avec son azimut, nord vrai seul (jamais « à la boussole ») ; même suite MGRS que `point_projete` (11.12) ; tournures en listes depuis 5.53 |
 | `terrain_autre_systeme` | champ de vision ou ligne de vue depuis un point écrit dans un autre système que le MNT (WGS84, UTM d'une autre zone, Lambert-93 sur un MNT en UTM) → depuis 11.23, la commande de terrain avec le point **recopié tel qu'écrit**, sans `data.transform_point` : le noyau ajoute la conversion au plan avant de le montrer (11.22) ; une ligne de vue peut viser un point du système du MNT ; une référence MGRS (une fois sur quatre, alors pour chaque point), qui n'est pas un `Point`, garde `coord.convert` vers le WGS84 puis `data.transform_point` vers l'`epsg` du MNT, et la commande prend `step:k.point` (MNT à système connu seulement). Remplace le refus `NO_TERRAIN_CRS` de 5.41 (11.12) |
 | `exposition` | « calcule l'exposition des versants du MNT » → `terrain.aspect`, `dem` seul (11.12, lot 2a) ; depuis 11.23, l'orientation des pentes dite sans le mot « exposition » (« dans quelle direction regardent les pentes », « vers où sont orientées les pentes ») aussi, jamais une pente reclassée (constat A01 de 11.16) |
 | `ombrage` | « ombrage du MNT, soleil à l'ouest (azimut 270°), hauteur du soleil 30°, exagération verticale de 2 » → `terrain.hillshade` ; `sun_azimuth`, `sun_altitude` et `z_factor` seulement s'ils sont écrits, les angles en degrés ou en grades (`gon`), tous dans la même unité ; sans réglage écrit, `dem` seul (11.12, lot 2a) |
-| `champ_de_vision_cumule` | « combien de ces points voient chaque endroit : le point …, le point … et le point … » → `terrain.viewshed_cumulative`, deux à quatre points dans le système du MNT, chacun avec son système ; hauteurs et `radius` comme `champ_de_vision` (11.12, lot 2a) ; une fois sur cinq, des points écrits dans un autre système, recopiés tels quels depuis 11.23 (la question du système, de 2026-11-08, est retirée : le noyau convertit chaque point) |
+| `champ_de_vision_cumule` | « combien de ces points voient chaque endroit : le point …, le point … et le point … » → `terrain.viewshed_cumulative`, deux à quatre points dans le système du MNT (deux à six depuis 5.54, lot 2, avec des tournures de décompte : « pour chaque endroit du terrain, indique depuis combien de points il est visible parmi … », poids 6), chacun avec son système ; hauteurs et `radius` comme `champ_de_vision` (11.12, lot 2a) ; une fois sur cinq, des points écrits dans un autre système, recopiés tels quels depuis 11.23 (la question du système, de 2026-11-08, est retirée : le noyau convertit chaque point) |
 | `points_hauts` | « les 10 sommets les plus hauts du MNT, proéminence d'au moins 20 m » → `terrain.peaks` ; `max_count` (2 à 100, écrit en chiffres), `min_prominence` et `min_distance` seulement s'ils sont écrits (11.12, lot 2a) |
 | `pente_seuil` | « où la pente dépasse-t-elle 15 % », « classe les pentes en moins de 5 %, de 5 % à 15 % et plus de 15 % » → `terrain.slope` dans l'unité du seuil, puis `raster.reclassify` sur `step:1` ; « dépasse, plus de n » → `{min: n, value: 1}`, « sous, moins de n » → `{max: n, value: 1}`, deux ou trois classes de valeurs 1, 2, 3 à bornes contiguës (11.12, lot 2a) |
 | `cout_cumule` | « calcule le coût de déplacement cumulé depuis le point … (Lambert-93) sur le raster de coût » → `terrain.cost_distance`, `cost` recopié de la `source` du raster de coût de l'inventaire, une à trois `sources` écrites dans son système, dans l'ordre écrit, chacune avec son système (une fois sur cinq, dans un autre système, recopiées telles quelles depuis 11.23, plus de question) ; une fois sur six, un lieu nommé sans coordonnées (« depuis la mairie de X ») → question qui demande le point en X, Y et système (11.12, lot 2b-1) |
@@ -132,7 +143,12 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `reclassement_raster` | « classe la distance aux routes en moins de 100 m, de 100 à 500 m et plus de 500 m », « où le bruit dépasse 65 dB » → `raster.reclassify` directement sur la `source` du raster brut, sans `terrain.slope` ; seuil unique (`{min}` ou `{max}`, valeur 1) ou deux à trois classes à bornes contiguës, valeurs 1, 2, 3 sauf si elles sont écrites (« notées 3, 2 et 1 », une fois sur trois) ; une fois sur huit, raster absent → question du raster (11.12, lot 2b-2) |
 | `style_topographique` | « mets les couches aux couleurs topographiques », « donne à la carte les couleurs d'une carte IGN » → `map.topographic_style` sans paramètre ; une fois sur trois, une ou deux couches nommées (« mets les routes et les rivières aux couleurs de l'IGN », « mets la couche des canalisations avec la sémiologie de l'IGN ») → `layers`, leurs identifiants dans l'ordre écrit (11.23) |
 | `style_degrade` | « colore les communes selon leur population », « représente les parcelles par classes de surface » → `map.graduated_style` sur la couche et son champ numérique ; `method` (« en quantiles », « à intervalles égaux », « par seuils naturels » ; depuis le second essai de 11.23, la méthode est écrite une fois sur deux, avec aussi « , à intervalles égaux », « avec des classes d'égale amplitude », « avec des classes de même effectif », « par ruptures naturelles », constat ST08), `class_count` (« en 7 classes », de 2 à 12) et `ramp` (« en bleus », « dans un dégradé de verts », « en niveaux de gris », « du jaune au rouge », « du rouge au bleu ») seulement s'ils sont écrits ; une fois sur six, la couche n'a pas le champ → la question du champ (11.23) |
-| `redemande` | environ 5 % du jeu : un exemple d'une autre famille vu au tour de redemande (voir plus bas) |
+| `export_pdf_echelle_format` | 5.54, lot 2 : « exporte la carte en PDF au 1:25 000 sur un A3 », « imprime la carte en A1 paysage au 1/10 000 » → un seul `layout.export_pdf` qui porte `scale` **et** `page_size` et/ou `orientation`, tels qu'écrits ; la carte seule ou au bout d'une recherche, titre facultatif ; jamais un refus (poids 4) |
+| `refus_fonction_absente` | 5.54, lot 2 : courbes de niveau, géocodage d'une adresse, plus court chemin sur un réseau routier, export en image (PNG, JPEG), durée d'un trajet entre deux points, crue, accumulation des écoulements, bassin versant, déblai et remblai, lissage, rugosité, couleurs par catégories d'un champ texte, étiquettes d'une couche, opacité, symboles proportionnels → un refus par fonction (`NO_CONTOUR` … `NO_PROPORTIONAL`), qui la nomme, jamais une commande voisine en substitut ; un MNT dans l'inventaire pour les fonctions du terrain ; « le nombre par commune avec son nom » reste un plan (`decompte_par_zone`). Une fois sur trois, un « presque refus », voisin d'une fonction absente, qui est un plan : classes ou tranches d'altitude (`raster.reclassify` du MNT), « jusqu'où va-t-on en 10 min à pied depuis le point … (Lambert-93) » (`analysis.isochrone`), pente ou exposition, couleurs topographiques ou dégradé ; aucune demande de refus ne nomme ce que fait une commande existante (isochrone, pente, exposition, couleurs topographiques, dégradé) (poids 6) |
+| `options_ecrites` | 5.54, lot 2 : un dégradé qui écrit au moins deux de sa méthode, de son nombre de classes et de son dégradé ; ou un champ de vision qui écrit au moins deux réglages parmi la courbure (« sans tenir compte de la courbure » → `curvature: false`), la réfraction (« coefficient de réfraction 0,2 », jamais 0,13 ; « en tenant compte de la courbure et d'une réfraction de 0,2 » → `curvature: true` et `refraction`), les hauteurs et le rayon ; la courbure dite seule (« en tenant compte de la courbure terrestre ») → `curvature: true` → toute option écrite au plan, aucune autre ; jamais une réfraction à côté d'une courbure désactivée, exprès : la réfraction n'agit que si la courbure est prise en compte, la phrase serait contradictoire (poids 5) |
+| `point_lambert_vers_geo` | 5.54, lot 2 : distance et azimut entre deux points en Lambert-93 (ou un en Lambert-93 et un en UTM), point projeté depuis un point en Lambert-93, recoupement de deux stations en Lambert-93, conversion d'un point en Lambert-93 vers l'UTM ou le MGRS → une étape `data.transform_point` vers 4326 par point en Lambert-93, puis la commande sur `step:k.point` ; nord vrai seul ; jamais un point en Lambert-93 à côté d'un point en WGS84 (la cible 4326 prendrait au garde-fou le système écrit du second point) (poids 4) |
+| `ordre_nord_est` | 5.54, lot 2 : « reprojette le point N = 6 862 000, E = 652 000 (Lambert-93) en WGS84 », « le point 2,3522 E, 48,8566 N (WGS84) », « le point nord 5 412 000, est 412 300 en UTM 31N » → `x` l'est, `y` le nord, l'étiquette fait foi ; `data.transform_point`, `terrain.viewshed` ou `coord.convert` ; une fois sur quatre l'ordre ordinaire étiqueté ; jamais un ordre inversé sans étiquette (poids 4) |
+| `redemande` | environ 5 % du jeu : un exemple d'une autre famille vu au tour de redemande (voir plus bas) ; poids 76 depuis 5.54, lot 2 (58 avant ; relevé pour garder la part au-dessus de 4,5 % après l'ajout des familles de la première séance, qui la diluaient à 3,7 %) |
 
 Depuis 5.15, `conditions_multiples` porte aussi les plans à **trois conditions** (cible
 filtrée, zone et distance ; zone et deux distances), quatre à six étapes, jamais plus de six.
@@ -204,6 +220,13 @@ encore un refus qui dit qu'aucune commande n'exporte une couche vers un fichier.
 nouvelle famille décale le tirage : la tournure « Où la pente du terrain dépasse-t-elle … » de
 `pente_seuil`, phrase des essais réels, est alors sortie à la graine par défaut ; elle s'écrit
 « du MNT » dans ce gabarit. Le modèle installé ne l'apprend qu'au prochain entraînement.
+
+Le refus de **retrait d'une couche du projet** est retiré en 10.27 : `layer.remove` est au
+registre, la famille `retrait_couche` le remplace, et le garde-fou (`removes_no_layer`) échoue si
+une famille rend encore un refus qui dit qu'aucune commande ne retire une couche du projet ou de
+la carte. Les deux branches du refus deviennent un refus d'effacer le fichier d'une couche du
+disque (principe 6), le nombre de branches ne change pas. Le modèle installé ne l'apprend qu'au
+prochain entraînement groupé.
 
 **Redemande.** Les plans de géométrie à une étape ne se corrompent pas (aucune couche) : le poids
 de `redemande` passe de 24 à 36 pour garder environ 5 % du jeu (419 sur 8 000 à la graine 1).
@@ -489,6 +512,523 @@ validation 292/300. Essais GPU : `plan_reel` 24/25, `question_reel` 11/12, `ecar
 phrase des gares compose `data.reproject` vers 2154 puis le tampon. Modèle dans
 `cassini-modeles\ajuste-apres-11-23\`, non installé ; décision au propriétaire.
 
+### Quatre causes après 11.23 : nom suffixé, fusion, pluriel, « confondues »
+
+L'analyse du recul des plans après 11.23 trouve quatre trous du générateur, et trois constats
+durables restent ratés par `ajuste-revue-11-23`. Chaque correction est une famille, une tournure
+ou un poids ; mêmes base, méthode, `DEFAULT_COUNT` et `DEFAULT_SEED`.
+
+- **Nom suffixé** (`Builder::add`) : un champ de rôle `nom` s'appelle `nom_<premier mot du thème>`
+  une fois sur quatre (`nom_quartier`, `nom_gare`) ; `decompte_par_zone` demande le nom une fois sur
+  deux (une sur trois avant). Le plan recopie le nom du champ de l'inventaire.
+- **Fusion à part** (`DISSOLVE_APART`, `dissolve_words`) : la moitié des fusions se dit dans une
+  proposition à part après la tête du tampon (« …, puis fusionne le résultat », « ; regroupe ensuite
+  l'ensemble en une seule entité ») → `dissolve: true`. Vaut pour `tampon`, `tampon_filtre` et le
+  tampon de la reprojection avant analyse.
+- **Pluriel parmi voisines** (`adjective_plural`) : dans `tampon_filtre` (poids 5 → 6), une fois sur
+  trois, la couche porte la valeur dite par son adjectif au pluriel et au moins une valeur voisine du
+  même champ, elle aussi à adjectif (classes de routes, cours d'eau permanents ou intermittents…).
+- **« Confondues »** : thème vecteur `zones_bruit` (zones d'exposition au bruit, champ de zone A à
+  D, groupe du zonage du PLU pour que « en zone A » ne désigne qu'une couche), ajouté aux périmètres
+  et aux zones (`AREAS`) ; famille `toutes_zones_confondues` (poids 4) : « tous aléas confondus »,
+  « toutes zones confondues », « quel que soit l'aléa » → une intersection avec la couche entière.
+  Une zone nommée de la même couche reste une sélection puis l'intersection (`dans_une_zone`).
+- **Cible par catégorie** (constat durable) : thème `equipements_publics` (groupe des écoles), champ
+  `categorie` (crèche, médiathèque, mairie, poste, école, salle polyvalente) ; `category_target`
+  dit la cible par sa catégorie (« les écoles », « les bureaux de poste »), un rang sur sept de
+  `filtered_target` et un tiers du rang « cible filtrée près d'une référence filtrée ».
+- **Référence par nom propre** (constat durable, `named_reference`, `NAMED_PLACES`) : une fois sur
+  quatre, `filtered_reference` désigne une gare, un arrêt, une école ou un quartier par son nom ; le
+  champ de nom de la couche liste ce nom et d'autres ; `select` `eq` sur ce champ, puis le tampon.
+- **Deux appartenances** (constat durable, rangs 13 et 14 de `draft_multi`) : une zone filtrée et
+  une autre couche de zones entière sur la même cible → `select(zone)`, `intersect(cible, step:1)`,
+  `intersect(step:2, couche)` ; dite dans l'autre ordre, `intersect(cible, couche)` puis
+  `intersect(step:2, step:1)`. La cible reste toujours la première couche de la chaîne.
+- **Recouvrement.** La tête « Exporte les … en GeoPackage » de `conversion_format` rendait S09 de
+  `plan_reel` : devant « les … », elle devient « Exporte-moi » ; la graine ne change pas.
+
+Au jeu par défaut (graine 1, 8 000) : 101 `toutes_zones_confondues`, 188 `tampon_filtre`, 48
+fusions dites à part, 24 `label_field` suffixés, 37 cibles par catégorie près d'une référence
+filtrée ou d'une zone, 84 références par nom propre, 49 plans à deux appartenances ; aucun exemple
+écarté.
+
+Entraînement (commit `ea591bc`) : 100 min ; validation 283/300. Essais GPU : `plan_reel` 23/25,
+`question_reel` 12/12, `ecart_reel` 37/40 (plans 24/27), `echelle_utm_reel` 8/8, `terrain_reel`
+8/8, `epic11_reel` 27/28 et F03 en question, `style_reel` 9/10 : barres tenues. Recette QGIS sur
+Annecy : recul, les tampons autour des gares en degrés partent sans `data.reproject`, et le nom des
+communes est un champ inventé. Modèle dans `cassini-modeles\ajuste-quatre-causes\`, non installé ;
+décision au propriétaire.
+
+### Après les quatre causes : nom recopié, reprojection, retrait de couche (2026-11-10)
+
+`ajuste-quatre-causes` tient ses barres mais recule sur Annecy (1/5) ; corrections du générateur,
+mêmes base, méthode, `DEFAULT_COUNT` et `DEFAULT_SEED` :
+
+- **Nom recopié** (`NAME_FIELDS`, `decoys`, `training/src/inventories.rs`) : le champ de rôle
+  `nom` prend un nom d'un pool commun à tous les thèmes (`nom`, `nom_officiel`, `NOM`, `libelle`,
+  `toponyme`, `nom_usuel`, `appellation`, `denomination`) ; `nom_<thème>`, `nom_commune`,
+  `nom_voie` et `nom_etab` disparaissent, car ils apprenaient à deviner le nom (`commune`) au lieu
+  de le recopier. Une fois sur deux, des leurres suivent le champ : sa version en majuscules
+  (`nom_officiel_en_majuscules`, `NOM_M`, `<nom>_maj`) et ou un code (`code_insee`, `INSEE_COM`,
+  `cleabs`…) ; le plan cite toujours le champ de nom lui-même. `decompte_par_zone` passe au poids
+  8 et demande le nom trois fois sur quatre.
+- **Reprojection** : `reprojection_avant_analyse` 6 → 8, et son contrepoids
+  `analyse_couche_metrique` 4 → 5.
+- **Retrait de couche** : `retrait_couche` 3 → 6, avec raster, plusieurs couches et verbe seul
+  (voir la table des familles).
+- **Recouvrement** : la tête « Fais un PDF de la carte » suivie du seul carroyage UTM rendait F03
+  d'`epic11_reel` ; devant un carroyage, elle devient « Fais-moi un PDF de la carte ».
+
+Au jeu par défaut (graine 1, 8 000), comparé à celui d'`ajuste-revue-11-23` (commit `47ef2f4`) :
+351 plans avec `data.reproject` (318), dont 246 reprojection puis analyse (201) ; 173 exemples
+avec `label_field` (41) ; 131 plans `layer.remove`, dont 35 de plusieurs couches et 23 sur un
+raster, et 38 questions du verbe seul. Le jeu ayant une taille fixe, les familles ajoutées depuis
+(`toutes_zones_confondues`, `retrait_couche`) et les poids remontés diluent les autres d'environ
+6 % en part de tirage ; à la graine 1, le hasard du tirage s'y ajoute (de −25 % à +25 % selon la
+famille, sur une centaine d'exemples).
+
+**Deux décisions du propriétaire (2026-11-10)** :
+
+1. **La recette QGIS d'Annecy est une barre officielle** : au moins 4 plans exécutés sur 5, dans
+   une seule session QGIS, sur le projet d'Annecy (`donnees-test-cassini/annecy/`), avec le modèle
+   chargé à part (`CASSINI_MODELS`), comme les essais GPU. Un modèle qui la manque n'est pas
+   installé, même s'il tient toutes les autres barres. **Depuis 5.45, la barre est d'au moins
+   16 phrases justes sur 20**, à partir de la prochaine nuit ; elle remplace celle de 4 sur 5
+   (voir « Recette d'Annecy à 20 phrases » ci-dessous).
+2. **Deux graines par entraînement** : chaque entraînement se fait deux fois la même nuit, sur le
+   même jeu engendré, avec deux graines d'entraînement (`pipeline.py --graine-torch 1` puis `2` ;
+   les graines du générateur, 1 et 2, ne changent pas). On garde celui des deux qui tient le
+   mieux les barres et la recette d'Annecy ; l'autre reste à côté, non installé.
+
+**Troisième candidat : la fusion des deux graines** (ajout du propriétaire, 2026-11-10). Après les
+deux entraînements, leurs adaptateurs se fusionnent en un troisième modèle, passé aux mêmes essais
+GPU et à la même recette d'Annecy. La fusion fait la moyenne des corrections complètes
+ΔW = B·A de chaque adaptateur, et non des matrices A et B une à une : les deux entraînements partent
+de points différents, et la moyenne de leurs A et de leurs B ne serait la moyenne d'aucune
+correction. Avec PEFT (déjà dans `training/entrainement`) : la base est chargée sur le
+processeur, en bf16, les deux adaptateurs HF (`travail/adaptateur-hf` de chaque sortie) s'y
+chargent, puis `add_weighted_adapter([a, b], [0.5, 0.5], combination_type="cat")` les concatène
+(rang doublé, 32), ce qui donne exactement ΔW = 0,5·ΔW_a + 0,5·ΔW_b. L'adaptateur fusionné suit
+ensuite la chaîne de `pipeline.py` : `convert_lora_to_gguf.py` du même commit de llama.cpp,
+fusion avec la base et quantification Q4_K_M, score de validation par llama.cpp sur le GPU, sur
+le même jeu de validation. Script hors dépôt de la nuit du 2026-11-10 :
+`~/cassini-entrainement/fusion-nuit-11-10.py`, sortie `ajuste-nuit-11-10-fusion`.
+
+Nuit du 2026-11-10 (commit `b53ff4c`, jeu identique pour les trois candidats ; essais GPU
+`--features cuda` ; recette d'Annecy à cinq phrases) :
+
+| Barre | graine a | graine b | fusion a+b | `ajuste-revue-11-23` |
+|---|---|---|---|---|
+| validation | 283/300 | 289/300 | **291/300** | 295/300 |
+| `plan_reel` | 25/25 | 25/25 | 25/25 | 24/25 ¹ |
+| `question_reel` | 12/12 | 12/12 | 12/12 | 12/12 ¹ |
+| `ecart_reel` | 36/40 | 35/40 | **37/40** | 36/40 ¹ |
+| `echelle_utm_reel` | 8/8 | 8/8 | 8/8 | 8/8 ¹ |
+| `terrain_reel` | 8/8 | 8/8 | 8/8 | 8/8 ¹ |
+| `epic11_reel` | 28/28 | 28/28 | 28/28 | 28/28 ¹ |
+| `style_reel` | 9/10 | 10/10 | 10/10 | 10/10 ¹ |
+| Annecy (≥ 4/5) | 4/5 | 4/5 | 4/5 | 4/5 |
+
+¹ Mesures du 2026-11-09, avant que H35 et S04 n'attendent `layer.remove`. Les quatre modèles
+ratent la même phrase d'Annecy, le décompte des gares par commune avec leur nom : `label_field`
+vaut `nom` (`commune` pour la graine b) au lieu de `nom_officiel`, dans une couche de 17 champs
+alors que les inventaires engendrés n'en portent que quelques-uns. Modèles dans
+`cassini-modeles\ajuste-nuit-11-10-a`, `-b` et `-fusion`, non installés ; décision au propriétaire.
+
+### Recette d'Annecy à 20 phrases (5.45, 2026-11-10)
+
+La recette d'Annecy passe de 5 à 20 phrases, écrites à la main comme un urbaniste ou un bureau
+d'études les dirait : données et projet, analyses vectorielles, terrain, coordonnées, mise en
+forme IGN et CNIG, PDF, et deux demandes ambiguës qui doivent donner une question. Chaque phrase
+porte son plan attendu (`qgis-plugin/tests/recette/annecy.json`, couches écrites `@nom`) ; les
+20 phrases sont tenues à l'écart du générateur par le garde de recouvrement. Relues en party le
+2026-11-10 (géomaticien de bureau d'études, urbaniste de collectivité, relecteur des plans
+attendus), **à confirmer par le propriétaire**.
+
+**Règle (décision du propriétaire, 2026-11-10)** : une phrase compte juste si son plan est
+conforme au plan attendu, avec la règle de `plan_reel` (égalité exacte des appels du plan montré,
+plan complété compris) **et** s'exécute ; une phrase ambiguë, si le modèle pose une question. Un
+plan non conforme est rejeté, pas exécuté. **Barre : au moins 16/20, à partir de la prochaine
+nuit** ; elle remplace 4/5.
+
+Commande (Windows ; `CASSINI_MODELS` : un dossier qui ne contient que le modèle mesuré et sa
+déclaration `*.modele.json`) :
+
+    set CASSINI_CORE=%LOCALAPPDATA%\Cassini\bin\cassini.exe
+    set CASSINI_MODELS=<dossier du seul modèle mesuré>
+    set QT_QPA_PLATFORM=windows
+    "C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat" qgis-plugin\tests\probe_recette.py ^
+        ..\donnees-test-cassini\annecy\projet-test-annecy.qgz qgis-plugin\tests\recette\annecy.json
+
+La sonde pose une copie du projet à côté de l'original et ne touche jamais à celui-ci ; elle
+imprime `SCORE : N/20 (barre 16)`, les ratés avec leur raison et leur plan attendu, puis les
+deux rejeux (en session, indicatif ; après réouverture, compté).
+Le projet et le fichier de phrases sont des arguments : le projet de 60 couches de 5.50 aura son
+propre fichier.
+
+**Mesure de référence** (2026-11-10, modèle installé `cassini-composition-4b-Q4_K_M.gguf`, la
+fusion a+b ; noyau installé ; QGIS 3.44.15) : **17/20**, barre tenue. Composition de 2 à 8 s par
+phrase (28 s pour la première, chargement compris). Ratés :
+
+| Phrase | Obtenu | Attendu |
+|---|---|---|
+| RA07 gares par commune avec le nom | `label_field` `nom` | `nom_officiel` (raté connu des nuits) |
+| RA09 « Fais un tampon autour des routes. » | tampon de 1 m | une question (distance absente) |
+| RA13 coordonnées UTM d'un point WGS84 | `data.transform_point` vers 32632 | `coord.convert` `to: ["utm"]` |
+
+RA13 rend un résultat juste par une autre commande : il reste compté raté. La règle stricte est
+gardée (décision de party du 2026-11-10, à confirmer par le propriétaire) : seul le plan attendu,
+`coord.convert`, est juste. Un premier passage avait donné 14/20 : quatre phrases écrivaient un point en degrés sans nommer le système, et le garde-fou des
+coordonnées (4.10) posait sa question ; le système (WGS84) y est maintenant écrit, avant toute
+mesure retenue. **Rejeu : non identique** lors de cette mesure, à l'étape 1 : `project.inventory`
+était journalisé et, rejoué en fin de session, avait vu les couches de résultat ajoutées depuis
+(entrée 2.12, « rejeu en même session »). Cette mesure ne décide d'aucune installation.
+
+Depuis (entrée 2.12), la lecture reste journalisée, rejouée et comparée, mais
+le motif de l'écart nomme la couche posée par une exécution précédente et dit de rouvrir le projet
+sans l'enregistrer avant de rejouer. La sonde rejoue donc deux fois : dans la session, à titre
+indicatif (ce motif nommé y est attendu), puis après avoir rouvert la copie du projet sans
+l'enregistrer ; seul ce second rejeu compte, et il doit être identique. Rejouée ainsi le 2026-11-10
+(même modèle, noyau de l'entrée 2.12 non installé) : **17/20**, mêmes ratés (RA07, RA09, RA13) ;
+rejeu en session : motif nommé à l'étape 1 ; **rejeu après réouverture : identique, 29 étapes**.
+
+### Inventaires larges et jeu de 8 600 exemples (2026-11-10)
+
+Après la nuit du 2026-11-10, deux corrections du générateur décidées par le propriétaire, mêmes
+base, méthode et `DEFAULT_SEED` :
+
+- **Inventaires larges** (`wide_fields`, `widen`, `training/src/inventories.rs`) : les six thèmes
+  qui en ont dans la réalité (communes, routes et bâtiments de la BD TOPO, gares, parcelles du
+  cadastre et des fichiers fonciers, zonage du standard du CNIG) portent, deux couches sur cinq
+  (au plus deux couches par inventaire, et aucune distraction d'un inventaire long d'une dizaine
+  de couches), 15 à 20 champs : les champs de rôle, et des champs de
+  remplissage dans l'ordre de leur producteur (`cleabs`, `code_insee_du_departement`,
+  `date_d_apparition`, `precision_planimetrique`, `nombre_de_logements`, `idurba`, `datappro`…),
+  de types texte, entier et réel. Le champ de nom et ses leurres se placent dans la moitié du
+  milieu de la liste. Aucun champ de remplissage ne double le sens d'un champ de rôle du thème
+  (ni nom, ni hauteur, ni nature de route, ni surface de parcelle, ni type de zone) : les
+  questions « aucun champ de … » restent justes, et un plan ne cite que le champ de rôle. Dans
+  `decompte_par_zone`, quand le nom est demandé, la couche des communes est en plus élargie une
+  fois sur deux (`Builder::wide_next` ; les quartiers n'ont pas de remplissage). Les familles qui prennent un champ par son rôle
+  (filtres, nom contenu, décompte par zone, style) le prennent ainsi, quatre fois sur dix, dans
+  une longue liste.
+- **Taille du jeu** : voir la décision ci-dessous.
+
+**Décision du propriétaire (2026-11-10), remplace celle de 5.15 sur la taille du jeu** : le jeu
+d'entraînement passe de 8 000 à **8 600 exemples** (`DEFAULT_COUNT` de `cassini-training`,
+`TRAINING_COUNT` de `pipeline.py`). Depuis `ajuste-revue-11-23`, deux familles se sont ajoutées
+(`toutes_zones_confondues`, `retrait_couche`) et quatre poids ont monté (`decompte_par_zone`,
+`reprojection_avant_analyse`, `analyse_couche_metrique`, `tampon_filtre`) : le total des poids
+passe de 324 à 342, et à 8 000 exemples, chaque famille à poids inchangé perdait 5 % de ses
+exemples. À 8 600, elle en garde 102 % (8 000 × 342 / 324 ≈ 8 444, arrondi au-dessus).
+Avec `gisement` (10.28, poids 3), le total passe à 345 : à 8 600, une famille à poids inchangé
+garde 101 % de ses exemples (8 600 × 324 / 345 ≈ 8 077 pour 8 000). Avec `azimut_magnetique`
+(10.29, poids 3), le total passe à 348 : à 8 600, elle en garde encore 100 % (8 600 × 324 / 348
+≈ 8 007 pour 8 000). Le jeu de validation reste à 300 exemples.
+
+Au jeu par défaut (graine 1), comparé au jeu d'`ajuste-revue-11-23` (commit `47ef2f4`, 8 000)
+et à celui de `b53ff4c` (8 000) :
+
+| Mesure | `47ef2f4` | `b53ff4c` | 8 600, inventaires larges |
+|---|---|---|---|
+| couches des six thèmes à 15 champs ou plus | 0 % | 0 % | 38 % (de 34 % pour le zonage à 40 %) |
+| champs par couche des six thèmes, en moyenne | — | 1,4 à 2,0 | 6,9 à 8,0 (15 à 20 si élargie) |
+| exemples avec `label_field` | 41 | 173 | 194, dont 65 dans une couche de 15 à 20 champs |
+| exemples des 51 familles à poids inchangé | 7 044 | 6 637 | 7 150 |
+| longueur moyenne d'un exemple (jetons de Qwen3.5) | 770 | 773 | 830 |
+| exemple le plus long (jetons) | 1 629 | 1 661 | 1 773 (sous les 2 048 de `MAX_LENGTH`) |
+| jetons du jeu entier | 6,16 M | 6,19 M | 7,14 M |
+
+La part de chaque famille reste dans la fourchette du hasard du tirage (de −25 % à +25 % sur une
+centaine d'exemples) ; les plus basses par rapport à `47ef2f4`, à poids inchangé :
+`export_pdf_format` 134 → 90, `champ_de_vision` 126 → 94, `point_projete` 120 → 101. Une
+autre graine du générateur les redistribuerait autrement : seule la somme est tenue.
+
+**Durée** : 538 pas au lieu de 500 (lot 1, accumulation 16) et 15 % de jetons en plus (7,5 % par
+les inventaires, 7,5 % par la taille du jeu). La nuit du 2026-11-10 entraînait en 1 h 30 environ
+(5 367 à 5 505 s) ; compter environ 1 h 45 par entraînement, soit une demi-heure de plus pour une
+nuit à deux graines. Les séquences les plus longues (1 773 jetons au plus) restent dans la plage
+mesurée avec les segments extensibles (« longs d'abord », jusqu'à 1 768 jetons, pic de 5,85 Gio
+sur la carte de 8 Go) : la carte ne devrait pas se remplir, à vérifier sur les premiers pas
+(`--longs-d-abord --pas-max 30`) avant la nuit.
+
+### Gros projets et couches proches (5.47)
+
+Changement de cap du 2026-11-10 (`change-inventaire-des-gros-projets`) : au-delà d'environ
+9 000 caractères de couches de l'utilisateur (17 000 depuis 5.48, mesure d'Annecy), le noyau montre au modèle une **vue triée**
+(`cassini_core::agent_inventory::sorted_view`, ticket 5.46) : un `index` réduit
+`{layer_id, name, geometry}` de toutes les couches, et dans `layers` le détail de celles que la
+demande désigne, puis des rasters. Le modèle n'avait jamais vu ni cette forme ni plus d'une
+dizaine de couches. Deux familles nouvelles :
+
+- **`gros_projet`** (poids 128 ; 148 depuis 5.54, lot 2) tire une autre famille selon les poids (redemandes et couches
+  proches comprises, elle-même exclue), pose son exemple dans un projet de 20 à 60 couches et le
+  fait rendre **par la fonction du noyau**, sans en copier la logique : l'inventaire appris est
+  retraduit en sortie brute de `project.inventory` (`inventories::raw_layer`, clé apprise absente
+  → clé brute absente, emprise en degrés au centre du fuseau UTM appris), complété de couches de
+  remplissage (`BIG_FILLERS`, 56 couches publiques façon BD TOPO 3, standard CNIG, servitudes et
+  autres producteurs, 10 à 25 champs, dont deux rasters : orthophotographie et SCAN 25 ; aucune ne
+  recouvre un thème), puis passé à `sorted_view` avec la demande et `ViewLimits::default()`. Les
+  identifiants appris `slug_<4 ou 8 hex>` deviennent des identifiants QGIS `slug_<uuid>` dont
+  l'uuid commence par ces chiffres ; le plan, la sortie rejetée d'une redemande et ses écarts sont
+  réécrits en identifiants courts montrés. `unloaded_files` reste celui de l'exemple de base.
+  Chaque famille garde ainsi son compte, petits et gros projets ensemble.
+- **`couches_proches`** (poids 7) pose deux couches d'un même thème qui ne diffèrent que par un
+  qualificatif : millésimes (« Gares 2019 », « Gares 2024 »), producteurs (« BD TOPO », « OSM »)
+  ou copie (« Gares », « Gares copie », même source). Sans le qualificatif, la réponse est une
+  question qui nomme les deux couches et finit par « ? » ; avec (un tiers des exemples), le plan
+  porte sur la bonne couche. Le mot de la demande désigne les deux noms, pour que la vue triée
+  les détaille toutes deux. Cette question est apprise, jamais écrite dans le noyau.
+
+**Gardes du générateur** (décisions du 2026-11-10, tranchées en party, à confirmer par le
+propriétaire) :
+
+1. une couche de remplissage dont un mot du nom, de la table ou du fichier égale un mot de la
+   demande n'est pas posée : aucune ambiguïté non voulue ;
+2. un gros projet trié n'est gardé que si chaque couche « utile » (`Example::focus` : celles que la
+   famille pose, ses distractions exclues) est détaillée, sauf une couche qu'un plan d'appels ne
+   cite que comme géométrie (aucun paramètre de champ dans les appels qui la citent). Précision
+   de réalisation : une couche reprojetée (`data.reproject`) doit être détaillée, le plan
+   dépendant de son système, que l'index ne montre pas ; un raster utile non détaillé est écarté
+   et compté (l'index ne montre pas sa source) ; un champ cité par le plan (`field`,
+   `label_field`, `x_field`, `y_field`) doit rester dans la couche détaillée, que la vue plafonne
+   à 30 champs ou 3 000 caractères ;
+3. un exemple dont le prompt dépasse `MAX_PROMPT_CHARS` = 12 900 caractères est écarté
+   (`training/src/lib.rs`) : au pire rapport mesuré (0,333 jeton par caractère de prompt, réponse
+   de 300 jetons au plus), il reste sous 4 596 jetons, donc sous les 4 608 de `MAX_LENGTH` ; la
+   chaîne d'entraînement n'en écarte aucun. Sur les prompts longs, le rapport est de 0,306.
+   Depuis 5.48, la vue triée est bornée à 11 000 caractères (`SORTED_BUDGET_CHARS`) : avec les
+   consignes courtes et la demande, elle tient sous ces 12 900 caractères, et `MAX_LENGTH` reste
+   à 4 608. Sous le seuil du tri (17 000 caractères depuis 5.48, pour garder le projet d'Annecy
+   inchangé), une vue peut encore dépasser cette borne : Annecy fait 16 597 caractères dans QGIS.
+   **Depuis 5.49**, la borne passe à 19 000 caractères et `MAX_LENGTH` à 5 632 (voir
+   « Ré-entraînement groupé (5.49) » ci-dessous) : ces projets moyens entrent au jeu.
+
+Les écarts sont comptés au résumé (`gros_projet`, colonne « écartés ») : 295 écartés pour 2 139
+gardés au jeu par défaut, par l'une ou l'autre des deux dernières gardes. Après 5.48 (désignation
+revue, seuil du tri à 17 000, budget de la vue triée à 11 000), le même jeu garde 2 033 gros projets
+(23,6 %) et en écarte 443 : les gros projets dont les couches de l'utilisateur tiennent sous
+17 000 caractères sont vus en entier, et ceux de plus de 12 900 caractères de prompt sont écartés
+par la borne. Les longueurs ci-dessous sont celles de 5.47 ; celles de 5.49 sont dans « Ré-entraînement groupé (5.49) ». Exemples d'écart : une couche de
+zonage non désignée par « les parcelles constructibles », le réseau routier d'une isochrone, un
+MNT accompagné de nombreuses couches détaillées par une valeur. Le premier cas est celui de la
+redemande élargie du noyau (5.48) : le modèle ne l'apprend pas ici.
+
+**Mesures** (graine 1, 8 600 exemples, jetons du tokeniseur de `Qwen/Qwen3.5-4B`, prompt et
+réponse) :
+
+| Mesure | Valeur |
+|---|---|
+| exemples `gros_projet` | 2 139 (24,9 %) |
+| couches par gros projet | 20 à 60, moyenne 39,8, médiane 40 |
+| gros projets vus triés (clé `index`) | 2 139 (100 % : les remplissages dépassent toujours le seuil) |
+| exemples `couches_proches` (petits projets) | 162, un tiers environ en plan ; d'autres dans les gros projets |
+| longueur, tous les exemples | moyenne 1 062, médiane 901, maximum 3 708 |
+| longueur, gros projets | moyenne 1 733, médiane 1 688, maximum 3 708 |
+| longueur, petits projets | moyenne 840, médiane 810, maximum 1 824 |
+| 95e et 99e centiles | 2 038 et 2 761 |
+| exemples au-delà de 4 608 jetons | 0 (414 au-delà de 2 048) |
+| prompt le plus long | 12 883 caractères |
+| jetons du jeu entier | 9,13 M (7,14 M au jeu des inventaires larges) |
+
+Le poids de `redemande` passe de 52 à 58 : les gros projets diluent les petits et écartent
+davantage de redemandes (prompt plus long), qui retombaient à 3,9 %. `MAX_LENGTH` passe de 2 048
+à 4 608 (`training/entrainement/pipeline.py`, décision du propriétaire), et le repli (gros
+projets plafonnés à 40 couches, `BIG_MAX_LAYERS`) n'a pas servi.
+
+**Essai d'une heure sur la carte de 8 Go (2026-11-10).** `pipeline.py --longs-d-abord --pas-max
+100` (RTX 3070 Ti, segments extensibles), sur le jeu de cette branche avant la relecture (2 055
+gros projets, séquence la plus longue 3 731 jetons ; le jeu final n'en diffère que par le tirage
+des remplissages). Les 1 600 exemples les plus longs passent d'abord, de 3 731 à environ
+2 000 jetons. Aucun écarté pour longueur.
+
+| Pas | s / pas | Pic (torch) | Perte |
+|---|---|---|---|
+| 1 à 10 (amorce et compilation comprises) | 38 | 5,28 Gio | 0,450 |
+| 11 à 20 (les plus longs, ≈ 3 500 jetons) | 27 | 5,29 Gio | 0,204 |
+| 21 à 100 | 21 à 25 | 5,40 puis 5,72 Gio | 0,064 au pas 100 |
+
+La carte ne se remplit pas : le pic, 5,72 Gio, reste sous celui des longs d'abord à 1 768
+jetons sans segments extensibles (7,58 Gio), et la vitesse ne s'effondre pas. 100 pas ont pris
+39 min. **`MAX_LENGTH` = 4 608 retenu.** Durée attendue d'un entraînement complet (538 pas) :
+le jeu porte 9,13 M de jetons au lieu de 7,14 M (+28 %), et le coût par pas est à peu près
+proportionnel aux jetons (14,3 s à 1 768 jetons, 27 s à 3 500). On attend donc environ
+2 h 15 d'entraînement au lieu de 1 h 45, et environ 3 h 10 pour la commande entière ; une nuit
+à deux graines fait environ 6 h 30.
+
+### Ré-entraînement groupé (5.49)
+
+Un seul entraînement pour tout ce qui s'est ajouté depuis la nuit du 2026-11-10 : inventaires
+larges, gros projets et couches proches (5.47), vue triée branchée (5.48), gisement (10.28),
+azimut magnétique (10.29), conversion raster (10.30), mise en page MGRS, en-tête et sources
+(10.31). Mêmes base, méthode, graines du générateur (1 et 2) et `DEFAULT_COUNT` (8 600).
+
+**Borne des prompts relevée** (tranchée en party le 2026-11-10, ingénieur ML, architecte,
+géomaticien ; à confirmer par le propriétaire). Après les fusions, le jeu ne gardait que 1 962 gros
+projets (22,8 %, sous la barre de 23 %) : 402 écartés, dont environ 270 parce que leur prompt
+dépassait 12 900 caractères. Ce sont les gros projets **vus en entier**, dont les couches de
+l'utilisateur tiennent sous le seuil du tri (17 000 caractères) : exactement la taille d'Annecy,
+qu'aucun exemple ne montrait. Sans borne, aucun prompt ne dépasse 19 000 caractères (18 506 au
+plus), et aucune séquence ne dépasse 5 176 jetons. Décision : `MAX_PROMPT_CHARS` 12 900 → **19 000**,
+`MAX_LENGTH` 4 608 → **5 632**, après un essai mémoire ; repli prévu si la carte se remplissait
+(bornes gardées, poids de `gros_projet` relevé). Écartés : relever le seul poids (le trou des
+projets moyens reste), alléger les couches de remplissage (le trou se déplace sans se fermer).
+Sur les prompts de plus de 12 900 caractères, le pire rapport mesuré est de 0,290 jeton par
+caractère de prompt, réponse comprise : 19 000 caractères feraient environ 5 518 jetons, sous
+5 632. Cette borne est mesurée, non construite : la garantie tient au compte de la chaîne, qui
+écarte et compte toute séquence au-delà de `MAX_LENGTH` (`pipeline.py`) ; à l'essai, 0 écarté sur
+les 8 600 exemples d'entraînement (graine 1) et les 300 de validation (graine 2).
+
+**Essai mémoire** (`pipeline.py --longs-d-abord --pas-max 30`, RTX 3070 Ti 8 Go, segments
+extensibles, 2026-11-10) : les 480 exemples les plus longs d'abord (de 5 176 jetons à environ
+3 000). Aucun écarté pour longueur.
+
+| Pas | s / pas | Pic (torch) | Perte |
+|---|---|---|---|
+| 1 à 10 (amorce et compilation comprises) | 65 | 5,64 Gio | 0,483 |
+| 11 à 20 (≈ 4 500 jetons) | 54 | 5,64 Gio | 0,193 |
+| 21 à 30 | 44 | 5,64 Gio | 0,189 |
+
+Sur ces 30 pas, le pic reste sous celui de 5.47 (5,72 Gio, atteint après le pas 20 sur 100 pas) :
+**`MAX_LENGTH` = 5 632 retenu**. L'essai couvre la séquence la plus longue du jeu (5 176 jetons),
+mais pas la montée tardive du pic observée en 5.47 : elle se lit sur les journaux de la nuit
+(pic imprimé tous les 10 pas), et le repli vaut si le pic passe 7,2 Gio ou si la vitesse
+s'effondre. La vitesse des pas les plus longs (54 s à 4 500 jetons) est attendue : elle compte
+dans la durée ci-dessous.
+
+**« Quadrillage UTM » dans deux familles.** `gisement` (« par rapport au quadrillage UTM »,
+« quadrillage UTM zone 32 ») et le carroyage du PDF (« avec un quadrillage UTM tous les 2 km »)
+partagent la tournure. Vérifié sur le jeu par défaut : aucun exemple ne mêle un appel `geo.*` et
+un appel `layout.*` ; un gisement ne parle jamais de carte, d'export, de carroyage, de grille ni
+d'intervalle (« tous les ») et rend toujours un plan (le noyau tire le fuseau du point) ; un
+carroyage UTM sans fuseau ni `utm_epsg` rend la question (aucun point d'où tirer le fuseau) ; une
+zone écrite donne la même zone dans les deux (`utm_zone` N, `epsg` 326NN). Les deux familles
+n'enseignent donc pas deux plans pour une même demande. Le test
+`a_grid_bearing_says_grid_and_names_its_zone_only_when_written` garde le côté du gisement (ni
+carte, ni export, ni carroyage, ni grille, ni intervalle, aucun appel `layout.*`) ; le reste est
+mesuré sur le jeu par défaut, et le carroyage garde ses propres tests (question sans fuseau).
+
+**Mesures du jeu** (graine 1, 8 600 exemples, tokeniseur de `Qwen/Qwen3.5-4B`, prompt et
+réponse) :
+
+| Mesure | 5.47 | 5.48 | 5.49 |
+|---|---|---|---|
+| exemples `gros_projet` | 2 139 (24,9 %) | 2 033 (23,6 %) | **2 165 (25,2 %)** |
+| gros projets écartés | 295 | 443 | 132 (couche utile montrée réduite) |
+| gros projets vus triés (clé `index`) | 100 % | — | 1 906 (88 %) |
+| couches par gros projet | 20 à 60, moyenne 39,8 | — | 20 à 60, moyenne 39,8 |
+| longueur, tous les exemples | moy. 1 062, méd. 901, max 3 708 | — | moy. 1 168, méd. 890, max 5 176 |
+| longueur, gros projets | moy. 1 733, max 3 708 | — | moy. 2 176, méd. 1 839, max 5 176 |
+| longueur, petits projets | moy. 840, max 1 824 | — | moy. 828, max 1 826 |
+| 95e et 99e centiles | 2 038 et 2 761 | — | 2 740 et 4 729 |
+| au-delà de `MAX_LENGTH` | 0 | — | 0 (116 au-delà de 4 608) |
+| prompt le plus long | 12 883 car. | — | 18 506 car. |
+| jetons du jeu entier | 9,13 M | — | 10,04 M |
+
+Familles nouvelles, en petits projets (les gros projets en tirent aussi, selon les poids) :
+`gisement` 54, `azimut_magnetique` 60, `conversion_raster` 75, `carroyage_mgrs` 91,
+`entete_pied_de_page` 90, `couches_proches` 132, `retrait_couche` 103, `redemande` 290.
+
+**Durée attendue** : 10,04 M de jetons au lieu de 9,13 M (+10 %), et les pas des séquences les
+plus longues coûtent plus que leur part de jetons (54 s à 4 500 jetons contre 27 s à 3 500) :
+environ 2 h 30 à 2 h 45 par entraînement, plus la chaîne GGUF et la validation, soit environ 7 h
+pour la nuit à deux graines.
+
+**Nuit du 2026-11-10 au 11** (commit `41ede5d`, jeu identique pour les trois candidats ; essais
+GPU `--features cuda` ; recettes QGIS par `probe_recette.py`, noyau construit sur le commit, non
+installé, `CASSINI_MODELS` sur le seul modèle mesuré). Entraînements : 2 h 33 (a) et 2 h 15 (b)
+pour 537 pas, pic de 5,76 Gio au plus : la carte ne s'est pas remplie.
+
+| Barre | graine a | graine b | fusion a+b | installé (fusion du 11-10) |
+|---|---|---|---|---|
+| validation | 289/300 | 285/300 | 290/300 | 291/300 |
+| `plan_reel` (≥ 23/25) | 24/25 | **22/25** | **22/25** | 25/25 |
+| `question_reel` (≥ 11/12) | 11/12 | 12/12 | 11/12 | 12/12 |
+| `ecart_reel` (≥ 32/40) | 35/40 | 36/40 | 37/40 | 37/40 |
+| `echelle_utm_reel` (≥ 7/8) | 8/8 | 8/8 | 8/8 | 8/8 |
+| `terrain_reel` (≥ 7/8) | 8/8 | 8/8 | 8/8 | 8/8 |
+| `epic11_reel` | 27/28 | 28/28 | 28/28 | 28/28 |
+| `style_reel` (≥ 9/10) | 10/10 | 10/10 | 10/10 | 10/10 |
+| Annecy, 20 phrases (≥ 16/20) | 18/20 | 18/20 | 18/20 | 17/20 |
+| rejeu après réouverture | identique (29 étapes) | identique | identique | identique |
+| gros projet, 7 phrases (indicatif) | 6/7 | 7/7 | 7/7 | 7/7 (mesure de 5.48) |
+
+Annecy : les trois candidats ratent RA05 (« parcelles en zone naturelle du PLUi » : opérateur
+`begins_with` au lieu de l'égalité attendue) et RA09 (« tampon autour des routes » sans distance :
+10 m au lieu d'une question) ; RA07 (nom recopié) et RA13 (`coord.convert`), ratés par le modèle
+installé, passent. Gros projet de 63 couches : première phrase en 36 à 38 s (inventaire de QGIS
+compris), puis 3 à 5 s ; la graine a prend `commune_associee_ou_deleguee` pour « les communes ».
+`plan_reel` : les trois ratent S15 (« altitude moyenne et maximale par commune », refus attendu :
+réponse coupée, trop longue) ; b et la fusion ratent aussi S23 et S24 (statistiques par zone d'un
+raster calculé, refus attendu : plan rendu). Le refus des statistiques par zone d'un raster recule
+donc avec ce jeu. Modèles dans `cassini-modeles\ajuste-5-49-a`, `-b` et `-fusion`, non installés ;
+décision au propriétaire.
+
+### Générateur après 5.49 (2026-11-11)
+
+Aucun candidat de 5.49 installé (décision du propriétaire du 2026-11-11). Trois sortes de demandes
+ratées par la nuit corrigées par les familles, sans pansement par phrase ; décisions tranchées en
+party le 2026-11-11 (ingénieur ML, géomaticien, architecte), **à confirmer par le propriétaire**.
+Mêmes base, méthode, `DEFAULT_COUNT` (8 600), graines du générateur (1 et 2), `MAX_PROMPT_CHARS`
+(19 000) et `MAX_LENGTH` (5 632).
+
+- **D1, refus des statistiques d'un raster** (S15, S23, S24 de `plan_reel`) : famille
+  `refus_stats_raster` (poids 5), sortie de `refus_hors_registre` (9 → 6 : ses quatre autres
+  branches, une sur quatre, gardent leur compte). Tournures neuves : deux statistiques à la fois,
+  « par commune », la statistique d'un dérivé dite d'un trait (« la pente médiane de chaque
+  quartier »), un dérivé du MNT puis sa statistique. Jamais « Donne-moi l'altitude … » ni
+  « Calcule la pente … puis sa moyenne par … » (S15, S23).
+- **D2** : le motif `NO_RASTER_STATS` est gardé tel quel ; « raccourcir » porte sur les demandes,
+  courtes et à une seule proposition dans plus de la moitié des exemples (le test
+  `statistics_of_a_raster_per_zone_are_a_whole_refusal` le tient).
+- **D3, tampon sans distance** (RA09 d'Annecy) : famille `question_tampon_sans_distance`
+  (poids 3) ; `tampon` (7) reste intact, contrepoids aux mêmes verbes.
+- **D4, zone naturelle** (RA05) : l'opérateur d'une catégorie de zone n'est plus figé dans
+  `ZONE_CATEGORIES` ; il se déduit des valeurs montrées (`zone_operator`, partagé par
+  `filtre_egalite` et `dans_une_zone`). Une valeur est de la catégorie si elle est le code, ou le
+  code suivi d'un indice en minuscule (`Nh` pour `N`, `AUc` pour `AU`, mais `AUc` n'est pas
+  agricole) ; `eq` quand la seule valeur de la catégorie montrée est le code, `begins_with`
+  sinon. `N` est forcé trois fois sur quatre, et alors sans `Nh` (standard du CNIG de 2017),
+  `Nh` une fois sur quatre. « Agricole », « urbaine » : `eq` ; « à urbaniser » : `begins_with AU`.
+- **D5, gisement entre lieux nommés** (essai QGIS du 2026-11-11 avec `ajuste-5-49-a` :
+  gisement entre deux lieux nommés en WGS84 rendu sans `north: "grid"`, comme le modèle
+  installé) : `gisement` 3 → 5 ; tournures « azimut du quadrillage », « par rapport au nord du
+  quadrillage », « en nord UTM » des deux côtés (distance et azimut, point projeté) ; points en
+  WGS84 deux fois sur trois (une sur deux avant), dont un sur trois nommé devant ses coordonnées
+  entre parenthèses (sommet, clocher, refuge, pylône, carrefour, château d'eau). Jamais « nord
+  Lambert » : le nord du quadrillage de la commande est celui de l'UTM. « Azimut grille » n'est
+  pas posé : le test du gisement interdit le mot « grille », tournure du carroyage du PDF (5.49).
+
+Le total des poids passe de 501 à 508 (D1 +2, D3 +3, D5 +2) : les familles à poids inchangé
+perdent 1,4 % de part de tirage.
+
+**Comptes du jeu par défaut** (graine 1, 8 600 exemples ; avant : commit `3a8eefb`). Familles en
+petits projets, puis exemples du jeu entier, gros projets compris :
+
+| Mesure | avant | après |
+|---|---|---|
+| `refus_hors_registre` | 148 | 107 |
+| `refus_stats_raster` | — | 95 |
+| `question_tampon_sans_distance` | — | 63 |
+| `tampon` | 126 | 103 |
+| `gisement` | 54 | 101 |
+| `filtre_egalite` | 212 | 182 |
+| `dans_une_zone` | 85 | 110 |
+| `gros_projet` | 2 165 (25,2 %), 132 écartés | 2 096 (24,4 %), 134 écartés |
+| refus `NO_RASTER_STATS`, jeu entier | 75 | 132 |
+| questions de la distance d'un tampon, jeu entier | 0 | 86 |
+| appels `north: "grid"`, jeu entier | 86 | 131 |
+| « naturelle » → `eq N` / `begins_with N`, jeu entier | 0 / 28 | 13 / 7 |
+| « agricole » `eq A`, « urbaine » `eq U`, « à urbaniser » `begins_with AU` | 24, 54, 15 | 17, 30, 21 |
+
+Les écarts des familles à poids inchangé (`tampon`, `filtre_egalite`, `dans_une_zone`) restent
+dans la fourchette du hasard du tirage. Le jeu de validation (graine 2, 300) se régénère.
+
+**Nuit préparée, non lancée** : `~/cassini-entrainement/nuit-apres-5-49.sh` et
+`fusion-apres-5-49.sh`, copies de ceux de 5.49 qui écrivent dans `ajuste-apres-5-49-a`, `-b` et
+`-fusion` (`cassini-modeles\`) et n'installent rien. Avant de la lancer : commiter, puis mettre
+l'arbre Windows des essais (`CASSINI-nuit`) sur ce commit.
+
 ### Les inventaires de QGIS (5.15)
 
 Les valeurs d'un champ texte sont triées, comme le produit les rend. `unloaded_files` est
@@ -525,8 +1065,9 @@ deux. Le jeu s'en tient donc à `U`.
 ## Le jeu tenu à l'écart
 
 `ai/tests/tenu_a_l_ecart/` porte 40 phrases inédites sur un inventaire de projet
-d'urbanisme : 26 plans (dont la phrase de démonstration exacte de `CLAUDE.md`),
-8 questions et 6 refus. C'est la barre honnête.
+d'urbanisme : 28 plans (dont la phrase de démonstration exacte de `CLAUDE.md`),
+8 questions et 4 refus (compte relu dans `sentences.json` le 2026-11-11 ; la doc disait
+26/8/6). C'est la barre honnête.
 
 Règle : il a été écrit par un autre auteur que le générateur, qui ne l'a pas lu. Seuls
 deux fichiers le lisent :
@@ -540,7 +1081,10 @@ deux fichiers le lisent :
   l'écart). Il a fait retirer trois tournures : « Fais une zone tampon de N m autour des
   ... » devient « Fais-moi une zone tampon ... », « Décris la couche des ... » devient
   « Décris-moi la couche des ... », et « de la section AB » sort des tournures des parcelles
-  (« en section AB », « de section AB » restent).
+  (« en section AB », « de section AB » restent). Depuis 10.29, l'ajout de la famille
+  `azimut_magnetique` décale les tirages : dans `filtre_numerique`, « Sélectionne » devient
+  « Sélectionne-moi » devant une hauteur de bâtiment (« … de plus de N m de haut »), sans
+  tirage de plus, pour qu'aucune phrase de la recette d'Annecy ne soit engendrée.
 - `ai/tests/ecart_reel.rs` mesure le vrai modèle sur ce jeu, sans jamais imprimer le texte
   des phrases.
 
@@ -593,7 +1137,7 @@ Ce texte est écrit **à un seul endroit** : `training/src/prompt.rs` (`render_p
 `completion`). La commande l'écrit dans le jeu :
 
 ```
-cargo run -p cassini-training --release -- --format chat --seed 1 --count 8000 --out entrainement.jsonl
+cargo run -p cassini-training --release -- --format chat --seed 1 --count 8600 --out entrainement.jsonl
 ```
 
 Chaque ligne est `{"prompt": "...", "completion": "..."}` : `prompt` est le texte exact vu
@@ -623,11 +1167,12 @@ La commande, sans intervention :
 2. refuse un dossier de sortie déjà rempli (rien n'est écrasé ; `--reprendre` finit un
    entraînement commencé en sautant les étapes déjà faites) ou situé dans le dépôt ;
 3. engendre les jeux par `cassini-training --format chat` : graine 1 pour l'entraînement
-   (8 000 exemples depuis 5.15, 5 000 avant), graine 2 pour la validation (300), dont elle retire les prompts déjà
+   (8 600 exemples depuis le 2026-11-10, 8 000 depuis 5.15, 5 000 avant), graine 2 pour la validation (300), dont elle retire les prompts déjà
    vus à l'entraînement ;
 4. prend la base `Qwen/Qwen3.5-4B` (Apache-2.0) à la révision épinglée
    `851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a`, dans le cache de Hugging Face ;
-5. écarte (et compte) tout exemple de plus de 2 048 jetons, sans jamais le tronquer ;
+5. écarte (et compte) tout exemple de plus de `MAX_LENGTH` jetons (2 048, puis 4 608 depuis 5.47, 5 632 depuis 5.49),
+   sans jamais le tronquer ;
 6. entraîne un adaptateur QLoRA : base en nf4, gradient checkpointing, graine fixe, perte
    sur la réponse seule, projections du modèle de langue seulement. Depuis le 2026-11-09, la
    base se charge et l'adaptateur se pose par **Unsloth** (`--sans-unsloth` reprend
@@ -653,7 +1198,12 @@ La commande, sans intervention :
    l'adaptateur GGUF (`--lora`), et le modèle fusionné. Les deux sorties doivent se lire
    comme un plan JSON, sinon la commande s'arrête ;
 10. écrit `rapport.json`, avec le commit du dépôt, l'état de l'arbre de travail (modifié ou
-   non, chemins modifiés) et l'empreinte de `uv.lock`.
+   non, chemins modifiés) et l'empreinte de `uv.lock`. Depuis 5.54, le rapport porte aussi la
+   **lignée** (`lignee`, un maillon pour un entraînement de zéro), que lit l'ajustement continu.
+
+Pour corriger quelques familles sans tout ré-entraîner, `--depuis <dossier> --familles a,b`
+repart de l'adaptateur d'un entraînement précédent au lieu de la base nue : voir « Ajustement
+continu » plus bas (règle des trois maillons, juge `non_oubli.py`).
 
 Dépendances épinglées par `training/entrainement/uv.lock` (Python 3.12) : torch (BSD-3),
 transformers, peft, accelerate, huggingface-hub (Apache-2.0), bitsandbytes (MIT),
@@ -885,7 +1435,7 @@ reprise (`--reprendre`) :
 (`SHORT_SYSTEM`) : le produit n'embarque pas la chaîne d'entraînement, qui n'est qu'une
 dépendance de développement de `cassini-ai`. Deux tests tiennent les deux textes ensemble :
 
-- sans modèle, pour chacun des 8 000 exemples engendrés, les tours que `ai` assemble valent
+- sans modèle, pour chacun des exemples du jeu par défaut (8 600 depuis le 2026-11-10), les tours que `ai` assemble valent
   `render_prompt`, octet pour octet, encadrement chatml compris ; et pour chaque exemple de
   redemande, la sortie rejetée jugée par `ai` donne les mêmes écarts, et les tours de
   `retry_turns` valent le prompt de redemande de l'entraînement (`render_retry_prompt`) ;
@@ -1111,7 +1661,9 @@ court) et, pour comparaison, Qwen3.5-9B Q4_K_M seul (long prompt). Décision du 
 - Les essais réels `ecart_reel`, `question_reel`, `plan_reel` et `duree_reel` prennent dans
   `CASSINI_TEST_MODEL` un GGUF ou une déclaration (`ai/tests/common/mod.rs`).
 - `plan_reel` : au plus 2 fausses questions sur 25 pour le long prompt (concession du
-  2026-10-17), au plus 1 pour le prompt court (plafond strict du ticket).
+  2026-10-17), au plus 1 pour le prompt court (plafond strict du ticket). Depuis 5.53
+  (livrable 3), ces plafonds sont rapportés au total de la barre élargie (voir « Barres
+  élargies »).
 - `ecart_reel` : le notateur est une fonction (`grade`) testée sans modèle. Pour chaque phrase
   manquée, il imprime la forme de l'écart (sorte, nombre d'étapes, ordre, commande ou nom du
   paramètre à l'étape k), jamais une valeur ni le texte ; la ligne `REDEMANDES` compte les
@@ -1816,3 +2368,767 @@ Complément (relecture), même jour, seconde sonde sur une autre copie (`projet-
 
 La distance de la première sonde (3 606 m, 55,9°) se retrouve à la main par l'approximation
 plane locale sur les deux points reprojetés (≈ 3,60 km, ≈ 55,9°).
+
+## Barre par commande (ticket 5.53, 2026-11-11)
+
+Règle : **une commande offerte au modèle, au moins trois phrases de mesure écrites à la main**,
+dont au moins deux attendent un plan qui l'appelle ; la troisième peut attendre une question ou
+un refus. « Offerte » se lit au registre (`Registry::standard()` sans les commandes que le noyau
+dicte seul) : 33 commandes au 2026-11-11, 99 phrases.
+
+- Phrases : `ai/tests/par_commande/phrases.json` (`id`, `command`, `phrase`, `expected` :
+  `{"kind": "calls", "calls": [...]}`, `{"kind": "question"}` ou `{"kind": "refusal"}`) ; le
+  titre d'un export PDF est libre et n'est pas écrit dans l'attendu.
+- Inventaire : `ai/tests/par_commande/inventory.json`, celui de l'épreuve (Villeneuve-le-Roi)
+  complété d'un raster de coût, de deux rasters notés, d'un masque, d'un relevé ASCII Grid et de
+  deux fichiers non chargés (CSV d'arrêts de bus, pistes cyclables).
+- Sans modèle, `cargo test -p cassini-ai --test par_commande_reel` vérifie la couverture (une
+  commande ajoutée au registre sans ses phrases fait échouer, en la nommant) et chaque attendu :
+  `check_plan`, garde-fou des coordonnées, complétion sans effet, couches et rasters présents.
+- Avec le modèle :
+  `CASSINI_TEST_MODEL=<*.modele.json> cargo test -p cassini-ai --release --features cuda --test par_commande_reel -- --ignored`
+  imprime une ligne `SCORE <commande> <justes>/<phrases>` par commande et `SCORE total`. Pas de
+  seuil : la barre de non-oubli (livrable 2 de 5.53) compare le relevé d'un nouveau modèle à
+  celui du modèle qu'il remplace.
+- Les phrases ne vont jamais au jeu d'entraînement : `training/tests/recouvrement.rs` les compare
+  au jeu engendré, à l'identique puis à un nombre ou une commune près. À l'écriture, trois
+  phrases (LR3, GS1, HS1) figuraient déjà au jeu : elles ont été réécrites, le générateur n'a pas
+  été touché.
+
+## Barres élargies : `plan_reel` et `question_reel` (ticket 5.53, livrable 3, lot 1, 2026-11-11)
+
+À 25 et 12 phrases, un raté pesait 4 à 8 % : trop pour juger un oubli à une phrase près.
+Les deux barres sont élargies en place, avec des phrases neuves écrites à la main (jamais
+engendrées, jamais recopiées d'une autre barre), sur l'inventaire de l'épreuve tel quel :
+
+| Barre | Phrases | Dont neuves | Refus attendus | Seuil |
+|---|---|---|---|---|
+| `plan_reel` | 25 + 23 = **48** | `ai/tests/plan_reel/phrases.json` | 5 de l'épreuve + 4 neufs | ≥ 80 % de plans conformes arrondi vers le bas, soit **38/48** (79,2 %) ; fausses questions au plus 2/25 du total au long prompt (**3**), 1/25 au prompt court (**1**) |
+| `question_reel` | 12 + 35 = **47** | `ai/tests/question_reel/phrases.json` | 4 neufs | ≥ 9/12 de réponses attendues arrondi vers le bas, soit **35/47** (74,5 %) |
+
+- Schéma : celui de `par_commande/phrases.json` sans `command` (`id`, `phrase`, `expected` :
+  `calls`, `question` ou `refusal`). Chaque refus porte `missing`, des mots qu'aucun identifiant
+  du registre ne contient (`mail`, `undo`, `geocod`, `contour`, `raster.zonal`, `translat`,
+  `weather`, `watershed`…), ou `missing_params`, une option `commande:paramètre` que le schéma
+  n'a pas (S18 : `layout.export_pdf:layers`) : le jour où une commande ou une option les porte,
+  le refus est faux et le test sans modèle nomme la phrase. Les 5 refus de l'épreuve reçoivent
+  les leurs dans `plan_reel.rs` (`refusal_of`), l'épreuve restant gelée. **Limite** : un mot
+  de `missing` est un mot-clé cherché tel quel dans les identifiants (non vide, minuscules
+  ASCII, contrôlé), pas un synonyme : une commande arrivée sous un autre nom (`terrain.isolines`
+  pour des courbes de niveau) ne fait pas rougir le refus.
+- Les sources gelées ne bougent pas : `plan_reel` lit toujours `tests/epreuve-modele-local/sentences.json`,
+  `question_reel` sa constante `AMBIGUOUS`. Un seul `SCORE`, sur le total.
+- `question_reel` compte désormais les **réponses attendues** : une question là où une question
+  est attendue, un refus là où un refus l'est. Ses 35 phrases neuves : 31 questions (couche,
+  champ ou valeur absents, distance ou point manquants, lieu sans coordonnées) et 4 refus.
+  Aucune ne nomme un fichier non ouvert de l'inventaire (test sans modèle).
+- Seuils (décision du propriétaire, D4) : proportionnels aux décisions passées, arrondis vers le
+  bas sur le total (`common::proportional`).
+- Contrôle commun des attendus (`ai/tests/common/mod.rs`, `invalid`) : celui de la barre par
+  commande, partagé par les trois barres — `check_plan`, garde-fou des coordonnées, complétion
+  sans effet, couches, champs, rasters et fichiers non chargés présents, valeur d'une égalité
+  (`eq`, `ne`) prise parmi les valeurs montrées du champ, refus bien écrits et encore justes.
+  Les 25 phrases de l'épreuve gardent leur comparaison exacte (titre d'export compris) ; les
+  neuves comparent le titre exactement quand l'attendu en porte un, sinon le laissent libre
+  (non vide). Dans `plan_reel`, seules les phrases qui attendent `layer.add` nomment un fichier
+  non ouvert ; dans `question_reel`, aucune.
+- Systèmes des points (2026-11-11) : `invalid` nomme aussi un `Point` littéral de
+  `coord.convert`, `geo.distance_azimuth`, `geo.destination_point` ou `geo.bearing_intersection`
+  qui n'est ni en WGS84 (4326) ni en UTM sur WGS84 (32601 à 32660, 32701 à 32760), la règle de
+  `geo_point::read_point` (`geo.unsupported_crs` à l'exécution) ; une référence `step:k.champ`
+  passe. PL18, PL19, DA1, DA3, BI1 et DP1, aux points en Lambert-93, attendent désormais une
+  étape `data.transform_point` vers 4326 par point, puis la commande sur `step:k.point`. Dans
+  `plan_reel`, le plafond de fausses questions ne compte plus qu'une question rendue sur une
+  phrase qui attend un plan : sur un refus attendu, c'est un raté ordinaire.
+- `training/tests/recouvrement.rs` lit les deux fichiers neufs : aucune phrase au jeu engendré,
+  à un nombre ou une commune près ; aucune phrase écrite à la main pour 5.53 ne reprend une
+  phrase d'un autre essai ni une autre de son propre fichier (`no_hand_written_sentence_copies_another_real_trial`).
+- `ecart_reel` reste à 40 (D5). Les totaux ayant changé, la barre de non-oubli rend
+  `non comparable` pour `plan_reel` et `question_reel` jusqu'à la remesure du parent installé,
+  prévue après le lot 3 (`echelle_utm_reel`, `terrain_reel` au lot 2 ; `epic11_reel`,
+  `style_reel` au lot 3).
+
+### Lot 2 : `echelle_utm_reel` et `terrain_reel` (2026-11-11)
+
+À 8 phrases, un raté pesait 12,5 %, et aucune n'attendait de refus. Les deux barres sont
+élargies de la même façon que celles du lot 1, sur l'inventaire de l'épreuve tel quel :
+
+| Barre | Phrases | Fichier des phrases neuves | Refus attendus | Seuil |
+|---|---|---|---|---|
+| `echelle_utm_reel` | 8 + 36 = **44** | `ai/tests/echelle_utm_reel/phrases.json` (`EU01`…`EU36`) | 4 neufs : `atlas`, `shortest_path`, `export_image`/`image`, `distance_matrix` | ≥ 7/8 de réponses attendues arrondi vers le bas, soit **38/44** (86,4 %) |
+| `terrain_reel` | 8 + 36 = **44** | `ai/tests/terrain_reel/phrases.json` (`TR01`…`TR36`) | 4 neufs : `flood`, `flow_accum`, `cut_fill`/`volume`, `solar`/`insolation` | ≥ 7/8 de réponses attendues arrondi vers le bas, soit **38/44** (86,4 %) |
+
+- `echelle_utm_reel` : exports à une échelle sous toutes ses écritures (« 1 : 2 500 », « 1/50 000e »,
+  « au 75 000e », « 1:20k », « au vingt-cinq millième »), avec page, orientation ou titre ; exports
+  au bout d'une sélection, d'un tampon ou d'une isochrone ; isochrones depuis un point UTM 31N ou
+  32N (est et nord écrits « E … / N … », nord avant l'est, « EPSG:32631 », relevé GPS
+  et « UTM31N »). Refus : atlas par commune, itinéraire le plus court par les routes, export
+  en image, temps de trajet entre deux points.
+- `terrain_reel` : pentes en degrés ou en pourcentage (déclivité, inclinaison, raideur) ; lignes de
+  vue et champs de vision, points en Lambert-93 seuls, hauteurs, rayon (au plus 2 500 m sur le MNT
+  de 5 m), courbure ou réfraction écrits et jamais égaux au défaut ; 6 exports seuls sans le
+  mot « PDF » (mise en page, impression, tirage, édition, planche), plus 3 en fin d'étape de
+  terrain (9 neufs). Refus : extension d'une crue, accumulation d'écoulement, cubature
+  déblai/remblai, rayonnement solaire annuel. La crue est écrite sans cote ni rivière : une cote
+  se ferait par `raster.reclassify` du MNT, une rivière absente de l'inventaire appellerait une
+  question.
+- Mots-clés des refus : `atlas` (`layout.export_atlas`), `shortest_path`
+  (`network.shortest_path`), `distance_matrix` (`analysis.distance_matrix`), `flood`
+  (`terrain.flood_extent`) et `flow_accum` (`terrain.flow_accumulation`) sont des morceaux
+  d'identifiants planifiés ou réservés du catalogue ; `export_image`, `image`, `cut_fill`,
+  `volume`, `solar` et `insolation` sont des mots-clés anglais choisis pour un futur identifiant,
+  aucun n'étant au catalogue. Le test sans modèle essaie chaque mot-clé de chaque refus.
+- Les distances des phrases neuves sont écrites en mètres : « 1 km » laissait `{1, km}` et
+  `{1000, m}` défendables, et la comparaison ne ramène pas l'une à l'autre.
+- Les 8 phrases de `SENTENCES` et leurs attendus ne bougent pas ; une seule comparaison pour les 44
+  (`common::same_calls`, l'ancien `comparable` retiré) : un `10.0` vaut désormais `10`. Un refus
+  attendu compte juste contre un refus rendu, une question est un échec. Un seul `SCORE … réponses
+  attendues` ; les essais sont renommés `echelle_utm_reel_at_least_7_of_8_of_the_answers_match`
+  et `terrain_reel_at_least_7_of_8_of_the_answers_match`, le seuil suivant le total (les filtres `echelle_utm_reel` et `terrain_reel`
+  des scripts les trouvent toujours).
+- Tests sans modèle : contrôles communs (`common::invalid`) sur les 44, total 40-50, au moins 3
+  refus avec `missing`, aucun fichier non ouvert nommé, et, pour `terrain_reel`, aucune phrase
+  dont l'attendu exporte la carte ne dit « PDF » (repérée par la commande attendue, plus par
+  l'identifiant). `echelle_utm_reel` mesure toujours le plan sans complétion.
+- `training/tests/recouvrement.rs` lit les deux fichiers neufs (`HAND_WRITTEN`) ; les phrases des
+  constantes Rust deviennent les sources `echelle_utm_reel:sentences` et `terrain_reel:sentences`.
+
+## Barres élargies : `epic11_reel` et `style_reel` (ticket 5.53, livrable 3, lot 3, 2026-11-11)
+
+Même règle qu'au lot 1 : élargies en place, phrases neuves écrites à la main dans un
+`phrases.json` par barre, constantes de phrases (`SENTENCES`, `GRID_QUESTION`, `FOREIGN_POINTS`)
+et leurs attendus intacts à l'octet près, un seul `SCORE` sur le total.
+
+| Barre | Phrases | Dont neuves | Composition des neuves | Seuil |
+|---|---|---|---|---|
+| `epic11_reel` | 28 + F03 + 20 = **49** (les 4 `FOREIGN_POINTS` toujours hors barre) | `ai/tests/epic11_reel/phrases.json` | un plan par commande (14, chacun portant `command`), 3 questions (point sans système, écrit comme tel, destination sans azimut, chemin sans arrivée), 3 refus, mots `missing` : `flow`, `hydro`, `accumul` (écoulements) ; `smooth`, `focal`, `mean_filter` (lissage) ; `rough`, `rugos` (rugosité) | 27/28 rapporté au total, arrondi vers le bas, soit **47/49** |
+| `style_reel` | 10 + 32 = **42** | `ai/tests/style_reel/phrases.json` | 9 mises en forme topographiques, 16 dégradés (choroplèthe, seuils naturels, effectifs égaux, amplitudes égales, dégradés nommés), 3 questions (champ ou couche absents), 4 refus, mots `missing` : `categor`, `unique_value` (catégories) ; `labels`, `label_placement` (étiquettes) ; `opacity`, `transparen` (transparence) ; `proportional_symbol` (symboles proportionnels) | 9/10 des réponses attendues, arrondi vers le bas, soit **37/42** |
+
+- `epic11_reel` : plus de règle par commande (décision du coordinateur, 2026-11-11, D4) ; les
+  lignes `COMMANDE <commande> <justes>/<mesurées>` restent imprimées, sans seuil (jamais
+  `SCORE <commande>`, réservé à `par_commande_reel`), avec un avertissement non bloquant pour une
+  commande sans aucun plan juste. F03 compte dans le total **et** garde son exigence dure : sans
+  question sur F03, l'essai (`epic11_reel_at_least_27_of_28_rounded_down_and_the_grid_question_asked`)
+  échoue quel que soit le total. L'essai boucle sur toute la barre (`bar()`), d'où il tire le
+  total et le nombre de plans mesurés par commande. Les 28 phrases d'origine gardent leur comparaison (titre d'export seulement non
+  vide) ; les neuves celle des autres barres (`common::same_calls`). Les attendus sont contrôlés
+  sur l'inventaire augmenté de l'essai (raster de coût, deux critères notés, masque) ; les points
+  des plans neufs sont dans le système de leur raster (Lambert-93) ou portés par une commande
+  sans raster (WGS84, UTM 31N). Tests sans modèle : chaque commande a un plan neuf qui l'appelle
+  (une commande privée du sien est nommée), aucun fichier non ouvert, notation, seuils en valeurs
+  fixes.
+- `style_reel` : les 10 phrases d'origine gardent la comparaison exacte ; tout dégradé, neuf
+  compris, porte un champ numérique de sa couche. Une question du garde-fou compte juste, comme
+  dans `question_reel`.
+- Tournures évitées, faute d'une seule réponse défendable : plus de 12 classes, dégradé hors de
+  la table, dégradé sur un champ texte, relèvement inverse, visée « à la boussole », « cap » sans
+  « magnétique », gisement en Lambert-93, point de passage d'un chemin, profil.
+- `training/tests/recouvrement.rs` lit les deux fichiers (`epic11_reel:phrases`, 20 ;
+  `style_reel:phrases`, 32) : aucune phrase au jeu engendré à un nombre ou une commune près,
+  aucune reprise d'un autre essai (constantes de la même barre comprises) ni en double.
+- **Remesure du parent.** Les totaux ayant changé, `epic11_reel` et `style_reel` rendent
+  `non comparable` comme les quatre barres des lots 1 et 2. Une fois les trois lots réunis sur une
+  révision `REV`, GPU libre : `bash ~/cassini-entrainement/mesures-5-53-3.sh REV` (hors dépôt) joue
+  les huit essais GPU du parent installé (`ajuste-apres-5-49-b`) dans `CASSINI-nuit`, seulement
+  s'il est propre, sa révision remise ensuite ; il s'arrête sans rien changer si le GPU est pris.
+  Contrôle : `non_oubli.py --parent` les anciens relevés du parent contre ce relevé, attendu
+  code 3, `ecart_reel` et `par_commande:*` tenues, les six barres élargies `non comparable`.
+  Ensuite, le parent d'un candidat est `5-53-3-mesures/essais-gpu-parent-5-53-3.log` (avec la
+  recette d'Annecy et le `rapport.json` d'`ajuste-apres-5-49-b`), et tout candidat se mesure à
+  `REV`. Si le parent ne tient pas un des nouveaux seuils, le seuil est revu sur les chiffres,
+  par décision du propriétaire.
+
+### Seuils au niveau du modèle installé (2026-11-11)
+
+Remesuré sur `8333fd2` (les trois lots réunis), le modèle installé `ajuste-apres-5-49-b` ratait
+**cinq** seuils : les quatre barres ci-dessous, et `plan_reel` par son plafond de fausses
+questions (PL19, question du garde-fou, et PL22). Décision du propriétaire (2026-11-11) : le
+seuil des quatre est fixé au niveau du modèle installé moins une phrase, dans une constante
+`NEEDED` de chaque essai ;
+l'objectif proportionnel reste calculé et imprimé dans la ligne `SCORE` (`seuil N, objectif …`),
+sans faire échouer. Ces seuils sont à relever quand un modèle fait mieux.
+
+| Barre | Installé | Objectif proportionnel | Seuil |
+|---|---|---|---|
+| `echelle_utm_reel` | 34/44 | 7/8, soit 38/44 | **33/44** |
+| `terrain_reel` | 33/44 | 7/8, soit 38/44 | **32/44** |
+| `epic11_reel` | 42/49 | 27/28, soit 47/49 | **41/49**, F03 toujours exigée en plus |
+| `style_reel` | 31/42 | 9/10, soit 37/42 | **30/42** |
+
+`plan_reel` (38/48, plafond de fausses questions), `question_reel` (35/47) et `ecart_reel` sont
+inchangés. `plan_reel` ne tient que parce que son plafond ne compte plus qu'une question rendue
+sur une phrase qui attend un plan (le compteur « dont garde-fou » suit la même règle) : PL22
+attend un refus et sort du plafond, PL19 y reste, soit exactement le plafond (1/1), sans marge.
+`ecart_reel` n'a pas reçu de seuil proportionnel neuf : sa barre de 40 est inchangée.
+
+Ces niveaux ont été mesurés sur `8333fd2`, **avant** la correction des attendus de points
+(conversion par `data.transform_point`, ci-dessus) et la nouvelle SR06 : ils sont à remesurer
+sur le commit final, et la remesure sera faite. Les essais sont renommés pour ne pas mentir sur leur seuil :
+`echelle_utm_reel_answers_match_at_the_installed_level`,
+`terrain_reel_answers_match_at_the_installed_level`,
+`epic11_reel_answers_match_at_the_installed_level_and_the_grid_question_asked`,
+`style_reel_answers_match_at_the_installed_level_on_the_whole_bar` (les filtres `--test <fichier>`
+ne changent pas).
+
+- **Pourquoi.** Ces barres sont des alarmes de régression : un seuil que le modèle installé ne
+  tient pas sonnerait à chaque mesure, sans rien dire. La garde contre l'oubli est ailleurs : la
+  barre de non-oubli (ci-dessous) compare chaque candidat à son parent, barre par barre. Les
+  objectifs proportionnels restent ceux du prochain entraînement.
+- **SR06** (`style_reel/phrases.json`) était discutable : la phrase ne disait pas la méthode et
+  l'attendu l'omettait, alors que `method: jenks`, égal au défaut, est aussi juste. La phrase dit
+  désormais « en seuils naturels » et l'attendu porte `method: "jenks"`, comme SR02 :
+  une seule réponse défendable, sans toucher à `common::same_calls`. Mesuré avant ce
+  changement, le modèle installé a eu SR06 fausse (`method: jenks` écrit) ; le seuil de 30 suit
+  la même règle que les trois autres barres.
+- **Leçons de la remesure**, à porter au générateur avant le prochain entraînement : `page_size`
+  perdu quand l'export porte aussi une échelle ; refus des fonctions absentes du registre (les
+  refus neufs des barres élargies) ; options non par défaut écrites dans la phrase (méthode,
+  dégradé, nombre de classes) ; champ de vision cumulé (`terrain.viewshed_cumulative`) ; un
+  point en Lambert-93 donné à une commande `geo.*` ou à `coord.convert` passe d'abord par
+  `data.transform_point` vers 4326, la commande lisant ensuite `step:k.point`.
+
+## Barre de non-oubli (ticket 5.53, livrable 2, 2026-11-11)
+
+Avant d'installer un modèle, on vérifie qu'il n'a rien oublié de ce que savait celui qu'il
+remplace. L'outil `training/entrainement/non_oubli.py` lit les relevés déjà produits du
+**parent** (le modèle installé) et du **candidat**, et rend un verdict par barre puis un verdict
+d'ensemble. Il ne charge aucun modèle, n'utilise pas le GPU, n'installe et ne déplace rien ;
+Python standard seul.
+
+```
+python3 -I training/entrainement/non_oubli.py \
+  --parent  <essais GPU> <recette(s) QGIS> <rapport.json> \
+  --candidat <essais GPU> <recette(s) QGIS> <rapport.json> \
+  --json non-oubli.json
+```
+
+Chaque relevé est reconnu à son contenu :
+
+- **essais GPU** (`essais-gpu-*.log`) : une barre par section `=== <essai> ===`, la première
+  fraction de sa ligne `SCORE` (les sous-scores d'`ecart_reel` ne comptent pas) ; dans la seule
+  section `par_commande_reel`, les lignes `SCORE <commande> <j>/<n>` donnent une barre
+  `par_commande:<commande>` par commande, et `SCORE total` la barre `par_commande_reel`.
+  Avertissements : section relancée ou à deux lignes `SCORE` (la dernière compte), section finie
+  sans `SCORE`, section sans ligne `=== fin … ===` (relevé coupé : seuil inconnu), ligne
+  `SCORE` de forme inconnue (nommée, ignorée), `SCORE <commande> 0/0` (ignorée) ;
+- **recette QGIS** (`recette-*.txt`) : `SCORE : <j>/<n>` (ou l'ancien `PLANS EXECUTES : <j>/<n>`)
+  donne la barre `recette:<nom>` (deux lignes de score : la dernière compte, avertissement ;
+  nombre de phrases annoncé par `phrases : … (N)` différent du total : avertissement), et
+  la ligne `FIN :` la barre `recette:<nom>:rejeu`, 1/1 pour « rejeu identique », 0/1 sinon ; une
+  recette sans ligne `FIN` (interrompue) n'a pas de barre de rejeu, ce qu'un avertissement
+  signale. Le nom vient du préfixe des phrases (`RA` → `annecy`, `G` → `gros`), sinon du fichier
+  de phrases de la ligne `phrases :` (`phrases-gros.json` → `gros`), sinon, pour les anciennes
+  recettes à « phrase 1 », du nom du fichier (`recette-annecy-…`), ce qu'un avertissement dit.
+  Un nom autre qu'`annecy` ou `gros` (`phrases-gros-v2.json` → `gros-v2`) est signalé : il
+  compte comme une barre ordinaire, jamais indicative ;
+- **rapport d'entraînement** (`rapport.json`) : `validation.justes` sur `validation.total`,
+  barre `validation`, et `validation.par_sorte`, la composition du jeu.
+
+Le texte est lu en ASCII seul : la marque d'ordre et les accents abîmés par la console Windows
+tombent. Chaque modèle est nommé par ses relevés (dossier du GGUF des essais, ligne `modèles :`
+de la recette, dossier et empreinte SHA-256 du rapport). Deux modèles différents d'un même côté,
+ou le même modèle des deux côtés, font un avertissement, et l'ensemble vaut alors **au mieux
+« à décider »** : on ne déclare pas installable une comparaison de relevés mélangés. Une barre lue dans deux fichiers d'un
+même côté, une fraction impossible (total nul, plus de justes que de phrases), un relevé vide
+ou de forme inconnue, ou un `--json` qui désigne un des relevés arrêtent l'outil (code 2), en
+nommant le fichier.
+
+**Règle.** Une barre **tient** si le candidat a au plus une phrase juste de moins que le parent,
+sur le même total ; le rejeu identique ne se perd pas (aucune tolérance). **Seuil propre** : le
+code de fin d'une section d'essais (`=== fin <essai> : 0 ===`, passée ; non nul, ratée) et, pour
+une recette, `(barre N)` de la ligne `SCORE :` (passée si justes ≥ N), ou à défaut la tournure
+« barre tenue », « SOUS LA BARRE » / « barre non tenue » (ni l'un ni l'autre : avertissement) ;
+un candidat qui rate un seuil que le parent passait est en `baisse`, même à une phrase près et
+même sur un autre total ; un candidat au seuil inconnu (section coupée) face à un parent qui le
+passait est `non comparable`. Le tableau montre le seuil (`seuil ok → raté (101)`).
+
+| Verdict de barre | Quand | Effet sur l'ensemble |
+|---|---|---|
+| `tenue` | au plus une phrase de moins, même total, seuil gardé | — |
+| `baisse` | deux phrases de moins ou plus, rejeu perdu, ou seuil propre perdu | `refusé` |
+| `absente` | barre du parent que le candidat n'a pas | `refusé` |
+| `sans parent` | barre nouvelle (par commande au premier relevé) | `à décider` |
+| `non comparable` | totaux différents (recette passée de 5 à 20 phrases) | `à décider` |
+
+`refusé` l'emporte sur `à décider`. Deux barres sont **indicatives** (leur verdict est montré, il
+ne compte pas) :
+
+- la recette du gros projet (`recette:gros`), tant que 5.50 n'en fait pas une barre ;
+- la **validation**, sauf si les deux jeux ont la même composition (`par_sorte` : mêmes totaux
+  par sorte) ; lue d'un seul côté, elle est indicative aussi (avertissement). Même composition
+  ne prouve pas mêmes phrases : c'est la meilleure garantie que porte le rapport. Le jeu de validation est tiré du générateur et renouvelé à chaque entraînement, ce
+  n'est pas une liste de phrases écrites à la main : 289/300 sur un jeu de 249/38/13 ne se
+  compare pas à 291/300 sur 253/25/22 (décision du propriétaire, 2026-11-11).
+
+Si aucune barre ne compte, le verdict est `à décider`.
+
+**Que faire d'un « à décider ».** Refuser bloquerait toute installation après l'ajout d'une
+barre, accepter ferait passer un oubli : le propriétaire tranche, sur le tableau. Deux voies :
+rejouer la mesure du parent sur la barre neuve ou élargie (par exemple la recette d'Annecy à 20
+phrases sur le modèle installé), qui rend la barre comparable ; ou décider à la main, et noter la
+décision dans le plan du ré-entraînement.
+
+Codes de sortie : 0 installable, 1 refusé, 2 relevé illisible, usage faux ou erreur imprévue (le
+message nomme le fichier ; jamais 1, qui voudrait dire « refusé » ; le fichier `--json` d'un
+lancement précédent est effacé), 3 à décider. Le JSON porte la règle, les identités, chaque barre
+(scores, code de fin de section, seuil, composition de la validation, relevé lu), les
+avertissements et le verdict.
+
+Les tests sans modèle : `python3 -I -m unittest discover -s training/entrainement/tests`
+(`tests/test_non_oubli.py`, une ligne de la matrice par test, les cas limites de la relecture,
+plus des extraits des vrais formats).
+
+**Essai : `ajuste-5-49-a` contre la fusion de la nuit du 11-10.** Parent :
+`11-23-mesures/essais-gpu-nuit-11-10-fusion.log`, `11-23-mesures/recette-annecy-nuit-11-10-fusion.txt`,
+`ajuste-nuit-11-10-fusion/rapport.json` ; candidat : `5-49-mesures/essais-gpu-a.log`,
+`recette-annecy-a.txt`, `recette-gros-a.txt`, `ajuste-5-49-a/rapport.json` (tous sous
+`~/cassini-entrainement/`). Sortie recopiée (chemins abrégés en `…`) :
+
+```
+Parent   : ajuste-nuit-11-10-fusion
+Candidat : ajuste-5-49-a
+
+plan_reel              25/25 → 24/25    tenue                    seuil ok → ok
+question_reel          12/12 → 11/12    tenue                    seuil ok → ok
+ecart_reel             37/40 → 35/40    baisse                   seuil ok → ok
+echelle_utm_reel         8/8 → 8/8      tenue                    seuil ok → ok
+terrain_reel             8/8 → 8/8      tenue                    seuil ok → ok
+epic11_reel            28/28 → 27/28    tenue                    seuil ok → ok
+style_reel             10/10 → 10/10    tenue                    seuil ok → ok
+validation           291/300 → 289/300  baisse (indicative)
+recette:annecy           4/5 → 18/20    non comparable           seuil — → ok
+recette:annecy:rejeu     1/1 → 1/1      tenue
+recette:gros               — → 6/7      sans parent (indicative) seuil — → ok
+recette:gros:rejeu         — → 1/1      sans parent (indicative)
+
+attention : …/11-23-mesures/recette-annecy-nuit-11-10-fusion.txt : ligne de score sans seuil (ni « (barre N) », ni « barre tenue »).
+attention : …/11-23-mesures/recette-annecy-nuit-11-10-fusion.txt : recette nommée « annecy » d'après le nom du fichier.
+attention : validation indicative : les deux jeux n'ont pas la même composition (calls 253/question 25/refusal 22 contre calls 249/question 38/refusal 13).
+Verdict : refusé
+```
+
+Code de sortie 1. `ajuste-5-49-a` perd deux phrases d'`ecart_reel` : à la règle d'une phrase
+près, il n'aurait pas été installé sur ces seuls relevés. La validation, tirée d'un autre jeu,
+ne compte pas. La recette d'Annecy n'est pas comparable (5 phrases pour le parent, 20 pour le
+candidat) ; seul son rejeu l'est, et il tient. L'ancienne recette du parent, à « phrase 1 », est
+nommée d'après son fichier, comme l'avertissement le dit.
+
+## Ajustement continu (ticket 5.54, lot 1, 2026-11-11)
+
+Un entraînement de zéro dure plusieurs heures sur 8 600 exemples, alors que le modèle installé
+ne rate que quelques familles. La même commande peut **repartir de l'adaptateur LoRA** d'un
+entraînement précédent (le **parent**, un dossier de sortie de `pipeline.py`, jamais modifié) et
+ne voir que les familles à corriger, mêlées d'un rappel de tout le reste :
+
+```
+uv run --project training/entrainement python training/entrainement/pipeline.py \
+  --sortie ~/cassini-entrainement/ajuste-continu-5-54-1 \
+  --depuis ~/cassini-entrainement/ajuste-apres-5-49-b --familles export_pdf_format,refus
+```
+
+- **Jeu de la séance** : 3 000 exemples par défaut (`--exemples`, décision D2), dont une part de
+  **rappel** d'au moins 0,4 (`--part-rappel`, 0,4 par défaut et au plus bas, D3), arrondie
+  au-dessus : 1 200 exemples, les premiers du jeu graine 1 (toutes familles ; le générateur est
+  déterministe, ses premiers exemples ne dépendent pas du compte demandé ; stratifié depuis la
+  séance 2, voir « Séance 2 (5.54) » plus bas), tirés avec une marge
+  de 60 puis coupés au compte une fois les trop longs écartés, puis 1 800 exemples **ciblés**,
+  graine 3, tirés par `cassini-training --familles a,b` parmi les seules familles nommées (même
+  tirage pondéré, restreint à leurs poids). Le jeu ciblé ne dépasse pas `FOCUS_COUNT` (1 800), ni
+  le rappel tiré `DEFAULT_COUNT` (8 600) : refus avant le GPU. Un jeu engendré plus court que
+  demandé arrête la chaîne. Le générateur refuse aussi d'écrire un jeu ciblé qui reprend une
+  phrase de barre (code 3, identifiant nommé : module `training/src/barres.rs`, la même
+  normalisation que `recouvrement.rs`). Une demande ciblée déjà vue (même prompt dans le rappel
+  ou plus haut dans le jeu ciblé, quelle que soit la réponse) est retirée et comptée ; la part du
+  rappel se compte sur le jeu final, et la chaîne s'arrête si elle tombe sous 0,4. Le rapport
+  l'écrit (`donnees.seance`).
+- **Validation** : celle d'un entraînement de zéro, graine 2, 300 exemples, moins les prompts vus
+  à l'entraînement ; le score reste comparable au parent.
+- **Entraînement** : taux d'apprentissage 5e-5 (au lieu de 2e-4), une seule graine
+  (`--graine-torch`), mêmes rang, alpha, modules et chemin d'Unsloth. L'adaptateur est posé par
+  `get_peft_model` comme pour un entraînement de zéro, puis reçoit les poids du parent
+  (`set_peft_model_state_dict`) ; une clé inattendue ou un paramètre LoRA resté à son
+  initialisation arrête la chaîne. L'empreinte du fichier est revérifiée juste avant sa lecture,
+  et chaque matrice `lora_B` chargée doit égaler celle du parent. La suite (GGUF, fusion, score,
+  essai) ne change pas.
+- **Lignée** (`lignee` du rapport) : une liste de maillons ; le maillon 1 est un entraînement de
+  zéro (`depart: "base"`). Chaque maillon porte le commit de Cassini, la graine torch, l'empreinte
+  SHA-256 de l'`adapter_model.safetensors` produit et, à partir du 2e, l'empreinte de
+  l'adaptateur de départ (`depart`), les familles et la part de rappel. Un parent d'avant 5.54
+  (sans `lignee`, comme `ajuste-apres-5-49-b`) est le maillon 1, reconstruit depuis son rapport
+  (`reconstruit: true`). Le rapport porte aussi `depart` et `depuis` (le dossier du parent).
+
+**Gardes**, toutes avant le GPU et avant de toucher au dossier de sortie (code 1, message clair) :
+parent incomplet ou illisible (le fichier est nommé), essai court (`pas_max`) ou entraînement
+sans score de validation ; lignée mal formée (maillon 1 parti de la base, chaque suivant de
+l'adaptateur du précédent, empreintes de 64 chiffres hexadécimaux) ; autre base ou autre révision (rapport, ou
+`base_model_name_or_path` de `adapter_config.json`, où Hugging Face écrit la révision) ; autres
+modules, rang ou alpha (rapport et `adapter_config.json`), autres `lora_dropout`, `bias`,
+`use_dora`, `use_rslora` ou `modules_to_save` ; adaptateur de domaine ; poids
+substitués (l'empreinte de l'`adapter_model.safetensors` diffère du dernier maillon du rapport) :
+« chaîne coupée ». Famille inconnue ou nommée deux fois (refusée avec la liste des noms connus ;
+le générateur la refuse aussi, en code 2) ; `--part-rappel` sous 0,4 ; `--familles` ou
+`--part-rappel` sans `--depuis` ; `--depuis` avec `--exemples-externes` (l'adaptateur de domaine
+reste hors de la chaîne) ; `--reprendre` avec un autre parent, d'autres familles (l'ordre ne
+compte pas), une autre part de rappel ou un autre nombre d'exemples que l'entraînement commencé ;
+en reprise, le maillon garde le commit enregistré.
+
+**Règle des trois maillons.** Une chaîne compte au plus trois maillons : l'entraînement de zéro
+et deux séances. Un parent qui en a déjà trois est refusé : **recalage**, c'est-à-dire un
+entraînement de zéro sur le jeu complet (8 600 exemples), qui intègre les familles corrigées et
+redevient le maillon 1. Chaque séance dérive un peu ; le recalage borne la dérive.
+
+**Le juge** de chaque maillon est la barre de non-oubli (plus haut) : `non_oubli.py`, contre les
+relevés de référence du modèle installé (`~/cassini-entrainement/reference-non-oubli/` : essais
+GPU, recettes d'Annecy et du gros projet). Le script de nuit
+`~/cassini-entrainement/nuit-5-54.sh <familles>` (hors dépôt) enchaîne les gardes du GPU, une
+séance depuis `ajuste-apres-5-49-b` (graine 1, 3 000 exemples, rappel 0,4), la copie dans
+`cassini-modeles/ajuste-continu-5-54-1` (non installé), les essais GPU, la recette d'Annecy, puis
+`non_oubli.py`, et écrit le verdict dans `nuit-5-54.etat`. Il n'installe rien.
+
+**Familles refusées au jeu ciblé** (`FOCUS_EXCLUDED`, `training/src/lib.rs`). Le jeu complet de la
+graine 1 ne copie aucune phrase de barre (`training/tests/recouvrement.rs`), mais une famille tirée
+seule bien plus souvent qu'au jeu complet parcourt davantage ses tournures. Le test tire donc
+chaque famille seule, à la graine 3, jusqu'à 1 800 exemples, et la soumet aux mêmes contrôles. Le
+premier relevé (2026-11-11) en trouve cinq qui engendrent une phrase de barre à un nombre ou une
+commune près : `filtre_numerique`, `pente`, `reprojection_couche`, `retrait_couche`,
+`carroyage_mgrs`. Le générateur (et la chaîne, avant le GPU) les refuse au jeu ciblé tant que
+leurs tournures ne sont pas reprises ; le test tient la liste exacte, dans les deux sens. Depuis le
+lot 2, la liste est vide (voir plus bas).
+
+Lot 1 (ce ticket) : la mécanique et le script, écrits, non lancés. Le contenu du jeu de la
+première séance (familles neuves ou renforcées) est le lot 2 ; la première vraie séance l'attend
+(D4). L'essai court `--depuis … --familles … --pas-max 2`, qui vérifie sur le GPU que le GGUF
+fusionné se charge dans le noyau et que le rapport porte deux maillons, attend l'accord du
+propriétaire.
+
+## Familles de la première séance continue (5.54, lot 2, 2026-11-11)
+
+Le contenu du jeu ciblé de la première séance : les leçons de la remesure (« Seuils au niveau du
+modèle installé », plus haut) deviennent des familles, et les cinq familles refusées au jeu ciblé
+sont réparées.
+
+**Réparations.** Chaque famille de `FOCUS_EXCLUDED`, tirée seule à la graine 3 jusqu'à 1 800
+exemples, rendait une phrase de barre à un nombre ou une commune près. La phrase **engendrée** a été
+regardée (jamais celle de la barre), et sa tournure reprise, sans tirage de plus : « Montre-moi sur
+la carte les … de plus de N m² » (`filtre_numerique`), « … calculées en degrés » après
+« donne-moi les pentes » (`pente`), « Fais passer la couche des … en … » (`reprojection_couche`),
+« Enlève-moi les … de la carte » (`retrait_couche`), « Sors-moi la carte en PDF » devant un
+carroyage MGRS (`carroyage_mgrs`). `FOCUS_EXCLUDED` est vide (`pub const FOCUS_EXCLUDED: &[&str] =
+&[];`, la forme que lit `pipeline.py`) ; la garde par famille de `recouvrement.rs` reste le contrôle
+des familles futures. Au jeu complet, le tirage déplacé par les familles neuves a fait sortir une
+tournure de `conversion_coordonnees` (« Convertis le point … en coordonnées UTM », emballée par un
+gros projet) : elle devient « Convertis-moi ».
+
+**Familles neuves ou renforcées** (table des familles, plus haut), une par leçon, chacune avec son
+test :
+
+| Leçon de la remesure | Famille | Test |
+|---|---|---|
+| `page_size` perdu à côté de `scale` | `export_pdf_echelle_format` | `an_export_at_a_scale_keeps_the_written_page_and_orientation` |
+| refus des fonctions absentes | `refus_fonction_absente` | `what_is_refused_as_absent_is_absent_from_the_registry` (mots-clés de `ABSENT_FUNCTIONS` absents des identifiants du registre) |
+| options écrites | `options_ecrites` | `a_written_option_is_in_the_plan_and_an_unwritten_one_is_not` |
+| champ de vision cumulé | `champ_de_vision_cumule` (poids 4 → 6, deux à six points, décomptes) | `a_count_of_the_points_seeing_each_place_is_a_cumulative_viewshed_of_two_to_six_points` |
+| point Lambert-93 vers `geo.*` et `coord.convert` | `point_lambert_vers_geo` | `a_lambert_point_reaches_a_geo_command_through_a_visible_transform` (toutes familles : aucun point de `geo.*` ou de `coord.convert` hors du WGS84 et de l'UTM) |
+| nord écrit avant l'est | `ordre_nord_est` | `north_before_east_is_read_by_its_labels` |
+
+Le recoupement en Lambert-93 vise un vrai point au nord des deux stations, comme `recoupement` :
+les stations sont ramenées en latitude et longitude par l'inverse de la projection Lambert-93
+(`lambert93_to_lat_lon`, constantes publiées de l'IGN, testée sur l'origine de la projection) ; le
+plan, lui, reprojette par `data.transform_point`.
+
+**Liste de la séance.** `FIRST_SESSION_FAMILIES` (`training/src/lib.rs`), recopiée dans la commande de la séance plus bas (le test `the_session_command_of_the_doc_names_the_first_session_families` tient la copie égale) : les six
+familles neuves ou renforcées, sans les cinq réparées (le rappel tient le reste). Le test
+`the_first_session_families_give_the_whole_focused_set_without_a_bar_sentence` vérifie qu'elle
+rend 1 800 exemples à la graine 3, chacune présente, sans aucune phrase de barre.
+
+**Poids.** Familles neuves 4 + 6 + 5 + 4 + 4 et cumulé + 2 ; `gros_projet` 128 → 148 et
+`redemande` 58 → 76 pour garder les gros projets vers 25 % et les redemandes au-dessus de 4,5 % ;
+`carroyage_utm_projet` 4 → 6, le tirage déplacé laissant moins d'une question pour deux recopies
+(`the_default_set_never_reprojects_a_metric_layer_unasked_and_asks_for_a_missing_utm_zone`).
+
+**Jeu graine 1** (8 600 exemples, aucun écarté hors `gros_projet`) :
+
+| | Avant (`0043f36`) | Après |
+|---|---|---|
+| gros projets | 2 106 (24,5 %) | 2 219 (25,8 %) |
+| redemandes | 349 (4,06 %) | 450 (5,23 %) |
+| refus | 502 | 518 (un tiers de `refus_fonction_absente` sont des presque refus, des plans) |
+| plans Lambert-93 → 4326 puis `geo.distance_azimuth` | 29 | 56 |
+| … puis `geo.destination_point` / `geo.bearing_intersection` | 0 / 0 | 19 / 17 |
+| … puis `coord.convert` | 33 | 77 |
+| plans qui portent `curvature` | 0 | 43 |
+| exports qui portent `scale` et un format ou une orientation | 0 | 89 |
+| plans `terrain.viewshed_cumulative` | 100 | 147 |
+
+**Recette.** Le script Windows de la recette QGIS, hors dépôt :
+`outils-cassini\scripts\recette-5-54.ps1`, à côté du dépôt (`-Models`,
+`-Project`, `-Phrases`, `-Out`) ; il pose `CASSINI_CORE` sur le noyau installé
+(`%LOCALAPPDATA%\Cassini\bin\cassini.exe`), `CASSINI_MODELS` sur le dossier donné et
+`QT_QPA_PLATFORM=windows`, lance `qgis-plugin/tests/probe_recette.py` par le Python de QGIS 3.44.15
+depuis `CASSINI-nuit`, et écrit la sortie puis `CODE <code>` dans `-Out`. `RECETTE_PS1` de
+`nuit-5-54.sh` le prend par défaut.
+
+**Commande de la séance** (après fusion en avance rapide sur `main`, `REV` le commit du worktree,
+propre ; accord du propriétaire, GPU libre) :
+
+```
+git -C ".../CASSINI-nuit" checkout -q --detach REV && WT=~/cassini-worktrees/5-54-lot-2 \
+  bash ~/cassini-entrainement/nuit-5-54.sh export_pdf_echelle_format,refus_fonction_absente,options_ecrites,champ_de_vision_cumule,point_lambert_vers_geo,ordre_nord_est
+```
+
+Écrite, pas lancée : la séance attend la revue et l'accord du propriétaire.
+
+## Séance 2 (5.54, 2026-11-12)
+
+La séance 1 (`ajuste-continu-5-54-1`, depuis B, `FIRST_SESSION_FAMILIES`, rappel 0,4 tiré du début
+du jeu graine 1) gagne sur les barres élargies, mais la barre de non-oubli la refuse : `ecart_reel`
+39 → 35/40, recoupement 2/3 → 0/3. Les causes relevées :
+
+- **refus devenus réflexes** : un dégradé selon un champ numérique, les modèles d'IA du poste, le
+  chemin de moindre coût entre deux points, le décompte par zone avec le nom, « en 5 classes »
+  devenaient des refus ;
+- **l'« aimant » du champ de vision** : environ 600 exemples de champ de vision contre 8 de ligne de
+  vue au jeu de la séance ;
+- **`data.transform_point` vers 4326** posé sur des points déjà en WGS84 ou en UTM (recoupement) ;
+- **oubli des petites familles** du rappel : le début du jeu graine 1 n'en tient que quelques-unes
+  (sur 1 500 : 4 recoupements, 4 reclassements, 13 lignes de vue).
+
+**Familles** (`training/src/families.rs`), chacune avec son test :
+
+| Cause | Changement | Test |
+|---|---|---|
+| refus réflexes | `refus_fonction_absente` poids 6 → 3, un presque refus sur deux (un sur trois avant) ; quatre voisins neufs : chemin de moindre coût entre deux points écrits (`terrain.least_cost_path`), dégradé dit par d'autres verbes, le nombre de classes seul une fois sur deux (`map.graduated_style` et `class_count`), décompte par zone avec le nom (`analysis.zonal_statistics` et `label_field`, inventaire et leurres de `decompte_par_zone`, même élision, `de_plural`), questions sur le poste (`model.list`, `system.about` : verbe, objet et ordre tirés, Cassini nommé, autres tournures que celles de `description`) | `what_is_refused_as_absent_is_absent_from_the_registry` |
+| un refus nomme une fonction absente | les refus écrits en clair dans `refus` deviennent des constantes `NO_*` (les deux raisons de suppression d'entités fusionnées en une) ; `KNOWN_REFUSALS` les liste toutes (32), chacune avec ses mots-clés absents des identifiants du registre (`ABSENT_FUNCTIONS`, `OTHER_REFUSALS`) | `every_learned_refusal_is_a_known_constant_and_line_of_sight_wordings_never_a_viewshed` (mots-clés ↔ registre ; jeu graine 1 et jeu ciblé de la séance 2 : toute raison de refus est dans la liste, chacune apprise) |
+| aimant du champ de vision | `ligne_de_vue` : « voit-on B depuis A », « B est-il visible de A », « B se voit-il depuis A », hauteur de la cible une fois sur deux (une sur trois), et une fois sur trois l'observateur, la cible ou les deux écrits dans un autre système que le MNT (`foreign_point` : WGS84, autre fuseau UTM, Lambert-93 sur un MNT en UTM), recopiés, le noyau les convertit (11.22) ; `champ_de_vision_cumule` poids 6 → 3 ; `ordre_nord_est` : champ de vision d'un tirage sur trois à un sur six, une ligne de vue entre deux points étiquetés prend le sixième libéré | `a_line_of_sight_takes_two_written_points_and_only_the_written_heights` (chaque cas étranger vu), `north_before_east_is_read_by_its_labels` (les quatre commandes) ; « voit-on le/la/l' », « aperçoit-on », « est-il (elle) visible », « se voit-il (elle) » : jamais un champ de vision ni un refus, et la réciproque, `the_viewshed_families_never_use_a_line_of_sight_wording` |
+| `transform_point` sur un point WGS84 ou UTM | `recoupement` : trois tournures neuves (dont « le point visé à l'azimut … »), stations en WGS84 ou en UTM toujours recopiées ; `point_lambert_vers_geo`, branche du recoupement : la seconde station en UTM 31N une fois sur deux, recopiée, seule la station en Lambert-93 transformée (jamais une station en WGS84), et toujours en premier : le recoupement rend son point dans le système de la première station, le WGS84 | `a_bearing_intersection_copies_its_wgs84_or_utm_stations_and_transforms_only_lambert_93` (la première station est la transformée, d'un point en 2154 vers 4326) |
+| « en 5 classes » refusé | `options_ecrites` : un dégradé qui n'écrit que le nombre de classes (au moins une option, au lieu de deux) | `a_written_option_is_in_the_plan_and_an_unwritten_one_is_not` (une seule option : le nombre de classes, ni méthode ni dégradé) |
+
+Les poids globaux de `ligne_de_vue` (4) et de `recoupement` (3) ne baissent pas : ils les
+retireraient du jeu complet, contre la cause d'oubli. `carroyage_utm_projet` passe de 6 à 9 : le
+tirage déplacé laissait 35 questions du fuseau pour 71 recopies (36 pour 76 au poids 8)
+(`the_default_set_never_reprojects_a_metric_layer_unasked_and_asks_for_a_missing_utm_zone`). Un
+test d'étiquettes acceptait « latitude et longitude », pas « la latitude et la longitude », que le
+tirage déplacé fait sortir : il les accepte toutes deux.
+
+**Rappel stratifié** (`stratified_recall`, `training/src/lib.rs`). Le rappel n'est plus le début du
+jeu graine 1 : il est fait d'exemples du jeu graine 1 **complet** (`generate(1, 8600)`, ce que
+`recouvrement.rs` garde déjà), au moins `RECALL_FLOOR` = 15 de chaque famille (ou tous ceux du jeu
+complet, s'il en a moins), le reste au poids réel des familles dans le jeu complet (rejets de
+`gros_projet` compris). Le quota de la famille `f`, qui a `n_f` exemples au jeu complet, est
+`q_f = min(n_f, max(min(15, n_f), ⌊λ·n_f⌋))`, λ le plus grand tel que Σ q_f ≤ le compte demandé ;
+le reliquat se comble par les premiers exemples non pris. Le fichier écrit le plancher d'abord (les
+15 premiers de chaque famille, dans l'ordre du jeu complet), puis le surplus : la marge de 60 que
+`session_mix` coupe ne mord que le surplus. L'entraînement mélange les exemples, l'ordre est sans
+effet sur lui. 15 plutôt que 20 : à 20, les gros projets tombaient vers 5 % du rappel.
+
+```
+cargo run -p cassini-training --release -- --format chat --seed 1 --count 1560 --rappel-stratifie 15 --out rappel.jsonl
+```
+
+Une autre graine que 1, `--familles`, un `--count` au-delà de 8 600 ou un plancher nul : rien n'est
+écrit (code 2) ; un rappel qui reprendrait une phrase de barre non plus (code 3, `barres::copies`).
+À côté du rappel, `rappel.jsonl.familles.json` donne la famille de chaque ligne et le plancher de
+chaque famille, `min(15, n_f)`. La chaîne (`pipeline.py`) :
+
+- lit `RECALL_FLOOR` et `RECALL_VERSION` dans `training/src/lib.rs` et passe toujours
+  `--rappel-stratifie 15` au rappel d'une séance (un seul chemin, pas d'option) ;
+- refuse avant le GPU un rappel plus court que 15 × le nombre de familles ;
+- après l'écart des exemples trop longs et la coupe de la marge, revérifie que le rappel a son
+  compte et que chaque famille garde son plancher (sinon arrêt, la famille nommée) ;
+- écrit `rappel_plancher` et `rappel_version` dans le maillon de la lignée, et refuse en reprise une
+  séance commencée avec l'ancien rappel (maillon sans `rappel_plancher`) ou une autre version de
+  l'algorithme. Le plancher de la part du rappel ne change pas
+(au moins 0,4) ; la séance 2 la porte à 0,5 (`--part-rappel 0.5`) : 3 000 exemples, 1 500 de rappel
+(1 560 tirés) et 1 500 ciblés, sous `FOCUS_COUNT`.
+
+**Comptes** (jeu graine 1, 8 600 exemples ; rappel de 1 500, avant : début du jeu graine 1 ; après :
+stratifié, 1 560 tirés) :
+
+| | Avant (`4fc3fe3`) | Après |
+|---|---|---|
+| gros projets (famille `gros_projet`) | 2 219 (25,8 %) | 2 124 (24,7 %) |
+| exemples de redemande (avec `retry`, gros projets compris) | 450 (5,23 %) | 428 (4,98 %) |
+| dont famille `redemande` seule (hors gros projets) | 330 | 337 |
+| refus | 518 | 464 |
+| exemples de `refus_fonction_absente` | 103 | 56 |
+| plans `terrain.line_of_sight` | 105 | 145 |
+| plans `terrain.viewshed` | 274 | 206 |
+| plans `terrain.viewshed_cumulative` | 147 | 79 |
+| plans `geo.bearing_intersection` (dont avec `data.transform_point`) | 65 (17) | 58 (10) |
+| dégradés au seul nombre de classes | 5 | 26 |
+| rappel : plus petite famille | 4 (`recoupement`, `reclassement_raster`) | 15 (toutes) |
+| rappel : `ligne_de_vue`, `recoupement` | 13, 4 | 15, 15 |
+| rappel : gros projets, sur les 1 500 entraînés | 407 (27,1 %) | 318 (21,2 %) |
+
+Les deux nombres de redemandes ne comptent pas la même chose : 330 (plan de la séance) est la
+famille `redemande` seule ; 450 (lot 2, plus haut) compte tous les exemples qui portent une
+redemande, y compris celles qu'un gros projet emballe. Les gros projets baissent un peu (2 219 →
+2 124) : le tirage déplacé par les poids neufs fait écarter un peu plus d'exemples emballés (124
+contre 116) et en tire moins ; ils restent dans la fourchette de 23 à 27 %.
+
+**Liste de la séance.** `SECOND_SESSION_FAMILIES` (`training/src/lib.rs`) : les six de la séance 1
+(la séance repart de B, ses gains se réapprennent), plus `ligne_de_vue` et `recoupement`. Dans la
+liste (poids 30), elles pèsent 13 % et 10 %. Le test
+`the_second_session_families_give_the_whole_focused_set_without_a_bar_sentence` vérifie qu'elle rend
+1 800 exemples à la graine 3, chacune présente, sans aucune phrase de barre ; le test
+`the_session_command_of_the_doc_names_the_second_session_families` tient égale la commande
+ci-dessous.
+
+**Script de nuit.** `nuit-5-54.sh` (hors dépôt) prend `NOM` (sortie, `ajuste-continu-5-54-1` par
+défaut), `MES` (relevés, `5-54-mesures` par défaut) et `PART_RAPPEL` (0,4 par défaut), passé à
+`--part-rappel`. L'état s'écrit dans `nuit-<NOM>.etat` (`nuit-5-54.etat` pour la séance 1) : une
+séance ne vide jamais l'état d'une autre.
+
+**Commande de la séance** (après fusion en avance rapide sur `main`, sans push, `REV` le commit du
+worktree, propre ; GPU libre, `ps` vérifié) :
+
+```
+git -C ".../CASSINI-nuit" checkout -q --detach REV && WT=~/cassini-worktrees/5-54-seance-2 \
+  NOM=ajuste-continu-5-54-2 MES=~/cassini-entrainement/5-54-2-mesures PART_RAPPEL=0.5 \
+  bash ~/cassini-entrainement/nuit-5-54.sh export_pdf_echelle_format,refus_fonction_absente,options_ecrites,champ_de_vision_cumule,point_lambert_vers_geo,ordre_nord_est,ligne_de_vue,recoupement
+```
+
+**Installation** : seulement si `nuit-ajuste-continu-5-54-2.etat` (l'état de la séance 2 ; celui de
+la séance 1, `nuit-5-54.etat`, reste lisible) dit « VERDICT non-oubli : installable » et que
+`[annecy] SCORE` vaut au moins 16/20 ; B reste installé à côté. Le juge est `non_oubli.py`, contre
+`reference-non-oubli/`.
+
+Écrite, pas lancée : la séance attend la revue et l'accord du propriétaire.
+
+## Séance 3 (5.54, 2026-11-12)
+
+La séance 2 (`ajuste-continu-5-54-2`, depuis B, `SECOND_SESSION_FAMILIES`, rappel stratifié 0,5)
+gagne partout, mais la barre de non-oubli la refuse : `ecart_reel` 39 → 35/40 et `question_reel`
+45 → 43/47. Les causes relevées :
+
+- **plans d'urbanisme à 4 étapes rendus en 3**, une étape de trop, un opérateur faux (`<` pour
+  `<=`, `=` pour `!=`), un refus au lieu d'une question ;
+- **plan au lieu d'une question** quand la valeur demandée manque aux valeurs connues d'un champ, ou
+  quand le champ manque ;
+- **dilution** : le jeu ciblé de la séance 2 n'avait que 6 plans à 4 étapes sur 1 800 et aucune
+  question ; le jeu graine 1, aucune question de valeur absente (aucune famille ne l'apprenait).
+
+La séance 3 repart de B et garde tout l'acquis de la séance 2 (familles, rappel stratifié à 0,5,
+refus rééquilibrés).
+
+**Familles** (`training/src/families.rs`), chacune avec son test :
+
+| Cause | Changement | Test |
+|---|---|---|
+| valeur absente : plan au lieu d'une question | famille neuve `question_valeur_absente` (poids 5) : une couche à champ texte dont toutes les valeurs sont montrées (clé `values`, au plus `MAX_VALUES` = 10), la valeur demandée tirée des valeurs du thème hors des valeurs listées (une listée retirée si toutes le sont ; jamais une valeur dont la forme normalisée contient une valeur listée ou y est contenue) ; trois branches : le filtre seul, la cible filtrée à une distance d'une référence (PDF une fois sur quatre), le zonage « en zone {code} » sans aucune valeur de la catégorie (`in_zone_category` : « zone A » demandée à côté de `AUc` est absente). Deux fois sur trois la question (`missing_value_question` : la couche, le champ, la valeur telle que la demande l'écrit et les valeurs listées, quatre tournures), une fois sur trois la même phrase avec la valeur listée, qui rend le plan. Une question n'est jamais tirée quand une autre couche ou un autre champ du rendu (cible, référence, distraction, champ de nom) porte la valeur, ses formes d'adjectif comprises. Une fois sur six, un contraste : la valeur cherchée dans un champ de nom, montré sans clé `values`, rend le plan avec la valeur écrite (`contains`, `begins_with`), jamais une question | `a_missing_value_asks_with_the_known_values_and_a_listed_one_is_a_plan` (question ⇔ valeur hors des valeurs listées, valeur citée écrite dans la demande et listée nulle part ailleurs, plan ⇔ valeur listée, opérateur du zonage d'après les valeurs montrées, chaque branche vue, champ sans `values` → plan, aucun refus) |
+| champ absent dans un plan long | `question_champ_absent` poids 5 → 10 (la question courte d'avant garde la moitié, soit son poids de 5) ; une fois sur quatre, le champ manque à une demande à plusieurs conditions (cible filtrée et distance, ou parcelles constructibles et distance, PDF une fois sur quatre) → question ; une fois sur quatre, la même demande avec le champ présent → le plan (contraste) ; champ absent, aucun autre champ de la couche ne liste la valeur écrite | `a_missing_field_in_a_long_request_asks_and_a_present_one_plans` |
+| opérateur faux | `numeric` : les quatre opérateurs à parts égales, deux tirages sur huit chacun (avant : `gt` 3/7, `lt` 2/7, `gte` et `lte` 1/7) ; `filtered_target` : la différence (`ne`) à deux tirages sur huit (un sur sept) | `several_conditions_vary_operators_and_lose_no_step` (les six opérateurs vus ; `gt`, `lt`, `gte`, `lte` chacun entre 20 et 30 % des sélections numériques de `conditions_multiples` ; `ne` au-dessus de 33 % des `eq` et `ne` de `filtered_target`, 25 % avant) |
+| étape perdue ou de trop | aucun changement de forme : `conditions_multiples` et `constructible` portent déjà les plans à 3, 4, 5 et 6 étapes ; ils entrent au jeu ciblé | `a_long_plan_has_one_step_per_written_condition_and_no_more` (une sélection par condition d'attribut écrite, comptée par le générateur là où il écrit la tournure (`written_condition`, sans tirage) ; un tampon par distance écrite, le PDF si et seulement si la demande le nomme, chaque étape sert à une suivante, longueurs 2 à 6 vues) |
+| question coupée dans un gros projet | `validate` écarte (rejet compté) un exemple dont la question cite un champ à valeurs que l'inventaire montré ne porte plus avec toutes ses valeurs (`Example::listed`, réécrit par `big` avec les identifiants courts) : la vue triée d'un gros projet peut ôter un champ à valeurs que la demande ne nomme pas | `a_missing_value_question_in_a_big_project_keeps_its_field_or_is_rejected` (gardé : le champ montré avec toutes ses valeurs ; le champ ôté : écarté) ; `no_family_produces_rejected_examples` admet ce motif |
+
+Le refus appris reste une constante de `KNOWN_REFUSALS` au jeu ciblé de la séance 3 aussi
+(`every_learned_refusal_is_a_known_constant_and_line_of_sight_wordings_never_a_viewshed`).
+
+**Poids.** `question_valeur_absente` 5, `question_champ_absent` 5 → 10 : total 570 → 580, `gros_projet`
+(148) et `redemande` (76) inchangés.
+
+**Comptes** (jeu graine 1, 8 600 exemples ; jeu ciblé, graine 3, 1 800 exemples, séance 2 avant,
+séance 3 après ; rappel stratifié, 1 560 tirés, compté sur les 1 500 premiers) :
+
+| | Avant (`51370b1`) | Après |
+|---|---|---|
+| graine 1 : gros projets (famille `gros_projet`) | 2 124 (24,7 %) | 2 064 (24,0 %) |
+| graine 1 : exemples de redemande (avec `retry`) | 428 (4,98 %) | 451 (5,24 %) |
+| graine 1 : plans à 4 étapes (dont `conditions_multiples`, `constructible`, `gros_projet`) | 244 (77, 71, 41) | 264 (66, 77, 51) |
+| graine 1 : plans à 5 étapes | 187 | 185 |
+| graine 1 : questions (famille `question_champ_absent`, `question_valeur_absente`) | 887 (91, 0) | 990 (124, 56) |
+| graine 1 : refus | 464 | 418 |
+| graine 1 : sélections `eq`, `ne`, `gt`, `lt`, `gte`, `lte` | 1 681, 145, 117, 72, 51, 44 | 1 704, 122, 72, 64, 81, 71 |
+| jeu ciblé : plans à 4 étapes (toutes familles, PDF compris) | 6 | 231 (12,8 %) |
+| jeu ciblé : plans à 5 étapes | 0 | 155 |
+| jeu ciblé : questions (de valeur absente, de champ absent) | 0 | 266 (81, 185), 14,8 % |
+| jeu ciblé : refus | 104 | 38 |
+| rappel : plans à 4 étapes, à 5 étapes | 44, 26 | 38, 28 |
+| rappel : `question_champ_absent`, `question_valeur_absente` | 15, — | 26, 15 |
+| rappel : `conditions_multiples`, `constructible` | 38, 22 | 33, 22 |
+| rappel : plus petite famille | 15 | 15 |
+
+Les écarts admis. Au jeu ciblé, les refus passent de 104 à 38 : les cinq familles neuves de la liste
+n'en apprennent pas, et `refus_fonction_absente` y pèse moins (3 sur 71 au lieu de 3 sur 30) ; le
+jeu graine 1 et le rappel gardent chaque refus connu (`every_learned_refusal…`). Au rappel, les plans
+à 4 étapes passent de 44 à 38 : le rappel suit les poids réels du jeu graine 1, que les familles
+neuves diluent, et le jeu ciblé en apporte 231. Au jeu graine 1, `gt` tombe de 117 à 72, au niveau
+de `lt`, `gte` et `lte` : c'est voulu (parts égales, l'a priori 3:1 de `gt` sur `lte` étant la
+cause), et `ne` (122) reste au niveau d'avant. Les rejets de `gros_projet` passent de 124 à 112.
+
+**Liste de la séance.** `THIRD_SESSION_FAMILIES` (`training/src/lib.rs`) : les huit de la séance 2,
+plus `conditions_multiples`, `constructible`, `distance_reference_filtree` (le contraste à trois
+étapes, « pas d'étape de trop »), `question_champ_absent` et `question_valeur_absente`. Poids de la
+liste : 71, dont 42 % aux huit de la séance 2. Le test
+`the_third_session_families_give_the_whole_focused_set_without_a_bar_sentence` vérifie qu'elle
+commence par la liste de la séance 2, rend 1 800 exemples à la graine 3, chacune présente, sans
+aucune phrase de barre, avec au moins 8 % de plans à 4 étapes et 10 % de questions ; le test
+`the_session_command_of_the_doc_names_the_third_session_families` tient égale la commande
+ci-dessous.
+
+**Commande de la séance** (après fusion en avance rapide sur `main`, sans push, `REV` le commit du
+worktree, propre ; GPU libre, `ps` vérifié) :
+
+```
+git -C "/mnt/c/Users/kevin/Downloads/Projet code/CASSINI-nuit" checkout -q --detach REV && WT=~/cassini-worktrees/5-54-seance-3 NOM=ajuste-continu-5-54-3 MES=~/cassini-entrainement/5-54-3-mesures PART_RAPPEL=0.5 setsid nohup bash ~/cassini-entrainement/nuit-5-54.sh export_pdf_echelle_format,refus_fonction_absente,options_ecrites,champ_de_vision_cumule,point_lambert_vers_geo,ordre_nord_est,ligne_de_vue,recoupement,conditions_multiples,constructible,distance_reference_filtree,question_champ_absent,question_valeur_absente
+```
+
+**Installation** : seulement si `nuit-ajuste-continu-5-54-3.etat` dit « VERDICT non-oubli :
+installable » et que `[annecy] SCORE` vaut au moins 16/20 ; B reste installé à côté. Le juge est
+`non_oubli.py`, contre `reference-non-oubli/`.
+
+Écrite, pas lancée : la séance attend la revue et l'accord du propriétaire.
+
+## Formulations de terrain (ticket 5.53, livrable 4, 2026-11-11)
+
+Les familles de géométrie et de terrain n'écrivent plus leurs tournures en phrases entières : chaque
+notion est une **liste de synonymes nommée** de `training/src/families.rs` (forme de `TOPO_WORDS` :
+la tournure sans le verbe), assemblée avec une liste de verbes. Règle : **une tournure, un
+paramètre** — chaque liste est liée à une commande et, pour les nords, à la valeur de `north`.
+Quelques tournures d'avant (« Recoupe la visée … avec celle … », « Quel gisement faut-il prendre
+… », « Montre la zone vue depuis … ») restent des branches à côté des listes.
+
+- Nords : `TRUE_NORTH_WORDS` et `TRUE_NORTH_HEADINGS` (« l'azimut vrai », « à {az} par rapport au
+  nord géographique » → `north` absent, D1), `GRID_NORTH_WORDS` et `GRID_NORTH_HEADINGS` (« le
+  gisement », « l'azimut en nord UTM », « par rapport au quadrillage UTM » → `grid`),
+  `MAGNETIC_NORTH_WORDS` et `MAGNETIC_NORTH_HEADINGS` (« l'azimut à la boussole », « le cap
+  magnétique » → `magnetic`) ; les listes en `_WORDS` servent `geo.distance_azimuth`, celles en
+  `_HEADINGS` (l'azimut `{az}` écrit dedans) `geo.destination_point`. Une demande ne parle que
+  d'un nord ; « l'azimut » ou « la direction » nus valent le nord vrai.
+- Mesures et verbes : `DISTANCE_WORDS` (« à vol d'oiseau », « géodésique », « en ligne droite »),
+  `DISTANCE_QUESTIONS` (« combien de kilomètres séparent A de B », « quelle distance sépare A de
+  B »), `MEASURE_VERBS`, `DESTINATION_VERBS` (« reporte un point », « projette », « depuis …,
+  avance de », « je pars de … et je marche …. Où suis-je »), `INTERSECTION_WORDS`
+  (`geo.bearing_intersection`, nord vrai seul : « le recoupement », « l'intersection des relèvements
+  pris depuis »).
+- Terrain : `SLOPE_WORDS` (pente, inclinaison, déclivité), `ASPECT_WORDS` (« les versants du MNT, à
+  l'adret et à l'ubac » compris), `HILLSHADE_WORDS` (estompage, relief ombré, avec leurs verbes),
+  `PEAK_WORDS` (points culminants, dominants), `VIEWSHED_WORDS` (bassin visuel),
+  `LINE_OF_SIGHT_WORDS` (intervisibilité, vue directe), `CUMULATIVE_VIEWSHED_WORDS`, assemblées par
+  `DEM_PRODUCT_VERBS` ou des verbes propres à la famille. Les réglages (unité, hauteurs, rayon,
+  soleil, nombre) restent des clauses à part.
+- Conversion et PDF complétés : degrés décimaux, coordonnées GPS (WGS84), coordonnées MGRS,
+  référence USNG (`convert_words`), « en RGF93 / Lambert-93 » (`TO_LAMBERT`), « quadrillage
+  kilométrique UTM », « quadrillage MGRS », « méridiens et parallèles » (grilles du PDF).
+
+**Tournures ambiguës** (`AMBIGUOUS_TERMS`, jamais engendrées, lues mot à mot) : « cap » sans
+« magnétique », occurrence par occurrence ; « gisement » avec « Lambert » sous toutes ses formes,
+« nord Lambert » (le gisement du noyau est UTM, D2) ; « coordonnées kilométriques » sans système
+nommé ; degrés, minutes et secondes (« DMS », « sexagésimal ») ; « relèvement », « recoupement » ou
+« recoupe » avec « boussole » (D4) ; « où suis-je » avec une visée, un repère ou un relèvement
+(relèvement inverse, D5 ; permis au bout d'un report de point) ; « crêtes », « ligne de crête » et
+« points cotés » pour les sommets ; « triangulation ». Les cas laissés au noyau (gisement
+Lambert-93, déclinaison en un point, `north` sur l'intersection, relèvement inverse) sont en
+`deferred-work`.
+
+Cinq tests les tiennent : `every_wording_of_every_list_is_generated` (chaque tournure tirée au
+moins une fois, entière et bornée, dans la branche de sa commande),
+`a_wording_is_recognised_only_as_drawn` (le contrôle lui-même),
+`a_request_speaks_of_one_north_and_its_plan_carries_it` (un seul nord par demande, son `north` au
+plan), `every_ambiguous_term_is_caught_and_its_neighbours_are_not` (chaque entrée de
+`AMBIGUOUS_TERMS` épinglée) et
+`the_default_set_has_every_wording_list_one_north_per_request_and_no_ambiguous_term` (graines 1 à
+5 : aucune tournure ambiguë, aucun mélange de nords ; graine par défaut : chaque liste présente
+dans les demandes de sa commande). Poids, graine et `DEFAULT_COUNT` inchangés ; le jeu engendré
+change (349 redemandes sur 8 600 à la graine 1, 4,06 %, au bas de la fourchette de 4 à 7 %), et
+le modèle ne l'apprend qu'au prochain entraînement.

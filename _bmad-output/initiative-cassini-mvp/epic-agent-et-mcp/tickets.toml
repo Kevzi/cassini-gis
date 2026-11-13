@@ -764,3 +764,245 @@ covers = []
 after = []
 hitl = false
 risk = "high"
+
+[[entry]]
+id = 45
+type = "story"
+title = "Recette QGIS d'Annecy portee a 20 phrases (barre 16/20)"
+description = "La recette QGIS reelle d'Annecy passe de 5 a 20 phrases, ecrites a la main et variees : donnees et projet, analyses vectorielles, terrain, coordonnees, mise en forme aux couleurs IGN et CNIG, export PDF, et au moins une demande ambigue qui doit donner une question. Les 20 phrases s'enchainent dans une seule session QGIS sur le projet d'Annecy, avec le modele charge a part (CASSINI_MODELS), comme les essais GPU ; la recette compte les plans executes et rejoue le journal. La recette et ses phrases sont versionnees dans le depot (sonde sous le Python de QGIS, comme les autres sondes), les donnees d'Annecy restant hors du depot. La barre officielle devient au moins 16 plans executes sur 20 (80 %) et remplace la barre de 4 sur 5 dans la doc d'entrainement."
+verify = "Avec le modele installe, la sonde joue les 20 phrases dans une session QGIS, ecrit un score « N/20 » (plan execute et conforme au plan attendu) et la liste des rates, et le rejeu du journal est identique ; une phrase ambigue comptee juste seulement si le modele pose une question ; le garde de recouvrement echoue si l'une des 20 phrases entre dans le generateur ; la doc d'entrainement porte la barre 16/20."
+covers = ["CAP-4"]
+after = []
+hitl = true
+risk = "medium"
+notes = [
+  "Decision: 2026-11-10 — proprietaire : recette d'Annecy a 20 phrases, barre >= 16/20, seuil de viabilite de 80 %.",
+  "hitl : le proprietaire relit les 20 phrases avant la premiere mesure (formulations d'un vrai utilisateur).",
+  "Les phrases ne sont jamais copiees dans le generateur d'entrainement ; elles rejoignent les phrases tenues a l'ecart du garde de recouvrement.",
+  "Origine : la recette actuelle a 5 phrases vit hors du depot (script de nuit sous %TEMP%) ; ses 5 phrases peuvent etre reprises parmi les 20.",
+  "Decision: 2026-11-10 — proprietaire : une phrase compte juste seulement si le plan s'execute ET est conforme au plan attendu, ecrit a la main pour chaque phrase (comme plan_reel) ; un plan qui s'execute mais fait autre chose compte rate.",
+]
+
+[[entry]]
+id = 46
+type = "story"
+title = "Vue triee de l'inventaire d'un gros projet : index reduit et couches detaillees par la demande"
+description = "Ajoute au noyau une fonction pure de (inventaire, demande, journal) qui rend la vue de l'inventaire montree au modele. Sous un seuil d'environ 9 000 caracteres pour la vue complete des couches de l'utilisateur, la vue reste exactement celle d'aujourd'hui. Au-dessus, elle a deux parties : `index`, toutes les couches dans l'ordre stable de 5.19, en forme reduite {layer_id, name, geometry}, identique d'une demande a l'autre ; et `layers`, les couches en detail dans la forme apprise, rangees dans l'ordre stable : par priorite les couches que la demande designe, les resultats du dernier plan execute (sans valeurs, 5.22), les couches citees par ce plan (lues dans le journal), puis les rasters, jusqu'au budget des details (14 000 caracteres moins l'index). La correspondance demande-couche normalise (minuscules, accents otes par une table ecrite a la main, decoupe sur tout ce qui n'est ni lettre ni chiffre, petite liste de mots vides, pluriel simple : `s` et `x` finals otes au-dela de 3 lettres, `eaux` donne `eau`) ; un mot de la demande d'au moins 3 lettres cherche dans le nom, le radical de l'identifiant et du fichier, puis les noms de champs, puis les valeurs ; une valeur de 1 ou 2 signes doit etre egale exactement, casse comprise. Priorite : nom, puis champ, puis valeur ; a egalite, l'ordre stable. Une couche detaillee garde au plus 30 champs ou 3 000 caracteres, choisis dans cet ordre : champs designes par la demande, champs texte a valeurs, champs numeriques, autres, dans l'ordre de QGIS a chaque rang. Quand deux couches se disputent un mot, les deux sont detaillees. La fonction n'est pas encore branchee a plan.propose."
+verify = "Tests du noyau sans modele : sous le seuil, vue identique a aujourd'hui, octet pour octet ; au-dessus, `gares` detaille `gare_sncf` ; une valeur `U` ne trouve que `U` ; une couche de 88 champs garde au plus 30 champs ou 3 000 caracteres ; l'index est identique pour deux phrases differentes ; l'inventaire du projet BD TOPO, fige en fixture synthetique de meme forme, tient au budget ; la vue est deterministe. La fonction n'est pas encore branchee a plan.propose."
+covers = ["CAP-4"]
+after = []
+hitl = false
+risk = "high"
+references = [
+  "change — _bmad-output/initiative-cassini-mvp/change-inventaire-des-gros-projets/change-inventaire-des-gros-projets.md, §3 points 1 a 6",
+  "architecture — _bmad-output/initiative-cassini-mvp/architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md, AD-23 (vue triee d'un gros projet)",
+]
+notes = [
+  "Decision: 2026-11-10 — proprietaire : forme reduite {layer_id, name, geometry}.",
+  "Decision: 2026-11-10 — proprietaire : seuil du tri environ 9 000 caracteres, couche detaillee plafonnee a 30 champs ou 3 000 caracteres, a revoir en 48 sur les mesures.",
+  "Decision: 2026-11-10 — proprietaire : la question entre couches proches est apprise par le modele (47), jamais ecrite dans le noyau ; le tri garantit seulement que les deux couches sont detaillees.",
+  "Mesure (2026-11-10, projet BD TOPO 74 + PLUi + MNT, 63 couches) : inventaire complet 84 463 caracteres ; forme reduite 5 699 caracteres ; troncon_de_route 6 411 caracteres, 2 947 pour ses 30 premiers champs. Les donnees restent hors du depot ; les tests n'utilisent qu'une fixture synthetique de meme forme.",
+  "Sans dependance nouvelle ; la regle est generique et ne sait rien de la BD TOPO.",
+  "Risque high : composition et cache (CLAUDE.md, relecture thorough) ; controle hors du ticket : la recette realiste de 50 et la non-regression d'Annecy 16/20.",
+]
+
+[[entry]]
+id = 47
+type = "story"
+title = "Generateur : gros projets de 20 a 60 couches rendus par la vue du noyau, et deux couches proches donnent une question"
+description = "Ajoute au generateur d'entrainement une famille « gros projet » de 20 a 60 couches, dont l'inventaire est rendu par la fonction de vue du noyau (46), ce qui garantit la forme, et une famille « deux couches proches », ou deux couches se disputent un mot de la demande et ou le plan attendu est une question. Les gros projets font environ 25 % du jeu. Construit sur la branche generateur-grands-inventaires une fois fusionnee : ses couches a 15-20 champs sont la matiere de la partie detaillee."
+verify = "training/tests/forme_inventaire.rs voit la cle `index` et la forme reduite ; training/tests/recouvrement.rs vert ; part des gros projets et longueurs de sequence consignees (mediane, maximum) ; aucune phrase des recettes ne vient au generateur."
+covers = ["CAP-4"]
+after = [46]
+hitl = false
+risk = "medium"
+references = [
+  "change — _bmad-output/initiative-cassini-mvp/change-inventaire-des-gros-projets/change-inventaire-des-gros-projets.md, §3 points 6 et 7",
+  "doc — docs/entrainement-du-modele.md",
+]
+notes = [
+  "Decision: 2026-11-10 — proprietaire : gros projets a environ 25 % du jeu ; repli si la memoire ne tient pas a la nouvelle MAX_LENGTH : gros projets plafonnes a 40 couches.",
+  "Decision: 2026-11-10 — proprietaire : la question entre couches proches est apprise par une famille du generateur, jamais un pansement dans le noyau (decision du 2026-10-22).",
+  "Attend la fusion de la branche story/generateur-grands-inventaires, qui n'a pas d'entree dans cet epic (plan : plan-generateur-grands-inventaires.md).",
+]
+
+[[entry]]
+id = 48
+type = "story"
+title = "Vue triee branchee a la composition, cache place a la fin de l'index, redemande elargie"
+description = "Fait passer tous les chemins de composition par la vue triee de 46 (canal, cli dont cli/src/main.rs, mesures). Les decoupes du cache du prompt et l'instantane d'ancrage se placent a la fin de l'index, qui reste un prefixe stable. Si le plan rendu fait porter un parametre de champ (champ, valeur, label_field) sur une couche montree reduite, le noyau recompose une seule fois, cette couche detaillee en plus ; un plan qui ne prend la couche reduite que comme geometrie est accepte tel quel. C'est une redemande, pas une reparation (AD-23) : le plan rendu passe par les memes schemas et le meme garde-fou. Le message de ai.prompt_too_long devient « le projet a trop de couches pour le modele ». Le seuil et les plafonds de 46 sont revus sur les mesures."
+verify = "Tests sans modele : un plan qui prend un champ d'une couche reduite declenche une seule redemande, avec la couche detaillee ; un plan qui ne prend que sa geometrie n'en declenche pas ; project.inventory du MCP reste inchange ; le rejeu est identique. Tous les chemins de composition passent par la vue (canal, cli dont cli/src/main.rs, mesures). Durees CPU et GPU consignees sur le gros projet ; ai.prompt_too_long rend son nouveau message."
+covers = ["CAP-4"]
+after = [46, 47]
+hitl = false
+risk = "high"
+references = [
+  "change — _bmad-output/initiative-cassini-mvp/change-inventaire-des-gros-projets/change-inventaire-des-gros-projets.md, §2 (5.18, 5.19) et §3 point 5",
+  "architecture — _bmad-output/initiative-cassini-mvp/architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md, AD-23 (vue triee d'un gros projet)",
+  "doc — docs/mesure-duree-par-phrase.md",
+]
+notes = [
+  "Decision: 2026-11-10 — proprietaire : duree par phrase < 30 s sous le seuil (inchange) ; gros projets < 60 s sur CPU et < 30 s sur GPU.",
+  "Decision: 2026-11-10 — proprietaire : seuil du tri et plafonds d'une couche detaillee revus ici sur les mesures.",
+  "Risque high : composition, cache et canal (CLAUDE.md, relecture thorough) ; controle hors du ticket : la recette realiste de 50 et la non-regression d'Annecy 16/20 et des jeux GPU.",
+]
+
+[[entry]]
+id = 49
+type = "story"
+title = "Re-entrainement groupe : grands inventaires, gros projets, couches proches"
+description = "Un seul re-entrainement, apres la branche generateur-grands-inventaires et la famille « gros projet » de 47 : MAX_LENGTH de l'entrainement porte a 4 608, apres une mesure de memoire d'une heure sur la carte de 8 Go ; puis deux graines la meme nuit, par la commande unique (meme base, meme methode, sur GPU). Le modele n'est installe que si les barres tiennent. Le proprietaire lance l'entrainement, qui occupe sa carte graphique."
+verify = "D'abord une mesure de memoire a la nouvelle MAX_LENGTH sur la carte de 8 Go (essai d'une heure). Puis deux graines la meme nuit. Barres : Annecy >= 16/20, plan_reel, question_reel et ecart_reel pas en baisse. Installe seulement si les barres tiennent."
+covers = ["CAP-4"]
+after = [47, 48, "10.28", "10.29", "10.30", "10.31"]
+hitl = true
+risk = "high"
+references = [
+  "doc — docs/entrainement-du-modele.md",
+]
+notes = [
+  "Decision: 2026-11-10 — proprietaire : MAX_LENGTH porte a 4 608 apres un essai d'une heure sur la carte de 8 Go, gros projets a environ 25 % du jeu ; repli : gros projets plafonnes a 40 couches.",
+  "Decision: 2026-11-10 — proprietaire : la branche generateur-grands-inventaires est fusionnee sans entrainement propre ; ses exemples (aucun au-dela de 1 773 jetons) rejoignent cet entrainement groupe.",
+  "Attend aussi la fusion de la branche story/generateur-grands-inventaires, qui n'a pas d'entree dans cet epic.",
+  "hitl : l'entrainement occupe la carte graphique du proprietaire ; il se lance quand le proprietaire le dit.",
+  "Risque high : le modele livre remplace celui du panneau ; controle hors du ticket : recette QGIS par le proprietaire (50, et Annecy 16/20).",
+]
+
+[[entry]]
+id = 50
+type = "story"
+title = "Recette realiste : projet BD TOPO 74 + PLUi + MNT, 20 phrases a plan attendu (barre 16/20)"
+description = "Recette QGIS reelle sur le projet d'environ 60 couches (BD TOPO 74 tous themes, PLUi d'Annecy, MNT), comme 5.45 : 20 phrases ecrites a la main, a plan attendu, enchainees dans une seule session QGIS avec le modele charge a part. La sonde est versionnee dans le depot, les donnees restent hors du depot. La demo filmee (epic de demo, entree 6) attend cette recette."
+verify = "Sonde versionnee comme 5.45 ; donnees hors depot ; 20 phrases enchainees dans une seule session QGIS, dont au moins deux avec couches proches (question attendue) et deux dont la couche n'est trouvee que par une valeur ou un synonyme ; score N/20 ; rejeu identique ; aucune ai.prompt_too_long ; durees par phrase (CPU et GPU) et duree du premier inventaire QGIS consignees."
+covers = ["CAP-4"]
+after = [49]
+hitl = true
+risk = "medium"
+references = [
+  "change — _bmad-output/initiative-cassini-mvp/change-inventaire-des-gros-projets/change-inventaire-des-gros-projets.md, §3 point 8 et §5",
+]
+notes = [
+  "Decision: 2026-11-10 — proprietaire : barre >= 16/20 (80 %), comme 5.45 ; une phrase compte juste seulement si son plan est le plan attendu.",
+  "Decision: 2026-11-10 — proprietaire : durees cibles des gros projets < 60 s sur CPU et < 30 s sur GPU.",
+  "hitl : le proprietaire relit les 20 phrases avant la premiere mesure.",
+  "Les phrases ne sont jamais copiees dans le generateur ; elles rejoignent les phrases tenues a l'ecart du garde de recouvrement.",
+]
+
+[[entry]]
+id = 51
+type = "story"
+title = "Empreinte du modele verifiee au lancement"
+description = "La declaration *.modele.json gagne model_sha256 et, s'il y a un adaptateur, adapter_sha256. Au premier chargement d'un modele dans la session, le noyau calcule les empreintes et refuse un fichier qui ne correspond pas par l'erreur models.tampered, qui nomme le fichier par son seul nom et dit de reinstaller par l'installeur ou de recopier depuis la porte hors ligne ; jamais de telechargement de reparation. Le resultat est garde en memoire pour la session, sans cache sur disque. Une declaration sans empreintes ou un GGUF seul sont acceptes et le panneau dit « empreinte du modele non declaree ». L'installeur en ligne et la chaine d'entrainement reproductible ecrivent les empreintes du manifeste des versions."
+verify = "Tests du noyau : une declaration juste charge ; un octet change dans le GGUF ou l'adaptateur rend models.tampered sans charger ; une declaration sans empreintes charge et le signale. Duree du lancement mesuree sur le poste i5 et consignee. L'installeur et la chaine d'entrainement ecrivent les empreintes du manifeste."
+covers = ["CAP-4", "CAP-13"]
+after = [50]
+hitl = false
+risk = "high"
+references = [
+  "change — _bmad-output/initiative-cassini-mvp/change-empreinte-du-modele-verifiee/change-empreinte-du-modele-verifiee.md, §2 a §5",
+  "architecture — _bmad-output/initiative-cassini-mvp/architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md, AD-15 (amendement du 2026-11-10) et AD-17",
+]
+notes = [
+  "Decision: 2026-11-10 — proprietaire : « ok pour 7, 8 et 9 » ; amendement approuve sous reserve de mesurer le temps de lancement sur l'i5 ; empreintes venues du seul manifeste des versions ; empreinte facultative pendant une version, obligatoire ensuite seulement si le proprietaire le confirme.",
+  "Decision: 2026-11-10 — proprietaire : « ok pour sha2 » ; crate sha2 (MIT OR Apache-2.0) acceptee dans le noyau.",
+  "Open question: si la mesure sur l'i5 gene, calcul de l'empreinte en parallele du chargement en memoire, la premiere phrase attendant la fin de la verification (change, §3).",
+  "Open question: la trace au journal (nom de la declaration et empreinte abregee sur chaque ligne de plan, non lue par le rejeu) est une option du change, §2.5.",
+  "Controle hors des criteres : relecture a plusieurs lentilles (thorough), risque high sur le chargement du modele.",
+]
+
+[[entry]]
+id = 52
+type = "story"
+title = "Grammaire limitee aux commandes connues du modele"
+description = "La declaration du modele (*.modele.json) nomme les commandes ajoutees qu'il connait. La grammaire du modele local n'inclut une commande ajoutee que si sa declaration la nomme ; sinon elle en est exclue et le modele ne peut pas l'inventer. Une commande ajoutee non connue reste offerte par le formulaire du panneau et par le MCP. Le mode long prompt (GGUF seul) reste possible pour des essais, sans promesse de justesse ni de duree."
+verify = "Tests du noyau avec le programme d'exemple de 2.14 : sans declaration qui la nomme, la commande ajoutee est absente de la grammaire et un plan qui la nomme est rejete ; avec une declaration qui la nomme, elle y figure ; dans les deux cas elle reste au catalogue de la session et aux outils MCP."
+covers = ["CAP-4", "CAP-8"]
+after = [51, "2.14"]
+hitl = false
+risk = "high"
+references = [
+  "change — _bmad-output/initiative-cassini-mvp/change-commandes-d-un-module-exterieur/change-commandes-d-un-module-exterieur.md, §4",
+  "architecture — _bmad-output/initiative-cassini-mvp/architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md, AD-23 (precision du 2026-11-10)",
+]
+notes = [
+  "Decision: 2026-11-10 — proprietaire : « ok pour 7, 8 et 9 » ; le modele local ne voit une commande ajoutee que si sa declaration la nomme. Attend la publication et l'epic 10 a travers 2.14.",
+  "Controle hors des criteres : relecture a plusieurs lentilles (thorough), risque high sur la composition des plans.",
+]
+
+[[entry]]
+id = 53
+type = "story"
+title = "Barre de mesure par commande, phrases ecrites a la main"
+description = "Chaque commande offerte au modele local a au moins 3 phrases de mesure ecrites a la main, avec le plan, la question ou le refus attendu ; ces phrases ne vont jamais au jeu d'entrainement. Les barres existantes sont portees a 40-50 phrases. Un test echoue des qu'une commande offerte n'a pas ses phrases. Une barre de non-oubli compare un nouveau modele a celui qu'il remplace : il tient chaque barre de son parent a une phrase pres, sinon il n'est pas installe. Le proprietaire fournit des formulations de terrain (gisement, releve, intersection, carroyage...) ; le generateur en tire des listes de synonymes, jamais les phrases."
+verify = "Retirer les phrases d'une commande fait echouer le test de couverture ; la barre de non-oubli, jouee sur ajuste-5-49-a contre la fusion de la nuit du 11-10, donne un verdict par barre ; aucune phrase de mesure ne figure dans un jeu d'entrainement genere (test de recouvrement)."
+covers = ["CAP-4"]
+after = []
+hitl = true
+risk = "high"
+notes = [
+  "Decision: 2026-11-11 — tranche en party (architecte, ingenieure ML, architecte des tests, geomaticien), approuve par le proprietaire : la mesure passe avant tout nouvel entrainement.",
+  "Constat du 2026-11-11 : aucune barre ne couvrait 10.28 a 10.31 ; l'ancien modele faisait 2/5 sur cinq phrases improvisees, ajuste-5-49-a 4/5 (gisement sans north grid rate par les deux).",
+  "Controle hors des criteres : le proprietaire relit les phrases de terrain ; relecture thorough.",
+]
+
+[[entry]]
+id = 54
+type = "story"
+title = "Ajustement continu : l'entrainement repart de l'adaptateur du modele installe"
+description = "La chaine d'entrainement peut repartir d'un adaptateur LoRA existant au lieu de la base seule. Le jeu d'une seance continue melange les familles nouvelles ou ratees et un rappel d'au moins 40 % tire de toutes les familles ; le taux d'apprentissage est divise par 4 (5e-5) ; une seule graine. Le rapport nomme le parent : empreinte SHA-256 de l'adaptateur de depart, commit et graine de chaque maillon. Une chaine compte au plus 3 maillons ; au-dela, un entrainement de zero sur le jeu complet sert de recalage. Un parent dont la base Qwen, sa revision ou les modules adaptes different est refuse : la chaine est coupee."
+verify = "Tests du pipeline : un depart depuis un adaptateur est refuse si la base ou la revision different ; le rapport d'une seance continue porte la lignee complete ; un quatrieme maillon est refuse ; un essai court (--pas-max) depuis ajuste-5-49-a produit un modele qui se charge dans le noyau."
+covers = ["CAP-4"]
+after = [53]
+hitl = false
+risk = "high"
+notes = [
+  "Decision: 2026-11-11 — idee du proprietaire, tranchee en party et approuvee : rappel >= 40 %, taux / 4, 3 maillons puis recalage, meme base sinon chaine coupee.",
+  "Controle hors des criteres : la barre de non-oubli de 53 juge chaque maillon avant installation.",
+]
+
+[[entry]]
+id = 55
+type = "story"
+title = "Nuit d'experience : ajustement continu contre depart de zero"
+description = "Une nuit entraine deux modeles sur le meme jeu : l'un repart de l'adaptateur installe (54), l'autre de la base. Les deux passent toutes les barres, dont les barres par commande et de non-oubli (53), et la recette d'Annecy. Le resultat dit si les nuits suivantes se font en continu ; le proprietaire decide et l'installation suit les regles habituelles."
+verify = "Un tableau compare les deux modeles barre par barre et par commande, avec la duree d'entrainement de chacun ; la decision du proprietaire est consignee dans le plan."
+covers = ["CAP-4"]
+after = [53, 54]
+hitl = true
+risk = "medium"
+notes = [
+  "Decision: 2026-11-11 — tranche en party et approuve : l'experience decide, pas l'opinion.",
+]
+
+[[entry]]
+id = 56
+type = "story"
+title = "Grammaire des parametres tiree des schemas du registre, textes bornes"
+description = "La grammaire du plan contraint aujourd'hui l'enveloppe et les identifiants de commande ; les parametres sont du JSON libre. Elle est desormais construite depuis le schema JSON des parametres de chaque commande offerte : champs connus, types, valeurs enumerees, champs requis. Les textes d'une question et d'un refus ont une longueur bornee. La verification par le noyau apres generation reste en place. La grammaire reste identique pour un registre donne, et sa duree de construction et de decodage est mesuree."
+verify = "Tests du noyau : un plan avec un champ inconnu, un type faux (un entier a la place d'un angle) ou une valeur hors enumeration ne peut pas etre produit sous la grammaire ; une question ou un refus trop long est impossible ; plan_reel, question_reel et la recette d'Annecy ne baissent pas avec le modele installe ; la duree par phrase reste dans la barre de 5.19."
+covers = ["CAP-4"]
+after = []
+hitl = false
+risk = "high"
+notes = [
+  "Decision: 2026-11-11 — verification de la party : plan_grammar ne contraint que l'enveloppe et les ids ; S15 (refus coupe) et l'angle rendu en 0 par l'ancien modele en relevent.",
+  "Touche la meme grammaire que 52 (commandes connues du modele) : la seconde construite part de la premiere.",
+  "Controle hors des criteres : relecture thorough, risque high sur la composition des plans.",
+]
+
+[[entry]]
+id = 57
+type = "story"
+title = "Garde-fou : une valeur ou un champ absent de l'inventaire donne une question, jamais un plan"
+description = "Le modele compose parfois un plan qui filtre sur une valeur que l'inventaire montre absente des valeurs connues d'un champ (cle values, liste complete jusqu'a MAX_VALUES), ou sur un champ que la couche n'a pas : l'utilisateur recoit une carte vide ou fausse sans le savoir. Apres la composition et avant la validation de l'utilisateur, le noyau controle chaque selection par attribut du plan contre l'inventaire envoye au modele. Une valeur absente d'une liste complete, compte tenu de l'operateur (egalite, difference, debut de valeur pour une categorie de zonage), ou un champ absent de la couche, change le plan en une question qui nomme la couche, le champ et, pour une valeur, les valeurs connues. Un champ sans cle values (liste trop longue ou non montree) n'est jamais controle sur sa valeur. C'est un invariant generique du registre, comme le garde-fou des coordonnees : il vaut pour tout modele, local ou ajuste, et ne connait aucune phrase."
+verify = "Tests du noyau : valeur absente d'une liste complete -> question citant couche, champ et valeurs ; valeur presente, champ sans values, valeur sur une etape intermediaire (resultat d'une etape precedente) -> plan inchange ; champ absent -> question, plus d'erreur de validation montree a l'utilisateur ; zonage « en zone AU » present des qu'une valeur commence par AU ; la question porte la provenance guard et le journal n'ecrit rien (AD-11) ; plan_reel, question_reel, ecart_reel et la recette d'Annecy ne baissent pas avec le modele installe, et question_reel monte ou reste egale ; la duree par phrase reste dans la barre de 5.19."
+covers = ["CAP-4"]
+after = []
+hitl = false
+risk = "high"
+notes = [
+  "Decision: 2026-11-12 — tranche en party et approuve par le proprietaire : invariant du registre, pas un pansement par phrase ; s'ajoute a l'entrainement (5.54 seance 3), ne le remplace pas.",
+  "Decision: 2026-11-12 — le candidat 2 (ajuste-continu-5-54-2) est installe pour la video ; ce garde-fou couvre son defaut « valeur absente -> plan ».",
+  "Open question: forme exacte de la question et place du controle (avant ou dans la validation existante) : a fixer par le plan, en citant les AD du contrat d'architecture.",
+  "Controle hors des criteres : relecture thorough, risque high sur la composition des plans ; recette QGIS d'Annecy rejouee avec le modele installe.",
+]

@@ -25,6 +25,7 @@ use llama_cpp_2::vocab::LlamaVocab;
 use llama_cpp_2::{LlamaStateSeqFlags, SeqState};
 
 mod devices;
+mod grammar;
 pub mod plan;
 mod threads;
 
@@ -79,7 +80,7 @@ impl fmt::Display for AiError {
             AiError::Context(e) => write!(f, "Le contexte du modèle n'a pas pu être créé : {e}"),
             AiError::PromptTooLong => write!(
                 f,
-                "La demande et l'inventaire du projet ne tiennent pas dans le contexte du modèle ; le plus souvent, l'inventaire est trop long : retirez des couches du projet, puis refaites la demande."
+                "Le projet a trop de couches pour le modèle : la demande et l'inventaire du projet ne tiennent pas dans son contexte. Retirez des couches du projet, puis refaites la demande."
             ),
             AiError::Decode(e) => write!(f, "Le modèle n'a pas pu répondre : {e}"),
             AiError::Grammar(e) => {
@@ -549,6 +550,10 @@ pub struct Timings {
     pub write: Duration,
     /// Nombre de jetons écrits.
     pub written_tokens: usize,
+    /// Création de l'échantillonneur de grammaire (analyse du GBNF par llama.cpp), comptée aussi
+    /// dans `write` (ticket 5.56) : le reste de `write` est le décodage contraint. Nulle sans
+    /// grammaire.
+    pub sampler: Duration,
 }
 
 /// Génération générale : conversation `turns`, sortie contrainte par la
@@ -763,12 +768,18 @@ fn generate_on(
 
     // `sample` fait déjà accepter le jeton choisi par la chaîne : l'accepter une
     // seconde fois ferait avancer la grammaire deux fois.
+    let mut sampler_time = Duration::ZERO;
     let mut sampler = match grammar {
         None => LlamaSampler::greedy(),
-        Some(g) => LlamaSampler::chain_simple([
-            LlamaSampler::grammar(llama, g, "root").map_err(|e| AiError::Grammar(e.to_string()))?,
-            LlamaSampler::greedy(),
-        ]),
+        Some(g) => {
+            let chain = LlamaSampler::chain_simple([
+                LlamaSampler::grammar(llama, g, "root")
+                    .map_err(|e| AiError::Grammar(e.to_string()))?,
+                LlamaSampler::greedy(),
+            ]);
+            sampler_time = write_start.elapsed();
+            chain
+        }
     };
     let mut bytes: Vec<u8> = Vec::new();
     let mut pos = tokens.len() as i32;
@@ -800,6 +811,7 @@ fn generate_on(
         cached_tokens,
         write: write_start.elapsed(),
         written_tokens,
+        sampler: sampler_time,
     };
     Ok((completion, timings))
 }
@@ -808,12 +820,17 @@ fn generate_on(
 mod tests {
     use super::*;
 
-    /// Ticket 5.18 : le message nomme l'inventaire du projet comme cause habituelle, et dit quoi faire.
+    /// Tickets 5.18 et 5.48 : le message dit que le projet a trop de couches pour le modèle, et quoi
+    /// faire.
     #[test]
     fn a_prompt_too_long_names_the_project_inventory() {
         let message = AiError::PromptTooLong.to_string();
+        assert!(
+            message.starts_with("Le projet a trop de couches pour le modèle"),
+            "{message}"
+        );
         assert!(message.contains("inventaire du projet"), "{message}");
-        assert!(message.contains("retirez des couches"), "{message}");
+        assert!(message.contains("Retirez des couches"), "{message}");
         assert_eq!(AiError::PromptTooLong.code(), "ai.prompt_too_long");
     }
 

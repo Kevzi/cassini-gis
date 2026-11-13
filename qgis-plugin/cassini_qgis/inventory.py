@@ -48,6 +48,16 @@ class QgisBackend:
 
         return QgsProject.instance().crs().authid()
 
+    def project_crs_unit(self):
+        """Unité du système du projet : `m`, `deg` ou `other` (entrée 9.16)."""
+        from qgis.core import QgsProject
+
+        return crs_unit(QgsProject.instance().crs())
+
+    def crs_unit_of(self, layer):
+        """Unité du système de la couche : `m`, `deg` ou `other` (entrée 9.16)."""
+        return crs_unit(layer.crs())
+
     def project_dir(self):
         """Dossier du fichier de projet ; vide si le projet n'est pas enregistré."""
         from qgis.core import QgsProject
@@ -167,6 +177,22 @@ class QgisBackend:
 
         name = QgsWkbTypes.geometryDisplayString(layer.geometryType())
         return "NoGeometry" if name == "Null" else name
+
+
+def crs_unit(crs):
+    """Unité d'un système de QGIS : `m` (mètres), `deg` (degrés) ou `other` (autre unité, ou
+    système invalide). Un fait lu par QGIS (`mapUnits`) : le noyau en tire le système de calcul
+    d'une distance en mètres, sans rien déduire d'un code (changement de cap du 2026-11-12)."""
+    from qgis.core import Qgis
+
+    if crs is None or not crs.isValid():
+        return "other"
+    units = crs.mapUnits()
+    if units == Qgis.DistanceUnit.Meters:
+        return "m"
+    if units == Qgis.DistanceUnit.Degrees:
+        return "deg"
+    return "other"
 
 
 def source_file(raw):
@@ -391,6 +417,9 @@ class ProjectInventoryGesture(_ReadGesture):
                 "source": raster_source(raw, project_dir) if kind == "raster" else source_name(raw),
                 "crs": backend.crs_of(layer),
             }
+            unit = self._unit(lambda: backend.crs_unit_of(layer))
+            if unit is not None:
+                entry["crs_unit"] = unit
             entry.update(self._facts(layer, kind))
             layers.append(entry)
             boxes.append(backend.extent_of(layer, project_crs))
@@ -398,12 +427,28 @@ class ProjectInventoryGesture(_ReadGesture):
         present = {backend.id_of(layer) for layer in backend.layers()}
         for gone in [k for k in _FACTS if k[0] not in present]:
             del _FACTS[gone]
-        return {
+        result = {
             "project_name": backend.project_name() or None,
             "layers": layers,
             "project_crs": project_crs,
             "extent": _extent(_union(boxes), project_crs, _union(lonlats)),
         }
+        unit = self._unit(lambda: backend.project_crs_unit())
+        if unit is not None:
+            result["project_crs_unit"] = unit
+        return result
+
+    def _unit(self, read):
+        """Unité lue par `read` ; `other` si la lecture échoue, None si le fond ne sait pas la lire.
+        Dans les deux cas, le noyau ne remplit pas de système de calcul : le tampon se fait seul,
+        sous la garde du geste, comme avant l'entrée 9.16 (amendement RA06)."""
+        if not hasattr(self._backend, "crs_unit_of"):
+            return None
+        try:
+            unit = read()
+        except Exception:  # une unité illisible ne prive pas le noyau de l'inventaire
+            return "other"
+        return unit if unit in ("m", "deg", "other") else "other"
 
     def _lonlat(self, layer):
         """Étendue d'une couche en degrés WGS84, reprojetée par QGIS ; None si elle manque, si la

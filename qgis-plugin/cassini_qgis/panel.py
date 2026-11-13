@@ -33,7 +33,18 @@ from qgis.PyQt.QtWidgets import (
     QWidget,
 )
 
-from . import agentview, client, external, form, models, runlog, summary, texts, thread
+from . import (
+    agentview,
+    client,
+    external,
+    form,
+    layer_remove,
+    models,
+    runlog,
+    summary,
+    texts,
+    thread,
+)
 
 
 class LayerCombo(QComboBox):
@@ -146,7 +157,7 @@ def _announce(widget, text):
         pass
 
 
-def _layer_name(layer_id):
+def _live_layer_name(layer_id):
     """Nom de la couche dans le projet QGIS, ou None ; jamais d'exception."""
     try:
         from qgis.core import QgsProject
@@ -155,6 +166,12 @@ def _layer_name(layer_id):
         return layer.name() if layer is not None else None
     except Exception:
         return None
+
+
+def _layer_name(layer_id):
+    """Nom de la couche dans le projet QGIS, ou None ; jamais d'exception. Une couche retirée
+    du projet par `layer.remove` garde le nom qu'elle avait, pour l'affichage seulement."""
+    return layer_remove.display_name(layer_id, _live_layer_name)
 
 
 def _title(text_label):

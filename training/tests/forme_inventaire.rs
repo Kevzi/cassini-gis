@@ -9,7 +9,11 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use cassini_core::agent_inventory::{agent_inventory, MAX_VALUES};
+use std::collections::HashSet;
+
+use cassini_core::agent_inventory::{
+    agent_inventory, sorted_view, LastPlan, ViewLimits, MAX_VALUES,
+};
 use cassini_training::{generate, DEFAULT_COUNT, DEFAULT_SEED};
 use serde_json::{json, Map, Value};
 
@@ -41,6 +45,11 @@ struct Learned {
     /// Sortes de valeurs des clés de couche, par sorte de couche.
     layer_sorts: HashMap<(String, String), BTreeSet<&'static str>>,
     geometries: BTreeSet<String>,
+    /// Jeux de clés des entrées de l'index d'un gros projet (5.47), et sortes de leurs valeurs.
+    index: BTreeSet<BTreeSet<String>>,
+    index_sorts: HashMap<String, BTreeSet<&'static str>>,
+    /// Inventaires qui portent la clé `index`.
+    sorted: usize,
     field: BTreeSet<BTreeSet<String>>,
     types: BTreeSet<String>,
     valued_types: BTreeSet<String>,
@@ -69,6 +78,19 @@ fn learned() -> Learned {
                 .entry(k.clone())
                 .or_default()
                 .insert(sort_of(v));
+        }
+        if let Some(index) = inv.get("index") {
+            l.sorted += 1;
+            for entry in index.as_array().expect("index liste") {
+                let entry = entry.as_object().expect("entrée objet");
+                l.index.insert(keys(entry));
+                for (k, v) in entry {
+                    l.index_sorts
+                        .entry(k.clone())
+                        .or_default()
+                        .insert(sort_of(v));
+                }
+            }
         }
         for layer in inv["layers"].as_array().expect("couches") {
             let layer = layer.as_object().expect("couche objet");
@@ -197,6 +219,19 @@ fn assert_seen(l: &Learned, out: &Value) {
         l.project
     );
     assert_sorts("projet", project, |k| l.project_sorts.get(k).cloned());
+    for entry in out
+        .get("index")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let entry = entry.as_object().unwrap();
+        assert!(l.index.contains(&keys(entry)), "index : {:?}", keys(entry));
+        assert_sorts("index", entry, |k| l.index_sorts.get(k).cloned());
+        if let Some(g) = entry["geometry"].as_str() {
+            assert!(l.geometries.contains(g), "index : {g}");
+        }
+    }
     for layer in out["layers"].as_array().unwrap() {
         let layer = layer.as_object().unwrap();
         let name = layer["name"].as_str().unwrap();
@@ -275,4 +310,88 @@ fn every_shape_the_product_renders_is_seen_in_the_generated_set() {
     assert_eq!(edges[2]["geometry"], Value::Null);
     assert_eq!(edges[2]["kind"], "vector");
     assert!(edges[3].get("source").is_none() && edges[3].get("feature_count").is_none());
+}
+
+/// Une sortie de `project.inventory` d'un gros projet (5.47) : 40 couches à la manière d'une BD
+/// TOPO départementale et d'un PLU, 12 à 18 champs chacune, dont des tables sans géométrie, une
+/// couche temporaire et deux rasters.
+fn big_raw() -> Value {
+    let geometries = [
+        "MultiPolygonZ",
+        "MultiLineStringZ",
+        "PointZ",
+        "Polygon",
+        "NoGeometry",
+    ];
+    let mut layers: Vec<Value> = (0..38)
+        .map(|i| {
+            let fields: Vec<Value> = (0..12 + i % 7)
+                .map(|k| match k % 4 {
+                    0 => json!({"name": format!("champ_{k}"), "type": "String",
+                        "values": ["En projet", "En service"]}),
+                    1 => json!({"name": format!("code_{k}"), "type": "Integer64"}),
+                    2 => json!({"name": format!("mesure_{k}"), "type": "Real"}),
+                    _ => json!({"name": format!("date_{k}"), "type": "Date"}),
+                })
+                .collect();
+            let mut layer = json!({
+                "layer_id": format!("table_{i}_{i:08x}_0000_4000_8000_00000000{i:04x}"),
+                "name": format!("Table {i}"),
+                "source": format!("BDT.gpkg|layername=table_{i}"),
+                "crs": "EPSG:2154", "kind": "vector",
+                "geometry": geometries[i % geometries.len()],
+                "feature_count": 100 + i, "fields": fields});
+            if i == 7 {
+                layer.as_object_mut().unwrap().remove("source");
+            }
+            layer
+        })
+        .collect();
+    layers.push(
+        json!({"layer_id": "ortho_1", "name": "Orthophotographie", "source": "ortho.vrt",
+        "crs": "EPSG:2154", "kind": "raster", "geometry": null, "fields": []}),
+    );
+    layers.push(
+        json!({"layer_id": "mnt_1", "name": "MNT", "source": "mnt.tif",
+        "crs": "EPSG:2154", "kind": "raster", "geometry": null, "fields": []}),
+    );
+    json!({
+        "project_name": "gros-projet", "project_crs": "EPSG:2154",
+        "extent": {"lonlat": {"west": 6.0, "south": 45.8, "east": 6.3, "north": 46.0,
+            "crs": "EPSG:4326"}},
+        "layers": layers,
+    })
+}
+
+#[test]
+fn the_sorted_view_of_a_big_project_has_only_shapes_seen_in_the_generated_set() {
+    let l = learned();
+    // La clé `index` et la forme réduite sont vues à l'entraînement, souvent.
+    assert!(l.sorted * 10 > l.total, "{} / {}", l.sorted, l.total);
+    // Forme réduite `{layer_id, name, geometry}` (décision du 2026-11-10) ; un raster ou une
+    // table y a une géométrie `null`.
+    let reduced: BTreeSet<String> = ["geometry", "layer_id", "name"]
+        .into_iter()
+        .map(String::from)
+        .collect();
+    assert!(l.index.contains(&reduced), "vus : {:?}", l.index);
+    assert!(l.index_sorts["geometry"].contains("null"));
+    let raw = big_raw();
+    for request in [
+        "Tampon de 200 m autour de la table 3.",
+        "Les pentes du MNT.",
+    ] {
+        let (view, _) = sorted_view(
+            &raw,
+            &[],
+            &HashSet::new(),
+            &LastPlan::default(),
+            request,
+            &ViewLimits::default(),
+        );
+        let out = &view.inventory;
+        assert_eq!(out["index"].as_array().unwrap().len(), 40);
+        assert!(!out["layers"].as_array().unwrap().is_empty());
+        assert_seen(&l, out);
+    }
 }

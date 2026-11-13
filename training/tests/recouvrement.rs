@@ -3,7 +3,14 @@
 //! des essais réels de `ai/tests/` : `plan_reel` (les phrases de l'épreuve), `question_reel`,
 //! `duree_reel` (le scénario de démo et son amorce), depuis 5.39 `echelle_utm_reel`, depuis 5.41
 //! `terrain_reel`, depuis 11.16, `epic11_reel` et, depuis 11.23, `style_reel` et les points d'un
-//! autre système de `epic11_reel`. Les familles visent leur sorte de demande
+//! autre système de `epic11_reel` et, depuis 5.45, les 20 phrases de la recette QGIS d'Annecy
+//! (`qgis-plugin/tests/recette/annecy.json`), puis depuis 5.53 la barre par commande
+//! (`ai/tests/par_commande/phrases.json`) et les phrases neuves de `plan_reel` et de
+//! `question_reel` (`ai/tests/plan_reel/phrases.json`, `ai/tests/question_reel/phrases.json`,
+//! livrable 3, lot 1), puis celles de `echelle_utm_reel` et de `terrain_reel`
+//! (`ai/tests/echelle_utm_reel/phrases.json`, `ai/tests/terrain_reel/phrases.json`, lot 2), puis
+//! celles d'`epic11_reel` et de `style_reel` (`ai/tests/epic11_reel/phrases.json`,
+//! `ai/tests/style_reel/phrases.json`, lot 3). Les familles visent leur sorte de demande
 //! avec d'autres tournures ; elles ne les recopient jamais. Deux comparaisons, sur le texte normalisé
 //! (minuscules, sans accents ni ponctuation) : à l'identique, puis à un nombre ou une commune
 //! près (chiffres masqués, noms de communes remplacés par un même repère, des deux côtés).
@@ -15,143 +22,14 @@
 
 use std::collections::HashSet;
 
-use cassini_training::families::COMMUNES;
-use cassini_training::{generate, normalize, DEFAULT_COUNT, DEFAULT_SEED};
-use serde_json::Value;
-
-const HELD_OUT: &str = include_str!("../../ai/tests/tenu_a_l_ecart/sentences.json");
-/// Les phrases de `plan_reel` : celles de l'épreuve du modèle local, qu'il lit telles quelles.
-const PLAN_REEL: &str = include_str!("../../tests/epreuve-modele-local/sentences.json");
-const QUESTION_REEL: &str = include_str!("../../ai/tests/question_reel.rs");
-const DUREE_REEL: &str = include_str!("../../ai/tests/duree_reel.rs");
-const ECHELLE_UTM_REEL: &str = include_str!("../../ai/tests/echelle_utm_reel.rs");
-const TERRAIN_REEL: &str = include_str!("../../ai/tests/terrain_reel.rs");
-const EPIC11_REEL: &str = include_str!("../../ai/tests/epic11_reel.rs");
-const STYLE_REEL: &str = include_str!("../../ai/tests/style_reel.rs");
-
-/// Texte normalisé, chiffres masqués et communes remplacées par un même repère.
-fn masked(text: &str) -> String {
-    let mut places: Vec<String> = COMMUNES.iter().map(|c| normalize(c)).collect();
-    places.push("villeneuve le roi".to_string());
-    // Les noms les plus longs d'abord : « villeneuve le roi » avant un nom plus court inclus.
-    places.sort_by_key(|p| std::cmp::Reverse(p.len()));
-    let mut out = format!(" {} ", normalize(text));
-    for place in &places {
-        out = out.replace(&format!(" {place} "), " lieu ");
-    }
-    let mut masked = String::new();
-    let mut in_digits = false;
-    for c in out.chars() {
-        if c.is_ascii_digit() {
-            if !in_digits {
-                masked.push('0');
-            }
-            in_digits = true;
-        } else {
-            masked.push(c);
-            in_digits = false;
-        }
-    }
-    // « 1 200 » est un seul nombre : des nombres consécutifs n'en font qu'un.
-    let mut words: Vec<&str> = masked.split_whitespace().collect();
-    words.dedup_by(|a, b| *a == "0" && *b == "0");
-    words.join(" ")
-}
-
-fn held_out() -> Vec<(String, String)> {
-    from_json(HELD_OUT)
-}
-
-/// Les phrases `{id, text}` d'un fichier `sentences.json`.
-fn from_json(text: &str) -> Vec<(String, String)> {
-    let sentences: Vec<Value> = serde_json::from_str(text).expect("sentences.json lisible");
-    assert!(!sentences.is_empty());
-    sentences
-        .iter()
-        .map(|s| {
-            (
-                s["id"].as_str().expect("id").to_string(),
-                s["text"].as_str().expect("texte").to_string(),
-            )
-        })
-        .collect()
-}
-
-/// Les littéraux de chaîne de la valeur de la constante `start` (après son `=`, jusqu'au
-/// premier `];` ou `);`) : les paires `("id", "texte")` d'un tableau de phrases.
-fn literals(source: &str, start: &str) -> Vec<String> {
-    let from = source
-        .find(start)
-        .unwrap_or_else(|| panic!("bloc « {start} » introuvable"));
-    let block = &source[from + start.len()..];
-    let block = &block[block.find('=').expect("valeur de la constante") + 1..];
-    let end = block
-        .find("];")
-        .into_iter()
-        .chain(block.find(");"))
-        .min()
-        .expect("fin du bloc");
-    let mut out = Vec::new();
-    let mut chars = block[..end].chars();
-    while let Some(c) = chars.next() {
-        if c != '"' {
-            continue;
-        }
-        let mut text = String::new();
-        while let Some(c) = chars.next() {
-            match c {
-                '\\' => text.extend(chars.next()),
-                '"' => break,
-                c => text.push(c),
-            }
-        }
-        out.push(text);
-    }
-    out
-}
-
-/// Les paires `(id, texte)` d'un tableau de phrases écrit dans un fichier Rust.
-fn pairs(source: &str, start: &str) -> Vec<(String, String)> {
-    let found = literals(source, start);
-    assert!(
-        !found.is_empty() && found.len().is_multiple_of(2),
-        "« {start} » : {found:?}"
-    );
-    found
-        .chunks(2)
-        .map(|p| (p[0].clone(), p[1].clone()))
-        .collect()
-}
-
-/// Les phrases des essais réels de `ai/tests/` : `plan_reel`, `question_reel`, `duree_reel`,
-/// `echelle_utm_reel`, `terrain_reel`, `epic11_reel`, `style_reel`.
-fn real_trials() -> Vec<(String, String)> {
-    let mut all = from_json(PLAN_REEL);
-    let questions = pairs(QUESTION_REEL, "const AMBIGUOUS");
-    assert_eq!(questions.len(), 12, "{questions:?}");
-    all.extend(questions);
-    let scenario = pairs(DUREE_REEL, "const SCENARIO");
-    assert_eq!(scenario.len(), 8, "{scenario:?}");
-    all.extend(scenario);
-    all.extend(pairs(DUREE_REEL, "const WARMUP"));
-    let scale_utm = pairs(ECHELLE_UTM_REEL, "const SENTENCES");
-    assert_eq!(scale_utm.len(), 8, "{scale_utm:?}");
-    all.extend(scale_utm);
-    let terrain = pairs(TERRAIN_REEL, "const SENTENCES");
-    assert_eq!(terrain.len(), 8, "{terrain:?}");
-    all.extend(terrain);
-    let epic11 = pairs(EPIC11_REEL, "const SENTENCES");
-    assert_eq!(epic11.len(), 28, "{epic11:?}");
-    all.extend(epic11);
-    all.extend(pairs(EPIC11_REEL, "const GRID_QUESTION"));
-    let foreign = pairs(EPIC11_REEL, "const FOREIGN_POINTS");
-    assert_eq!(foreign.len(), 4, "{foreign:?}");
-    all.extend(foreign);
-    let style = pairs(STYLE_REEL, "const SENTENCES");
-    assert_eq!(style.len(), 10, "{style:?}");
-    all.extend(style);
-    all
-}
+use cassini_training::barres::{
+    self, held_out, masked, real_trials, real_trials_by_source, HAND_WRITTEN,
+};
+use cassini_training::families::FAMILIES;
+use cassini_training::{
+    generate, generate_families_unchecked, normalize, DEFAULT_COUNT, DEFAULT_SEED, FOCUS_COUNT,
+    FOCUS_EXCLUDED, FOCUS_SEED,
+};
 
 /// Identifiants des phrases de `sentences` dont la forme `key` figure dans le jeu engendré.
 fn overlap(sentences: Vec<(String, String)>, key: fn(&str) -> String) -> Vec<String> {
@@ -195,10 +73,103 @@ fn no_sentence_of_the_real_trials_appears_in_the_generated_set() {
     );
 }
 
+/// Le jeu ciblé d'une séance d'ajustement continu (5.54) est tiré à `FOCUS_SEED` sur les seules
+/// familles choisies : chaque famille, tirée seule à cette graine jusqu'à `FOCUS_COUNT`
+/// exemples, passe les mêmes contrôles que le jeu complet (jeu tenu à l'écart à l'identique et à
+/// un nombre ou une commune près, essais réels à un nombre ou une commune près). Une famille
+/// trop petite pour `FOCUS_COUNT` exemples neufs rend ce qu'elle peut : tout est contrôlé. Les
+/// familles qui ne les passent pas sont exactement celles de `FOCUS_EXCLUDED`, que le
+/// générateur refuse au jeu ciblé ; une famille réparée en sort, une famille neuve qui copie
+/// une phrase y entre ou se répare (seul l'identifiant de la phrase est imprimé).
+#[test]
+fn no_family_drawn_alone_at_the_focus_seed_copies_a_held_out_or_real_trial_sentence() {
+    let mut copies = Vec::new();
+    let mut leaking = Vec::new();
+    for family in FAMILIES {
+        let (examples, _) =
+            generate_families_unchecked(FOCUS_SEED, FOCUS_COUNT, &[family.name]).unwrap();
+        let found = barres::copies(&examples);
+        if !found.is_empty() {
+            leaking.push(family.name);
+            copies.extend(found.into_iter().map(|c| format!("{} : {c}", family.name)));
+        }
+    }
+    let mut excluded = FOCUS_EXCLUDED.to_vec();
+    excluded.sort_unstable();
+    leaking.sort_unstable();
+    assert_eq!(
+        leaking,
+        excluded,
+        "familles qui, tirées seules, engendrent une phrase tenue à l'écart ou d'un essai réel \
+         ({}), contre FOCUS_EXCLUDED",
+        copies.join(", ")
+    );
+}
+
+/// Les phrases écrites à la main pour 5.53 (barre par commande, phrases neuves de `plan_reel`,
+/// `question_reel`, `echelle_utm_reel`, `terrain_reel`, `epic11_reel` et `style_reel`) sont
+/// écrites à neuf : aucune ne reprend, à un nombre ou une commune près, une phrase d'une autre
+/// source d'essai réel, ni une autre phrase de son propre fichier.
+#[test]
+fn no_hand_written_sentence_copies_another_real_trial() {
+    let sources = real_trials_by_source();
+    let mut copies = Vec::new();
+    for (name, _, _) in HAND_WRITTEN {
+        let (_, mine) = sources.iter().find(|(n, _)| *n == name).unwrap();
+        let others: HashSet<String> = sources
+            .iter()
+            .filter(|(n, _)| *n != name)
+            .flat_map(|(_, s)| s.iter().map(|(_, text)| masked(text)))
+            .collect();
+        let mut own = HashSet::new();
+        for (id, text) in mine {
+            let key = masked(text);
+            if others.contains(&key) || !own.insert(key) {
+                copies.push(format!("{name}:{id}"));
+            }
+        }
+    }
+    assert!(
+        copies.is_empty(),
+        "phrases écrites à la main reprises d'un autre essai ou en double : {}",
+        copies.join(", ")
+    );
+}
+
+/// Le contrôle anti-copie retrouve chaque source par son nom : deux sources du même nom
+/// confondraient leurs phrases.
+#[test]
+fn the_real_trial_sources_have_distinct_names() {
+    let sources = real_trials_by_source();
+    let mut names = HashSet::new();
+    for (name, _) in &sources {
+        assert!(names.insert(*name), "source en double : {name}");
+    }
+    for (name, _, _) in HAND_WRITTEN {
+        assert!(
+            names.contains(name),
+            "source écrite à la main absente : {name}"
+        );
+    }
+}
+
 #[test]
 fn the_real_trials_are_read_whole() {
     let all = real_trials();
-    assert_eq!(all.len(), 25 + 12 + 8 + 1 + 8 + 8 + 28 + 1 + 4 + 10);
+    assert_eq!(
+        all.len(),
+        25 + 12
+            + 8
+            + 1
+            + 8
+            + 8
+            + 28
+            + 1
+            + 4
+            + 10
+            + 20
+            + HAND_WRITTEN.iter().map(|(_, _, n)| n).sum::<usize>()
+    );
     let find = |id: &str| all.iter().find(|(i, _)| i == id).unwrap().1.clone();
     assert_eq!(
         find("Q11"),
@@ -221,6 +192,29 @@ fn the_real_trials_are_read_whole() {
     );
     assert!(find("Y04").contains("UTM 32N"));
     assert_eq!(find("ST10"), "Colore les gares selon leur fréquentation.");
+    assert_eq!(find("RA09"), "Fais un tampon autour des routes.");
+    assert_eq!(find("PK1"), "Où sont les sommets du MNT ?");
+    assert_eq!(
+        find("PL23"),
+        "Trace les courbes de niveau du MNT tous les 5 m."
+    );
+    assert_eq!(find("QR35"), "Délimite le bassin versant à partir du MNT.");
+    assert_eq!(
+        find("EU36"),
+        "Donne le temps de trajet en voiture entre le point 451 000 / 5 409 000 et le point 457 000 / 5 401 000, UTM 31N."
+    );
+    assert_eq!(
+        find("TR36"),
+        "Calcule le rayonnement solaire reçu par le terrain sur une année."
+    );
+    assert_eq!(
+        find("EP20"),
+        "Calcule l'indice de rugosité du terrain à partir du MNT."
+    );
+    assert_eq!(
+        find("SR32"),
+        "Représente la population des communes par des cercles proportionnels."
+    );
 }
 
 #[test]

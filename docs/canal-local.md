@@ -279,8 +279,28 @@ modèle :
 {"jsonrpc":"2.0","id":5,"result":{"question":"Il manque à la demande un point en coordonnées : quels sont x, y et le système (code EPSG, par exemple 2154 pour le Lambert-93) ?","source":"guard"}}
 ```
 
+Le garde-fou contrôle aussi, depuis le ticket 5.57, chaque sélection par attribut du plan
+validé contre l'inventaire montré au modèle. Une valeur absente de la liste complète d'un champ
+(clé `values`) ou un champ que la couche n'a pas rendent une question `guard` qui nomme la
+couche, le champ et, pour une valeur, les valeurs connues (pour un champ, les champs de la
+couche), au lieu d'un filtre sans effet ou d'une carte vide, ou d'une erreur
+`analysis.unknown_field`. `eq` et `ne` cherchent la valeur exacte dans la liste, casse comprise ;
+`begins_with` cherche une valeur qui commence par elle, `contains` une valeur qui la contient,
+sans tenir compte de la casse, et une valeur qui porte `%` ou `_` (jokers du LIKE de QGIS) n'est
+pas contrôlée ; `lt`, `lte`, `gt` et `gte` ne le sont jamais. Un champ se cherche aussi sans la
+casse, comme le fait QGIS. Un champ sans `values` (ou à plus de dix valeurs), une valeur vide,
+une couche citée par `step:` et une couche montrée seulement dans `index` ne sont pas contrôlés,
+et dans la vue triée d'un gros projet un champ absent ne l'est pas non plus (la couche détaillée
+a pu perdre des champs) :
+
+```json
+{"jsonrpc":"2.0","id":5,"result":{"question":"Le champ typezone de la couche « Zonage PLU » n'a pas de valeur « AU » (valeurs : N, U) : laquelle faut-il prendre ?","source":"guard"}}
+{"jsonrpc":"2.0","id":6,"result":{"question":"La couche « Zonage PLU » n'a aucun champ « zone_plu » (champs : typezone, libelle) : quel champ faut-il utiliser ?","source":"guard"}}
+```
+
 Sur une question `guard`, l'extension remet la phrase d'origine dans la zone de saisie,
-pour que l'utilisateur la complète par le point. La provenance n'est jamais écrite au journal.
+pour que l'utilisateur la complète (le point, la valeur ou le champ). La provenance n'est jamais
+écrite au journal.
 
 Rien n'est gardé en attente : une question ne s'exécute jamais, et un `plan.execute`
 qui suit répond `plan.unknown`. Comme toute nouvelle proposition, une question efface aussi le plan qui

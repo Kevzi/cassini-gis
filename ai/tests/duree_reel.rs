@@ -15,7 +15,14 @@
 //!   $p.ProcessorAffinity = [IntPtr]0x55
 //!   $p.WaitForExit()
 //!
-//! Chaque phrase passe par `compose_plan`, comme dans le produit, redemande comprise, et toutes
+//! Chaque phrase passe par la vue du noyau pour sa demande (`common::shown_view` : identifiants
+//! courts, vue triée d'un gros projet, ticket 5.48), dont la taille est imprimée, puis par
+//! `compose_plan_anchored` avec l'ancrage du cache, comme dans le produit (la redemande élargie de
+//! `plan.propose`, elle, ne joue pas ici). L'inventaire peut être la sortie brute de
+//! `project.inventory` prise dans QGIS ; `CASSINI_TEST_SENTENCES=<json>` (`[{"id", "text"}]`, hors
+//! dépôt) remplace alors le scénario par les phrases d'un autre projet.
+//!
+//! Chaque composition passe par la redemande de `compose_plan` comprise, et toutes
 //! dans le même processus : le modèle est chargé au premier appel puis gardé, et la lecture de la
 //! partie fixe de l'invite est reprise d'un instantané (ticket 12). Les durées de chargement, de
 //! lecture de l'invite et d'écriture sont additionnées par phrase, avec le nombre d'appels au
@@ -38,7 +45,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use cassini_ai::generate_files_measured;
-use cassini_ai::plan::{compose_plan_with, AgentError};
+use cassini_ai::plan::{compose_plan_anchored, AgentError};
 use cassini_ai::Timings;
 use cassini_core::plan::Plan;
 use cassini_core::registry::Registry;
@@ -176,10 +183,27 @@ fn duree_reel_par_phrase() {
         match std::env::var_os("CASSINI_TEST_INVENTORY") {
             Some(path) => {
                 let inventory = read_inventory(&PathBuf::from(path));
-                let sentences = std::iter::once(&WARMUP)
-                    .chain(&SCENARIO)
-                    .map(|(id, text)| (id.to_string(), text.to_string()))
-                    .collect();
+                let sentences = match std::env::var_os("CASSINI_TEST_SENTENCES") {
+                    // Phrases d'un autre projet (`[{"id", "text"}]`, hors dépôt), amorce en tête.
+                    Some(file) => std::iter::once((WARMUP.0.to_string(), WARMUP.1.to_string()))
+                        .chain(
+                            read_inventory(&PathBuf::from(file))
+                                .as_array()
+                                .expect("phrases : une liste")
+                                .iter()
+                                .map(|s| {
+                                    (
+                                        s["id"].as_str().unwrap().to_string(),
+                                        s["text"].as_str().unwrap().to_string(),
+                                    )
+                                }),
+                        )
+                        .collect(),
+                    None => std::iter::once(&WARMUP)
+                        .chain(&SCENARIO)
+                        .map(|(id, text)| (id.to_string(), text.to_string()))
+                        .collect(),
+                };
                 (inventory, sentences)
             }
             None => {
@@ -196,8 +220,10 @@ fn duree_reel_par_phrase() {
                 (serde_json::from_str(INVENTORY).unwrap(), sentences)
             }
         };
-    // Comme dans le produit : identifiants courts montrés, plan retraduit (ticket 5.19).
-    let (inventory, ids) = common::shown_inventory(&inventory);
+    // Comme dans le produit : la vue du noyau pour chaque phrase (identifiants courts, vue triée
+    // d'un gros projet, tickets 5.19 et 5.48), composée avec l'ancrage du cache, plan retraduit.
+    // `CASSINI_TEST_INVENTORY` peut être la sortie brute de `project.inventory` prise dans QGIS.
+    let full = inventory;
     let registry = Registry::standard();
 
     let fils = threads.map_or_else(
@@ -206,11 +232,13 @@ fn duree_reel_par_phrase() {
     );
     println!("Fils : {fils}");
     println!();
-    println!("| id | appels | chargement (s) | lecture du prompt (s) | jetons de l'invite | jetons repris | écriture (s) | jetons écrits | total (s) | issue |");
-    println!("|---|---|---|---|---|---|---|---|---|---|");
+    println!("| id | vue (car.) | appels | chargement (s) | lecture du prompt (s) | jetons de l'invite | jetons repris | écriture (s) | jetons écrits | total (s) | issue |");
+    println!("|---|---|---|---|---|---|---|---|---|---|---|");
     let mut rows = Vec::new();
     for (id, text) in &sentences {
         let mut row = Row::default();
+        let (view, users, ids) = common::shown_view(&full, text);
+        let view_chars = view.to_string().chars().count();
         let got = {
             let mut generator = |request: &cassini_ai::plan::GenerationRequest| {
                 let (completion, timings) = generate_files_measured(
@@ -224,12 +252,12 @@ fn duree_reel_par_phrase() {
                 Ok(completion)
             };
             common::restored(
-                compose_plan_with(style, &registry, &inventory, text, &mut generator),
+                compose_plan_anchored(style, &registry, &view, users, text, &mut generator),
                 &ids,
             )
         };
         println!(
-            "| {id} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+            "| {id} | {view_chars} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
             row.calls,
             secs(row.load),
             secs(row.prompt),
@@ -279,6 +307,7 @@ fn call(load: u64, prompt: u64, write: u64, read: usize, written: usize) -> Timi
         cached_tokens: read / 2,
         write: Duration::from_millis(write),
         written_tokens: written,
+        sampler: Duration::ZERO,
     }
 }
 

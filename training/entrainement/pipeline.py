@@ -26,6 +26,14 @@ base, mêmes graines, mêmes hyperparamètres. Par défaut le jeu civil engendr�
 l'adaptateur et sa déclaration, sous le nom choisi, sans fusion. Le fichier est lu et vérifié
 avant le GPU ; le rapport n'en garde que l'empreinte et les comptes, jamais le contenu.
 
+Avec `--depuis <dossier> --familles a,b` (ticket 5.54, ajustement continu), l'entraînement repart
+de l'adaptateur LoRA d'un entraînement précédent (un dossier de sortie de cette commande, jamais
+modifié) au lieu de partir de zéro : jeu de séance = familles nommées (graine 3) + rappel tiré de
+toutes les familles (exemples du jeu graine 1 complet, stratifiés : au moins `RECALL_FLOOR` par
+famille, le reste au poids ; au moins 40 %, `--part-rappel`), 3 000 exemples par défaut, taux d'apprentissage 5e-5, une graine. Le rapport porte la lignée (`lignee`, au plus trois
+maillons) ; un parent d'une autre base, d'une autre révision ou d'autres modules est refusé, avant
+le GPU.
+
 Python ne met rien en forme : le texte vu par le modèle vient de `training/src/prompt.rs`.
 Les modèles et poids sortent hors du dépôt. torch et transformers ne sont importés que dans
 les étapes qui en ont besoin : les gardes se testent sans eux (`tests/`).
@@ -36,6 +44,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import platform
 import random
@@ -67,11 +76,24 @@ LLAMA_CPP_SYS_VERSION = "0.1.160"
 
 TRAINING_SEED = 1
 VALIDATION_SEED = 2
+# Graine et taille maximale du jeu ciblé d'une séance continue (`FOCUS_SEED` et `FOCUS_COUNT` de
+# `training/src/lib.rs`, gardés par `training/tests/recouvrement.rs` ; un test les relie).
+FOCUS_SEED = 3
+FOCUS_COUNT = 1800
+# Graine de l'entraînement (torch, ordre des exemples, LoRA, llama.cpp), réglable par
+# `--graine-torch` : deux entraînements la même nuit sur le même jeu (décision du propriétaire,
+# 2026-11-10). Les graines du générateur (1 et 2) ne changent pas : le jeu reste celui que
+# `training/tests/recouvrement.rs` contrôle.
 TORCH_SEED = 1
-TRAINING_COUNT = 8000  # décision du propriétaire, 5.15
+TRAINING_COUNT = 8600  # décision du propriétaire, 5.15 ; 8 600 depuis le 2026-11-10
 VALIDATION_COUNT = 300
-# Une séquence mesurée fait moins de 1 400 jetons : 2 048 laisse de la marge sans tronquer.
-MAX_LENGTH = 2048
+# Gros projets de 20 à 60 couches (5.47, décision du propriétaire du 2026-11-10) : 4 608, tenu
+# par l'essai du 2026-11-10 sur la carte de 8 Go (`--longs-d-abord --pas-max 100` : pic 5,72 Gio).
+# 5 632 depuis 5.49 (tranchée en party le 2026-11-10, à confirmer par le propriétaire) : les gros
+# projets vus en entier, jusqu'à la taille d'Annecy, entrent au jeu. Le générateur écarte déjà tout
+# prompt au-delà de `MAX_PROMPT_CHARS` (`training/src/lib.rs`), pour qu'aucune séquence n'atteigne
+# cette borne (mesures et essai mémoire : `docs/entrainement-du-modele.md`, 5.49).
+MAX_LENGTH = 5632
 # Le GPU visé a 8 Go ; on refuse en dessous de 7 Gio de mémoire totale.
 MIN_GPU_MEMORY = 7 * 1024**3
 
@@ -97,6 +119,32 @@ HYPERPARAMETERS: dict[str, Any] = {
     "longueur_max": MAX_LENGTH,
     "jetons_max_generes": 512,
 }
+
+# Ajustement continu (5.54, décisions du propriétaire du 2026-11-11) : séance de 3 000 exemples
+# par défaut (D2), dont une part de rappel d'au moins 0,4 (D3), au taux de 5e-5 ; une chaîne de
+# trois maillons au plus, puis recalage par un entraînement de zéro sur le jeu complet.
+CONTINUOUS_COUNT = 3000
+RECALL_SHARE = 0.4
+MIN_RECALL_SHARE = 0.4
+CONTINUOUS_LEARNING_RATE = 5e-5
+MAX_LINKS = 3
+# Rappel tiré en plus, puis coupé au compte une fois les exemples trop longs écartés : la part
+# du rappel tient le plancher après filtrage (le générateur borne déjà la longueur des prompts).
+RECALL_MARGIN = 60
+# Un dossier de sortie de cette commande, tel que `--depuis` le lit.
+PARENT_REPORT = "rapport.json"
+PARENT_ADAPTER_DIR = Path("travail") / "adaptateur-hf"
+ADAPTER_CONFIG = "adapter_config.json"
+ADAPTER_WEIGHTS = "adapter_model.safetensors"
+FAMILIES_SOURCE = ROOT / "training" / "src" / "families.rs"
+GENERATOR_SOURCE = ROOT / "training" / "src" / "lib.rs"
+FOCUS_EXCLUDED_LIST = re.compile(r"pub const FOCUS_EXCLUDED: &\[&str\] = &\[(.*?)\];", re.S)
+# `Family {`, des lignes de commentaire éventuelles, puis `name: "…"` : la forme que le test
+# `the_pipeline_reads_the_family_names_and_constants_as_written_here` de `lib.rs` tient égale à
+# `FAMILIES`.
+FAMILY_NAME = re.compile(r'Family \{\s*(?://[^\n]*\n\s*)*name: "([a-z0-9_]+)"')
+SNAPSHOT_PATH = re.compile(r"models--([^/]+?)--([^/]+)/snapshots/([0-9a-f]{40})/?$")
+BROKEN_CHAIN = "chaîne coupée"
 
 QUANTIZATION = "Q4_K_M"
 BASE_NAME = "qwen3.5-4b-base-Q4_K_M.gguf"
@@ -216,6 +264,483 @@ def check_options(args: argparse.Namespace) -> Outputs:
             + ") et l'écraserait dans un dossier de modèles. Choisissez un autre nom."
         )
     return outputs
+
+# -- ajustement continu (5.54) : gardes du parent, testées sans torch ----------------------
+
+
+@dataclass(frozen=True)
+class Parent:
+    """Un entraînement précédent, lu dans son dossier de sortie (jamais modifié) : son rapport,
+    la configuration de son adaptateur, l'empreinte de ses poids et sa lignée."""
+
+    folder: Path
+    report: dict[str, Any]
+    config: dict[str, Any]
+    adapter_sha256: str
+    lineage: list[dict[str, Any]]
+
+    @property
+    def adapter_dir(self) -> Path:
+        return self.folder / PARENT_ADAPTER_DIR
+
+
+@dataclass(frozen=True)
+class Continuation:
+    """Une séance continue : le parent, les familles du jeu ciblé et la part du rappel."""
+
+    parent: Parent
+    families: list[str]
+    recall_share: float
+    count: int = 3000  # CONTINUOUS_COUNT
+
+
+def read_json_file(path: Path) -> Any:
+    if not path.is_file():
+        raise PipelineStop(f"parent incomplet : {path} absent")
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise PipelineStop(f"parent illisible : {path} ({error})") from error
+
+
+def safetensors_keys(path: Path) -> list[str]:
+    """Les noms des tenseurs d'un fichier safetensors, lus dans son en-tête (8 octets de
+    longueur, puis du JSON), sans torch."""
+    if not path.is_file():
+        raise PipelineStop(f"parent incomplet : {path} absent")
+    try:
+        with open(path, "rb") as f:
+            size = int.from_bytes(f.read(8), "little")
+            if not 2 <= size <= 100 * 1024**2:
+                raise ValueError(f"en-tête de {size} octets")
+            header = json.loads(f.read(size))
+        if not isinstance(header, dict):
+            raise ValueError("en-tête qui n'est pas un objet")
+    except (OSError, UnicodeDecodeError, ValueError) as error:
+        raise PipelineStop(f"parent illisible : {path} ({error})") from error
+    return [k for k in header if k != "__metadata__"]
+
+
+SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+
+
+def rebuilt_first_link(report: dict[str, Any], adapter_sha256: str, path: Path) -> list[dict[str, Any]]:
+    """La lignée d'un parent d'avant 5.54 (sans clé `lignee`) : un entraînement de zéro, le
+    maillon 1, reconstruit depuis son rapport (`depot_cassini.commit`, ou l'ancien
+    `commit_cassini`). Sans commit ou sans graine torch, la chaîne s'arrête en le disant."""
+    commit = report.get("depot_cassini", {}).get("commit") or report.get("commit_cassini")
+    seed = report.get("graines", {}).get("torch")
+    if not isinstance(commit, str) or not commit:
+        raise PipelineStop(f"parent illisible : {path} : ni depot_cassini.commit ni commit_cassini")
+    if not isinstance(seed, int):
+        raise PipelineStop(f"parent illisible : {path} : graines.torch absente")
+    return [{
+        "maillon": 1,
+        "depart": "base",
+        "commit": commit,
+        "graine_torch": seed,
+        "adaptateur_sha256": adapter_sha256,
+        "reconstruit": True,
+    }]
+
+
+def check_lineage(lineage: Any, path: Path) -> None:
+    """Une lignée se lit maillon par maillon : numéros 1, 2, …, empreintes de 64 chiffres
+    hexadécimaux, le maillon 1 parti de la base et chaque suivant de l'adaptateur du précédent."""
+    def broken(reason: str) -> PipelineStop:
+        return PipelineStop(f"parent illisible : {path} : lignée mal formée ({reason})")
+
+    if not isinstance(lineage, list) or not lineage:
+        raise broken("pas une liste de maillons")
+    for rank, link in enumerate(lineage, start=1):
+        if not isinstance(link, dict) or link.get("maillon") != rank:
+            raise broken(f"maillon {rank} absent ou mal numéroté")
+        if not (isinstance(link.get("adaptateur_sha256"), str) and SHA256_HEX.fullmatch(link["adaptateur_sha256"])):
+            raise broken(f"maillon {rank} : empreinte de l'adaptateur invalide")
+        before = "base" if rank == 1 else lineage[rank - 2]["adaptateur_sha256"]
+        if link.get("depart") != before:
+            raise broken(f"maillon {rank} : départ {link.get('depart')!r}, attendu {before!r}")
+
+
+def read_parent(folder: Path) -> Parent:
+    """Lit un dossier de sortie de cette commande : `rapport.json` et
+    `travail/adaptateur-hf/{adapter_config.json, adapter_model.safetensors}`. Un fichier absent
+    ou illisible arrête la chaîne en le nommant. Rien n'y est écrit."""
+    folder = folder.resolve()
+    if not folder.is_dir():
+        raise PipelineStop(f"parent introuvable : {folder} n'est pas un dossier")
+    report = read_json_file(folder / PARENT_REPORT)
+    config = read_json_file(folder / PARENT_ADAPTER_DIR / ADAPTER_CONFIG)
+    for path, value in ((folder / PARENT_REPORT, report), (folder / PARENT_ADAPTER_DIR / ADAPTER_CONFIG, config)):
+        if not isinstance(value, dict):
+            raise PipelineStop(f"parent illisible : {path} n'est pas un objet JSON")
+    report_path = folder / PARENT_REPORT
+    for key in ("base", "hyperparametres", "donnees", "graines", "depot_cassini"):
+        if key in report and not isinstance(report[key], dict):
+            raise PipelineStop(f"parent illisible : {report_path} : « {key} » n'est pas un objet")
+    for key in ("base", "hyperparametres", "donnees"):
+        if key not in report:
+            raise PipelineStop(f"parent illisible : {report_path} : « {key} » absent")
+    # Un essai court n'est pas un parent, ni un entraînement inachevé (sans score de validation).
+    if report["hyperparametres"].get("pas_max") is not None:
+        raise PipelineStop(f"parent refusé : {report_path} : essai court (pas_max "
+                           f"{report['hyperparametres']['pas_max']}), pas un entraînement complet")
+    if not isinstance(report.get("validation"), dict):
+        raise PipelineStop(f"parent refusé : {report_path} : pas de score de validation, entraînement inachevé")
+    weights = folder / PARENT_ADAPTER_DIR / ADAPTER_WEIGHTS
+    keys = safetensors_keys(weights)
+    if not keys or any("lora_" not in k for k in keys):
+        raise PipelineStop(f"parent illisible : {weights} ne contient pas que des poids LoRA ({len(keys)} tenseurs)")
+    adapter_sha256 = sha256(weights)
+    lineage = report.get("lignee")
+    if lineage is None:
+        lineage = rebuilt_first_link(report, adapter_sha256, report_path)
+    check_lineage(lineage, report_path)
+    return Parent(folder=folder, report=report, config=config, adapter_sha256=adapter_sha256, lineage=lineage)
+
+
+def base_of_adapter(config: dict[str, Any]) -> tuple[str | None, str | None]:
+    """Dépôt et révision de la base d'un adaptateur. Hugging Face écrit le chemin du cache
+    (`…/models--Qwen--Qwen3.5-4B/snapshots/<révision>`) dans `base_model_name_or_path` et laisse
+    `revision` vide ; un nom de dépôt prend la révision de `revision`."""
+    name = config.get("base_model_name_or_path")
+    if not isinstance(name, str):
+        return None, None
+    match = SNAPSHOT_PATH.search(name.replace("\\", "/"))
+    if match:
+        return f"{match[1]}/{match[2]}", match[3]
+    return name, config.get("revision")
+
+
+def check_parent(parent: Parent) -> None:
+    """Refuse un parent dont l'adaptateur ne se continue pas : autre base ou révision, autres
+    modules, rang ou alpha, adaptateur de domaine, poids substitués depuis son rapport, ou
+    lignée déjà à trois maillons."""
+    report, config = parent.report, parent.config
+    where = parent.folder
+    base = report.get("base", {})
+    if base.get("depot") != BASE_REPO or base.get("revision") != BASE_REVISION:
+        raise PipelineStop(
+            f"{BROKEN_CHAIN} : le parent {where} a la base {base.get('depot')} @ {base.get('revision')}, "
+            f"la chaîne {BASE_REPO} @ {BASE_REVISION}")
+    repo, revision = base_of_adapter(config)
+    if repo != BASE_REPO or revision != BASE_REVISION:
+        raise PipelineStop(
+            f"{BROKEN_CHAIN} : l'adaptateur du parent {where} a été posé sur {repo} @ {revision}, "
+            f"la chaîne sur {BASE_REPO} @ {BASE_REVISION}")
+    h = report.get("hyperparametres", {})
+    expected = {"modules": HYPERPARAMETERS["modules"], "rang": HYPERPARAMETERS["rang"],
+                "alpha": HYPERPARAMETERS["alpha"]}
+    found = {
+        "rapport": {"modules": h.get("modules"), "rang": h.get("rang"), "alpha": h.get("alpha")},
+        ADAPTER_CONFIG: {"modules": config.get("target_modules"), "rang": config.get("r"),
+                         "alpha": config.get("lora_alpha")},
+    }
+    for source, values in found.items():
+        different = [k for k in expected if values[k] != expected[k]]
+        if different:
+            raise PipelineStop(
+                f"{BROKEN_CHAIN} : {', '.join(different)} du parent ({source}) diffèrent de ceux de la chaîne : "
+                + "; ".join(f"{k} {values[k]!r} au lieu de {expected[k]!r}" for k in different))
+    # Le reste de l'identité de l'adaptateur, celle que pose `get_peft_model` dans `train`.
+    identity = {"lora_dropout": HYPERPARAMETERS["dropout"], "bias": "none", "use_dora": False,
+                "use_rslora": False, "modules_to_save": None}
+    defaults = {"use_dora": False, "use_rslora": False, "modules_to_save": None}
+    different = [k for k, v in identity.items() if config.get(k, defaults.get(k)) != v]
+    if different:
+        raise PipelineStop(
+            f"{BROKEN_CHAIN} : {', '.join(different)} de {ADAPTER_CONFIG} du parent diffèrent de ceux de la chaîne : "
+            + "; ".join(f"{k} {config.get(k, defaults.get(k))!r} au lieu de {identity[k]!r}" for k in different))
+    if report.get("donnees", {}).get("externe") is not None:
+        raise PipelineStop(f"{BROKEN_CHAIN} : le parent {where} est un adaptateur de domaine, hors de la chaîne")
+    if len(parent.lineage) >= MAX_LINKS:
+        raise PipelineStop(
+            f"le parent {where} a déjà {len(parent.lineage)} maillons (au plus {MAX_LINKS}) : "
+            "recalage : entraînement de zéro sur le jeu complet")
+    recorded = parent.lineage[-1]["adaptateur_sha256"]
+    if recorded != parent.adapter_sha256:
+        raise PipelineStop(
+            f"adaptateur substitué : {where / PARENT_ADAPTER_DIR / ADAPTER_WEIGHTS} a l'empreinte "
+            f"{parent.adapter_sha256}, le rapport du parent {recorded}")
+
+
+def known_families() -> list[str]:
+    """Les noms des familles du générateur, lus dans `training/src/families.rs` (le
+    générateur refuse aussi tout nom inconnu, en code 2)."""
+    try:
+        names = FAMILY_NAME.findall(FAMILIES_SOURCE.read_text(encoding="utf-8"))
+    except OSError as error:
+        raise PipelineStop(f"familles illisibles : {FAMILIES_SOURCE} ({error})") from error
+    if not names:
+        raise PipelineStop(f"familles illisibles : aucune famille lue dans {FAMILIES_SOURCE}")
+    return names
+
+
+def focus_excluded() -> list[str]:
+    """Les familles que le générateur refuse au jeu ciblé (`FOCUS_EXCLUDED`,
+    `training/src/lib.rs`) : tirées seules, elles engendrent une phrase d'une barre."""
+    try:
+        match = FOCUS_EXCLUDED_LIST.search(GENERATOR_SOURCE.read_text(encoding="utf-8"))
+    except OSError as error:
+        raise PipelineStop(f"générateur illisible : {GENERATOR_SOURCE} ({error})") from error
+    if match is None:
+        raise PipelineStop(f"générateur illisible : FOCUS_EXCLUDED absent de {GENERATOR_SOURCE}")
+    return re.findall(r'"([a-z0-9_]+)"', match[1])
+
+
+def parse_families(text: str) -> list[str]:
+    """`a,b` → les familles nommées ; un nom inconnu ou en double, ou une famille refusée au jeu
+    ciblé par le générateur, est refusé avant le GPU (le générateur les refuse aussi)."""
+    names = [n.strip() for n in text.split(",")]
+    known = known_families()
+    unknown = [n for n in names if n not in known]
+    if unknown:
+        raise PipelineStop(
+            f"famille inconnue : {', '.join(repr(n) for n in unknown)} ; familles connues : {', '.join(known)}")
+    twice = sorted({n for n in names if names.count(n) > 1})
+    if twice:
+        raise PipelineStop(f"famille nommée deux fois : {', '.join(twice)}")
+    excluded = [n for n in names if n in focus_excluded()]
+    if excluded:
+        raise PipelineStop(
+            f"famille refusée au jeu ciblé : {', '.join(excluded)} (tirée seule, elle engendre une phrase "
+            "d'une barre ; FOCUS_EXCLUDED de training/src/lib.rs, tant que sa tournure n'est pas reprise)")
+    return names
+
+
+def check_continuation(args: argparse.Namespace) -> Continuation | None:
+    """Les options de l'ajustement continu, puis le parent, lu et comparé : tout refus tombe
+    avant le GPU et avant de toucher au dossier de sortie. Sans `--depuis`, rien."""
+    parent_dir = getattr(args, "parent", None)
+    families = getattr(args, "families", None)
+    share = getattr(args, "recall_share", None)
+    if parent_dir is None:
+        extra = [flag for flag, value in (("--familles", families), ("--part-rappel", share)) if value is not None]
+        if extra:
+            raise PipelineStop(f"{', '.join(extra)} n'a de sens qu'avec --depuis <dossier d'un entraînement>")
+        return None
+    if args.external is not None:
+        raise PipelineStop("--depuis et --exemples-externes sont exclusifs : l'adaptateur de domaine reste hors de la chaîne")
+    if not families:
+        raise PipelineStop("--depuis exige --familles a,b : les familles du jeu ciblé de la séance")
+    share = RECALL_SHARE if share is None else share
+    if not MIN_RECALL_SHARE <= share < 1:
+        raise PipelineStop(
+            f"--part-rappel {share} refusée : au moins {MIN_RECALL_SHARE} (le rappel garde ce que le parent sait), "
+            "moins de 1 (il faut des exemples ciblés)")
+    names = parse_families(families)
+    count = CONTINUOUS_COUNT if args.examples is None else args.examples
+    session_counts(count, share)
+    parent = read_parent(parent_dir)
+    check_parent(parent)
+    return Continuation(parent=parent, families=names, recall_share=share, count=count)
+
+
+GENERATOR_CONSTANT = re.compile(
+    r"pub const (FOCUS_SEED|FOCUS_COUNT|DEFAULT_COUNT|RECALL_FLOOR|RECALL_VERSION): \w+ = ([0-9_]+);")
+
+
+def generator_constants() -> dict[str, int]:
+    """`FOCUS_SEED`, `FOCUS_COUNT` et `DEFAULT_COUNT`, lus dans `training/src/lib.rs` : les
+    bornes de ce que `training/tests/recouvrement.rs` garde ; et `RECALL_FLOOR`, le plancher par
+    famille du rappel stratifié et `RECALL_VERSION`, la version de son algorithme (5.54, séance 2)."""
+    try:
+        found = {name: int(value.replace("_", ""))
+                 for name, value in GENERATOR_CONSTANT.findall(GENERATOR_SOURCE.read_text(encoding="utf-8"))}
+    except OSError as error:
+        raise PipelineStop(f"générateur illisible : {GENERATOR_SOURCE} ({error})") from error
+    if set(found) != {"FOCUS_SEED", "FOCUS_COUNT", "DEFAULT_COUNT", "RECALL_FLOOR", "RECALL_VERSION"}:
+        raise PipelineStop(f"générateur illisible : constantes absentes de {GENERATOR_SOURCE} ({sorted(found)})")
+    return found
+
+
+def session_counts(count: int, share: float) -> tuple[int, int]:
+    """Exemples de rappel et exemples ciblés d'une séance de `count` exemples : le rappel est
+    arrondi au-dessus, pour que sa part ne tombe jamais sous `share`. Le jeu ciblé ne dépasse pas
+    `FOCUS_COUNT`, ni le rappel tiré (marge comprise) `DEFAULT_COUNT` : au-delà, ce qui est
+    entraîné sortirait de ce que `recouvrement.rs` contrôle."""
+    recall = math.ceil(count * share - 1e-9)
+    focus = count - recall
+    if recall < 1 or focus < 1:
+        raise PipelineStop(f"--exemples {count} : trop peu pour une séance avec rappel et jeu ciblé")
+    bounds = generator_constants()
+    if focus > bounds["FOCUS_COUNT"]:
+        raise PipelineStop(f"--exemples {count} : {focus} exemples ciblés, au plus {bounds['FOCUS_COUNT']} "
+                           "(FOCUS_COUNT, la borne gardée par recouvrement.rs)")
+    # Le plancher du rappel stratifié (au plus `RECALL_FLOOR` par famille) doit tenir dans le rappel.
+    floor_total = bounds["RECALL_FLOOR"] * len(known_families())
+    if floor_total > recall:
+        raise PipelineStop(f"--exemples {count} : {recall} exemples de rappel, moins que le plancher du rappel "
+                           f"stratifié ({bounds['RECALL_FLOOR']} par famille, {floor_total} en tout)")
+    if recall + RECALL_MARGIN > bounds["DEFAULT_COUNT"]:
+        raise PipelineStop(f"--exemples {count} : {recall} exemples de rappel et {RECALL_MARGIN} de marge, au plus "
+                           f"{bounds['DEFAULT_COUNT']} (DEFAULT_COUNT, le jeu graine 1 gardé par recouvrement.rs)")
+    return recall, focus
+
+
+def session_mix(recall: list[data.Example], focus: list[data.Example], recall_count: int | None = None,
+                min_share: float = MIN_RECALL_SHARE) -> tuple[list[data.Example], dict[str, Any]]:
+    """Le jeu d'une séance continue : le rappel, coupé à `recall_count` (il est tiré avec une
+    marge, pour que des exemples trop longs écartés ne le fassent pas tomber sous le plancher),
+    puis le jeu ciblé, moins les demandes déjà vues (même prompt dans le rappel ou plus haut dans
+    le jeu ciblé, quelle que soit la réponse), comptées. La part du rappel est comptée sur le jeu
+    final ; sous `min_share`, la chaîne s'arrête."""
+    drawn = len(recall)
+    if recall_count is not None:
+        recall = recall[:recall_count]
+    recall_prompts = {e.prompt for e in recall}
+    seen = set(recall_prompts)
+    kept, from_recall, internal = [], 0, 0
+    for example in focus:
+        if example.prompt in seen:
+            if example.prompt in recall_prompts:
+                from_recall += 1
+            else:
+                internal += 1
+            continue
+        seen.add(example.prompt)
+        kept.append(example)
+    training = recall + kept
+    share = len(recall) / len(training) if training else 0.0
+    if share < min_share:
+        raise PipelineStop(f"part du rappel comptée {share:.3f}, sous {min_share} : la séance oublierait")
+    return training, {"exemples_rappel": len(recall), "exemples_cible": len(kept),
+                      "rappel_marge_non_prise": drawn - len(recall),
+                      "cible_doublons_du_rappel": from_recall, "cible_doublons_internes": internal,
+                      "part_rappel_comptee": round(share, 4)}
+
+
+def recall_families(path: Path) -> dict[str, Any]:
+    """`<rappel>.familles.json`, écrit par le générateur à côté du rappel stratifié : la famille de
+    chaque ligne et le plancher de chaque famille. Absent ou mal formé : la chaîne s'arrête."""
+    side = Path(f"{path}.familles.json")
+    try:
+        value = json.loads(side.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise PipelineStop(f"familles du rappel illisibles : {side} ({error})") from error
+    if not (isinstance(value, dict) and isinstance(value.get("familles"), list)
+            and isinstance(value.get("minimum"), dict)
+            and value.get("plancher") == generator_constants()["RECALL_FLOOR"]):
+        raise PipelineStop(f"familles du rappel illisibles : {side} (familles, minimum ou plancher)")
+    return value
+
+
+def check_recall_floor(families: list[str], wanted: int, minimum: dict[str, int]) -> None:
+    """Après l'écart des exemples trop longs et la coupe de la marge, le rappel entraîné (les
+    `wanted` premiers) a son compte et garde au moins le plancher de chaque famille ; sinon la
+    chaîne s'arrête, en nommant la famille."""
+    if len(families) < wanted:
+        raise PipelineStop(f"rappel de {len(families)} exemples après l'écart des trop longs, {wanted} demandés : "
+                           "la marge ne suffit pas")
+    counts: dict[str, int] = {}
+    for family in families[:wanted]:
+        counts[family] = counts.get(family, 0) + 1
+    for family, floor in sorted(minimum.items()):
+        if counts.get(family, 0) < floor:
+            raise PipelineStop(f"rappel stratifié entamé : famille {family}, {counts.get(family, 0)} exemples "
+                               f"sur un plancher de {floor} (exemples trop longs écartés)")
+
+
+def check_counts(plan: dict[str, tuple[Path, int, int, list[str]]], read: dict[str, list[data.Example]]) -> None:
+    """Chaque jeu engendré a le compte demandé : un jeu plus court (familles épuisées, fichier
+    coupé) arrête la chaîne avant l'entraînement, en nommant le fichier."""
+    for name, (path, _, wanted, _) in plan.items():
+        if name in read and len(read[name]) != wanted:
+            raise PipelineStop(f"{path} : {len(read[name])} exemples, {wanted} demandés")
+
+
+def lineage(continuation: Continuation | None, commit: str, torch_seed: int) -> list[dict[str, Any]]:
+    """La lignée du rapport : un maillon pour un entraînement de zéro, celle du parent plus un
+    maillon pour une séance continue. L'empreinte de l'adaptateur produit se remplit après
+    l'entraînement."""
+    link: dict[str, Any] = {"maillon": 1, "depart": "base", "commit": commit, "graine_torch": torch_seed,
+                            "adaptateur_sha256": None}
+    if continuation is None:
+        return [link]
+    links = [dict(item) for item in continuation.parent.lineage]
+    link |= {"maillon": len(links) + 1, "depart": continuation.parent.adapter_sha256,
+             "familles": continuation.families, "part_rappel": continuation.recall_share,
+             "rappel_plancher": generator_constants()["RECALL_FLOOR"],
+             "rappel_version": generator_constants()["RECALL_VERSION"], "exemples": continuation.count}
+    return links + [link]
+
+
+def effective_hyperparameters(continuation: Continuation | None) -> dict[str, Any]:
+    return HYPERPARAMETERS | ({"taux_apprentissage": CONTINUOUS_LEARNING_RATE} if continuation else {})
+
+
+def check_resume_parent(report: dict[str, Any], continuation: Continuation | None) -> None:
+    """À la reprise, refuse un autre parent ou d'autres familles (ou une autre part de rappel, un
+    autre plancher du rappel stratifié) que ceux de l'entraînement commencé : l'adaptateur et les
+    jeux déjà écrits ne leur correspondraient pas (`rappel_version` : la version de l'algorithme du
+    rappel stratifié). Un rapport d'avant 5.54 est un départ de zéro ;
+    un maillon sans `rappel_plancher` a pris l'ancien rappel, le début du jeu graine 1."""
+    if not any(key in report for key in ("depart", "lignee", "donnees")):
+        return
+    lignee = report.get("lignee")
+    last = lignee[-1] if isinstance(lignee, list) and lignee and isinstance(lignee[-1], dict) else {}
+    families = last.get("familles")
+    before = (report.get("depart", "base"), sorted(families) if isinstance(families, list) else families,
+              last.get("part_rappel"), last.get("rappel_plancher"), last.get("rappel_version"), last.get("exemples"))
+    constants = generator_constants() if continuation else {}
+    now = ((continuation.parent.adapter_sha256, sorted(continuation.families), continuation.recall_share,
+            constants["RECALL_FLOOR"], constants["RECALL_VERSION"], continuation.count) if continuation
+           else ("base", None, None, None, None, None))
+    if before != now:
+        raise PipelineStop(
+            "--reprendre avec un autre parent, d'autres familles, une autre part de rappel, un autre rappel "
+            "(plancher par famille) ou un autre nombre d'exemples que l'entraînement commencé : relancez avec "
+            "les mêmes options, ou dans un dossier vide")
+
+
+def check_loaded_keys(missing: list[str], unexpected: list[str], loaded: int) -> None:
+    """Après le chargement des poids du parent : aucune clé inattendue, aucun paramètre LoRA
+    resté à son initialisation (les poids de la base, absents de l'adaptateur, ne comptent pas)."""
+    lora_missing = [k for k in missing if "lora_" in k]
+    if unexpected or lora_missing or loaded == 0:
+        raise PipelineStop(
+            f"poids du parent mal chargés : {len(unexpected)} clés inattendues {unexpected[:3]}, "
+            f"{len(lora_missing)} paramètres LoRA non chargés {lora_missing[:3]}, {loaded} tenseurs lus")
+
+
+def same_tensor(a, b) -> bool:
+    import torch
+
+    return torch.equal(a.detach().to("cpu", b.dtype), b.detach().to("cpu"))
+
+
+def check_loaded_values(parent: dict[str, Any], now: dict[str, Any], same=same_tensor) -> int:
+    """Après le chargement : chaque matrice `lora_B` de l'adaptateur (nulle à l'initialisation)
+    égale celle du parent. Rend le nombre de matrices comparées."""
+    keys = sorted(k for k in parent if "lora_B" in k)
+    if not keys:
+        raise PipelineStop("poids du parent mal chargés : aucune matrice lora_B dans l'adaptateur du parent")
+    for key in keys:
+        if key not in now or not same(now[key], parent[key]):
+            raise PipelineStop(f"poids du parent mal chargés : {key} n'égale pas celle du parent")
+    return len(keys)
+
+
+def load_parent_weights(model, adapter_dir: Path, expected_sha256: str, load_file=None, set_state=None,
+                        get_state=None, same=None) -> int:
+    """Pose les poids LoRA du parent sur l'adaptateur que `get_peft_model` vient de créer (même
+    configuration) : le chemin d'Unsloth reste celui d'un entraînement de zéro. L'empreinte du
+    fichier est revérifiée juste avant la lecture ; après, les clés et les matrices `lora_B`.
+    Les fonctions de peft et de safetensors se remplacent pour les tests."""
+    if load_file is None:
+        from safetensors.torch import load_file
+    if set_state is None:
+        from peft import set_peft_model_state_dict as set_state
+    if get_state is None:
+        from peft import get_peft_model_state_dict as get_state
+    path = adapter_dir / ADAPTER_WEIGHTS
+    found = sha256(path)
+    if found != expected_sha256:
+        raise PipelineStop(f"adaptateur substitué : {path} a l'empreinte {found}, lue avant le GPU {expected_sha256}")
+    state = load_file(str(path))
+    result = set_state(model, state)
+    check_loaded_keys(list(result.missing_keys), list(result.unexpected_keys), len(state))
+    return check_loaded_values(state, get_state(model), same or same_tensor)
 
 
 @dataclass(frozen=True)
@@ -376,19 +901,40 @@ def write_atomically(path: Path, command: list[str], **options: Any) -> None:
 # -- étape 3 : génération ------------------------------------------------------------------
 
 
-def generate(folder: Path, count: int, validation_count: int) -> dict[str, Path]:
+def generation_plan(folder: Path, count: int, validation_count: int,
+                    continuation: Continuation | None = None) -> dict[str, tuple[Path, int, int, list[str]]]:
+    """Les jeux à engendrer, dans l'ordre (la validation en dernier : sa présence dit, à la
+    reprise, que les autres sont écrits). De zéro : graine 1 pour l'entraînement. Séance
+    continue : le rappel, stratifié dans le jeu graine 1 complet (`--rappel-stratifie
+    RECALL_FLOOR` : au moins `RECALL_FLOOR` exemples par famille d'abord, puis le reste au poids ;
+    la marge coupée par `session_mix` ne mord que ce reste), puis le jeu ciblé, graine 3, sur les
+    familles nommées."""
+    if continuation is None:
+        sets = {"entrainement": (folder / "entrainement.jsonl", TRAINING_SEED, count, [])}
+    else:
+        recall, focus = session_counts(count, continuation.recall_share)
+        sets = {
+            "rappel": (folder / "rappel.jsonl", TRAINING_SEED, recall + RECALL_MARGIN,
+                       ["--rappel-stratifie", str(generator_constants()["RECALL_FLOOR"])]),
+            "cible": (folder / "cible.jsonl", FOCUS_SEED, focus, ["--familles", ",".join(continuation.families)]),
+        }
+    return sets | {"validation": (folder / "validation.jsonl", VALIDATION_SEED, validation_count, [])}
+
+
+def generate(folder: Path, count: int, validation_count: int,
+             continuation: Continuation | None = None) -> dict[str, Path]:
     folder.mkdir(parents=True, exist_ok=True)
-    sets = {
-        "entrainement": (folder / "entrainement.jsonl", TRAINING_SEED, count),
-        "validation": (folder / "validation.jsonl", VALIDATION_SEED, validation_count),
-    }
-    for path, seed, n in sets.values():
-        run(
+    sets = generation_plan(folder, count, validation_count, continuation)
+    for path, seed, n, extra in sets.values():
+        # La sortie d'erreur est capturée : un refus du générateur (famille inconnue, code 2 ;
+        # jeu ciblé qui reprend une phrase de barre, code 3, identifiant nommé) entre au message.
+        result = run(
             ["cargo", "run", "-q", "-p", "cassini-training", "--release", "--",
-             "--format", "chat", "--seed", str(seed), "--count", str(n), "--out", str(path)],
-            cwd=ROOT,
+             "--format", "chat", "--seed", str(seed), "--count", str(n), *extra, "--out", str(path)],
+            cwd=ROOT, capture_output=True, text=True,
         )
-    return {name: path for name, (path, _, _) in sets.items()}
+        sys.stderr.write(result.stderr or "")
+    return {name: path for name, (path, _, _, _) in sets.items()}
 
 
 # -- étapes 5 et 6 : entraînement et validation --------------------------------------------
@@ -527,14 +1073,15 @@ def encode(tokenizer, example: data.Example) -> tuple[list[int], int]:
 
 
 def train(base_dir: str, examples: list[data.Example], adapter_dir: Path, max_steps: int | None,
-          long_first: bool = False) -> dict[str, Any]:
+          long_first: bool = False, hyperparameters: dict[str, Any] | None = None,
+          start_adapter: Path | None = None, start_sha256: str | None = None) -> dict[str, Any]:
     import torch
     import torch.nn.functional as F
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
     from transformers import AutoTokenizer, get_cosine_schedule_with_warmup
 
     set_seeds(TORCH_SEED)
-    h = HYPERPARAMETERS
+    h = HYPERPARAMETERS if hyperparameters is None else hyperparameters
     allocator = configure_allocator()
     log(f"allocateur : {allocator}")
     tokenizer = AutoTokenizer.from_pretrained(base_dir)
@@ -562,6 +1109,12 @@ def train(base_dir: str, examples: list[data.Example], adapter_dir: Path, max_st
             LoraConfig(r=h["rang"], lora_alpha=h["alpha"], lora_dropout=h["dropout"],
                        target_modules=h["modules"], bias="none", task_type="CAUSAL_LM"),
         )
+    loaded = None
+    if start_adapter is not None:
+        # Séance continue (5.54) : l'adaptateur vient d'être posé, à la même configuration ; il
+        # prend les poids du parent avant que l'optimiseur ne voie ses paramètres.
+        loaded = load_parent_weights(model, start_adapter, start_sha256)
+        log(f"poids du parent chargés : {loaded} matrices lora_B vérifiées, de {start_adapter}")
     trainable, total = model.get_nb_trainable_parameters()
     log(f"paramètres entraînés : {trainable:,} sur {total:,}")
 
@@ -625,6 +1178,7 @@ def train(base_dir: str, examples: list[data.Example], adapter_dir: Path, max_st
         "pic_memoire_gpu_octets": torch.cuda.max_memory_reserved(),
         "parametres_entraines": trainable,
         "allocateur": allocator,
+        **({"matrices_lora_b_du_parent_verifiees": loaded} if loaded is not None else {}),
     }
 
 
@@ -976,8 +1530,17 @@ def launch(args: argparse.Namespace) -> dict[str, Any]:
     # Les options et le fichier externe avant tout coût : un nom refusé ou une ligne mal formée
     # n'attend ni le GPU, ni un téléchargement.
     outputs = check_options(args)
+    # Le parent d'une séance continue, lu et comparé avant le GPU et avant le dossier de sortie.
+    continuation = check_continuation(args)
     external = read_external(args.external, args.external_validation) if args.external else None
     civil = not args.external_only
+    # Le compte de la séance (bornes comprises) est vérifié par `check_continuation`.
+    count = continuation.count if continuation else (
+        args.examples if args.examples is not None else TRAINING_COUNT)
+    report_path = output / "rapport.json"
+    if args.resume:
+        # Lecture seule : un autre parent ou d'autres familles que l'entraînement commencé.
+        check_resume_parent(read_report(report_path), continuation)
     # Le GPU ensuite : un refus ne laisse ni dossier rempli, ni téléchargement.
     memory, gpu_name = gpu_memory()
     check_gpu(memory)
@@ -986,20 +1549,43 @@ def launch(args: argparse.Namespace) -> dict[str, Any]:
     prepare_output(output, args.resume)
     work = output / "travail"
     work.mkdir(exist_ok=True)
-    report_path = output / "rapport.json"
     report = read_report(report_path) if args.resume else {}
+    started_seed = report.get("graines", {}).get("torch")
+    if started_seed is not None and started_seed != TORCH_SEED:
+        # L'adaptateur déjà écrit a été entraîné avec l'autre graine (deux graines par nuit).
+        raise PipelineStop(
+            f"--reprendre avec la graine d'entraînement {TORCH_SEED}, l'entraînement commencé a "
+            f"la graine {started_seed} : relancez avec --graine-torch {started_seed}"
+        )
 
+    hyperparameters = effective_hyperparameters(continuation)
+    state = repository_state()
+    started_lineage = report.get("lignee")
     report.update({
         "base": {"depot": BASE_REPO, "revision": BASE_REVISION, "licence": "Apache-2.0"},
         "llama_cpp": {"url": LLAMA_CPP_URL, "commit": LLAMA_CPP_COMMIT,
                       "llama_cpp_sys_2": LLAMA_CPP_SYS_VERSION},
-        "depot_cassini": repository_state(),
-        "graines": {"entrainement": TRAINING_SEED, "validation": VALIDATION_SEED, "torch": TORCH_SEED},
-        "hyperparametres": HYPERPARAMETERS | ({"pas_max": args.max_steps} if args.max_steps else {})
+        "depot_cassini": state,
+        "graines": {"entrainement": TRAINING_SEED, "validation": VALIDATION_SEED, "torch": TORCH_SEED}
+        | ({"cible": FOCUS_SEED} if continuation else {}),
+        "hyperparametres": hyperparameters | ({"pas_max": args.max_steps} if args.max_steps else {})
         | ({"longs_d_abord": True} if args.long_first else {}),
         "gpu": {"nom": gpu_name, "memoire_totale_octets": memory},
         "versions": versions(),
+        # Ajustement continu (5.54) : la lignée, que la séance suivante lit.
+        "lignee": lineage(continuation, state["commit"], TORCH_SEED),
     })
+    if (isinstance(started_lineage, list) and len(started_lineage) == len(report["lignee"])
+            and isinstance(started_lineage[-1], dict) and started_lineage[-1].get("commit")):
+        # En reprise, le maillon garde le commit de l'entraînement commencé.
+        report["lignee"][-1]["commit"] = started_lineage[-1]["commit"]
+    if continuation:
+        # L'adaptateur de départ et son dossier ; un entraînement de zéro n'en a pas.
+        report["depart"] = continuation.parent.adapter_sha256
+        report["depuis"] = str(continuation.parent.folder)
+    else:
+        report.pop("depart", None)
+        report.pop("depuis", None)
     report.pop("commit_cassini", None)
     check_resume(report, external, civil)
     write_report(report_path, report)
@@ -1009,11 +1595,21 @@ def launch(args: argparse.Namespace) -> dict[str, Any]:
     if not civil:
         sets = {}
     elif args.resume and (data_dir / "validation.jsonl").exists():
-        sets = {"entrainement": data_dir / "entrainement.jsonl", "validation": data_dir / "validation.jsonl"}
+        sets = {name: path for name, (path, _, _, _)
+                in generation_plan(data_dir, count, args.validation, continuation).items()}
     else:
-        sets = generate(data_dir, args.examples, args.validation)
-    mixed = mix(data.read_jsonl(sets["entrainement"]) if civil else [],
-                data.read_jsonl(sets["validation"]) if civil else [], external)
+        sets = generate(data_dir, count, args.validation, continuation)
+    read = {name: data.read_jsonl(path) for name, path in sets.items()}
+    if continuation:
+        # Un jeu plus court que demandé arrête la chaîne avant l'entraînement.
+        check_counts(generation_plan(data_dir, count, args.validation, continuation), read)
+        recall_all, focus_all = read["rappel"], read["cible"]
+        # `mix` ne touche pas au côté entraînement : il n'y sert qu'à retirer de la validation
+        # tout prompt du rappel tiré ou du jeu ciblé.
+        civil_training = recall_all + focus_all
+    else:
+        civil_training = read["entrainement"] if civil else []
+    mixed = mix(civil_training, read["validation"] if civil else [], external)
 
     # 4. base (Unsloth avant transformers)
     if USE_UNSLOTH:
@@ -1028,7 +1624,22 @@ def launch(args: argparse.Namespace) -> dict[str, Any]:
     def length(e: data.Example) -> int:
         return len(encode(tokenizer, e)[0])
 
-    training, too_long = data.drop_too_long(mixed["civil_training"], length, MAX_LENGTH)
+    session = None
+    if continuation:
+        # La part du rappel se compte sur le jeu final, une fois les exemples trop longs écartés.
+        side = recall_families(sets["rappel"])
+        if len(side["familles"]) != len(recall_all):
+            raise PipelineStop(f"familles du rappel : {len(side['familles'])} pour {len(recall_all)} exemples "
+                               f"({sets['rappel']})")
+        recall_kept, recall_too_long = data.drop_too_long(recall_all, length, MAX_LENGTH)
+        kept_families = [f for e, f in zip(recall_all, side["familles"]) if length(e) <= MAX_LENGTH]
+        focus_kept, focus_too_long = data.drop_too_long(focus_all, length, MAX_LENGTH)
+        recall_count = session_counts(count, continuation.recall_share)[0]
+        check_recall_floor(kept_families, recall_count, side["minimum"])
+        training, session = session_mix(recall_kept, focus_kept, recall_count)
+        too_long = recall_too_long + focus_too_long
+    else:
+        training, too_long = data.drop_too_long(mixed["civil_training"], length, MAX_LENGTH)
     validation, too_long_validation = data.drop_too_long(mixed["civil_validation"], length, MAX_LENGTH)
     external_training, external_too_long = data.drop_too_long(mixed["external_training"], length, MAX_LENGTH)
     external_validation, external_too_long_validation = data.drop_too_long(
@@ -1052,11 +1663,16 @@ def launch(args: argparse.Namespace) -> dict[str, Any]:
         } if civil else {}),
         "jetons_mediane": lengths[len(lengths) // 2],
         "jetons_max": lengths[-1],
-        **({
-            "empreinte_entrainement": sha256(sets["entrainement"]),
-            "empreinte_validation": sha256(sets["validation"]),
-        } if civil else {}),
+        **({f"empreinte_{name}": sha256(path) for name, path in sets.items()} if civil else {}),
     }
+    if continuation:
+        report["donnees"]["seance"] = session | {
+            "familles": continuation.families,
+            "part_rappel_demandee": continuation.recall_share,
+            "rappel": f"jeu graine {TRAINING_SEED} stratifié, au moins "
+                      f"{generator_constants()['RECALL_FLOOR']} exemples par famille, le reste au poids",
+            "cible": f"graine {FOCUS_SEED}, familles nommées seules",
+        }
     if external is not None:
         # Empreintes et comptes seulement : aucun exemple externe n'entre au rapport.
         report["donnees"]["externe"] = {
@@ -1082,12 +1698,17 @@ def launch(args: argparse.Namespace) -> dict[str, Any]:
         report["chemin_entrainement"] = training_path()
         report["noyaux"] = install_fast_kernels()
         log(f"noyaux de l'attention linéaire : {report['noyaux']}")
-        result = train(base_dir, training, adapter_dir, args.max_steps, args.long_first)
+        result = train(base_dir, training, adapter_dir, args.max_steps, args.long_first, hyperparameters,
+                       continuation.parent.adapter_dir if continuation else None,
+                       continuation.parent.adapter_sha256 if continuation else None)
         model = result.pop("modele")
         report["entrainement"] = result
         write_report(report_path, report)
     else:
         model = None
+    # La lignée porte l'empreinte de l'adaptateur produit : la séance suivante la vérifie.
+    report["lignee"][-1]["adaptateur_sha256"] = sha256(adapter_dir / ADAPTER_WEIGHTS)
+    write_report(report_path, report)
     # Le score civil (5.17) quand le jeu civil est mélangé, et le score externe à part : les deux
     # montrent si l'adaptateur de domaine oublie les commandes ordinaires.
     scores = ([("validation", validation, "validation-sorties.jsonl", "de validation")] if civil else []) + (
@@ -1172,13 +1793,14 @@ def launch(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    global FAST_KERNELS, USE_UNSLOTH, TORCH_SEED
     parser = argparse.ArgumentParser(description="Ré-entraîne le modèle de composition de Cassini.")
     parser.add_argument("--sortie", dest="output", type=Path, required=True,
                         help="dossier de sortie, vide et hors du dépôt")
     parser.add_argument("--reprendre", dest="resume", action="store_true",
                         help="finir un entraînement commencé dans --sortie")
-    parser.add_argument("--exemples", dest="examples", type=int, default=TRAINING_COUNT,
-                        help="exemples d'entraînement")
+    parser.add_argument("--exemples", dest="examples", type=int, default=None,
+                        help=f"exemples d'entraînement ({TRAINING_COUNT} de zéro, {CONTINUOUS_COUNT} par séance continue)")
     parser.add_argument("--validation", dest="validation", type=int, default=VALIDATION_COUNT,
                         help="exemples de validation engendrés")
     parser.add_argument("--pas-max", dest="max_steps", type=int, default=None,
@@ -1197,10 +1819,19 @@ def main(argv: list[str] | None = None) -> int:
                         help="nom de l'adaptateur de domaine et de sa déclaration (avec --exemples-externes)")
     parser.add_argument("--externe-seul", dest="external_only", action="store_true",
                         help="n'entraîne que sur le fichier externe, sans le jeu civil engendré")
+    parser.add_argument("--graine-torch", dest="torch_seed", type=int, default=TORCH_SEED,
+                        help="graine de l'entraînement seul ; le jeu engendré ne change pas")
     parser.add_argument("--validation-externe", dest="external_validation", type=Path, default=None,
                         help="second fichier pour le score externe, au lieu d'une part du premier")
+    parser.add_argument("--depuis", dest="parent", type=Path, default=None,
+                        help="dossier de sortie d'un entraînement précédent : la séance repart de son adaptateur")
+    parser.add_argument("--familles", dest="families", default=None,
+                        help="familles du jeu ciblé, séparées par des virgules (avec --depuis)")
+    parser.add_argument("--part-rappel", dest="recall_share", type=float, default=None,
+                        help=f"part du rappel tiré de toutes les familles (avec --depuis ; {RECALL_SHARE} par défaut, "
+                             f"{MIN_RECALL_SHARE} au moins)")
     args = parser.parse_args(argv)
-    global FAST_KERNELS, USE_UNSLOTH
+    TORCH_SEED = args.torch_seed
     FAST_KERNELS = not args.reference_kernels
     USE_UNSLOTH = not args.without_unsloth
     start = time.time()

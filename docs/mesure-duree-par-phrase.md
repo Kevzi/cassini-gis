@@ -600,3 +600,64 @@ de peu. Mesure seule : aucun seuil n'est vérifié par un test.
 bout_en_bout -- --ignored`, voir `docs/entrainement-du-modele.md`) : plan de démo à 5 étapes,
 conforme, composé en 16,5 s (chargement compris), exécuté, puis rejoué dans une seconde session
 sans modèle : `{"steps": 5, "identical": true}`.
+
+## Vue triée branchée à la composition (ticket 5.48, 2026-11-10)
+
+Noyau de la branche `story/5-48-vue-branchee` (paquet `--features gpu`, Windows), modèle installé
+(fusion A+B de la nuit du 2026-11-10, qui n'a pas appris la vue triée : elle le sera en 5.49), sonde
+`qgis-plugin/tests/probe_recette.py` dans QGIS 3.44.15, `CASSINI_MODELS` sur un dossier qui ne
+contient que ce modèle. Données et sorties hors dépôt : `../donnees-test-cassini/annecy/essais-5-48/`
+(projet de 63 couches construit par `annecy/scripts/construire-projet-gros.py`, voir le `LISEZMOI`).
+Durée de composition par phrase, mesurée par la sonde (inventaire QGIS, vue, modèle, redemandes).
+
+**Taille de la vue** (inventaires réels pris dans QGIS, `inventaire-qgis.py`) :
+
+| Projet | Couches | Inventaire brut | Vue du modèle | Lecture de l'inventaire par QGIS |
+|---|---|---|---|---|
+| Annecy (`projet-test-annecy.qgz`) | 12 | 33 854 car. | 16 597 car., sous le seuil (17 000) : vue d'avant, à l'octet | 30,5 s |
+| Gros projet (BD TOPO 74 + PLUi + MNT) | 63 | 175 657 car. | index 5 692 car. ; vue de 8 386 à 10 995 car. sur 29 phrases | 39,1 s |
+
+**GPU** (RTX 3070 Ti) :
+
+| Projet | Phrases | 1re phrase | Phrases suivantes | Plans justes | Rejeu après réouverture |
+|---|---|---|---|---|---|
+| Annecy, 20 phrases (`recette/annecy.json`) | 20 | 37,7 s (lecture QGIS 30 s comprise) | 3,9 à 45,1 s ; 18 sur 19 sous 30 s ; médiane 8,7 s | 17/20, ratés RA07, RA09, RA13 (ceux de la référence de 5.45) | identique |
+| Gros projet (`essais-5-48/phrases-gros.json`) | 7 | 49,8 s (lecture QGIS 39 s comprise) | 5,1 à 7,5 s | 7/7 (indicatif, pas une barre de 48) | identique |
+
+Aucun `ai.prompt_too_long`. Sur Annecy, les phrases longues (RA11 et RA12 à 28,7 s, RA13 à
+45,1 s, RA14 à 23,4 s) sont les phrases de terrain à coordonnées, dont la vue n'a pas changé : leur
+durée vient de la composition (redemande de `compose_plan` comprise), pas de la vue.
+
+**CPU seul** (5800X, carte masquée par `GGML_VK_VISIBLE_DEVICES=aucune`, fils par défaut du produit) :
+
+| Projet | Phrases | 1re phrase | Phrases suivantes | Plans justes | Rejeu après réouverture |
+|---|---|---|---|---|---|
+| Annecy, 6 phrases (`essais-5-48/phrases-annecy-6.json` : RA01, 03, 04, 08, 10, 16) | 6 | 158,9 s (lecture QGIS 30 s, chargement et lecture complète de l'invite) | 7,1 à 20,7 s, toutes sous 30 s | 6/6 | identique |
+| Gros projet | 7 | 153,3 s (lecture QGIS 39 s comprise) | 40,3 à 59,6 s, toutes sous 60 s (trois à 58,6–59,6 s) | 7/7 (indicatif) | identique |
+
+Sur le gros projet, chaque phrase relit la fin de l'index et ses couches détaillées (≈ 5 000
+caractères, ≈ 1 800 jetons) : les barres de 60 s (CPU) et 30 s (GPU) tiennent, celle du CPU
+de justesse. La première phrase d'une session reste longue (lecture de l'inventaire par QGIS, déjà
+reportée, puis lecture complète de l'invite).
+
+## Grammaire des paramètres (ticket 5.56, 2026-11-11)
+
+La grammaire du modèle contraint désormais les paramètres de chaque commande offerte, d'après le
+schéma que le catalogue montre au modèle. Construite en ~15 ms (registre standard, 348 règles,
+~26 Ko) ; lue par llama.cpp en 0,7 ms. La ligne `cassini-timings` gagne trois champs, à la fin :
+`grammaire=` (construction, au premier essai seulement, `0` à la redemande), `echantillonneur=`
+(création de l'échantillonneur de grammaire, comptée aussi dans `ecriture=`, `0` sans grammaire)
+et `replis=` (champs retombés sur le JSON libre, `0` attendu ; la liste est écrite une fois sur la
+sortie d'erreur quand elle n'est pas vide).
+
+Limites à connaître :
+
+- La borne de 240 caractères ne règle que la **question** et le **refus**. Un paramètre texte
+  (`value` d'un filtre, `field`, chemins, titres) reste une chaîne JSON sans borne de longueur.
+- L'acceptation de la grammaire par llama.cpp (syntaxe, plafond de répétition) n'est vérifiée que
+  par l'essai ignoré `grammaire_reel` ; à lancer à la main à chaque changement de
+  `ai/src/grammar.rs` ou d'un schéma de commande :
+  `CASSINI_TEST_MODEL=<gguf ou déclaration> cargo test -p cassini-ai --lib -- --ignored --nocapture grammaire_reel`.
+
+Mesures avec le modèle (base `e912a11` contre la branche, GPU) : à faire, après la fin de
+l'entraînement en cours.

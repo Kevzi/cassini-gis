@@ -49,8 +49,9 @@ pub enum Plan {
     },
 }
 
-/// D'où vient une question : du modèle, ou du garde-fou sur les coordonnées du noyau
-/// (`point::guard_coordinates`). Jamais écrite au journal (AD-11).
+/// D'où vient une question : du modèle, ou d'un garde-fou du noyau, sur les coordonnées
+/// (`point::guard_coordinates`) ou sur les attributs (`attribute_guard::guard_attributes`,
+/// ticket 5.57). Jamais écrite au journal (AD-11).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QuestionSource {
@@ -437,10 +438,11 @@ fn previous_error(step: usize, k: usize) -> PlanError {
 }
 
 /// Le schéma des éléments d'un paramètre tableau dont les éléments sont des [`Point`]
-/// (`Vec<Point>`, `observers`, `sources`) ; `None` pour tout autre paramètre.
+/// (`Vec<Point>`, `observers`, `sources`) ; `None` pour tout autre paramètre. Public pour que la
+/// grammaire du modèle (`cassini-ai`, ticket 5.56) reconnaisse les mêmes tableaux.
 ///
 /// [`Point`]: crate::point::Point
-pub(crate) fn point_items_schema(schema: &Value, root: &Value) -> Option<Value> {
+pub fn point_items_schema(schema: &Value, root: &Value) -> Option<Value> {
     let items = crate::point::items_schema(schema, root, 0)?;
     crate::point::is_point(items, root).then(|| items.clone())
 }
