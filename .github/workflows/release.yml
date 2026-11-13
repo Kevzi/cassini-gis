@@ -99,6 +99,13 @@ jobs:
       - name: Assemblage du paquet du noyau (liste fermée)
         run: python -I installer/assembler_noyau.py --source C:\ct\release --sortie dist/noyau
 
+      - name: Le paquet assemblé répond
+        run: |
+          $sortie = & dist\noyau\cassini.exe run system.about 2>&1
+          $code = $LASTEXITCODE
+          Write-Host $sortie
+          if ($code -ne 0) { throw ("paquet assemblé : code 0x{0:X}" -f $code) }
+
       # Inno Setup est déjà installé sur le poste de GitHub (licence permissive propre, voir
       # docs/publier-une-version.md) : on affiche sa version dans le journal, sans rien installer.
       - name: Inno Setup (version du poste)
@@ -160,6 +167,10 @@ jobs:
               if (-not (Test-Path "$dir1\bin\$($f.Name)")) { throw "$($f.Name) absent du paquet installé" }
             }
             if (-not (Test-Path "$dir1\bin\ggml-vulkan.dll")) { throw "ggml-vulkan.dll absente" }
+            foreach ($f in Get-ChildItem dist\noyau -File) {
+              $a = (Get-FileHash $f.FullName).Hash; $b = (Get-FileHash "$dir1\bin\$($f.Name)").Hash
+              Write-Host ("{0} {1}" -f $f.Name, $(if ($a -eq $b) { 'identique' } else { 'DIFFERENT' }))
+            }
             $sortie = & "$dir1\bin\cassini.exe" run system.about 2>&1
             $code = $LASTEXITCODE
             Write-Host $sortie
