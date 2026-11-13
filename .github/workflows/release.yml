@@ -160,8 +160,10 @@ jobs:
               if (-not (Test-Path "$dir1\bin\$($f.Name)")) { throw "$($f.Name) absent du paquet installé" }
             }
             if (-not (Test-Path "$dir1\bin\ggml-vulkan.dll")) { throw "ggml-vulkan.dll absente" }
-            & "$dir1\bin\cassini.exe" run system.about
-            if ($LASTEXITCODE -ne 0) { throw "cassini.exe run system.about a échoué" }
+            $sortie = & "$dir1\bin\cassini.exe" run system.about 2>&1
+            $code = $LASTEXITCODE
+            Write-Host $sortie
+            if ($code -ne 0) { throw ("cassini.exe run system.about a échoué : code 0x{0:X}" -f $code) }
             $info = Get-Content "$dir1\bin\installation.json" -Raw | ConvertFrom-Json
             if ($info.version -ne $env:TAG.TrimStart('v')) { throw "version installée : $($info.version)" }
             if (-not $info.installe_le) { throw "date d'installation absente" }
@@ -233,8 +235,10 @@ jobs:
           foreach ($f in Get-ChildItem dist\noyau -File) {
             if (-not (Test-Path "$dir\bin\$($f.Name)")) { throw "$($f.Name) absent du paquet installé" }
           }
-          & "$dir\bin\cassini.exe" run system.about
-          if ($LASTEXITCODE -ne 0) { throw "cassini.exe run system.about a échoué" }
+          $sortie = & "$dir\bin\cassini.exe" run system.about 2>&1
+          $code = $LASTEXITCODE
+          Write-Host $sortie
+          if ($code -ne 0) { throw ("cassini.exe run system.about a échoué : code 0x{0:X}" -f $code) }
           # Le modèle est listé par model.list (le noyau le cherche dans models\ à côté de lui).
           $liste = & "$dir\bin\cassini.exe" run model.list | Out-String
           Write-Host $liste
