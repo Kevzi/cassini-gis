@@ -44,3 +44,38 @@ protège d'un téléchargement corrompu ou d'un fichier remplacé seul ; cela ne
 release entièrement compromise, où manifeste et noyau changeraient ensemble. Le paramètre
 `/MANIFESTE=` sert aux essais locaux ; l'installeur n'en a pas besoin à l'usage normal. Les
 empreintes des installeurs eux-mêmes seront publiées sur la page d'accueil (7.12).
+
+## Porte 2 : l'installeur complet hors ligne (ticket 7.2)
+
+Sur la même étiquette (ou un lancement manuel du workflow, sans publication), la recette
+construit aussi `cassini-installeur-complet.exe`, un seul fichier qui contient `cassini.exe`, le
+modèle et l'archive de l'extension QGIS. Elle échoue avant toute publication si l'archive de
+l'extension pèse 25 Mo ou plus ou contient un binaire, si le modèle est introuvable ou si son
+SHA-256 diffère de celui de `installer/modele.json`, ou si le fichier dépasse 4 Go (limite d'Inno
+Setup pour un seul fichier : 4,2 Go ; repli prévu : zip et `install.cmd`). Le modèle est
+téléchargé depuis Hugging Face (`KevziFar/cassini-composition-4b-GGUF`), jamais construit ici.
+
+Le fichier dépasse les 2 Gio d'une release GitHub : il est livré comme **artefact du workflow**.
+Récupération : onglet Actions du dépôt, l'exécution de la release, section « Artifacts »,
+`cassini-installeur-complet-<étiquette>` (conservé 14 jours ; il contient aussi
+`cassini_qgis-<version>.zip`). La recette prouve déjà l'installation silencieuse sur le poste de
+GitHub avec une règle de pare-feu qui interdit au fichier toute sortie réseau, mais seule la VM
+ci-dessous constitue la vraie preuve « machine débranchée ».
+
+Les deux installeurs partagent le même `AppId` (voulu) : un seul Cassini par utilisateur, chaque
+porte met à jour l'autre, et le désinstalleur ne retire que ce que le dernier installeur a posé.
+
+### Essai du propriétaire en VM (étape hitl)
+
+1. VM Windows propre, **réseau coupé** (adaptateur désactivé), puis y copier le fichier.
+2. Lancer `cassini-installeur-complet.exe` : `%LOCALAPPDATA%\Cassini\bin` reçoit `cassini.exe`,
+   `installation.json` et `models\` (le modèle et sa déclaration) ; `%LOCALAPPDATA%\Cassini\extension`
+   reçoit l'archive de l'extension.
+3. Dans une console : `%LOCALAPPDATA%\Cassini\bin\cassini.exe run system.about` répond, et
+   `cassini.exe run model.list` liste `cassini-composition-4b-Q4_K_M.gguf`.
+4. Dans QGIS : Extensions, Installer depuis un ZIP, choisir l'archive du dossier `extension`.
+5. Rejouer la démo : le panneau trouve le noyau et le modèle sans réseau.
+6. Désinstaller (Paramètres, Applications) : le noyau et le modèle disparaissent.
+
+Hors périmètre ici (7.4) : déclaration `*.modele.json` avec empreintes, hébergement de ce fichier
+sur Hugging Face, noyau gpu (7.6).

@@ -3,14 +3,14 @@ title: 'Porte 2 sous Windows : un seul fichier installable réseau coupé'
 type: 'feature'
 ticket: '2'
 created: '2026-11-13'
-status: 'ready-for-dev'
+status: 'built'
 baseline_revision: '0f7245c7a6eb0958f23edd512cf5a33cda06d0bd'
 route: 'full'
 route_source: 'auto'
 risk: 'high'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'thorough'
+review_source: 'pinned'
+lenses_ran: [blind-hunter, edge-case-hunter, verification-gap, intent-alignment]
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-cassini-mvp/epic-publication/epic-publication.md'
@@ -64,9 +64,31 @@ context:
 
 ## Implementation Notes
 
+Valeurs du modèle publié par 7.3 (à fixer dans le dépôt, par exemple `installer/modele.json`) :
+- adresse : `https://huggingface.co/KevziFar/cassini-composition-4b-GGUF/resolve/main/cassini-composition-4b-0.1.0-Q4_K_M.gguf`
+- SHA-256 : `b687313f4a49c23e13673d14d185f3ee56d3e710e8d01c08595339236b21a865` ; taille : 2783446944 octets.
+- Dans l'installeur le modèle est posé sous le nom attendu par le noyau, `bin\models\cassini-composition-4b-Q4_K_M.gguf`, avec une déclaration `*.modele.json` minimale `{"model": "…", "prompt": "short"}` comme celles du poste du propriétaire (les empreintes viennent de 7.4).
+- Disque du poste GitHub : `Compression=none` pour le modèle (déjà quantifié) ; vérifier l'espace libre avant de télécharger.
+
 ## Plan Change Log
 
 ## Review Triage Log
+
+Passe 1, `thorough` (quatre lentilles). Aucun intent_gap ni bad_plan : pas de reprise du plan.
+
+| Verdict | Route | Constat et preuve |
+|---|---|---|
+| high | patch | `release.yml` écrit par l'implémenteur n'était pas du YAML valide (nom d'étape « Artefact : … ») ; il avait annoncé le contraire. Corrigé par le relecteur principal, `yaml.safe_load` passe sur les trois workflows. |
+| medium | patch | Coupure en cours de téléchargement (`IncompleteRead`, pas un `OSError`) : traceback et `.gguf` partiel laissé. Corrigé avec message français et suppression ; test ajouté. |
+| medium | patch | Preuve d'installation : le modèle installé n'était vérifié que par son nom, la désinstallation que par `cassini.exe`. Empreinte, taille dans `model.list` et absence de tous les fichiers posés ajoutées. |
+| medium | patch | Étape « réseau coupé » : la règle de pare-feu ne bloque que l'exécutable de l'installeur, qu'Inno relance depuis un dossier temporaire. Étape renommée et commentaire honnête ; la vraie preuve reste la VM. |
+| low | patch | `modele.json` : sha256 et taille non validés ; source vide produisait un zip vide ; `$dir` défini dans le `try` ; garde statique du `.iss` à quatre mots de plus ; `NomModele` du `.iss` relié à `modele.json` par un test ; `test_taille_fausse` sans assertion de suppression. |
+| low | patch | Même `AppId` que l'installeur en ligne : gardé volontairement (un Cassini par utilisateur) et désormais écrit dans le `.iss` et la doc. |
+| medium | defer | Aucune nouvelle tentative sur 2,8 Go : un incident de Hugging Face fait échouer toute la release. |
+| low | defer | Adresse du modèle non limitée à `https` (les tests utilisent `file://`) ; délai global du téléchargement ; détection de binaire à signatures minimales (zip imbriqués, « MZ » en texte). |
+| medium | defer | Version de `metadata.txt` jamais comparée à l'étiquette : 7.10 (décision Q9). Empreinte de l'installeur complet non publiée : 7.12. |
+| false | rejeté | « TAG peut être vide en essai à blanc » : l'étape « Étiquette visée » de 7.1 le définit toujours. « Installeur sans le modèle passe la taille » : ISCC échoue si une source manque. |
+| low | rejeté | `SaveStringToFile` non vérifié, `#if FileExists` dans le `.iss`, noms d'artefact, horodatages du zip : improbables ou correction plus lourde que le défaut. |
 
 ## Design Notes
 

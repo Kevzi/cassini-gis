@@ -81,3 +81,8 @@ training/**/*.jsonl
 
 # --- Installeur en ligne (ticket 7.1) ---
 installer-sortie/
+
+# --- Porte 2 (7.2) : modele telecharge par la recette, jamais versionne ---
+modele/
+proof/
+proof-complet/

@@ -1153,3 +1153,9 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-publication/story-balle-tracante-etiquette-release-et-installeur-en-ligne-mini-plan.md`
   summary: Champ de schéma dans manifeste.json et fichier du noyau verrouillé lors d'une mise à jour, pour 7.5.
   evidence: le format du manifeste est lu par recherche de texte ; « Mettre à jour Cassini » le fera évoluer (Blind Hunter, Edge Case Hunter).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-publication/story-porte-2-sous-windows-un-seul-fichier-installable-reseau-coup-plan.md`
+  summary: Nouvelle tentative avec attente croissante pour le téléchargement du modèle (2,8 Go) dans la release.
+  evidence: un incident passager de Hugging Face fait échouer toute la release, à relancer à la main (Blind Hunter, Edge Case Hunter).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-publication/story-porte-2-sous-windows-un-seul-fichier-installable-reseau-coup-plan.md`
+  summary: Limiter l'adresse du modèle à https, ajouter un délai global au téléchargement et durcir la détection de binaire de l'archive d'extension.
+  evidence: les tests utilisent file:// ; un serveur qui goutte à goutte bloque la CI ; un zip imbriqué passerait pour « sans binaire » (Edge Case Hunter).

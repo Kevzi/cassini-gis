@@ -148,6 +148,80 @@ jobs:
             Stop-Process -Id $srv.Id -Force -ErrorAction SilentlyContinue
           }
 
+      # ---- Porte 2 (7.2) : installeur complet hors ligne, un seul fichier ----
+      # Tout échoue avant la publication : archive trop lourde ou avec un binaire, modèle
+      # introuvable ou altéré (SHA-256 fixé dans installer/modele.json), fichier trop gros.
+      - name: Archive de l'extension (sans binaire, moins de 25 Mo)
+        run: python -I installer/archive_extension.py --sortie "dist/cassini_qgis-$($env:TAG.TrimStart('v')).zip"
+
+      # Le modèle (~2,8 Go) vient de Hugging Face (publié par 7.3) ; jamais construit ici.
+      # Le script vérifie l'espace libre avant de télécharger et l'empreinte après.
+      - name: Téléchargement du modèle (empreinte vérifiée)
+        run: python -I installer/telecharger_modele.py --sortie modele/cassini-composition-4b-Q4_K_M.gguf
+
+      - name: Compilation de l'installeur complet
+        run: |
+          $version = $env:TAG.TrimStart('v')
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DVersion=$version" installer\cassini-hors-ligne.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC a échoué (installeur complet)" }
+          # Le modèle source n'est plus utile : on libère le disque avant l'essai.
+          Remove-Item -Recurse -Force modele
+
+      - name: Taille de l'installeur complet (un seul fichier)
+        run: python -I installer/verifier_taille.py installer-sortie/cassini-installeur-complet.exe
+
+      # L'installeur n'a aucune fonction réseau (garde statique dans les tests) ; la règle du
+      # pare-feu ne bloque que l'exécutable de l'installeur, pas ses copies temporaires. La vraie
+      # preuve « machine débranchée » est l'essai en VM du propriétaire.
+      - name: Preuve de l'installation complète (pare-feu sur l'installeur)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $inst = "$PWD\installer-sortie\cassini-installeur-complet.exe"
+          $version = $env:TAG.TrimStart('v')
+          $regle = 'cassini-installeur-complet-sans-reseau'
+          $dir = "$PWD\proof-complet"
+          $modele = Get-Content installer/modele.json -Raw | ConvertFrom-Json
+          New-NetFirewallRule -DisplayName $regle -Direction Outbound -Program $inst -Action Block | Out-Null
+          try {
+            $p = Start-Process $inst -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$dir" -Wait -PassThru
+            if ($p.ExitCode -ne 0) { throw "installation complète : code $($p.ExitCode)" }
+          } finally {
+            Remove-NetFirewallRule -DisplayName $regle -ErrorAction SilentlyContinue
+          }
+          if (-not (Test-Path "$dir\bin\cassini.exe")) { throw "cassini.exe absent" }
+          & "$dir\bin\cassini.exe" run system.about
+          if ($LASTEXITCODE -ne 0) { throw "cassini.exe run system.about a échoué" }
+          # Le modèle est listé par model.list (le noyau le cherche dans models\ à côté de lui).
+          $liste = & "$dir\bin\cassini.exe" run model.list | Out-String
+          Write-Host $liste
+          if ($liste -notmatch 'cassini-composition-4b-Q4_K_M\.gguf') { throw "model.list ne liste pas le modèle" }
+          if ($liste -notmatch [string]$modele.taille) { throw "model.list ne donne pas la taille $($modele.taille)" }
+          $gguf = "$dir\bin\models\cassini-composition-4b-Q4_K_M.gguf"
+          if ((Get-FileHash $gguf -Algorithm SHA256).Hash.ToLower() -ne $modele.sha256) { throw "SHA-256 du modèle installé différent" }
+          if (-not (Test-Path "$dir\extension\cassini_qgis-$version.zip")) { throw "archive de l'extension absente" }
+          $info = Get-Content "$dir\bin\installation.json" -Raw | ConvertFrom-Json
+          if ($info.version -ne $version -or -not $info.installe_le) { throw "installation.json incorrect" }
+          # Désinstallation : le dossier bin disparaît.
+          Start-Process "$dir\unins000.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES' -Wait
+          for ($i = 0; $i -lt 30 -and (Test-Path "$dir\bin"); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path "$dir\bin\cassini.exe") { throw "désinstallation : cassini.exe existe encore" }
+          foreach ($f in @($gguf, "$dir\bin\models\cassini-composition-4b.modele.json", "$dir\bin\installation.json", "$dir\extension\cassini_qgis-$version.zip")) {
+            if (Test-Path $f) { throw "désinstallation : $f existe encore" }
+          }
+
+      # Le fichier dépasse les 2 Gio d'une release GitHub : il est livré comme artefact du
+      # workflow (onglet Actions), pour l'essai en VM du propriétaire.
+      - name: Artefact, installeur complet
+        uses: actions/upload-artifact@v4
+        with:
+          name: cassini-installeur-complet-${{ env.TAG }}
+          path: |
+            installer-sortie/cassini-installeur-complet.exe
+            dist/cassini_qgis-*.zip
+          compression-level: 0
+          retention-days: 14
+
       # Dernière étape : tout ce qui précède est vert.
       - name: Publication de la release
         if: github.ref_type == 'tag'
