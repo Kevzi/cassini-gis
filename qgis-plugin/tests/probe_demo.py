@@ -22,6 +22,14 @@ commande, pour voir la sonde rendre ECHEC ; `CASSINI_DEMO_TAMPER=1`, qui change 
 `CASSINI_DEMO_DROP_ITEM=<élément>` (title, legend, scalebar, northarrow, sources), qui retire
 cet élément de la liste relevée sur la mise en page, pour voir la sonde rendre ECHEC.
 
+Le projet de démo reçoit aussi le MNT synthétique `fixtures/mnt-colline-2154.tif` (copié, couche
+« MNT », ajoutée sous les couches vectorielles pour ne rien cacher) ; avec un projet donné, il faut
+une couche raster nommée « MNT ». Après le premier plan jugé et sa mise en page, la sonde propose
+une seconde phrase (`PHRASE2`) : pente du MNT en degrés, ajoutée à la carte, nouvel export. Elle
+juge (`judge_slope`) `terrain.slope` en degrés sur le MNT, la couche de pente dans le projet, et son
+fichier dans les `sources` du second export, qui doit avoir plus de couches que le premier. Le rejeu
+porte alors sur les étapes des deux plans.
+
 Après un plan jugé juste, la sonde juge la mise en page (titre, légende, échelle, flèche du nord
 et sources, d'après ce que le geste d'export déclare avoir posé, `items_placed`, et le résultat
 de l'export ; PDF non vide), puis ferme le projet, le rouvre, lance un nouveau noyau sans
@@ -63,6 +71,8 @@ PHRASE = (
     "Trouve les parcelles constructibles du PLU à moins de 500 m d'une gare à "
     "Annecy et sors-moi la carte en PDF."
 )
+PHRASE2 = ("Calcule les pentes en degrés à partir du MNT, puis "
+           "sors-moi la carte en PDF.")
 GIVE_UP_MS = 30 * 60 * 1000
 DEMO_FIXTURES = os.path.join(ROOT, "fixtures", "demo")
 # Fichier, nom de couche : les noms de l'inventaire de l'épreuve du modèle local.
@@ -71,6 +81,9 @@ DEMO_LAYERS = (
     ("parcelles-2154.geojson", "Parcelles cadastrales"),
     ("gares-2154.geojson", "Gares"),
 )
+# Le MNT synthétique de `fixtures/`, copié dans le projet, sous les couches vectorielles.
+DEM_FIXTURE = os.path.join(ROOT, "fixtures", "mnt-colline-2154.tif")
+DEM_NAME = "MNT"
 INJECTED = "qgis.demo_injected"
 
 
@@ -113,6 +126,7 @@ from qgis.core import (  # noqa: E402
     QgsCoordinateReferenceSystem,
     QgsCoordinateTransform,
     QgsProject,
+    QgsRasterLayer,
     QgsVectorLayer,
 )
 from qgis.PyQt.QtCore import QProcess, QTimer  # noqa: E402
@@ -138,6 +152,13 @@ def assemble_demo_project():
     """Projet de démo dans un dossier temporaire, sur des copies des fixtures."""
     work = tempfile.mkdtemp(prefix="cassini-demo-")
     project.setCrs(QgsCoordinateReferenceSystem("EPSG:2154"))
+    # Ajouté en premier, le raster est le plus bas de l'arbre : il ne cache aucun vecteur.
+    dem_copy = os.path.join(work, os.path.basename(DEM_FIXTURE))
+    shutil.copyfile(DEM_FIXTURE, dem_copy)
+    dem = QgsRasterLayer(dem_copy, DEM_NAME, "gdal")
+    if not dem.isValid():
+        sys.exit("fixture illisible : %s" % dem_copy)
+    project.addMapLayer(dem)
     for file, name in DEMO_LAYERS:
         copy = os.path.join(work, file)
         shutil.copyfile(os.path.join(DEMO_FIXTURES, file), copy)
@@ -164,8 +185,12 @@ OUTPUT_DIR = os.path.splitext(PROJECT)[0] + ".cassini"
 def reference_layers():
     """Couches de référence du contrôle, relevées avant l'exécution (les sorties du plan
     reprennent les champs du PLU et ne doivent pas être prises pour lui)."""
-    zoning = stations = parcels = None
+    zoning = stations = parcels = dem = None
     for layer in project.mapLayers().values():
+        if isinstance(layer, QgsRasterLayer):
+            if dem is None and layer.name().lower() == DEM_NAME.lower():
+                dem = layer
+            continue
         if not isinstance(layer, QgsVectorLayer):
             continue
         name = layer.name().lower()
@@ -176,12 +201,12 @@ def reference_layers():
             parcels = layer
         if stations is None and kind == Qgis.GeometryType.Point and "gare" in name:
             stations = layer
-    return zoning, stations, parcels
+    return zoning, stations, parcels, dem
 
 
-ZONING, STATIONS, PARCELS = reference_layers()
+ZONING, STATIONS, PARCELS, DEM = reference_layers()
 missing = demo_verdict.missing_layers_reason(
-    ZONING is not None, STATIONS is not None, PARCELS is not None)
+    ZONING is not None, STATIONS is not None, PARCELS is not None, DEM is not None)
 if missing is not None:
     print(demo_verdict.verdict_line(missing), flush=True)
     QgsApplication.exitQgis()
@@ -189,7 +214,7 @@ if missing is not None:
 
 t0 = time.monotonic()
 state = {"reason": None, "done": False, "marks": {}, "calls": [], "steps": [], "phase": "plan",
-         "export": None}
+         "export": None, "sources1": []}
 
 
 def now():
@@ -350,6 +375,48 @@ def layout_verdict(steps):
     return demo_verdict.judge_layout(items, facts)
 
 
+def export_result(steps):
+    return next((s.get("result") for s in steps
+                 if isinstance(s, dict) and s.get("command") == demo_verdict.EXPORT), None)
+
+
+def slope_in_project(steps):
+    """Vrai si une couche du projet lit le fichier de pente rendu par `terrain.slope`."""
+    step = next((s for s in steps if isinstance(s, dict) and s.get("command") == demo_verdict.SLOPE), None)
+    result = step.get("result") if step else None
+    file = result.get("file") if isinstance(result, dict) else None
+    if not isinstance(file, str) or not file:
+        return False
+    stem = os.path.basename(file.replace("\\", "/")).rsplit(".", 1)[0]
+    return any(stem in layer.source() or stem == layer.name() for layer in project.mapLayers().values())
+
+
+def slope_verdict(steps):
+    """Jugement de la pente (plan 2), puis de la mise en page du second export."""
+    result = export_result(steps)
+    sources2 = result.get("sources") if isinstance(result, dict) else None
+    facts = {"calls": state["calls"], "dem_name": DEM.source(),
+             "slope_in_project": slope_in_project(steps),
+             "sources1": state["sources1"], "sources2": sources2 or []}
+    print("  pente : sources du second export %s" % facts["sources2"], flush=True)
+    return demo_verdict.judge_slope(steps, facts) or layout_verdict(steps)
+
+
+def journal_steps(executed):
+    """Étapes que le rejeu doit refaire : celles du journal, qui compte aussi les étapes dictées
+    par le noyau (ouverture et style de la pente) que le plan ne liste pas. Les étapes des deux
+    plans y sont toutes, dans l'ordre."""
+    with open(os.path.join(OUTPUT_DIR, "journal.jsonl"), encoding="utf-8") as f:
+        rows = [json.loads(line) for line in f if line.strip()]
+    steps = [{"step": i + 1, "command": row.get("id")} for i, row in enumerate(rows)]
+    commands = [s.get("command") for s in executed]
+    journal = [s["command"] for s in steps]
+    it = iter(journal)
+    if not all(command in it for command in commands):
+        raise RuntimeError("le journal ne contient pas les étapes des deux plans dans l'ordre")
+    return steps
+
+
 def tamper_journal():
     """Change le `result` de la première étape d'analyse du journal, avant le rejeu."""
     path = os.path.join(OUTPUT_DIR, "journal.jsonl")
@@ -422,6 +489,14 @@ def on_event(kind, payload):
         for step in steps:
             print("  étape %s %s : %s" % (step.get("step"), step.get("command"),
                                           json.dumps(step.get("result"), ensure_ascii=False)))
+        if state["phase"] == "plan2":
+            reason = slope_verdict(steps)
+            if reason is not None:
+                finish(reason)
+            else:
+                state["steps"] = journal_steps(state["steps1"] + steps)
+                QTimer.singleShot(0, start_replay_guarded)
+            return
         layer_id = demo_verdict.retained_layer_id(steps)
         features = retained_features(layer_id) if layer_id else None
         for fact in features or []:
@@ -439,8 +514,13 @@ def on_event(kind, payload):
         if reason is not None:
             finish(reason)
         else:
-            state["steps"] = steps
-            QTimer.singleShot(0, start_replay_guarded)
+            result = export_result(steps)
+            state["steps1"] = steps
+            state["sources1"] = (result.get("sources") if isinstance(result, dict) else None) or []
+            state["phase"] = "plan2"
+            marks["propose"] = time.monotonic()
+            print("[%s] seconde phrase : %s" % (now(), PHRASE2), flush=True)
+            core.propose(PHRASE2)
     else:
         reason = demo_verdict.failure_reason(kind, payload, state["calls"])
         if reason is not None:

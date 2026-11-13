@@ -74,7 +74,7 @@ def pdf_file(steps):
     return file if isinstance(file, str) and file else None
 
 
-def missing_layers_reason(has_zoning, has_stations, has_parcels):
+def missing_layers_reason(has_zoning, has_stations, has_parcels, has_dem=True):
     """Raison d'ECHEC quand le projet n'a pas les couches de référence du contrôle."""
     if not has_parcels:
         return "couche des parcelles introuvable : aucune couche de polygones nommée « parcelle »"
@@ -82,6 +82,8 @@ def missing_layers_reason(has_zoning, has_stations, has_parcels):
         return "couche du PLU introuvable : aucune couche n'a de champ « %s »" % ZONE_FIELD
     if not has_stations:
         return "couche des gares introuvable : aucune couche de points nommée « gare »"
+    if not has_dem:
+        return "couche du MNT introuvable : aucune couche raster nommée « MNT »"
     return None
 
 
@@ -193,6 +195,51 @@ def judge_layout(items, facts):
         return "mise en page : PDF illisible"
     if not facts.get("pdf_size"):
         return "mise en page : PDF vide"
+    return None
+
+
+SLOPE = "terrain.slope"
+SLOPE_UNIT = "degrees"
+
+
+def _base_name(path):
+    return str(path).replace("\\", "/").rsplit("/", 1)[-1]
+
+
+def judge_slope(steps, facts):
+    """Verdict du plan de la pente (second plan de la sonde).
+
+    `steps` : les étapes exécutées du plan 2 (le `result` de `terrain.slope` porte `file`) ;
+    `facts` : `calls`, les appels du plan proposé (leurs `params`) ; `dem_name`, le fichier du
+    MNT du projet ; `slope_in_project`, vrai si une couche du projet lit le fichier de pente ;
+    `sources1` et `sources2`, les `sources` du premier et du second export.
+    """
+    calls = facts.get("calls") or []
+    call = next((c for c in calls if isinstance(c, dict) and c.get("command") == SLOPE), None)
+    step = next((s for s in steps if isinstance(s, dict) and s.get("command") == SLOPE), None)
+    if call is None and step is None:
+        return "pente : %s absent du plan" % SLOPE
+    params = (call or {}).get("params")
+    params = params if isinstance(params, dict) else {}
+    unit = params.get("unit")
+    if unit != SLOPE_UNIT:
+        return "pente : unité %s au lieu de %s" % (unit, SLOPE_UNIT)
+    dem = params.get("dem")
+    if not isinstance(dem, str) or _base_name(dem) != _base_name(facts.get("dem_name") or ""):
+        return "pente : dem %s n'est pas le MNT" % dem
+    result = (step or {}).get("result")
+    file = result.get("file") if isinstance(result, dict) else None
+    if not isinstance(file, str) or not file:
+        return "pente : %s sans fichier de pente dans son résultat" % SLOPE
+    if not facts.get("slope_in_project"):
+        return "pente : couche absente du projet"
+    stem = _base_name(file).rsplit(".", 1)[0]
+    sources1 = facts.get("sources1") or []
+    sources2 = facts.get("sources2") or []
+    if not any(stem in str(source) for source in sources2):
+        return "pente : couche absente du PDF (%s ne figure pas dans les sources)" % stem
+    if len(sources2) <= len(sources1):
+        return "pente : le second export n'a pas plus de couches que le premier"
     return None
 
 

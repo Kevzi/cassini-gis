@@ -168,6 +168,78 @@ class JudgeReplayTest(unittest.TestCase):
         self.assertIsNone(v.tamper_refused_reason(False, True))
 
 
+SLOPE_FILE = "C:/k/demo.cassini/1-terrain.slope.tif"
+
+
+def slope_steps():
+    return [
+        {"step": 1, "command": "terrain.slope", "result": {"file": SLOPE_FILE}},
+        {"step": 2, "command": "layer.open_raster", "result": {}},
+        {"step": 3, "command": "layout.export_pdf", "result": {"file": PDF, "page_count": 1}},
+    ]
+
+
+def slope_facts(unit="degrees", dem="mnt-colline-2154.tif", commands=("terrain.slope",)):
+    return {
+        "calls": [{"command": c, "params": {"dem": dem, "unit": unit}} for c in commands],
+        "dem_name": "C:/k/mnt-colline-2154.tif",
+        "slope_in_project": True,
+        "sources1": ["parcelles-2154.geojson"],
+        "sources2": ["parcelles-2154.geojson", "1-terrain.slope.tif"],
+    }
+
+
+class JudgeSlopeTest(unittest.TestCase):
+    def test_slope_in_degrees_on_the_dem_is_ok(self):
+        self.assertIsNone(v.judge_slope(slope_steps(), slope_facts()))
+
+    def test_plan_without_slope(self):
+        reason = v.judge_slope(slope_steps()[1:], slope_facts(commands=("terrain.viewshed",)))
+        self.assertEqual(reason, "pente : terrain.slope absent du plan")
+
+    def test_wrong_unit(self):
+        self.assertEqual(
+            v.judge_slope(slope_steps(), slope_facts(unit="percent")),
+            "pente : unité percent au lieu de degrees")
+
+    def test_wrong_dem(self):
+        self.assertEqual(
+            v.judge_slope(slope_steps(), slope_facts(dem="autre.tif")),
+            "pente : dem autre.tif n'est pas le MNT")
+
+    def test_slope_result_without_file(self):
+        steps = slope_steps()
+        steps[0]["result"] = {}
+        self.assertEqual(
+            v.judge_slope(steps, slope_facts()),
+            "pente : terrain.slope sans fichier de pente dans son résultat")
+
+    def test_slope_call_without_params_names_the_unit(self):
+        facts = slope_facts()
+        facts["calls"] = [{"command": "terrain.slope"}]
+        self.assertEqual(
+            v.judge_slope(slope_steps(), facts), "pente : unité None au lieu de degrees")
+
+    def test_slope_layer_missing_from_project(self):
+        facts = slope_facts()
+        facts["slope_in_project"] = False
+        self.assertEqual(v.judge_slope(slope_steps(), facts), "pente : couche absente du projet")
+
+    def test_slope_missing_from_pdf_sources(self):
+        facts = slope_facts()
+        facts["sources2"] = ["parcelles-2154.geojson", "gares-2154.geojson"]
+        self.assertIn("couche absente du PDF", v.judge_slope(slope_steps(), facts))
+
+    def test_second_export_without_more_layers(self):
+        facts = slope_facts()
+        facts["sources1"] = ["a", "b"]
+        self.assertIn("pas plus de couches", v.judge_slope(slope_steps(), facts))
+
+    def test_missing_dem_layer_in_project(self):
+        self.assertIn("MNT", v.missing_layers_reason(True, True, True, has_dem=False))
+        self.assertIsNone(v.missing_layers_reason(True, True, True))
+
+
 class FontsTest(unittest.TestCase):
     def test_no_font_is_refused(self):
         self.assertIn("aucune police", v.fonts_reason(0))
