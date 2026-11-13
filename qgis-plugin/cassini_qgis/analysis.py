@@ -14,6 +14,7 @@ et n'en dérive aucun autre. Le travail avance en tâche QGIS annulable
 Le fond `QgisBackend` est le seul endroit de ce module qui touche `qgis.core`.
 """
 
+import contextlib
 import os
 
 try:  # importés à plat par les tests, en paquet par QGIS
@@ -646,14 +647,12 @@ class ProcessingGesture:
             return
         handle = self._handle
         if handle is not None:
-            try:
+            with contextlib.suppress(Exception):
                 handle.cancel()
                 # La tâche tient encore le fichier : on répond et on nettoie quand elle
                 # rend la main (`_on_finished`), pas avant.
                 self._cancelling = True
                 return
-            except Exception:  # l'ordre doit tout de même recevoir sa réponse
-                pass
         self._clean()
         self._finish(error=GestureError(CANCELLED, "Geste annulé."))
 

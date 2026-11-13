@@ -16,6 +16,7 @@ paramètres illisibles : titre court de la description du registre (`short_title
 ligne du journal.
 """
 
+import contextlib
 import math
 import re
 
@@ -971,12 +972,10 @@ def label(command, params, lang, layer_name=None, step_names=None, catalogue=Non
     """
     make = _SENTENCES.get(command)
     if make is not None and isinstance(params, dict):
-        try:
+        with contextlib.suppress(Exception):
             names = _Names(lang, layer_name, step_names)
             names.ahead = True
             return _finish(lang, make(lang, params, None, names))
-        except Exception:  # _Unreadable compris : jamais d'exception jusqu'à l'utilisateur
-            pass
     return short_title(command, catalogue, lang)
 
 

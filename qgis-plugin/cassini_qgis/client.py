@@ -23,6 +23,7 @@ qui permet de tester sans QGIS. Le registre de gestes est un objet à deux
 méthodes, `ids()` et `create(id)` (voir `gestures.py`).
 """
 
+import contextlib
 import json
 
 PROTOCOL_VERSION = 2
@@ -815,10 +816,8 @@ class CoreClient:
         if order is not None:
             order["settled"] = True  # plus de réponse : le canal se ferme
             self._current = None
-            try:
+            with contextlib.suppress(Exception):
                 order["gesture"].cancel()
-            except Exception:
-                pass
 
     def _notify(self, kind, payload):
         if not self._closing:

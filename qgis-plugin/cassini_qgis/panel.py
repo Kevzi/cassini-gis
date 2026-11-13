@@ -5,6 +5,7 @@ l'extension. Le noyau valide les paramètres et décide de tout. Les textes, le
 formulaire par schéma et le journal sont dans des modules sans Qt, testés seuls.
 """
 
+import contextlib
 import os
 import time
 
@@ -149,15 +150,13 @@ HOME_BANNERS = ("not_found",)  # bandeaux qui portent le bouton de la page d'acc
 
 def _announce(widget, text):
     """Annonce aux lecteurs d'écran (zone vivante), sans jamais lever d'exception."""
-    try:
+    with contextlib.suppress(Exception):
         from qgis.PyQt.QtGui import QAccessible, QAccessibleEvent
 
         widget.setAccessibleDescription(text)
         QAccessible.updateAccessibility(
             QAccessibleEvent(widget, QAccessible.Event.NameChanged)
         )
-    except Exception:
-        pass
 
 
 def _live_layer_name(layer_id):
@@ -2162,10 +2161,8 @@ class CassiniPanel(QWidget):
 
     def _ask_clicked(self, checked):
         self.external.ask = bool(checked)
-        try:
+        with contextlib.suppress(Exception):
             QSettings().setValue(EXTERNAL_ASK_KEY, "true" if checked else "false")
-        except Exception:
-            pass
         if self.external.enabled:  # la case ne vaut que pour les appels suivants
             self._actions.set_external(True, self.external.ask)
         self.render()
@@ -2198,10 +2195,8 @@ class CassiniPanel(QWidget):
 
     def _expert_toggled(self, opened):
         self._fit_folds()
-        try:
+        with contextlib.suppress(Exception):
             QSettings().setValue(EXPERT_KEY, "true" if opened else "false")
-        except Exception:
-            pass
 
     def _lang_changed(self, _index):
         self.lang = texts.normalize(str(self.lang_box.currentData()))
