@@ -68,6 +68,8 @@ context: []
 
 ## Implementation Notes
 
+- Essai sous le vrai QGIS 3.44.15 (2026-11-13, poste du propriétaire, noyau gpu `C:\ct-5-57g`, modèle installé) : `VERDICT : OK`, code 0. Plan de 5 étapes composé en 56 s, exécuté en 0,8 s, 7 parcelles retenues (P01, P02, P05, P06, P09, P10, P14), toutes en zone U et à 240–437 m de la gare, PDF produit. Cette entrée reste `built` : le ticket de l'arbre a été fusionné avec 6.2 et 6.3 le 2026-11-12, et le rejeu du journal après réouverture, la lecture de la mise en page (titre, légende, échelle, flèche du nord, sources) et les deux échecs nommés (journal altéré, légende perdue) restent à construire.
+
 - Couches de référence (PLU : première couche vectorielle à champ `typezone` ; gares : première couche de points dont le nom contient « gare ») relevées **avant** l'exécution : les sorties d'intersection reprennent le champ `typezone` et ne doivent pas être prises pour le PLU. Absentes → ECHEC avant même de lancer le noyau.
 - Faits relevés dans le SCR du projet (EPSG:2154 si le projet est géographique) ; tolérance de 0,01 m sur les 500 m (le tampon de QGIS est inscrit dans le cercle).
 - Échec injecté : code `qgis.demo_injected`, réponse différée d'un tour de boucle Qt.
