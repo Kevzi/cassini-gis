@@ -26,9 +26,7 @@ permissions:
 jobs:
   release:
     name: Release Windows (noyau gpu, installeurs)
-    # windows-2022 (Visual Studio 2022) : sur windows-latest (VS 18, CMake 4.4) l'étape install de
-    # vulkan-shaders-gen passe avant sa construction et la compilation Vulkan échoue (essai à blanc 7.6).
-    runs-on: windows-2022
+    runs-on: windows-latest
     env:
       # Chemin de build court : CMake échoue au-delà de MAX_PATH.
       CARGO_TARGET_DIR: C:\ct
@@ -81,7 +79,9 @@ jobs:
       # Noyau unique, gpu : sans carte ni pilote Vulkan, il retombe sur le processeur à
       # l'exécution (docs/paquet-du-noyau.md).
       - name: Construction du noyau (gpu, Vulkan)
-        run: cargo build --release -p cassini --features gpu --locked
+        # -j 1 : en parallèle, l'étape install de vulkan-shaders-gen (ExternalProject de llama.cpp)
+        # passe avant sa construction et la compilation échoue (essais à blanc 7.6).
+        run: cargo build --release -p cassini --features gpu --locked -j 1
 
       # La garde porte sur le paquet livré : même dossier cible que la construction.
       - name: Garde hors ligne sur le paquet livré
