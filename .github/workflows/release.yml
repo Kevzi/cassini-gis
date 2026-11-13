@@ -1,0 +1,144 @@
+# Release de Cassini (ticket 7.1, AD-17).
+#
+# Une étiquette `vX.Y.Z` fait construire le noyau Windows processeur, lance la garde hors
+# ligne sur CE binaire, compile l'installeur en ligne, prouve l'installation (manifeste
+# valide, puis manifeste altéré) et seulement alors publie la release : `cassini.exe`,
+# l'installeur et `manifeste.json`. Construit par GitHub Actions, jamais sur le poste du
+# propriétaire. Actions officielles de GitHub seulement ; Inno Setup vient de Chocolatey,
+# à version fixée (voir docs/publier-une-version.md).
+
+name: Release
+
+on:
+  push:
+    tags:
+      # Versions complètes seulement : une étiquette de préversion ne doit jamais devenir
+      # la « dernière » release, vers laquelle pointent les adresses fixes d'AD-17.
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+# Seul workflow à écrire : la publication de la release.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Release Windows (noyau processeur, installeur en ligne)
+    runs-on: windows-latest
+    env:
+      # Chemin de build court : CMake échoue au-delà de MAX_PATH.
+      CARGO_TARGET_DIR: C:\ct
+      LIBCLANG_PATH: C:\Program Files\LLVM\bin
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      # Rien n'est construit ni publié si l'étiquette diffère de la version de Cargo.toml.
+      - name: Étiquette égale à la version Cargo
+        run: python -I installer/verifier_etiquette.py
+
+      - name: Tests du manifeste
+        run: python -I -m unittest discover -s installer/tests
+
+      - name: Construction du noyau (processeur)
+        run: cargo build --release -p cassini --locked
+
+      # La garde porte sur le binaire livré : même dossier cible que la construction.
+      - name: Garde hors ligne sur le binaire livré
+        run: cargo test --release -p cassini --test hors_ligne --locked
+
+      - name: Noyau en release
+        run: C:\ct\release\cassini.exe run system.about
+
+      - name: Fichiers à livrer
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item C:\ct\release\cassini.exe dist\cassini.exe
+
+      # Inno Setup : licence permissive propre (voir docs/publier-une-version.md).
+      - name: Inno Setup
+        run: choco install innosetup --version=6.4.3 --no-progress -y
+
+      - name: Compilation de l'installeur en ligne
+        run: |
+          $version = $env:TAG.TrimStart('v')
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DVersion=$version" installer\cassini-en-ligne.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC a échoué" }
+          Copy-Item installer-sortie\cassini-installeur-en-ligne.exe dist\
+
+      - name: Manifeste des versions
+        run: python -I installer/manifeste.py --etiquette $env:TAG --sortie dist/manifeste.json dist/cassini.exe
+
+      # Preuve de l'installeur contre un serveur local : manifeste valide, puis altéré.
+      - name: Preuve de l'installation (valide puis altéré)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $proof = "$PWD\proof"
+          New-Item -ItemType Directory -Force "$proof\valide", "$proof\altere" | Out-Null
+          Copy-Item dist\cassini.exe "$proof\cassini.exe"
+          python -I installer/manifeste.py --etiquette $env:TAG --base-url http://127.0.0.1:8000 --sortie "$proof\valide\manifeste.json" dist/cassini.exe
+          # Manifeste altéré : le premier caractère de l'empreinte est changé.
+          $json = Get-Content "$proof\valide\manifeste.json" -Raw
+          $m = [regex]::Match($json, '"sha256": "(.)')
+          $c = if ($m.Groups[1].Value -eq '0') { '1' } else { '0' }
+          $json = $json.Remove($m.Groups[1].Index, 1).Insert($m.Groups[1].Index, $c)
+          [IO.File]::WriteAllText("$proof\altere\manifeste.json", $json)
+
+          $srv = Start-Process python -ArgumentList '-I','-m','http.server','8000','--bind','127.0.0.1','--directory',$proof -PassThru -WindowStyle Hidden
+          try {
+            # Le serveur répond avant le premier essai (au plus 30 s).
+            $pret = $false
+            for ($i = 0; $i -lt 30 -and -not $pret; $i++) {
+              if ($srv.HasExited) { throw "le serveur local s'est arrêté" }
+              try { Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8000/valide/manifeste.json | Out-Null; $pret = $true }
+              catch { Start-Sleep -Seconds 1 }
+            }
+            if (-not $pret) { throw "le serveur local ne répond pas" }
+            $inst = "$PWD\dist\cassini-installeur-en-ligne.exe"
+
+            # 1. Manifeste valide : le noyau est posé et répond.
+            $dir1 = "$proof\inst-valide"
+            $p = Start-Process $inst -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$dir1",'/MANIFESTE=http://127.0.0.1:8000/valide/manifeste.json' -Wait -PassThru
+            if ($p.ExitCode -ne 0) { throw "installation valide : code $($p.ExitCode)" }
+            if (-not (Test-Path "$dir1\bin\cassini.exe")) { throw "cassini.exe absent" }
+            & "$dir1\bin\cassini.exe" run system.about
+            if ($LASTEXITCODE -ne 0) { throw "cassini.exe run system.about a échoué" }
+            $info = Get-Content "$dir1\bin\installation.json" -Raw | ConvertFrom-Json
+            if ($info.version -ne $env:TAG.TrimStart('v')) { throw "version installée : $($info.version)" }
+            if (-not $info.installe_le) { throw "date d'installation absente" }
+            Write-Host "installation.json : $($info | ConvertTo-Json -Compress)"
+
+            # Désinstallation : le dossier disparaît.
+            Start-Process "$dir1\unins000.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES' -Wait
+            for ($i = 0; $i -lt 20 -and (Test-Path "$dir1\bin"); $i++) { Start-Sleep -Seconds 1 }
+            if (Test-Path "$dir1\bin") { throw "désinstallation : bin existe encore" }
+
+            # 2. Empreinte altérée : installation refusée, rien posé.
+            $dir2 = "$proof\inst-altere"
+            $p = Start-Process $inst -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$dir2",'/MANIFESTE=http://127.0.0.1:8000/altere/manifeste.json' -Wait -PassThru
+            if ($p.ExitCode -eq 0) { throw "l'installation altérée aurait dû être refusée" }
+            if (Test-Path "$dir2\bin\cassini.exe") { throw "un fichier a été posé malgré l'empreinte fausse" }
+            Write-Host "empreinte altérée refusée (code $($p.ExitCode))"
+
+            # 3. Manifeste injoignable (aucun serveur sur ce port) : installation refusée.
+            $dir3 = "$proof\inst-injoignable"
+            $p = Start-Process $inst -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$dir3",'/MANIFESTE=http://127.0.0.1:8001/manifeste.json' -Wait -PassThru
+            if ($p.ExitCode -eq 0) { throw "l'installation sans manifeste aurait dû être refusée" }
+            if (Test-Path "$dir3\bin\cassini.exe") { throw "un fichier a été posé sans manifeste" }
+            Write-Host "manifeste injoignable refusé (code $($p.ExitCode))"
+          } finally {
+            Stop-Process -Id $srv.Id -Force -ErrorAction SilentlyContinue
+          }
+
+      # Dernière étape : tout ce qui précède est vert.
+      - name: Publication de la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create $env:TAG
+          dist/cassini.exe dist/cassini-installeur-en-ligne.exe dist/manifeste.json
+          --title "Cassini $env:TAG" --generate-notes --verify-tag

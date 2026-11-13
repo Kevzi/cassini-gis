@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Avertissement de Windows</title>
+<style>
+  :root { --fond: #fff; --texte: #1b1f24; --lien: #0b5cad; }
+  @media (prefers-color-scheme: dark) { :root { --fond: #14171a; --texte: #e6e8ea; --lien: #6cb0f5; } }
+  body { background: var(--fond); color: var(--texte); font: 1.0625rem/1.55 system-ui, sans-serif; margin: 0; }
+  main { max-width: 42rem; margin: 0 auto; padding: 2rem 1rem; }
+  a { color: var(--lien); }
+</style>
+</head>
+<body>
+<main>
+  <h1>L'avertissement de Windows à l'ouverture de l'installeur</h1>
+  <p>En ouvrant l'installeur de Cassini, Windows (SmartScreen) peut afficher « Windows a protégé votre ordinateur ». Ce message apparaît pour tout programme récent qui n'est pas encore signé par un éditeur reconnu ; il ne dit pas que Cassini est dangereux. La signature du programme viendra plus tard.</p>
+
+  <h2>Pour continuer</h2>
+  <ol>
+    <li>Dans la fenêtre bleue, cliquez sur « Informations complémentaires ».</li>
+    <li>Cliquez sur « Exécuter quand même ».</li>
+  </ol>
+
+  <h2>Pour vérifier le fichier avant</h2>
+  <p>Le manifeste de chaque version, <a href="https://github.com/Kevzi/cassini-gis/releases/latest/download/manifeste.json">manifeste.json</a>, donne l'empreinte SHA-256 du moteur de Cassini ; l'installeur la vérifie lui-même et ne pose rien si elle ne correspond pas.</p>
+
+  <p><a href="index.html">Retour à la page d'accueil</a> · <a href="mailto:cassini-sig@proton.me">cassini-sig@proton.me</a></p>
+</main>
+</body>
+</html>

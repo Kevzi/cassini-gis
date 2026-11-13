@@ -1,0 +1,36 @@
+# Page d'accueil de Cassini : GitHub Pages, tirée du dossier `site/` (ticket 7.1, AD-17).
+# Adresse fixe : https://kevzi.github.io/cassini-gis. Actions officielles seulement.
+
+name: Site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - '.github/workflows/site.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploiement:
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deploiement.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+      - id: deploiement
+        uses: actions/deploy-pages@v4

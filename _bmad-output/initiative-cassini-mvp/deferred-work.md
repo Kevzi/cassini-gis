@@ -1137,3 +1137,19 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-export-et-demo/story-pdf-de-resultat-lisible-cadre-sur-le-resultat-resultat-mis-e-plan.md`
   summary: Dans une session enchaînée, les sorties des plans précédents restent visibles dans le PDF d'un nouveau plan, sous leur nom technique (« 4-analysis.intersect ») : `focus` ne lit que le plan en cours.
   evidence: relecture de 7.9 (2026-11-12) ; `current_plan` borné au plan en cours (`plan_start`).
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-publication/story-balle-tracante-etiquette-release-et-installeur-en-ligne-mini-plan.md`
+  summary: La release ne rejoue pas la recette complète (fmt, clippy, tests) avant de publier.
+  evidence: release.yml ne lance que le manifeste, la construction et la garde hors ligne ; une étiquette peut tomber sur un commit jamais vert (Edge Case Hunter, Blind Hunter). Contrôle manuel dans docs/publier-une-version.md.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-publication/story-balle-tracante-etiquette-release-et-installeur-en-ligne-mini-plan.md`
+  summary: Prouver l'installeur et le manifeste sans étiquette (déclencheur workflow_dispatch sans publication).
+  evidence: seule une étiquette exécute le .iss ; une erreur coûte une étiquette publique à supprimer (Verification Gap, Intent Alignment).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-publication/story-balle-tracante-etiquette-release-et-installeur-en-ligne-mini-plan.md`
+  summary: Publier l'empreinte SHA-256 de l'installeur lui-même sur la page d'accueil et la release (7.12).
+  evidence: l'avertissement SmartScreen demande de confiance sans moyen de vérifier ; Q6 de l'epic place les empreintes sur la page (Blind Hunter).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-publication/story-balle-tracante-etiquette-release-et-installeur-en-ligne-mini-plan.md`
+  summary: Preuves de refus plus strictes : lire le journal de l'installeur (/LOG=) pour la cause du refus. Non vérifié, maybe-false.
+  evidence: code de sortie non nul seulement ; se règle au premier passage réel sur Windows (Edge Case Hunter, Blind Hunter).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-publication/story-balle-tracante-etiquette-release-et-installeur-en-ligne-mini-plan.md`
+  summary: Champ de schéma dans manifeste.json et fichier du noyau verrouillé lors d'une mise à jour, pour 7.5.
+  evidence: le format du manifeste est lu par recherche de texte ; « Mettre à jour Cassini » le fera évoluer (Blind Hunter, Edge Case Hunter).
