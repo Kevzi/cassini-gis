@@ -90,6 +90,15 @@ class GardeTest(unittest.TestCase):
         errs = ce.check_metadata(self.pkg(meta="[general]\n"))
         self.assertEqual(len(errs), 2)
 
+    def test_publication_extension_reelle(self):
+        self.assertEqual(ce.check_publication(ce.DEFAULT_PKG), [])
+
+    def test_publication_refuse_metadonnees_incompletes(self):
+        meta = "[general]\ndescription=x (traceur)\nexperimental=True\nicon=a.svg\n"
+        texte = "\n".join(ce.check_publication(self.pkg(meta=meta)))
+        for mot in ("email", "homepage", "repository", "tracker", "experimental", "traceur", "a.svg", "LICENSE"):
+            self.assertIn(mot, texte)
+
     def test_noyau_sans_qgis(self):
         for crate in ("core", "cli", "ai"):
             path = os.path.join(ROOT, crate, "Cargo.toml")

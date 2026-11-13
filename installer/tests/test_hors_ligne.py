@@ -60,6 +60,33 @@ class TestArchive(Base):
         out = self.d / "vraie.zip"
         self.assertLess(ae.construire(ae.SOURCE, out), ae.LIMITE)
 
+    def test_vraie_archive_pour_le_depot_d_extensions(self):
+        out = self.d / "vraie.zip"
+        ae.construire(ae.SOURCE, out)
+        with zipfile.ZipFile(out) as z:
+            noms = set(z.namelist())
+            self.assertIn("cassini_qgis/LICENSE", noms)
+            self.assertIn("cassini_qgis/assets/logo-cassini-light.svg", noms)
+            self.assertIn("cassini_qgis/metadata.txt", noms)
+
+    def test_publication_vraie_extension(self):
+        ae.verifier_publication(ae.SOURCE)
+
+    def test_publication_refuse_licence_absente_ou_cle_vide(self):
+        s = self.source()
+        with self.assertRaises(ae.ArchiveErreur):
+            ae.verifier_publication(s)
+        (s / "i.svg").write_text("<svg/>", encoding="utf-8")
+        cles = "".join(f"{k}=x\n" for k in ae.CLES_PUBLICATION if k != "icon")
+        (s / "metadata.txt").write_text("[general]\n" + cles + "icon=i.svg\n", encoding="utf-8")
+        with self.assertRaisesRegex(ae.ArchiveErreur, "LICENSE"):
+            ae.verifier_publication(s)
+        (s / "LICENSE").write_text("GPL", encoding="utf-8")
+        ae.verifier_publication(s)
+        (s / "metadata.txt").write_text("[general]\nemail=\n", encoding="utf-8")
+        with self.assertRaisesRegex(ae.ArchiveErreur, "email"):
+            ae.verifier_publication(s)
+
     def test_extension_vide(self):
         s = self.d / "vide"
         s.mkdir()

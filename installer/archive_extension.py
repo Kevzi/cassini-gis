@@ -17,6 +17,7 @@ RACINE = Path(__file__).resolve().parent.parent
 SOURCE = RACINE / "qgis-plugin" / "cassini_qgis"
 LIMITE = 25 * 1024 * 1024
 
+CLES_PUBLICATION = ("email", "homepage", "repository", "tracker", "icon")
 EXTENSIONS_BINAIRES = {".exe", ".dll", ".so", ".dylib", ".pyd", ".gguf", ".bin", ".a", ".lib", ".o"}
 # Signatures d'exécutables : PE (MZ), ELF, Mach-O.
 SIGNATURES = (b"MZ", b"\x7fELF", b"\xfe\xed\xfa\xce", b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe")
@@ -66,12 +67,31 @@ def construire(source: Path, sortie: Path, limite: int = LIMITE) -> int:
     return taille
 
 
+def verifier_publication(source: Path) -> None:
+    """Exigences du dépôt d'extensions QGIS : LICENSE, icône et clés de `metadata.txt`."""
+    meta = source / "metadata.txt"
+    valeurs = {}
+    if meta.is_file():
+        for ligne in meta.read_text(encoding="utf-8").splitlines():
+            if "=" in ligne and not ligne.lstrip().startswith(("#", ";", "[")):
+                k, v = ligne.split("=", 1)
+                valeurs[k.strip()] = v.strip()
+    manques = [k for k in CLES_PUBLICATION if not valeurs.get(k)]
+    if manques:
+        raise ArchiveErreur(f"metadata.txt : clés vides ou absentes : {', '.join(manques)}")
+    if not (source / valeurs["icon"]).is_file():
+        raise ArchiveErreur(f"metadata.txt : icône introuvable : {valeurs['icon']}")
+    if not (source / "LICENSE").is_file():
+        raise ArchiveErreur("LICENSE absent de l'extension")
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--source", type=Path, default=SOURCE)
     p.add_argument("--sortie", type=Path, required=True)
     a = p.parse_args(argv)
     try:
+        verifier_publication(a.source)
         taille = construire(a.source, a.sortie)
     except (ArchiveErreur, OSError) as e:
         print(f"archive de l'extension refusée : {e}", file=sys.stderr)

@@ -39,6 +39,8 @@ DYNAMIC_IMPORTS = {"__import__", "import_module"}
 
 MAX_BYTES = 25 * 1024 * 1024
 EXPECTED_META = {"qgisMinimumVersion": "3.44", "qgisMaximumVersion": "4.99"}
+# Exigences du dépôt d'extensions QGIS (7.10) : clés à remplir et valeur fixée.
+REQUIRED_PUBLICATION = ("email", "homepage", "repository", "tracker", "icon")
 
 
 def check_imports(pkg):
@@ -118,13 +120,38 @@ def check_metadata(pkg):
     return errors
 
 
-def run(pkg):
-    return check_imports(pkg) + check_size(pkg) + check_metadata(pkg)
+def check_publication(pkg):
+    """Exigences du dépôt d'extensions QGIS : métadonnées complètes, icône et LICENSE présents."""
+    path = os.path.join(pkg, "metadata.txt")
+    if not os.path.isfile(path):
+        return [f"{path} : fichier absent"]
+    values = {}
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            if "=" in line and not line.lstrip().startswith(("#", ";", "[")):
+                k, v = line.split("=", 1)
+                values[k.strip()] = v.strip()
+    errors = [f"{path} : clé {k} vide ou absente" for k in REQUIRED_PUBLICATION if not values.get(k)]
+    if values.get("experimental", "").lower() != "false":
+        errors.append(f"{path} : experimental doit valoir False")
+    if "traceur" in values.get("description", "").lower():
+        errors.append(f"{path} : la description ne doit plus dire « traceur »")
+    icon = values.get("icon")
+    if icon and not os.path.isfile(os.path.join(pkg, icon)):
+        errors.append(f"{path} : icône {icon} introuvable dans le paquet")
+    if not os.path.isfile(os.path.join(pkg, "LICENSE")):
+        errors.append(f"{pkg} : LICENSE absent")
+    return errors
+
+
+def run(pkg, publication=False):
+    errors = check_imports(pkg) + check_size(pkg) + check_metadata(pkg)
+    return errors + check_publication(pkg) if publication else errors
 
 
 def main(argv):
     pkg = argv[1] if len(argv) > 1 else DEFAULT_PKG
-    errors = run(pkg)
+    errors = run(pkg, publication=True)
     for e in errors:
         print(f"ECHEC {e}", file=sys.stderr)
     if errors:
