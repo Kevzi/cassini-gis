@@ -3,7 +3,7 @@ title: 'Noyau gpu Vulkan construit par la recette Windows'
 type: 'feature'
 ticket: '6'
 created: '2026-11-13'
-status: 'built'
+status: 'done'
 baseline_revision: '543721eae603ec3abf66c1be7c737ed677bab659'
 route: 'full'
 route_source: 'auto'
@@ -67,7 +67,7 @@ context:
 
 ## Implementation Notes
 
-Essai à blanc `release.yml` sur la branche (run 43427703726) : vert, paquet assemblé, installation prouvée (valide, altérée, sans manifeste, installeur complet). Trois défauts trouvés par l'essai : compilation Vulkan en échec avec le générateur Visual Studio (corrigé : `CMAKE_GENERATOR=Ninja`) ; boucle de l'installeur en ligne qui avançait après le `nom` au lieu du `sha256` (les DLL recevaient le contenu de `cassini.exe`, code 0xC000007B ; corrigé) ; sorties de la preuve rendues bavardes. Reste à faire par le propriétaire : l'essai sur sa carte graphique et sans carte.
+Essai à blanc `release.yml` sur la branche (run 43427703726) : vert, paquet assemblé, installation prouvée (valide, altérée, sans manifeste, installeur complet). Trois défauts trouvés par l'essai : compilation Vulkan en échec avec le générateur Visual Studio (corrigé : `CMAKE_GENERATOR=Ninja`) ; boucle de l'installeur en ligne qui avançait après le `nom` au lieu du `sha256` (les DLL recevaient le contenu de `cassini.exe`, code 0xC000007B ; corrigé) ; sorties de la preuve rendues bavardes. Essai local du 2026-11-13 sur le poste du propriétaire, avec un noyau gpu compilé en local (pas le binaire de la release) : avec la carte, Vulkan choisi (RTX 3070 Ti) et 34/34 couches sur la carte ; avec `GGML_VK_VISIBLE_DEVICES=aucune`, 0 périphérique Vulkan et 34 couches sur le processeur, même réponse. Passé à done sur cette base ; l'installation de l'artefact de la release sur ce poste n'a pas été faite.
 
 ## Plan Change Log
 
