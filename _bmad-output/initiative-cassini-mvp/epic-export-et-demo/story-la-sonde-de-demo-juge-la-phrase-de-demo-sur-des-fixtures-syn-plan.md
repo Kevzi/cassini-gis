@@ -1,7 +1,7 @@
 ---
 title: 'La sonde de démo juge la phrase de démo sur des fixtures synthétiques'
 type: 'feature'
-ticket: '1'
+ticket: ''
 created: '2026-11-10'
 status: 'done'
 baseline_revision: '47ef2f44baa217b2d2d69a6ad689c457fe1cdd5e'
