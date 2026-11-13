@@ -144,3 +144,25 @@ def score_line(right, total):
     need = bar(total)
     return "SCORE : %d/%d (barre %d) : %s" % (
         right, total, need, "barre tenue" if right >= need else "SOUS LA BARRE")
+
+
+TOO_LONG = "ai.prompt_too_long"  # refus de composition compté à part (5.50)
+
+
+def too_long_count(missed):
+    """Nombre de phrases ratées par un refus `ai.prompt_too_long` (liste de `(id, raison)`)."""
+    return sum(1 for _, reason in missed if reason == "refus : %s" % TOO_LONG)
+
+
+def durations_line(durations):
+    """Durées de composition (secondes, dans l'ordre des phrases) : première, médiane, maximale.
+
+    La première est à part : elle porte le chargement du modèle et l'inventaire QGIS.
+    """
+    if not durations:
+        return "durées de composition : aucune"
+    ordered = sorted(durations)
+    mid = len(ordered) // 2
+    median = ordered[mid] if len(ordered) % 2 else (ordered[mid - 1] + ordered[mid]) / 2
+    return "durées de composition : première %.1f s, médiane %.1f s, maximale %.1f s (%d phrases)" % (
+        durations[0], median, ordered[-1], len(durations))

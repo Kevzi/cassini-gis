@@ -32,7 +32,9 @@ partir sans lui, pour ne jamais prendre en silence le dossier des modèles du po
 Sortie : par phrase, la durée de composition, le plan, `JUSTE` ou `RATE — <raison>` (avec le plan
 attendu) ; puis `SCORE : N/total (barre B) : …`, la liste des ratés, le verdict indicatif du rejeu
 en session et celui, compté, du rejeu après réouverture.
-Code 0 si la barre est tenue et le rejeu après réouverture identique, 1 sinon, 2 si la sonde n'a
+Après le score : les durées de composition (première à part, médiane, maximale) et le compte des
+refus `ai.prompt_too_long` (5.50).
+Code 0 si la barre est tenue, le rejeu après réouverture identique et aucun `ai.prompt_too_long`, 1 sinon, 2 si la sonde n'a
 pas pu partir.
 """
 
@@ -108,7 +110,7 @@ print("phrases : %s (%d) ; noyau : %s ; modèles : %s" % (
 
 t0 = time.monotonic()
 state = {"i": 0, "phase": None, "since": 0.0, "right": 0, "missed": [], "done": False,
-         "replay": None, "in_session": None}
+         "replay": None, "in_session": None, "durations": []}
 
 
 def now():
@@ -143,6 +145,8 @@ def next_phrase():
         total = len(PHRASES)
         print("\n%s" % rv.score_line(state["right"], total), flush=True)
         print("ratés : %s" % (", ".join("%s (%s)" % m for m in state["missed"]) or "aucun"), flush=True)
+        print(rv.durations_line(state["durations"]), flush=True)
+        print("prompt_too_long : %d" % rv.too_long_count(state["missed"]), flush=True)
         print("\n[%s] rejeu du journal dans la session (indicatif)" % now(), flush=True)
         state["phase"], state["in_session"] = "replay_in_session", "interrompu"
         if not core.replay():
@@ -185,6 +189,7 @@ def on_event(kind, payload):
     if kind == client.READY:
         next_phrase()
     elif kind == client.PLAN_PROPOSED and phase == "propose":
+        state["durations"].append(time.monotonic() - state["since"])
         print("  composition %.1f s ; plan : %s" % (time.monotonic() - state["since"], dumps(payload["plan"])),
               flush=True)
         reason = rv.on_proposed(current(), payload["plan"])
@@ -195,9 +200,11 @@ def on_event(kind, payload):
             state["phase"], state["pending"] = "reject", reason
             core.reject_plan(payload["plan_id"])
     elif kind == client.PLAN_QUESTION and phase == "propose":
+        state["durations"].append(time.monotonic() - state["since"])
         print("  question (%.1f s) : %s" % (time.monotonic() - state["since"], dumps(payload)), flush=True)
         verdict(rv.on_question(current()))
     elif kind == client.PLAN_FAILED and phase == "propose":
+        state["durations"].append(time.monotonic() - state["since"])
         print("  refus (%.1f s) : %s" % (time.monotonic() - state["since"], dumps(payload)), flush=True)
         verdict(rv.on_failed(payload))
     elif kind in (client.PLAN_REJECTED, client.PLAN_FAILED) and phase == "reject":
@@ -272,4 +279,5 @@ QgsApplication.exitQgis()
 held = state["right"] >= rv.bar(len(PHRASES))
 print("rejeu en session (indicatif) : %s ; rejeu après réouverture (compté) : %s" % (
     state["in_session"] or "non joué", state["replay"]), flush=True)
-sys.exit(0 if held and state["replay"] == "rejeu identique" else 1)
+too_long = rv.too_long_count(state["missed"])
+sys.exit(0 if held and state["replay"] == "rejeu identique" and not too_long else 1)

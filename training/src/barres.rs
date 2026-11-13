@@ -23,6 +23,8 @@ const EPIC11_REEL: &str = include_str!("../../ai/tests/epic11_reel.rs");
 const STYLE_REEL: &str = include_str!("../../ai/tests/style_reel.rs");
 /// Les phrases de la recette QGIS d'Annecy (5.45), écrites à la main, jouées sous QGIS.
 const RECETTE_ANNECY: &str = include_str!("../../qgis-plugin/tests/recette/annecy.json");
+/// Les phrases de la recette du gros projet (5.50), écrites à la main, jouées sous QGIS.
+const RECETTE_GROS_ANNECY: &str = include_str!("../../qgis-plugin/tests/recette/gros-annecy.json");
 /// Les phrases de la barre par commande (5.53), écrites à la main : `{id, command, phrase, …}`.
 const PAR_COMMANDE: &str = include_str!("../../ai/tests/par_commande/phrases.json");
 /// Les phrases neuves de `plan_reel` (5.53, livrable 3), écrites à la main : `{id, phrase, …}`.
@@ -201,6 +203,9 @@ pub fn real_trials_by_source() -> Vec<(&'static str, Vec<(String, String)>)> {
     let annecy = from_json(RECETTE_ANNECY);
     assert_eq!(annecy.len(), 20, "{annecy:?}");
     all.push(("recette:annecy", annecy));
+    let gros = from_json(RECETTE_GROS_ANNECY);
+    assert_eq!(gros.len(), 20, "{gros:?}");
+    all.push(("recette:gros-annecy", gros));
     for (name, text, count) in HAND_WRITTEN {
         let phrases = from_phrases(text);
         assert_eq!(phrases.len(), count, "{name} : {phrases:?}");

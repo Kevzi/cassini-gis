@@ -692,6 +692,58 @@ l'enregistrer ; seul ce second rejeu compte, et il doit être identique. Rejoué
 (même modèle, noyau de l'entrée 2.12 non installé) : **17/20**, mêmes ratés (RA07, RA09, RA13) ;
 rejeu en session : motif nommé à l'étape 1 ; **rejeu après réouverture : identique, 29 étapes**.
 
+### Recette du gros projet (5.50, 2026-11-13)
+
+Même sonde, même règle, même barre (16/20) que la recette d'Annecy, sur le projet réel de 63
+couches (54 tables BD TOPO, 7 couches du PLUi, 2 MNT), où la vue de l'inventaire est triée
+(5.46 à 5.49) : la preuve attendue est que le modèle trouve la bonne couche, pose sa question
+entre couches proches et ne rencontre aucun `ai.prompt_too_long`. Les 20 phrases
+(`qgis-plugin/tests/recette/gros-annecy.json`, `GA01` à `GA20`) sont écrites à la main : trois
+sélections par une valeur (« les lacs » vers `plan_d_eau`, « routes départementales », « gares de
+voyageurs et de fret »), deux questions attendues sur des couches proches (routes ; voies
+ferrées), le retrait de couche en dernier. Elles rejoignent le garde de recouvrement (40 phrases
+d'essais réels pour les deux recettes). Phrases relues par le propriétaire avant la mesure.
+
+La sonde imprime en plus, après le score, les durées de composition (première à part, médiane,
+maximale) et `prompt_too_long : n` ; elle sort en code 1 si `n > 0`. Cibles : moins de 60 s sur
+CPU, moins de 30 s sur GPU.
+
+Commande (la copie du projet est posée à côté de l'original, jamais l'original) :
+
+    set CASSINI_CORE=%LOCALAPPDATA%\Cassini\bin\cassini.exe
+    set CASSINI_MODELS=<dossier du seul modèle mesuré>
+    set QT_QPA_PLATFORM=windows
+    "C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat" qgis-plugin\tests\probe_recette.py ^
+        ..\donnees-test-cassini\annecy\projet-gros-annecy.qgz qgis-plugin\tests\recette\gros-annecy.json
+
+**Mesure du 2026-11-13 (phrases relues et acceptées telles quelles par le propriétaire)** : modèle
+installé (`cassini-composition-4b-Q4_K_M`), noyau du build local `C:\ct-5-57g` (CPU : le même sans
+`ggml-vulkan.dll`), QGIS 3.44.15, `projet-gros-annecy.qgz`. Sorties brutes hors dépôt :
+`donnees-test-cassini/annecy/essais-5-50/{cpu,gpu}-gros-recette.txt`.
+
+| | Score | 1re composition (inventaire compris) | Médiane | Maximum | `prompt_too_long` | Rejeu après réouverture |
+|---|---|---|---|---|---|---|
+| CPU | **14/20, sous la barre de 16** | 90,3 s | 28,3 s | 90,3 s | 0 | identique |
+| GPU | **14/20, sous la barre de 16** | 39,9 s | 3,9 s | 39,9 s | 0 | identique |
+
+Les deux mesures rendent les mêmes six ratés. Cibles de durée (moins de 60 s sur CPU, moins de
+30 s sur GPU) : **non tenues sur CPU** (première phrase 90,3 s, deuxième durée la plus longue
+64,7 s, médiane 28,3 s) ; sur GPU, la première phrase dépasse la cible (39,9 s), les autres
+restent sous 10 s (maximum 9,8 s, relevé dans la sortie brute).
+
+| Phrase | Raté |
+|---|---|
+| GA03 « zones agricoles du PLUi » | question (« aucune valeur *zones agricoles* dans TYPEZONE ») au lieu de `TYPEZONE = A` |
+| GA06 « routes départementales » | deux sélections, dont une sur `troncon_de_route` avec un champ inventé (`cpx_classement_administratif`) |
+| GA08 « voies ferrées » | plan sur `voie_ferree_nommee` au lieu de la question entre couches proches |
+| GA09 « gares de voyageurs et de fret » | question « aucune couche de gares » : `equipement_de_transport` n'est pas trouvée par la valeur |
+| GA13 « depuis le Mont Veyrier » | plan conforme, mais `terrain.viewshed_too_large` (3 km sur le MNT à 5 m) : défaut de la phrase, pas du modèle |
+| GA19 « exporte les communes » | `commune_associee_ou_deleguee` au lieu de `commune` |
+
+La barre n'est pas tenue et n'est pas abaissée. La question entre couches proches est juste
+pour les routes (GA07) et manquée pour les voies ferrées (GA08). Même en corrigeant GA13, le score
+resterait à 15/20.
+
 ### Inventaires larges et jeu de 8 600 exemples (2026-11-10)
 
 Après la nuit du 2026-11-10, deux corrections du générateur décidées par le propriétaire, mêmes

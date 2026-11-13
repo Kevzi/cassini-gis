@@ -1,0 +1,69 @@
+[
+  {"id": "GA01", "text": "Qu'est-ce qu'il y a comme couches dans mon projet ?",
+   "expect": {"plan": [{"command": "project.inventory", "params": {}}]}},
+  {"id": "GA02", "text": "Quels champs a la couche des bâtiments ?",
+   "expect": {"plan": [{"command": "layer.describe", "params": {"layer_id": "@batiment"}}]}},
+  {"id": "GA03", "text": "Sélectionne les zones agricoles du PLUi.",
+   "note": "PLUi : TYPEZONE vaut A pour une zone agricole",
+   "expect": {"plan": [{"command": "analysis.select_by_attribute", "params": {
+     "layer_id": "@200066793_ZONE_URBA_20260326", "field": "TYPEZONE", "operator": "eq", "value": "A"}}]}},
+  {"id": "GA04", "text": "Sélectionne les bâtiments de plus de 20 m de haut.",
+   "expect": {"plan": [{"command": "analysis.select_by_attribute", "params": {
+     "layer_id": "@batiment", "field": "hauteur", "operator": "gt", "value": "20"}}]}},
+  {"id": "GA05", "text": "Sélectionne les lacs.",
+   "note": "couche trouvée par une valeur : plan_d_eau, champ nature, valeur Lac",
+   "expect": {"plan": [{"command": "analysis.select_by_attribute", "params": {
+     "layer_id": "@plan_d_eau", "field": "nature", "operator": "eq", "value": "Lac"}}]}},
+  {"id": "GA06", "text": "Sélectionne les routes départementales.",
+   "note": "couche trouvée par une valeur : route_numerotee_ou_nommee, champ type_de_route, valeur Départementale, parmi trois couches de routes",
+   "expect": {"plan": [{"command": "analysis.select_by_attribute", "params": {
+     "layer_id": "@route_numerotee_ou_nommee", "field": "type_de_route", "operator": "eq", "value": "Départementale"}}]}},
+  {"id": "GA07", "text": "Fais un tampon de 100 m autour des routes.",
+   "note": "couches proches : troncon_de_route, route_numerotee_ou_nommee et voie_nommee se disputent « routes » ; une question est attendue",
+   "expect": {"question": true}},
+  {"id": "GA08", "text": "Fais un tampon de 50 m autour des voies ferrées.",
+   "note": "couches proches : troncon_de_voie_ferree et voie_ferree_nommee ; une question est attendue",
+   "expect": {"question": true}},
+  {"id": "GA09", "text": "Sélectionne les gares de voyageurs et de fret.",
+   "note": "couche trouvée par une valeur : equipement_de_transport, champ nature, valeur Gare voyageurs et fret",
+   "expect": {"plan": [{"command": "analysis.select_by_attribute", "params": {
+     "layer_id": "@equipement_de_transport", "field": "nature", "operator": "eq", "value": "Gare voyageurs et fret"}}]}},
+  {"id": "GA10", "text": "Trace un tampon de 300 m autour des lignes électriques.",
+   "expect": {"plan": [{"command": "analysis.buffer", "params": {
+     "layer_id": "@ligne_electrique", "distance": {"value": 300, "unit": "m"}}}]}},
+  {"id": "GA11", "text": "Trace une bande de 25 m de part et d'autre des cours d'eau.",
+   "expect": {"plan": [{"command": "analysis.buffer", "params": {
+     "layer_id": "@cours_d_eau", "distance": {"value": 25, "unit": "m"}}}]}},
+  {"id": "GA12", "text": "Donne-moi les pentes en pourcentage à partir du MNT à 5 m.",
+   "expect": {"plan": [{"command": "terrain.slope", "params": {
+     "dem": "mnt/mnt-annecy-5m.tif", "unit": "percent"}}]}},
+  {"id": "GA13", "text": "Qu'est-ce qu'on voit depuis le Mont Veyrier (45,9136 N, 6,1797 E, WGS84), yeux à 1,70 m, dans un rayon de 3 km ? Prends le MNT à 5 m.",
+   "note": "point WGS84 sur un MNT en Lambert-93 : plan complété par le noyau (11.22), comme RA11",
+   "expect": {"plan": [
+     {"command": "data.transform_point", "params": {
+       "point": {"x": 6.1797, "y": 45.9136, "epsg": 4326}, "target_epsg": 2154}},
+     {"command": "terrain.viewshed", "params": {
+       "dem": "mnt/mnt-annecy-5m.tif", "observer": "step:1.point",
+       "observer_height": {"value": 1.7, "unit": "m"},
+       "radius": {"value": 3, "unit": "km"}}}]}},
+  {"id": "GA14", "text": "Donne-moi les coordonnées UTM du point 45,9020 N, 6,1218 E (WGS84).",
+   "expect": {"plan": [{"command": "coord.convert", "params": {
+     "point": {"x": 6.1218, "y": 45.902, "epsg": 4326}, "to": ["utm"]}}]}},
+  {"id": "GA15", "text": "Quelle distance à vol d'oiseau entre la mairie d'Annecy (45,8992 N, 6,1294 E, WGS84) et celle de Thonon-les-Bains (46,3760 N, 6,4797 E, WGS84) ?",
+   "expect": {"plan": [{"command": "geo.distance_azimuth", "params": {
+     "from": {"x": 6.1294, "y": 45.8992, "epsg": 4326},
+     "to": {"x": 6.4797, "y": 46.376, "epsg": 4326}}}]}},
+  {"id": "GA16", "text": "Mets les forêts publiques aux couleurs de l'IGN.",
+   "expect": {"plan": [{"command": "map.topographic_style", "params": {"layers": ["@foret_publique"]}}]}},
+  {"id": "GA17", "text": "Colorie les communes selon leur population en 4 classes.",
+   "expect": {"plan": [{"command": "map.graduated_style", "params": {
+     "layer_id": "@commune", "field": "population", "class_count": 4}}]}},
+  {"id": "GA18", "text": "Sors-moi la carte en PDF, format A4 paysage, avec le titre « Grand Annecy ».",
+   "expect": {"plan": [{"command": "layout.export_pdf", "params": {
+     "title": "Grand Annecy", "page_size": "a4", "orientation": "landscape"}}]}},
+  {"id": "GA19", "text": "Exporte les communes en GeoPackage, je dois les transmettre au bureau d'études.",
+   "expect": {"plan": [{"command": "data.convert", "params": {"layer_id": "@commune", "format": "gpkg"}}]}},
+  {"id": "GA20", "text": "Retire les cimetières du projet, on n'en a pas besoin.",
+   "note": "en dernier : retire une couche du projet",
+   "expect": {"plan": [{"command": "layer.remove", "params": {"layer_id": "@cimetiere"}}]}}
+]

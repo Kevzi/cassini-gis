@@ -11,6 +11,9 @@ sys.path.insert(0, HERE)
 import recette_verdict as rv  # noqa: E402
 
 ANNECY = os.path.join(HERE, "recette", "annecy.json")
+GROS = os.path.join(HERE, "recette", "gros-annecy.json")
+INVENTAIRE_GROS = os.path.join(HERE, "..", "..", "..", "donnees-test-cassini", "annecy",
+                               "essais-5-48", "inventaire-gros.json")
 LAYERS = rv.layer_index([("gares_1", "gares"), ("communes_2", "communes")])
 
 BUFFER = {"command": "analysis.buffer",
@@ -140,6 +143,56 @@ class AnnecyFile(unittest.TestCase):
         commands = {c["command"].split(".")[0] for p in self.phrases if p["plan"] for c in p["plan"]}
         for family in ("project", "layer", "analysis", "terrain", "coord", "geo", "map", "layout", "data"):
             self.assertIn(family, commands)
+
+
+
+
+class Summary(unittest.TestCase):
+    def test_too_long_refusals_are_counted_apart(self):
+        missed = [("A", "refus : ai.prompt_too_long"), ("B", "plan non conforme"),
+                  ("C", "refus : ai.prompt_too_long"), ("D", "refus : ai.autre")]
+        self.assertEqual(rv.too_long_count(missed), 2)
+        self.assertEqual(rv.too_long_count([]), 0)
+
+    def test_durations_first_median_max(self):
+        line = rv.durations_line([30.0, 2.0, 4.0, 8.0, 6.0])
+        self.assertIn("première 30.0 s", line)
+        self.assertIn("médiane 6.0 s", line)
+        self.assertIn("maximale 30.0 s", line)
+
+    def test_median_of_an_even_count(self):
+        self.assertIn("médiane 3.0 s", rv.durations_line([9.0, 2.0, 4.0, 1.0]))
+
+    def test_no_duration(self):
+        self.assertIn("aucune", rv.durations_line([]))
+
+
+class GrosAnnecy(unittest.TestCase):
+    def raw(self):
+        with open(GROS, encoding="utf-8") as f:
+            return json.load(f)
+
+    def test_twenty_phrases_with_unique_ids(self):
+        raw = self.raw()
+        self.assertEqual(len(raw), 20)
+        self.assertEqual(len({p["id"] for p in raw}), 20)
+        self.assertEqual([p["id"] for p in raw], ["GA%02d" % i for i in range(1, 21)])
+
+    def test_at_least_two_questions(self):
+        self.assertGreaterEqual(sum(p["expect"] == {"question": True} for p in self.raw()), 2)
+
+    def test_at_least_two_layers_found_by_a_value(self):
+        self.assertGreaterEqual(sum("trouvée par une valeur" in p.get("note", "") for p in self.raw()), 2)
+
+    def test_layer_names_exist_in_the_inventory(self):
+        if not os.path.exists(INVENTAIRE_GROS):
+            self.skipTest("inventaire-gros.json absent (données hors dépôt)")
+        with open(INVENTAIRE_GROS, encoding="utf-8") as f:
+            names = [l["name"] for l in json.load(f)["layers"]]
+        with open(GROS, encoding="utf-8") as f:
+            text = f.read()
+        loaded = rv.load(text, rv.layer_index((n, n) for n in names))
+        self.assertEqual(len(loaded), 20)
 
 
 if __name__ == "__main__":

@@ -1171,3 +1171,10 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 ## Deferred from: code review of plan-pente-cachee-dans-le-pdf (2026-11-13)
 
 - Session rouverte en milieu de plan : `Session.plan_start` est `None` (posé seulement à l'étape 1 d'un plan, `core/src/journal/mod.rs:214`), donc `fill_focus` ne calcule aucun `focus` et les sorties des plans précédents restent visibles dans le PDF. Antérieur au correctif, qui ne le change pas ; à traiter en dérivant le début du plan depuis le journal.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-recette-realiste-projet-bd-topo-74-plui-mnt-20-phrases-a-pla-plan.md`
+  summary: Recette du gros projet à 14/20 (CPU et GPU), sous la barre de 16 : décider de la suite (corriger les phrases GA06, GA09, GA13, ré-entraîner, ou changement de cap).
+  evidence: six ratés identiques sur les deux mesures du 2026-11-13 ; GA13 est un défaut de la phrase (`terrain.viewshed_too_large`), même corrigé le score reste à 15/20 ; durée de la première composition 90,3 s (CPU) et 39,9 s (GPU) au-delà des cibles.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-recette-realiste-projet-bd-topo-74-plui-mnt-20-phrases-a-pla-plan.md`
+  summary: Vérifier dans le GeoPackage BD TOPO les valeurs attendues de GA06 (`type_de_route = Départementale`) et GA09 (`nature = Gare voyageurs et fret`).
+  evidence: l'inventaire de test ne liste que 11 valeurs par champ ; ces deux valeurs viennent du schéma, pas des données, et ces deux phrases font partie des six ratés.
