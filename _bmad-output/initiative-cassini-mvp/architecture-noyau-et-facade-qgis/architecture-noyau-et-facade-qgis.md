@@ -497,9 +497,13 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   - manifeste des versions, à adresse fixe dans la release :
     `https://github.com/Kevzi/cassini-gis/releases/latest/download/manifeste.json` ;
   - modèle et installeur complet hors ligne : dépôt Hugging Face
-    `Kevzi/cassini-composition-4b-GGUF`, avec des noms de fichiers versionnés ;
+    `KevziFar/cassini-composition-4b-GGUF`, avec des noms de fichiers versionnés ;
   - page d'accueil, vers laquelle pointent le champ `homepage` de `metadata.txt` et le
     bouton du panneau quand le noyau est introuvable : `https://kevzi.github.io/cassini-gis`.
+
+  Rectificatif (2026-11-13, avant toute publication) : le compte Hugging Face du propriétaire
+  est `KevziFar`, pas `Kevzi` (nom de son compte GitHub) ; le dépôt du modèle est donc
+  `KevziFar/cassini-composition-4b-GGUF`. Aucune adresse n'avait encore été distribuée.
 
   Elles ne changent plus après la première version publiée : un installeur déjà
   distribué doit toujours les trouver. La règle, la frontière et l'ordre de recherche

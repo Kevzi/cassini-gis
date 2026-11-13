@@ -22,7 +22,7 @@ context:
 
 **Problem:** la recette de 7.2 et l'installeur en ligne de 7.4 téléchargent le modèle depuis Hugging Face, où il n'est pas encore.
 
-**Approach:** le propriétaire crée le compte et le jeton (étape hitl) ; le dépôt public `Kevzi/cassini-composition-4b-GGUF` reçoit le modèle installé (`cassini-composition-4b-Q4_K_M.gguf`, SHA-256 `b687313f4a49c23e…`, session 5.54-3) sous le nom versionné `cassini-composition-4b-0.1.0-Q4_K_M.gguf`, avec la licence Apache-2.0, une NOTICE de Qwen, la mention des modifications et une fiche qui décrit un usage civil. La fiche ne dit rien d'un module défense (CLAUDE.md §2.9).
+**Approach:** le propriétaire crée le compte et le jeton (étape hitl) ; le dépôt public `KevziFar/cassini-composition-4b-GGUF` reçoit le modèle installé (`cassini-composition-4b-Q4_K_M.gguf`, SHA-256 `b687313f4a49c23e…`, session 5.54-3) sous le nom versionné `cassini-composition-4b-0.1.0-Q4_K_M.gguf`, avec la licence Apache-2.0, une NOTICE de Qwen, la mention des modifications et une fiche qui décrit un usage civil. La fiche ne dit rien d'un module défense (CLAUDE.md §2.9).
 
 </frozen-after-approval>
 
@@ -33,7 +33,7 @@ Oneshot : le travail est de la documentation et un script d'envoi (moins de 100 
 ## Verification
 
 **Commands:**
-- `curl -sIL https://huggingface.co/Kevzi/cassini-composition-4b-GGUF/resolve/main/cassini-composition-4b-0.1.0-Q4_K_M.gguf` -- expected: 200
+- `curl -sIL https://huggingface.co/KevziFar/cassini-composition-4b-GGUF/resolve/main/cassini-composition-4b-0.1.0-Q4_K_M.gguf` -- expected: 200
 - `sha256sum` du fichier téléchargé -- expected: égal à celui du modèle installé
 
 **Manual checks (if no CLI):**

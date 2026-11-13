@@ -1,6 +1,6 @@
 # Publie le modèle de Cassini sur Hugging Face (ticket 7.3).
 #
-# Préalables, à faire une fois par le propriétaire : un compte Hugging Face nommé « Kevzi », puis
+# Préalables, à faire une fois par le propriétaire : un compte Hugging Face nommé « KevziFar », puis
 # `hf auth login` avec un jeton à droits d'écriture (saisi dans le terminal, jamais dans un chat).
 #
 # Usage :  powershell -File docs\modele-hugging-face\publier.ps1
@@ -9,7 +9,7 @@
 
 $ErrorActionPreference = 'Stop'
 
-$repo = 'Kevzi/cassini-composition-4b-GGUF'
+$repo = 'KevziFar/cassini-composition-4b-GGUF'
 $nom = 'cassini-composition-4b-0.1.0-Q4_K_M.gguf'
 $sha = 'b687313f4a49c23e13673d14d185f3ee56d3e710e8d01c08595339236b21a865'
 $modele = Join-Path $env:LOCALAPPDATA 'Cassini\bin\models\cassini-composition-4b-Q4_K_M.gguf'
