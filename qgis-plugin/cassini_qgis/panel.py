@@ -144,6 +144,9 @@ BANNERS = {
 }
 
 
+HOME_BANNERS = ("not_found",)  # bandeaux qui portent le bouton de la page d'accueil
+
+
 def _announce(widget, text):
     """Annonce aux lecteurs d'écran (zone vivante), sans jamais lever d'exception."""
     try:
@@ -319,6 +322,9 @@ class _Fold(QWidget):
 
 class CassiniPanel(QWidget):
     """Colonne unique : en-tête, bandeau, saisie, résultat, journal, mode expert."""
+
+    install_info = None  # version lue dans installation.json (set_install_info)
+    install_reminder = False
 
     def __init__(self, actions):
         super().__init__()
@@ -506,6 +512,15 @@ class CassiniPanel(QWidget):
         sl.addWidget(self.external_switch)
         sl.addWidget(self.external_ask)
         sl.addWidget(self.external_reason)
+        # Version installée et rappel de mise à jour (lus par le plugin, aucun accès disque ici).
+        self.install_info = None
+        self.install_reminder = False
+        self.install_label = QLabel()
+        self.install_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.install_note = QLabel()
+        self.install_note.setWordWrap(True)
+        sl.addWidget(self.install_label)
+        sl.addWidget(self.install_note)
 
         # Bandeau d'état : un seul à la fois.
         self.banner_zone = QWidget()
@@ -516,8 +531,11 @@ class CassiniPanel(QWidget):
         self.banner_text.setWordWrap(True)
         self.banner_button = QPushButton()
         self.banner_button.clicked.connect(self._banner_action)
+        self.banner_home = QPushButton()
+        self.banner_home.clicked.connect(self._open_home)
         bl.addWidget(self.banner_icon)
         bl.addWidget(self.banner_text, 1)
+        bl.addWidget(self.banner_home)
         bl.addWidget(self.banner_button)
         col.addWidget(self.banner_zone)
 
@@ -1150,6 +1168,15 @@ class CassiniPanel(QWidget):
         self.lang_box.setAccessibleName(t("settings_language"))
         self.model_label.setText(t("settings_model"))
         self._render_models()
+        info = self.install_info
+        self.install_label.setVisible(info is not None)
+        self.install_note.setVisible(info is not None and self.install_reminder)
+        if info is not None:
+            self.install_label.setText(
+                t("install_version", version=info["version"],
+                  date=info["installed_at"].strftime("%Y-%m-%d"))
+            )
+            self.install_note.setText(t("update_reminder"))
 
         usable = self.ready and self.banner is None
         if self.banner is None:
@@ -1165,6 +1192,9 @@ class CassiniPanel(QWidget):
             elif action == "relaunch":
                 self.banner_button.setText(t("relaunch"))
             self.banner_button.setAccessibleName(self.banner_button.text())
+            self.banner_home.setVisible(self.banner in HOME_BANNERS)
+            self.banner_home.setText(t("open_home"))
+            self.banner_home.setAccessibleName(t("open_home"))
             self.banner_zone.setVisible(True)
 
         self._render_external()
@@ -2010,6 +2040,15 @@ class CassiniPanel(QWidget):
         if self._actions.reject(plan_id):
             self.agent.start_rejecting()
             self.render()
+
+    def set_install_info(self, info, reminder=False):
+        """Version lue par le plugin dans `installation.json` (ou None) et rappel dû ou non."""
+        self.install_info = info
+        self.install_reminder = bool(info) and bool(reminder)
+        self.render()
+
+    def _open_home(self):
+        self._actions.open_home()
 
     def _banner_action(self):
         action = BANNERS.get(self.banner, (None, None))[1]

@@ -11,6 +11,7 @@ sys.path.insert(0, PKG)
 
 import client  # noqa: E402
 import gestures  # noqa: E402
+import installation  # noqa: E402,F401
 import locator  # noqa: E402
 import texts  # noqa: E402,F401
 
@@ -594,10 +595,14 @@ class FakePanel:
         self.messages = []
         self.ready = None
         self.events = []
+        self.install_infos = []
 
     def set_banner(self, kind, message=None):
         self.banners.append(kind)
         self.messages.append(message)
+
+    def set_install_info(self, info, reminder=False):
+        self.install_infos.append((info, reminder))
 
     def set_ready(self, catalogue, history=(), read_only=False):
         self.ready = catalogue
@@ -606,6 +611,40 @@ class FakePanel:
 
     def on_event(self, kind, payload):
         self.events.append((kind, payload))
+
+
+class StubTimer:
+    """QTimer muet : garde l'intervalle et l'état ; `fire()` simule un tick."""
+
+    def __init__(self):
+        self.interval = None
+        self.active = False
+        self.slots = []
+        self.timeout = self
+
+    def connect(self, slot):
+        self.slots.append(slot)
+
+    def setInterval(self, ms):
+        self.interval = ms
+
+    def start(self):
+        self.active = True
+
+    def stop(self):
+        self.active = False
+
+    def fire(self):
+        for slot in self.slots:
+            slot()
+
+
+class StubDesktop:
+    opened = []
+
+    @staticmethod
+    def openUrl(url):
+        StubDesktop.opened.append(url)
 
 
 def load_plugin():
@@ -621,13 +660,15 @@ def load_plugin():
     mod("qgis")
     mod("qgis.core", QgsApplication=object, QgsProject=StubProject)
     mod("qgis.PyQt")
-    mod("qgis.PyQt.QtCore", QProcess=StubProcess, QTimer=object, QSettings=type(
-        "S", (), {"value": lambda self, *a: "", "setValue": lambda self, *a: None}), Qt=object)
+    mod("qgis.PyQt.QtCore", QProcess=StubProcess, QTimer=StubTimer, QSettings=type(
+        "S", (), {"value": lambda self, *a: "", "setValue": lambda self, *a: None}), Qt=object,
+        QUrl=lambda url: url)
+    mod("qgis.PyQt.QtGui", QDesktopServices=StubDesktop)
     mod("qgis.PyQt.QtWidgets", QDockWidget=StubWidget, QFileDialog=StubWidget)
     pkg = types.ModuleType("cassini_stub")
     pkg.__path__ = [PKG]
     sys.modules["cassini_stub"] = pkg
-    for n in ("client", "gestures", "locator", "texts"):
+    for n in ("client", "gestures", "installation", "locator", "texts"):
         sys.modules["cassini_stub." + n] = sys.modules[n]
     mod("cassini_stub.panel", CassiniPanel=FakePanel)
     return importlib.import_module("cassini_stub.plugin")
@@ -789,7 +830,8 @@ class PanelBannerTest(unittest.TestCase):
         panel.set_banner("refused", message)
         del panel.render  # le vrai render de la classe
         for name in ("title", "settings_button", "settings_zone", "lang_label", "lang_box",
-                     "model_label", "banner_zone", "banner_text", "banner_button", "input",
+                     "model_label", "banner_zone", "banner_text", "banner_button", "banner_home",
+                     "install_label", "install_note", "input",
                      "send_button", "details", "expert", "footer"):
             setattr(panel, name, Recorder())
         for name in ("_render_models", "_render_external", "_render_agent", "_render_result",
@@ -914,6 +956,48 @@ class PluginBehaviourTest(unittest.TestCase):
         self.p._refresh()
         self.assertEqual(self.p.panel.banners, ["not_found"])
         self.assertEqual(StubProcess.created, 0)
+
+    def test_not_found_probes_every_3_seconds_then_launches(self):
+        StubProject.name = "/a/p.qgz"
+        found = [None]
+        self.mod.locator.locate = lambda s: found[0]
+        self.fake_client()
+        self.p._refresh()
+        probe = self.p._probe
+        self.assertEqual((probe.interval, probe.active), (3000, True))
+        probe.fire()  # toujours rien : le bandeau reste
+        self.assertEqual(StubProcess.created, 0)
+        found[0] = ("/x/cassini", "install")
+        probe.fire()
+        self.assertEqual(StubProcess.created, 1)
+        self.assertFalse(probe.active)
+        self.assertIsNone(self.p._probe)
+        self.assertEqual(self.p.panel.banners[-1], "starting")
+
+    def test_not_found_clears_install_info_and_closing_project_stops_probe(self):
+        StubProject.name = "/a/p.qgz"
+        self.mod.locator.locate = lambda s: None
+        self.fake_client()
+        self.p._refresh()
+        self.assertEqual(self.p.panel.install_infos[-1], (None, False))
+        probe = self.p._probe
+        self.assertTrue(probe.active)
+        StubProject.name = ""
+        self.p._refresh()
+        self.assertFalse(probe.active)
+        self.assertIsNone(self.p._probe)
+
+    def test_launch_passes_install_info_to_the_panel(self):
+        StubProject.name = "/a/p.qgz"
+        self.mod.locator.locate = lambda s: ("/nowhere/cassini", "PATH")
+        self.fake_client()
+        self.p._refresh()
+        self.assertEqual(self.p.panel.install_infos, [(None, False)])
+
+    def test_open_home_uses_desktop_services(self):
+        StubDesktop.opened.clear()
+        self.p.open_home()
+        self.assertEqual(StubDesktop.opened, [installation.HOME_URL])
 
     def test_died_allows_relaunch(self):
         StubProject.name = "/a/p.qgz"

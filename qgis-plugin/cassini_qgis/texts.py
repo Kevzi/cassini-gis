@@ -43,8 +43,14 @@ _FR = {
     "no_project": "Ouvrez ou enregistrez un projet QGIS : Cassini se lance avec le projet.",
     "starting": "Démarrage du noyau…",
     "not_found": (
-        "Le noyau Cassini est introuvable. Installez le paquet Cassini, ou "
-        "désignez le fichier. Rien n'est téléchargé."
+        "Cassini a besoin de son moteur pour fonctionner. Installez-le depuis la "
+        "page d'accueil, ou désignez le fichier. Rien n'est téléchargé ici."
+    ),
+    "open_home": "Ouvrir la page d'accueil",
+    "install_version": "Version installée : {version}, le {date}",
+    "update_reminder": (
+        "Cette installation date de plus de trois mois. Lancez « Mettre à jour "
+        "Cassini » pour voir s'il existe une version plus récente."
     ),
     "died": "Le noyau s'est arrêté de façon inattendue. Votre projet n'est pas modifié.",
     "refused": (
@@ -358,8 +364,14 @@ _EN = {
     "no_project": "Open or save a QGIS project: Cassini starts with the project.",
     "starting": "Starting the core…",
     "not_found": (
-        "The Cassini core cannot be found. Install the Cassini package, or "
-        "point to the file. Nothing is downloaded."
+        "Cassini needs its engine to work. Install it from the home page, or "
+        "point to the file. Nothing is downloaded here."
+    ),
+    "open_home": "Open the home page",
+    "install_version": "Installed version: {version}, on {date}",
+    "update_reminder": (
+        "This installation is more than three months old. Run “Update Cassini” "
+        "to see whether a newer version exists."
     ),
     "died": "The core stopped unexpectedly. Your project is unchanged.",
     "refused": (

@@ -4,14 +4,17 @@ Qt uniquement par `qgis.PyQt` (AD-18). Aucune logique métier ici : le noyau
 décide, le panneau affiche (AD-4).
 """
 
+import datetime
 import os
 
 from qgis.core import QgsApplication, QgsProject
-from qgis.PyQt.QtCore import QProcess, QSettings, Qt, QTimer
+from qgis.PyQt.QtCore import QProcess, QSettings, Qt, QTimer, QUrl
+from qgis.PyQt.QtGui import QDesktopServices
 from qgis.PyQt.QtWidgets import QDockWidget, QFileDialog
 
-from . import client, delegated, gestures, locator, panel, texts
+from . import client, delegated, gestures, installation, locator, panel, texts
 
+PROBE_MS = 3000  # resonde du noyau tant que le bandeau « moteur introuvable » est affiché
 SLOW_TICKS = 100  # 100 x 100 ms : un geste de test de dix secondes
 
 
@@ -58,6 +61,7 @@ class CassiniPlugin:
         self.client = None
         self.process = None
         self.project_path = None
+        self._probe = None
 
     # -- QGIS ---------------------------------------------------------
     def initGui(self):
@@ -73,6 +77,7 @@ class CassiniPlugin:
         self._refresh()
 
     def unload(self):
+        self._stop_probe()
         self._stop()
         project = QgsProject.instance()
         app = QgsApplication.instance()
@@ -144,6 +149,10 @@ class CassiniPlugin:
             self.project_path = None
             self._refresh()
 
+    def open_home(self):
+        """Ouvre la page d'accueil d'AD-17 dans le navigateur ; rien n'est téléchargé ici."""
+        QDesktopServices.openUrl(QUrl(installation.HOME_URL))
+
     def relaunch(self):
         self._stop()
         self.project_path = None
@@ -158,6 +167,7 @@ class CassiniPlugin:
         file_name = QgsProject.instance().fileName()
         if not file_name:
             self._stop()
+            self._stop_probe()
             self.project_path = None
             self._banner("no_project")
             return
@@ -175,14 +185,43 @@ class CassiniPlugin:
         found = locator.locate(str(setting))
         if found is None:
             self.project_path = None
+            if self.panel is not None:
+                self.panel.set_install_info(None)  # plus d'installation retrouvée à décrire
             self._banner("not_found")
+            self._start_probe()
             return
+        self._stop_probe()
         program, _origin = found
+        if self.panel is not None:
+            info = installation.read(program)
+            now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+            due = info is not None and installation.reminder_due(info["installed_at"], now)
+            self.panel.set_install_info(info, due)
         self._banner("starting")
         self.process = QProcess()
         registry = delegated.build_registry(SlowProbe)
         self.client = client.CoreClient(self.process, self._on_event, registry)
         self.client.start(program, self.project_path)
+
+    def _start_probe(self):
+        if self._probe is None:
+            self._probe = QTimer()
+            self._probe.setInterval(PROBE_MS)
+            self._probe.timeout.connect(self._probe_tick)
+            self._probe.start()
+
+    def _stop_probe(self):
+        if self._probe is not None:
+            self._probe.stop()
+            self._probe = None
+
+    def _probe_tick(self):
+        """Le noyau est-il apparu ? Alors on se lance, sans redémarrer QGIS."""
+        setting = QSettings().value(locator.SETTING_KEY, "") or ""
+        if locator.locate(str(setting)) is not None:
+            self._stop_probe()
+            self.project_path = None
+            self._refresh()
 
     def _on_event(self, kind, payload):
         if self.panel is None:
