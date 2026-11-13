@@ -39,6 +39,20 @@ la rouvrir, ou la poser à la main. La construction en a besoin pour compiler le
 La recette par défaut (CI Linux et Windows) n'a pas ce SDK : la feature `gpu` est hors défaut,
 et `cargo build` sans elle donne le noyau processeur seul, d'un seul fichier, comme avant.
 
+## Paquet livré par la release (ticket 7.6)
+
+Le noyau livré est **unique et gpu** : la recette Windows de la release (jamais le poste du
+propriétaire) installe le SDK Vulkan **1.4.363.0**, téléchargé à
+`https://sdk.lunarg.com/sdk/download/1.4.363.0/windows/vulkansdk-windows-X64-1.4.363.0.exe`, dont
+le SHA-256 est fixé à `94a82d378f7a5e3e54c9db7d2fb7016af136e14ac0a18dbf0f2f67a36352d141`
+(publié par LunarG) : si l'empreinte diffère, la construction s'arrête avant toute compilation.
+Puis elle construit avec `--features gpu`, passe la garde hors ligne sur ce paquet et l'assemble
+(`installer/assembler_noyau.py`) par **liste fermée** : le tableau ci-dessous, et rien d'autre ;
+un fichier manquant ou en trop (jamais `llama-common.dll`) fait échouer la recette. Le manifeste
+liste chaque fichier avec son SHA-256 ; l'installeur en ligne les télécharge tous, vérifie chaque
+empreinte et ne pose rien si l'une diffère ; l'installeur complet les embarque. Sans carte ni
+pilote Vulkan, le noyau installé retombe sur le processeur.
+
 ## Commande
 
 ```powershell
@@ -67,7 +81,7 @@ fermé :
 | `cassini.exe` | le noyau |
 | `llama.dll`, `ggml.dll`, `ggml-base.dll` | llama.cpp, importés par `cassini.exe` |
 | `ggml-cpu-*.dll` (toutes) | moteur processeur, une variante par jeu d'instructions |
-| `ggml-vulkan.dll` | moteur carte graphique (facultatif : sans lui, processeur) |
+| `ggml-vulkan.dll` | moteur carte graphique (facultatif à l'exécution : sans carte ni pilote, processeur ; obligatoire dans le paquet livré) |
 
 Ne **jamais** copier `llama-common.dll` : le noyau ne l'importe pas et elle embarque un client
 HTTP (elle importe `ws2_32`). La construction ne la pose d'ailleurs pas dans `C:\ct\release`.

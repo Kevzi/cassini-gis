@@ -3,14 +3,14 @@ title: 'Noyau gpu Vulkan construit par la recette Windows'
 type: 'feature'
 ticket: '6'
 created: '2026-11-13'
-status: 'ready-for-dev'
+status: 'built'
 baseline_revision: '543721eae603ec3abf66c1be7c737ed677bab659'
 route: 'full'
 route_source: 'auto'
 risk: 'high'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-cassini-mvp/epic-publication/epic-publication.md'
@@ -70,6 +70,14 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+- `IGNORES` morte et docstring trop large (assembler_noyau.py) -- low, patch : constante supprimée, docstring réécrite.
+- Garde hors ligne avant l'assemblage -- low, rejeté : la liste fermée rend le paquet égal au dossier de construction pour les .dll/.exe ; corriger ajouterait une étape.
+- Un seul SHA altéré dans la preuve, boucle Pascal sans test unitaire -- maybe-false/medium, defer : seul l'essai à blanc de la release peut la valider.
+- Test-Path "bin\*" ne prouve que l'état final -- false : c'est le comportement voulu (la pose ne vient qu'après PrepareToInstall).
+- Intro de publier-une-version.md « ce binaire » -- low, patch : corrigée.
+- Tableau « facultatif » de ggml-vulkan.dll -- low, patch : précisé (facultatif à l'exécution, obligatoire dans le paquet).
+- Critère 1 sans test automatisé -- false : l'étape manuelle du propriétaire est prévue par la section Verification.
 
 ## Design Notes
 

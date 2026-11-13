@@ -1159,3 +1159,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-publication/story-porte-2-sous-windows-un-seul-fichier-installable-reseau-coup-plan.md`
   summary: Limiter l'adresse du modèle à https, ajouter un délai global au téléchargement et durcir la détection de binaire de l'archive d'extension.
   evidence: les tests utilisent file:// ; un serveur qui goutte à goutte bloque la CI ; un zip imbriqué passerait pour « sans binaire » (Edge Case Hunter).
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-publication/story-noyau-gpu-vulkan-construit-par-la-recette-windows-plan.md`
+  summary: La boucle multi-entrées de l'installeur en ligne (cassini-en-ligne.iss) n'est prouvée que par l'essai à blanc de la release, et la preuve n'altère que la dernière empreinte.
+  evidence: Pascal Script avec avancée par Pos/Copy, aucun test unitaire ; à vérifier au premier `gh workflow run release.yml` (manifeste valide puis altéré, éventuellement une altération sur chaque entrée).

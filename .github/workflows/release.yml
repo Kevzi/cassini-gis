@@ -1,9 +1,9 @@
 # Release de Cassini (ticket 7.1, AD-17).
 #
-# Une étiquette `vX.Y.Z` fait construire le noyau Windows processeur, lance la garde hors
-# ligne sur CE binaire, compile l'installeur en ligne, prouve l'installation (manifeste
+# Une étiquette `vX.Y.Z` fait construire le noyau Windows gpu (Vulkan, SDK à empreinte fixée, ticket 7.6),
+# assemble le paquet par liste fermée, lance la garde hors ligne sur ce paquet, compile l'installeur en ligne, prouve l'installation (manifeste
 # valide, puis manifeste altéré) et seulement alors publie la release : `cassini.exe`,
-# l'installeur et `manifeste.json`. Construit par GitHub Actions, jamais sur le poste du
+# les DLL, l'installeur et `manifeste.json`. Construit par GitHub Actions, jamais sur le poste du
 # propriétaire. Actions officielles de GitHub seulement ; Inno Setup est celui du poste de GitHub
 # (voir docs/publier-une-version.md).
 
@@ -25,7 +25,7 @@ permissions:
 
 jobs:
   release:
-    name: Release Windows (noyau processeur, installeur en ligne)
+    name: Release Windows (noyau gpu, installeurs)
     runs-on: windows-latest
     env:
       # Chemin de build court : CMake échoue au-delà de MAX_PATH.
@@ -53,20 +53,45 @@ jobs:
       - name: Tests du manifeste
         run: python -I -m unittest discover -s installer/tests
 
-      - name: Construction du noyau (processeur)
-        run: cargo build --release -p cassini --locked
+      # SDK Vulkan : outil de construction seulement (glslc compile les shaders, les en-têtes
+      # décrivent l'API). Jamais livré ; vulkan-1.dll vient du pilote de l'utilisateur. Version
+      # et empreinte fixées (publiées par LunarG) : si l'empreinte diffère, la recette échoue
+      # ici, avant toute compilation.
+      - name: SDK Vulkan 1.4.363.0 (empreinte vérifiée)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '1.4.363.0'
+          $attendue = '94a82d378f7a5e3e54c9db7d2fb7016af136e14ac0a18dbf0f2f67a36352d141'
+          $url = "https://sdk.lunarg.com/sdk/download/$version/windows/vulkansdk-windows-X64-$version.exe"
+          $exe = Join-Path $env:RUNNER_TEMP 'vulkansdk.exe'
+          Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $exe
+          $reelle = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          if ($reelle -ne $attendue) { throw "SDK Vulkan : SHA-256 $reelle différent de l'empreinte fixée $attendue ; construction arrêtée" }
+          $p = Start-Process $exe -ArgumentList 'install','--accept-licenses','--default-answer','--confirm-command' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "installation du SDK Vulkan : code $($p.ExitCode)" }
+          $sdk = "C:\VulkanSDK\$version"
+          if (-not (Test-Path "$sdk\Bin\glslc.exe")) { throw "glslc.exe absent de $sdk" }
+          "VULKAN_SDK=$sdk" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "$sdk\Bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          Remove-Item $exe -Force
 
-      # La garde porte sur le binaire livré : même dossier cible que la construction.
-      - name: Garde hors ligne sur le binaire livré
-        run: cargo test --release -p cassini --test hors_ligne --locked
+      # Noyau unique, gpu : sans carte ni pilote Vulkan, il retombe sur le processeur à
+      # l'exécution (docs/paquet-du-noyau.md).
+      - name: Construction du noyau (gpu, Vulkan)
+        run: cargo build --release -p cassini --features gpu --locked
+
+      # La garde porte sur le paquet livré : même dossier cible que la construction.
+      - name: Garde hors ligne sur le paquet livré
+        run: cargo test --release -p cassini --features gpu --test hors_ligne --locked
 
       - name: Noyau en release
         run: C:\ct\release\cassini.exe run system.about
 
-      - name: Fichiers à livrer
-        run: |
-          New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item C:\ct\release\cassini.exe dist\cassini.exe
+      # Liste fermée : échoue si un fichier manque ou si un autre est présent (llama-common.dll
+      # embarque un client HTTP, jamais livrée).
+      - name: Assemblage du paquet du noyau (liste fermée)
+        run: python -I installer/assembler_noyau.py --source C:\ct\release --sortie dist/noyau
 
       # Inno Setup est déjà installé sur le poste de GitHub (licence permissive propre, voir
       # docs/publier-une-version.md) : on affiche sa version dans le journal, sans rien installer.
@@ -84,7 +109,11 @@ jobs:
           Copy-Item installer-sortie\cassini-installeur-en-ligne.exe dist\
 
       - name: Manifeste des versions
-        run: python -I installer/manifeste.py --etiquette $env:TAG --sortie dist/manifeste.json dist/cassini.exe
+        shell: pwsh
+        run: |
+          $fichiers = @(Get-ChildItem dist\noyau -File | ForEach-Object { $_.FullName })
+          python -I installer/manifeste.py --etiquette $env:TAG --sortie dist/manifeste.json @fichiers
+          if ($LASTEXITCODE -ne 0) { throw "manifeste : échec" }
 
       # Preuve de l'installeur contre un serveur local : manifeste valide, puis altéré.
       - name: Preuve de l'installation (valide puis altéré)
@@ -93,11 +122,14 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $proof = "$PWD\proof"
           New-Item -ItemType Directory -Force "$proof\valide", "$proof\altere" | Out-Null
-          Copy-Item dist\cassini.exe "$proof\cassini.exe"
-          python -I installer/manifeste.py --etiquette $env:TAG --base-url http://127.0.0.1:8000 --sortie "$proof\valide\manifeste.json" dist/cassini.exe
-          # Manifeste altéré : le premier caractère de l'empreinte est changé.
+          Copy-Item dist\noyau\* "$proof\"
+          $fichiers = @(Get-ChildItem dist\noyau -File | ForEach-Object { $_.FullName })
+          python -I installer/manifeste.py --etiquette $env:TAG --base-url http://127.0.0.1:8000 --sortie "$proof\valide\manifeste.json" @fichiers
+          if ($LASTEXITCODE -ne 0) { throw "manifeste de preuve : échec" }
+          # Manifeste altéré : le premier caractère de l'empreinte de la DERNIÈRE entrée
+          # (une DLL, pas le noyau) est changé.
           $json = Get-Content "$proof\valide\manifeste.json" -Raw
-          $m = [regex]::Match($json, '"sha256": "(.)')
+          $m = [regex]::Matches($json, '"sha256": "(.)') | Select-Object -Last 1
           $c = if ($m.Groups[1].Value -eq '0') { '1' } else { '0' }
           $json = $json.Remove($m.Groups[1].Index, 1).Insert($m.Groups[1].Index, $c)
           [IO.File]::WriteAllText("$proof\altere\manifeste.json", $json)
@@ -118,7 +150,10 @@ jobs:
             $dir1 = "$proof\inst-valide"
             $p = Start-Process $inst -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$dir1",'/MANIFESTE=http://127.0.0.1:8000/valide/manifeste.json' -Wait -PassThru
             if ($p.ExitCode -ne 0) { throw "installation valide : code $($p.ExitCode)" }
-            if (-not (Test-Path "$dir1\bin\cassini.exe")) { throw "cassini.exe absent" }
+            foreach ($f in Get-ChildItem dist\noyau -File) {
+              if (-not (Test-Path "$dir1\bin\$($f.Name)")) { throw "$($f.Name) absent du paquet installé" }
+            }
+            if (-not (Test-Path "$dir1\bin\ggml-vulkan.dll")) { throw "ggml-vulkan.dll absente" }
             & "$dir1\bin\cassini.exe" run system.about
             if ($LASTEXITCODE -ne 0) { throw "cassini.exe run system.about a échoué" }
             $info = Get-Content "$dir1\bin\installation.json" -Raw | ConvertFrom-Json
@@ -135,7 +170,7 @@ jobs:
             $dir2 = "$proof\inst-altere"
             $p = Start-Process $inst -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$dir2",'/MANIFESTE=http://127.0.0.1:8000/altere/manifeste.json' -Wait -PassThru
             if ($p.ExitCode -eq 0) { throw "l'installation altérée aurait dû être refusée" }
-            if (Test-Path "$dir2\bin\cassini.exe") { throw "un fichier a été posé malgré l'empreinte fausse" }
+            if (Test-Path "$dir2\bin\*") { throw "un fichier a été posé malgré l'empreinte fausse" }
             Write-Host "empreinte altérée refusée (code $($p.ExitCode))"
 
             # 3. Manifeste injoignable (aucun serveur sur ce port) : installation refusée.
@@ -189,7 +224,9 @@ jobs:
           } finally {
             Remove-NetFirewallRule -DisplayName $regle -ErrorAction SilentlyContinue
           }
-          if (-not (Test-Path "$dir\bin\cassini.exe")) { throw "cassini.exe absent" }
+          foreach ($f in Get-ChildItem dist\noyau -File) {
+            if (-not (Test-Path "$dir\bin\$($f.Name)")) { throw "$($f.Name) absent du paquet installé" }
+          }
           & "$dir\bin\cassini.exe" run system.about
           if ($LASTEXITCODE -ne 0) { throw "cassini.exe run system.about a échoué" }
           # Le modèle est listé par model.list (le noyau le cherche dans models\ à côté de lui).
@@ -229,5 +266,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: >
           gh release create $env:TAG
-          dist/cassini.exe dist/cassini-installeur-en-ligne.exe dist/manifeste.json
+          (Get-ChildItem dist/noyau -File | ForEach-Object { $_.FullName })
+          dist/cassini-installeur-en-ligne.exe dist/manifeste.json
           --title "Cassini $env:TAG" --generate-notes --verify-tag

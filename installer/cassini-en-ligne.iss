@@ -2,7 +2,7 @@
 ;
 ; Programme SEPARE du noyau et de l'extension : seul à toucher au réseau, une seule
 ; fois, pendant l'installation. Il lit le manifeste de la release, télécharge le
-; noyau, VERIFIE son SHA-256 et ne pose rien si l'empreinte ne correspond pas.
+; paquet du noyau, VERIFIE le SHA-256 de chaque fichier et ne pose rien si l'une diffère.
 ;
 ; Compilation :  ISCC.exe /DVersion=0.1.0 installer\cassini-en-ligne.iss
 ; Test local  :  cassini-installeur-en-ligne.exe /VERYSILENT /MANIFESTE=http://127.0.0.1:8000/manifeste.json
@@ -37,8 +37,9 @@ UninstallDisplayName=Cassini
 Name: "french"; MessagesFile: "compiler:Languages\French.isl"
 
 [Files]
-; Posé depuis le dossier temporaire, après téléchargement et vérification.
-Source: "{tmp}\cassini.exe"; DestDir: "{app}\bin"; Flags: external ignoreversion
+; Tout le paquet du noyau (cassini.exe et les DLL de llama.cpp), posé depuis le dossier
+; temporaire après téléchargement et vérification de chaque empreinte.
+Source: "{tmp}\noyau\*"; DestDir: "{app}\bin"; Flags: external ignoreversion
 
 [UninstallDelete]
 ; Le noyau seulement : le dossier du modèle, posé à côté par la porte 1 complète (7.4), est
@@ -91,18 +92,34 @@ begin
   Result := Copy(Reste, 1, Q - 1);
 end;
 
-{ Position de l'entrée du fichier Nom dans le manifeste, 0 si absente. }
-function PositionFichier(const Json, Nom: String): Integer;
+{ Un nom de fichier du manifeste : lettres, chiffres, point, tiret, souligné, rien d'autre
+  (jamais de séparateur de dossier). }
+function NomSain(const Nom: String): Boolean;
+var
+  I: Integer;
+  C: Char;
 begin
-  Result := Pos('"nom": "' + Nom + '"', Json);
+  Result := (Nom <> '') and (Nom <> '.') and (Nom <> '..');
+  for I := 1 to Length(Nom) do
+  begin
+    C := Nom[I];
+    if not (((C >= 'a') and (C <= 'z')) or ((C >= 'A') and (C <= 'Z')) or
+            ((C >= '0') and (C <= '9')) or (C = '.') or (C = '-') or (C = '_')) then
+      Result := False;
+  end;
+end;
+
+procedure NettoyerNoyau;
+begin
+  DelTree(ExpandConstant('{tmp}\noyau'), True, True, True);
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
-  Manifeste, Json, Url, Sha: String;
+  Manifeste, Json, Reste, Nom, Url, Sha, Dest, Source: String;
   Brut: AnsiString;
-  Pos0: Integer;
-  Source: String;
+  Nombre, P: Integer;
+  AvecNoyau: Boolean;
 begin
   Result := '';
   Source := ExpandConstant('{param:MANIFESTE|{#ManifesteParDefaut}}');
@@ -124,28 +141,63 @@ begin
   end;
   Json := String(Brut);
 
-  Pos0 := PositionFichier(Json, 'cassini.exe');
-  Url := '';
-  Sha := '';
-  if Pos0 > 0 then
-  begin
-    Url := ValeurApres(Json, 'url', Pos0);
-    Sha := Lowercase(ValeurApres(Json, 'sha256', Pos0));
-  end;
   VersionInstallee := ValeurApres(Json, 'version', 1);
-  if (Url = '') or (Length(Sha) <> 64) or (VersionInstallee = '') then
+  if VersionInstallee = '' then
   begin
     Result := 'La liste des versions de Cassini est incomplète. Aucun fichier n''a été installé.';
     Exit;
   end;
 
-  try
-    DownloadTemporaryFile(Url, 'cassini.exe', Sha, nil);
-  except
-    Result := 'Le téléchargement du moteur de Cassini a échoué ou son empreinte SHA-256 ' +
-      'ne correspond pas à celle attendue.' + #13#10 +
-      'Par sécurité, rien n''a été installé.' + #13#10 + GetExceptionMessage;
-    DeleteFile(ExpandConstant('{tmp}\cassini.exe'));
+  NettoyerNoyau;
+  ForceDirectories(ExpandConstant('{tmp}\noyau'));
+  Dest := ExpandConstant('{tmp}\noyau\');
+  Nombre := 0;
+  AvecNoyau := False;
+  Reste := Json;
+  { Une passe par entrée du manifeste : chaque fichier est téléchargé et son SHA-256 vérifié ;
+    la pose ne vient qu'après PrepareToInstall, donc rien n'est posé si l'un échoue. }
+  while True do
+  begin
+    Nom := ValeurApres(Reste, 'nom', 1);
+    if Nom = '' then
+      Break;
+    Url := ValeurApres(Reste, 'url', 1);
+    Sha := Lowercase(ValeurApres(Reste, 'sha256', 1));
+    if (not NomSain(Nom)) or (Url = '') or (Length(Sha) <> 64) then
+    begin
+      NettoyerNoyau;
+      Result := 'La liste des versions de Cassini est incomplète. Aucun fichier n''a été installé.';
+      Exit;
+    end;
+    try
+      DownloadTemporaryFile(Url, Nom, Sha, nil);
+    except
+      Result := 'Le téléchargement de ' + Nom + ' a échoué ou son empreinte SHA-256 ' +
+        'ne correspond pas à celle attendue.' + #13#10 +
+        'Par sécurité, rien n''a été installé.' + #13#10 + GetExceptionMessage;
+      DeleteFile(ExpandConstant('{tmp}\') + Nom);
+      NettoyerNoyau;
+      Exit;
+    end;
+    if not FileCopy(ExpandConstant('{tmp}\') + Nom, Dest + Nom, False) then
+    begin
+      NettoyerNoyau;
+      Result := 'Cassini n''a pas pu préparer ' + Nom + '. Aucun fichier n''a été installé.';
+      Exit;
+    end;
+    DeleteFile(ExpandConstant('{tmp}\') + Nom);
+    if Nom = 'cassini.exe' then
+      AvecNoyau := True;
+    Nombre := Nombre + 1;
+    { Passe à l'entrée suivante. }
+    P := Pos('"nom": "' + Nom + '"', Reste);
+    Reste := Copy(Reste, P + 8 + Length(Nom), Length(Reste));
+  end;
+
+  if (Nombre = 0) or (not AvecNoyau) then
+  begin
+    NettoyerNoyau;
+    Result := 'La liste des versions de Cassini est incomplète. Aucun fichier n''a été installé.';
   end;
 end;
 

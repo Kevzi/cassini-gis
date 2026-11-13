@@ -1,8 +1,8 @@
 # Publier une version de Cassini (ticket 7.1)
 
-Une étiquette `vX.Y.Z` fait tout : la recette construit le noyau Windows (processeur) sur
-GitHub Actions, lance la garde hors ligne sur ce binaire, compile l'installeur en ligne, le
-prouve contre un manifeste valide puis altéré, et publie la release avec `cassini.exe`,
+Une étiquette `vX.Y.Z` fait tout : la recette construit le noyau Windows (gpu, Vulkan) sur
+GitHub Actions, lance la garde hors ligne sur ce paquet, compile l'installeur en ligne, le
+prouve contre un manifeste valide puis altéré, et publie la release avec le paquet du noyau (`cassini.exe` et ses DLL),
 `cassini-installeur-en-ligne.exe` et `manifeste.json`. Rien n'est construit sur le poste du
 propriétaire.
 
@@ -14,6 +14,30 @@ et une copie modifiée d'Inno Setup doit être marquée comme telle. Cassini l'u
 modifier. Les installeurs produits embarquent un petit lanceur d'Inno Setup sous cette licence,
 à lister dans les licences de la release (R7). **Adoption : à approuver par le propriétaire avant
 la première étiquette** ; sinon, repli prévu à l'epic : un petit installeur maison hors du noyau.
+
+## Noyau gpu et SDK Vulkan (ticket 7.6)
+
+Le noyau livré est unique et gpu (Vulkan), livré avec les DLL de llama.cpp : la liste fermée est
+dans `docs/paquet-du-noyau.md`. La recette installe le **SDK Vulkan 1.4.363.0** (adresse
+officielle de LunarG et SHA-256 fixés dans `release.yml` ; la construction échoue si l'empreinte
+diffère) en silencieux (`install --accept-licenses --default-answer --confirm-command`). Le SDK est
+un outil de construction : il n'est jamais livré, et `vulkan-1.dll` vient du pilote de
+l'utilisateur.
+
+**Licence du SDK** (fichier `Licenses\LICENSE.txt` du SDK installé) : « The Vulkan SDK is comprised
+of 100% open-source components. The majority of the materials are MIT or Apache 2.0 licenses. [...]
+The SDK itself is not licensed. » Ce que Cassini livre venant du SDK passe par `ggml-vulkan.dll`
+(shaders compilés par `glslc`, de licence permissive) ; à lister dans les licences de la release
+(R7).
+
+### Essai du propriétaire du noyau gpu (étape hitl)
+
+1. Lancer la recette à blanc (`gh workflow run release.yml`) et récupérer l'artefact de
+   l'installeur complet ; l'installer.
+2. Avec la carte : `set CASSINI_DEBUG_LLAMA=1`, lancer le noyau installé sur une phrase : le
+   périphérique Vulkan est choisi et les couches sont posées sur la carte.
+3. Sans la carte : `set GGML_VK_VISIBLE_DEVICES=aucune` puis la même phrase : le processeur est
+   utilisé.
 
 ## Étapes du propriétaire pour `v0.1.0`
 
@@ -32,8 +56,9 @@ la première étiquette** ; sinon, repli prévu à l'epic : un petit installeur 
 ## Tester l'installeur à la main
 
 ```powershell
-python -I installer/manifeste.py --etiquette v0.1.0 --base-url http://127.0.0.1:8000 --sortie web\manifeste.json C:\ct\release\cassini.exe
-copy C:\ct\release\cassini.exe web\ ; python -m http.server 8000 --directory web
+python -I installer/assembler_noyau.py --source C:\ct\release --sortie dist\noyau
+python -I installer/manifeste.py --etiquette v0.1.0 --base-url http://127.0.0.1:8000 --sortie web\manifeste.json (Get-ChildItem dist\noyau -File).FullName
+copy dist\noyau\* web\ ; python -m http.server 8000 --directory web
 .\cassini-installeur-en-ligne.exe /MANIFESTE=http://127.0.0.1:8000/manifeste.json
 ```
 
@@ -78,4 +103,4 @@ porte met à jour l'autre, et le désinstalleur ne retire que ce que le dernier 
 6. Désinstaller (Paramètres, Applications) : le noyau et le modèle disparaissent.
 
 Hors périmètre ici (7.4) : déclaration `*.modele.json` avec empreintes, hébergement de ce fichier
-sur Hugging Face, noyau gpu (7.6).
+sur Hugging Face.

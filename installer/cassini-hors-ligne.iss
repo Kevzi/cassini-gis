@@ -12,14 +12,14 @@
 ;
 ; Compilation (depuis la racine du depot) :
 ;   ISCC.exe /DVersion=0.1.0 installer\cassini-hors-ligne.iss
-; avec dist\cassini.exe, modele\cassini-composition-4b-Q4_K_M.gguf et
+; avec le paquet du noyau dans dist\noyau, modele\cassini-composition-4b-Q4_K_M.gguf et
 ; dist\cassini_qgis-0.1.0.zip deja produits par la recette.
 
 #ifndef Version
   #define Version "0.1.0"
 #endif
 #ifndef Noyau
-  #define Noyau "..\dist\cassini.exe"
+  #define Noyau "..\dist\noyau"
 #endif
 #ifndef Modele
   #define Modele "..\modele\cassini-composition-4b-Q4_K_M.gguf"
@@ -55,7 +55,9 @@ UninstallDisplayName=Cassini
 Name: "french"; MessagesFile: "compiler:Languages\French.isl"
 
 [Files]
-Source: "{#Noyau}"; DestDir: "{app}\bin"; DestName: "cassini.exe"; Flags: ignoreversion
+; Tout le paquet du noyau gpu (cassini.exe et les DLL de llama.cpp), assemble par
+; installer/assembler_noyau.py.
+Source: "{#Noyau}\*"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "{#Modele}"; DestDir: "{app}\bin\models"; DestName: "{#NomModele}"; Flags: ignoreversion
 ; Archive de l'extension, a installer a la main dans QGIS (Extensions, Installer depuis un ZIP).
 Source: "{#Archive}"; DestDir: "{app}\extension"; Flags: ignoreversion
