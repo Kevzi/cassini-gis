@@ -11024,10 +11024,17 @@ fn couche_par_valeur(rng: &mut Rng) -> Option<Example> {
         let np = format!("{} {}", rng.pick(&["les", "les", "tous les"]), f.pl);
         // « Sélectionne les lacs. » est une phrase de la recette 5.50 : cette tête n'est jamais
         // écrite ici (recouvrement.rs), les autres têtes de recherche disent la même demande.
+        // Même règle pour « Trouve les cols. » (GN07, recette v3), que la valeur `Col` engendrerait
+        // à l'identique ; les autres têtes la disent aussi (5.59).
         let mut found = None;
         for _ in 0..64 {
             let (head, q) = open_find(rng, &noun, &np, true);
-            if !head.starts_with("Sélectionne ") {
+            let bar_head = if f.value == "Col" {
+                "Trouve "
+            } else {
+                "Sélectionne "
+            };
+            if !head.starts_with("Sélectionne ") && !head.starts_with(bar_head) {
                 found = Some((head, q));
                 break;
             }
@@ -16061,6 +16068,13 @@ mod tests {
             asked * 20 > examples.len() && planned > asked,
             "{asked} / {planned}"
         );
+    }
+
+    #[test]
+    fn the_value_family_never_writes_a_bar_sentence_for_cols() {
+        for e in valid(couche_par_valeur, 6000) {
+            assert_ne!(e.request, "Trouve les cols.");
+        }
     }
 
     #[test]
