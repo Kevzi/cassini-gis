@@ -1006,3 +1006,20 @@ notes = [
   "Open question: forme exacte de la question et place du controle (avant ou dans la validation existante) : a fixer par le plan, en citant les AD du contrat d'architecture.",
   "Controle hors des criteres : relecture thorough, risque high sur la composition des plans ; recette QGIS d'Annecy rejouee avec le modele installe.",
 ]
+
+[[entry]]
+id = 59
+type = "story"
+title = "Seance continue avec la famille de la valeur rare, mesuree sur une v4 de phrases neuves"
+description = "Une seance d'ajustement continu repart de ajuste-continu-5-58-1 (le modele installe) avec les familles de la seance 3 et couche_par_valeur, qui pose parfois un raster d'elevation a cote de la couche cherchee (commit 3cabf06). Elle vise le rate GN07 de la recette v3 : « Trouve les cols. » partait sur le raster au lieu de la couche qui porte la valeur Col. Une v4 de 20 phrases neuves du gros projet (projet-gros-annecy), sans reprendre GN01 a GN20 ni les recettes d'avant, est ecrite puis rangee dans les barres du generateur et dans le garde-fou de recouvrement. Le modele obtenu est mesure (essais GPU, recette d'Annecy, v4 sur GPU puis CPU) et juge par le non-oubli contre le modele installe. Il n'est installe que sur decision du proprietaire."
+verify = "La v4 compte 20 phrases, aucune reprise des recettes precedentes, et le test de recouvrement passe avec elle. La chaine de la seance (nuit-5-58b.sh) finit avec un verdict du juge de non-oubli. Le rapport donne : essais GPU, recette d'Annecy (barre 16/20), v4 sur GPU et sur CPU, et le sort de GN07 (juste ou rate)."
+covers = ["CAP-4"]
+after = []
+hitl = true
+risk = "medium"
+notes = [
+  "Decision: 2026-11-14 — table bmad : DEFAULT_COUNT reste a 8 600, le seuil du rappel stratifie reste a 18 %, le lien avec 5.55 est abandonne (aucun ticket 5.55).",
+  "Decision: 2026-11-14 — GN20 (« Selectionne les passages a niveau ») n'est pas un rate du modele : point_du_reseau (186), toponymie (177) et INFO_PCT (20) portent la valeur ; la question du modele est legitime. L'attendu n'est pas retouche apres coup.",
+  "Decision: 2026-11-14 — le modele ajuste-continu-5-58-1 est installe ; l'ancien (ajuste-apres-5-49-b) est sauvegarde dans cassini-modeles. Une installation de plus ne se fait que sur decision du proprietaire, juge « installable » et Annecy a 16/20 au moins.",
+  "Controle hors des criteres : le proprietaire decide de l'installation ; le juge de non-oubli n'est pas contourne.",
+]
