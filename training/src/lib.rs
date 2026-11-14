@@ -978,6 +978,16 @@ mod tests {
             "{planned} / {}",
             close.len()
         );
+        // 5.58 : les trois familles tirées des ratés de la recette 5.50, au moins 60, 60 et 40
+        // (poids 6, 6 et 4 sur 596 : 87, 87 et 58 de 8 600, hors gros projets qui les emballent aussi).
+        for (family, least) in [
+            ("jumeaux_bdtopo", 60),
+            ("couche_par_valeur", 60),
+            ("couche_principale", 40),
+        ] {
+            let n = examples.iter().filter(|e| e.family == family).count();
+            assert!(n >= least, "{family} : {n}");
+        }
     }
 
     #[test]
@@ -1666,7 +1676,11 @@ mod tests {
         }
         // Les gros projets, sur les 1 500 réellement entraînés.
         let big = count(&recall[..1500], "gros_projet");
-        assert!(big * 100 >= 1500 * 20, "{big} gros projets");
+        // 5.58 : trois familles de plus, chacune avec son plancher de 15, prennent au surplus ;
+        // les gros projets passent de ~22 % à 18,6 % (279 sur 1 500 ; 76 familles x plancher de 15 =
+        // 1 140 exemples de plancher). Le poids de `gros_projet`
+        // n'y change presque rien (160 : 289, 172 : 292) : la barre passe de 20 à 18 %.
+        assert!(big * 100 >= 1500 * 18, "{big} gros projets");
         // Le plancher puis le surplus, chacun dans l'ordre du jeu complet.
         let floor_len: usize = sizes.values().map(|&n| n.min(RECALL_FLOOR)).sum();
         assert!(positions[..floor_len].windows(2).all(|w| w[0] < w[1]));
@@ -1783,7 +1797,7 @@ mod tests {
     #[test]
     fn the_session_command_of_the_doc_names_the_first_session_families() {
         // La commande de la séance, recopiée dans la doc, nomme exactement `FIRST_SESSION_FAMILIES`.
-        let doc = include_str!("../../docs/entrainement-du-modele.md");
+        let doc = include_str!("../../docs/entrainement-du-modele.md").replace("\r\n", "\n");
         let line = format!("nuit-5-54.sh {}", FIRST_SESSION_FAMILIES.join(","));
         assert!(doc.contains(&format!("{line}\n")), "{line}");
     }
@@ -1816,7 +1830,7 @@ mod tests {
 
     #[test]
     fn the_session_command_of_the_doc_names_the_second_session_families() {
-        let doc = include_str!("../../docs/entrainement-du-modele.md");
+        let doc = include_str!("../../docs/entrainement-du-modele.md").replace("\r\n", "\n");
         let line = format!("nuit-5-54.sh {}", SECOND_SESSION_FAMILIES.join(","));
         assert!(doc.contains(&format!("{line}\n")), "{line}");
     }
@@ -1872,7 +1886,7 @@ mod tests {
 
     #[test]
     fn the_session_command_of_the_doc_names_the_third_session_families() {
-        let doc = include_str!("../../docs/entrainement-du-modele.md");
+        let doc = include_str!("../../docs/entrainement-du-modele.md").replace("\r\n", "\n");
         let line = format!("nuit-5-54.sh {}", THIRD_SESSION_FAMILIES.join(","));
         assert!(doc.contains(&format!("{line}\n")), "{line}");
     }

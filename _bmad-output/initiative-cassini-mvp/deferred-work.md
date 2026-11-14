@@ -1182,3 +1182,14 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-57b-garde-fou-champ-absent-vue-triee.md`
   summary: Écrire un test d'intégration `cli` qui prouve que `ModelComposer` passe `view.cut_layers` au garde-fou.
   evidence: aucun test ne l'exerce ; un `None` passé par erreur laisserait la suite verte (relecture 5.57b). Prouvé à la main par la recette réelle du 2026-11-13.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-58-familles-bdtopo-jumeaux-valeurs-couche-principale.md`
+  summary: Le propriétaire revoit le seuil du rappel stratifié (20 % abaissé à 18 % de gros projets sur 1 500) ou `RECALL_FLOOR`, que les trois familles de 5.58 ont rendu plus serrés.
+  evidence: 76 familles x plancher de 15 = 1 140 exemples sur 1 500 ; alourdir `gros_projet` n'aide presque pas (160 -> 289, 172 -> 292). Décision prise en party pendant la nuit du 2026-11-13 au 2026-11-14, à confirmer.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-58-familles-bdtopo-jumeaux-valeurs-couche-principale.md`
+  summary: Après la prochaine nuit, vérifier que le modèle ne retient pas « toujours le nom le plus court » (contraste entre `jumeaux_bdtopo` et `couche_principale`), avec la v2 et des phrases neuves (v3).
+  evidence: les deux familles enseignent des conduites opposées sur des noms de couches voisins ; aucun exemple ne les oppose, et seule une mesure sur le modèle entraîné le dira.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-58-familles-bdtopo-jumeaux-valeurs-couche-principale.md`
+  summary: Lire `qgis_shapes` et `focus_ids` pour savoir si la couche jumelle marquée « leurre » dans `couche_principale` perd sa géométrie dans les exemples.
+  evidence: la relecture 5.58 le soupçonne sans l'avoir confirmé ; si c'est le cas, le modèle verrait un signe qui n'existe pas avec de vraies jumelles.

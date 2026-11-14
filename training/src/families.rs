@@ -13,8 +13,8 @@ use cassini_core::agent_inventory::{sorted_view, LastPlan, ViewLimits};
 use serde_json::{json, Value};
 
 use crate::inventories::{
-    big_project, theme, Builder, FieldDef, Geom, Kind, Layer, Noun, Theme, Val, BIG_MAX_LAYERS,
-    BIG_MIN_LAYERS, CATEGORIES, CRITERIA, MASKS, NAMED_PLACES, RAW_RASTERS, THEMES,
+    bdtopo, big_project, theme, Builder, FieldDef, Geom, Kind, Layer, Noun, Theme, Val, BDTOPO,
+    BIG_MAX_LAYERS, BIG_MIN_LAYERS, CATEGORIES, CRITERIA, MASKS, NAMED_PLACES, RAW_RASTERS, THEMES,
 };
 use crate::rng::Rng;
 
@@ -503,6 +503,25 @@ pub static FAMILIES: &[Family] = &[
         name: "couches_proches",
         weight: 7,
         make: couches_proches,
+    },
+    // Trois familles tirées des ratés de la recette 5.50 (5.58), sur un petit catalogue de tables
+    // de la BD TOPO : deux tables qui se disputent un mot (question), une couche que la demande ne
+    // dit que par une valeur de champ (plan, ou question si deux tables la portent), et la
+    // couche au nom exact quand le nom de l'autre le contient (plan). Poids de 6, 6 et 4.
+    Family {
+        name: "jumeaux_bdtopo",
+        weight: 6,
+        make: jumeaux_bdtopo,
+    },
+    Family {
+        name: "couche_par_valeur",
+        weight: 6,
+        make: couche_par_valeur,
+    },
+    Family {
+        name: "couche_principale",
+        weight: 4,
+        make: couche_principale,
     },
     // Environ 25 % du jeu (décision du propriétaire du 2026-11-10) : un exemple d'une autre
     // famille, tirée selon les poids, posé dans un projet de 20 à 60 couches et rendu par la vue
@@ -7391,7 +7410,6 @@ const DESTINATION_VERBS: &[(&str, bool)] = &[
     ("positionne un point à {d} {de_p}, {h}", false),
     ("trace le point situé à {d} {de_p}, {h}", false),
     ("quel point atteint-on à {d} {de_p}, {h}", true),
-    ("où arrive-t-on en partant {de_p} sur {d} {h}", true),
     (
         "je pars {de_p} et je marche {d} {h} : quel est le point d'arrivée",
         true,
@@ -10678,6 +10696,445 @@ fn couches_proches(rng: &mut Rng) -> Option<Example> {
         })
     };
     Some(example("couches_proches", b, rng, request, expected))
+}
+
+// -- tables de la BD TOPO : jumeaux, valeurs, couche principale (5.58) -------------------------
+
+/// Une désignation de table dans la demande : au pluriel (« des routes ») et au singulier
+/// (« d'une route »).
+struct Said {
+    des: &'static str,
+    dun: &'static str,
+}
+
+/// Deux tables de la BD TOPO qui se disputent un mot (« routes » : `troncon_de_route` et
+/// `route_numerotee_ou_nommee`), et de quoi dire chacune seule.
+struct TablePair {
+    a: &'static str,
+    b: &'static str,
+    /// Le mot partagé, après « de » : « routes », « voies ferrées ».
+    pl: &'static str,
+    shared: Said,
+    only_a: &'static [Said],
+    only_b: &'static [Said],
+}
+
+const TABLE_PAIRS: &[TablePair] = &[
+    TablePair {
+        a: "troncon_de_route",
+        b: "route_numerotee_ou_nommee",
+        pl: "routes",
+        shared: Said {
+            des: "des routes",
+            dun: "d'une route",
+        },
+        only_a: &[Said {
+            des: "des tronçons de route",
+            dun: "d'un tronçon de route",
+        }],
+        only_b: &[
+            Said {
+                des: "des routes numérotées",
+                dun: "d'une route numérotée",
+            },
+            Said {
+                des: "des routes nommées",
+                dun: "d'une route nommée",
+            },
+            Said {
+                des: "des routes numérotées ou nommées",
+                dun: "d'une route numérotée ou nommée",
+            },
+        ],
+    },
+    TablePair {
+        a: "troncon_de_voie_ferree",
+        b: "voie_ferree_nommee",
+        pl: "voies ferrées",
+        shared: Said {
+            des: "des voies ferrées",
+            dun: "d'une voie ferrée",
+        },
+        only_a: &[Said {
+            des: "des tronçons de voie ferrée",
+            dun: "d'un tronçon de voie ferrée",
+        }],
+        only_b: &[Said {
+            des: "des voies ferrées nommées",
+            dun: "d'une voie ferrée nommée",
+        }],
+    },
+];
+
+/// Une demande de proximité sur la couche `chosen`, que la demande dit `plural` (« des routes »)
+/// ou `singular` (« d'une route ») : un tampon, ou des objets d'un thème civil à moins d'une
+/// distance d'elle. Rend la phrase et le plan. `None` si aucun thème n'est libre.
+fn proximity(
+    rng: &mut Rng,
+    b: &mut Builder,
+    chosen: &str,
+    plural: &str,
+    singular: &str,
+) -> Option<(String, Vec<Value>)> {
+    let d = dist(rng);
+    if rng.chance(1, 2) {
+        let body = tampon_head(rng, &d, plural);
+        return Some((body, vec![buffer(chosen, &d, false)]));
+    }
+    let s = pick_theme(rng, b, ordinary)?;
+    let target = b.add(rng, s.key, &[], &[], &[]);
+    let reference = if rng.chance(1, 3) { singular } else { plural };
+    let np = format!(
+        "les {} {}",
+        s.noun.pl,
+        near(rng, &target.theme.noun, &d, reference)
+    );
+    let (head, _) = open_find(rng, &s.noun, &np, false);
+    Some((
+        head,
+        vec![buffer(chosen, &d, false), intersect(&target.id, &step(1))],
+    ))
+}
+
+/// La question qui nomme les deux couches entre « ».
+fn which_of_two(rng: &mut Rng, pl: &str, x: &str, y: &str) -> Value {
+    question(match rng.below(4) {
+        0 => format!(
+            "Deux couches peuvent correspondre aux {pl} : « {x} » et « {y} ». Laquelle faut-il \
+             utiliser ?"
+        ),
+        1 => format!(
+            "Le projet contient deux couches de {pl} : « {x} » et « {y} ». Laquelle veux-tu \
+             utiliser ?"
+        ),
+        2 => format!("Quelle couche de {pl} faut-il prendre : « {x} » ou « {y} » ?"),
+        _ => format!(
+            "« {x} » et « {y} » peuvent toutes deux convenir. Sur laquelle faut-il travailler ?"
+        ),
+    })
+}
+
+/// Deux tables jumelles de la BD TOPO (`troncon_de_route` et `route_numerotee_ou_nommee`) : une
+/// demande qui ne garde que le mot partagé (« les routes ») donne une question qui nomme les
+/// deux ; une demande qui lève l'ambiguïté (« les routes nommées ») donne le plan sur la bonne
+/// table (un tiers). Le noyau n'écrit aucune question (décision du 2026-11-10, point 4) : le
+/// modèle la compose.
+fn jumeaux_bdtopo(rng: &mut Rng) -> Option<Example> {
+    let pair = rng.pick(TABLE_PAIRS);
+    let mut b = Builder::new();
+    let (ta, tb) = (bdtopo(pair.a), bdtopo(pair.b));
+    // Le nom de la table, ou son libellé : la couche s'appelle comme le fichier ou comme un humain.
+    let style = rng.below(2);
+    let la = b.add_table(rng, pair.a, Some(ta.names[style]), &[], &[]);
+    let lb = b.add_table(rng, pair.b, Some(tb.names[style]), &[], &[]);
+    let qualified = rng.chance(1, 3);
+    let pick_a = rng.chance(1, 2);
+    let (chosen, other, only) = if pick_a {
+        (&la, &lb, rng.pick(pair.only_a))
+    } else {
+        (&lb, &la, rng.pick(pair.only_b))
+    };
+    if qualified {
+        b.mark_decoy(&other.id);
+    }
+    let (plural, singular) = if !qualified {
+        (pair.shared.des.to_string(), pair.shared.dun.to_string())
+    } else if rng.chance(1, 4) {
+        let by_name = format!("de la couche « {} »", chosen.name);
+        (by_name.clone(), by_name)
+    } else {
+        (only.des.to_string(), only.dun.to_string())
+    };
+    let (body, plan) = proximity(rng, &mut b, &chosen.id, &plural, &singular)?;
+    let request = finish(rng, &body, false, false);
+    let expected = if qualified {
+        calls(plan)
+    } else if rng.chance(1, 2) {
+        which_of_two(rng, pair.pl, &la.name, &lb.name)
+    } else {
+        which_of_two(rng, pair.pl, &lb.name, &la.name)
+    };
+    Some(example("jumeaux_bdtopo", b, rng, request, expected))
+}
+
+/// Une valeur d'un champ `nature` que la demande dit sans nommer la table : « les lacs » sont les
+/// entités `Lac` de `plan_d_eau`. `also` : une seconde table qui porte la même valeur (ambiguë).
+struct ValueFact {
+    table: &'static str,
+    value: &'static str,
+    sg: &'static str,
+    pl: &'static str,
+    fem: bool,
+    also: Option<&'static str>,
+}
+
+const fn fact(
+    table: &'static str,
+    value: &'static str,
+    sg: &'static str,
+    pl: &'static str,
+    fem: bool,
+) -> ValueFact {
+    ValueFact {
+        table,
+        value,
+        sg,
+        pl,
+        fem,
+        also: None,
+    }
+}
+
+const VALUE_FACTS: &[ValueFact] = &[
+    fact("plan_d_eau", "Lac", "lac", "lacs", false),
+    fact("plan_d_eau", "Lagune", "lagune", "lagunes", true),
+    fact("plan_d_eau", "Bassin", "bassin", "bassins", false),
+    fact(
+        "equipement_de_transport",
+        "Gare routière",
+        "gare routière",
+        "gares routières",
+        true,
+    ),
+    fact("equipement_de_transport", "Péage", "péage", "péages", false),
+    fact(
+        "equipement_de_transport",
+        "Station de métro",
+        "station de métro",
+        "stations de métro",
+        true,
+    ),
+    fact(
+        "construction_ponctuelle",
+        "Éolienne",
+        "éolienne",
+        "éoliennes",
+        true,
+    ),
+    fact("construction_ponctuelle", "Phare", "phare", "phares", false),
+    fact(
+        "construction_ponctuelle",
+        "Clocher",
+        "clocher",
+        "clochers",
+        false,
+    ),
+    fact(
+        "zone_d_activite_ou_d_interet",
+        "Camping",
+        "camping",
+        "campings",
+        false,
+    ),
+    fact("zone_d_activite_ou_d_interet", "Zoo", "zoo", "zoos", false),
+    fact("lieu_dit_non_habite", "Col", "col", "cols", false),
+    fact("lieu_dit_non_habite", "Grotte", "grotte", "grottes", true),
+    fact("lieu_dit_non_habite", "Sommet", "sommet", "sommets", false),
+    // La même valeur dans deux tables : la demande ne dit pas laquelle.
+    ValueFact {
+        also: Some("zone_d_activite_ou_d_interet"),
+        ..fact("equipement_de_transport", "Port", "port", "ports", false)
+    },
+    ValueFact {
+        also: Some("construction_ponctuelle"),
+        ..fact("plan_d_eau", "Réservoir", "réservoir", "réservoirs", false)
+    },
+];
+
+/// Une couche que la demande ne désigne que par une valeur de champ : « sélectionne les lacs »,
+/// sans couche nommée « lac ». Le plan est la sélection `nature = Lac` sur la table qui porte la
+/// valeur (cherchée dans les valeurs listées de l'inventaire) ; si deux tables la portent, c'est
+/// une question qui les nomme. Une ou deux tables à `nature` sans la valeur sont posées à côté.
+fn couche_par_valeur(rng: &mut Rng) -> Option<Example> {
+    let f = rng.pick(VALUE_FACTS);
+    let noun = Noun {
+        sg: f.sg,
+        pl: f.pl,
+        fem: f.fem,
+    };
+    let mut b = Builder::new();
+    let style = rng.below(2);
+    let force = [("nature", f.value)];
+    let main = b.add_table(
+        rng,
+        f.table,
+        Some(bdtopo(f.table).names[style]),
+        &["nature"],
+        &force,
+    );
+    let second = f.also.map(|key| {
+        b.add_table(
+            rng,
+            key,
+            Some(bdtopo(key).names[style]),
+            &["nature"],
+            &force,
+        )
+    });
+    if second.is_none() {
+        // Les tables à `nature` dont aucune valeur ne dit le mot de la demande, ni leur nom.
+        let said = crate::inventories::plain_words(&format!("{} {}", f.pl, f.value));
+        let home = bdtopo(f.table).group;
+        let mut candidates: Vec<&'static Theme> = BDTOPO
+            .iter()
+            .filter(|t| t.key != f.table && t.group != home)
+            .filter(|t| {
+                t.field("nature").is_some_and(|d| match &d.kind {
+                    Kind::Text { values, .. } => values
+                        .iter()
+                        .all(|v| crate::inventories::plain_words(v.v).is_disjoint(&said)),
+                    _ => false,
+                })
+            })
+            .filter(|t| {
+                t.names
+                    .iter()
+                    .all(|n| crate::inventories::plain_words(n).is_disjoint(&said))
+            })
+            .collect();
+        for _ in 0..rng.range(1, 2) {
+            if candidates.is_empty() {
+                break;
+            }
+            let t = candidates.remove(rng.below(candidates.len()));
+            candidates.retain(|c| c.group != t.group);
+            let decoy = b.add_table(rng, t.key, Some(t.names[style]), &["nature"], &[]);
+            b.mark_decoy(&decoy.id);
+        }
+    }
+    let field = main.field("nature")?.name.clone();
+    let tampon = second.is_none() && rng.chance(1, 4);
+    let (body, interrogative, plan) = if tampon {
+        let d = dist(rng);
+        let body = tampon_head(rng, &d, &format!("des {}", f.pl));
+        (
+            body,
+            false,
+            vec![
+                select(&main.id, &field, "eq", f.value),
+                buffer(&step(1), &d, false),
+            ],
+        )
+    } else {
+        let np = format!("{} {}", rng.pick(&["les", "les", "tous les"]), f.pl);
+        // « Sélectionne les lacs. » est une phrase de la recette 5.50 : cette tête n'est jamais
+        // écrite ici (recouvrement.rs), les autres têtes de recherche disent la même demande.
+        let mut found = None;
+        for _ in 0..64 {
+            let (head, q) = open_find(rng, &noun, &np, true);
+            if !head.starts_with("Sélectionne ") {
+                found = Some((head, q));
+                break;
+            }
+        }
+        let (head, q) = found?;
+        (head, q, vec![select(&main.id, &field, "eq", f.value)])
+    };
+    let request = finish(rng, &body, interrogative, false);
+    let expected = match &second {
+        None => calls(plan),
+        Some(other) => {
+            let (x, y) = if rng.chance(1, 2) {
+                (&main.name, &other.name)
+            } else {
+                (&other.name, &main.name)
+            };
+            question(match rng.below(4) {
+                0 => format!(
+                    "Les {} figurent dans deux couches : « {x} » et « {y} ». Laquelle faut-il \
+                     utiliser ?",
+                    f.pl
+                ),
+                1 => format!(
+                    "Deux couches contiennent des {} : « {x} » et « {y} ». Laquelle veux-tu \
+                     utiliser ?",
+                    f.pl
+                ),
+                2 => format!(
+                    "Faut-il chercher les {} dans « {x} » ou dans « {y} » ?",
+                    f.pl
+                ),
+                _ => format!(
+                    "« {x} » et « {y} » portent toutes deux des {}. Sur laquelle faut-il \
+                     travailler ?",
+                    f.pl
+                ),
+            })
+        }
+    };
+    Some(example("couche_par_valeur", b, rng, request, expected))
+}
+
+/// Qualificatifs invariables d'une seconde couche au nom plus long (« Gares hors service »).
+const LONG_QUALIFIERS: &[&str] = &[
+    "hors service",
+    "en projet",
+    "de réserve",
+    "temporaires",
+    "à vérifier",
+];
+
+/// Deux couches dont le nom de l'une contient celui de l'autre (`commune` et
+/// `commune_associee_ou_deleguee`, « Gares » et « Gares hors service ») : la demande qui dit le
+/// nom court (« les communes ») vise la couche au nom exact, sans question ; un cinquième des
+/// demandes dit le qualificatif de la longue, qui est alors la bonne.
+fn couche_principale(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let qualified = rng.chance(1, 5);
+    let (short, long, plural, singular, long_plural, long_singular) = if rng.chance(1, 2) {
+        let style = rng.below(2);
+        let short = b.add_table(
+            rng,
+            "commune",
+            Some(bdtopo("commune").names[style]),
+            &[],
+            &[],
+        );
+        let long_table = bdtopo("commune_associee_ou_deleguee");
+        let long = b.add_table(rng, long_table.key, Some(long_table.names[style]), &[], &[]);
+        let (lp, ls) = match rng.below(3) {
+            0 => ("des communes associées", "d'une commune associée"),
+            1 => ("des communes déléguées", "d'une commune déléguée"),
+            _ => (
+                "des communes associées ou déléguées",
+                "d'une commune associée ou déléguée",
+            ),
+        };
+        (
+            short,
+            long,
+            "des communes".to_string(),
+            "d'une commune".to_string(),
+            lp.to_string(),
+            ls.to_string(),
+        )
+    } else {
+        let t = pick_theme(rng, &b, ordinary)?;
+        let q = *rng.pick(LONG_QUALIFIERS);
+        let (short, long) = b.add_twins(rng, t.key, &cap(t.noun.pl), "", q, false);
+        (
+            short,
+            long,
+            t.noun.des(),
+            t.noun.dun(),
+            format!("{} {q}", t.noun.des()),
+            format!("{} {q}", t.noun.dun()),
+        )
+    };
+    let (chosen, other) = if qualified {
+        (&long, &short)
+    } else {
+        (&short, &long)
+    };
+    b.mark_decoy(&other.id);
+    let (p, s) = if qualified {
+        (long_plural, long_singular)
+    } else {
+        (plural, singular)
+    };
+    let (body, plan) = proximity(rng, &mut b, &chosen.id, &p, &s)?;
+    let request = finish(rng, &body, false, false);
+    Some(example("couche_principale", b, rng, request, calls(plan)))
 }
 
 // -- redemande -------------------------------------------------------------
@@ -15478,6 +15935,282 @@ mod tests {
             asked > planned && planned * 5 > examples.len(),
             "{asked} / {planned}"
         );
+    }
+
+    fn layer_named<'a>(e: &'a Example, id: &str) -> &'a Value {
+        e.inventory["layers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|l| l["layer_id"] == id)
+            .unwrap_or_else(|| panic!("couche {id} absente"))
+    }
+
+    #[test]
+    fn twin_bdtopo_tables_ask_which_one_unless_the_request_says_it() {
+        let examples = valid(jumeaux_bdtopo, 600);
+        let (mut asked, mut planned) = (0, 0);
+        for e in &examples {
+            let layers = e.inventory["layers"].as_array().unwrap();
+            if let Some(q) = e.expected["question"].as_str() {
+                asked += 1;
+                let cited = quoted(q);
+                assert_eq!(cited.len(), 2, "{q}");
+                for c in &cited {
+                    assert!(layers.iter().any(|l| l["name"] == c.as_str()), "{q}");
+                }
+                // Les deux sont des jumelles : leurs noms partagent le mot de la demande.
+                let said = crate::normalize(&e.request);
+                assert!(
+                    said.contains("route") || said.contains("voie"),
+                    "{}",
+                    e.request
+                );
+                continue;
+            }
+            planned += 1;
+            let id = e.expected["calls"][0]["params"]["layer_id"]
+                .as_str()
+                .unwrap();
+            let chosen = crate::normalize(layer_named(e, id)["name"].as_str().unwrap());
+            let said = crate::normalize(&e.request);
+            // La demande lève l'ambiguïté : le tronçon, ou le qualificatif de la table nommée.
+            if chosen.contains("troncon") {
+                assert!(
+                    said.contains("troncon") || said.contains("couche"),
+                    "{said}"
+                );
+            } else {
+                assert!(
+                    said.contains("nomm") || said.contains("numerot") || said.contains("couche"),
+                    "{said} → {chosen}"
+                );
+            }
+        }
+        assert!(
+            asked > planned && planned * 6 > examples.len(),
+            "{asked} / {planned}"
+        );
+    }
+
+    #[test]
+    fn a_layer_found_only_by_a_value_gets_the_selection_on_the_table_that_has_it() {
+        let examples = valid(couche_par_valeur, 600);
+        let (mut asked, mut planned) = (0, 0);
+        for e in &examples {
+            let said = crate::normalize(&e.request);
+            if let Some(q) = e.expected["question"].as_str() {
+                asked += 1;
+                let cited = quoted(q);
+                assert_eq!(cited.len(), 2, "{q}");
+                assert!(q.ends_with('?'), "{q}");
+                continue;
+            }
+            planned += 1;
+            let select = &e.expected["calls"][0];
+            assert_eq!(select["command"], "analysis.select_by_attribute");
+            let params = &select["params"];
+            let layer = layer_named(e, params["layer_id"].as_str().unwrap());
+            let field = layer["fields"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|f| f["name"] == params["field"])
+                .unwrap();
+            let value = params["value"].as_str().unwrap();
+            assert!(
+                field["values"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|v| v == value),
+                "{value} absente de {field}"
+            );
+            // La valeur est dite dans la demande, et aucune couche n'en porte le nom.
+            let word = crate::normalize(value);
+            let stem = word.split(' ').next().unwrap().trim_end_matches('s');
+            assert!(said.contains(stem), "{said} / {value}");
+            for l in e.inventory["layers"].as_array().unwrap() {
+                let name = crate::normalize(l["name"].as_str().unwrap());
+                assert!(
+                    !name.split(' ').any(|w| w.trim_end_matches('s') == stem),
+                    "{name} / {said}"
+                );
+            }
+            // Aucune autre couche ne porte cette valeur.
+            let carriers = e.inventory["layers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|l| {
+                    l["fields"].as_array().unwrap().iter().any(|f| {
+                        f["values"]
+                            .as_array()
+                            .is_some_and(|vs| vs.iter().any(|v| v == value))
+                    })
+                })
+                .count();
+            assert_eq!(carriers, 1, "{said}");
+        }
+        assert!(
+            asked * 20 > examples.len() && planned > asked,
+            "{asked} / {planned}"
+        );
+    }
+
+    #[test]
+    fn a_value_carried_by_two_tables_names_both() {
+        for e in valid(couche_par_valeur, 600)
+            .iter()
+            .filter(|e| e.expected["kind"] == "question")
+        {
+            let q = e.expected["question"].as_str().unwrap();
+            let cited = quoted(q);
+            let carrying = e.inventory["layers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|l| cited.iter().any(|c| l["name"] == c.as_str()))
+                .count();
+            assert_eq!(carrying, 2, "{q}");
+        }
+    }
+
+    #[test]
+    fn the_main_layer_is_the_one_with_the_exact_name() {
+        let examples = valid(couche_principale, 600);
+        let mut exact = 0;
+        for e in &examples {
+            assert_eq!(e.expected["kind"], "calls");
+            let layers = e.inventory["layers"].as_array().unwrap();
+            let id = e.expected["calls"][0]["params"]["layer_id"]
+                .as_str()
+                .unwrap();
+            let chosen = crate::normalize(layer_named(e, id)["name"].as_str().unwrap());
+            // Un nom contenu dans celui d'une autre couche : la bonne est la plus courte, sauf
+            // si la demande dit le qualificatif de la longue.
+            let longer = layers.iter().any(|l| {
+                let n = crate::normalize(l["name"].as_str().unwrap());
+                n != chosen && n.starts_with(&chosen)
+            });
+            if longer {
+                exact += 1;
+            } else {
+                let said = crate::normalize(&e.request);
+                assert!(
+                    [
+                        "associ",
+                        "delegu",
+                        "hors service",
+                        "en projet",
+                        "reserve",
+                        "temporaire",
+                        "verifier"
+                    ]
+                    .iter()
+                    .any(|q| said.contains(q)),
+                    "{said} → {chosen}"
+                );
+            }
+        }
+        assert!(
+            exact * 4 >= examples.len() * 3,
+            "{exact} / {}",
+            examples.len()
+        );
+    }
+
+    #[test]
+    fn the_three_bdtopo_families_stay_in_the_prompt_bound_and_a_big_project() {
+        let registry = cassini_core::registry::Registry::standard();
+        for (make, name) in [
+            (jumeaux_bdtopo as fn(&mut Rng) -> Option<Example>, "jumeaux"),
+            (couche_par_valeur, "valeur"),
+            (couche_principale, "principale"),
+        ] {
+            let mut rng = Rng::new(11);
+            let (mut kept, mut tried) = (0, 0);
+            for _ in 0..300 {
+                let Some(base) = make(&mut rng) else { continue };
+                tried += 1;
+                let total = rng.range(BIG_MIN_LAYERS as u64, BIG_MAX_LAYERS as u64) as usize;
+                let Some(big) = big(&mut rng, base, total) else {
+                    continue;
+                };
+                if crate::validate(&registry, &big).is_ok() {
+                    kept += 1;
+                    assert!(crate::prompt_text(&big).chars().count() <= crate::MAX_PROMPT_CHARS);
+                }
+            }
+            assert!(
+                kept * 2 > tried,
+                "{name} : {kept} / {tried} gardés en gros projet"
+            );
+        }
+    }
+
+    #[test]
+    fn no_filler_doubles_a_bdtopo_table_the_family_already_placed() {
+        let mut rng = Rng::new(5);
+        let mut seen = 0;
+        for i in 0..200 {
+            let make = if i % 2 == 0 {
+                couche_par_valeur
+            } else {
+                jumeaux_bdtopo
+            };
+            let Some(base) = make(&mut rng) else { continue };
+            let Some(big) = big(&mut rng, base, 40) else {
+                continue;
+            };
+            // L'index porte toutes les couches : une table y figure une fois, pas deux.
+            for table in ["plan_d_eau", "troncon_de_voie_ferree"] {
+                let n = big.inventory["index"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|l| l["layer_id"].as_str().unwrap().contains(table))
+                    .count();
+                seen += n;
+                assert!(n <= 1, "{table} : {n}");
+            }
+        }
+        assert!(seen > 20, "{seen}");
+    }
+
+    #[test]
+    fn no_civil_theme_slug_hides_a_bdtopo_table_name() {
+        // `big_project` écarte un remplissage dont la table est dans l'identifiant d'une couche
+        // apprise : aucun thème civil ne doit en porter, sans quoi son tirage changerait.
+        for f in crate::inventories::BIG_FILLERS {
+            for t in THEMES {
+                assert!(
+                    !t.slugs.iter().any(|s| s.contains(f.table)),
+                    "{} / {}",
+                    t.key,
+                    f.table
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn no_bdtopo_value_is_also_a_civil_theme_value() {
+        // Une demande par valeur ne doit pas viser aussi un champ d'un thème civil.
+        let civil: BTreeSet<String> = THEMES
+            .iter()
+            .flat_map(|t| t.fields.iter())
+            .filter_map(|f| match &f.kind {
+                Kind::Text { values, .. } => Some(values.iter().map(|v| v.v)),
+                _ => None,
+            })
+            .flatten()
+            .flat_map(crate::inventories::plain_words)
+            .collect();
+        for f in VALUE_FACTS {
+            let words = crate::inventories::plain_words(f.value);
+            assert!(words.is_disjoint(&civil), "{} : {:?}", f.value, words);
+        }
     }
 
     #[test]

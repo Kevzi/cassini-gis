@@ -1548,6 +1548,363 @@ pub const MASKS: [&str; 2] = ["masque_inondable", "masque_protege"];
 /// Rasters bruts que `raster.reclassify` classe directement, sans étape de terrain.
 pub const RAW_RASTERS: [&str; 2] = ["distance_routes", "bruit"];
 
+// -- tables de la BD TOPO (5.58) ---------------------------------------------------------------
+//
+// Un petit catalogue de tables réelles de la BD TOPO 3, **hors de `THEMES`** : y ajouter un thème
+// changerait les distractions, donc les tirages, de toutes les autres familles. Seules les trois
+// familles de 5.58 les posent (`Builder::add_table`). Chaque table prend le groupe du thème civil
+// qu'elle recouvre (`voirie`, `communes`, `gares`, `rivieres`), pour que `finish` ne pose pas ce
+// thème en distraction à côté : « les routes » ne désigne alors que les tables de la BD TOPO.
+
+const fn bd_nature(values: &'static [Val]) -> FieldDef {
+    FieldDef {
+        role: "nature",
+        names: &["nature"],
+        label: "de nature",
+        kind: Kind::Text {
+            values,
+            phrases: &["de nature {v}"],
+        },
+    }
+}
+
+const fn bd_text(
+    role: &'static str,
+    names: &'static [&'static str],
+    values: &'static [Val],
+) -> FieldDef {
+    FieldDef {
+        role,
+        names,
+        label: "",
+        kind: Kind::Text {
+            values,
+            phrases: &["{v}"],
+        },
+    }
+}
+
+const BD_TOPONYME: FieldDef = FieldDef {
+    role: "nom",
+    names: &["toponyme", "nom_officiel"],
+    label: "de nom",
+    kind: Kind::Name {
+        fragments: &[
+            "Saint", "Jean", "Moulin", "Pont", "Haut", "Bois", "Centre", "Parc",
+        ],
+    },
+};
+
+const BD_COMMUNE_NOM: FieldDef = FieldDef {
+    role: "nom",
+    names: &["nom_officiel"],
+    label: "de nom",
+    kind: Kind::Name {
+        fragments: &["Saint", "sur-Seine", "Mont", "Bois", "le-Pont", "Val"],
+    },
+};
+
+const BD_INSEE: FieldDef = FieldDef {
+    role: "insee",
+    names: &["code_insee"],
+    label: "de code INSEE",
+    kind: Kind::Id,
+};
+
+macro_rules! bd_table {
+    ($key:expr, $group:expr, $sg:expr, $pl:expr, $fem:expr, $geom:expr, $names:expr, $fields:expr) => {
+        Theme {
+            key: $key,
+            group: $group,
+            domain: "BD TOPO",
+            noun: Noun {
+                sg: $sg,
+                pl: $pl,
+                fem: $fem,
+            },
+            of_none: "",
+            the_layer: "",
+            names: $names,
+            slugs: &[$key],
+            files: &[$key],
+            geom: $geom,
+            fields: $fields,
+        }
+    };
+}
+
+/// Les tables de la BD TOPO 3 des trois familles de 5.58, avec les champs à valeurs qui comptent.
+/// L'ordre est fixe : il fait partie de la reproductibilité.
+pub static BDTOPO: &[Theme] = &[
+    bd_table!(
+        "troncon_de_route",
+        "voirie",
+        "tronçon de route",
+        "tronçons de route",
+        false,
+        Geom::Line,
+        &["troncon_de_route", "Tronçons de route"],
+        &[
+            bd_nature(&[
+                v("Bretelle"),
+                v("Chemin"),
+                v("Escalier"),
+                v("Piste cyclable"),
+                v("Rond-point"),
+                v("Route à 1 chaussée"),
+                v("Route à 2 chaussées"),
+                v("Route empierrée"),
+                v("Sentier"),
+                v("Type autoroutier"),
+            ]),
+            bd_text(
+                "importance",
+                &["importance"],
+                &[v("1"), v("2"), v("3"), v("4"), v("5"), v("6")]
+            ),
+            bd_text(
+                "sens",
+                &["sens_de_circulation"],
+                &[
+                    v("Double sens"),
+                    v("Sans objet"),
+                    v("Sens direct"),
+                    v("Sens inverse")
+                ]
+            ),
+        ]
+    ),
+    bd_table!(
+        "route_numerotee_ou_nommee",
+        "voirie",
+        "route numérotée ou nommée",
+        "routes numérotées ou nommées",
+        true,
+        Geom::Line,
+        &["route_numerotee_ou_nommee", "Routes numérotées ou nommées"],
+        &[
+            FieldDef {
+                role: "numero",
+                names: &["numero"],
+                label: "de numéro",
+                kind: Kind::Name {
+                    fragments: &["A 41", "N 201", "D 1508", "D 909", "E 712"]
+                },
+            },
+            bd_text(
+                "type_de_route",
+                &["type_de_route"],
+                &[
+                    v("Autoroute"),
+                    v("Départementale"),
+                    v("Nationale"),
+                    v("Route européenne")
+                ]
+            ),
+            bd_text(
+                "gestionnaire",
+                &["gestionnaire"],
+                &[
+                    v("Commune"),
+                    v("Département"),
+                    v("DIR"),
+                    v("Société d'autoroute")
+                ]
+            ),
+        ]
+    ),
+    bd_table!(
+        "troncon_de_voie_ferree",
+        "voie_ferree",
+        "tronçon de voie ferrée",
+        "tronçons de voie ferrée",
+        false,
+        Geom::Line,
+        &["troncon_de_voie_ferree", "Tronçons de voie ferrée"],
+        &[
+            bd_nature(&[
+                v("Funiculaire ou crémaillère"),
+                v("LGV"),
+                v("Métro"),
+                v("Tramway"),
+                v("Voie de service"),
+                v("Voie ferrée principale"),
+            ]),
+            bd_text("largeur", &["largeur"], &[v("Étroite"), v("Normale")]),
+        ]
+    ),
+    bd_table!(
+        "voie_ferree_nommee",
+        "voie_ferree",
+        "voie ferrée nommée",
+        "voies ferrées nommées",
+        true,
+        Geom::Line,
+        &["voie_ferree_nommee", "Voies ferrées nommées"],
+        &[
+            BD_TOPONYME,
+            bd_text(
+                "etat",
+                &["etat_de_l_objet"],
+                &[v("En construction"), v("En projet"), v("En service")]
+            ),
+        ]
+    ),
+    bd_table!(
+        "equipement_de_transport",
+        "gares",
+        "équipement de transport",
+        "équipements de transport",
+        false,
+        Geom::Point,
+        &["equipement_de_transport", "Équipements de transport"],
+        &[
+            BD_TOPONYME,
+            bd_nature(&[
+                v("Aire de repos ou de service"),
+                v("Gare routière"),
+                v("Gare voyageurs et fret"),
+                v("Gare voyageurs uniquement"),
+                v("Péage"),
+                v("Port"),
+                v("Station de métro"),
+                v("Station de tramway"),
+            ]),
+        ]
+    ),
+    bd_table!(
+        "plan_d_eau",
+        "rivieres",
+        "plan d'eau",
+        "plans d'eau",
+        false,
+        Geom::Polygon,
+        &["plan_d_eau", "Plans d'eau"],
+        &[
+            BD_TOPONYME,
+            bd_nature(&[
+                v("Bassin"),
+                v("Écoulement canalisé"),
+                v("Lac"),
+                v("Lagune"),
+                v("Mare"),
+                v("Réservoir"),
+            ]),
+            bd_text(
+                "persistance",
+                &["persistance"],
+                &[v("Intermittent"), v("Permanent")]
+            ),
+        ]
+    ),
+    bd_table!(
+        "construction_ponctuelle",
+        "construction_ponctuelle",
+        "construction ponctuelle",
+        "constructions ponctuelles",
+        true,
+        Geom::Point,
+        &["construction_ponctuelle", "Constructions ponctuelles"],
+        &[bd_nature(&[
+            v("Calvaire"),
+            v("Clocher"),
+            v("Éolienne"),
+            v("Phare"),
+            v("Réservoir"),
+            v("Transformateur"),
+        ]),]
+    ),
+    bd_table!(
+        "zone_d_activite_ou_d_interet",
+        "zone_d_activite",
+        "zone d'activité ou d'intérêt",
+        "zones d'activité ou d'intérêt",
+        true,
+        Geom::Polygon,
+        &[
+            "zone_d_activite_ou_d_interet",
+            "Zones d'activité ou d'intérêt"
+        ],
+        &[
+            BD_TOPONYME,
+            bd_nature(&[
+                v("Camping"),
+                v("Établissement thermal"),
+                v("Marché"),
+                v("Parc de loisirs"),
+                v("Port"),
+                v("Zone industrielle"),
+                v("Zoo"),
+            ]),
+        ]
+    ),
+    bd_table!(
+        "lieu_dit_non_habite",
+        "lieu_dit",
+        "lieu-dit non habité",
+        "lieux-dits non habités",
+        false,
+        Geom::Point,
+        &["lieu_dit_non_habite", "Lieux-dits non habités"],
+        &[
+            BD_TOPONYME,
+            bd_nature(&[v("Col"), v("Grotte"), v("Gué"), v("Source"), v("Sommet")]),
+        ]
+    ),
+    bd_table!(
+        "commune",
+        "communes",
+        "commune",
+        "communes",
+        true,
+        Geom::Polygon,
+        &["commune", "Commune"],
+        &[
+            BD_COMMUNE_NOM,
+            BD_INSEE,
+            FieldDef {
+                role: "population",
+                names: &["population"],
+                label: "de population",
+                kind: number!(true, 1000, 60000, 500,
+                    gt: &["de plus de {n} habitants"],
+                    lt: &["de moins de {n} habitants"],
+                    gte: &["d'au moins {n} habitants"],
+                    lte: &["d'au plus {n} habitants"]),
+            },
+        ]
+    ),
+    bd_table!(
+        "commune_associee_ou_deleguee",
+        "communes",
+        "commune associée ou déléguée",
+        "communes associées ou déléguées",
+        true,
+        Geom::Polygon,
+        &[
+            "commune_associee_ou_deleguee",
+            "Commune associée ou déléguée"
+        ],
+        &[
+            BD_COMMUNE_NOM,
+            BD_INSEE,
+            bd_text(
+                "statut",
+                &["nature"],
+                &[v("Commune associée"), v("Commune déléguée")]
+            ),
+        ]
+    ),
+];
+
+/// La table de la BD TOPO de clé `key` (panique si inconnue).
+pub fn bdtopo(key: &str) -> &'static Theme {
+    BDTOPO
+        .iter()
+        .find(|t| t.key == key)
+        .unwrap_or_else(|| panic!("table BD TOPO inconnue : {key}"))
+}
+
 /// Le thème de clé `key` (panique si inconnu : c'est une erreur de programmation).
 pub fn theme(key: &str) -> &'static Theme {
     THEMES
@@ -2154,6 +2511,42 @@ impl Builder {
     ) -> Layer {
         let t = theme(key);
         assert!(!self.taken(t), "thème déjà pris : {key}");
+        self.add_theme(rng, t, None, require, forbid, force)
+    }
+
+    /// Fait de la couche `id` une couche de distraction : le plan ne la cite pas, elle n'est plus
+    /// « utile » (5.58, `focus_ids`) et un gros projet n'a pas à la détailler.
+    pub fn mark_decoy(&mut self, id: &str) {
+        if let Some(i) = self.layers.iter().position(|l| l.id == id) {
+            if !self.distractors.contains(&i) {
+                self.distractors.push(i);
+            }
+        }
+    }
+
+    /// Ajoute une couche d'une table de la BD TOPO (5.58, `BDTOPO`), nommée `name` si donné.
+    /// Plusieurs tables d'un même groupe (les jumelles) coexistent : aucune garde de groupe.
+    pub fn add_table(
+        &mut self,
+        rng: &mut Rng,
+        key: &str,
+        name: Option<&str>,
+        require: &[&str],
+        force: &[(&str, &str)],
+    ) -> Layer {
+        self.add_theme(rng, bdtopo(key), name, require, &[], force)
+    }
+
+    fn add_theme(
+        &mut self,
+        rng: &mut Rng,
+        t: &'static Theme,
+        name: Option<&str>,
+        require: &[&str],
+        forbid: &[&str],
+        force: &[(&str, &str)],
+    ) -> Layer {
+        let key = t.key;
         let slug = *rng.pick(t.slugs);
         let file = *rng.pick(t.files);
         let ext = extension(rng, t.geom);
@@ -2217,7 +2610,10 @@ impl Builder {
         let layer = Layer {
             theme: t,
             id: layer_id(rng, slug),
-            name: (*rng.pick(t.names)).to_string(),
+            name: {
+                let drawn = (*rng.pick(t.names)).to_string();
+                name.map_or(drawn, str::to_string)
+            },
             source: format!("donnees/{file}.{ext}"),
             epsg: match self.vector_epsg {
                 Some(epsg) if t.geom != Geom::Raster => epsg,
@@ -3536,6 +3932,10 @@ pub fn big_project(
         ids.push((id.to_string(), qgis));
     }
     let said = plain_words(request);
+    let owned: Vec<String> = layers
+        .iter()
+        .filter_map(|l| l.get("layer_id")?.as_str().map(str::to_ascii_lowercase))
+        .collect();
     let epsg = learned["project"]["epsg"].as_u64().unwrap_or(2154);
     let mut pool: Vec<&BigFiller> = BIG_FILLERS.iter().collect();
     rng.shuffle(&mut pool);
@@ -3546,6 +3946,11 @@ pub fn big_project(
         let (layer, name, file) = filler.raw(rng, epsg);
         let names = [name.as_str(), filler.table, file.as_str()];
         if names.iter().any(|n| !plain_words(n).is_disjoint(&said)) {
+            continue;
+        }
+        // Une table de la BD TOPO que la famille a déjà posée (5.58 : `plan_d_eau`,
+        // `troncon_de_voie_ferree`) n'est pas doublée par son remplissage.
+        if owned.iter().any(|t| t.contains(filler.table)) {
             continue;
         }
         let at = rng.below(raw.len() + 1);
