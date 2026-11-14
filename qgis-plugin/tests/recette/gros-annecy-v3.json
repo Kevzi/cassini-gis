@@ -1,0 +1,66 @@
+[
+  {"id": "GN01", "text": "Montre-moi la liste des couches du projet.",
+   "expect": {"plan": [{"command": "project.inventory", "params": {}}]}},
+  {"id": "GN02", "text": "Quels champs porte la couche des établissements recevant du public ?",
+   "expect": {"plan": [{"command": "layer.describe", "params": {"layer_id": "@erp"}}]}},
+  {"id": "GN03", "text": "Sélectionne les forêts domaniales.",
+   "note": "couche trouvée par une valeur : foret_publique, champ nature, valeur Forêt domaniale (l'autre valeur est Autre forêt publique)",
+   "expect": {"plan": [{"command": "analysis.select_by_attribute", "params": {
+     "layer_id": "@foret_publique", "field": "nature", "operator": "eq", "value": "Forêt domaniale"}}]}},
+  {"id": "GN04", "text": "Sélectionne les télésièges.",
+   "note": "couche trouvée par une valeur : transport_par_cable, champ nature, valeur Télésiège",
+   "expect": {"plan": [{"command": "analysis.select_by_attribute", "params": {
+     "layer_id": "@transport_par_cable", "field": "nature", "operator": "eq", "value": "Télésiège"}}]}},
+  {"id": "GN05", "text": "Affiche les héliports.",
+   "note": "couche trouvée par une valeur : aerodrome, champ nature, valeur Héliport",
+   "expect": {"plan": [{"command": "analysis.select_by_attribute", "params": {
+     "layer_id": "@aerodrome", "field": "nature", "operator": "eq", "value": "Héliport"}}]}},
+  {"id": "GN06", "text": "Sélectionne les terrains de tennis.",
+   "note": "couche trouvée par une valeur : terrain_de_sport, champ nature, valeur Terrain de tennis",
+   "expect": {"plan": [{"command": "analysis.select_by_attribute", "params": {
+     "layer_id": "@terrain_de_sport", "field": "nature", "operator": "eq", "value": "Terrain de tennis"}}]}},
+  {"id": "GN07", "text": "Trouve les cols.",
+   "note": "couche trouvée par une valeur : detail_orographique, champ nature, valeur Col",
+   "expect": {"plan": [{"command": "analysis.select_by_attribute", "params": {
+     "layer_id": "@detail_orographique", "field": "nature", "operator": "eq", "value": "Col"}}]}},
+  {"id": "GN08", "text": "Sélectionne les pylônes de plus de 20 m de haut.",
+   "note": "pylone.hauteur va de 0 à 25,7",
+   "expect": {"plan": [{"command": "analysis.select_by_attribute", "params": {
+     "layer_id": "@pylone", "field": "hauteur", "operator": "gt", "value": "20"}}]}},
+  {"id": "GN09", "text": "Sélectionne les communes de plus de 300 habitants.",
+   "note": "commune.population est un entier de 55 à 550 (la couche commune, pas commune_associee_ou_deleguee)",
+   "expect": {"plan": [{"command": "analysis.select_by_attribute", "params": {
+     "layer_id": "@commune", "field": "population", "operator": "gt", "value": "300"}}]}},
+  {"id": "GN10", "text": "Fais un tampon de 200 m autour des cimetières.",
+   "expect": {"plan": [{"command": "analysis.buffer", "params": {
+     "layer_id": "@cimetiere", "distance": {"value": 200, "unit": "m"}}}]}},
+  {"id": "GN11", "text": "Trace un tampon de 400 m autour des postes de transformation.",
+   "expect": {"plan": [{"command": "analysis.buffer", "params": {
+     "layer_id": "@poste_de_transformation", "distance": {"value": 400, "unit": "m"}}}]}},
+  {"id": "GN12", "text": "Trace une bande de 1 km autour des remontées mécaniques.",
+   "note": "transport_par_cable ; distance dite en km",
+   "expect": {"plan": [{"command": "analysis.buffer", "params": {
+     "layer_id": "@transport_par_cable", "distance": {"value": 1, "unit": "km"}}}]}},
+  {"id": "GN13", "text": "Sélectionne les forêts privées.",
+   "note": "valeur absente : foret_publique.nature ne porte que Forêt domaniale et Autre forêt publique ; une question est attendue",
+   "expect": {"question": true}},
+  {"id": "GN14", "text": "Calcule la pente en degrés sur le MNT à 25 m.",
+   "expect": {"plan": [{"command": "terrain.slope", "params": {
+     "dem": "mnt/mnt-74-25m.tif", "unit": "degrees"}}]}},
+  {"id": "GN15", "text": "Donne-moi les coordonnées MGRS du point 45,8326 N, 6,8652 E (WGS84).",
+   "expect": {"plan": [{"command": "coord.convert", "params": {
+     "point": {"x": 6.8652, "y": 45.8326, "epsg": 4326}, "to": ["mgrs"]}}]}},
+  {"id": "GN16", "text": "Mets les cours d'eau aux couleurs de la carte IGN.",
+   "expect": {"plan": [{"command": "map.topographic_style", "params": {"layers": ["@cours_d_eau"]}}]}},
+  {"id": "GN17", "text": "Prépare un PDF de la carte en A3 portrait, avec pour titre « Vallée d'Annecy ».",
+   "expect": {"plan": [{"command": "layout.export_pdf", "params": {
+     "title": "Vallée d'Annecy", "page_size": "a3", "orientation": "portrait"}}]}},
+  {"id": "GN18", "text": "Convertis les forêts publiques en GeoJSON.",
+   "expect": {"plan": [{"command": "data.convert", "params": {"layer_id": "@foret_publique", "format": "geojson"}}]}},
+  {"id": "GN19", "text": "Quelles colonnes a la couche des pylônes ?",
+   "expect": {"plan": [{"command": "layer.describe", "params": {"layer_id": "@pylone"}}]}},
+  {"id": "GN20", "text": "Sélectionne les passages à niveau.",
+   "note": "couche trouvée par une valeur : point_du_reseau, champ nature, valeur Passage à niveau ; en dernier",
+   "expect": {"plan": [{"command": "analysis.select_by_attribute", "params": {
+     "layer_id": "@point_du_reseau", "field": "nature", "operator": "eq", "value": "Passage à niveau"}}]}}
+]
