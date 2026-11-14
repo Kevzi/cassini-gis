@@ -28,6 +28,9 @@ const RECETTE_GROS_ANNECY: &str = include_str!("../../qgis-plugin/tests/recette/
 /// La v2 de cette recette (5.50) : GA03, GA06 et GA13 réécrites après la première mesure.
 const RECETTE_GROS_ANNECY_V2: &str =
     include_str!("../../qgis-plugin/tests/recette/gros-annecy-v2.json");
+/// La v3 (5.58) : vingt phrases neuves, écrites sans reprendre les cas ratés de la v2.
+const RECETTE_GROS_ANNECY_V3: &str =
+    include_str!("../../qgis-plugin/tests/recette/gros-annecy-v3.json");
 /// Les phrases de la barre par commande (5.53), écrites à la main : `{id, command, phrase, …}`.
 const PAR_COMMANDE: &str = include_str!("../../ai/tests/par_commande/phrases.json");
 /// Les phrases neuves de `plan_reel` (5.53, livrable 3), écrites à la main : `{id, phrase, …}`.
@@ -217,6 +220,9 @@ pub fn real_trials_by_source() -> Vec<(&'static str, Vec<(String, String)>)> {
         .collect();
     assert_eq!(gros_v2.len(), 3, "{gros_v2:?}");
     all.push(("recette:gros-annecy-v2", gros_v2));
+    let gros_v3 = from_json(RECETTE_GROS_ANNECY_V3);
+    assert_eq!(gros_v3.len(), 20, "{gros_v3:?}");
+    all.push(("recette:gros-annecy-v3", gros_v3));
     for (name, text, count) in HAND_WRITTEN {
         let phrases = from_phrases(text);
         assert_eq!(phrases.len(), count, "{name} : {phrases:?}");
