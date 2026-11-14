@@ -1,0 +1,71 @@
+[
+  {"id": "HN01", "text": "Fais-moi l'inventaire des couches chargées.",
+   "expect": {"plan": [{"command": "project.inventory", "params": {}}]}},
+  {"id": "HN02", "text": "Donne-moi les champs de la couche des constructions linéaires.",
+   "expect": {"plan": [{"command": "layer.describe", "params": {"layer_id": "@construction_lineaire"}}]}},
+  {"id": "HN03", "text": "Sélectionne les cascades.",
+   "note": "couche trouvée par une valeur : detail_hydrographique, champ nature, valeur Cascade (414)",
+   "expect": {"plan": [{"command": "analysis.select_by_attribute", "params": {
+     "layer_id": "@detail_hydrographique", "field": "nature", "operator": "eq", "value": "Cascade"}}]}},
+  {"id": "HN04", "text": "Montre-moi les tunnels.",
+   "note": "couche trouvée par une valeur : construction_lineaire, champ nature, valeur Tunnel (178)",
+   "expect": {"plan": [{"command": "analysis.select_by_attribute", "params": {
+     "layer_id": "@construction_lineaire", "field": "nature", "operator": "eq", "value": "Tunnel"}}]}},
+  {"id": "HN05", "text": "Sélectionne les clochers.",
+   "note": "couche trouvée par une valeur : construction_ponctuelle, champ nature, valeur Clocher (534)",
+   "expect": {"plan": [{"command": "analysis.select_by_attribute", "params": {
+     "layer_id": "@construction_ponctuelle", "field": "nature", "operator": "eq", "value": "Clocher"}}]}},
+  {"id": "HN06", "text": "Sélectionne les tramways.",
+   "note": "couche trouvée par une valeur : troncon_de_voie_ferree, champ nature, valeur Tramway (31)",
+   "expect": {"plan": [{"command": "analysis.select_by_attribute", "params": {
+     "layer_id": "@troncon_de_voie_ferree", "field": "nature", "operator": "eq", "value": "Tramway"}}]}},
+  {"id": "HN07", "text": "Affiche les réserves naturelles.",
+   "note": "couche trouvée par une valeur : parc_ou_reserve, champ nature, valeur Réserve naturelle (12)",
+   "expect": {"plan": [{"command": "analysis.select_by_attribute", "params": {
+     "layer_id": "@parc_ou_reserve", "field": "nature", "operator": "eq", "value": "Réserve naturelle"}}]}},
+  {"id": "HN08", "text": "Trouve les lavoirs.",
+   "note": "couche trouvée par une valeur : detail_hydrographique, champ nature, valeur Lavoir (234)",
+   "expect": {"plan": [{"command": "analysis.select_by_attribute", "params": {
+     "layer_id": "@detail_hydrographique", "field": "nature", "operator": "eq", "value": "Lavoir"}}]}},
+  {"id": "HN09", "text": "Sélectionne les châteaux d'eau.",
+   "note": "couche trouvée par une valeur : reservoir, champ nature, valeur Château d'eau (10)",
+   "expect": {"plan": [{"command": "analysis.select_by_attribute", "params": {
+     "layer_id": "@reservoir", "field": "nature", "operator": "eq", "value": "Château d'eau"}}]}},
+  {"id": "HN10", "text": "Trouve les gares de téléphérique.",
+   "note": "couche trouvée par une valeur : equipement_de_transport, champ nature, valeur Gare téléphérique (76)",
+   "expect": {"plan": [{"command": "analysis.select_by_attribute", "params": {
+     "layer_id": "@equipement_de_transport", "field": "nature", "operator": "eq", "value": "Gare téléphérique"}}]}},
+  {"id": "HN11", "text": "Affiche les bâtiments qui comptent plus de 10 étages.",
+   "note": "batiment.nombre_d_etages va de 0 à 16",
+   "expect": {"plan": [{"command": "analysis.select_by_attribute", "params": {
+     "layer_id": "@batiment", "field": "nombre_d_etages", "operator": "gt", "value": "10"}}]}},
+  {"id": "HN12", "text": "Sélectionne les bâtiments de plus de 40 m de haut.",
+   "note": "batiment.hauteur va de 0 à 57,2",
+   "expect": {"plan": [{"command": "analysis.select_by_attribute", "params": {
+     "layer_id": "@batiment", "field": "hauteur", "operator": "gt", "value": "40"}}]}},
+  {"id": "HN13", "text": "Trace un tampon de 300 m autour des réservoirs.",
+   "expect": {"plan": [{"command": "analysis.buffer", "params": {
+     "layer_id": "@reservoir", "distance": {"value": 300, "unit": "m"}}}]}},
+  {"id": "HN14", "text": "Trace une bande de 2 km autour des aérodromes.",
+   "note": "distance dite en km",
+   "expect": {"plan": [{"command": "analysis.buffer", "params": {
+     "layer_id": "@aerodrome", "distance": {"value": 2, "unit": "km"}}}]}},
+  {"id": "HN15", "text": "Sélectionne les volcans.",
+   "note": "valeur absente : aucune couche du projet ne porte la valeur Volcan ; une question est attendue",
+   "expect": {"question": true}},
+  {"id": "HN16", "text": "Donne-moi la carte des pentes en degrés du MNT à 25 m.",
+   "expect": {"plan": [{"command": "terrain.slope", "params": {
+     "dem": "mnt/mnt-74-25m.tif", "unit": "degrees"}}]}},
+  {"id": "HN17", "text": "Passe 45,9237 N et 6,8694 E (WGS84) en coordonnées UTM.",
+   "expect": {"plan": [{"command": "coord.convert", "params": {
+     "point": {"x": 6.8694, "y": 45.9237, "epsg": 4326}, "to": ["utm"]}}]}},
+  {"id": "HN18", "text": "Quelle distance et quel azimut entre le point 45,9237 N, 6,8694 E et le point 45,8326 N, 6,8652 E (WGS84) ?",
+   "expect": {"plan": [{"command": "geo.distance_azimuth", "params": {
+     "from": {"x": 6.8694, "y": 45.9237, "epsg": 4326}, "to": {"x": 6.8652, "y": 45.8326, "epsg": 4326}}}]}},
+  {"id": "HN19", "text": "Exporte la carte en PDF, format A4 paysage, avec pour titre « Haute-Savoie ».",
+   "expect": {"plan": [{"command": "layout.export_pdf", "params": {
+     "title": "Haute-Savoie", "page_size": "a4", "orientation": "landscape"}}]}},
+  {"id": "HN20", "text": "Enlève les terrains de sport du projet.",
+   "note": "en dernier",
+   "expect": {"plan": [{"command": "layer.remove", "params": {"layer_id": "@terrain_de_sport"}}]}}
+]

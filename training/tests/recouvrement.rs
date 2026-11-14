@@ -171,6 +171,7 @@ fn the_real_trials_are_read_whole() {
             + 20
             + 3
             + 20
+            + 20
             + HAND_WRITTEN.iter().map(|(_, _, n)| n).sum::<usize>()
     );
     let find = |id: &str| all.iter().find(|(i, _)| i == id).unwrap().1.clone();
