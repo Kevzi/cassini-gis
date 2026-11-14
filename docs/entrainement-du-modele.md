@@ -2939,10 +2939,9 @@ la carte les … de plus de N m² » (`filtre_numerique`), « … calculées en 
 « Enlève-moi les … de la carte » (`retrait_couche`), « Sors-moi la carte en PDF » devant un
 carroyage MGRS (`carroyage_mgrs`). `FOCUS_EXCLUDED` est alors vide (`pub const FOCUS_EXCLUDED: &[&str] =
 &[];`, la forme que lit `pipeline.py`) ; la garde par famille de `recouvrement.rs` reste le contrôle
-des familles futures. Depuis la recette v3 du gros projet (5.58), elle porte `redemande` : cette
-famille emballe d'autres familles, et l'une d'elles, tirée seule à la graine 3, engendre « Trouve
-les cols. » (GN07). `redemande` n'est dans aucune séance continue ; le jeu complet ne copie aucune
-phrase de la v3. Au jeu complet, le tirage déplacé par les familles neuves a fait sortir une
+des familles futures. Avec la recette v3 du gros projet (5.58), `redemande` y est entrée un temps
+(elle emballait une famille qui engendrait « Trouve les cols. », GN07) ; le raster `mnt` ajouté à
+`couche_par_valeur` a déplacé le tirage et la fuite a disparu : la liste est de nouveau vide. Au jeu complet, le tirage déplacé par les familles neuves a fait sortir une
 tournure de `conversion_coordonnees` (« Convertis le point … en coordonnées UTM », emballée par un
 gros projet) : elle devient « Convertis-moi ».
 

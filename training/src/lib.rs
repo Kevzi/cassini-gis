@@ -327,11 +327,8 @@ pub const FOCUS_COUNT: usize = 1800;
 /// Refusées au jeu ciblé tant que leurs tournures ne sont pas reprises ; le test tient cette liste
 /// exacte, dans les deux sens. Vide depuis 5.54, lot 2 : les cinq familles du premier relevé
 /// (`filtre_numerique`, `pente`, `reprojection_couche`, `retrait_couche`, `carroyage_mgrs`) ont
-/// perdu leur tournure fautive. La liste reste le contrôle des familles futures. `redemande`
-/// y est revenue avec la recette v3 du gros projet (5.58) : elle emballe d'autres familles, et
-/// l'une d'elles, tirée seule à la graine 3, engendre « Trouve les cols. » (GN07). Elle n'est
-/// dans aucune séance continue, et le jeu complet ne copie aucune phrase de la v3.
-pub const FOCUS_EXCLUDED: &[&str] = &["redemande"];
+/// perdu leur tournure fautive. La liste reste le contrôle des familles futures.
+pub const FOCUS_EXCLUDED: &[&str] = &[];
 
 /// Les familles du jeu ciblé de la première séance continue (5.54, lot 2) : les six familles
 /// neuves ou renforcées d'après les leçons de la remesure du 2026-11-11 (format gardé avec

@@ -11002,6 +11002,11 @@ fn couche_par_valeur(rng: &mut Rng) -> Option<Example> {
             b.mark_decoy(&decoy.id);
         }
     }
+    // Un modèle d'élévation à côté (recette v3, GN07 : « Trouve les cols. » partait sur le
+    // raster et demandait son « champ de type ») : la valeur se cherche dans les tables à champs.
+    if rng.chance(1, 3) {
+        b.add(rng, "mnt", &[], &[], &[]);
+    }
     let field = main.field("nature")?.name.clone();
     let tampon = second.is_none() && rng.chance(1, 4);
     let (body, interrogative, plan) = if tampon {
