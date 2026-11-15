@@ -15,10 +15,11 @@ SETTING_KEY = "cassini/model"
 
 
 def clean(listed):
-    """Entrées lisibles de la liste reçue : `{"file", "size_bytes", "problem"}`.
+    """Entrées lisibles de la liste reçue : `{"file", "size_bytes", "problem", "warning"}`.
 
     Une entrée sans nom de fichier texte est écartée ; une taille illisible vaut None,
-    un problème vide ou illisible n'en est pas un.
+    un problème ou un avertissement vide ou illisible n'en est pas un. L'avertissement
+    (« empreinte du modèle non déclarée », ticket 5.51) n'empêche pas de servir.
     """
     entries = []
     if not isinstance(listed, list):
@@ -35,7 +36,10 @@ def clean(listed):
         problem = item.get("problem")
         if not isinstance(problem, str) or not problem.strip():
             problem = None
-        entries.append({"file": name, "size_bytes": size, "problem": problem})
+        warning = item.get("warning")
+        if not isinstance(warning, str) or not warning.strip():
+            warning = None
+        entries.append({"file": name, "size_bytes": size, "problem": problem, "warning": warning})
     return entries
 
 
@@ -104,6 +108,9 @@ def label(lang, entry):
     text = texts.tr(lang, "models_entry", name=entry["file"], size=size) if size else entry["file"]
     if entry.get("problem"):
         text = texts.tr(lang, "models_entry_problem", label=text, problem=entry["problem"])
+    elif entry.get("warning"):
+        # Le texte vient du noyau seul, qui ne parle que français : l'extension le traduit.
+        text = texts.tr(lang, "models_entry_unverified", label=text)
     return text
 
 

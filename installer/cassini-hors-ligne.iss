@@ -29,6 +29,9 @@
 #endif
 
 #define NomModele "cassini-composition-4b-Q4_K_M.gguf"
+; Empreinte SHA-256 du modele : celle du manifeste des versions (installer/modele.json), la
+; seule source (ticket 5.51). Le noyau la verifie au premier chargement du modele.
+#define EmpreinteModele "b687313f4a49c23e13673d14d185f3ee56d3e710e8d01c08595339236b21a865"
 #define Declaration "cassini-composition-4b.modele.json"
 
 [Setup]
@@ -95,10 +98,10 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
   begin
-    { Declaration minimale du modele, comme sur le poste du proprietaire ; les empreintes
-      viennent de 7.4. }
+    { Declaration du modele avec son empreinte SHA-256 (ticket 5.51). La declaration de
+      l'installeur en ligne reste a 7.4. }
     SaveStringToFile(ExpandConstant('{app}\bin\models\{#Declaration}'),
-      '{"model": "{#NomModele}", "prompt": "short"}' + #10, False);
+      '{"model": "{#NomModele}", "prompt": "short", "model_sha256": "{#EmpreinteModele}"}' + #10, False);
     { Meme format que l'installeur en ligne (7.1). }
     SaveStringToFile(ExpandConstant('{app}\bin\installation.json'),
       '{"version": "{#Version}", "installe_le": "' + DateIsoUtc + '"}' + #10, False);

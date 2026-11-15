@@ -62,6 +62,9 @@ pub enum AiError {
     /// La déclaration `*.modele.json` n'est pas lisible : message complet, qui ne nomme la
     /// déclaration que par son seul nom de fichier.
     BadDeclaration(String),
+    /// Un fichier du modèle ne correspond pas à l'empreinte de sa déclaration : le nom du
+    /// fichier seul (AD-9), jamais son chemin.
+    Tampered(String),
 }
 
 impl fmt::Display for AiError {
@@ -87,6 +90,10 @@ impl fmt::Display for AiError {
                 write!(f, "La grammaire de la réponse n'a pas pu être lue : {e}")
             }
             AiError::BadDeclaration(e) => write!(f, "{e}"),
+            AiError::Tampered(name) => write!(
+                f,
+                "Le fichier « {name} » ne correspond pas à l'empreinte déclarée : il est abîmé ou a été remplacé, il n'est pas chargé. Réinstallez Cassini par l'installeur, ou recopiez le fichier depuis la porte hors ligne."
+            ),
         }
     }
 }
@@ -107,6 +114,7 @@ impl AiError {
             AiError::Decode(_) => "ai.decode",
             AiError::Grammar(_) => "ai.grammar",
             AiError::BadDeclaration(_) => "models.bad_declaration",
+            AiError::Tampered(_) => "models.tampered",
         }
     }
 }
@@ -174,6 +182,47 @@ fn model_key(files: &ModelFiles) -> Result<ModelKey, AiError> {
         model: file_key(&files.model)?,
         adapter: files.adapter.as_deref().map(file_key).transpose()?,
     })
+}
+
+/// Empreintes déjà vérifiées dans cette session : fichier (chemin, taille, date de modification)
+/// et empreinte attendue. Gardé en mémoire seulement, jamais sur disque : un cache qu'il suffirait
+/// d'éditer contournerait la vérification (ticket 5.51).
+fn verified_files() -> &'static Mutex<Vec<(FileKey, String)>> {
+    static VERIFIED: OnceLock<Mutex<Vec<(FileKey, String)>>> = OnceLock::new();
+    VERIFIED.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// Vérifie que `file` a l'empreinte SHA-256 `expected` (hexadécimal, 64 chiffres). Le calcul se
+/// fait au premier passage de la session ; un fichier de même identité n'est pas relu. Un
+/// fichier dont l'identité (taille, date) est illisible n'est pas jugé ici : son chargement dira qu'il manque. Une erreur de lecture pendant le calcul, elle, refuse le fichier.
+pub(crate) fn verify_fingerprint(file: &Path, expected: &str) -> Result<(), AiError> {
+    verify_fingerprint_counted(file, expected).map(|_| ())
+}
+
+/// Comme `verify_fingerprint`, et dit si l'empreinte a été calculée (vrai) ou reprise de la
+/// mémoire de la session (faux).
+fn verify_fingerprint_counted(file: &Path, expected: &str) -> Result<bool, AiError> {
+    let Ok(key) = file_key(file) else {
+        return Ok(false);
+    };
+    let expected = expected.to_ascii_lowercase();
+    let known = |v: &Vec<(FileKey, String)>| v.iter().any(|(k, e)| *k == key && *e == expected);
+    if verified_files().lock().is_ok_and(|v| known(&v)) {
+        return Ok(false);
+    }
+    match cassini_core::commands::model_list::sha256_file(file) {
+        Ok(actual) if actual == expected => {
+            if let Ok(mut v) = verified_files().lock() {
+                v.push((key, expected));
+            }
+            Ok(true)
+        }
+        _ => Err(AiError::Tampered(
+            file.file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+        )),
+    }
 }
 
 /// Place d'un instantané : la fin de la tête mise en cache.

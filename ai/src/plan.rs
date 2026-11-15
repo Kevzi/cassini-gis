@@ -787,13 +787,19 @@ pub fn resolve_model(path: &Path) -> Result<(ModelFiles, PromptStyle), AiError> 
     let declaration = read_declaration(path)
         .map_err(|m| AiError::BadDeclaration(format!("« {name} » : {m}.")))?;
     let folder = path.parent().unwrap_or(Path::new(""));
-    Ok((
-        ModelFiles {
-            model: folder.join(&declaration.model),
-            adapter: declaration.adapter.as_ref().map(|a| folder.join(a)),
-        },
-        declaration.prompt.into(),
-    ))
+    let files = ModelFiles {
+        model: folder.join(&declaration.model),
+        adapter: declaration.adapter.as_ref().map(|a| folder.join(a)),
+    };
+    // Empreintes déclarées : un fichier qui n'y correspond pas n'est jamais chargé (ticket 5.51).
+    // Sans empreinte déclarée, le modèle charge ; le panneau le signale.
+    if let Some(expected) = &declaration.model_sha256 {
+        crate::verify_fingerprint(&files.model, expected)?;
+    }
+    if let (Some(adapter), Some(expected)) = (&files.adapter, &declaration.adapter_sha256) {
+        crate::verify_fingerprint(adapter, expected)?;
+    }
+    Ok((files, declaration.prompt.into()))
 }
 
 /// Générateur branché sur le modèle local `model` (contraint par la grammaire).
@@ -2346,6 +2352,89 @@ mod tests {
             assert!(message.contains("ajuste.modele.json"), "{message}");
             assert!(!message.contains(&*dir.to_string_lossy()), "{message}");
         }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn sha_of(bytes: &[u8]) -> String {
+        let path = std::env::temp_dir().join(format!(
+            "cassini-ai-sha-{}-{:?}-{}",
+            std::process::id(),
+            std::thread::current().id(),
+            bytes.len()
+        ));
+        std::fs::write(&path, bytes).unwrap();
+        let sha = cassini_core::commands::model_list::sha256_file(&path).unwrap();
+        let _ = std::fs::remove_file(path);
+        sha
+    }
+
+    /// Ticket 5.51 : une déclaration juste charge ; un octet changé rend `models.tampered`,
+    /// au nom du fichier seul ; sans empreintes, le modèle charge.
+    #[test]
+    fn fingerprints_are_checked_when_declared_and_refuse_a_changed_file() {
+        let dir = std::env::temp_dir().join(format!("cassini-ai-sha-decl-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let decl = dir.join("m.modele.json");
+        std::fs::write(dir.join("base.gguf"), b"base-bytes").unwrap();
+        std::fs::write(dir.join("lora.gguf"), b"lora-bytes!").unwrap();
+        let (b, l) = (sha_of(b"base-bytes"), sha_of(b"lora-bytes!"));
+        let write = |model: &str, adapter: &str| {
+            std::fs::write(
+                &decl,
+                format!(
+                    r#"{{"model":"base.gguf","adapter":"lora.gguf","model_sha256":"{model}","adapter_sha256":"{adapter}"}}"#
+                ),
+            )
+            .unwrap();
+        };
+        // Déclaration juste.
+        write(&b, &l);
+        assert!(resolve_model(&decl).is_ok());
+        // Majuscules acceptées.
+        write(&b.to_uppercase(), &l);
+        assert!(resolve_model(&decl).is_ok());
+        // Octet changé dans le GGUF, puis dans l'adaptateur.
+        std::fs::write(dir.join("base.gguf"), b"base-byteX").unwrap();
+        let e = resolve_model(&decl).unwrap_err();
+        assert_eq!(e.code(), "models.tampered");
+        let message = e.to_string();
+        assert!(message.contains("base.gguf"), "{message}");
+        assert!(!message.contains(&*dir.to_string_lossy()), "{message}");
+        assert!(!message.to_lowercase().contains("télécharg"), "{message}");
+        std::fs::write(dir.join("base.gguf"), b"base-bytes").unwrap();
+        std::fs::write(dir.join("lora.gguf"), b"lora-bytesX").unwrap();
+        let e = resolve_model(&decl).unwrap_err();
+        assert_eq!(e, AiError::Tampered("lora.gguf".to_string()));
+        // Déclaration ancienne, sans empreintes : charge.
+        std::fs::write(&decl, r#"{"model":"base.gguf","adapter":"lora.gguf"}"#).unwrap();
+        assert!(resolve_model(&decl).is_ok());
+        // Empreinte mal formée : déclaration refusée.
+        for bad in ["abc", &"g".repeat(64), &"a".repeat(65)] {
+            write(bad, &l);
+            assert_eq!(
+                resolve_model(&decl).unwrap_err().code(),
+                "models.bad_declaration",
+                "{bad}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Ticket 5.51 : un seul calcul par session pour un même fichier inchangé.
+    #[test]
+    fn a_verified_file_is_not_hashed_again_in_the_session() {
+        let dir = std::env::temp_dir().join(format!("cassini-ai-sha-mem-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("memoire.gguf");
+        std::fs::write(&file, b"une session").unwrap();
+        let sha = sha_of(b"une session");
+        assert_eq!(crate::verify_fingerprint_counted(&file, &sha), Ok(true));
+        assert_eq!(crate::verify_fingerprint_counted(&file, &sha), Ok(false));
+        // Le fichier change (taille) : l'identité change, l'empreinte est recalculée et refusée.
+        std::fs::write(&file, b"une session abimee").unwrap();
+        assert!(crate::verify_fingerprint_counted(&file, &sha).is_err());
         let _ = std::fs::remove_dir_all(dir);
     }
 

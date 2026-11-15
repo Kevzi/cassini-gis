@@ -204,5 +204,14 @@ class TestScriptSansReseau(unittest.TestCase):
         self.assertEqual(nom, tm.lire_declaration()["nom_installe"])
 
 
+class TestEmpreinteDeclaration(unittest.TestCase):
+    def test_iss_declare_l_empreinte_du_manifeste(self):
+        racine = Path(__file__).resolve().parent.parent
+        texte = (racine / "cassini-hors-ligne.iss").read_text(encoding="utf-8")
+        sha = json.loads((racine / "modele.json").read_text(encoding="utf-8"))["sha256"]
+        self.assertIn(f'#define EmpreinteModele "{sha}"', texte)
+        self.assertIn('"model_sha256": "{#EmpreinteModele}"', texte)
+
+
 if __name__ == "__main__":
     unittest.main()

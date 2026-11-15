@@ -58,7 +58,7 @@ PLAN_EXEC_FAILED = "plan_exec_failed"  # payload : {"code", "message", "step", "
 PLAN_CANCELLED = "plan_cancelled"  # payload : {"step", "outputs"}
 PLAN_REJECTED = "plan_rejected"  # payload : {"plan_id"}
 # Modèles de l'agent (`agent.models`) : noms de fichiers et tailles, jamais de chemin.
-MODELS = "models"  # payload : {"models": [{"file", "size_bytes", "problem"?}, ...]}
+MODELS = "models"  # payload : {"models": [{"file", "size_bytes", "problem"?, "warning"?}, ...]}
 MODELS_FAILED = "models_failed"  # payload : {"code", "message"}
 MODEL_EVENTS = (MODELS, MODELS_FAILED)
 PLAN_EVENTS = (

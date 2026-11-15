@@ -15,6 +15,9 @@ schemars = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 inventory = "0.3"
+# sha2 (MIT OR Apache-2.0), acceptee par le proprietaire le 2026-11-10 : empreinte SHA-256 des
+# modeles GGUF verifiee au lancement (ticket 5.51).
+sha2 = "0.10"
 # tiff (MIT), acceptee par le proprietaire le 2026-11-03 (entree 4.1) : lecture et ecriture
 # des MNT GeoTIFF dans core/src/dem.rs, sans GDAL (AD-1). Fonctions JPEG, WebP et fax
 # desactivees : seules les compressions deflate et LZW, en pur Rust, sont tirees.

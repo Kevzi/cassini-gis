@@ -56,9 +56,51 @@ pub struct ModelDeclaration {
     /// Prompt attendu ; absent : le long prompt.
     #[serde(default)]
     pub prompt: PromptKind,
+    /// Empreinte SHA-256 (64 hexadécimaux) du GGUF du modèle ; absente : non déclarée.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_sha256: Option<String>,
+    /// Empreinte SHA-256 (64 hexadécimaux) du GGUF de l'adaptateur ; absente : non déclarée.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adapter_sha256: Option<String>,
+}
+
+/// Message du diagnostic et du panneau quand le modèle n'a pas d'empreinte déclarée.
+pub const UNDECLARED_FINGERPRINT: &str = "empreinte du modèle non déclarée";
+
+/// Vrai si `s` est une empreinte SHA-256 en hexadécimal : exactement 64 chiffres hexadécimaux.
+pub fn is_sha256_hex(s: &str) -> bool {
+    s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// Empreinte SHA-256 du fichier `path`, en hexadécimal minuscule, lue en flux : le fichier
+/// n'est jamais tenu entier en mémoire.
+pub fn sha256_file(path: &Path) -> std::io::Result<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 1 << 20];
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
 }
 
 impl ModelDeclaration {
+    /// Vrai si toutes les empreintes dues sont déclarées : celle du modèle, et celle de
+    /// l'adaptateur s'il y en a un.
+    pub fn fingerprints_declared(&self) -> bool {
+        self.model_sha256.is_some() && (self.adapter.is_none() || self.adapter_sha256.is_some())
+    }
+
     /// Les GGUF nommés : le modèle, puis l'adaptateur.
     pub fn files(&self) -> impl Iterator<Item = &str> {
         std::iter::once(self.model.as_str()).chain(self.adapter.as_deref())
@@ -114,6 +156,21 @@ pub fn read_declaration(path: &Path) -> Result<ModelDeclaration, String> {
                 "la déclaration de modèle nomme « {bad} », qui n'est pas un nom de fichier GGUF du même dossier"
             )
         });
+    }
+    for (field, value) in [
+        ("model_sha256", &declaration.model_sha256),
+        ("adapter_sha256", &declaration.adapter_sha256),
+    ] {
+        if value.as_deref().is_some_and(|v| !is_sha256_hex(v)) {
+            return Err(format!(
+                "la déclaration de modèle porte une empreinte « {field} » mal formée (64 chiffres hexadécimaux attendus)"
+            ));
+        }
+    }
+    if declaration.adapter.is_none() && declaration.adapter_sha256.is_some() {
+        return Err(
+            "la déclaration de modèle porte « adapter_sha256 » sans nommer d'adaptateur".to_string(),
+        );
     }
     Ok(declaration)
 }
@@ -309,6 +366,10 @@ pub struct DiagnosedModel {
     /// français et sans chemin ; absent si rien.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub problem: Option<String>,
+    /// Avertissement qui n'empêche pas de servir : « empreinte du modèle non déclarée » ;
+    /// absent si les empreintes sont déclarées.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
 }
 
 /// Le diagnostic du dossier de modèles : le dossier retenu, et chaque modèle avec son problème.
@@ -334,6 +395,14 @@ pub fn diagnose(
     let models = hide_named(scan(&folder)?, |m| m.missing.is_empty())
         .into_iter()
         .map(|m| {
+            // Un GGUF seul n'a pas de déclaration, donc pas d'empreinte ; une déclaration
+            // illisible a déjà son problème.
+            let warning = match &m.declaration {
+                None => true,
+                Some(Ok(d)) => !d.fingerprints_declared(),
+                Some(Err(_)) => false,
+            }
+            .then(|| UNDECLARED_FINGERPRINT.to_string());
             let problem = match m.declaration {
                 Some(Err(e)) => Some(e),
                 _ if !m.missing.is_empty() => {
@@ -345,6 +414,7 @@ pub fn diagnose(
                 file: m.file,
                 size_bytes: m.size_bytes,
                 problem,
+                warning,
             }
         })
         .collect();
@@ -637,9 +707,9 @@ mod tests {
             problem,
             "la déclaration de modèle n'est pas lisible (ligne 1, colonne 1)"
         );
-        // Le GGUF seul ne porte pas de champ `problem`.
+        // Le GGUF seul ne porte pas de champ `problem`, mais l'avertissement d'empreinte.
         let json = serde_json::to_value(&d.models[2]).unwrap();
-        assert_eq!(json, json!({"file": "c.gguf", "size_bytes": 2}));
+        assert_eq!(json, json!({"file": "c.gguf", "size_bytes": 2, "warning": UNDECLARED_FINGERPRINT}));
         // `model.list` reste inchangé : la déclaration illisible n'y figure pas, et la
         // déclaration lisible cache les GGUF qu'elle nomme.
         let listed = discover(dir.to_str(), None).unwrap();
@@ -695,6 +765,80 @@ mod tests {
         let err = diagnose(dir.join("absent").to_str(), None).unwrap_err();
         assert_eq!(err.code, "models.no_folder");
         assert!(diagnose(None, None).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sha256_file_matches_the_known_digest_and_streams() {
+        let dir = scratch("sha");
+        let f = dir.join("a.gguf");
+        std::fs::write(&f, b"abc").unwrap();
+        assert_eq!(
+            sha256_file(&f).unwrap(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        // Plus grand que le tampon de lecture : lu en plusieurs morceaux.
+        std::fs::write(&f, vec![7u8; (1 << 20) * 2 + 5]).unwrap();
+        assert_eq!(sha256_file(&f).unwrap().len(), 64);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn declaration_fingerprints_are_validated_and_reported_undeclared() {
+        let dir = scratch("fp");
+        let f = dir.join("x.modele.json");
+        let good = "a".repeat(64);
+        std::fs::write(
+            &f,
+            format!(r#"{{"model":"m.gguf","model_sha256":"{good}"}}"#),
+        )
+        .unwrap();
+        let d = read_declaration(&f).unwrap();
+        assert_eq!(d.model_sha256.as_deref(), Some(good.as_str()));
+        assert!(d.fingerprints_declared());
+        // Mal formée : refusée.
+        for bad in ["abc".to_string(), "z".repeat(64), "a".repeat(63)] {
+            std::fs::write(&f, format!(r#"{{"model":"m.gguf","model_sha256":"{bad}"}}"#)).unwrap();
+            assert!(read_declaration(&f).unwrap_err().contains("mal formée"));
+        }
+        // Empreinte d'adaptateur sans adaptateur : refusée.
+        std::fs::write(
+            &f,
+            format!(r#"{{"model":"m.gguf","adapter_sha256":"{good}"}}"#),
+        )
+        .unwrap();
+        assert!(read_declaration(&f).is_err());
+        // Diagnostic : sans empreinte, GGUF seul et adaptateur sans empreinte sont signalés.
+        std::fs::write(dir.join("m.gguf"), b"1").unwrap();
+        std::fs::write(dir.join("solo.gguf"), b"1").unwrap();
+        std::fs::write(dir.join("l.gguf"), b"1").unwrap();
+        std::fs::write(&f, r#"{"model":"m.gguf"}"#).unwrap();
+        std::fs::write(
+            dir.join("y.modele.json"),
+            format!(r#"{{"model":"m.gguf","adapter":"l.gguf","model_sha256":"{good}"}}"#),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("z.modele.json"),
+            format!(
+                r#"{{"model":"m.gguf","adapter":"l.gguf","model_sha256":"{good}","adapter_sha256":"{good}"}}"#
+            ),
+        )
+        .unwrap();
+        let d = diagnose(dir.to_str(), None).unwrap();
+        let warn = |name: &str| {
+            d.models
+                .iter()
+                .find(|m| m.file == name)
+                .unwrap()
+                .warning
+                .clone()
+        };
+        let msg = Some(UNDECLARED_FINGERPRINT.to_string());
+        assert_eq!(warn("x.modele.json"), msg);
+        assert_eq!(warn("solo.gguf"), msg);
+        assert_eq!(warn("y.modele.json"), msg);
+        assert_eq!(warn("z.modele.json"), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

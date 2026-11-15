@@ -447,7 +447,7 @@ fn plan_propose_with_a_declaration_naming_a_missing_base_names_the_file_only() {
     assert_eq!(
         replies[0]["result"]["models"],
         json!([{"file": "ajuste.modele.json", "size_bytes": 17,
-            "problem": "fichier manquant : base-absente.gguf"}])
+            "problem": "fichier manquant : base-absente.gguf", "warning": "empreinte du modèle non déclarée"}])
     );
     assert_eq!(replies[1]["error"]["data"]["code"], "ai.no_model", "{text}");
     assert_eq!(
@@ -484,7 +484,7 @@ fn agent_models_lists_two_models_and_an_unknown_choice_is_refused() {
     assert_eq!(replies.len(), 2, "{text}");
     assert_eq!(
         replies[0]["result"],
-        json!({"models": [{"file": "a.gguf", "size_bytes": 5}, {"file": "b.gguf", "size_bytes": 3}]})
+        json!({"models": [{"file": "a.gguf", "size_bytes": 5, "warning": "empreinte du modèle non déclarée"}, {"file": "b.gguf", "size_bytes": 3, "warning": "empreinte du modèle non déclarée"}]})
     );
     assert_eq!(
         replies[1]["error"]["data"]["code"], "models.unknown",

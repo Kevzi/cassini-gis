@@ -215,6 +215,23 @@ class PipelineGuards(unittest.TestCase):
                     self.assertNotRegex(file, r"[/\\:]|\.\.")
                     self.assertTrue(file.endswith(".gguf"), file)
 
+    def test_declarations_carry_the_sha256_of_the_gguf_files_they_name(self):
+        import hashlib
+
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder)
+            contents = {pipeline.BASE_NAME: b"base", pipeline.ADAPTER_NAME: b"lora", pipeline.MERGED_NAME: b"fusion"}
+            for name, content in contents.items():
+                (output / name).write_bytes(content)
+            pipeline.write_declarations(output)
+            adapted = json.loads((output / pipeline.ADAPTED_DECLARATION_NAME).read_text(encoding="utf-8"))
+            merged = json.loads((output / pipeline.MERGED_DECLARATION_NAME).read_text(encoding="utf-8"))
+        digest = lambda name: hashlib.sha256(contents[name]).hexdigest()  # noqa: E731
+        self.assertEqual(adapted["model_sha256"], digest(pipeline.BASE_NAME))
+        self.assertEqual(adapted["adapter_sha256"], digest(pipeline.ADAPTER_NAME))
+        self.assertEqual(merged["model_sha256"], digest(pipeline.MERGED_NAME))
+        self.assertNotIn("adapter_sha256", merged)
+
 
 if __name__ == "__main__":
     unittest.main()

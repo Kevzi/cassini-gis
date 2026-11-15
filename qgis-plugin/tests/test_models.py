@@ -51,16 +51,23 @@ class CleanTest(unittest.TestCase):
         got = models.clean([
             {"file": "a.gguf", "size_bytes": True, "problem": "  "},
             {"file": "b.gguf", "size_bytes": -1, "problem": 3},
-            {"file": "c.gguf", "size_bytes": 7, "problem": "fichier manquant : d.gguf"},
+            {"file": "c.gguf", "size_bytes": 7, "problem": "fichier manquant : d.gguf", "warning": None},
         ])
         self.assertEqual(got, [
-            {"file": "a.gguf", "size_bytes": None, "problem": None},
-            {"file": "b.gguf", "size_bytes": None, "problem": None},
-            {"file": "c.gguf", "size_bytes": 7, "problem": "fichier manquant : d.gguf"},
+            {"file": "a.gguf", "size_bytes": None, "problem": None, "warning": None},
+            {"file": "b.gguf", "size_bytes": None, "problem": None, "warning": None},
+            {"file": "c.gguf", "size_bytes": 7, "problem": "fichier manquant : d.gguf", "warning": None},
         ])
 
 
 class LabelTest(unittest.TestCase):
+    def test_an_undeclared_fingerprint_is_flagged_but_stays_usable(self):
+        listed = [{"file": "a.gguf", "size_bytes": 2_000, "warning": "empreinte du modèle non déclarée"}]
+        entries = models.clean(listed)
+        self.assertEqual(models.usable(entries), ["a.gguf"])
+        self.assertEqual(models.label("fr", entries[0]), "a.gguf (2,0 ko) — empreinte du modèle non déclarée")
+        self.assertEqual(models.label("en", entries[0]), "a.gguf (2.0 kB) — model fingerprint not declared")
+
     def test_name_and_readable_size(self):
         entry = models.clean(LISTED)[0]
         self.assertEqual(models.label("fr", entry), "Qwen3.5-9B-Q4_K_M.gguf (5,6 Go)")

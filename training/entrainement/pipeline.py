@@ -1480,8 +1480,16 @@ def read_report(path: Path) -> dict[str, Any]:
 
 def write_declarations(output: Path, declarations: dict[str, dict[str, str]] = DECLARATIONS) -> list[str]:
     """Écrit les déclarations de modèle à côté des GGUF (base + adaptateur, fusionné), sous un
-    nom temporaire puis renommées, et rend leurs noms. Réécrites à l'identique à la reprise."""
+    nom temporaire puis renommées, et rend leurs noms. Réécrites à l'identique à la reprise.
+
+    Chaque déclaration porte l'empreinte SHA-256 des GGUF qu'elle nomme (`model_sha256`,
+    `adapter_sha256`), calculée sur les fichiers du dossier : le noyau les vérifie au premier
+    chargement (ticket 5.51). Un GGUF absent du dossier reste sans empreinte."""
     for name, declaration in declarations.items():
+        declaration = dict(declaration)
+        for field, key in (("model_sha256", "model"), ("adapter_sha256", "adapter")):
+            if key in declaration and (output / declaration[key]).is_file():
+                declaration[field] = sha256(output / declaration[key])
         partial = temporary(output / name)
         partial.write_text(json.dumps(declaration, ensure_ascii=False) + "\n", encoding="utf-8")
         partial.replace(output / name)

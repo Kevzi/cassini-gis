@@ -1497,12 +1497,51 @@ mod tests {
         let models = composer.models(&Registry::standard()).unwrap();
         let text = Value::Array(models.clone()).to_string();
         assert!(shows_no_folder(&text, &dir), "{text}");
-        assert_eq!(models[0], json!({"file": "a.gguf", "size_bytes": 5}));
-        assert_eq!(models[1], json!({"file": "b.gguf", "size_bytes": 3}));
+        assert_eq!(
+            models[0],
+            json!({"file": "a.gguf", "size_bytes": 5, "warning": "empreinte du modèle non déclarée"})
+        );
+        assert_eq!(
+            models[1],
+            json!({"file": "b.gguf", "size_bytes": 3, "warning": "empreinte du modèle non déclarée"})
+        );
         assert_eq!(models[2]["file"], "casse.modele.json");
         assert!(models[2]["problem"].is_string());
         assert_eq!(models[3]["problem"], "fichier manquant : absent.gguf");
         assert_eq!(models.len(), 4);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Ticket 5.51 : un modèle dont l'empreinte ne correspond pas n'est pas chargé ; l'erreur
+    /// `models.tampered` ne nomme que le fichier, sans chemin ni téléchargement.
+    #[test]
+    fn a_tampered_model_is_refused_without_a_path_or_a_download() {
+        let (dir, composer) = models_folder();
+        std::fs::write(
+            dir.join("fige.modele.json"),
+            format!(
+                r#"{{"model":"a.gguf","model_sha256":"{}"}}"#,
+                "0".repeat(64)
+            ),
+        )
+        .unwrap();
+        let e = composer.choose(Some("fige.modele.json")).unwrap_err();
+        assert_eq!(e.code, "models.tampered");
+        assert!(e.message.contains("a.gguf"), "{}", e.message);
+        assert!(shows_no_folder(&e.message, &dir), "{}", e.message);
+        assert!(
+            !e.message.to_lowercase().contains("télécharg"),
+            "{}",
+            e.message
+        );
+        // Une déclaration juste charge.
+        let sha = cassini_core::commands::model_list::sha256_file(&dir.join("b.gguf")).unwrap();
+        std::fs::write(
+            dir.join("juste.modele.json"),
+            format!(r#"{{"model":"b.gguf","model_sha256":"{sha}"}}"#),
+        )
+        .unwrap();
+        assert!(composer.choose(Some("juste.modele.json")).is_ok());
         let _ = std::fs::remove_dir_all(dir);
     }
 
