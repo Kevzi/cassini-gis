@@ -1193,3 +1193,9 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/plan-5-58-familles-bdtopo-jumeaux-valeurs-couche-principale.md`
   summary: Lire `qgis_shapes` et `focus_ids` pour savoir si la couche jumelle marquée « leurre » dans `couche_principale` perd sa géométrie dans les exemples.
   evidence: la relecture 5.58 le soupçonne sans l'avoir confirmé ; si c'est le cas, le modèle verrait un signe qui n'existe pas avec de vraies jumelles.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-export-et-demo/story-refactor-sweep-plan.md`
+  summary: Précision sur l'entrée de 7.9 « sorties des plans précédents sous leur nom technique » : le correctif f5bd91c (2026-11-13) la traite pour une session enchaînée normale ; il ne reste que le cas d'une session rouverte en milieu de plan (`Session.plan_start` à `None`, `core/src/journal/mod.rs`), où aucun `focus` n'est calculé.
+  evidence: tri du ticket 7 (2026-11-15) ; aucun constat reporté de l'epic ne vise le code de la sonde de démo : ils touchent le noyau, l'extension, une décision du propriétaire (légende des MNT) ou l'absence de QGIS en CI, et restent consignés ici.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-export-et-demo/story-refactor-sweep-plan.md`
+  summary: Le noyau installé (`%LOCALAPPDATA%` Cassini, construit le 2026-11-13 à 09:35) précède f5bd91c (2026-11-13, 18:22) : avec lui, `probe_demo.py` sur les fixtures rend ECHEC sur la pente (« sorties du plan 1 encore dans le PDF ») ; avec un noyau reconstruit à jour, il rend OK. À réinstaller sur décision du propriétaire (risque moyen : la démo filmée tourne avec ce noyau).
+  evidence: mesures du 2026-11-15 consignées dans le plan du ticket 7 ; sonde OK avec `C:\ct-5-57g\release\cassini.exe`, ECHEC avec le noyau installé.
