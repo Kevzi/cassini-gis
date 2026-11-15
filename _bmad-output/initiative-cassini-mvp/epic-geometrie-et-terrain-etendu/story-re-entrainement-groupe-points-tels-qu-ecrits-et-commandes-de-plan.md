@@ -3,7 +3,7 @@ title: 'Ré-entraînement groupé : points tels qu''écrits et commandes de styl
 type: 'feature'
 ticket: '23'
 created: '2026-11-08'
-status: 'in-review'
+status: 'done'
 baseline_revision: '8c69b8aabba1b452c7752aa76d2d81b8584982cd'
 route: 'full'
 route_source: 'auto'
@@ -93,6 +93,8 @@ context:
   - F03 « carroyage UTM au kilomètre » sans `utm_epsg` dans l'inventaire : le modèle invente EPSG:32620 au lieu de poser la question — erreur réelle (65 recopies contre 11 questions dans le jeu).
   - S21 (ligne de vue en Lambert-93) et ST08 (dégradé à intervalles égaux en bleus) : écarts de paramètres, à lire de près.
 - Barres non tenues (`plan_reel` 22 < 23 tant que l'attendu de S05 n'est pas corrigé ; F03) : le modèle n'est pas proposé à l'installation. Le second essai (au plus un) n'est pas lancé : il prend la carte graphique environ 6 h et attend la décision du propriétaire (règle de 11.16). Pistes : attendu de S05 ; exemples où une couche déjà métrique n'est jamais reprojetée ; plus de questions quand l'inventaire n'a pas de `utm_epsg`.
+
+- Clôture (2026-11-15) : le premier essai n'a pas tenu les barres, le second essai a été mené dans `plan-second-essai-11-23.md` (commit `84a39ca`) : modèle `ajuste-11-23c`, validation 288/300, `plan_reel` 23/25, `question_reel` 12/12, `ecart_reel` 32/40, `echelle_utm_reel` 8/8, `terrain_reel` 8/8, `epic11_reel` 28/28 (F03 en question), `style_reel` 9/10. Toutes les barres sont tenues ; la règle « au plus un second essai » est respectée. Le modèle n'est pas installé : décision du propriétaire. La relecture de la partie A est triée plus bas (boucle 0) ; aucune nouvelle revue lancée à la clôture.
 
 ## Plan Change Log
 
