@@ -1022,4 +1022,5 @@ notes = [
   "Decision: 2026-11-14 — GN20 (« Selectionne les passages a niveau ») n'est pas un rate du modele : point_du_reseau (186), toponymie (177) et INFO_PCT (20) portent la valeur ; la question du modele est legitime. L'attendu n'est pas retouche apres coup.",
   "Decision: 2026-11-14 — le modele ajuste-continu-5-58-1 est installe ; l'ancien (ajuste-apres-5-49-b) est sauvegarde dans cassini-modeles. Une installation de plus ne se fait que sur decision du proprietaire, juge « installable » et Annecy a 16/20 au moins.",
   "Controle hors des criteres : le proprietaire decide de l'installation ; le juge de non-oubli n'est pas contourne.",
+  "Resultat: 2026-11-15 — mesure et refuse : juge de non-oubli « refuse » (ecart_reel, epic11_reel, par_commande_reel en baisse), Annecy 17/20, v3 17/20, v4 17/20. GN07 reste rate. Rien d'installe ; rapport dans docs/entrainement-du-modele.md.",
 ]

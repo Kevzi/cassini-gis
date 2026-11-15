@@ -3258,3 +3258,46 @@ plan), `every_ambiguous_term_is_caught_and_its_neighbours_are_not` (chaque entr�
 dans les demandes de sa commande). Poids, graine et `DEFAULT_COUNT` inchangés ; le jeu engendré
 change (349 redemandes sur 8 600 à la graine 1, 4,06 %, au bas de la fourchette de 4 à 7 %), et
 le modèle ne l'apprend qu'au prochain entraînement.
+
+## Séance continue 5.59 : mesurée, refusée (2026-11-15)
+
+Séance repartie de `ajuste-continu-5-58-1` (le modèle installé) avec les 13 familles de 5.58-1 et
+`couche_par_valeur`, rappel à 0,5, 3 000 exemples, graine torch 1 (script `nuit-5-59.sh`, hors
+dépôt). Sortie `ajuste-continu-5-59-1`, copiée dans `cassini-modeles`, **non installée**.
+
+**Avant la séance.** Le jeu ciblé à 14 familles reprenait « Trouve les cols. » (GN07) à
+l'identique : le pipeline l'a refusé. Le contrôle par famille seule ne le voyait pas, car chaque
+retrait d'une famille déplace le tirage. Sur 8 graines à 20 000 exemples, c'était la seule
+collision de `couche_par_valeur`. La tête « Trouve » est écartée pour la valeur `Col`, comme
+« Sélectionne » l'est pour la phrase de la recette 5.50 (`c4b7266`).
+
+**Mesures (GPU), modèle installé → candidat.**
+
+| | 5-58-1 | 5-59-1 |
+|---|---|---|
+| plan_reel | 44/48 | 43/48 |
+| question_reel | 46/47 | 46/47 |
+| ecart_reel | 38/40 | 36/40 (baisse) |
+| echelle_utm_reel | 42/44 | 43/44 |
+| terrain_reel | 37/44 | 40/44 |
+| epic11_reel | 45/49 | 43/49 (baisse) |
+| style_reel | 36/42 | 39/42 |
+| par_commande_reel | 89/99 | 86/99 (baisse) |
+| recette d'Annecy | 18/20 | 17/20 |
+| gros projet | 7/7 | 7/7 |
+| v3 (20 phrases) | 18/20 | 17/20 |
+| v4 (20 phrases neuves) | non mesurée | 17/20 |
+
+Verdict du juge de non-oubli : **refusé** (trois baisses : `ecart_reel`, `epic11_reel`,
+`par_commande_reel`). Les barres de recette sont tenues, mais le juge ne tolère pas la baisse.
+
+**Sort de GN07 : raté, inchangé.** « Trouve les cols. » part encore sur le raster `mnt-annecy-5m`
+(question « champ de type de relief ») au lieu de `detail_orographique.nature = Col`. GN06
+(« terrains de tennis » → « Petit terrain multi-sports ») est un raté nouveau de la v3. Les trois
+ratés de la v4 (HN03 « cascades », HN08 « lavoirs », HN10 « gares de téléphérique ») sont des
+questions posées sur une phrase claire : la famille `couche_par_valeur` n'a pas réglé le défaut
+« valeur rare → question ».
+
+Relevés bruts hors dépôt : `~/cassini-entrainement/5-59-1-mesures/`. Le modèle installé reste
+`ajuste-continu-5-58-1`. Piste non vérifiée : montrer autrement les valeurs d'une table qui en
+porte beaucoup, plutôt que d'entraîner encore.
