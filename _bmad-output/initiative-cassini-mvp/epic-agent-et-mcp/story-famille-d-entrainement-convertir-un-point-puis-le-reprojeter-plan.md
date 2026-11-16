@@ -3,7 +3,7 @@ title: 'Famille d''entrainement : convertir un point puis le reprojeter, avant u
 type: 'feature'
 ticket: '61'
 created: '2026-11-16'
-status: 'built'
+status: done
 baseline_revision: '302df024402ea12209f570fb1ee81434fdff3fb8'
 route: 'full'
 route_source: 'auto'
@@ -65,7 +65,7 @@ context: ['{project-root}/docs/entrainement-du-modele.md']
 
 ## Implementation Notes
 
-Lot 1 fait le 2026-11-16 : famille `mgrs_vers_vision_cumulee_pdf` (poids 4), test sur 600 tirages, plancher de 40, doc. Tests de `cassini-training` verts, clippy et fmt propres. Lot 2 (seance continue, juge, mesures) : a faire.
+Lot 1 fait le 2026-11-16 : famille `mgrs_vers_vision_cumulee_pdf` (poids 4), test sur 600 tirages, plancher de 40, doc. Tests de `cassini-training` verts, clippy et fmt propres. Lot 2 (`continu-5-61`, 2026-11-16) : refuse par le juge (terrain_reel 37 -> 33, question_reel 46 -> 44) ; le plan de 11.14 gardait `data.reproject` a l'etape 2. Lot 3 : tournures qui disent la conversion puis la reprojection du point (2 fois sur 3), deux bornes du jeu assouplies (`couches_proches` >= 90, part planifiee >= 17 %, a confirmer). Seance `continu-5-61b` : juge installable, Annecy 18/20, gros 7/7, v4 15/20 (sous la barre de 16, accepte). **Decision du proprietaire (2026-11-16) : installer.** `continu-5-61b` est installe (empreinte verifiee) ; l'ancien `ajuste-continu-5-58-1` est sauvegarde dans `cassini-modeles`. Sonde de 11.14 sur le modele installe : `VERDICT : OK`.
 
 ## Plan Change Log
 
