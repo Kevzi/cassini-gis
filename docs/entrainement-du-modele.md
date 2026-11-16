@@ -841,6 +841,8 @@ rien n'est installé sans décision du propriétaire.
 
 **Lot 3 (2026-11-16).** Deux fois sur trois, la famille écrit elle-même la conversion puis la reprojection du point (« Passe … en WGS84, puis reprojette-le dans le système du MNT, établis … depuis ce point »), six tournures de tête, quatre de suite ; la phrase de 11.14 n'est pas copiée. Le décalage de la graine a fait sortir deux bornes de leurs anciennes valeurs, assouplies et à confirmer par le propriétaire : `couches_proches` au moins 90 (au lieu de 100), part planifiée au moins 17 % (au lieu de 20 %).
 
+**Lot 3, résultat (séance `continu-5-61b`, 2026-11-16) : installable.** Entraînement 52 min 26 s (continu depuis `ajuste-continu-5-58-1`). Juge : « installable », toutes les barres tenues (plan 44/48, question 45/47, terrain 39/44 contre 37/44, par commande 89/99). Annecy 18/20 (barre 16), gros projet 7/7, v4 15/20 (barre 16 : **sous la barre**, point à décider par le propriétaire). Sonde de 11.14 sur ce modèle, sans l'installer : plan juste en quatre étapes (`coord.convert`, `data.transform_point`, `terrain.viewshed_cumulative` sur `step:2.point`, `layout.export_pdf` A3, grille UTM de 1 km), `VERDICT : OK`, rejeu identique, PDF regardé (A3, carroyage de 1 km, légende, échelle, nord, sources). Le verdict avait d'abord refusé « PDF de 2 pages » : Qt réécrit l'objet de la page dans une mise à jour incrémentale ; `pdf_page_count` compte désormais les objets distincts (test ajouté). Aucun modèle installé.
+
 ### Inventaires larges et jeu de 8 600 exemples (2026-11-10)
 
 Après la nuit du 2026-11-10, deux corrections du générateur décidées par le propriétaire, mêmes

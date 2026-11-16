@@ -22,8 +22,12 @@ GOOD_GRIDS = [("EPSG:32632", 1000.0, 1000.0, True)]
 
 def pdf(width=1190.55, height=841.89, pages=1):
     body = b"%%PDF-1.7\n1 0 obj << /Type /Pages /Count %d >> endobj\n" % pages
-    for _ in range(pages):
-        body += b"2 0 obj << /Type /Page /MediaBox [0 0 %.2f %.2f] >> endobj\n" % (width, height)
+    for number in range(2, 2 + pages):
+        body += b"%d 0 obj << /Type /Page /MediaBox [0 0 %.2f %.2f] >> endobj\n" % (
+            number,
+            width,
+            height,
+        )
     return body
 
 
@@ -103,6 +107,12 @@ class PdfTest(unittest.TestCase):
 
     def test_no_media_box(self):
         self.assertIn("boîte", v.judge_pdf(b"%PDF-1.7\n", GOOD_GRIDS))
+
+    def test_a_page_rewritten_by_an_incremental_update_counts_once(self):
+        # Le PDF géoréférencé de Qt réécrit l'objet de la page (même numéro) en fin de fichier.
+        data = pdf() + b"2 0 obj << /MediaBox [ 0 0 1191 842 ] /Type /Page /VP [ 9 0 R ] >> endobj\n"
+        self.assertEqual(v.pdf_page_count(data), 1)
+        self.assertIsNone(v.judge_pdf(data, GOOD_GRIDS))
 
     def test_two_pages(self):
         self.assertIn("2 page", v.judge_pdf(pdf(pages=2), GOOD_GRIDS))

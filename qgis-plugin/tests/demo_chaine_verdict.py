@@ -84,8 +84,16 @@ def pdf_media_box(data):
 
 
 def pdf_page_count(data):
-    """Nombre de pages d'un PDF lu en octets (objets `/Type /Page`, hors `/Pages`)."""
-    return len(re.findall(rb"/Type\s*/Page(?![s\w])", data or b""))
+    """Nombre de pages d'un PDF lu en octets (objets `/Type /Page`, hors `/Pages`).
+
+    Un PDF géoréférencé de Qt réécrit la page dans une mise à jour incrémentale (même numéro
+    d'objet, deux fois dans le fichier) : on compte les objets distincts, pas les occurrences."""
+    data = data or b""
+    objects = set()
+    for found in re.finditer(rb"/Type\s*/Page(?![s\w])", data):
+        owner = re.findall(rb"(\d+)\s+\d+\s+obj\b", data[: found.start()])
+        objects.add(owner[-1] if owner else found.start())
+    return len(objects)
 
 
 def is_a3(box):
