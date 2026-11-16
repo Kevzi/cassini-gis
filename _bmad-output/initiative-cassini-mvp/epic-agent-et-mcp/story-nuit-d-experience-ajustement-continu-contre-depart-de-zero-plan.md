@@ -3,7 +3,7 @@ title: 'Nuit d''experience : ajustement continu contre depart de zero'
 type: 'chore'
 ticket: '55'
 created: '2026-11-16'
-status: 'done'
+status: done
 baseline_revision: '31d13200b27f6a6b0e52e98feab94c7b389e719b'
 route: 'full'
 route_source: 'auto'
