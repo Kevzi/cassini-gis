@@ -108,6 +108,7 @@ standards publics et ne sont tirées d'aucun fichier réel.
 | `question_valeur_absente` | depuis la séance 3 de 5.54 : une valeur absente des valeurs connues d'un champ (clé `values`), ou « en zone AU » sans aucune valeur qui commence par AU → question qui nomme la couche, le champ et ses valeurs ; un tiers de contraste, la valeur listée → le plan ; une fois sur six, la valeur dans un champ de nom montré sans `values` → le plan avec la valeur écrite (poids 5) |
 | `jumeaux_bdtopo` | depuis 5.58 : deux tables BD TOPO qui se disputent un mot (`troncon_de_route` et `route_numerotee_ou_nommee`, `troncon_de_voie_ferree` et `voie_ferree_nommee`) ; « tampon autour des routes » → une question qui cite les deux noms ; « des routes nommées » ou « des tronçons de route » (un tiers) → le plan sur cette table (poids 6) |
 | `couche_par_valeur` | depuis 5.58 : une couche que la demande ne désigne que par une valeur de `nature` (« les lacs » → `plan_d_eau`, « les gares routières » → `equipement_de_transport`) → `analysis.select_by_attribute` sur la table qui porte la valeur ; deux tables qui la portent (`Port`, `Réservoir`) → une question qui cite les deux (poids 6) |
+| `mgrs_vers_vision_cumulee_pdf` | depuis 5.61 : un observateur donné par une référence MGRS, un champ de vision cumulé, puis un PDF A3 carroyé en UTM au kilomètre → `coord.convert`, `data.transform_point` (point `step:1.wgs84`, système du MNT), `terrain.viewshed_cumulative` (`observers: ["step:2.point"]`, jamais `data.reproject` ni `terrain.viewshed`), `layout.export_pdf` |
 | `couche_principale` | depuis 5.58 : `commune` et `commune_associee_ou_deleguee` (ou « Gares » et « Gares hors service ») ; « les communes » → le plan sur la couche au nom exact, sans question ; le qualificatif dit → la couche longue (poids 4) |
 | `refus` | courriel, suppression d'entités, effacement du fichier d'une couche sur le disque (« supprime le fichier de la couche … du disque », depuis 10.27 : retirer la couche du projet est un plan, `retrait_couche` ; le refus dit que les fichiers de l'utilisateur ne sont jamais modifiés), export d'une couche en tableur (Excel, CSV : le refus nomme les formats de `data.convert`, depuis 10.9), couleur choisie à la main (« mets les gares en rouge » : depuis 11.23, le refus dit que le catalogue ne pose pas de couleur choisie mais sait les couleurs topographiques et le dégradé, jamais qu'aucune commande ne change le style), itinéraire sur le réseau routier entre deux objets d'une couche (depuis 11.12, lot 2b-1, le refus dit que le chemin de moindre coût demande un raster de coût et deux points en coordonnées), téléchargement, 3D → refus affirmatif |
 | `refus_hors_registre` | cadrage ou zoom de la carte, PDF dans un format hors de la série du catalogue (A5, lettre US), ou envoyé à une imprimante ou avec un nombre d'exemplaires (« envoie la carte à l'imprimante », « en 3 exemplaires ») ; « imprime la carte » seul reste un export, PDF qui nomme les couches à montrer (« fais une carte PDF A3 des écoles et des gares », depuis 11.23 : l'export met en page la carte affichée sans choisir ses couches, même avec un format ou une orientation connus), trajet depuis plusieurs lieux (« de chaque gare », « de toutes les gares », « des gares ») → refus affirmatif, jamais un plan de substitution. Le point de terrain écrit dans un autre système que le MNT, refusé en 5.41, est un plan depuis 11.12 (`terrain_autre_systeme`). Le champ de vision, la ligne de vue et la pente n'y sont plus depuis 4.6 : le registre les a. Le seuil sur la pente (« où la pente dépasse 15 % »), refusé de 4.6 à 11.12, est un plan depuis 11.12, lot 2a (`pente_seuil`). Le PDF en A3, A0 ou portrait, refusé jusqu'au lot 3 de 11.12 (« seulement une page A4 paysage »), est un plan depuis (`export_pdf_format`) |
@@ -815,6 +816,26 @@ haut est périmé). Chaque famille déjà là garde 580 / 596 = 97,3 % de son co
 (`cargo run -p cassini-training`), puis l'entraînement de la procédure du ré-entraînement groupé
 (5.49), et mesurer sur des phrases neuves (v3) plutôt que sur la recette 5.50 déjà retouchée.
 `DEFAULT_COUNT` reste au propriétaire.
+
+### Une famille tirée de la démonstration de 11.14 (5.61, 2026-11-16)
+
+Pour la demande de la démonstration (point MGRS, reprojection vers le système du MNT, champ de
+vision cumulé, PDF A3 carroyé), le modèle installé composait `data.reproject` (une couche) au lieu
+de `data.transform_point` (un point) et `terrain.viewshed` au lieu de `terrain.viewshed_cumulative` ;
+le garde-fou refusait à juste titre la référence `step:2.point`. La famille `mgrs_vers_vision_cumulee_pdf`
+(poids 4) écrit la chaîne `coord.convert` (MGRS vers WGS84), `data.transform_point` (`step:1.wgs84`,
+système du MNT), `terrain.viewshed_cumulative` (`observers: ["step:2.point"]`) et `layout.export_pdf`
+(A3, carroyage projeté d'un kilomètre sur un fuseau UTM tiré par le générateur), avec six tournures. Aucune phrase
+de la recette ni de la demande de 11.14 n'y est reprise (`FOCUS_EXCLUDED` reste vide).
+
+Deux barres de tests bougent, à confirmer par le propriétaire : la barre des gros projets du
+rappel stratifié passe de 18 à 17 % (266 sur 1 500 = 17,7 %), et le rapport questions / recopies du
+carroyage UTM passe de 50 à 48 % en ne comptant plus la nouvelle famille (elle recopie toujours un
+fuseau présent). Le décalage des tirages a aussi fait recopier la phrase tenue DC1 (« Enregistre la
+couche des gares au format GeoJSON. ») par la famille `redemande` (`conversion_format`) : sa
+tournure « Enregistre-moi … » est employée pour « la couche des … » seulement, sans changer aucun
+tirage ; `FOCUS_EXCLUDED` reste vide. Aucun entraînement n'est lancé : le lot 2 repart du modèle installé avec cette famille ;
+rien n'est installé sans décision du propriétaire.
 
 ### Inventaires larges et jeu de 8 600 exemples (2026-11-10)
 

@@ -385,6 +385,12 @@ pub static FAMILIES: &[Family] = &[
         weight: 3,
         make: champ_de_vision_cumule,
     },
+    // 5.61 : la chaîne MGRS, reprojection du point, champ de vision cumulé, PDF carroyé.
+    Family {
+        name: "mgrs_vers_vision_cumulee_pdf",
+        weight: 4,
+        make: mgrs_vers_vision_cumulee_pdf,
+    },
     Family {
         name: "points_hauts",
         weight: 4,
@@ -5548,6 +5554,63 @@ fn champ_de_vision_cumule(rng: &mut Rng) -> Option<Example> {
     Some(example("champ_de_vision_cumule", b, rng, request, expected))
 }
 
+/// Un champ de vision cumulé depuis une référence MGRS, puis l'export PDF carroyé (5.61, tiré de
+/// la démonstration de 11.14) : `coord.convert` (MGRS vers WGS84), `data.transform_point` (le
+/// point WGS84 vers le système du MNT), `terrain.viewshed_cumulative` (`observers` =
+/// `["step:2.point"]`, le point reprojeté, jamais une couche : `data.reproject` n'est pas la
+/// bonne commande) et `layout.export_pdf` (A3, carroyage projeté d'un kilomètre). Les tournures
+/// ne reprennent aucune phrase des recettes tenues.
+fn mgrs_vers_vision_cumulee_pdf(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let epsg = terrain_epsg(rng);
+    let dem = b.add_dem(rng, epsg);
+    let mut steps = Vec::new();
+    let (place, observer) = foreign_terrain_point(rng, epsg, true, &mut steps)?;
+    // L'observateur : la référence, reprojetée sur le système du MNT avant le calcul.
+    let w = pick_str(rng, CUMULATIVE_VIEWSHED_WORDS);
+    let mut body = match rng.below(6) {
+        0 => format!("Établis {w} à partir de {place}"),
+        1 => format!("Trace {w} pour un observateur situé sur {place}"),
+        2 => format!("Je veux {w} d'un observateur placé sur {place}"),
+        3 => format!("Prépare {w} en partant de {place}"),
+        4 => format!("Pour {place}, détermine {w}"),
+        _ => format!("Donne-moi {w} dont l'observateur est {a}", a = a_np(&place)),
+    };
+    let mut params = json!({"dem": dem.source, "observers": [observer]});
+    if rng.chance(1, 2) {
+        let (h, text) = eye_clause(rng);
+        body.push_str(&text);
+        params["observer_height"] = h;
+    }
+    if rng.chance(1, 2) {
+        let (r, text) = radius_clause(rng);
+        body.push_str(&text);
+        params["radius"] = r;
+    }
+    let code = b.project_utm(rng, true)?;
+    let tail = match rng.below(5) {
+        0 => ", puis exporte la carte en PDF A3 avec un carroyage UTM kilométrique",
+        1 => " et sors-en une carte PDF en A3 avec un quadrillage UTM au kilomètre",
+        2 => ", ensuite imprime la carte en PDF au format A3 avec une grille UTM de 1 km",
+        3 => " ; fais-en un PDF A3 carroyé en UTM tous les 1 km",
+        _ => ", et génère le PDF de la carte en A3 avec un carroyage UTM tous les kilomètres",
+    };
+    body.push_str(tail);
+    let request = finish(rng, &body, false, false);
+    steps.push(json!({"command": "terrain.viewshed_cumulative", "params": params}));
+    steps.push(json!({"command": "layout.export_pdf", "params": {
+        "title": "Carte du projet",
+        "page_size": "a3",
+        "grid": {"kind": "projected", "epsg": code, "interval": {"value": 1, "unit": "km"}}}}));
+    Some(example(
+        "mgrs_vers_vision_cumulee_pdf",
+        b,
+        rng,
+        request,
+        calls(steps),
+    ))
+}
+
 const PROMINENCES: &[u64] = &[5, 10, 20, 30, 50];
 const PEAK_SPACINGS: &[(u64, &str)] = &[
     (100, "m"),
@@ -6985,6 +7048,11 @@ fn conversion_format(rng: &mut Rng) -> Option<Example> {
         0 | 1 if what.starts_with("les ") => (format!("Exporte-moi {what} {words}"), false),
         0 | 1 => (format!("Exporte {what} {words}"), false),
         2 => (format!("Convertis {what} {words}"), false),
+        // « Enregistre la couche des gares au format GeoJSON » est DC1 (recouvrement, 5.61 : la
+        // famille ajoutée a déplacé les tirages) : devant « la couche des … », « Enregistre-moi ».
+        3 if what.starts_with("la couche des ") => {
+            (format!("Enregistre-moi {what} {words}"), false)
+        }
         3 => (format!("Enregistre {what} {words}"), false),
         4 => (format!("Sors-moi {what} {words}"), false),
         5 => (format!("Écris {what} {words}"), false),
@@ -15017,6 +15085,37 @@ mod tests {
         for e in &colors {
             assert_eq!(e.expected["reason"], NO_CHOSEN_COLOR, "{}", e.request);
             assert!(!styles_no_layer(&e.expected));
+        }
+    }
+
+    #[test]
+    fn an_mgrs_point_is_converted_then_reprojected_before_a_cumulative_viewshed_and_a_pdf() {
+        // 5.61 : la chaîne de la démonstration de 11.14, une seule référence, jamais une couche.
+        for e in valid(mgrs_vers_vision_cumulee_pdf, 600) {
+            assert_eq!(
+                commands(&e),
+                [
+                    "coord.convert",
+                    "data.transform_point",
+                    "terrain.viewshed_cumulative",
+                    "layout.export_pdf"
+                ],
+                "{}",
+                e.request
+            );
+            let steps = e.expected["calls"].as_array().unwrap();
+            assert_eq!(steps[1]["params"]["point"], "step:1.wgs84");
+            assert_eq!(steps[2]["params"]["observers"], json!(["step:2.point"]));
+            assert_eq!(steps[3]["params"]["page_size"], "a3");
+            let grid = &steps[3]["params"]["grid"];
+            assert_eq!(grid["kind"], "projected");
+            assert_eq!(grid["interval"], json!({"value": 1, "unit": "km"}));
+            assert!(
+                e.request.contains("MGRS") || e.request.contains("mgrs"),
+                "{}",
+                e.request
+            );
+            assert!(e.request.contains("A3"), "{}", e.request);
         }
     }
 
