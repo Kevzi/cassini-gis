@@ -1041,3 +1041,35 @@ notes = [
   "Severite: P2 — contournable en donnant le point en WGS84 ou en Lambert-93.",
   "Controle hors des criteres : relecture thorough (invariant de composition des plans) ; la sonde de 11.14 rejouee sur le poste, confirmee par le proprietaire.",
 ]
+
+[[entry]]
+id = 61
+type = "story"
+title = "Famille d'entrainement : convertir un point puis le reprojeter point par point, avant un champ de vision cumule"
+description = "Pour la demande de la demonstration de 11.14 (point MGRS, reprojection vers le systeme du MNT, champ de vision cumule, PDF A3 carroye), le modele installe compose data.reproject (une couche) au lieu de data.transform_point (un point) et terrain.viewshed au lieu de terrain.viewshed_cumulative ; le garde-fou refuse a juste titre la reference step:2.point. Une famille du generateur apprend la chaine coord.convert, data.transform_point, terrain.viewshed_cumulative, layout.export_pdf, avec des formulations variees ; une seance continue repart du modele installe avec elle."
+verify = "La famille est dans le generateur avec son test de recouvrement ; la seance continue finit avec un verdict du juge de non-oubli et les mesures habituelles (Annecy, gros projet, v4) ; la demande de la demonstration donne un plan sans question du garde-fou ; rien n'est installe sans decision du proprietaire."
+covers = ["CAP-4"]
+after = []
+hitl = true
+risk = "medium"
+notes = [
+  "Decision: 2026-11-16 — constat de 5.60 : le garde-fou est correct, le defaut est dans la composition du modele ; le proprietaire retient l'entrainement plutot qu'une reformulation de la demande.",
+  "Decision: 2026-11-16 — les nuits suivantes se font en continu (5.55) ; le modele installe reste ajuste-continu-5-58-1 ; une installation ne se fait que sur decision du proprietaire, juge « installable » et Annecy a 16/20 au moins.",
+  "Controle hors des criteres : le proprietaire decide de l'installation ; la sonde de 11.14 rejouee sur le poste.",
+]
+
+[[entry]]
+id = 62
+type = "bug"
+title = "La question du garde-fou dit qu'un point manque quand une reference ne designe pas un point"
+description = "Pour la demande de 11.14, le garde-fou refuse observer = step:2.point parce que l'etape 2 (data.reproject) ne produit aucun point, et affiche « Il manque a la demande un point en coordonnees : quels sont x, y et le systeme ». Le message est trompeur : aucune coordonnee ne manque dans la demande, c'est une reference du plan qui ne designe pas un point."
+verify = "Une reference du plan vers un champ qui n'est pas un point rend une question qui le dit, sans demander des x et y a l'utilisateur ; la question d'une coordonnee absente de la demande reste inchangee ; un test echoue avant et passe apres."
+covers = ["CAP-4"]
+after = []
+hitl = false
+risk = "medium"
+refine = true
+notes = [
+  "Decision: 2026-11-16 — propose par 5.60, retenu par le proprietaire ; le refus du garde-fou ne change pas, seul le message.",
+  "Severite: P3 — message trompeur, refus correct.",
+]
