@@ -36,6 +36,10 @@ pub const POINT_MARK: &str = "point";
 /// d'une étape.
 pub const GUARD_QUESTION: &str = "Il manque à la demande un point en coordonnées : quels sont x, y et le système (code EPSG, par exemple 2154 pour le Lambert-93) ?";
 
+/// Question rendue par le garde-fou quand le plan renvoie à une étape dont le champ n'est pas
+/// un point (ni une référence MGRS) : aucune coordonnée ne manque à la demande.
+pub const REFERENCE_QUESTION: &str = "Le plan renvoie à une étape qui ne donne pas de point en coordonnées : peux-tu préciser d'où vient ce point ?";
+
 /// Un point en coordonnées, avec son système (jamais de coordonnée nue, AD-19).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -719,7 +723,9 @@ fn reference_is_a(
 
 /// Garde-fou de AD-23 sur les coordonnées : rend `plan` inchangé si chaque `Point` de ses
 /// étapes vient de `request` ou d'une étape précédente, sinon une question à provenance
-/// `guard`. Une question ou un refus passe inchangé.
+/// `guard` : [`GUARD_QUESTION`] pour une coordonnée absente de la demande,
+/// [`REFERENCE_QUESTION`] pour une référence qui ne désigne pas un point (la première cause
+/// rencontrée dans l'ordre des étapes l'emporte). Une question ou un refus passe inchangé.
 ///
 /// Les nombres de la demande forment un multiensemble : chaque nombre littéral du plan hors
 /// `Point` (durée, distance) y retire d'abord une occurrence égale s'il en trouve une ; puis,
@@ -729,9 +735,10 @@ fn reference_is_a(
 /// question. Le système n'est jamais pris au projet.
 pub fn guard_coordinates(registry: &Registry, plan: Plan, request: &str) -> Plan {
     match &plan {
-        Plan::Calls { calls } if invents_a_point(registry, calls, request, true) => {
-            guard_question()
-        }
+        Plan::Calls { calls } => match invents_a_point(registry, calls, request, true) {
+            Some(doubt) => guard_question(doubt),
+            None => plan,
+        },
         _ => plan,
     }
 }
@@ -743,27 +750,36 @@ pub fn guard_coordinates(registry: &Registry, plan: Plan, request: &str) -> Plan
 /// inconnue n'est pas une affaire de coordonnées : elle est laissée à la redemande.
 pub fn guard_rejected(registry: &Registry, plan: &Plan, request: &str) -> Option<Plan> {
     match plan {
-        Plan::Calls { calls } if invents_a_point(registry, calls, request, false) => {
-            Some(guard_question())
+        Plan::Calls { calls } => {
+            invents_a_point(registry, calls, request, false).map(guard_question)
         }
         _ => None,
     }
 }
 
-/// Vrai si un point de `calls` ne vient ni de `request` ni d'une étape. `strict` : une
-/// commande inconnue compte comme un doute (plan validé) ; sinon elle est ignorée.
+/// Ce que le garde-fou reproche à un plan : une coordonnée qui ne vient pas de la demande, ou
+/// une référence à une étape dont le champ n'est pas ce que le paramètre attend.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Doubt {
+    Invented,
+    Reference,
+}
+
+/// La cause du doute si un point de `calls` ne vient ni de `request` ni d'une étape (sinon
+/// `None`). `strict` : une commande inconnue compte comme un doute (plan validé) ; sinon elle
+/// est ignorée.
 fn invents_a_point(
     registry: &Registry,
     calls: &[PlannedCall],
     request: &str,
     strict: bool,
-) -> bool {
+) -> Option<Doubt> {
     let mut found = Found::default();
     for (index, call) in calls.iter().enumerate() {
         let step = index + 1;
         let Some(spec) = registry.spec(&call.command) else {
             if strict {
-                return true;
+                return Some(Doubt::Invented);
             }
             continue;
         };
@@ -787,7 +803,7 @@ fn invents_a_point(
                             reference_is_a(registry, calls, step, s, root, value, mark)
                         })
                     {
-                        return true;
+                        return Some(Doubt::Reference);
                     }
                 }
                 continue;
@@ -796,7 +812,7 @@ fn invents_a_point(
         }
     }
     if found.doubtful {
-        return true;
+        return Some(Doubt::Invented);
     }
     // Une référence MGRS du plan figure telle quelle dans la demande, espaces et casse ignorés
     // (CAP-15). Elle ne prend aucun nombre à la demande, et ses chiffres n'y restent pas pour
@@ -806,7 +822,7 @@ fn invents_a_point(
     for literal in &found.mgrs {
         let key = mgrs_key(literal);
         let Some(index) = written.iter().position(|w| w.key == key) else {
-            return true;
+            return Some(Doubt::Invented);
         };
         used.push(index);
     }
@@ -851,17 +867,22 @@ fn invents_a_point(
     // L'emprunt n'est permis que si chaque système écrit dans la demande a servi à un point :
     // un système écrit resté sans point (« … en Lambert-93, … en WGS84 », deux points en
     // Lambert-93) est un doute, donc la question (décision du propriétaire, 2026-11-05).
-    invented
+    (invented
         || (borrowed
             && request_systems(request)
                 .iter()
-                .any(|written| !systems.iter().any(|s| same(*s, *written))))
+                .any(|written| !systems.iter().any(|s| same(*s, *written)))))
+    .then_some(Doubt::Invented)
 }
 
-/// La question du garde-fou.
-fn guard_question() -> Plan {
+/// La question du garde-fou, selon la cause du doute.
+fn guard_question(doubt: Doubt) -> Plan {
+    let question = match doubt {
+        Doubt::Invented => GUARD_QUESTION,
+        Doubt::Reference => REFERENCE_QUESTION,
+    };
     Plan::Question {
-        question: GUARD_QUESTION.to_string(),
+        question: question.to_string(),
         source: QuestionSource::Guard,
     }
 }
@@ -886,6 +907,18 @@ mod tests {
     }
 
     fn is_guard(plan: &Plan) -> bool {
+        matches!(plan, Plan::Question { question, source: QuestionSource::Guard }
+            if question == GUARD_QUESTION || question == REFERENCE_QUESTION)
+    }
+
+    /// La question de la référence qui ne désigne pas un point, et non celle d'une coordonnée
+    /// absente de la demande.
+    fn asks_about_a_reference(plan: &Plan) -> bool {
+        matches!(plan, Plan::Question { question, source: QuestionSource::Guard }
+            if question == REFERENCE_QUESTION)
+    }
+
+    fn asks_for_a_point(plan: &Plan) -> bool {
         matches!(plan, Plan::Question { question, source: QuestionSource::Guard }
             if question == GUARD_QUESTION)
     }
@@ -1481,6 +1514,18 @@ mod tests {
         let partial = isochrone(json!({"x": 2.458, "y": 48.658}), json!(10));
         assert!(registry.check_plan(&partial).is_err());
         assert!(guard_rejected(&registry, &partial, request).is_some_and(|q| is_guard(&q)));
+        // Une référence qui ne désigne pas un point, sur une sortie rejetée : la question de la
+        // référence, comme pour un plan validé.
+        let bad_reference = calls(json!([
+            convert(json!({"mgrs": "32TKR8128088316", "to": ["wgs84"]})),
+            {"command": "data.reproject",
+             "params": {"layer_id": "step:1.point", "target_epsg": 2154}},
+            {"command": "terrain.viewshed",
+             "params": {"dem": "mnt/mnt-74-25m.tif", "observer": "step:2.point"}}
+        ]));
+        let mgrs_request = "Mets 32T KR 81280 88316 (MGRS) en WGS84, puis le champ de vision.";
+        assert!(guard_rejected(&registry, &bad_reference, mgrs_request)
+            .is_some_and(|q| asks_about_a_reference(&q)));
         // Un rejet sans affaire de coordonnées suit son cours : commande inconnue, point donné.
         let unknown = calls(json!([{"command": "no.such", "params": {}}]));
         assert_eq!(guard_rejected(&registry, &unknown, request), None);
@@ -1692,10 +1737,8 @@ mod tests {
                 first,
                 convert(json!({param: reference, "to": ["wgs84"]}))
             ]));
-            assert!(
-                is_guard(&guard_coordinates(&registry, plan, request)),
-                "{param} {reference}"
-            );
+            let guarded = guard_coordinates(&registry, plan, request);
+            assert!(asks_about_a_reference(&guarded), "{param} {reference}");
         }
         // Un champ `Point` d'une autre commande ne tient pas lieu de référence MGRS.
         let plan = calls(json!([
@@ -1750,5 +1793,35 @@ mod tests {
             stray,
             "rien"
         )));
+    }
+
+    #[test]
+    fn a_reference_to_a_step_without_a_point_asks_about_the_reference() {
+        // Le plan de la démonstration de 11.14 : `data.reproject` rend une couche, pas un point.
+        let registry = Registry::standard();
+        let plan = calls(json!([
+            convert(json!({"mgrs": "32TKR8128088316", "to": ["wgs84"]})),
+            {"command": "data.reproject",
+             "params": {"layer_id": "step:1.point", "target_epsg": 2154}},
+            {"command": "terrain.viewshed",
+             "params": {"dem": "mnt/mnt-74-25m.tif", "observer": "step:2.point"}}
+        ]));
+        let request = "Convertis le point 32T KR 81280 88316 (MGRS) en WGS84, reprojette-le, puis calcule le champ de vision depuis ce point.";
+        let guarded = guard_coordinates(&registry, plan, request);
+        assert!(asks_about_a_reference(&guarded), "{guarded:?}");
+        let Plan::Question { question, .. } = guarded else {
+            unreachable!()
+        };
+        assert!(question.ends_with('?'));
+        assert!(!question.contains("x, y"));
+    }
+
+    #[test]
+    fn an_invented_coordinate_keeps_the_question_for_a_point() {
+        let registry = Registry::standard();
+        let plan = calls(json!([convert(json!({
+            "point": {"x": 2.4, "y": 48.7, "epsg": 4326}, "to": ["mgrs"]}))]));
+        let guarded = guard_coordinates(&registry, plan, "Mets ce point en MGRS.");
+        assert!(asks_for_a_point(&guarded), "{guarded:?}");
     }
 }
