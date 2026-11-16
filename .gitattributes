@@ -4,3 +4,6 @@ fixtures/*.geojson -text
 # Coefficients et valeurs de test du WMM2025 : gardés octet pour octet (empreinte SHA-256 du
 # LISEZMOI), jamais de conversion des fins de ligne.
 core/data/wmm2025/* -text
+
+# Scripts shell : toujours en LF, ils tournent sous WSL (une conversion CRLF les casserait).
+*.sh text eol=lf
