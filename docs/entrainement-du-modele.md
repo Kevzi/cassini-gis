@@ -3301,3 +3301,73 @@ questions posées sur une phrase claire : la famille `couche_par_valeur` n'a pas
 Relevés bruts hors dépôt : `~/cassini-entrainement/5-59-1-mesures/`. Le modèle installé reste
 `ajuste-continu-5-58-1`. Piste non vérifiée : montrer autrement les valeurs d'une table qui en
 porte beaucoup, plutôt que d'entraîner encore.
+
+## Nuit d'expérience 5.55 : départ de zéro contre séance continue (2026-11-16)
+
+Deux modèles comparés au modèle installé `ajuste-continu-5-58-1`, par le même juge de non-oubli et
+les mêmes relevés de référence. Générateur au commit `31d1320`.
+
+- **Bras « base »** : `base-5-55`, entraîné de zéro sur le jeu complet (8 600 exemples, graine
+  torch 1), par `training/entrainement/nuit-5-55.sh base`. Copié dans `cassini-modeles`, **non
+  installé**.
+- **Bras « continu »** : pas refait. La séance 5.59 (`ajuste-continu-5-59-1`) avait mêmes entrées :
+  parent `ajuste-continu-5-58-1`, 14 familles, rappel 0,5, 3 000 exemples, graine 1, et un code
+  d'entraînement identique (`c4b7266`, rien d'utile à l'entraînement n'a changé depuis). Son
+  rejeu (lancé puis arrêté au début) aurait coûté 2 à 3 h de GPU pour le même résultat ; décision
+  du propriétaire du 2026-11-16.
+
+**Durées** (`rapport.json`, secondes).
+
+| | base-5-55 | continu (5-59-1) |
+|---|---|---|
+| exemples | 8 600 | 3 000 |
+| entraînement | 8 195 s (2 h 17) | 2 438 s (41 min) |
+| chaîne entière (fusion, GGUF, validation) | 9 338 s (2 h 36) | 3 500 s (58 min) |
+
+**Barres, modèle installé → candidat** (GPU).
+
+| | installé 5-58-1 | base-5-55 | continu 5-59-1 |
+|---|---|---|---|
+| validation (300) | 293 | 289 | 289 |
+| plan_reel | 44/48 | 45/48 | 43/48 |
+| question_reel | 46/47 | 46/47 | 46/47 |
+| ecart_reel | 38/40 | 35/40 (baisse) | 36/40 (baisse) |
+| echelle_utm_reel | 42/44 | 40/44 (baisse) | 43/44 |
+| terrain_reel | 37/44 | 37/44 | 40/44 |
+| epic11_reel | 45/49 | 44/49 | 43/49 (baisse) |
+| style_reel | 36/42 | 37/42 | 39/42 |
+| par_commande_reel | 89/99 | 80/99 (baisse) | 86/99 (baisse) |
+| recette d'Annecy | 18/20 | **20/20** | 17/20 |
+| gros projet | 7/7 | 7/7 | 7/7 |
+| v4 (20 phrases neuves) | non mesurée | 16/20 | 17/20 |
+| **Verdict du juge** | | **refusé** | **refusé** |
+
+**Par commande** (3 phrases chacune ; seules les commandes qui bougent). Total 89 → 80 pour la
+base, 89 → 86 pour le continu.
+
+| commande | installé | base | continu |
+|---|---|---|---|
+| analysis.isochrone | 3 | 2 | 2 |
+| analysis.zonal_statistics | 3 | 2 | 3 |
+| data.convert_raster | 3 | 2 | 2 |
+| data.reproject | 2 | 1 | 2 |
+| geo.bearing_intersection | 3 | 2 | 3 |
+| geo.destination_point | 3 | 2 | 3 |
+| layer.remove | 3 | 3 | 2 |
+| map.graduated_style | 2 | 3 | 2 |
+| model.list | 2 | 2 | 3 |
+| raster.reclassify | 2 | 1 | 2 |
+| raster.weighted_overlay | 3 | 2 | 3 |
+| terrain.aspect | 3 | 2 | 3 |
+| terrain.hillshade | 2 | 3 | 2 |
+| terrain.line_of_sight | 3 | 2 | 3 |
+| terrain.peaks | 3 | 3 | 2 |
+| terrain.viewshed_cumulative | 2 | 1 | 2 |
+
+**Lecture.** Aucun des deux n'est installable. Le départ de zéro coûte 3,6 fois plus de temps
+d'entraînement et perd davantage sur les commandes rares (9 phrases de moins, contre 3), mais il
+est le seul à améliorer la recette d'Annecy (20/20). La séance continue est moins chère et plus
+proche de l'installé, sans le dépasser. L'écart de validation (289 contre 293) et le v4 (16 contre
+17/20) ne départagent pas. **Décision du propriétaire : à consigner dans le plan.**
+
+Relevés bruts hors dépôt : `~/cassini-entrainement/5-55-mesures/base-5-55/` et `5-59-1-mesures/`.
