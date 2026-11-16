@@ -3,7 +3,7 @@ title: 'Demonstration de bout en bout dans QGIS'
 type: 'feature'
 ticket: '14'
 created: '2026-11-16'
-status: built
+status: done
 baseline_revision: '3b10bb0f991039ba734f86c789ff7c3d2e93ffda'
 route: 'full'
 route_source: 'auto'
@@ -74,7 +74,7 @@ context: []
 - Fait : `demo_chaine_verdict.py` + `test_demo_chaine_verdict.py` (24 tests verts), `probe_demo_chaine.py`, `outils-cassini/scripts/demo-11-14.ps1`. Point choisi sur le MNT 25 m d'Annecy : `32T KR 81280 88316` (Mont Veyrier, 797 m au MNT).
 - Sonde jouee deux fois le 2026-11-16 (modele `ajuste-continu-5-58-1` installe, noyau installe, hors ligne) : `VERDICT : ECHEC — question`. Aucun plan : le garde-fou des coordonnees du noyau (`source: guard`) repond « Il manque a la demande un point en coordonnees : quels sont x, y et le systeme (code EPSG...) ? » (~38 s, identique aux deux essais). Le point MGRS n'est pas reconnu comme point en coordonnees. Releves : `%TEMP%\demo-11-14-20261116-141201.txt` et `-141250.txt`.
 - Selon la decision (2), rien n'est corrige en entrainant ni en changeant la phrase : le proprietaire decide de la suite. Restent non verifies : plan valide, PDF A3 carroye, rejeu, reseau (jamais atteints). Confirmation du proprietaire : non consignee.
-- **Rejouee le 2026-11-16 apres 5.61** (modele `continu-5-61b` installe) : plan juste en quatre etapes, PDF A3 carroye regarde, rejeu identique, `VERDICT : OK`. Le compteur de pages du verdict a ete corrige (Qt reecrit la page dans une mise a jour incrementale). Reste : la confirmation du proprietaire sur son poste.
+- **Rejouee le 2026-11-16 apres 5.61** (modele `continu-5-61b` installe) : plan juste en quatre etapes, PDF A3 carroye regarde, rejeu identique, `VERDICT : OK`. Le compteur de pages du verdict a ete corrige (Qt reecrit la page dans une mise a jour incrementale). **Confirmation du proprietaire (2026-11-16) : la demo est confirmee sur son poste.** Ticket clos.
 
 ## Plan Change Log
 
