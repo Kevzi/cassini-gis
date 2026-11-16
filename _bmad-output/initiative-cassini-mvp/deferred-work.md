@@ -1199,3 +1199,10 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-export-et-demo/story-refactor-sweep-plan.md`
   summary: Le noyau installé (`%LOCALAPPDATA%` Cassini, construit le 2026-11-13 à 09:35) précède f5bd91c (2026-11-13, 18:22) : avec lui, `probe_demo.py` sur les fixtures rend ECHEC sur la pente (« sorties du plan 1 encore dans le PDF ») ; avec un noyau reconstruit à jour, il rend OK. À réinstaller sur décision du propriétaire (risque moyen : la démo filmée tourne avec ce noyau).
   evidence: mesures du 2026-11-15 consignées dans le plan du ticket 7 ; sonde OK avec `C:\ct-5-57g\release\cassini.exe`, ECHEC avec le noyau installé.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-demonstration-de-bout-en-bout-dans-qgis-plan.md`
+  summary: `pdf_media_box` et `pdf_page_count` (demo_chaine_verdict.py) lisent le PDF en octets et n'ont jamais ete essayes sur un PDF produit par Qt.
+  evidence: aucun PDF n'a ete produit (la sonde a fini en question) ; tester au premier PDF reel : objets compresses ou MediaBox heritee donneraient un faux « boite illisible ».
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-demonstration-de-bout-en-bout-dans-qgis-plan.md`
+  summary: `judge_plan` controle seulement la presence des quatre ids de commande, pas le lien entre eux (observateur issu de la conversion, reprojection vers le CRS du MNT).
+  evidence: un plan aux bons ids mais aux parametres sans rapport rendrait OK ; a resserrer quand une chaine reelle sortira du modele.
