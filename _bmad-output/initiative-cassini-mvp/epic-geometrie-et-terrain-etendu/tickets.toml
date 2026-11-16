@@ -249,6 +249,6 @@ title = "Demonstration de bout en bout dans QGIS"
 description = "Une sonde, lancee sous le Python de QGIS sur le poste du proprietaire, enchaine par le vrai modele une conversion MGRS, une reprojection vers le systeme du MNT, un champ de vision cumule et un PDF A3 carroye, puis rejoue le journal."
 verify = "Une seule demande en francais suffit a l'enchainement ; la sonde rend OK, le PDF porte le carroyage demande, le rejeu apres fermeture et reouverture du projet est identique, et le proprietaire confirme la demonstration."
 covers = ["G2", "G4", "G7", "G11", "G12"]
-after = [13, 18, 21]
+after = [13, 18, 21, "5.60"]
 hitl = true
 risk = "medium"

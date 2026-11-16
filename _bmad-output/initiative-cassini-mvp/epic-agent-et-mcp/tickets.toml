@@ -1024,3 +1024,20 @@ notes = [
   "Controle hors des criteres : le proprietaire decide de l'installation ; le juge de non-oubli n'est pas contourne.",
   "Resultat: 2026-11-15 — mesure et refuse : juge de non-oubli « refuse » (ecart_reel, epic11_reel, par_commande_reel en baisse), Annecy 17/20, v3 17/20, v4 17/20. GN07 reste rate. Rien d'installe ; rapport dans docs/entrainement-du-modele.md.",
 ]
+
+[[entry]]
+id = 60
+type = "bug"
+title = "Le garde-fou des coordonnees refuse un point MGRS ecrit dans la demande"
+description = "La demande « Convertis le point 32T KR 81280 88316 (MGRS) en WGS84, reprojette-le vers le systeme du MNT, calcule le champ de vision cumule depuis ce point et sors la carte en PDF A3 avec un carroyage UTM de 1 km » rend une question du garde-fou (source guard) : « Il manque a la demande un point en coordonnees », au lieu d'un plan. Constate deux fois le 2026-11-16 par la sonde de 11.14, projet d'Annecy, modele ajuste-continu-5-58-1. Hypothese : le garde-fou cherche des x et y numeriques avec un systeme et ne compte pas une chaine MGRS comme un point de la demande, alors que coord.convert sait la lire."
+verify = "La demande ci-dessus donne un plan (conversion, reprojection, champ de vision cumule, export PDF) et non une question du garde-fou ; une coordonnee inventee par le plan reste refusee ; un test echoue sur le defaut et passe apres ; la sonde de 11.14 rejouee sur le poste, confirmee par le proprietaire."
+covers = ["CAP-4"]
+after = []
+hitl = true
+risk = "high"
+refine = true
+notes = [
+  "Decision: 2026-11-16 — tranche avec le proprietaire (suite de 11.14) : on corrige le garde-fou dans le noyau, on ne reformule pas la phrase de la demonstration.",
+  "Severite: P2 — contournable en donnant le point en WGS84 ou en Lambert-93.",
+  "Controle hors des criteres : relecture thorough (invariant de composition des plans) ; la sonde de 11.14 rejouee sur le poste, confirmee par le proprietaire.",
+]

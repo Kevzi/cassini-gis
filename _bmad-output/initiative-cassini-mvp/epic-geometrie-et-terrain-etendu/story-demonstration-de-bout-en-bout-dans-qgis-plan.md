@@ -3,7 +3,7 @@ title: 'Demonstration de bout en bout dans QGIS'
 type: 'feature'
 ticket: '14'
 created: '2026-11-16'
-status: 'in-review'
+status: blocked
 baseline_revision: '3b10bb0f991039ba734f86c789ff7c3d2e93ffda'
 route: 'full'
 route_source: 'auto'
@@ -13,6 +13,8 @@ review_source: 'pinned'
 lenses_ran: ['quick']
 review_loop_iteration: 0
 context: []
+blocked_at: "2026-11-16"
+blocked_reason: "Le garde-fou des coordonnees (core/src/point.rs) refuse un point MGRS : bug a corriger avant de rejouer la sonde"
 ---
 
 <frozen-after-approval reason="human-owned intent — do not modify unless human renegotiates">
