@@ -837,6 +837,10 @@ tournure « Enregistre-moi … » est employée pour « la couche des … » seu
 tirage ; `FOCUS_EXCLUDED` reste vide. Aucun entraînement n'est lancé : le lot 2 repart du modèle installé avec cette famille ;
 rien n'est installé sans décision du propriétaire.
 
+**Lot 2 (séance continue `continu-5-61`, 2026-11-16) : refusée par le juge.** Annecy 18/20, gros projet 6/7, v4 16/20 (barres tenues), aucune question du garde-fou ; mais `terrain_reel` baisse (37/44 → 33/44) et `question_reel` aussi (46/47 → 44/47). Sur la demande de 11.14, le plan brut du modèle est juste sauf l'étape 2 : `data.reproject` (`layer_id: step:1.wgs84_point`) au lieu de `data.transform_point`. L'étape du champ de vision cumulé est apprise (`terrain.viewshed_cumulative`). Cause : aucune tournure du jeu ne disait « convertis… reprojette-le vers le système du MNT », alors que « reprojette » appelle `data.reproject`.
+
+**Lot 3 (2026-11-16).** Deux fois sur trois, la famille écrit elle-même la conversion puis la reprojection du point (« Passe … en WGS84, puis reprojette-le dans le système du MNT, établis … depuis ce point »), six tournures de tête, quatre de suite ; la phrase de 11.14 n'est pas copiée. Le décalage de la graine a fait sortir deux bornes de leurs anciennes valeurs, assouplies et à confirmer par le propriétaire : `couches_proches` au moins 90 (au lieu de 100), part planifiée au moins 17 % (au lieu de 20 %).
+
 ### Inventaires larges et jeu de 8 600 exemples (2026-11-10)
 
 Après la nuit du 2026-11-10, deux corrections du générateur décidées par le propriétaire, mêmes

@@ -5568,13 +5568,34 @@ fn mgrs_vers_vision_cumulee_pdf(rng: &mut Rng) -> Option<Example> {
     let (place, observer) = foreign_terrain_point(rng, epsg, true, &mut steps)?;
     // L'observateur : la référence, reprojetée sur le système du MNT avant le calcul.
     let w = pick_str(rng, CUMULATIVE_VIEWSHED_WORDS);
-    let mut body = match rng.below(6) {
-        0 => format!("Établis {w} à partir de {place}"),
-        1 => format!("Trace {w} pour un observateur situé sur {place}"),
-        2 => format!("Je veux {w} d'un observateur placé sur {place}"),
-        3 => format!("Prépare {w} en partant de {place}"),
-        4 => format!("Pour {place}, détermine {w}"),
-        _ => format!("Donne-moi {w} dont l'observateur est {a}", a = a_np(&place)),
+    // Deux fois sur trois, la phrase dit elle-même la conversion puis la reprojection du point
+    // (5.61, lot 3) : « reprojette-le » désigne un point, donc `data.transform_point`, jamais la
+    // reprojection d'une couche (`data.reproject`), que le modèle choisissait.
+    let mut body = if rng.chance(2, 3) {
+        let head = match rng.below(6) {
+            0 => format!("Passe {place} en WGS84, puis reprojette-le dans le système du MNT"),
+            1 => format!("Convertis {place} en WGS84 et reprojette ce point vers le système de coordonnées du MNT"),
+            2 => format!("Transforme {place} en WGS84, reprojette ensuite le point sur le système du MNT"),
+            3 => format!("Écris {place} en WGS84 puis reprojette-le dans le système du MNT"),
+            4 => format!("Convertis {place} en degrés WGS84, puis reprojette ce point dans le système de la couche MNT"),
+            _ => format!("Prends {place}, convertis-le en WGS84 puis reprojette-le vers le système du MNT"),
+        };
+        let then = match rng.below(4) {
+            0 => format!("établis {w} depuis ce point"),
+            1 => format!("trace {w} à partir de ce point"),
+            2 => format!("prépare {w} avec ce point comme observateur"),
+            _ => format!("détermine {w} depuis ce point"),
+        };
+        format!("{head}, {then}")
+    } else {
+        match rng.below(6) {
+            0 => format!("Établis {w} à partir de {place}"),
+            1 => format!("Trace {w} pour un observateur situé sur {place}"),
+            2 => format!("Je veux {w} d'un observateur placé sur {place}"),
+            3 => format!("Prépare {w} en partant de {place}"),
+            4 => format!("Pour {place}, détermine {w}"),
+            _ => format!("Donne-moi {w} dont l'observateur est {a}", a = a_np(&place)),
+        }
     };
     let mut params = json!({"dem": dem.source, "observers": [observer]});
     if rng.chance(1, 2) {
