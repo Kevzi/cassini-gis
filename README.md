@@ -564,7 +564,9 @@ un seul contrôle en échec fait passer le run au rouge.
 Deux familles ne tournent pas en CI, parce qu'elles demandent ce que la CI n'a pas :
 **les sondes sous le vrai QGIS** (`qgis-plugin/tests/probe_*.py`), qui enchaînent les
 commandes dans un vrai projet, le rouvrent et rejouent le journal (`probe_demo.py` joue la
-phrase de démo d'Annecy jusqu'au PDF) ; et **les mesures du
+phrase de démo d'Annecy jusqu'au PDF ; `qgis-plugin/tests/lancer_demo.ps1` la joue sur les
+fixtures puis sur le projet réel et rend un rapport D1 à D4, voir
+[`docs/lancer-la-demo.md`](docs/lancer-la-demo.md)) ; et **les mesures du
 vrai modèle** (`ai/tests/*_reel.rs`) : justesse des plans, des questions et des refus,
 score sur des phrases tenues à l'écart, une barre par commande, durée par phrase.
 Leurs phrases sont protégées : un test sans modèle vérifie chaque réponse attendue

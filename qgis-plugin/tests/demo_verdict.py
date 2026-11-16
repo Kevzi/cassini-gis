@@ -327,6 +327,58 @@ def judge_slope(steps, facts):
     return None
 
 
+TERRAIN_PREFIX = "terrain."
+
+# Statuts d'un critère du rapport.
+OK = "OK"
+FAIL = "ECHEC"
+NOT_JUDGED = "non jugé"
+
+# Les quatre critères de l'epic (clé, intitulé du rapport).
+CRITERIA = (
+    ("D1", "phrase de démo, hors ligne"),
+    ("D2", "rejeu identique"),
+    ("D3", "PDF : titre, légende, échelle, nord, sources"),
+    ("D4", "commande de terrain du noyau"),
+)
+
+
+def terrain_commands(steps):
+    """Commandes `terrain.*` distinctes des étapes exécutées, dans l'ordre."""
+    found = []
+    for step in steps or []:
+        command = step.get("command") if isinstance(step, dict) else None
+        if isinstance(command, str) and command.startswith(TERRAIN_PREFIX) and command not in found:
+            found.append(command)
+    return found
+
+
+def judge_terrain(steps):
+    """Verdict D4 : au moins une commande de terrain du noyau exécutée (raison d'ECHEC ou `None`)."""
+    if not terrain_commands(steps):
+        return "aucune commande %s* exécutée par le noyau" % TERRAIN_PREFIX
+    return None
+
+
+def criterion(status, detail=""):
+    """Un critère du rapport : (statut, détail)."""
+    return (status, detail)
+
+
+def report_lines(criteria, title=None):
+    """Lignes du rapport D1 à D4. `criteria` : clé -> (statut, détail) ; une clé absente
+    est « non jugé » sans raison."""
+    lines = ["RAPPORT %s" % title] if title else ["RAPPORT"]
+    for key, label in CRITERIA:
+        status, detail = criteria.get(key) or (NOT_JUDGED, "")
+        if status == OK:
+            text = OK + (" (%s)" % detail if detail else "")
+        else:
+            text = status + (" — %s" % detail if detail else "")
+        lines.append("  %s %s   %s" % (key, label, text))
+    return lines
+
+
 def failure_reason(kind, payload, calls=None):
     """Raison d'ECHEC d'un événement qui n'est pas PLAN_DONE, ou `None` s'il n'en est pas un.
 

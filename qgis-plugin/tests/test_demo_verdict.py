@@ -254,6 +254,61 @@ class JudgeSlopeTest(unittest.TestCase):
         self.assertIsNone(v.missing_layers_reason(True, True, True))
 
 
+class ReportTest(unittest.TestCase):
+    def all_ok(self):
+        return {
+            "D1": v.criterion(v.OK),
+            "D2": v.criterion(v.OK, "9 étapes"),
+            "D3": v.criterion(v.OK),
+            "D4": v.criterion(v.OK, "terrain.slope"),
+        }
+
+    def test_all_ok_report(self):
+        lines = v.report_lines(self.all_ok(), "fixtures")
+        self.assertEqual(lines[0], "RAPPORT fixtures")
+        self.assertEqual(len(lines), 5)
+        self.assertTrue(lines[1].startswith("  D1 ") and lines[1].endswith("OK"))
+        self.assertTrue(lines[2].endswith("OK (9 étapes)"))
+        self.assertTrue(lines[4].endswith("OK (terrain.slope)"))
+        self.assertFalse(any("ECHEC" in line for line in lines))
+
+    def test_one_failure_is_named_with_its_reason(self):
+        criteria = self.all_ok()
+        criteria["D3"] = v.criterion(v.FAIL, "mise en page : légende absente")
+        lines = v.report_lines(criteria)
+        self.assertEqual(lines[0], "RAPPORT")
+        self.assertTrue(lines[3].startswith("  D3 "))
+        self.assertTrue(lines[3].endswith("ECHEC — mise en page : légende absente"))
+        self.assertEqual(sum("ECHEC" in line for line in lines), 1)
+
+    def test_missing_criterion_is_not_judged_never_ok(self):
+        criteria = {"D1": v.criterion(v.FAIL, "question : Quelle commune ?")}
+        lines = v.report_lines(criteria)
+        for line in lines[2:]:
+            self.assertIn("non jugé", line)
+        self.assertNotIn("OK", "".join(lines[2:]))
+
+    def test_not_judged_keeps_its_reason(self):
+        lines = v.report_lines({"D2": v.criterion(v.NOT_JUDGED, "plan non mené au bout")})
+        self.assertTrue(lines[2].endswith("non jugé — plan non mené au bout"))
+
+
+class JudgeTerrainTest(unittest.TestCase):
+    def test_slope_step_is_ok(self):
+        self.assertIsNone(v.judge_terrain(slope_steps()))
+        self.assertEqual(v.terrain_commands(slope_steps()), ["terrain.slope"])
+
+    def test_plan_without_terrain_command(self):
+        reason = v.judge_terrain(steps())
+        self.assertIn("terrain.", reason)
+        self.assertEqual(v.terrain_commands(steps()), [])
+
+    def test_empty_and_garbage_steps(self):
+        self.assertIsNotNone(v.judge_terrain([]))
+        self.assertIsNotNone(v.judge_terrain(None))
+        self.assertIsNotNone(v.judge_terrain(["x", {"command": None}]))
+
+
 class FontsTest(unittest.TestCase):
     def test_no_font_is_refused(self):
         self.assertIn("aucune police", v.fonts_reason(0))

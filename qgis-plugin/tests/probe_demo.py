@@ -53,6 +53,11 @@ champ propre à la couche des parcelles, chacune de ses entités a son point int
 `typezone = U` et est à 500 m au plus de la gare la plus proche, et le PDF commence par `%PDF-`.
 Les gestes sont ceux de l'extension (`delegated.build_registry`), style compris. Elle imprime les durées, le plan,
 le résultat de chaque étape, puis `VERDICT : OK` (code 0) ou `VERDICT : ECHEC — <raison>` (code 1).
+Avant le `VERDICT`, elle imprime un bloc `RAPPORT <intitulé>` : D1 (phrase de démo, hors ligne),
+D2 (rejeu identique), D3 (PDF : titre, légende, échelle, nord, sources) et D4 (commande de terrain
+du noyau), chacun OK, ECHEC ou non jugé avec sa raison. Un échec de mise en page, de pente ou de
+rejeu n'arrête plus la sonde : les critères suivants restent jugés ; la raison du VERDICT est la
+première rencontrée. `CASSINI_DEMO_LABEL` donne l'intitulé du bloc (le lanceur `lancer_demo.ps1`).
 Avec un argument, elle ouvre le projet donné, par exemple celui d'Annecy (territoire de la démo,
 décision du propriétaire du 2026-11-10 ; `donnees-test-cassini/annecy/projet-test-annecy.qgz`) dont
 les gares sont en EPSG:4326 : le tampon est calculé dans le système du projet (entrée 9.16). Elle
@@ -204,28 +209,38 @@ if len(sys.argv) == 2:
 else:
     PROJECT = assemble_demo_project()
 OUTPUT_DIR = os.path.splitext(PROJECT)[0] + ".cassini"
+# Intitulé du bloc RAPPORT : posé par le lanceur, sinon « fixtures » ou le nom du projet donné.
+LABEL = os.environ.get("CASSINI_DEMO_LABEL") or (
+    os.path.splitext(os.path.basename(PROJECT))[0] if len(sys.argv) == 2 else "fixtures")
+
+
+def zone_field(layer):
+    """Nom exact du champ `typezone` de la couche (le PLU du Géoportail l'écrit en majuscules)."""
+    return next((n for n in layer.fields().names() if n.lower() == demo_verdict.ZONE_FIELD), None)
 
 
 def reference_layers():
     """Couches de référence du contrôle, relevées avant l'exécution (les sorties du plan
     reprennent les champs du PLU et ne doivent pas être prises pour lui)."""
-    zoning = stations = parcels = dem = None
+    zoning = stations = parcels = dem = dem_fallback = None
     for layer in project.mapLayers().values():
         if isinstance(layer, QgsRasterLayer):
             if dem is None and layer.name().lower() == DEM_NAME.lower():
                 dem = layer
+            elif dem_fallback is None and layer.name().lower().startswith(DEM_NAME.lower()):
+                dem_fallback = layer  # projet réel : « mnt_25m », « mnt_5m_annecy »…
             continue
         if not isinstance(layer, QgsVectorLayer):
             continue
         name = layer.name().lower()
         kind = layer.geometryType()
-        if zoning is None and layer.fields().indexFromName(demo_verdict.ZONE_FIELD) >= 0:
+        if zoning is None and zone_field(layer) is not None:
             zoning = layer
         elif parcels is None and kind == Qgis.GeometryType.Polygon and "parcelle" in name:
             parcels = layer
         if stations is None and kind == Qgis.GeometryType.Point and "gare" in name:
             stations = layer
-    return zoning, stations, parcels, dem
+    return zoning, stations, parcels, dem or dem_fallback
 
 
 ZONING, STATIONS, PARCELS, DEM = reference_layers()
@@ -238,7 +253,7 @@ if missing is not None:
 
 t0 = time.monotonic()
 state = {"reason": None, "done": False, "marks": {}, "calls": [], "steps": [], "phase": "plan",
-         "export": None, "earlier_names": [],
+         "export": None, "earlier_names": [], "crit": {}, "first": None, "d1_plan_ok": False,
          "net": [], "net_keys": set(), "pids": set(), "polls": 0}
 POLL_MS = 1000
 
@@ -371,9 +386,46 @@ def timed_create(command_id):
 registry.create = timed_create
 
 
+def set_criterion(key, status, detail=""):
+    state["crit"][key] = demo_verdict.criterion(status, detail)
+
+
+def note_failure(key, reason):
+    """Un critère en ECHEC qui n'arrête pas la sonde : les suivants restent jugés. La première
+    raison notée est celle du VERDICT."""
+    set_criterion(key, demo_verdict.FAIL, reason)
+    state["first"] = state["first"] or reason
+
+
+def final_criteria(reason):
+    """Critères D1 à D4 à imprimer : ceux jugés en route, les autres expliqués."""
+    crit = dict(state["crit"])
+    if "D1" not in crit:
+        if state["d1_plan_ok"]:
+            crit["D1"] = demo_verdict.criterion(
+                demo_verdict.NOT_JUDGED, "réseau non relevé jusqu'au bout")
+        else:
+            crit["D1"] = demo_verdict.criterion(demo_verdict.FAIL, reason or "")
+    if state["phase"] == "plan2" and "D4" not in crit and reason is not None:
+        crit["D4"] = demo_verdict.criterion(demo_verdict.FAIL, reason)
+    if state["phase"] == "replay" and "D2" not in crit and reason is not None:
+        crit["D2"] = demo_verdict.criterion(demo_verdict.FAIL, reason)
+    for key, _label in demo_verdict.CRITERIA:
+        if key not in crit:
+            crit[key] = demo_verdict.criterion(
+                demo_verdict.NOT_JUDGED, "la sonde s'est arrêtée avant : %s" % reason)
+    return crit
+
+
 def finish(reason):
     if not state["done"]:
+        # Chaque critère garde sa propre raison ; la première défaillance notée ne sert qu'à la
+        # ligne VERDICT.
+        criteria = final_criteria(reason)
+        reason = state["first"] or reason
         state["done"], state["reason"] = True, reason
+        for line in demo_verdict.report_lines(criteria, LABEL):
+            print(line, flush=True)
         print("[%s] %s" % (now(), demo_verdict.verdict_line(reason)), flush=True)
         QTimer.singleShot(0, app.quit)
 
@@ -410,7 +462,8 @@ def retained_features(layer_id):
     if not isinstance(layer, QgsVectorLayer):
         return None
     crs = metric_crs()
-    zones = [(f[demo_verdict.ZONE_FIELD], g) for f, g in geometries(ZONING, crs)]
+    field = zone_field(ZONING)
+    zones = [(f[field], g) for f, g in geometries(ZONING, crs)]
     stations = [g for _f, g in geometries(STATIONS, crs)]
     facts = []
     for feature, geometry in geometries(layer, crs):
@@ -485,15 +538,39 @@ def slope_in_project(steps):
     return any(stem == layer_stem(layer) or stem == layer.name() for layer in project.mapLayers().values())
 
 
+def chosen_dem_source():
+    """Source du MNT que le plan désigne parmi les rasters « MNT… » du projet (un projet réel en
+    a plusieurs : n'importe lequel est un MNT) ; à défaut, celui de référence."""
+    slope = next((c for c in state["calls"]
+                  if isinstance(c, dict) and c.get("command") == demo_verdict.SLOPE), None)
+    asked = ((slope or {}).get("params") or {}).get("dem")
+    if isinstance(asked, str):
+        wanted = os.path.basename(asked.replace("\\", "/"))
+        for layer in project.mapLayers().values():
+            if isinstance(layer, QgsRasterLayer) and layer.name().lower().startswith(DEM_NAME.lower()):
+                if os.path.basename(layer.source().replace("\\", "/")) == wanted:
+                    return layer.source()
+    return DEM.source()
+
+
 def slope_verdict(steps):
     """Jugement de la pente (plan 2), puis de la mise en page du second export."""
     result = export_result(steps)
     sources2 = result.get("sources") if isinstance(result, dict) else None
-    facts = {"calls": state["calls"], "dem_name": DEM.source(),
+    facts = {"calls": state["calls"], "dem_name": chosen_dem_source(),
              "slope_in_project": slope_in_project(steps),
              "earlier_names": state["earlier_names"], "sources2": sources2 or []}
     print("  pente : sources du second export %s" % facts["sources2"], flush=True)
-    return demo_verdict.judge_slope(steps, facts) or layout_verdict(steps)
+    reason = demo_verdict.judge_terrain(steps) or demo_verdict.judge_slope(steps, facts)
+    if reason is not None:
+        note_failure("D4", reason)
+    else:
+        found = demo_verdict.terrain_commands(steps)
+        set_criterion("D4", demo_verdict.OK, ", ".join(found))
+    layout = layout_verdict(steps)
+    if layout is not None:
+        note_failure("D3", layout)
+    return reason or layout
 
 
 def journal_steps(executed):
@@ -556,7 +633,17 @@ def on_replay_event(kind, payload):
     elif kind in (client.REPLAY_DONE, client.REPLAY_FAILED):
         print("[%s] %s %s" % (now(), kind, json.dumps(payload, ensure_ascii=False)), flush=True)
         reason = demo_verdict.judge_replay(kind, payload, state["steps"])
-        finish(reason if reason is not None else network_verdict())
+        if reason is not None:
+            note_failure("D2", reason)
+        else:
+            set_criterion("D2", demo_verdict.OK, "%d étapes" % len(state["steps"]))
+        network = network_verdict()
+        if state["d1_plan_ok"]:
+            if network is not None:
+                note_failure("D1", network)
+            else:
+                set_criterion("D1", demo_verdict.OK, "aucune connexion externe du noyau")
+        finish(reason if reason is not None else network)
     elif kind in (client.FAILED, client.DIED):
         finish("rejeu : noyau %s" % payload)
 
@@ -587,12 +674,9 @@ def on_event(kind, payload):
             print("  étape %s %s : %s" % (step.get("step"), step.get("command"),
                                           json.dumps(step.get("result"), ensure_ascii=False)))
         if state["phase"] == "plan2":
-            reason = slope_verdict(steps)
-            if reason is not None:
-                finish(reason)
-            else:
-                state["steps"] = journal_steps(state["steps1"] + steps)
-                QTimer.singleShot(0, start_replay_guarded)
+            slope_verdict(steps)  # un échec est noté ; le rejeu est jugé quand même
+            state["steps"] = journal_steps(state["steps1"] + steps)
+            QTimer.singleShot(0, start_replay_guarded)
             return
         layer_id = demo_verdict.retained_layer_id(steps)
         features = retained_features(layer_id) if layer_id else None
@@ -606,20 +690,24 @@ def on_event(kind, payload):
             "pdf_head": pdf_head(steps),
         }
         reason = demo_verdict.judge_done(steps, facts, injected=FAIL_STEP)
-        if reason is None:
-            reason = layout_verdict(steps)
         if reason is not None:
-            finish(reason)
+            finish(reason)  # D1 en ECHEC ; D2 à D4 : non jugés
+            return
+        state["d1_plan_ok"] = True
+        layout = layout_verdict(steps)
+        if layout is not None:
+            note_failure("D3", layout)  # les critères suivants restent jugés
         else:
-            state["steps1"] = steps
-            state["earlier_names"] = [
-                s["result"]["name"] for s in steps
-                if isinstance(s, dict) and isinstance(s.get("result"), dict)
-                and isinstance(s["result"].get("name"), str)]
-            state["phase"] = "plan2"
-            marks["propose"] = time.monotonic()
-            print("[%s] seconde phrase : %s" % (now(), PHRASE2), flush=True)
-            core.propose(PHRASE2)
+            set_criterion("D3", demo_verdict.OK)
+        state["steps1"] = steps
+        state["earlier_names"] = [
+            s["result"]["name"] for s in steps
+            if isinstance(s, dict) and isinstance(s.get("result"), dict)
+            and isinstance(s["result"].get("name"), str)]
+        state["phase"] = "plan2"
+        marks["propose"] = time.monotonic()
+        print("[%s] seconde phrase : %s" % (now(), PHRASE2), flush=True)
+        core.propose(PHRASE2)
     else:
         reason = demo_verdict.failure_reason(kind, payload, state["calls"])
         if reason is not None:
