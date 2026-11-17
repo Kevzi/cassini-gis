@@ -101,7 +101,7 @@ porte met à jour l'autre, et le désinstalleur ne retire que ce que le dernier 
    `installation.json` et `models\` (le modèle et sa déclaration) ; `%LOCALAPPDATA%\Cassini\extension`
    reçoit l'archive de l'extension.
 3. Dans une console : `%LOCALAPPDATA%\Cassini\bin\cassini.exe run system.about` répond, et
-   `cassini.exe run model.list` liste `cassini-composition-4b-Q4_K_M.gguf`.
+   `cassini.exe run model.list` liste `cassini-composition-4b-0.2.0-Q4_K_M.gguf`.
 4. Dans QGIS : Extensions, Installer depuis un ZIP, choisir l'archive du dossier `extension`.
 5. Rejouer la démo : le panneau trouve le noyau et le modèle sans réseau.
 6. Désinstaller (Paramètres, Applications) : le noyau et le modèle disparaissent.
@@ -143,3 +143,44 @@ manifeste annonce alors une adresse qui ne répond pas encore, à déposer à la
 4. Servir un modèle dont un octet est changé (`/MANIFESTE=` local) : l'installation est refusée et
    rien n'est posé.
 5. Désinstaller : le noyau disparaît, le dossier `models` reste.
+
+## Mettre à jour Cassini : le même programme que l'installeur en ligne
+
+L'installeur en ligne sert aussi de mise à jour. Il copie une version de lui-même dans
+`%LOCALAPPDATA%\Cassini\mettre-a-jour-cassini.exe` et crée, dans le menu Démarrer, le raccourci
+**« Mettre à jour Cassini »**, qui le lance avec le paramètre `/MISEAJOUR`. Rien ne se met à jour
+tout seul : aucune vérification automatique, tout se lance à la main.
+
+Avec `/MISEAJOUR`, le programme lit le manifeste, compare sa version à celle de
+`bin\installation.json` (trois nombres séparés par des points ; une version illisible vaut « mise à
+jour proposée »), demande confirmation, vérifie le SHA-256 de chaque fichier, puis pose le noyau et,
+si le modèle du manifeste n'est pas déjà dans `bin\models`, ce nouveau modèle **à côté** des anciens.
+`installation.json` garde ses deux clés ; `installe_le` devient la date de la dernière mise à jour.
+
+- Installé à jour (version du manifeste inférieure ou égale, modèle du manifeste déjà là) : message
+  « Cassini est à jour », rien n'est téléchargé ni réécrit, code 0.
+- Cassini non installé : message « Cassini n'est pas installé », rien n'est posé, code non nul en
+  silencieux.
+- Noyau en cours d'usage (QGIS ouvert) : message qui dit de fermer QGIS, rien n'est posé.
+- Silencieux : `cassini-installeur-en-ligne.exe /MISEAJOUR /VERYSILENT` (pas de dialogue ;
+  `/MANIFESTE=` et `/MODELE=0|1` fonctionnent comme à l'installation ; en mise à jour, le modèle n'est
+  proposé par défaut que si un `.gguf` est déjà installé).
+
+**Le nom installé du modèle porte sa version** (`installer/modele.json`, champ `nom_installe`, par
+exemple `cassini-composition-4b-0.2.0-Q4_K_M.gguf`) : un nouveau modèle ne remplace jamais l'ancien
+et aucun fichier de `models` n'est supprimé ni écrasé. Un nouveau modèle publié change donc le
+nom dans `installer/modele.json` (et dans `cassini-hors-ligne.iss`, `NomModele`, et `release.yml`).
+La déclaration de la porte 2 garde le nom fixe `cassini-composition-4b.modele.json` ; si elle nomme
+déjà un autre modèle, la déclaration du nouveau prend le nom du modèle.
+
+La recette de release prouve, avec un petit modèle servi en local : installation d'une version A,
+`/MISEAJOUR` contre un manifeste B (version plus haute, modèle versionné) puis contre le même
+manifeste (rien de réécrit), noyau verrouillé, Cassini non installé.
+
+### Essai du propriétaire en VM (mise à jour)
+
+1. Installer une version (porte 1), puis lancer « Mettre à jour Cassini » depuis le menu Démarrer
+   contre un manifeste plus récent (`/MANIFESTE=` local) : la confirmation s'affiche en français.
+2. Relancer le panneau dans QGIS : les deux modèles sont proposés, l'ancien reste choisissable.
+3. Relancer « Mettre à jour Cassini » : « Cassini est à jour ».
+4. Ouvrir QGIS (noyau chargé) et relancer la mise à jour : le message demande de fermer QGIS.

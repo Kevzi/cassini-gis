@@ -2,5 +2,5 @@
   "url": "https://huggingface.co/KevziFar/cassini-composition-4b-GGUF/resolve/main/cassini-composition-4b-0.2.0-Q4_K_M.gguf",
   "sha256": "1c430872c0cedf23e52b0ef26ee8ac5aaf72aa4d8f0213711fbb40c61ca2695e",
   "taille": 2783446944,
-  "nom_installe": "cassini-composition-4b-Q4_K_M.gguf"
+  "nom_installe": "cassini-composition-4b-0.2.0-Q4_K_M.gguf"
 }

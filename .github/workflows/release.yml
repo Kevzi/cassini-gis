@@ -223,6 +223,80 @@ jobs:
             if (Test-Path "$dir1b\bin\models\*") { throw "sans modèle : models n'est pas vide" }
             Write-Host "sans modèle : noyau posé, models vide"
 
+            # 1 quater. Mise à jour (/MISEAJOUR, même programme). Version A (0.0.1, modèle sous
+            # l'ancien nom sans version), puis manifeste B (0.0.2, modèle versionné) : le noyau est
+            # remplacé, l'ancien modèle et sa déclaration restent, le nouveau est à côté.
+            $nomAncien = 'cassini-composition-4b-Q4_K_M.gguf'
+            $octets = New-Object byte[] 1048576
+            (New-Object Random 8).NextBytes($octets)
+            [IO.File]::WriteAllBytes("$proof\modele-ancien.gguf", $octets)
+            $shaAncien = (Get-FileHash "$proof\modele-ancien.gguf" -Algorithm SHA256).Hash.ToLower()
+            @{ url = "http://127.0.0.1:8000/modele-ancien.gguf"; sha256 = $shaAncien; taille = 1048576; nom_installe = $nomAncien } |
+              ConvertTo-Json | Set-Content "$proof\modele-ancien.json" -Encoding utf8
+            New-Item -ItemType Directory -Force "$proof\maj-a", "$proof\maj-b" | Out-Null
+            $ecrire = 'import sys; sys.path.insert(0, "installer"); import manifeste as m; from pathlib import Path; v, base, mod, out = sys.argv[1:5]; Path(out).write_text(m.construire(v, [Path(f) for f in sys.argv[5:]], base, m.section_modele(Path(mod))), encoding="utf-8", newline="\n")'
+            python -I -c $ecrire 0.0.1 http://127.0.0.1:8000 "$proof\modele-ancien.json" "$proof\maj-a\manifeste.json" @fichiers
+            if ($LASTEXITCODE -ne 0) { throw "manifeste A : échec" }
+            python -I -c $ecrire 0.0.2 http://127.0.0.1:8000 "$proof\modele-bon.json" "$proof\maj-b\manifeste.json" @fichiers
+            if ($LASTEXITCODE -ne 0) { throw "manifeste B : échec" }
+            $dirM = "$proof\inst-maj"
+            $urlA = 'http://127.0.0.1:8000/maj-a/manifeste.json'
+            $urlB = 'http://127.0.0.1:8000/maj-b/manifeste.json'
+            $maj = @('/MISEAJOUR','/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$dirM","/MANIFESTE=$urlB")
+
+            # Cassini non installé : refusé, rien posé, code non nul.
+            $dirVide = "$proof\inst-maj-vide"
+            $p = Start-Process $inst -ArgumentList '/MISEAJOUR','/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$dirVide","/MANIFESTE=$urlB" -Wait -PassThru
+            if ($p.ExitCode -eq 0) { throw "/MISEAJOUR sans Cassini installé aurait dû échouer" }
+            if (Test-Path "$dirVide\bin\*") { throw "/MISEAJOUR sans installation : un fichier a été posé" }
+
+            # Installation de la version A.
+            $p = Start-Process $inst -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$dirM","/MANIFESTE=$urlA" -Wait -PassThru
+            if ($p.ExitCode -ne 0) { throw "installation de A : code $($p.ExitCode)" }
+            if ((Get-Content "$dirM\bin\installation.json" -Raw | ConvertFrom-Json).version -ne '0.0.1') { throw "A : version installée incorrecte" }
+            if (-not (Test-Path "$dirM\bin\models\$nomAncien")) { throw "A : ancien modèle absent" }
+
+            # Noyau en cours d'usage (fichier ouvert sans partage de suppression) : refusé, rien posé.
+            $verrou = [IO.File]::Open("$dirM\bin\cassini.exe", 'Open', 'Read', 'Read')
+            try {
+              $p = Start-Process $inst -ArgumentList $maj -Wait -PassThru
+            } finally { $verrou.Close() }
+            if ($p.ExitCode -eq 0) { throw "/MISEAJOUR avec le noyau verrouillé aurait dû échouer" }
+            if ((Get-Content "$dirM\bin\installation.json" -Raw | ConvertFrom-Json).version -ne '0.0.1') { throw "noyau verrouillé : installation.json a changé" }
+            if (Test-Path "$dirM\bin\models\$nomModele") { throw "noyau verrouillé : un modèle a été posé" }
+
+            # Mise à jour de A vers B.
+            $p = Start-Process $inst -ArgumentList $maj -Wait -PassThru
+            if ($p.ExitCode -ne 0) { throw "/MISEAJOUR : code $($p.ExitCode)" }
+            foreach ($f in Get-ChildItem dist\noyau -File) {
+              if ((Get-FileHash $f.FullName).Hash -ne (Get-FileHash "$dirM\bin\$($f.Name)").Hash) { throw "mise à jour : $($f.Name) différent" }
+            }
+            $info = Get-Content "$dirM\bin\installation.json" -Raw | ConvertFrom-Json
+            if ($info.version -ne '0.0.2' -or -not $info.installe_le) { throw "mise à jour : installation.json incorrect" }
+            if ((Get-FileHash "$dirM\bin\models\$nomAncien" -Algorithm SHA256).Hash.ToLower() -ne $shaAncien) { throw "mise à jour : l'ancien modèle a changé" }
+            if ((Get-FileHash "$dirM\bin\models\$nomModele" -Algorithm SHA256).Hash.ToLower() -ne $shaModele) { throw "mise à jour : le nouveau modèle est incorrect" }
+            $declAncienne = Get-Content "$dirM\bin\models\cassini-composition-4b.modele.json" -Raw | ConvertFrom-Json
+            if ($declAncienne.model -ne $nomAncien -or $declAncienne.model_sha256 -ne $shaAncien) { throw "mise à jour : l'ancienne déclaration a changé" }
+            $declNouvelle = Get-Content ("$dirM\bin\models\" + $nomModele.Substring(0, $nomModele.Length - 5) + '.modele.json') -Raw | ConvertFrom-Json
+            if ($declNouvelle.model -ne $nomModele -or $declNouvelle.model_sha256 -ne $shaModele) { throw "mise à jour : la nouvelle déclaration est incorrecte" }
+            if (-not (Test-Path "$dirM\mettre-a-jour-cassini.exe")) { throw "mise à jour : la copie de l'installeur est absente" }
+            $liste = & "$dirM\bin\cassini.exe" run model.list | Out-String
+            Write-Host $liste
+            if ($liste -match 'models\.tampered') { throw "mise à jour : model.list signale models.tampered" }
+            if ($liste -notmatch [regex]::Escape($nomAncien) -or $liste -notmatch [regex]::Escape($nomModele)) { throw "mise à jour : model.list ne liste pas les deux modèles" }
+
+            # Second passage, même manifeste : à jour, rien réécrit, code 0.
+            $avant = @("$dirM\bin\installation.json", "$dirM\bin\cassini.exe", "$dirM\bin\models\$nomModele") |
+              ForEach-Object { "{0}|{1}" -f (Get-FileHash $_).Hash, (Get-Item $_).LastWriteTimeUtc.Ticks }
+            Start-Sleep -Seconds 2
+            $p = Start-Process $inst -ArgumentList $maj -Wait -PassThru
+            if ($p.ExitCode -ne 0) { throw "/MISEAJOUR à jour : code $($p.ExitCode)" }
+            $apres = @("$dirM\bin\installation.json", "$dirM\bin\cassini.exe", "$dirM\bin\models\$nomModele") |
+              ForEach-Object { "{0}|{1}" -f (Get-FileHash $_).Hash, (Get-Item $_).LastWriteTimeUtc.Ticks }
+            if (($avant -join ';') -ne ($apres -join ';')) { throw "/MISEAJOUR à jour : un fichier a été réécrit" }
+            Write-Host "mise à jour : A vers B puis à jour, deux modèles et deux déclarations"
+            Start-Process "$dirM\unins000.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES' -Wait
+
             # 1 ter. Modèle servi avec un octet changé : tout est refusé, noyau compris.
             $dir1c = "$proof\inst-modele-altere"
             $p = Start-Process $inst -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$dir1c",'/MANIFESTE=http://127.0.0.1:8000/modele-altere/manifeste.json' -Wait -PassThru
@@ -256,7 +330,7 @@ jobs:
       # Le modèle (~2,8 Go) vient de Hugging Face (publié par 7.3) ; jamais construit ici.
       # Le script vérifie l'espace libre avant de télécharger et l'empreinte après.
       - name: Téléchargement du modèle (empreinte vérifiée)
-        run: python -I installer/telecharger_modele.py --sortie modele/cassini-composition-4b-Q4_K_M.gguf
+        run: python -I installer/telecharger_modele.py --sortie modele/cassini-composition-4b-0.2.0-Q4_K_M.gguf
 
       - name: Compilation de l'installeur complet
         run: |
@@ -298,9 +372,9 @@ jobs:
           # Le modèle est listé par model.list (le noyau le cherche dans models\ à côté de lui).
           $liste = & "$dir\bin\cassini.exe" run model.list | Out-String
           Write-Host $liste
-          if ($liste -notmatch 'cassini-composition-4b-Q4_K_M\.gguf') { throw "model.list ne liste pas le modèle" }
+          if ($liste -notmatch 'cassini-composition-4b-0.2.0-Q4_K_M\.gguf') { throw "model.list ne liste pas le modèle" }
           if ($liste -notmatch [string]$modele.taille) { throw "model.list ne donne pas la taille $($modele.taille)" }
-          $gguf = "$dir\bin\models\cassini-composition-4b-Q4_K_M.gguf"
+          $gguf = "$dir\bin\models\cassini-composition-4b-0.2.0-Q4_K_M.gguf"
           if ((Get-FileHash $gguf -Algorithm SHA256).Hash.ToLower() -ne $modele.sha256) { throw "SHA-256 du modèle installé différent" }
           if (-not (Test-Path "$dir\extension\cassini_qgis-$version.zip")) { throw "archive de l'extension absente" }
           $info = Get-Content "$dir\bin\installation.json" -Raw | ConvertFrom-Json

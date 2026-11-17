@@ -1206,3 +1206,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-geometrie-et-terrain-etendu/story-demonstration-de-bout-en-bout-dans-qgis-plan.md`
   summary: `judge_plan` controle seulement la presence des quatre ids de commande, pas le lien entre eux (observateur issu de la conversion, reprojection vers le CRS du MNT).
   evidence: un plan aux bons ids mais aux parametres sans rapport rendrait OK ; a resserrer quand une chaine reelle sortira du modele.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-publication/story-mettre-a-jour-cassini-le-meme-programme-que-l-installeur-en-plan.md`
+  summary: En mode interactif, « Cassini est à jour » et « Cassini n'est pas installé » n'apparaissent qu'après les pages d'accueil, de modèle et de confirmation, alors qu'un lancement « Mettre à jour Cassini » devrait répondre tout de suite.
+  evidence: les tests ne couvrent que le texte du script ; la décision n'est prise que dans PrepareToInstall (le manifeste ne peut se télécharger qu'une fois l'assistant ouvert). À juger sur la VM du propriétaire, puis éventuellement sauter les pages via ShouldSkipPage.

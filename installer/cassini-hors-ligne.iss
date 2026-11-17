@@ -12,7 +12,7 @@
 ;
 ; Compilation (depuis la racine du depot) :
 ;   ISCC.exe /DVersion=0.1.1 installer\cassini-hors-ligne.iss
-; avec le paquet du noyau dans dist\noyau, modele\cassini-composition-4b-Q4_K_M.gguf et
+; avec le paquet du noyau dans dist\noyau, modele\cassini-composition-4b-0.2.0-Q4_K_M.gguf et
 ; dist\cassini_qgis-0.1.1.zip deja produits par la recette.
 
 #ifndef Version
@@ -22,13 +22,13 @@
   #define Noyau "..\dist\noyau"
 #endif
 #ifndef Modele
-  #define Modele "..\modele\cassini-composition-4b-Q4_K_M.gguf"
+  #define Modele "..\modele\cassini-composition-4b-0.2.0-Q4_K_M.gguf"
 #endif
 #ifndef Archive
   #define Archive "..\dist\cassini_qgis-" + Version + ".zip"
 #endif
 
-#define NomModele "cassini-composition-4b-Q4_K_M.gguf"
+#define NomModele "cassini-composition-4b-0.2.0-Q4_K_M.gguf"
 ; Empreinte SHA-256 du modele : celle du manifeste des versions (installer/modele.json), la
 ; seule source (ticket 5.51). Le noyau la verifie au premier chargement du modele.
 #define EmpreinteModele "1c430872c0cedf23e52b0ef26ee8ac5aaf72aa4d8f0213711fbb40c61ca2695e"
@@ -95,12 +95,21 @@ begin
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
+var
+  NomDecl: String;
+  Existant: AnsiString;
 begin
   if CurStep = ssPostInstall then
   begin
-    { Declaration du modele avec son empreinte SHA-256 (ticket 5.51). La declaration de
-      l'installeur en ligne reste a 7.4. }
-    SaveStringToFile(ExpandConstant('{app}\bin\models\{#Declaration}'),
+    { Declaration du modele avec son empreinte SHA-256 (ticket 5.51). Meme regle que l'installeur
+      en ligne : si la declaration au nom fixe existe deja et ne nomme pas ce modele (ancien modele
+      non versionne), elle reste intacte et la nouvelle prend le nom du modele. }
+    NomDecl := '{#Declaration}';
+    if FileExists(ExpandConstant('{app}\bin\models\') + NomDecl) and
+       LoadStringFromFile(ExpandConstant('{app}\bin\models\') + NomDecl, Existant) and
+       (Pos('{#NomModele}', String(Existant)) = 0) then
+      NomDecl := Copy('{#NomModele}', 1, Length('{#NomModele}') - 5) + '.modele.json';
+    SaveStringToFile(ExpandConstant('{app}\bin\models\') + NomDecl,
       '{"model": "{#NomModele}", "prompt": "short", "model_sha256": "{#EmpreinteModele}"}' + #10, False);
     { Meme format que l'installeur en ligne (7.1). }
     SaveStringToFile(ExpandConstant('{app}\bin\installation.json'),

@@ -1,4 +1,4 @@
-; Installeur en ligne minimal de Cassini (ticket 7.1, AD-17).
+﻿; Installeur en ligne minimal de Cassini (ticket 7.1, AD-17).
 ;
 ; Programme SEPARE du noyau et de l'extension : seul à toucher au réseau, une seule
 ; fois, pendant l'installation. Il lit le manifeste de la release, télécharge le
@@ -6,6 +6,12 @@
 ;
 ; Compilation :  ISCC.exe /DVersion=0.1.1 installer\cassini-en-ligne.iss
 ; Test local  :  cassini-installeur-en-ligne.exe /VERYSILENT /MANIFESTE=http://127.0.0.1:8000/manifeste.json
+;
+; Mise à jour (ticket 5 de l'epic publication) : le MEME programme, lancé avec /MISEAJOUR (raccourci
+; « Mettre à jour Cassini » du menu Démarrer, qui lance la copie {app}\mettre-a-jour-cassini.exe).
+; Il lit le manifeste, compare à {app}\bin\installation.json, demande confirmation, pose le noyau
+; et un nouveau modèle sous son propre nom (jamais à la place d'un ancien) ; installé à jour : rien
+; n'est téléchargé ni réécrit, code 0. Tout se lance à la main : aucune vérification automatique.
 ;
 ; Le manifeste a la mise en forme fixée par installer/manifeste.py (un champ par ligne) :
 ; Inno Setup n'a pas d'analyseur JSON, on y cherche du texte.
@@ -44,7 +50,15 @@ Source: "{tmp}\noyau\*"; DestDir: "{app}\bin"; Flags: external ignoreversion
 ; posé seulement si la case est cochée et que le manifeste le propose. `uninsneveruninstall` :
 ; un modèle posé n'est jamais retiré par la désinstallation ni remplacé par une mise à jour d'un
 ; autre nom (un ancien modèle reste à côté).
-Source: "{tmp}\modele\*"; DestDir: "{app}\bin\models"; Flags: external ignoreversion uninsneveruninstall; Check: ModelePret
+; `onlyifdoesntexist` : un fichier de `models` n'est jamais écrasé.
+Source: "{tmp}\modele\*"; DestDir: "{app}\bin\models"; Flags: external ignoreversion uninsneveruninstall onlyifdoesntexist; Check: ModelePret
+; Copie de cet installeur, que lance le raccourci « Mettre à jour Cassini » (/MISEAJOUR). Pas de
+; copie quand on tourne déjà depuis elle (un exécutable en cours ne se remplace pas) : elle reste
+; celle de la dernière installation par l'installeur d'origine.
+Source: "{srcexe}"; DestDir: "{app}"; DestName: "mettre-a-jour-cassini.exe"; Flags: external ignoreversion; Check: CopieInstalleurUtile
+
+[Icons]
+Name: "{autoprograms}\Mettre à jour Cassini"; Filename: "{app}\mettre-a-jour-cassini.exe"; Parameters: "/MISEAJOUR"; Comment: "Met à jour le noyau et le modèle de Cassini"
 
 [UninstallDelete]
 ; Les fichiers du noyau seulement (jamais le dossier `models` : le modèle est à l'utilisateur
@@ -63,11 +77,106 @@ const
   { Même nom que la déclaration de l'installeur complet (porte 2) : une porte met l'autre à jour. }
   DeclarationModele = 'cassini-composition-4b.modele.json';
 
+procedure ExitProcess(Code: Cardinal); external 'ExitProcess@kernel32.dll stdcall';
+
 var
-  VersionInstallee: String;
+  VersionAPoser, VersionPresente: String;
   PageModele: TInputOptionWizardPage;
   NomModele, ShaModele: String;
   ModeleTelecharge: Boolean;
+
+{ Lancé avec /MISEAJOUR ? (interrupteur sans valeur : on parcourt la ligne de commande.) }
+function ModeMiseAJour: Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+    if CompareText(ParamStr(I), '/MISEAJOUR') = 0 then
+      Result := True;
+end;
+
+{ Au moins un modèle (.gguf) déjà posé dans models ? }
+function ModeleDejaPresent: Boolean;
+var
+  R: TFindRec;
+begin
+  Result := False;
+  if FindFirst(ExpandConstant('{app}\bin\models\*.gguf'), R) then
+  begin
+    Result := True;
+    FindClose(R);
+  end;
+end;
+
+{ Pas de copie de l'installeur sur lui-même (mise à jour lancée depuis le raccourci). }
+function CopieInstalleurUtile: Boolean;
+begin
+  Result := CompareText(ExpandConstant('{srcexe}'), ExpandConstant('{app}\mettre-a-jour-cassini.exe')) <> 0;
+end;
+
+{ Une partie (0 = majeure, 1, 2) d'une version « a.b.c » ; une partie absente vaut 0, une partie
+  vide ou non numérique rend -1. }
+function PartieVersion(V: String; N: Integer): Integer;
+var
+  I, P: Integer;
+  Part: String;
+begin
+  Part := '0';
+  for I := 0 to N do
+  begin
+    if V = '' then
+    begin
+      Part := '0';
+      Break;
+    end;
+    P := Pos('.', V);
+    if P = 0 then
+    begin
+      Part := V;
+      V := '';
+    end
+    else
+    begin
+      Part := Copy(V, 1, P - 1);
+      V := Copy(V, P + 1, Length(V));
+    end;
+  end;
+  Result := StrToIntDef(Part, -1);
+end;
+
+{ Compare deux versions : -1 si A < B, 0 si égales, 1 si A > B, -2 si l'une est illisible. }
+function ComparerVersions(const A, B: String): Integer;
+var
+  I, X, Y: Integer;
+begin
+  Result := 0;
+  if (A = '') or (B = '') then
+  begin
+    Result := -2;
+    Exit;
+  end;
+  for I := 0 to 2 do
+  begin
+    X := PartieVersion(A, I);
+    Y := PartieVersion(B, I);
+    if (X < 0) or (Y < 0) then
+    begin
+      Result := -2;
+      Exit;
+    end;
+    if X < Y then
+    begin
+      Result := -1;
+      Exit;
+    end;
+    if X > Y then
+    begin
+      Result := 1;
+      Exit;
+    end;
+  end;
+end;
 
 { Case « modèle » cochée par défaut ; /MODELE=0 ou /MODELE=1 pour l'installation silencieuse. }
 procedure InitializeWizard;
@@ -80,6 +189,10 @@ begin
     False, False);
   PageModele.Add('Télécharger et installer le modèle');
   PageModele.Values[0] := ExpandConstant('{param:MODELE|1}') <> '0';
+  { En mise à jour, le modèle n'est proposé par défaut que si l'utilisateur en avait déjà un
+    (/MODELE=0 ou /MODELE=1 reste prioritaire). }
+  if ModeMiseAJour and (ExpandConstant('{param:MODELE|}') = '') then
+    PageModele.Values[0] := ModeleDejaPresent;
 end;
 
 function ModelePret: Boolean;
@@ -139,6 +252,56 @@ begin
   end;
 end;
 
+{ La section « modele » du manifeste (vide si absente), coupée avant « porte2 ». }
+function SectionModele(const Json: String): String;
+var
+  P: Integer;
+begin
+  Result := '';
+  P := Pos('"modele"', Json);
+  if P = 0 then
+    Exit;
+  Result := Copy(Json, P, Length(Json));
+  P := Pos('"porte2"', Result);
+  if P > 0 then
+    Result := Copy(Result, 1, P - 1);
+end;
+
+{ La version écrite dans {app}\bin\installation.json ; vide si le fichier manque ou est illisible. }
+function LireVersionPresente: String;
+var
+  Brut: AnsiString;
+begin
+  Result := '';
+  if LoadStringFromFile(ExpandConstant('{app}\bin\installation.json'), Brut) then
+    Result := ValeurApres(String(Brut), 'version', 1);
+end;
+
+{ Le dossier bin est-il en cours d'usage (QGIS ouvert : cassini.exe ou une DLL chargée) ?
+  Un dossier qui contient un fichier ouvert ne se renomme pas : on le renomme puis on le remet. }
+function NoyauEnCoursDUsage: Boolean;
+var
+  Bin, Essai: String;
+begin
+  Result := False;
+  Bin := ExpandConstant('{app}\bin');
+  Essai := ExpandConstant('{app}\bin-verif');
+  if not DirExists(Bin) then
+    Exit;
+  if RenameFile(Bin, Essai) then
+  begin
+    { Impossible de remettre le dossier : on refuse (rien n'est installé) plutôt que de continuer sans bin. }
+    if not RenameFile(Essai, Bin) then
+    begin
+      Result := True;
+      MsgBox('Cassini : le dossier ' + Essai + ' doit être renommé en bin à la main, puis la mise à jour relancée. ' +
+        'Aucun fichier n''a été posé.', mbError, MB_OK);
+    end;
+  end
+  else
+    Result := True;
+end;
+
 procedure NettoyerNoyau;
 begin
   DelTree(ExpandConstant('{tmp}\noyau'), True, True, True);
@@ -150,13 +313,22 @@ function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   Manifeste, Json, Reste, Nom, Url, Sha, ShaBrut, Dest, Source: String;
   Brut: AnsiString;
-  Nombre, P, DebutModele, DebutPorte2: Integer;
-  AvecNoyau: Boolean;
-  Section, Fichiers: String;
+  Nombre, P, DebutModele, DebutPorte2, Cmp: Integer;
+  AvecNoyau, ModelePresent, ModeleVoulu: Boolean;
+  Section, Fichiers, NomManifeste, Question: String;
 begin
   Result := '';
   ModeleTelecharge := False;
   Source := ExpandConstant('{param:MANIFESTE|{#ManifesteParDefaut}}');
+
+  { Mise à jour d'un Cassini qui n'est pas installé : rien à faire, code non nul en silencieux. }
+  if ModeMiseAJour and (not FileExists(ExpandConstant('{app}\bin\installation.json'))) and
+     (not FileExists(ExpandConstant('{app}\bin\cassini.exe'))) then
+  begin
+    Result := 'Cassini n''est pas installé. Lancez d''abord l''installeur de Cassini.' + #13#10 +
+      'Aucun fichier n''a été posé.';
+    Exit;
+  end;
 
   try
     DownloadTemporaryFile(Source, 'manifeste.json', '', nil);
@@ -175,11 +347,49 @@ begin
   end;
   Json := String(Brut);
 
-  VersionInstallee := ValeurApres(Json, 'version', 1);
-  if VersionInstallee = '' then
+  VersionAPoser := ValeurApres(Json, 'version', 1);
+  if VersionAPoser = '' then
   begin
     Result := 'La liste des versions de Cassini est incomplète. Aucun fichier n''a été installé.';
     Exit;
+  end;
+
+  if ModeMiseAJour then
+  begin
+    VersionPresente := LireVersionPresente;
+    ModeleVoulu := PageModele.Values[0];
+    NomManifeste := ValeurApres(SectionModele(Json), 'nom', 1);
+    { Le nom versionné du modèle dit s'il est déjà là : pas de calcul d'empreinte de 2,8 Go. }
+    ModelePresent := (not ModeleVoulu) or (NomManifeste = '') or
+      FileExists(ExpandConstant('{app}\bin\models\') + NomManifeste);
+    Cmp := ComparerVersions(VersionPresente, VersionAPoser);
+    { Installée plus récente : à jour. Égale : à jour si le modèle du manifeste est là.
+      Plus ancienne ou illisible : mise à jour proposée. }
+    if (Cmp = 1) or ((Cmp = 0) and ModelePresent) then
+    begin
+      if not WizardSilent then
+        MsgBox('Cassini est à jour (version ' + VersionPresente + ').', mbInformation, MB_OK);
+      ExitProcess(0);
+    end;
+    if Cmp = -2 then
+      Question := 'Mettre à jour Cassini vers la version ' + VersionAPoser + ' ?'
+    else if Cmp = 0 then
+      Question := 'Cassini ' + VersionPresente + ' est installé ; le nouveau modèle sera ajouté à côté de l''ancien. Continuer ?'
+    else
+      Question := 'Mettre à jour Cassini de la version ' + VersionPresente + ' vers la version ' +
+        VersionAPoser + ' ?';
+    if not ModelePresent then
+      Question := Question + #13#10#13#10 + 'Le nouveau modèle (' + NomManifeste +
+        ') sera téléchargé et ajouté ; l''ancien modèle reste.';
+    { En silencieux, pas de dialogue : la confirmation vaut « oui ». }
+    if (not WizardSilent) and (MsgBox(Question, mbConfirmation, MB_YESNO) = IDNO) then
+      ExitProcess(0);
+    if NoyauEnCoursDUsage then
+    begin
+      Result := 'Cassini est en cours d''utilisation. Fermez QGIS et toute fenêtre ouverte sur le dossier de Cassini, puis relancez la mise à jour.' +
+        #13#10 + 'Aucun fichier n''a été posé.';
+      Exit;
+    end;
   end;
 
   NettoyerNoyau;
@@ -259,11 +469,7 @@ begin
     l'installation (le noyau compris), rien n'est posé. }
   if (not PageModele.Values[0]) or (Pos('"modele"', Json) = 0) then
     Exit;
-  P := Pos('"modele"', Json);
-  Section := Copy(Json, P, Length(Json));
-  P := Pos('"porte2"', Section);
-  if P > 0 then
-    Section := Copy(Section, 1, P - 1);
+  Section := SectionModele(Json);
   NomModele := ValeurApres(Section, 'nom', 1);
   Url := ValeurApres(Section, 'url', 1);
   ShaModele := Lowercase(ValeurApres(Section, 'sha256', 1));
@@ -274,6 +480,9 @@ begin
     Result := 'La liste des versions de Cassini est incomplète (modèle). Aucun fichier n''a été installé.';
     Exit;
   end;
+  { Ce modèle est déjà là (même nom) : ni téléchargé ni touché, un fichier de models n'est jamais écrasé. }
+  if FileExists(ExpandConstant('{app}\bin\models\') + NomModele) then
+    Exit;
   try
     DownloadTemporaryFile(Url, NomModele, ShaModele, nil);
   except
@@ -317,6 +526,6 @@ begin
         '{"model": "' + NomModele + '", "prompt": "short", "model_sha256": "' + ShaModele + '"}' + #10, False);
     end;
     SaveStringToFile(ExpandConstant('{app}\bin\installation.json'),
-      '{"version": "' + VersionInstallee + '", "installe_le": "' + DateIsoUtc + '"}' + #10, False);
+      '{"version": "' + VersionAPoser + '", "installe_le": "' + DateIsoUtc + '"}' + #10, False);
   end;
 end;

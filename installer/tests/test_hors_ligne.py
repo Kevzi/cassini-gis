@@ -199,6 +199,13 @@ class TestScriptSansReseau(unittest.TestCase):
         for mot in ("downloadtemporaryfile", "tdownloadwizardpage", "http://", "https://", "urlmon", "wininet", "winhttp", "internetopen"):
             self.assertNotIn(mot, texte, mot)
 
+    def test_declaration_existante_d_un_autre_modele_jamais_ecrasee(self):
+        iss = (Path(__file__).resolve().parent.parent / "cassini-hors-ligne.iss").read_text(encoding="utf-8")
+        self.assertIn("NomDecl := '{#Declaration}';", iss)
+        self.assertIn("(Pos('{#NomModele}', String(Existant)) = 0)", iss)
+        self.assertIn("NomDecl := Copy('{#NomModele}', 1, Length('{#NomModele}') - 5) + '.modele.json';", iss)
+        self.assertNotIn("ExpandConstant('{app}" + chr(92) + "bin" + chr(92) + "models" + chr(92) + "{#Declaration}')", iss)
+
     def test_nom_modele_egal_a_la_declaration(self):
         iss = (Path(__file__).resolve().parent.parent / "cassini-hors-ligne.iss").read_text(encoding="utf-8")
         nom = re.search(r'^#define NomModele "([^"]+)"', iss, re.M).group(1)
