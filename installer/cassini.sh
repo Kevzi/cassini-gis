@@ -256,9 +256,11 @@ else
       verifier "$MODELE_SRC" "$MODELE_SHA" "$MODELE_NOM"
     fi
   fi
-  # Le tar du noyau ne contient que `cassini`.
-  LISTE=$(tar -tzf "$NOYAU_SRC" 2>/dev/null | sed 's|^\./||') || LISTE=""
-  [ "$LISTE" = "cassini" ] || erreur "$NOYAU_NOM_TAR ne contient pas exactement le fichier cassini. Aucun fichier n'a ete installe."
+  # Le tar du noyau ne contient que `cassini` et les deux textes de licences (ou `cassini` seul).
+  LISTE=$(tar -tzf "$NOYAU_SRC" 2>/dev/null | sed 's|^\./||' | tr '
+' ' ') || LISTE=""
+  [ "$LISTE" = "cassini " ] || [ "$LISTE" = "cassini LICENCES-TIERCES.txt FRONTIERE-GPL.txt " ] ||
+    erreur "$NOYAU_NOM_TAR ne contient pas exactement le fichier cassini et les textes de licences. Aucun fichier n'a ete installe."
   mkdir -p "$TMP/noyau" && tar -xzf "$NOYAU_SRC" -C "$TMP/noyau" || erreur "impossible de deplier $NOYAU_NOM_TAR."
   NOYAU_PRET="$TMP/noyau/cassini"
   [ -f "$NOYAU_PRET" ] || erreur "$NOYAU_NOM_TAR ne contient pas cassini."
@@ -285,6 +287,15 @@ fi
 # Le noyau : pose par mv d'un fichier temporaire du meme dossier, QGIS peut etre ouvert.
 cp "$NOYAU_PRET" "$BIN/.cassini.nouveau" && chmod 755 "$BIN/.cassini.nouveau" && mv -f "$BIN/.cassini.nouveau" "$BIN/cassini" ||
   { rm -f "$BIN/.cassini.nouveau"; erreur "impossible de poser le noyau dans $BIN (est-il en cours d'usage ?)."; }
+
+# Textes de licences (a cote du noyau, comme sous Windows) : porte 2 dans l'archive depliee, porte 1
+# dans le tar du noyau. Facultatifs pour une ancienne archive qui n'en contient pas.
+if [ "$PORTE2" = 1 ]; then SRC_TXT="$DIR"; else SRC_TXT="$TMP/noyau"; fi
+for t in LICENCES-TIERCES.txt FRONTIERE-GPL.txt; do
+  if [ -f "$SRC_TXT/$t" ]; then
+    cp "$SRC_TXT/$t" "$BIN/.$t.part" && mv -f "$BIN/.$t.part" "$BIN/$t" || { rm -f "$BIN/.$t.part"; erreur "impossible de poser $t."; }
+  fi
+done
 
 DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 printf '{"version": "%s", "installe_le": "%s"}\n' "$VERSION" "$DATE" > "$BIN/installation.json.part" &&

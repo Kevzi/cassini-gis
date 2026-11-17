@@ -2,7 +2,8 @@
 
 Copie de `C:\\ct\\release` vers `dist\\noyau` exactement : `cassini.exe`, `llama.dll`,
 `ggml.dll`, `ggml-base.dll`, tous les `ggml-cpu-*.dll` (au moins un) et `ggml-vulkan.dll`.
-Échoue si l'un manque, et si un autre fichier (DLL ou exécutable) est présent dans le dossier
+Y ajoute les deux textes de licences (`LICENCES-TIERCES.txt`, `FRONTIERE-GPL.txt`, produits par
+`installer/licences.py`), pris dans le dossier `--textes` : échec s'ils manquent. Échoue si l'un manque, et si un autre fichier (DLL ou exécutable) est présent dans le dossier
 de construction : jamais `llama-common.dll`, qui embarque un client HTTP. Seuls les `.dll` et
 `.exe` comptent : les autres fichiers de construction (`.pdb`, `.lib`, `.d`, dossiers) sont ignorés.
 
@@ -17,6 +18,7 @@ import sys
 from pathlib import Path
 
 FIXES = ("cassini.exe", "llama.dll", "ggml.dll", "ggml-base.dll", "ggml-vulkan.dll")
+TEXTES = ("LICENCES-TIERCES.txt", "FRONTIERE-GPL.txt")
 MOTIF_CPU = re.compile(r"^ggml-cpu-[^/\\]+\.dll$")
 
 
@@ -25,15 +27,18 @@ class AssemblageErreur(Exception):
 
 
 def fichiers_attendus(noms: set[str]) -> list[str]:
-    return sorted(set(FIXES) | {n for n in noms if MOTIF_CPU.match(n)})
+    return sorted(set(FIXES) | set(TEXTES) | {n for n in noms if MOTIF_CPU.match(n)})
 
 
-def assembler(source: Path, sortie: Path) -> list[str]:
+def assembler(source: Path, sortie: Path, textes: Path) -> list[str]:
     """Copie le paquet ; rien n'est écrit si le dossier source ne convient pas."""
     if not source.is_dir():
         raise AssemblageErreur(f"dossier de construction introuvable : {source}")
     presents = {f.name for f in source.iterdir() if f.is_file()}
     attendus = fichiers_attendus(presents)
+    absents = [n for n in TEXTES if not (textes / n).is_file()]
+    if absents:
+        raise AssemblageErreur(f"texte de licences manquant dans {textes} : {', '.join(absents)}")
     manquants = [n for n in FIXES if n not in presents]
     if manquants:
         raise AssemblageErreur(f"fichier manquant dans le paquet : {', '.join(manquants)}")
@@ -50,7 +55,7 @@ def assembler(source: Path, sortie: Path) -> list[str]:
         if ancien.is_file():
             ancien.unlink()
     for n in attendus:
-        shutil.copy2(source / n, sortie / n)
+        shutil.copy2((textes if n in TEXTES else source) / n, sortie / n)
     return attendus
 
 
@@ -69,10 +74,11 @@ def verifier_dossier(dossier: Path) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--source", type=Path, required=True)
+    p.add_argument("--textes", type=Path, required=True, help="dossier écrit par installer/licences.py")
     p.add_argument("--sortie", type=Path, required=True)
     a = p.parse_args(argv)
     try:
-        noms = assembler(a.source, a.sortie)
+        noms = assembler(a.source, a.sortie, a.textes)
         verifier_dossier(a.sortie)
     except (AssemblageErreur, OSError) as e:
         print(f"paquet du noyau refusé : {e}", file=sys.stderr)

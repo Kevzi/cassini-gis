@@ -1,10 +1,10 @@
 """Assemble les deux archives Linux de Cassini (ticket 7.7) par liste fermée.
 
-- `cassini-noyau-linux-<version>.tar.gz` : le noyau processeur, un seul fichier `cassini`
-  (porte 1 : `cassini.sh` le télécharge depuis la release GitHub).
+- `cassini-noyau-linux-<version>.tar.gz` : le noyau processeur, `cassini` et les deux textes de
+  licences (porte 1 : `cassini.sh` le télécharge depuis la release GitHub).
 - `cassini-complet-linux-<version>.tar` : la porte 2, `noyau/cassini`, `modele/<nom>.gguf`,
-  `cassini.sh`, `VERSION` et `empreintes.txt` (SHA-256 de chaque fichier, vérifiés par le script
-  avant toute pose). Sans compression : le modèle quantifié ne se comprime presque pas. Hébergée
+  `cassini.sh`, `VERSION`, `empreintes.txt` (SHA-256 du noyau et du modèle, vérifiés par le script
+  avant toute pose) et les deux textes de licences, posés sans empreinte. Sans compression : le modèle quantifié ne se comprime presque pas. Hébergée
   sur Hugging Face (plus de 2 Gio), pas sur la release GitHub.
 
 Le binaire doit être un exécutable ELF nommé `cassini`, et ne demander aucune version de la glibc
@@ -12,7 +12,7 @@ au-delà de 2.35 (Ubuntu 22.04) : la garde lit `objdump -T`.
 
 Usage :
     python -I installer/assembler_linux.py --binaire target/release/cassini \\
-        --modele modele/cassini-composition-4b-0.2.0-Q4_K_M.gguf --version 0.1.1 --sortie dist-linux
+        --modele modele/cassini-composition-4b-0.2.0-Q4_K_M.gguf --textes dist/licences --version 0.1.1 --sortie dist-linux
 """
 
 import argparse
@@ -27,6 +27,8 @@ import tarfile
 from pathlib import Path
 
 INSTALLER = Path(__file__).resolve().parent
+# Produits par installer/licences.py ; dans chaque archive, l'assemblage échoue sans eux.
+TEXTES = ("LICENCES-TIERCES.txt", "FRONTIERE-GPL.txt")
 PLAFOND_GLIBC = (2, 35)
 MOTIF_GLIBC = re.compile(r"GLIBC_(\d+)\.(\d+)(?:\.(\d+))?")
 MAGIE_ELF = b"\x7fELF"
@@ -155,6 +157,7 @@ def assembler(
     script: Path,
     version: str,
     sortie: Path,
+    textes: Path,
     nom_modele: str | None = None,
     controler_glibc: bool = True,
 ) -> list[Path]:
@@ -169,6 +172,9 @@ def assembler(
         raise AssemblageErreur(f"installeur introuvable : {script}")
     if not modele.is_file() or modele.suffix != ".gguf":
         raise AssemblageErreur(f"modèle introuvable ou sans extension .gguf : {modele}")
+    absents = [n for n in TEXTES if not (textes / n).is_file()]
+    if absents:
+        raise AssemblageErreur(f"texte de licences manquant dans {textes} : {', '.join(absents)}")
     nom_modele = nom_modele or modele.name
     if nom_modele != modele.name:
         raise AssemblageErreur(f"le modèle s'appelle {modele.name}, pas {nom_modele}")
@@ -187,13 +193,16 @@ def assembler(
             f"{sha256_de(modele)}  modele/{modele.name}\n"
         )
         (work / "empreintes.txt").write_text(empreintes, encoding="utf-8", newline="\n")
-        _ecrire_tar(tar_noyau, [(binaire, "cassini")], compresse=True)
+        _ecrire_tar(
+            tar_noyau, [(binaire, "cassini")] + [(textes / n, n) for n in TEXTES], compresse=True
+        )
         _ecrire_tar(
             tar_complet,
             [
                 (script, "cassini.sh"),
                 (work / "VERSION", "VERSION"),
                 (work / "empreintes.txt", "empreintes.txt"),
+                *[(textes / n, n) for n in TEXTES],
                 (binaire, "noyau/cassini"),
                 (modele, f"modele/{modele.name}"),
             ],
@@ -212,9 +221,9 @@ def noms_dans(chemin: Path) -> list[str]:
 
 def verifier_archives(tar_noyau: Path, tar_complet: Path, nom_modele: str) -> None:
     """Les archives contiennent exactement la liste fermée, sans rien d'autre."""
-    if noms_dans(tar_noyau) != ["cassini"]:
+    if noms_dans(tar_noyau) != ["cassini", *TEXTES]:
         raise AssemblageErreur(f"{tar_noyau.name} : contenu inattendu {noms_dans(tar_noyau)}")
-    attendus = ["cassini.sh", "VERSION", "empreintes.txt", "noyau/cassini", f"modele/{nom_modele}"]
+    attendus = ["cassini.sh", "VERSION", "empreintes.txt", *TEXTES, "noyau/cassini", f"modele/{nom_modele}"]
     if noms_dans(tar_complet) != attendus:
         raise AssemblageErreur(f"{tar_complet.name} : contenu inattendu {noms_dans(tar_complet)}")
 
@@ -224,6 +233,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--binaire", type=Path, required=True, help="le binaire ELF `cassini` (processeur)")
     p.add_argument("--modele", type=Path, required=True, help="le fichier .gguf du modèle")
     p.add_argument("--script", type=Path, default=INSTALLER / "cassini.sh")
+    p.add_argument("--textes", type=Path, required=True, help="dossier écrit par installer/licences.py")
     p.add_argument("--version", required=True)
     p.add_argument("--sortie", type=Path, required=True)
     p.add_argument("--sans-controle-glibc", action="store_true", help="essais seulement")
@@ -235,7 +245,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"le modèle s'appelle {a.modele.name}, installer/modele.json attend {ref['nom_installe']}"
             )
         archives = assembler(
-            a.binaire, a.modele, a.script, a.version, a.sortie,
+            a.binaire, a.modele, a.script, a.version, a.sortie, a.textes,
             controler_glibc=not a.sans_controle_glibc,
         )
     except (AssemblageErreur, OSError, KeyError, ValueError) as e:

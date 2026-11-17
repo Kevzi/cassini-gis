@@ -244,3 +244,25 @@ terminal ; `--oui` la saute.
 3. Installer QGIS, l'extension depuis son ZIP, rejouer la démo : le panneau trouve le noyau.
 4. Lancer `mettre-a-jour-cassini --mise-a-jour` contre une version plus récente : l'ancien modèle reste ;
    le relancer : « Cassini est à jour ».
+
+## Licences livrées (R7)
+
+Chaque paquet du noyau, Windows et Linux, contient deux textes, joints aussi à la release :
+
+- `LICENCES-TIERCES.txt` : les crates du noyau (`core`, `ai`, `cli`, sans `cassini-app`, comme
+  `deny.toml`) avec leur version et leur licence SPDX, triées, lues dans `cargo metadata` ; puis
+  une liste fermée de composants hors Cargo : llama.cpp (MIT), le modèle Qwen3.5-4B modifié
+  (Apache-2.0), Inno Setup (licence permissive, lanceur embarqué dans les installeurs Windows) et
+  le SDK Vulkan (outil de construction, jamais livré). Les avis ColorBrewer et WMM2025 restent dans
+  `NOTICE`.
+- `FRONTIERE-GPL.txt` : copie de `docs/frontiere-gpl.md`, qui explique pourquoi l'extension (GPL) et
+  le noyau (Apache-2.0) restent deux programmes séparés.
+
+`python -I installer/licences.py --sortie dist/licences` les écrit (stdlib Python et `cargo metadata`
+hors ligne, sortie identique d'une exécution à l'autre). Il échoue, en nommant la crate, si une crate
+livrée n'a pas de licence déclarée ou n'a que des licences GPL, LGPL ou AGPL à offrir. Pour ajouter
+ou retirer un composant hors Cargo (nouveau modèle, nouvel outil), modifier `HORS_CARGO` dans
+`installer/licences.py`. La recette génère les deux fichiers avant l'assemblage : `assembler_noyau.py`
+et `assembler_linux.py` (option `--textes`) échouent s'ils manquent. Sous Windows, ils sont dans
+`bin` à côté de `cassini.exe` (le manifeste les liste, l'installeur en ligne les télécharge) ; sous
+Linux, `cassini.sh` les pose dans `~/.local/share/cassini/bin`.

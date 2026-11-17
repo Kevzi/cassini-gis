@@ -57,6 +57,13 @@ jobs:
       - name: Construction du noyau (processeur)
         run: cargo build --release -p cassini --locked
 
+      # Licences livrées (R7) : crates du noyau lues dans cargo metadata (`cargo fetch` tire les sources de toutes les
+      # plateformes, que `cargo metadata --offline` exige), échec si une crate n'a pas de licence ou est sous GPL ou LGPL.
+      - name: Licences de ce qui est livré
+        run: |
+          cargo fetch --locked
+          python -I installer/licences.py --sortie dist/licences
+
       # Garde hors ligne sur le binaire livré : table des symboles importés (ELF).
       - name: Garde hors ligne sur le binaire livré
         run: cargo test --release -p cassini --test hors_ligne --locked
@@ -74,7 +81,7 @@ jobs:
       - name: Archives Linux (liste fermée, glibc au plus 2.35)
         run: |
           nom=$(python -I -c "import json; print(json.load(open('installer/modele.json'))['nom_installe'])")
-          python -I installer/assembler_linux.py --binaire target/release/cassini --modele "modele/$nom"             --version "${TAG#v}" --sortie dist-linux
+          python -I installer/assembler_linux.py --binaire target/release/cassini --modele "modele/$nom"             --textes dist/licences --version "${TAG#v}" --sortie dist-linux
           cp installer/cassini.sh dist-linux/cassini.sh
           rm -rf target modele
           df -h .
@@ -167,10 +174,17 @@ jobs:
       - name: Noyau en release
         run: C:\ct\release\cassini.exe run system.about
 
+      # Licences livrées (R7) : LICENCES-TIERCES.txt et FRONTIERE-GPL.txt, joints au paquet du noyau
+      # (donc au manifeste, à l'installeur en ligne et à la porte 2) et à la release.
+      - name: Licences de ce qui est livré
+        run: |
+          cargo fetch --locked
+          python -I installer/licences.py --sortie dist/licences
+
       # Liste fermée : échoue si un fichier manque ou si un autre est présent (llama-common.dll
       # embarque un client HTTP, jamais livrée).
       - name: Assemblage du paquet du noyau (liste fermée)
-        run: python -I installer/assembler_noyau.py --source C:\ct\release --sortie dist/noyau
+        run: python -I installer/assembler_noyau.py --source C:\ct\release --textes dist/licences --sortie dist/noyau
 
       - name: Le paquet assemblé répond
         run: |

@@ -131,6 +131,14 @@ class Serveur:
         self.httpd.server_close()
 
 
+def faux_textes(dossier: Path) -> Path:
+    """Les deux textes de licences, factices, comme les écrit installer/licences.py."""
+    dossier.mkdir(exist_ok=True)
+    for n in assembler_linux.TEXTES:
+        (dossier / n).write_bytes(n.encode())
+    return dossier
+
+
 def tar_noyau(chemin: Path, contenu: bytes) -> None:
     with tarfile.open(chemin, "w:gz") as t:
         info = tarfile.TarInfo("cassini")
@@ -356,7 +364,9 @@ class TestEssaiReel(unittest.TestCase):
         modele.write_bytes(self.modeles[NOM_NOUVEAU])
         sortie = self.d / "dist"
         _, complet = (
-            assembler_linux.assembler(binaire, modele, SCRIPT, version, sortie, controler_glibc=False)
+            assembler_linux.assembler(
+                binaire, modele, SCRIPT, version, sortie, faux_textes(self.d / "txt"), controler_glibc=False
+            )
         )
         dossier = self.d / "depliee"
         dossier.mkdir()
@@ -384,6 +394,8 @@ class TestEssaiReel(unittest.TestCase):
         self.assertEqual(self.srv.requetes, [])
         bin_ = self.racine / "bin"
         self.assertEqual((bin_ / "cassini").read_bytes(), (dossier / "noyau" / "cassini").read_bytes())
+        for t in assembler_linux.TEXTES:
+            self.assertEqual((bin_ / t).read_bytes(), t.encode())
         self.assertEqual((bin_ / "models" / NOM_NOUVEAU).read_bytes(), self.modeles[NOM_NOUVEAU])
         decl = json.loads((bin_ / "models" / "cassini-composition-4b.modele.json").read_text(encoding="utf-8"))
         self.assertEqual(decl["model_sha256"], sha(self.modeles[NOM_NOUVEAU]))
@@ -415,14 +427,15 @@ class TestAssembleurLinux(unittest.TestCase):
         self.binaire.write_bytes(b"\x7fELF contenu")
         self.modele = self.d / "src" / NOM_NOUVEAU
         self.modele.write_bytes(b"modele")
+        self.txt = faux_textes(self.d / "txt")
 
     def test_archives_exactes_et_empreintes(self):
         n, c = assembler_linux.assembler(
-            self.binaire, self.modele, SCRIPT, "0.1.1", self.d / "out", controler_glibc=False
+            self.binaire, self.modele, SCRIPT, "0.1.1", self.d / "out", self.txt, controler_glibc=False
         )
         self.assertEqual(n.name, "cassini-noyau-linux-0.1.1.tar.gz")
         self.assertEqual(c.name, "cassini-complet-linux-0.1.1.tar")
-        self.assertEqual(assembler_linux.noms_dans(n), ["cassini"])
+        self.assertEqual(assembler_linux.noms_dans(n), ["cassini", *assembler_linux.TEXTES])
         with tarfile.open(c) as t:
             emp = t.extractfile("empreintes.txt").read().decode()
             self.assertEqual(t.extractfile("VERSION").read().decode(), "0.1.1\n")
@@ -431,7 +444,7 @@ class TestAssembleurLinux(unittest.TestCase):
         self.assertIn(f"{sha(self.binaire.read_bytes())}  noyau/cassini\n", emp)
         # Reproductible : mêmes octets deux fois de suite.
         n2, _ = assembler_linux.assembler(
-            self.binaire, self.modele, SCRIPT, "0.1.1", self.d / "out2", controler_glibc=False
+            self.binaire, self.modele, SCRIPT, "0.1.1", self.d / "out2", self.txt, controler_glibc=False
         )
         self.assertEqual(n.read_bytes(), n2.read_bytes())
 
@@ -439,17 +452,25 @@ class TestAssembleurLinux(unittest.TestCase):
         autre = self.d / "src" / "autre"
         autre.write_bytes(b"\x7fELF")
         with self.assertRaises(assembler_linux.AssemblageErreur):
-            assembler_linux.assembler(autre, self.modele, SCRIPT, "0.1.1", self.d / "o", controler_glibc=False)
+            assembler_linux.assembler(autre, self.modele, SCRIPT, "0.1.1", self.d / "o", self.txt, controler_glibc=False)
         exe = self.d / "src2"
         exe.mkdir()
         faux = exe / "cassini"
         faux.write_bytes(b"MZ pas un ELF")
         with self.assertRaises(assembler_linux.AssemblageErreur):
-            assembler_linux.assembler(faux, self.modele, SCRIPT, "0.1.1", self.d / "o", controler_glibc=False)
+            assembler_linux.assembler(faux, self.modele, SCRIPT, "0.1.1", self.d / "o", self.txt, controler_glibc=False)
         with self.assertRaises(assembler_linux.AssemblageErreur):
-            assembler_linux.assembler(self.binaire, self.d / "absent.gguf", SCRIPT, "0.1.1", self.d / "o", controler_glibc=False)
+            assembler_linux.assembler(self.binaire, self.d / "absent.gguf", SCRIPT, "0.1.1", self.d / "o", self.txt, controler_glibc=False)
         with self.assertRaises(assembler_linux.AssemblageErreur):
-            assembler_linux.assembler(self.binaire, self.modele, SCRIPT, "v0.1", self.d / "o", controler_glibc=False)
+            assembler_linux.assembler(self.binaire, self.modele, SCRIPT, "v0.1", self.d / "o", self.txt, controler_glibc=False)
+        self.assertFalse((self.d / "o").exists())
+
+    def test_textes_de_licences_manquants(self):
+        (self.txt / "LICENCES-TIERCES.txt").unlink()
+        with self.assertRaisesRegex(assembler_linux.AssemblageErreur, "LICENCES-TIERCES.txt"):
+            assembler_linux.assembler(
+                self.binaire, self.modele, SCRIPT, "0.1.1", self.d / "o", self.txt, controler_glibc=False
+            )
         self.assertFalse((self.d / "o").exists())
 
     def test_plafond_glibc(self):

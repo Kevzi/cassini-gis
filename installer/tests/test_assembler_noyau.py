@@ -18,6 +18,10 @@ class TestAssembler(unittest.TestCase):
         self.src = self.d / "release"
         self.src.mkdir()
         self.out = self.d / "dist" / "noyau"
+        self.txt = self.d / "licences"
+        self.txt.mkdir()
+        for n in an.TEXTES:
+            (self.txt / n).write_bytes(n.encode())
 
     def poser(self, noms):
         for n in noms:
@@ -25,39 +29,47 @@ class TestAssembler(unittest.TestCase):
 
     def test_paquet_complet(self):
         self.poser(COMPLET + ["cassini.pdb", "cassini.d"])
-        self.assertEqual(sorted(an.assembler(self.src, self.out)), sorted(COMPLET))
-        self.assertEqual(sorted(f.name for f in self.out.iterdir()), sorted(COMPLET))
-        self.assertEqual(an.main(["--source", str(self.src), "--sortie", str(self.out)]), 0)
+        self.assertEqual(sorted(an.assembler(self.src, self.out, self.txt)), sorted(COMPLET + list(an.TEXTES)))
+        self.assertEqual(sorted(f.name for f in self.out.iterdir()), sorted(COMPLET + list(an.TEXTES)))
+        self.assertEqual(an.main(["--source", str(self.src), "--textes", str(self.txt), "--sortie", str(self.out)]), 0)
 
     def test_vulkan_manquante(self):
         self.poser([n for n in COMPLET if n != "ggml-vulkan.dll"])
         with self.assertRaisesRegex(an.AssemblageErreur, "ggml-vulkan.dll"):
-            an.assembler(self.src, self.out)
+            an.assembler(self.src, self.out, self.txt)
         self.assertFalse(self.out.exists())
 
     def test_aucun_moteur_processeur(self):
         self.poser(an.FIXES)
         with self.assertRaises(an.AssemblageErreur):
-            an.assembler(self.src, self.out)
+            an.assembler(self.src, self.out, self.txt)
 
     def test_llama_common_refusee(self):
         self.poser(COMPLET + ["llama-common.dll"])
         with self.assertRaisesRegex(an.AssemblageErreur, "llama-common.dll"):
-            an.assembler(self.src, self.out)
+            an.assembler(self.src, self.out, self.txt)
         self.assertFalse(self.out.exists())
-        self.assertEqual(an.main(["--source", str(self.src), "--sortie", str(self.out)]), 1)
+        self.assertEqual(an.main(["--source", str(self.src), "--textes", str(self.txt), "--sortie", str(self.out)]), 1)
 
     def test_autre_executable_refuse(self):
         self.poser(COMPLET + ["autre.exe"])
         with self.assertRaises(an.AssemblageErreur):
-            an.assembler(self.src, self.out)
+            an.assembler(self.src, self.out, self.txt)
+
+    def test_textes_de_licences_manquants(self):
+        self.poser(COMPLET)
+        (self.txt / "FRONTIERE-GPL.txt").unlink()
+        with self.assertRaisesRegex(an.AssemblageErreur, "FRONTIERE-GPL.txt"):
+            an.assembler(self.src, self.out, self.txt)
+        self.assertFalse(self.out.exists())
+        self.assertEqual(an.main(["--source", str(self.src), "--textes", str(self.txt), "--sortie", str(self.out)]), 1)
 
     def test_dossier_source_absent(self):
-        self.assertEqual(an.main(["--source", str(self.d / "absent"), "--sortie", str(self.out)]), 1)
+        self.assertEqual(an.main(["--source", str(self.d / "absent"), "--textes", str(self.txt), "--sortie", str(self.out)]), 1)
 
     def test_verifier_dossier_refuse_fichier_en_trop(self):
         self.poser(COMPLET)
-        an.assembler(self.src, self.out)
+        an.assembler(self.src, self.out, self.txt)
         (self.out / "llama-common.dll").write_bytes(b"x")
         with self.assertRaises(an.AssemblageErreur):
             an.verifier_dossier(self.out)
