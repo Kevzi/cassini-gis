@@ -3,7 +3,7 @@ title: 'Republier le modele a jour sur Hugging Face (continu-5-61b)'
 type: 'chore'
 ticket: '15'
 created: '2026-11-17'
-status: 'built'
+status: 'done'
 baseline_revision: '8cf2d47afad1134363c64b7da877d8a12805413c'
 route: 'oneshot'
 route_source: 'auto'
@@ -27,7 +27,7 @@ context: []
 
 ## Implementation Notes
 
-Oneshot : cinq fichiers, des valeurs (nom versionne 0.2.0, SHA-256 1c430872…, taille inchangee 2 783 446 944) et une phrase de fiche. `publier.ps1` verifie deja que le modele installe porte l'empreinte attendue : il refusera tout autre fichier. A faire par le proprietaire : `powershell -File docs\modele-hugging-face\publier.ps1`, puis rejouer la sonde de 11.14 avec le modele telecharge depuis Hugging Face. Tant que le fichier 0.2.0 n'est pas en ligne, la recette de release (qui le telecharge) echouerait : ne pas etiqueter avant l'envoi.
+Oneshot : cinq fichiers, des valeurs (nom versionne 0.2.0, SHA-256 1c430872…, taille inchangee 2 783 446 944) et une phrase de fiche. `publier.ps1` verifie deja que le modele installe porte l'empreinte attendue : il refusera tout autre fichier. A faire par le proprietaire : `powershell -File docs\modele-hugging-face\publier.ps1`, puis rejouer la sonde de 11.14 avec le modele telecharge depuis Hugging Face. Fait le 2026-11-17 : le proprietaire a lance `publier.ps1` ; le fichier 0.2.0 est en ligne (taille 2783446944, SHA-256 1c430872…, verifie par l'API du depot). Telecharge par `installer/telecharger_modele.py` (empreinte verifiee) dans un dossier temporaire avec sa declaration, la sonde de 11.14 rend `VERDICT : OK` (rejeu identique, 0 connexion). Tant que le fichier 0.2.0 n'etait pas en ligne, la recette de release (qui le telecharge) echouerait : ne pas etiqueter avant l'envoi.
 
 ## Review Triage Log
 
