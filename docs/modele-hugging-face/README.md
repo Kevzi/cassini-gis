@@ -39,9 +39,9 @@ French request into a sequence of typed commands that the user reviews before an
 
 | Fichier | Contenu |
 |---|---|
-| `cassini-composition-4b-0.1.0-Q4_K_M.gguf` | modèle quantifié Q4_K_M, 2 783 446 944 octets |
+| `cassini-composition-4b-0.2.0-Q4_K_M.gguf` | modèle quantifié Q4_K_M, 2 783 446 944 octets |
 
-SHA-256 : `b687313f4a49c23e13673d14d185f3ee56d3e710e8d01c08595339236b21a865`
+SHA-256 : `1c430872c0cedf23e52b0ef26ee8ac5aaf72aa4d8f0213711fbb40c61ca2695e`
 
 Posé dans le dossier `models\` à côté de `cassini.exe`, le noyau le trouve seul. Les installeurs
 de Cassini le téléchargent depuis cette adresse et vérifient cette empreinte.
@@ -52,7 +52,8 @@ de Cassini le téléchargent depuis cette adresse et vérifient cette empreinte.
   © Alibaba Cloud (voir `NOTICE`).
 - **Modifications** (ce fichier n'est pas le modèle de Qwen) : ajustement par adaptateur LoRA sur
   un jeu d'exemples **synthétiques** — des demandes en français et le plan de commandes attendu —
-  engendré par le générateur du dépôt de Cassini (`training/`), sans donnée de tiers ; fusion de
+  engendré par le générateur du dépôt de Cassini (`training/`), sans donnée de tiers, en
+  plusieurs séances successives ; fusion de
   l'adaptateur dans les poids de la base ; conversion en GGUF et quantification Q4_K_M avec
   llama.cpp.
 

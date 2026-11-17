@@ -31,7 +31,7 @@
 #define NomModele "cassini-composition-4b-Q4_K_M.gguf"
 ; Empreinte SHA-256 du modele : celle du manifeste des versions (installer/modele.json), la
 ; seule source (ticket 5.51). Le noyau la verifie au premier chargement du modele.
-#define EmpreinteModele "b687313f4a49c23e13673d14d185f3ee56d3e710e8d01c08595339236b21a865"
+#define EmpreinteModele "1c430872c0cedf23e52b0ef26ee8ac5aaf72aa4d8f0213711fbb40c61ca2695e"
 #define Declaration "cassini-composition-4b.modele.json"
 
 [Setup]
