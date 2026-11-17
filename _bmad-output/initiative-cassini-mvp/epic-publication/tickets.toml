@@ -57,13 +57,25 @@ hitl = false
 risk = "medium"
 
 [[entry]]
+id = 15
+type = "story"
+title = "Republier le modèle à jour sur Hugging Face (continu-5-61b)"
+description = "Le modèle que la porte 1 et la porte 2 livrent (`installer/modele.json`, cassini-composition-4b-0.1.0, SHA-256 b687313f…) est plus ancien que le modèle installé sur le poste du propriétaire, continu-5-61b : il compose data.reproject au lieu de data.transform_point et la démo 11.14 échoue chez qui installe par la porte 1. Préparer en local un GGUF Q4_K_M versionné de continu-5-61b (par exemple 0.2.0, SHA-256 1c430872…), mettre à jour `installer/modele.json` (url, sha256, taille), la fiche et le script de `docs/modele-hugging-face`, et les gardes des tests de l'installeur ; le propriétaire fait lui-même l'envoi avec son jeton Hugging Face."
+verify = "Le fichier est en ligne sous son nom versionné et `modele.json` en porte l'empreinte ; l'installeur en ligne le télécharge, le vérifie, et la sonde de 11.14 (`outils-cassini/scripts/demo-11-14.ps1`) rend VERDICT : OK avec ce modèle téléchargé depuis Hugging Face ; les tests de l'installeur passent."
+covers = ["R3", "R5"]
+after = [3, 4]
+hitl = true
+risk = "medium"
+notes = ["Ne rien envoyer ni publier depuis la session : l'envoi est fait par le propriétaire. 7.5 et la reconstruction de l'installeur complet (7.2) dépendent du nouveau modele.json."]
+
+[[entry]]
 id = 5
 type = "story"
 title = "« Mettre à jour Cassini », le même programme que l'installeur en ligne"
 description = "L'installeur en ligne gagne un lancement « Mettre à jour Cassini » (menu Démarrer) qui lit le manifeste, compare à l'installé, propose, télécharge, vérifie l'empreinte, installe, met à jour la version et la date écrites par 7.1, et pose un nouveau modèle à côté des anciens sans jamais en supprimer."
 verify = "Sur une VM où une version plus ancienne est installée, la mise à jour installe la nouvelle, garde l'ancien modèle sélectionnable dans le panneau, et ne fait rien quand l'installé est à jour."
 covers = ["R3"]
-after = [4]
+after = [4, 15]
 hitl = false
 risk = "medium"
 
