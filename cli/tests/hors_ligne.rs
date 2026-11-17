@@ -3,12 +3,15 @@
 //! `common`) ; ce test lit la table d'imports de chaque PE, pour que la garantie ne régresse pas
 //! en silence. Depuis le ticket 5.21, le paquet livré (feature `gpu`) est un dossier : le
 //! binaire et ses moteurs de calcul (`llama.dll`, `ggml*.dll`), tous vérifiés.
-//! Il ne s'exécute que sous Windows, où la recette a un job dédié.
+//! Sous Linux (ticket 7.7), le binaire processeur est un seul ELF : la même garde lit ses symboles
+//! dynamiques non définis et refuse la résolution de noms et les bibliothèques de transfert.
+//! Chaque test ne s'exécute que sur son système, où la recette a un job dédié.
 
 use std::path::{Path, PathBuf};
 
+use object::read::elf::ElfFile64;
 use object::read::pe::PeFile64;
-use object::Object;
+use object::{Object, ObjectSymbol};
 
 const FORBIDDEN: [&str; 6] = [
     "ws2_32", "wsock32", "winhttp", "wininet", "mswsock", "dnsapi",
@@ -113,4 +116,62 @@ fn the_binary_and_its_libraries_import_no_network_dll() {
             dir.display()
         );
     }
+}
+
+/// Symboles qu'un binaire hors ligne n'importe pas : résolution de noms (DNS) et clients de
+/// transfert ou de chiffrement réseau. Les préfixes couvrent libcurl, OpenSSL et GnuTLS.
+const FORBIDDEN_SYMBOLS: [&str; 6] = [
+    "getaddrinfo",
+    "gethostbyname",
+    "curl_",
+    "ssl_",
+    "gnutls_",
+    "nghttp2_",
+];
+
+/// Les symboles dynamiques non définis (importés) de l'ELF `path`, en minuscules.
+fn elf_imported_symbols(path: &Path) -> Vec<String> {
+    let bytes = std::fs::read(path).unwrap();
+    let elf = ElfFile64::<object::Endianness>::parse(&*bytes)
+        .unwrap_or_else(|e| panic!("{} n'est pas un ELF 64 bits : {e}", path.display()));
+    elf.dynamic_symbols()
+        .filter(|s| s.is_undefined())
+        .filter_map(|s| s.name().ok().map(str::to_lowercase))
+        .collect()
+}
+
+#[test]
+fn the_linux_binary_imports_no_name_resolution_or_transfer_library() {
+    if !cfg!(target_os = "linux") {
+        return;
+    }
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_cassini"));
+    let symbols = elf_imported_symbols(&exe);
+    assert!(
+        symbols.iter().any(|s| s == "malloc" || s == "memcpy"),
+        "la table des symboles importés est vide : {} symboles",
+        symbols.len()
+    );
+    for symbol in &symbols {
+        for forbidden in FORBIDDEN_SYMBOLS {
+            assert!(
+                !symbol.starts_with(forbidden),
+                "{} importe {symbol}",
+                exe.display()
+            );
+        }
+    }
+    // Noyau processeur : un seul fichier, aucune bibliothèque de moteur posée à côté.
+    let dir = exe.parent().unwrap();
+    let engines: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|e| file_name(&e.path()))
+        .filter(|n| n.starts_with("libggml") || n.starts_with("libllama"))
+        .collect();
+    assert!(
+        engines.is_empty(),
+        "bibliothèque de moteur inattendue dans {} : {engines:?}",
+        dir.display()
+    );
 }

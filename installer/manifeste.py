@@ -74,17 +74,42 @@ def section_porte2(version: str, fichier: Path, url_base: str) -> dict:
     }
 
 
+def section_linux(
+    noyau: Path, porte2: Path, noyau_url_base: str, porte2_url_base: str
+) -> dict:
+    """La section `linux` (7.7) : le tar du noyau (release GitHub) et le tar complet (Hugging Face).
+
+    Les noms sont ceux des fichiers construits par `assembler_linux.py`. `cassini.sh` seul la lit ;
+    l'installeur Windows ne la lit pas.
+    """
+    return {
+        "noyau": {
+            "nom": noyau.name,
+            "url": f"{noyau_url_base.rstrip('/')}/{noyau.name}",
+            "sha256": sha256_de(noyau),
+        },
+        "porte2": {
+            "nom": porte2.name,
+            "url": f"{porte2_url_base.rstrip('/')}/{porte2.name}",
+            "sha256": sha256_de(porte2),
+            "taille": porte2.stat().st_size,
+        },
+    }
+
+
 def construire(
     version: str,
     fichiers: list[Path],
     base_url: str,
     modele: dict | None = None,
     porte2: dict | None = None,
+    linux: dict | None = None,
 ) -> str:
     """Le texte du manifeste, un champ par ligne, retour à la ligne final.
 
-    `modele` et `porte2` viennent après `fichiers` (l'installeur coupe le texte au premier
-    `"modele"` pour sa boucle de fichiers) ; absents quand non fournis.
+    `modele`, `porte2` et `linux` viennent après `fichiers`, dans cet ordre (l'installeur Windows
+    coupe le texte au premier `"modele"` ou `"porte2"` pour sa boucle de fichiers, et `linux`
+    reste après eux) ; absents quand non fournis.
     """
     base = base_url.rstrip("/")
     entrees = [
@@ -95,6 +120,8 @@ def construire(
         doc["modele"] = modele
     if porte2 is not None:
         doc["porte2"] = porte2
+    if linux is not None:
+        doc["linux"] = linux
     return json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
 
 
@@ -112,6 +139,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.add_argument("--porte2", type=Path, help="installeur complet : ajoute la section porte2")
     p.add_argument("--porte2-url-base", help="préfixe de l'adresse de la porte 2 (défaut : dossier de l'url du modèle)")
+    p.add_argument(
+        "--linux",
+        type=Path,
+        nargs=2,
+        metavar=("NOYAU_TAR", "COMPLET_TAR"),
+        help="ajoute la section linux : tar du noyau et tar complet (porte 2 Linux)",
+    )
     p.add_argument("--sortie", type=Path, required=True)
     p.add_argument("fichiers", nargs="+", type=Path)
     a = p.parse_args(argv)
@@ -126,7 +160,13 @@ def main(argv: list[str] | None = None) -> int:
                 raise ManifesteErreur("--porte2 demande --modele (dossier Hugging Face de la porte 2)")
             url_base = a.porte2_url_base or modele["url"].rsplit("/", 1)[0]
             porte2 = section_porte2(version, a.porte2, url_base)
-        texte = construire(version, a.fichiers, base, modele, porte2)
+        linux = None
+        if a.linux:
+            if modele is None:
+                raise ManifesteErreur("--linux demande --modele (dossier Hugging Face de la porte 2)")
+            url_base = a.porte2_url_base or modele["url"].rsplit("/", 1)[0]
+            linux = section_linux(a.linux[0], a.linux[1], base, url_base)
+        texte = construire(version, a.fichiers, base, modele, porte2, linux)
     except (ManifesteErreur, OSError) as e:
         print(f"manifeste : {e}", file=sys.stderr)
         return 1

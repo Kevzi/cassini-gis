@@ -184,3 +184,63 @@ manifeste (rien de réécrit), noyau verrouillé, Cassini non installé.
 2. Relancer le panneau dans QGIS : les deux modèles sont proposés, l'ancien reste choisissable.
 3. Relancer « Mettre à jour Cassini » : « Cassini est à jour ».
 4. Ouvrir QGIS (noyau chargé) et relancer la mise à jour : le message demande de fermer QGIS.
+
+## Linux (7.7) : noyau processeur, deux portes en tar et script POSIX
+
+Sous Linux, les deux portes sont une archive tar et **un seul script POSIX**, `installer/cassini.sh`,
+qui installe sans droits root dans `~/.local/share/cassini` (le noyau dans `bin/cassini`, où
+l'extension le cherche, avec `installation.json` et `models/`). Dépendances : `sh`, `tar`,
+`sha256sum`, et `curl` ou `wget` pour la porte 1 seulement.
+
+La recette a un job `linux` (Ubuntu 22.04, glibc 2.35) qui précède le job Windows. Il construit le
+noyau **processeur** (`cargo build --release -p cassini`, sans `gpu`, sans `target-cpu=native` : pas de
+Vulkan sous Linux, une base x86-64 générique, plus lente que le noyau Windows, à mesurer sur la VM),
+lance la garde hors ligne (table des symboles importés de l'ELF), puis `installer/assembler_linux.py`
+fabrique, par liste fermée :
+
+- `cassini-noyau-linux-<version>.tar.gz` : le seul fichier `cassini` (porte 1, release GitHub) ;
+- `cassini-complet-linux-<version>.tar` : `noyau/cassini`, `modele/<nom>.gguf`, `cassini.sh`,
+  `VERSION` et `empreintes.txt` (porte 2, plus de 2 Gio : dépôt Hugging Face du modèle, comme la
+  porte 2 Windows, pas la release GitHub).
+
+L'assemblage échoue si le binaire n'est pas un ELF nommé `cassini` ou si `objdump -T` y lit une
+version de glibc au-delà de 2.35. `installer/preuve_linux.py` prouve ensuite `cassini.sh` sur ces
+archives, avec un serveur local et un petit modèle de preuve : installation valide (`run system.about`,
+`model.list` sans `models.tampered`), octet changé dans le noyau puis dans le modèle (refus, rien
+posé), mise à jour A vers B (ancien modèle gardé), « à jour » (rien téléchargé ni réécrit),
+mise à jour sans installation (refus), et la porte 2 avec de faux `curl` et `wget` qui laissent une
+trace (aucun appel réseau). Le manifeste gagne une section `linux` (`noyau` et `porte2` : nom,
+adresse, SHA-256, et taille pour la porte 2), **après** `porte2` : l'installeur Windows ne la lit pas.
+La release joint le tar du noyau et `cassini.sh`.
+
+### Installer et mettre à jour
+
+```sh
+# Porte 1 (réseau) : télécharger cassini.sh depuis la release, puis
+sh cassini.sh                      # noyau et modèle (--sans-modele pour le noyau seul)
+sh cassini.sh --manifeste CHEMIN_OU_URL   # un autre manifeste (essai)
+
+# Porte 2 (hors ligne) : déplier cassini-complet-linux-<version>.tar, puis, dans le dossier
+sh cassini.sh                      # trouve noyau/ et modele/ à côté de lui, aucun appel réseau
+
+# Mise à jour, à la main
+~/.local/share/cassini/mettre-a-jour-cassini --mise-a-jour    # copie du script posée à l'installation
+```
+
+Mêmes règles que sous Windows (7.5) : chaque fichier est vérifié par `sha256sum` avant la pose et
+rien n'est posé si l'un échoue (le message nomme le fichier) ; le noyau est posé par `mv` d'un fichier
+temporaire du même dossier (QGIS peut rester ouvert) ; la version se compare à trois nombres ;
+« à jour » ne télécharge ni ne réécrit rien (code 0) ; aucun fichier de `models` n'est supprimé ni
+écrasé, un nouveau modèle se pose à côté sous son nom versionné avec sa déclaration `*.modele.json` ;
+sans installation, `--mise-a-jour` refuse (code non nul). La confirmation n'est demandée que sur un
+terminal ; `--oui` la saute.
+
+### Essai du propriétaire sur Ubuntu 22.04 propre (hitl)
+
+1. VM Ubuntu 22.04 propre, réseau actif : `sh cassini.sh` ; `~/.local/share/cassini/bin/cassini run
+   system.about` répond et `run model.list` liste le modèle sans `models.tampered`. Mesurer la vitesse
+   du noyau processeur.
+2. Autre VM, réseau coupé : déplier le tar complet, `sh cassini.sh` ; même résultat.
+3. Installer QGIS, l'extension depuis son ZIP, rejouer la démo : le panneau trouve le noyau.
+4. Lancer `mettre-a-jour-cassini --mise-a-jour` contre une version plus récente : l'ancien modèle reste ;
+   le relancer : « Cassini est à jour ».

@@ -78,6 +78,67 @@ class TestManifeste(unittest.TestCase):
         self.assertNotIn("modele", data)
         self.assertNotIn("porte2", data)
 
+    def test_section_linux_apres_porte2_et_sans_effet_sur_la_boucle_windows(self):
+        racine = Path(manifeste.__file__).resolve().parent
+        modele = manifeste.section_modele(racine / "modele.json")
+        complet = self.d / "complet.exe"
+        complet.write_bytes(b"xyz")
+        porte2 = manifeste.section_porte2("0.1.1", complet, "https://hf/x")
+        noyau_tar = self.d / "cassini-noyau-linux-0.1.1.tar.gz"
+        noyau_tar.write_bytes(b"tar du noyau")
+        complet_tar = self.d / "cassini-complet-linux-0.1.1.tar"
+        complet_tar.write_bytes(b"tar complet")
+        linux = manifeste.section_linux(noyau_tar, complet_tar, "https://gh/v0.1.1", "https://hf/x")
+        self.assertEqual(list(linux), ["noyau", "porte2"])
+        self.assertEqual(list(linux["noyau"]), ["nom", "url", "sha256"])
+        self.assertEqual(list(linux["porte2"]), ["nom", "url", "sha256", "taille"])
+        self.assertEqual(linux["noyau"]["url"], "https://gh/v0.1.1/cassini-noyau-linux-0.1.1.tar.gz")
+        self.assertEqual(linux["porte2"]["sha256"], hashlib.sha256(b"tar complet").hexdigest())
+        texte = manifeste.construire("0.1.1", [self.exe], "https://e/d", modele, porte2, linux)
+        self.assertEqual(list(json.loads(texte)), ["version", "fichiers", "modele", "porte2", "linux"])
+        # Les repères de l'installeur Windows (premier `"modele"`, premier `"porte2"`) restent
+        # ceux des sections de premier niveau, et la boucle des fichiers s'arrête avant eux :
+        # aucune entrée `linux` n'y est avalée.
+        avant = texte[: texte.index('"modele"')]
+        self.assertNotIn("linux", avant)
+        self.assertEqual(avant.count('"sha256"'), 1)
+        self.assertLess(texte.index('"porte2"'), texte.index('"linux"'))
+        self.assertEqual(texte.count('"modele"'), 1)
+        self.assertIn(
+            '  "linux": {\n    "noyau": {\n      "nom": "cassini-noyau-linux-0.1.1.tar.gz",\n',
+            texte,
+        )
+
+    def test_section_linux_absente_quand_non_fournie(self):
+        sortie = self.d / "manifeste.json"
+        code = manifeste.main(["--etiquette", "v0.1.0", "--cargo", str(self.cargo), "--modele",
+                               "--sortie", str(sortie), str(self.exe)])
+        self.assertEqual(code, 0)
+        self.assertNotIn("linux", json.loads(sortie.read_text(encoding="utf-8")))
+
+    def test_main_avec_linux(self):
+        sortie = self.d / "manifeste.json"
+        a = self.d / "n.tar.gz"
+        b = self.d / "c.tar"
+        a.write_bytes(b"1")
+        b.write_bytes(b"22")
+        code = manifeste.main(["--etiquette", "v0.1.0", "--cargo", str(self.cargo), "--sortie", str(sortie),
+                               "--modele", "--linux", str(a), str(b), str(self.exe)])
+        self.assertEqual(code, 0)
+        data = json.loads(sortie.read_text(encoding="utf-8"))
+        self.assertTrue(data["linux"]["noyau"]["url"].endswith("/releases/download/v0.1.0/n.tar.gz"))
+        self.assertTrue(data["linux"]["porte2"]["url"].startswith("https://huggingface.co/"))
+        self.assertEqual(data["linux"]["porte2"]["taille"], 2)
+
+    def test_main_linux_sans_modele_refuse(self):
+        sortie = self.d / "manifeste.json"
+        a = self.d / "n.tar.gz"
+        a.write_bytes(b"1")
+        code = manifeste.main(["--etiquette", "v0.1.0", "--cargo", str(self.cargo), "--sortie", str(sortie),
+                               "--linux", str(a), str(a), str(self.exe)])
+        self.assertEqual(code, 1)
+        self.assertFalse(sortie.exists())
+
     def test_main_avec_modele_et_porte2(self):
         sortie = self.d / "manifeste.json"
         complet = self.d / "complet.exe"

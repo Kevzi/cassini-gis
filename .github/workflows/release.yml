@@ -1,4 +1,5 @@
-# Release de Cassini (ticket 7.1, AD-17).
+# Release de Cassini (ticket 7.1, AD-17). Le job `linux` (7.7) construit avant lui le noyau processeur
+# Linux, ses deux archives et la preuve de cassini.sh ; le job Windows les joint au manifeste.
 #
 # Une étiquette `vX.Y.Z` fait construire le noyau Windows gpu (Vulkan, SDK à empreinte fixée, ticket 7.6),
 # assemble le paquet par liste fermée, lance la garde hors ligne sur ce paquet, compile l'installeur en ligne, prouve l'installation (manifeste
@@ -24,8 +25,80 @@ permissions:
   contents: write
 
 jobs:
+  # ---- Linux (7.7) : noyau processeur, deux archives, preuve de cassini.sh ----
+  # Ubuntu 22.04 (glibc 2.35) : le noyau tourne sur toute distribution au moins aussi récente.
+  # Sans `gpu` (pas de Vulkan sous Linux) ni `target-cpu=native` : une base x86-64 générique.
+  linux:
+    name: Linux (noyau processeur, archives)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Étiquette visée
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then t="$GITHUB_REF_NAME"
+          else t="v$(python -I -c "import sys; sys.path.insert(0, 'installer'); import manifeste; print(manifeste.version_cargo(manifeste.RACINE / 'Cargo.toml'))")"; fi
+          echo "TAG=$t" >> "$GITHUB_ENV"
+
+      - name: Étiquette égale à la version Cargo
+        run: python -I installer/verifier_etiquette.py
+
+      - name: Tests de l'installeur (cassini.sh compris)
+        run: python -I -m unittest discover -s installer/tests
+
+      # libclang pour bindgen (llama.cpp) ; cmake, g++ et binutils (objdump) sont déjà sur le poste.
+      - name: Outils de construction
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libclang-dev cmake build-essential binutils
+
+      - name: Construction du noyau (processeur)
+        run: cargo build --release -p cassini --locked
+
+      # Garde hors ligne sur le binaire livré : table des symboles importés (ELF).
+      - name: Garde hors ligne sur le binaire livré
+        run: cargo test --release -p cassini --test hors_ligne --locked
+
+      - name: Noyau en release
+        run: ./target/release/cassini run system.about
+
+      # Le modèle (~2,8 Go) vient de Hugging Face, empreinte vérifiée ; jamais construit ici.
+      - name: Téléchargement du modèle (empreinte vérifiée)
+        run: |
+          nom=$(python -I -c "import json; print(json.load(open('installer/modele.json'))['nom_installe'])")
+          python -I installer/telecharger_modele.py --sortie "modele/$nom"
+
+      # Liste fermée, plafond glibc 2.35 (objdump -T) : l'assemblage échoue au-delà.
+      - name: Archives Linux (liste fermée, glibc au plus 2.35)
+        run: |
+          nom=$(python -I -c "import json; print(json.load(open('installer/modele.json'))['nom_installe'])")
+          python -I installer/assembler_linux.py --binaire target/release/cassini --modele "modele/$nom"             --version "${TAG#v}" --sortie dist-linux
+          cp installer/cassini.sh dist-linux/cassini.sh
+          rm -rf target modele
+          df -h .
+          ls -l dist-linux
+
+      # Preuve de cassini.sh sur les archives livrées : porte 1 (serveur local, petit modèle de
+      # preuve), octet changé, mise à jour, à jour, non installé ; porte 2 sans réseau.
+      - name: Preuve de l'installation Linux
+        run: |
+          python -I installer/preuve_linux.py --etiquette "$TAG" --script installer/cassini.sh             --noyau "dist-linux/cassini-noyau-linux-${TAG#v}.tar.gz"             --complet "dist-linux/cassini-complet-linux-${TAG#v}.tar"
+
+      # Le tar complet dépasse les 2 Gio d'une release GitHub : artefact du workflow, repris par le
+      # job Windows (manifeste, dépôt Hugging Face) et pour l'essai en VM du propriétaire.
+      - name: Artefact, archives Linux
+        uses: actions/upload-artifact@v4
+        with:
+          name: cassini-linux-${{ env.TAG }}
+          path: dist-linux/*
+          compression-level: 0
+          retention-days: 14
+
   release:
     name: Release Windows (noyau gpu, installeurs)
+    needs: linux
     runs-on: windows-latest
     env:
       # Chemin de build court : CMake échoue au-delà de MAX_PATH.
@@ -387,6 +460,13 @@ jobs:
             if (Test-Path $f) { throw "désinstallation : $f existe encore" }
           }
 
+      # Archives Linux construites et prouvées par le job `linux` (7.7).
+      - name: Archives Linux du job linux
+        uses: actions/download-artifact@v4
+        with:
+          name: cassini-linux-${{ env.TAG }}
+          path: dist-linux
+
       # Porte 2 dans le manifeste (7.4) : nom versionné, adresse Hugging Face, SHA-256 et taille
       # du fichier construit ci-dessus. Le manifeste final est fini ICI, avant `gh release create`.
       - name: Manifeste complet (section porte2) et empreintes de la porte 2
@@ -394,10 +474,14 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $fichiers = @(Get-ChildItem dist\noyau -File | ForEach-Object { $_.FullName })
-          python -I installer/manifeste.py --etiquette $env:TAG --modele --porte2 installer-sortie/cassini-installeur-complet.exe --sortie dist/manifeste.json @fichiers
+          $v = $env:TAG.TrimStart('v')
+          $tarNoyau = "dist-linux/cassini-noyau-linux-$v.tar.gz"
+          $tarComplet = "dist-linux/cassini-complet-linux-$v.tar"
+          python -I installer/manifeste.py --etiquette $env:TAG --modele --porte2 installer-sortie/cassini-installeur-complet.exe --linux $tarNoyau $tarComplet --sortie dist/manifeste.json @fichiers
           if ($LASTEXITCODE -ne 0) { throw "manifeste complet : échec" }
           $m = Get-Content dist/manifeste.json -Raw | ConvertFrom-Json
           if (-not $m.modele -or -not $m.porte2) { throw "manifeste : section modele ou porte2 absente" }
+          if (-not $m.linux -or -not $m.linux.noyau -or -not $m.linux.porte2) { throw "manifeste : section linux absente" }
           Write-Host ($m.porte2 | ConvertTo-Json -Compress)
           # Déclaration d'empreintes déposée à côté du fichier sur Hugging Face.
           New-Item -ItemType Directory -Force hf-depot | Out-Null
@@ -405,6 +489,10 @@ jobs:
           New-Item -ItemType HardLink -Path "hf-depot\$($m.porte2.nom)" -Target (Resolve-Path installer-sortie/cassini-installeur-complet.exe) | Out-Null
           [ordered]@{ version = $m.version; nom = $m.porte2.nom; sha256 = $m.porte2.sha256; taille = $m.porte2.taille } |
             ConvertTo-Json | Set-Content "hf-depot\$($m.porte2.nom -replace '\.exe$','.empreintes.json')" -Encoding utf8
+          # Porte 2 Linux : même dépôt, même forme de déclaration d'empreintes.
+          New-Item -ItemType HardLink -Path "hf-depot\$($m.linux.porte2.nom)" -Target (Resolve-Path "dist-linux/$($m.linux.porte2.nom)") | Out-Null
+          [ordered]@{ version = $m.version; nom = $m.linux.porte2.nom; sha256 = $m.linux.porte2.sha256; taille = $m.linux.porte2.taille } |
+            ConvertTo-Json | Set-Content "hf-depot\$($m.linux.porte2.nom -replace '\.tar$','.empreintes.json')" -Encoding utf8
 
       # Dépôt sur Hugging Face : seulement si le jeton HF_TOKEN est présent (secret du dépôt).
       # Sans jeton, un avis et on continue : le manifeste annonce alors une adresse pas encore servie.
@@ -447,4 +535,6 @@ jobs:
           gh release create $env:TAG
           (Get-ChildItem dist/noyau -File | ForEach-Object { $_.FullName })
           dist/cassini-installeur-en-ligne.exe dist/manifeste.json
+          (Get-ChildItem dist-linux -File -Filter 'cassini-noyau-linux-*.tar.gz' | ForEach-Object { $_.FullName })
+          dist-linux/cassini.sh
           --title "Cassini $env:TAG" --generate-notes --verify-tag
