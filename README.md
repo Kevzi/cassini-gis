@@ -255,6 +255,8 @@ sont réservés pour l'hydrologie et la couverture radio.
 
 ## Installer
 
+La page d'accueil, avec la vidéo, l'installation en trois étapes et les empreintes SHA-256 des installeurs : <https://kevzi.github.io/cassini-gis>.
+
 ### Bientôt : deux installeurs
 
 À la publication (étape 7), Cassini s'installera en deux temps : **l'extension**

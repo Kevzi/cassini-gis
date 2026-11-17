@@ -10,7 +10,10 @@
   body { background: var(--fond); color: var(--texte); font: 1.0625rem/1.55 system-ui, sans-serif; margin: 0; }
   main { max-width: 42rem; margin: 0 auto; padding: 2rem 1rem; }
   a { color: var(--lien); }
-  .telecharger { display: inline-block; padding: .6rem 1.1rem; border: 1px solid var(--bord); border-radius: .4rem; font-weight: 600; }
+  video { width: 100%; height: auto; border: 1px solid var(--bord); border-radius: .4rem; }
+  code { font-family: ui-monospace, monospace; font-size: .85rem; word-break: break-all; }
+  dt { font-weight: 600; margin-top: 1rem; }
+  dd { margin: .2rem 0 0; }
 </style>
 </head>
 <body>
@@ -19,11 +22,20 @@
   <p>Cassini est l'interface en français d'un SIG qui fonctionne entièrement hors ligne : vous décrivez ce que vous voulez, il propose les opérations, vous les validez, il les exécute et les journalise.</p>
   <p>C'est une extension pour QGIS, posée sur un moteur indépendant ; vos données restent sur votre poste et rien n'est envoyé sur le réseau.</p>
 
-  <h2>Télécharger</h2>
-  <p><a class="telecharger" href="https://github.com/Kevzi/cassini-gis/releases/latest/download/cassini-installeur-en-ligne.exe">Installeur Cassini pour Windows</a></p>
-  <p>Windows affichera sans doute un avertissement à l'ouverture : l'installeur n'est pas encore signé. <a href="avertissement-windows.html">Pourquoi, et comment continuer sans risque</a>.</p>
+  <h2>Installer en trois étapes</h2>
+  <ol>
+    <li>Installez <a href="https://qgis.org">QGIS</a> (version 3.44 ou plus récente), si ce n'est pas déjà fait.</li>
+    <li>Lancez un installeur de Cassini ci-dessous : il pose le moteur et le modèle d'IA (<a href="https://huggingface.co/KevziFar/cassini-composition-4b-GGUF">modèle sur Hugging Face</a>).</li>
+    <li>Dans QGIS, installez l'extension Cassini depuis le gestionnaire d'extensions, puis ouvrez son panneau.</li>
+  </ol>
 
-  <p>Contact : <a href="mailto:cassini-sig@proton.me">cassini-sig@proton.me</a></p>
+  <h2>Télécharger</h2>
+  <ul>
+    <li><a href="https://github.com/Kevzi/cassini-gis/releases/download/v0.1.1/cassini-installeur-en-ligne.exe">Installeur léger pour Windows</a><br>SHA-256 : <code>2cfac6df10bd64145c4eccd7de44ae93c479a1d6eb75e466c61f428d41241df1</code></li>
+  </ul>
+  <p>Comparez l'empreinte SHA-256 du fichier téléchargé à celle affichée ici : <code>certutil -hashfile fichier SHA256</code> sous Windows, <code>sha256sum fichier</code> sous Linux. Windows affichera sans doute un avertissement à l'ouverture : l'installeur n'est pas encore signé. <a href="avertissement-windows.html">Pourquoi, et comment continuer sans risque</a>.</p>
+
+  <p><a href="faq.html">Questions fréquentes</a> · <a href="https://github.com/Kevzi/cassini-gis">Code source</a> · Contact : <a href="mailto:cassini-sig@proton.me">cassini-sig@proton.me</a></p>
 </main>
 </body>
 </html>

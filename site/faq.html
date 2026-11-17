@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Questions fréquentes</title>
+<style>
+  :root { --fond: #fff; --texte: #1b1f24; --lien: #0b5cad; --bord: #d0d7de; }
+  @media (prefers-color-scheme: dark) { :root { --fond: #14171a; --texte: #e6e8ea; --lien: #6cb0f5; --bord: #3a4046; } }
+  body { background: var(--fond); color: var(--texte); font: 1.0625rem/1.55 system-ui, sans-serif; margin: 0; }
+  main { max-width: 42rem; margin: 0 auto; padding: 2rem 1rem; }
+  a { color: var(--lien); }
+  video { width: 100%; height: auto; border: 1px solid var(--bord); border-radius: .4rem; }
+  code { font-family: ui-monospace, monospace; font-size: .85rem; word-break: break-all; }
+  dt { font-weight: 600; margin-top: 1rem; }
+  dd { margin: .2rem 0 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Questions fréquentes</h1>
+  <dl>
+    <dt>Cassini a-t-il besoin d'Internet ?</dt>
+    <dd>Non. Seul l'installeur léger télécharge, une seule fois, pendant l'installation. Ensuite, ni le moteur ni l'extension ne touchent au réseau. L'installeur complet tient en un seul fichier, pour les postes isolés.</dd>
+    <dt>Mes données sont-elles envoyées quelque part ?</dt>
+    <dd>Non. Vous apportez vos fichiers, Cassini ne les modifie jamais et ne les envoie nulle part.</dd>
+    <dt>Faut-il QGIS ?</dt>
+    <dd>Oui : Cassini est une extension de QGIS (version 3.44 ou plus récente), qui fournit la carte, les formats et l'export PDF.</dd>
+    <dt>Pourquoi Windows affiche-t-il un avertissement ?</dt>
+    <dd>L'installeur n'est pas encore signé. <a href="avertissement-windows.html">Voici comment continuer sans risque</a>.</dd>
+    <dt>Comment vérifier mon téléchargement ?</dt>
+    <dd>Comparez son empreinte SHA-256 à celle de la <a href="index.html">page d'accueil</a>.</dd>
+    <dt>Comment mettre à jour ?</dt>
+    <dd>Avec « Mettre à jour Cassini », lancé à la main ; un nouveau modèle s'installe à côté de l'ancien.</dd>
+    <dt>Quelles données puis-je ouvrir ?</dt>
+    <dd>Celles que QGIS lit : GeoPackage, Shapefile, GeoJSON, CSV à coordonnées, GeoParquet, et des modèles d'élévation pour le terrain.</dd>
+  </dl>
+  <p><a href="index.html">Retour à la page d'accueil</a> · <a href="mailto:cassini-sig@proton.me">cassini-sig@proton.me</a></p>
+</main>
+</body>
+</html>

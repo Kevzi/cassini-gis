@@ -72,7 +72,24 @@ L'installeur compare le noyau téléchargé au SHA-256 du `manifeste.json` de la
 protège d'un téléchargement corrompu ou d'un fichier remplacé seul ; cela ne protège pas d'une
 release entièrement compromise, où manifeste et noyau changeraient ensemble. Le paramètre
 `/MANIFESTE=` sert aux essais locaux ; l'installeur n'en a pas besoin à l'usage normal. Les
-empreintes des installeurs eux-mêmes seront publiées sur la page d'accueil (7.12).
+empreintes des installeurs eux-mêmes sont publiées sur la page d'accueil (ticket 12).
+
+## Page d'accueil (ticket 12)
+
+`site/index.html` et `site/faq.html` sont générés, jamais écrits à la main, depuis le manifeste de
+la release et le fichier de l'installeur en ligne (son empreinte est calculée). Les liens pointent vers
+la release de ce manifeste, pas vers `latest` : **régénérer la page à chaque release**, sans quoi
+elle montre l'ancienne version :
+
+```powershell
+python -I installer/page_accueil.py --manifeste manifeste.json --installeur-en-ligne cassini-installeur-en-ligne.exe --sortie site
+```
+
+La vidéo `site/cassini-presentation.mp4` doit peser moins de 25 Mo (le générateur refuse sinon) ;
+sans elle, la page est générée sans balise vidéo. Réencodage, hors du poste du dépôt (ffmpeg
+requis) : par exemple `ffmpeg -i cassini-presentation.mp4 -c:v libx264 -crf 30 -preset slow -c:a aac -b:a 96k -movflags +faststart site/cassini-presentation.mp4`,
+en baissant le CRF jusqu'à passer sous 25 Mo. Relire la page, puis pousser `site/` : le workflow
+`site.yml` la publie.
 
 ## Porte 2 : l'installeur complet hors ligne (ticket 7.2)
 
