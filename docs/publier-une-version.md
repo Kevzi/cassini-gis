@@ -106,5 +106,40 @@ porte met à jour l'autre, et le désinstalleur ne retire que ce que le dernier 
 5. Rejouer la démo : le panneau trouve le noyau et le modèle sans réseau.
 6. Désinstaller (Paramètres, Applications) : le noyau et le modèle disparaissent.
 
-Hors périmètre ici (7.4) : déclaration `*.modele.json` avec empreintes, hébergement de ce fichier
-sur Hugging Face.
+## Porte 1 complète : le modèle facultatif (ticket 7.4)
+
+L'installeur en ligne propose désormais le modèle : une case « Télécharger et installer le modèle »,
+**cochée par défaut** ; en silencieux, `/MODELE=0` (sans) ou `/MODELE=1` (avec, défaut). Le modèle
+est téléchargé depuis Hugging Face à l'adresse du manifeste, son SHA-256 est vérifié, il est posé
+dans `%LOCALAPPDATA%\Cassini\bin\models` et sa déclaration `cassini-composition-4b.modele.json`
+(`model`, `prompt`, `model_sha256`, la même forme que la porte 2) est écrite à côté, si bien que le
+noyau le vérifie au premier chargement. Un modèle absent, injoignable ou dont un octet a changé
+refuse **toute** l'installation (noyau compris, rien n'est posé) ; sans modèle (case décochée ou
+ancien manifeste sans section `modele`), le noyau s'installe seul. Le dossier `models` n'est jamais
+supprimé : ni à la mise à jour (un ancien modèle reste, et sa déclaration aussi : celle du nouveau
+modèle prend alors son nom), ni à la désinstallation. Le modèle (environ 2,8 Go) est tenu deux fois
+sur le disque pendant l'installation (téléchargement temporaire, puis copie à destination) : prévoir
+environ 6 Go d'espace libre.
+
+Le manifeste porte deux sections de plus après `fichiers` : `modele` (valeurs de
+`installer/modele.json`, seule source) et `porte2` (nom versionné, adresse Hugging Face, SHA-256 et
+taille de l'installeur complet). La recette de release prouve, sur le poste de GitHub et avec un
+petit modèle de preuve servi en local : avec modèle, sans modèle (`/MODELE=0`), octet changé.
+
+### Dépôt de la porte 2 sur Hugging Face : jeton `HF_TOKEN`
+
+À la publication d'une étiquette, la recette dépose l'installeur complet et un fichier
+`cassini-installeur-complet-<version>.empreintes.json` dans le dépôt Hugging Face du modèle, **si
+le secret `HF_TOKEN` du dépôt GitHub existe** (jeton Hugging Face avec droit d'écriture sur
+`KevziFar/cassini-composition-4b-GGUF`). Sans jeton, la recette affiche un avis et continue : le
+manifeste annonce alors une adresse qui ne répond pas encore, à déposer à la main.
+
+### Essai du propriétaire en VM (porte 1 complète)
+
+1. VM Windows propre, réseau actif. Lancer `cassini-installeur-en-ligne.exe` en laissant la case
+   cochée : `bin\models` reçoit le modèle et `cassini-composition-4b.modele.json`.
+2. `cassini.exe run model.list` liste le modèle sans signaler `models.tampered`, puis rejouer la démo.
+3. Relancer l'installeur avec `/MODELE=0` dans un autre dossier : le noyau seul, `models` vide.
+4. Servir un modèle dont un octet est changé (`/MANIFESTE=` local) : l'installation est refusée et
+   rien n'est posé.
+5. Désinstaller : le noyau disparaît, le dossier `models` reste.

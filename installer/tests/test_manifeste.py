@@ -49,6 +49,46 @@ class TestManifeste(unittest.TestCase):
         self.assertIn(f'      "sha256": "{f["sha256"]}"\n', texte)
         self.assertIn('      "nom": "cassini.exe",\n', texte)
 
+    def test_sections_modele_et_porte2(self):
+        racine = Path(manifeste.__file__).resolve().parent
+        modele = manifeste.section_modele(racine / "modele.json")
+        ref = json.loads((racine / "modele.json").read_text(encoding="utf-8"))
+        self.assertEqual(list(modele), ["nom", "url", "sha256", "taille"])
+        self.assertEqual(modele["nom"], ref["nom_installe"])
+        self.assertEqual(modele["sha256"], ref["sha256"])
+        self.assertEqual(modele["taille"], ref["taille"])
+        complet = self.d / "complet.exe"
+        complet.write_bytes(b"xyz")
+        porte2 = manifeste.section_porte2("0.1.1", complet, "https://hf/x/resolve/main/")
+        self.assertEqual(list(porte2), ["nom", "url", "sha256", "taille"])
+        self.assertEqual(porte2["nom"], "cassini-installeur-complet-0.1.1.exe")
+        self.assertEqual(porte2["url"], "https://hf/x/resolve/main/cassini-installeur-complet-0.1.1.exe")
+        self.assertEqual(porte2["taille"], 3)
+        texte = manifeste.construire("0.1.1", [self.exe], "https://e/d", modele, porte2)
+        data = json.loads(texte)
+        self.assertEqual(list(data), ["version", "fichiers", "modele", "porte2"])
+        # Un champ par ligne, dans l'ordre nom, url, sha256, taille ; `"modele"` après les fichiers.
+        self.assertIn('  "modele": {\n    "nom": "' + modele["nom"] + '",\n    "url": ', texte)
+        self.assertLess(texte.index('"fichiers"'), texte.index('"modele"'))
+        self.assertLess(texte.index('"modele"'), texte.index('"porte2"'))
+        self.assertEqual(texte.count('"modele"'), 1)
+
+    def test_sections_absentes_quand_non_fournies(self):
+        data = json.loads(manifeste.construire("0.1.0", [self.exe], "https://e/d"))
+        self.assertNotIn("modele", data)
+        self.assertNotIn("porte2", data)
+
+    def test_main_avec_modele_et_porte2(self):
+        sortie = self.d / "manifeste.json"
+        complet = self.d / "complet.exe"
+        complet.write_bytes(b"abc")
+        code = manifeste.main(["--etiquette", "v0.1.0", "--cargo", str(self.cargo), "--sortie", str(sortie),
+                               "--modele", "--porte2", str(complet), str(self.exe)])
+        self.assertEqual(code, 0)
+        data = json.loads(sortie.read_text(encoding="utf-8"))
+        self.assertEqual(data["porte2"]["sha256"], hashlib.sha256(b"abc").hexdigest())
+        self.assertTrue(data["porte2"]["url"].startswith("https://huggingface.co/"))
+
     def test_main_ecrit(self):
         sortie = self.d / "manifeste.json"
         code = manifeste.main(

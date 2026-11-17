@@ -49,13 +49,53 @@ def sha256_de(chemin: Path) -> str:
     return h.hexdigest()
 
 
-def construire(version: str, fichiers: list[Path], base_url: str) -> str:
-    """Le texte du manifeste, un champ par ligne, retour à la ligne final."""
+def section_modele(modele_json: Path) -> dict:
+    """La section `modele` : valeurs de `installer/modele.json`, seule source."""
+    d = json.loads(modele_json.read_text(encoding="utf-8"))
+    try:
+        return {
+            "nom": d["nom_installe"],
+            "url": d["url"],
+            "sha256": d["sha256"].lower(),
+            "taille": int(d["taille"]),
+        }
+    except (KeyError, ValueError, TypeError, AttributeError) as e:
+        raise ManifesteErreur(f"{modele_json} incomplet ({e!r})") from e
+
+
+def section_porte2(version: str, fichier: Path, url_base: str) -> dict:
+    """La section `porte2` : l'installeur complet, sous un nom versionné."""
+    nom = f"cassini-installeur-complet-{version}.exe"
+    return {
+        "nom": nom,
+        "url": f"{url_base.rstrip('/')}/{nom}",
+        "sha256": sha256_de(fichier),
+        "taille": fichier.stat().st_size,
+    }
+
+
+def construire(
+    version: str,
+    fichiers: list[Path],
+    base_url: str,
+    modele: dict | None = None,
+    porte2: dict | None = None,
+) -> str:
+    """Le texte du manifeste, un champ par ligne, retour à la ligne final.
+
+    `modele` et `porte2` viennent après `fichiers` (l'installeur coupe le texte au premier
+    `"modele"` pour sa boucle de fichiers) ; absents quand non fournis.
+    """
     base = base_url.rstrip("/")
     entrees = [
         {"nom": f.name, "url": f"{base}/{f.name}", "sha256": sha256_de(f)} for f in fichiers
     ]
-    return json.dumps({"version": version, "fichiers": entrees}, indent=2, ensure_ascii=False) + "\n"
+    doc: dict = {"version": version, "fichiers": entrees}
+    if modele is not None:
+        doc["modele"] = modele
+    if porte2 is not None:
+        doc["porte2"] = porte2
+    return json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -63,6 +103,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--etiquette", required=True, help="étiquette de version, par exemple v0.1.0")
     p.add_argument("--cargo", type=Path, default=RACINE / "Cargo.toml")
     p.add_argument("--base-url", help="préfixe des adresses (défaut : la release de l'étiquette)")
+    p.add_argument(
+        "--modele",
+        type=Path,
+        nargs="?",
+        const=RACINE / "installer" / "modele.json",
+        help="ajoute la section modele (défaut : installer/modele.json)",
+    )
+    p.add_argument("--porte2", type=Path, help="installeur complet : ajoute la section porte2")
+    p.add_argument("--porte2-url-base", help="préfixe de l'adresse de la porte 2 (défaut : dossier de l'url du modèle)")
     p.add_argument("--sortie", type=Path, required=True)
     p.add_argument("fichiers", nargs="+", type=Path)
     a = p.parse_args(argv)
@@ -70,7 +119,14 @@ def main(argv: list[str] | None = None) -> int:
         version = version_cargo(a.cargo)
         verifier_etiquette(a.etiquette, version)
         base = a.base_url or f"{DEPOT}/releases/download/{a.etiquette}"
-        texte = construire(version, a.fichiers, base)
+        modele = section_modele(a.modele) if a.modele else None
+        porte2 = None
+        if a.porte2:
+            if modele is None:
+                raise ManifesteErreur("--porte2 demande --modele (dossier Hugging Face de la porte 2)")
+            url_base = a.porte2_url_base or modele["url"].rsplit("/", 1)[0]
+            porte2 = section_porte2(version, a.porte2, url_base)
+        texte = construire(version, a.fichiers, base, modele, porte2)
     except (ManifesteErreur, OSError) as e:
         print(f"manifeste : {e}", file=sys.stderr)
         return 1

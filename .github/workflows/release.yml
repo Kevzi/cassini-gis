@@ -125,7 +125,7 @@ jobs:
         shell: pwsh
         run: |
           $fichiers = @(Get-ChildItem dist\noyau -File | ForEach-Object { $_.FullName })
-          python -I installer/manifeste.py --etiquette $env:TAG --sortie dist/manifeste.json @fichiers
+          python -I installer/manifeste.py --etiquette $env:TAG --modele --sortie dist/manifeste.json @fichiers
           if ($LASTEXITCODE -ne 0) { throw "manifeste : échec" }
 
       # Preuve de l'installeur contre un serveur local : manifeste valide, puis altéré.
@@ -137,12 +137,30 @@ jobs:
           New-Item -ItemType Directory -Force "$proof\valide", "$proof\altere" | Out-Null
           Copy-Item dist\noyau\* "$proof\"
           $fichiers = @(Get-ChildItem dist\noyau -File | ForEach-Object { $_.FullName })
-          python -I installer/manifeste.py --etiquette $env:TAG --base-url http://127.0.0.1:8000 --sortie "$proof\valide\manifeste.json" @fichiers
+          # Modèle de preuve : un petit fichier servi en local, sous le nom et avec les champs
+          # de installer/modele.json (le vrai modèle de 2,8 Go n'est pas téléchargé ici) ;
+          # une copie dont un octet est changé sert au cas « octet changé ».
+          $nomModele = (Get-Content installer/modele.json -Raw | ConvertFrom-Json).nom_installe
+          $octets = New-Object byte[] 1048576
+          (New-Object Random 7).NextBytes($octets)
+          [IO.File]::WriteAllBytes("$proof\modele-bon.gguf", $octets)
+          $octets[1000] = $octets[1000] -bxor 1
+          [IO.File]::WriteAllBytes("$proof\modele-altere.gguf", $octets)
+          $shaModele = (Get-FileHash "$proof\modele-bon.gguf" -Algorithm SHA256).Hash.ToLower()
+          foreach ($v in 'bon','altere') {
+            @{ url = "http://127.0.0.1:8000/modele-$v.gguf"; sha256 = $shaModele; taille = 1048576; nom_installe = $nomModele } |
+              ConvertTo-Json | Set-Content "$proof\modele-$v.json" -Encoding utf8
+          }
+          python -I installer/manifeste.py --etiquette $env:TAG --base-url http://127.0.0.1:8000 --modele "$proof\modele-bon.json" --sortie "$proof\valide\manifeste.json" @fichiers
           if ($LASTEXITCODE -ne 0) { throw "manifeste de preuve : échec" }
-          # Manifeste altéré : le premier caractère de l'empreinte de la DERNIÈRE entrée
-          # (une DLL, pas le noyau) est changé.
+          New-Item -ItemType Directory -Force "$proof\modele-altere" | Out-Null
+          python -I installer/manifeste.py --etiquette $env:TAG --base-url http://127.0.0.1:8000 --modele "$proof\modele-altere.json" --sortie "$proof\modele-altere\manifeste.json" @fichiers
+          if ($LASTEXITCODE -ne 0) { throw "manifeste de preuve (modèle altéré) : échec" }
+          # Manifeste altéré : le premier caractère de l'empreinte de la DERNIÈRE entrée de
+          # `fichiers` (une DLL, ni le noyau ni le modèle) est changé.
           $json = Get-Content "$proof\valide\manifeste.json" -Raw
-          $m = [regex]::Matches($json, '"sha256": "(.)') | Select-Object -Last 1
+          $avantModele = $json.Substring(0, $json.IndexOf('"modele"'))
+          $m = [regex]::Matches($avantModele, '"sha256": "(.)') | Select-Object -Last 1
           $c = if ($m.Groups[1].Value -eq '0') { '1' } else { '0' }
           $json = $json.Remove($m.Groups[1].Index, 1).Insert($m.Groups[1].Index, $c)
           [IO.File]::WriteAllText("$proof\altere\manifeste.json", $json)
@@ -180,10 +198,37 @@ jobs:
             if (-not $info.installe_le) { throw "date d'installation absente" }
             Write-Host "installation.json : $($info | ConvertTo-Json -Compress)"
 
-            # Désinstallation : le dossier disparaît.
+            # Modèle (case cochée par défaut) : posé, déclaration avec model_sha256.
+            $gguf1 = "$dir1\bin\models\$nomModele"
+            if ((Get-FileHash $gguf1 -Algorithm SHA256).Hash.ToLower() -ne $shaModele) { throw "modèle installé différent" }
+            $decl = Get-Content "$dir1\bin\models\cassini-composition-4b.modele.json" -Raw | ConvertFrom-Json
+            if ($decl.model -ne $nomModele -or $decl.model_sha256 -ne $shaModele -or $decl.prompt -ne 'short') { throw "déclaration du modèle incorrecte" }
+            $liste = & "$dir1\bin\cassini.exe" run model.list | Out-String
+            Write-Host $liste
+            if ($liste -match 'models\.tampered') { throw "model.list signale models.tampered" }
+            if ($liste -notmatch [regex]::Escape($nomModele)) { throw "model.list ne liste pas le modèle" }
+
+            # Désinstallation : le noyau disparaît, le modèle et sa déclaration restent.
             Start-Process "$dir1\unins000.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES' -Wait
-            for ($i = 0; $i -lt 20 -and (Test-Path "$dir1\bin"); $i++) { Start-Sleep -Seconds 1 }
-            if (Test-Path "$dir1\bin") { throw "désinstallation : bin existe encore" }
+            for ($i = 0; $i -lt 20 -and (Test-Path "$dir1\bin\cassini.exe"); $i++) { Start-Sleep -Seconds 1 }
+            if (Test-Path "$dir1\bin\cassini.exe") { throw "désinstallation : cassini.exe existe encore" }
+            if (-not (Test-Path $gguf1)) { throw "désinstallation : le modèle a été supprimé" }
+            if (-not (Test-Path "$dir1\bin\models\cassini-composition-4b.modele.json")) { throw "désinstallation : la déclaration a été supprimée" }
+
+            # 1 bis. Sans modèle (/MODELE=0) : noyau posé, aucun fichier dans models, code 0.
+            $dir1b = "$proof\inst-sans-modele"
+            $p = Start-Process $inst -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$dir1b",'/MODELE=0','/MANIFESTE=http://127.0.0.1:8000/valide/manifeste.json' -Wait -PassThru
+            if ($p.ExitCode -ne 0) { throw "installation sans modèle : code $($p.ExitCode)" }
+            if (-not (Test-Path "$dir1b\bin\cassini.exe")) { throw "sans modèle : noyau absent" }
+            if (Test-Path "$dir1b\bin\models\*") { throw "sans modèle : models n'est pas vide" }
+            Write-Host "sans modèle : noyau posé, models vide"
+
+            # 1 ter. Modèle servi avec un octet changé : tout est refusé, noyau compris.
+            $dir1c = "$proof\inst-modele-altere"
+            $p = Start-Process $inst -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$dir1c",'/MANIFESTE=http://127.0.0.1:8000/modele-altere/manifeste.json' -Wait -PassThru
+            if ($p.ExitCode -eq 0) { throw "le modèle altéré aurait dû être refusé" }
+            if (Test-Path "$dir1c\bin\*") { throw "un fichier a été posé malgré le modèle altéré" }
+            Write-Host "modèle altéré refusé (code $($p.ExitCode))"
 
             # 2. Empreinte altérée : installation refusée, rien posé.
             $dir2 = "$proof\inst-altere"
@@ -267,6 +312,45 @@ jobs:
           foreach ($f in @($gguf, "$dir\bin\models\cassini-composition-4b.modele.json", "$dir\bin\installation.json", "$dir\extension\cassini_qgis-$version.zip")) {
             if (Test-Path $f) { throw "désinstallation : $f existe encore" }
           }
+
+      # Porte 2 dans le manifeste (7.4) : nom versionné, adresse Hugging Face, SHA-256 et taille
+      # du fichier construit ci-dessus. Le manifeste final est fini ICI, avant `gh release create`.
+      - name: Manifeste complet (section porte2) et empreintes de la porte 2
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $fichiers = @(Get-ChildItem dist\noyau -File | ForEach-Object { $_.FullName })
+          python -I installer/manifeste.py --etiquette $env:TAG --modele --porte2 installer-sortie/cassini-installeur-complet.exe --sortie dist/manifeste.json @fichiers
+          if ($LASTEXITCODE -ne 0) { throw "manifeste complet : échec" }
+          $m = Get-Content dist/manifeste.json -Raw | ConvertFrom-Json
+          if (-not $m.modele -or -not $m.porte2) { throw "manifeste : section modele ou porte2 absente" }
+          Write-Host ($m.porte2 | ConvertTo-Json -Compress)
+          # Déclaration d'empreintes déposée à côté du fichier sur Hugging Face.
+          New-Item -ItemType Directory -Force hf-depot | Out-Null
+          # Lien dur : le fichier fait plusieurs Go, on ne le copie pas.
+          New-Item -ItemType HardLink -Path "hf-depot\$($m.porte2.nom)" -Target (Resolve-Path installer-sortie/cassini-installeur-complet.exe) | Out-Null
+          [ordered]@{ version = $m.version; nom = $m.porte2.nom; sha256 = $m.porte2.sha256; taille = $m.porte2.taille } |
+            ConvertTo-Json | Set-Content "hf-depot\$($m.porte2.nom -replace '\.exe$','.empreintes.json')" -Encoding utf8
+
+      # Dépôt sur Hugging Face : seulement si le jeton HF_TOKEN est présent (secret du dépôt).
+      # Sans jeton, un avis et on continue : le manifeste annonce alors une adresse pas encore servie.
+      - name: Dépôt de la porte 2 sur Hugging Face (jeton HF_TOKEN)
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:HF_TOKEN) {
+            Write-Host "::warning::HF_TOKEN absent : la porte 2 n'est pas déposée sur Hugging Face (voir docs/publier-une-version.md)"
+            exit 0
+          }
+          $modele = Get-Content installer/modele.json -Raw | ConvertFrom-Json
+          $depot = ([Uri]$modele.url).AbsolutePath.Trim('/') -replace '^([^/]+/[^/]+)/.*$','$1'
+          python -m pip install --quiet "huggingface_hub==0.26.2"
+          if ($LASTEXITCODE -ne 0) { throw "installation de huggingface_hub : échec" }
+          python -c "import sys; from huggingface_hub import HfApi; HfApi(token=sys.argv[2]).upload_folder(repo_id=sys.argv[1], folder_path='hf-depot', repo_type='model', commit_message='Porte 2 ' + sys.argv[3])" $depot $env:HF_TOKEN $env:TAG
+          if ($LASTEXITCODE -ne 0) { throw "dépôt sur Hugging Face : échec" }
 
       # Le fichier dépasse les 2 Gio d'une release GitHub : il est livré comme artefact du
       # workflow (onglet Actions), pour l'essai en VM du propriétaire.
