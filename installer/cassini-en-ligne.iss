@@ -83,6 +83,7 @@ var
   VersionAPoser, VersionPresente: String;
   PageModele: TInputOptionWizardPage;
   NomModele, ShaModele: String;
+  DefautMajApplique: Boolean;
   ModeleTelecharge: Boolean;
 
 { Lancé avec /MISEAJOUR ? (interrupteur sans valeur : on parcourt la ligne de commande.) }
@@ -189,10 +190,25 @@ begin
     False, False);
   PageModele.Add('Télécharger et installer le modèle');
   PageModele.Values[0] := ExpandConstant('{param:MODELE|1}') <> '0';
-  { En mise à jour, le modèle n'est proposé par défaut que si l'utilisateur en avait déjà un
-    (/MODELE=0 ou /MODELE=1 reste prioritaire). }
+end;
+
+{ En mise à jour, le modèle n'est proposé par défaut que si l'utilisateur en avait déjà un
+  (/MODELE=0 ou /MODELE=1 reste prioritaire). Pas dans InitializeWizard : le dossier d'installation
+  n'y est pas encore connu. Appliqué une seule fois, à l'affichage de la page ou, en silencieux
+  où elle est sautée, au début de PrepareToInstall. }
+procedure AppliquerDefautMiseAJour;
+begin
+  if DefautMajApplique then
+    Exit;
+  DefautMajApplique := True;
   if ModeMiseAJour and (ExpandConstant('{param:MODELE|}') = '') then
     PageModele.Values[0] := ModeleDejaPresent;
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if CurPageID = PageModele.ID then
+    AppliquerDefautMiseAJour;
 end;
 
 function ModelePret: Boolean;
@@ -318,6 +334,7 @@ var
   Section, Fichiers, NomManifeste, Question: String;
 begin
   Result := '';
+  AppliquerDefautMiseAJour;
   ModeleTelecharge := False;
   Source := ExpandConstant('{param:MANIFESTE|{#ManifesteParDefaut}}');
 
