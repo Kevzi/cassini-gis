@@ -1210,3 +1210,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-publication/story-mettre-a-jour-cassini-le-meme-programme-que-l-installeur-en-plan.md`
   summary: En mode interactif, « Cassini est à jour » et « Cassini n'est pas installé » n'apparaissent qu'après les pages d'accueil, de modèle et de confirmation, alors qu'un lancement « Mettre à jour Cassini » devrait répondre tout de suite.
   evidence: les tests ne couvrent que le texte du script ; la décision n'est prise que dans PrepareToInstall (le manifeste ne peut se télécharger qu'une fois l'assistant ouvert). À juger sur la VM du propriétaire, puis éventuellement sauter les pages via ShouldSkipPage.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-plus-proche-voisin-et-matrice-de-distances-plan.md`
+  summary: `analysis.distance_matrix` (matrice de distances, sortie `table`) reste à construire une fois 10.1 (gabarit SummaryRow, qgis.bad_result) et 10.3 (geste à chaîne fixe, sortie table) faits.
+  evidence: le ticket 10.10 ne déclare que `after: [9]` mais exige la sortie table du geste générique, que seuls 10.1 et 10.3 livrent ; découpe décidée par le propriétaire le 2026-11-18, `analysis.nearest` seule dans ce plan.
