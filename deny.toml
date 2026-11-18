@@ -9,6 +9,12 @@ exclude = ["cassini-app"]
 allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "Unlicense"]
 confidence-threshold = 0.9
 
+[advisories]
+# RUSTSEC-2026-0543 : `chrono` n'est plus maintenu (aucune faille, aucune version corrigée). Il
+# arrive par `rmcp` et `schemars`, que le noyau ne peut pas remplacer. À lever dès qu'ils passent à
+# `jiff` ou `time`.
+ignore = ["RUSTSEC-2026-0543"]
+
 [bans]
 multiple-versions = "allow"
 deny = [

@@ -386,8 +386,8 @@ begin
       ExitProcess(0);
     if NoyauEnCoursDUsage then
     begin
-      Result := 'Cassini est en cours d''utilisation. Fermez QGIS et toute fenêtre ouverte sur le dossier de Cassini, puis relancez la mise à jour.' +
-        #13#10 + 'Aucun fichier n''a été posé.';
+      Result := 'Cassini est en cours d''utilisation. Fermez QGIS et toute fenêtre ouverte sur le dossier de Cassini, puis relancez la mise à jour.' + #13#10 +
+        'Aucun fichier n''a été posé.';
       Exit;
     end;
   end;
