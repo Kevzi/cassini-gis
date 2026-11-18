@@ -2,16 +2,39 @@
 name=Cassini
 qgisMinimumVersion=3.44
 qgisMaximumVersion=4.99
-description=Interface en langage naturel pour QGIS, hors ligne.
-version=0.1.3
+version=0.1.4
 author=Cassini
+description=Interface en langage naturel pour QGIS : décrivez votre analyse en français, une IA locale la prépare, vous la validez, QGIS l'exécute. Hors ligne.
 email=cassini-sig@proton.me
 homepage=https://kevzi.github.io/cassini-gis
 repository=https://github.com/Kevzi/cassini-gis
 tracker=https://github.com/Kevzi/cassini-gis/issues
 icon=assets/logo-cassini-light.svg
-about=Extension Cassini (GPL). Elle ne contient aucun binaire : le noyau Cassini (cassini, licence Apache-2.0) est une dependance externe a installer a part, avec le paquet Cassini. L'extension le cherche dans cet ordre : reglage QGIS cassini/core_path, variable d'environnement CASSINI_CORE, emplacement d'installation du paquet, PATH. Elle ne telecharge jamais rien.
-tags=offline,ai,cassini
 experimental=False
 deprecated=False
 supportsQt6=True
+about=Cassini est l'interface en français de QGIS, pilotée par une IA qui tourne sur votre poste, sans réseau.
+    Vous décrivez ce que vous voulez en une phrase, par exemple : « Trouve les parcelles constructibles du PLU à moins de 500 m d'une gare à Annecy et sors-moi la carte en PDF ». Cassini la traduit en une suite d'opérations, vous l'affiche étape par étape, attend votre validation, l'exécute dans QGIS et la journalise pour pouvoir la rejouer à l'identique.
+    POUR QUI
+    Bureaux d'études (urbanisme, environnement), collectivités, étudiants, et toute personne qui sait ce qu'elle veut obtenir mais pas où cliquer. Cassini n'a pas pour but de remplacer QGIS : il s'appuie sur lui pour la carte, les formats, le projet et l'export.
+    CE QUE CASSINI SAIT FAIRE
+    - Analyses vectorielles : zone tampon, intersection, sélection par attribut, statistiques par zone, isochrones.
+    - Analyse de terrain sur un modèle numérique d'élévation : champ de vision (simple et cumulé), ligne de vue entre deux points, pente, exposition, ombrage, points hauts, surface de coût et chemin de moindre coût, reclassification et superposition pondérée de rasters.
+    - Géométrie et coordonnées : conversion WGS84, UTM et MGRS, distance et azimut, point par azimut et distance, recoupement, reprojection d'une couche.
+    - Carte et mise en page : ouverture de couches vecteur et raster, styles (gradué, topographique), ordre des couches, export PDF avec titre, légende, échelle, flèche du nord et sources.
+    - Journal rejouable : chaque exécution est enregistrée à côté du projet QGIS et se rejoue à l'identique, même après fermeture et réouverture.
+    - IA externe en option : le même catalogue de commandes peut être proposé à une IA de votre choix par le protocole MCP, à votre demande seulement.
+    VOS DONNÉES RESTENT CHEZ VOUS
+    Vous apportez vos fichiers (GeoPackage, Shapefile, GeoJSON, CSV à coordonnées, GeoParquet, modèles d'élévation). Cassini n'en télécharge ni n'en redistribue aucun, ne modifie jamais les originaux et n'envoie rien sur le réseau : le modèle de langage et le moteur de calcul s'exécutent localement, ce qui convient aux postes isolés.
+    INSTALLATION
+    1. Installez QGIS 3.44 ou plus récent (séries 3 et 4 prises en charge).
+    2. Installez le moteur et le modèle d'IA avec l'installeur de Cassini (Windows ou Linux), téléchargeable sur https://kevzi.github.io/cassini-gis ; un installeur complet, en un seul fichier, existe pour les postes sans réseau.
+    3. Installez cette extension depuis le gestionnaire d'extensions de QGIS, puis ouvrez le panneau Cassini.
+    L'extension ne contient aucun binaire et ne télécharge jamais rien : elle cherche le moteur installé à part, dans cet ordre : réglage QGIS cassini/core_path, variable d'environnement CASSINI_CORE, emplacement d'installation, PATH.
+    LICENCES
+    L'extension est sous licence GPL, comme QGIS. Le moteur (Apache-2.0) est un programme distinct, lancé comme processus séparé et joint par un canal documenté (JSON-RPC sur l'entrée et la sortie standard) : il ne lie jamais QGIS. Le texte de la frontière et les licences des composants livrés sont fournis avec l'installeur.
+    ÉTAT DU PROJET
+    Version de jeunesse (0.1). Quelques fonctions bien faites plutôt que beaucoup à moitié finies ; l'extension n'affiche aucune parité avec QGIS. Retours et signalements bienvenus sur le suivi des anomalies ou à cassini-sig@proton.me.
+changelog=0.1.4 : fiche détaillée de l'extension.
+    0.1.3 : mise à jour du moteur et des installeurs (licences livrées, mise à jour depuis le menu Démarrer, installeur Linux).
+tags=offline,ai,français,terrain,mnt,pdf,hors ligne,llm,langage naturel,analyse
