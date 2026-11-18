@@ -267,7 +267,7 @@ begin
     Result := Copy(Result, 1, P - 1);
 end;
 
-{ La version écrite dans {app}\bin\installation.json ; vide si le fichier manque ou est illisible. }
+// La version écrite dans {app}\bin\installation.json ; vide si le fichier manque ou est illisible.
 function LireVersionPresente: String;
 var
   Brut: AnsiString;
