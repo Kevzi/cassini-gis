@@ -372,7 +372,7 @@ donne l'esquisse.
 | `data.convert` | faite | qgis | epic 10, entrée 9 |
 | `data.convert_raster` | faite | qgis | epic 10, entrée 30 |
 | `layer.remove` | faite | qgis | epic 10, entrée 27 |
-| `analysis.nearest` | planifiée | qgis | epic 10, entrée 10 |
+| `analysis.nearest` | faite | qgis | epic 10, entrée 10 |
 | `analysis.distance_matrix` | planifiée | qgis | epic 10, entrée 10 |
 | `analysis.statistics_by_category` | planifiée | qgis | epic 10, entrée 11 |
 | `analysis.sum_line_lengths` | planifiée | qgis | epic 10, entrée 11 |
@@ -1951,6 +1951,7 @@ proche d'une seconde couche, et la distance (epic 10, entrée 10).
 | `target_layer_id` | chaîne | oui | — | Couche des voisins, différente de `layer_id`. |
 | `max_distance` | `Distance` | non | `m`, `km` | Distance au-delà de laquelle aucun voisin n'est joint ; absente, sans limite. |
 | `out` | chaîne | non | — | Fourni par le noyau. |
+| `work_epsg` | entier | non | code EPSG | Fourni par le noyau, pour une couche en degrés seulement, comme `analysis.buffer` : la distance du champ est en mètres. |
 
 | Résultat | Type | Sens |
 |---|---|---|
@@ -1960,11 +1961,12 @@ proche d'une seconde couche, et la distance (epic 10, entrée 10).
 | `unmatched_count` | entier | Entités sans voisin dans `max_distance`. |
 
 ```json fiche
-{"id": "analysis.nearest", "status": "planifiee", "runs_in": "qgis", "dictated_by_core": false,
+{"id": "analysis.nearest", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
  "params": {"layer_id": {"type": "string", "required": true},
             "target_layer_id": {"type": "string", "required": true},
             "max_distance": {"type": "Distance", "required": false},
-            "out": {"type": "string", "required": false}},
+            "out": {"type": "string", "required": false},
+            "work_epsg": {"type": "integer", "required": false}},
  "result": ["crs", "distance_field", "feature_count", "layer_id", "name", "unit", "unmatched_count"]}
 ```
 

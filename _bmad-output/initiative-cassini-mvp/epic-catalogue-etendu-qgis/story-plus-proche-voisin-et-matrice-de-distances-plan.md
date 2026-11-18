@@ -3,15 +3,15 @@ title: 'Plus proche voisin (analysis.nearest)'
 type: 'feature'
 ticket: '10'
 created: '2026-11-18'
-status: 'ready-for-dev'
+status: 'built'
 baseline_revision: 'a0a3abf3c8e522728af66c68fe1001bcb156badc'
 route: 'full'
 route_source: 'auto'
 risk: 'medium'
-review: ''
-review_source: ''
-lenses_ran: []
-review_loop_iteration: 0
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick']
+review_loop_iteration: 1
 context:
   - '{project-root}/_bmad-output/initiative-cassini-mvp/spec-cassini-mvp/catalogue-des-commandes.md'
   - '{project-root}/_bmad-output/initiative-cassini-mvp/change-distance-en-metres-sur-couche-en-degres/change-distance-en-metres-sur-couche-en-degres.md'
@@ -74,9 +74,34 @@ context:
 
 ## Plan Change Log
 
+- 2026-11-18, boucle 1 (relecture quick). Déclencheurs : (a) le champ `distance` est codé en dur, or QGIS renomme le nouveau champ (`distance_2`) quand la couche d'entrée en porte déjà un, ou après un second `analysis.nearest` : `unmatched_count` et `distance_field` lisent alors l'ancien champ (constaté sous QGIS 3.44) ; (b) `native:joinbynearest` rend une ligne par voisin à égale distance : 1 entité, 3 cibles équidistantes, 3 lignes en sortie (constaté sous QGIS 3.44), ce qui casse « chaque entité reçoit son plus proche voisin » et `feature_count` = nombre d'entités de `layer_id`. Amendé : Design Notes (deux contraintes). État connu mauvais évité : nom de champ fixe ; sortie dédoublée. KEEP : déclaration du noyau `analysis_nearest.rs` et son journal de test (work_epsg), ligne de fiche du catalogue avec `work_epsg` (exigée par `catalogue.rs`), textes et résumés fr/en, famille `plus_proche_voisin` et phrases NEA1-3, poids `gros_projet` 152, barre 102, `FOCUS_EXCLUDED = ["redemande"]` (tirage GA06). Diff d'origine sauvegardé : `scratchpad/diff-10-10.patch`.
+
 ## Review Triage Log
 
+| Constat | Verdict | Preuve |
+|---|---|---|
+| `distance` codé en dur, champ renommé en cas de conflit | medium → bad_plan | sonde QGIS : 2e jointure rend `distance_2`, couche avec `distance` rend `distance_2` ; le code lit l'ancien champ |
+| Voisins à égale distance : plusieurs lignes par entité | medium → bad_plan | sonde QGIS : 1 entité, 3 cibles équidistantes, 3 lignes |
+| Fiche du catalogue : `work_epsg` ajouté au-delà du statut | low, rejeté | exigé par `core/tests/catalogue.rs` ; le correctif serait d'éditer le plan |
+| `FOCUS_EXCLUDED`/`gros_projet` hors liste de tâches ; doc « Vide depuis 5.54 » | low, rejeté | forcé par le déplacement du tirage ; le commentaire explique l'entrée 10.10 |
+| `try_from` perd les descriptions du schéma | false | schemars 1.2.3 n'emprunte le type source que si `from` ET `into` sont posés (`schema_exprs.rs:60`) ; ici `try_from` seul |
+| Sonde non consignée, `MAX_DISTANCE: None`, cas degrés avec cible d'un autre SCR | false | la sonde a été lancée (RÉSULTAT : OK) et couvre ces cas sous le vrai QGIS |
+| Sonde : sortie vide et annulation | low, rejeté | couverts par les tests à backend factice ; correctif = complexité sans gain |
+
+Boucle 2 (relecture quick) :
+
+| Constat | Verdict | Preuve |
+|---|---|---|
+| Fiche du catalogue : `work_epsg` au-delà du statut | carried low, rejeté | même constat que la boucle 1 |
+| Commentaires « vide depuis 5.54 » (`lib.rs`, `commande.rs`) devenus faux | low → patch | `FOCUS_EXCLUDED` contient `redemande` ; trois commentaires corrigés ; les lignes 830 et 838 de la doc d'entraînement décrivent l'état de 5.54 et restent vraies |
+| Voisin retenu à égalité dépend de l'ordre de QGIS | false | le plan demande une ligne par entité, de façon répétable ; le rang 1 est stable sur mêmes données (sonde cas 6) |
+| `_nearest_fields` : contrôle de la queue faible | false | un autre ordre de QGIS échoue en `analysis.failed`, bruyamment, sans chiffres faux |
+| Sonde non lancée par `unittest`, cas non couverts | low, rejeté | couverts par le backend factice ; correctif = complexité sans gain |
+| Cases du plan non cochées, Implementation Notes vide | rejeté | le correctif serait d'éditer le plan |
+
 ## Design Notes
+
+Contraintes issues de la boucle 1 : (1) le nom du champ de distance doit être lu sur la couche produite, jamais supposé : QGIS le suffixe en cas de conflit ; `distance_field` et `unmatched_count` portent sur ce nom. (2) `native:joinbynearest` rend une ligne par voisin équidistant : la chaîne doit garantir une ligne par entité de `layer_id`, `feature_count` égal à leur nombre, sans choix arbitraire non déterministe.
 
 `native:joinbynearest` mesure dans le système de la couche d'entrée : la chaîne ouvre par la reprojection vers `work_epsg` (comme le buffer), donc le champ `distance` est en mètres. À vérifier par la sonde : la couche cible est-elle transformée par l'algorithme ? Sinon, la reprojeter aussi.
 

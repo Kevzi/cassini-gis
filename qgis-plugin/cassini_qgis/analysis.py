@@ -276,6 +276,64 @@ def summarize_zonal_statistics(backend, layer, params):
     return {"zones": [{"label": label, "count": count} for label, count in pairs], "truncated": truncated}
 
 
+def translate_nearest(params, layer):
+    """Paramètres neutres de `analysis.nearest` -> paramètres de `native:joinbynearest`.
+
+    Un seul voisin, tous les champs de la cible copiés, aucune entité écartée : une entité sans
+    voisin (au-delà de la limite, ou cible vide) reste, avec des valeurs nulles. La limite est en
+    mètres, comme le champ de distance : l'algorithme mesure dans le système de la couche d'entrée,
+    que la chaîne a mis en mètres. La couche cible est ajoutée par le geste (clé `overlay`).
+    """
+    limit = params.get("max_distance")
+    return {
+        "INPUT": layer,
+        "FIELDS_TO_COPY": [],  # liste vide : tous les champs de la cible
+        "DISCARD_NONMATCHING": False,
+        "PREFIX": "",
+        "NEIGHBORS": 1,
+        "MAX_DISTANCE": _distance_in_meters(limit) if limit is not None else None,
+    }
+
+
+# `native:joinbynearest` ajoute en queue six champs : rang du voisin, distance, puis les quatre
+# coordonnées. QGIS les renomme (`distance_2`...) quand un nom existe déjà dans l'entrée ou la
+# cible : on les lit donc par leur place, jamais par un nom supposé.
+_NEAREST_TAIL = 6
+
+
+def _nearest_fields(backend, layer):
+    """(champ du rang du voisin, champ de la distance) de la couche rendue par la jointure."""
+    names = [name for name, _ in backend.fields_of(layer)]
+    if len(names) < _NEAREST_TAIL:
+        raise GestureError(FAILED, "La jointure au plus proche voisin n'a pas rendu les champs attendus.")
+    rank, distance = names[-_NEAREST_TAIL], names[-_NEAREST_TAIL + 1]
+    if not (rank.startswith("n") and distance.startswith("distance")):
+        raise GestureError(FAILED, "La jointure au plus proche voisin n'a pas rendu les champs attendus.")
+    return rank, distance
+
+
+def translate_nearest_first(params, layer, backend):
+    """Garde le premier voisin de chaque entité (`native:extractbyexpression`).
+
+    À égale distance, `native:joinbynearest` rend une ligne par voisin, de rang 1, 2, 3... : on ne
+    garde que le rang 1 (déterministe), et les entités sans voisin (rang nul). Il reste ainsi une
+    ligne par entité de la couche d'entrée.
+    """
+    rank, _ = _nearest_fields(backend, layer)
+    quoted = '"%s"' % rank.replace('"', '""')
+    return {"INPUT": layer, "EXPRESSION": "%s = 1 OR %s IS NULL" % (quoted, quoted)}
+
+
+def summarize_nearest(backend, layer, params):
+    """Champ de distance (lu sur la couche produite), mètres, entités sans voisin (clé `summary`)."""
+    _, distance = _nearest_fields(backend, layer)
+    return {
+        "distance_field": distance,
+        "unit": "m",
+        "unmatched_count": backend.null_count(layer, distance),
+    }
+
+
 # Table fermée : id de commande -> algorithme et traduction.
 #   algorithm : id de l'algorithme du cadre de traitement ;
 #   translate : (params du noyau, couche d'entrée) -> paramètres de l'algorithme, sans la sortie ;
@@ -294,7 +352,8 @@ def summarize_zonal_statistics(backend, layer, params):
 #               {algorithm, translate(params, sortie précédente), output, empty_error} ;
 #               seule cette dernière étape écrit `out`, la première écrit en sortie
 #               temporaire ; `empty_error` (code, message) si la sortie de la première
-#               étape n'a aucune entité ;
+#               étape n'a aucune entité (sans `empty_error`, une sortie vide est acceptée) ;
+#               `with_backend` : la traduction reçoit aussi le fond (lecture des champs) ;
 #   summary   : (facultatif) (fond, couche produite, params) -> dict qui complète le résultat ;
 #   target_crs: (facultatif) paramètre du noyau qui porte un code EPSG d'arrivée ; le fond
 #               doit le connaître (`crs_is_known`), sinon `data.unknown_crs`, avant tout
@@ -357,6 +416,23 @@ ALGORITHMS = {
         "field_optional": True,
         "geometry": "Polygon",
         "summary": summarize_zonal_statistics,
+    },
+    "analysis.nearest": {
+        "algorithm": "native:joinbynearest",
+        "translate": translate_nearest,
+        "output": "OUTPUT",
+        "input": "layer_id",
+        "metric": True,
+        "work_crs": "work_epsg",
+        "overlay": "target_layer_id",
+        "overlay_key": "INPUT_2",
+        "then": {
+            "algorithm": "native:extractbyexpression",
+            "translate": translate_nearest_first,
+            "output": "OUTPUT",
+            "with_backend": True,
+        },
+        "summary": summarize_nearest,
     },
     "analysis.isochrone": {
         "algorithm": "native:serviceareafrompoint",
@@ -501,6 +577,18 @@ class QgisBackend(_ReadBackend):
             count = feature[count_field]
             pairs.append((text, int(count) if count is not None else 0))
         return pairs, self.feature_count(layer) > limit
+
+    def null_count(self, layer, field):
+        """Nombre d'entités de la couche dont le champ `field` est nul ou vide."""
+        from qgis.core import QgsFeatureRequest
+
+        request = QgsFeatureRequest().setSubsetOfAttributes([field], layer.fields())
+        total = 0
+        for feature in layer.getFeatures(request):
+            value = feature[field]
+            if value is None or (hasattr(value, "isNull") and value.isNull()):
+                total += 1
+        return total
 
     def read_written(self, path):
         """(nombre d'entités, pilote) du fichier écrit, ouvert à part sans l'ajouter au
@@ -878,10 +966,13 @@ class ProcessingGesture:
         backend = self._backend
         reference = results.get(self._entry["output"])
         temporary = backend.temporary_layer(self._handle, reference) if reference else None
-        if temporary is None or backend.feature_count(temporary) == 0:
+        if temporary is None:
+            raise GestureError(FAILED, "L'étape intermédiaire de l'analyse n'a rien rendu.")
+        if then.get("empty_error") and backend.feature_count(temporary) == 0:
             code, message = then["empty_error"]
             raise GestureError(code, message)
-        parameters = then["translate"](self._params or {}, temporary)
+        extra = (backend,) if then.get("with_backend") else ()
+        parameters = then["translate"](self._params or {}, temporary, *extra)
         parameters[then["output"]] = self._out
         self._stage = 1
         self._handle = backend.run_algorithm(then["algorithm"], parameters, self._on_finished, self._handle)

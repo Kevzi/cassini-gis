@@ -138,6 +138,34 @@ class LayerCommandsTest(unittest.TestCase):
         )
 
 
+class NearestSummaryTest(unittest.TestCase):
+    PARAMS = {"layer_id": "parcelles_2", "target_layer_id": "gares_1"}
+
+    def test_nearest(self):
+        out = {"name": "Voisin", "feature_count": 4, "unmatched_count": 0}
+        self.assertEqual(
+            say("analysis.nearest", self.PARAMS, out),
+            "Voisin le plus proche dans Gares pour chaque entité de Parcelles : nouvelle couche Voisin, 4 entités.",
+        )
+        self.assertEqual(
+            say("analysis.nearest", self.PARAMS, out, lang="en"),
+            "Nearest neighbour in Gares for each feature of Parcelles: new layer Voisin, 4 features.",
+        )
+
+    def test_limit_and_unmatched(self):
+        params = dict(self.PARAMS, max_distance={"value": 500, "unit": "m"})
+        out = {"name": "Voisin", "feature_count": 4, "unmatched_count": 3}
+        text = say("analysis.nearest", params, out)
+        self.assertIn("à moins de 500 m", text)
+        self.assertTrue(text.endswith("4 entités ; sans voisin : 3 entités."), text)
+
+    def test_without_result_only_parameters(self):
+        self.assertEqual(
+            say("analysis.nearest", self.PARAMS),
+            "Voisin le plus proche dans Gares pour chaque entité de Parcelles.",
+        )
+
+
 class OtherCommandsTest(unittest.TestCase):
     def test_layer_add_shows_only_the_file_name(self):
         params = {"path": "C:\\Users\\camille\\donnees\\gares.gpkg"}
@@ -842,6 +870,9 @@ SAMPLES = {
     "analysis.zonal_statistics": ({"layer_id": "parcelles_2", "points_layer_id": "gares_1"},
                                   {"name": "Décompte", "feature_count": 4, "zones": [],
                                    "truncated": False}),
+    "analysis.nearest": ({"layer_id": "parcelles_2", "target_layer_id": "gares_1"},
+                         {"layer_id": "v_6", "name": "Voisin", "feature_count": 4, "crs": "EPSG:2154",
+                          "distance_field": "distance", "unit": "m", "unmatched_count": 0}),
     "analysis.isochrone": ({"layer_id": "routes_1", "duration": {"value": 10, "unit": "min"},
                             "mode": "walk"},
                            {"layer_id": "iso_1", "name": "Isochrone", "feature_count": 1}),

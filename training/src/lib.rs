@@ -325,10 +325,13 @@ pub const FOCUS_COUNT: usize = 1800;
 /// phrase d'une barre à un nombre ou une commune près (relevé de
 /// `training/tests/recouvrement.rs`) : le jeu complet ne la tire pas, un jeu ciblé le pourrait.
 /// Refusées au jeu ciblé tant que leurs tournures ne sont pas reprises ; le test tient cette liste
-/// exacte, dans les deux sens. Vide depuis 5.54, lot 2 : les cinq familles du premier relevé
+/// exacte, dans les deux sens. Vide de 5.54, lot 2, à 10.10 : les cinq familles du premier relevé
 /// (`filtre_numerique`, `pente`, `reprojection_couche`, `retrait_couche`, `carroyage_mgrs`) ont
 /// perdu leur tournure fautive. La liste reste le contrôle des familles futures.
-pub const FOCUS_EXCLUDED: &[&str] = &[];
+/// Entrée 10.10 : `redemande` y entre. Tirée seule à `FOCUS_SEED`, elle emballe une autre famille
+/// selon les poids, et l'ajout de `plus_proche_voisin` a déplacé ce tirage sur « Sélectionne les
+/// routes départementales » (essai réel GA06). Le jeu complet, lui, ne copie rien (le test le tient).
+pub const FOCUS_EXCLUDED: &[&str] = &["redemande"];
 
 /// Les familles du jeu ciblé de la première séance continue (5.54, lot 2) : les six familles
 /// neuves ou renforcées d'après les leçons de la remesure du 2026-11-11 (format gardé avec
@@ -1771,7 +1774,7 @@ mod tests {
         assert!(generate_families(FOCUS_SEED, 10, &[]).is_err());
         assert!(generate_families(FOCUS_SEED, 10, &[""]).is_err());
         // Une famille qui, tirée seule, engendre une phrase de barre est refusée au jeu ciblé
-        // (`FOCUS_EXCLUDED`, vide depuis 5.54, lot 2 : le contrôle reste pour les familles futures).
+        // (`FOCUS_EXCLUDED` : `redemande` depuis 10.10, le contrôle vaut pour les familles futures).
         if let Some(excluded) = FOCUS_EXCLUDED.first() {
             let err = generate_families(FOCUS_SEED, 10, &["tampon", excluded]).unwrap_err();
             assert!(err.contains(excluded), "{err}");

@@ -39,6 +39,8 @@ class FakeBackend:
         self.pairs, self.counts_call = [], None
         self.near, self.near_call, self.temporary_count = True, None, 1
         self.encodings, self.driver = [], None
+        self.nulls, self.null_call = 0, None
+        self.out_fields = None  # champs des couches temporaire et produite, quand un test les fixe
 
     def layer(self, layer_id):
         return self.items.get(layer_id)
@@ -79,12 +81,17 @@ class FakeBackend:
         pairs = self.pairs[:limit]
         return pairs, len(self.pairs) > limit
 
+    def null_count(self, layer, field):
+        self.null_call = (layer.lid, field)
+        return self.nulls
+
     def has_feature_near(self, layer, x, y, epsg, radius):
         self.near_call = (layer.lid, x, y, epsg, radius)
         return self.near
 
     def temporary_layer(self, handle, reference):
-        return FakeLayer(reference, "temporaire", count=self.temporary_count)
+        extra = {} if self.out_fields is None else {"fields": self.out_fields}
+        return FakeLayer(reference, "temporaire", count=self.temporary_count, **extra)
 
     def run_algorithm(self, algorithm_id, parameters, finished, previous=None, encoding=None):
         self.calls.append((algorithm_id, dict(parameters)))
@@ -109,7 +116,8 @@ class FakeBackend:
         self.loaded = path
         if not self.loadable:
             return None
-        return FakeLayer("out_1", name, self.loaded_crs, count=self.loaded_count)
+        extra = {} if self.out_fields is None else {"fields": self.out_fields}
+        return FakeLayer("out_1", name, self.loaded_crs, count=self.loaded_count, **extra)
 
 
 def start(entry, backend, params):
@@ -617,6 +625,156 @@ class ZonalStatisticsTest(unittest.TestCase):
     def test_zones_must_be_polygons(self):
         _, calls = start(self.entry, self.backend, self.params(layer_id="p", points_layer_id="z"))
         self.assertEqual(calls[0][1].code, "analysis.bad_params")
+        self.assertEqual(self.backend.calls, [])
+
+    def test_cancellation_leaves_no_file(self):
+        g, calls = start(self.entry, self.backend, self.params())
+        g.cancel()
+        self.backend.finished(False, {})
+        self.assertEqual(calls[0][1].code, "qgis.cancelled")
+        self.assertFalse(os.path.exists(self.out))
+
+
+TAIL = ("n", "distance", "feature_x", "feature_y", "nearest_x", "nearest_y")
+
+
+class NearestTest(unittest.TestCase):
+    """Plus proche voisin : `native:joinbynearest` puis une seule ligne par entité ; limite en
+    mètres, aucune entité écartée ; une couche en degrés est reprojetée d'abord vers `work_epsg`
+    (comme le tampon). Le champ de distance est lu sur la couche, jamais supposé."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.out = os.path.join(self.dir.name, "3-analysis.nearest.gpkg")
+        self.entry = analysis.ALGORITHMS["analysis.nearest"]
+        self.backend = FakeBackend(
+            [
+                FakeLayer("p", name="parcelles", geometry="Polygon"),
+                FakeLayer("g", name="gares"),
+                FakeLayer("w", name="gares_wgs", crs="EPSG:4326", metric=False),
+                FakeLayer("r", vector=False),
+            ],
+            loaded_count=5,
+        )
+        self.backend.out_fields = ("nom",) + TAIL
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def params(self, **extra):
+        p = {"layer_id": "p", "target_layer_id": "g", "out": self.out}
+        p.update(extra)
+        return p
+
+    def run_chain(self, **extra):
+        _, calls = start(self.entry, self.backend, self.params(**extra))
+        self.backend.finished(True, {"OUTPUT": "jointe"})  # la jointure, puis la garde du rang 1
+        if len(self.backend.calls) > 1:
+            self.backend.finished(True, {})
+        return calls
+
+    def test_a_metric_layer_joins_its_nearest_neighbour(self):
+        _, calls = start(self.entry, self.backend, self.params())
+        algo, p = self.backend.calls[0]
+        self.assertEqual(algo, "native:joinbynearest")
+        self.assertEqual((p["INPUT"].lid, p["INPUT_2"].lid), ("p", "g"))
+        self.assertEqual(p["NEIGHBORS"], 1)
+        self.assertFalse(p["DISCARD_NONMATCHING"])
+        self.assertIsNone(p["MAX_DISTANCE"])
+        self.assertEqual(p["OUTPUT"], "TEMPORARY_OUTPUT")
+        self.backend.finished(True, {"OUTPUT": "jointe"})
+        algo, p = self.backend.calls[1]
+        self.assertEqual(algo, "native:extractbyexpression")
+        self.assertEqual(p["INPUT"].lid, "jointe")
+        self.assertEqual(p["OUTPUT"], self.out)
+        self.backend.finished(True, {})
+        result, error = calls[0]
+        self.assertIsNone(error)
+        self.assertEqual(
+            result,
+            {"layer_id": "out_1", "name": "3-analysis.nearest", "feature_count": 5, "crs": "EPSG:2154",
+             "distance_field": "distance", "unit": "m", "unmatched_count": 0},
+        )
+        self.assertEqual(self.backend.null_call, ("out_1", "distance"))
+
+    def test_ties_keep_one_row_per_feature(self):
+        # À égale distance, QGIS rend une ligne par voisin, de rang 1, 2, 3 : seul le rang 1 reste.
+        self.run_chain()
+        self.assertEqual(self.backend.calls[1][1]["EXPRESSION"], '"n" = 1 OR "n" IS NULL')
+
+    def test_the_distance_field_is_read_from_the_layer_when_qgis_renames_it(self):
+        self.backend.out_fields = ("distance", "n", "n_2", "distance_2", "feature_x", "feature_y", "nearest_x", "nearest_y")
+        calls = self.run_chain()
+        self.assertEqual(self.backend.calls[1][1]["EXPRESSION"], '"n_2" = 1 OR "n_2" IS NULL')
+        self.assertEqual(calls[0][0]["distance_field"], "distance_2")
+        self.assertEqual(self.backend.null_call, ("out_1", "distance_2"))
+
+    def test_unexpected_fields_fail_cleanly(self):
+        self.backend.out_fields = ("a", "b")
+        calls = self.run_chain()
+        self.assertEqual(calls[0][1].code, "analysis.failed")
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_an_empty_input_is_not_an_error(self):
+        self.backend.temporary_count = 0
+        self.backend.loaded_count = 0
+        calls = self.run_chain()
+        self.assertIsNone(calls[0][1])
+        self.assertEqual(calls[0][0]["feature_count"], 0)
+
+    def test_a_layer_in_degrees_is_reprojected_first_and_measured_in_meters(self):
+        _, calls = start(self.entry, self.backend, self.params(layer_id="w", target_layer_id="g", work_epsg=2154))
+        self.assertEqual(self.backend.calls[0][0], "native:reprojectlayer")
+        self.assertEqual(self.backend.calls[0][1]["TARGET_CRS"], "EPSG:2154")
+        self.backend.finished(True, {"OUTPUT": "reprojetee"})
+        algo, p = self.backend.calls[1]
+        self.assertEqual(algo, "native:joinbynearest")
+        self.assertEqual(p["INPUT"].lid, "reprojetee")
+        self.assertEqual(p["INPUT_2"].lid, "g")  # la cible n'est pas reprojetée par le geste
+        self.backend.finished(True, {"OUTPUT": "jointe"})
+        self.assertEqual(self.backend.calls[2][0], "native:extractbyexpression")
+        self.backend.finished(True, {})
+        self.assertIsNone(calls[0][1])
+
+    def test_without_work_crs_a_layer_in_degrees_is_refused(self):
+        _, calls = start(self.entry, self.backend, self.params(layer_id="w"))
+        self.assertEqual(calls[0][1].code, "analysis.crs_not_metric")
+        self.assertEqual(self.backend.calls, [])
+
+    def test_max_distance_is_given_in_meters(self):
+        for limit, meters in (({"value": 500, "unit": "m"}, 500.0), ({"value": 0.5, "unit": "km"}, 500.0)):
+            self.backend.calls.clear()
+            start(self.entry, self.backend, self.params(max_distance=limit))
+            self.assertEqual(self.backend.calls[0][1]["MAX_DISTANCE"], meters)
+
+    def test_unmatched_features_are_kept_and_counted(self):
+        self.backend.nulls = 2
+        calls = self.run_chain(max_distance={"value": 500, "unit": "m"})
+        self.assertEqual(calls[0][0]["unmatched_count"], 2)
+        self.assertEqual(calls[0][0]["feature_count"], 5)
+
+    def test_an_empty_target_leaves_every_feature_without_neighbour(self):
+        self.backend.items["g"].count = 0
+        self.backend.loaded_count, self.backend.nulls = 5, 5
+        calls = self.run_chain()
+        self.assertEqual(self.backend.calls[0][0], "native:joinbynearest")
+        result = calls[0][0]
+        self.assertEqual(result["unmatched_count"], result["feature_count"])
+
+    def test_same_layer_refused(self):
+        _, calls = start(self.entry, self.backend, self.params(target_layer_id="p"))
+        self.assertEqual(calls[0][1].code, "analysis.bad_params")
+        self.assertEqual(self.backend.calls, [])
+
+    def test_unknown_or_raster_layers_refused(self):
+        for key, value, code in (
+            ("layer_id", "nope", "layer.not_found"),
+            ("layer_id", "r", "layer.not_vector"),
+            ("target_layer_id", "nope", "layer.not_found"),
+            ("target_layer_id", "r", "layer.not_vector"),
+        ):
+            _, calls = start(self.entry, self.backend, self.params(**{key: value}))
+            self.assertEqual(calls[0][1].code, code)
         self.assertEqual(self.backend.calls, [])
 
     def test_cancellation_leaves_no_file(self):

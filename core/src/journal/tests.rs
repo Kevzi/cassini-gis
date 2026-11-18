@@ -4702,6 +4702,17 @@ impl Executor for CrsQgis {
                           "name": "tampon", "feature_count": 3, "crs": format!("EPSG:{work}")}),
                 )
             }
+            "analysis.nearest" => {
+                self.buffers.borrow_mut().push(p.clone());
+                let n = self.count.get() + 1;
+                self.count.set(n);
+                fs::write(p["out"].as_str().unwrap(), "gpkg").unwrap();
+                Ok(
+                    json!({"layer_id": format!("voisin_g{}_{n}", self.generation),
+                          "name": "voisin", "feature_count": 3, "crs": "EPSG:2154",
+                          "distance_field": "distance", "unit": "m", "unmatched_count": 0}),
+                )
+            }
             other => panic!("commande inattendue : {other}"),
         }
     }
@@ -4752,6 +4763,47 @@ fn a_buffer_of_a_layer_in_degrees_logs_the_metric_project_system() {
     let err = s.call("analysis.buffer", absent).unwrap_err();
     assert_eq!(err.code, "layer.not_found");
     assert!(buffers.borrow()[2].get("work_epsg").is_none());
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_nearest_join_of_a_layer_in_degrees_logs_the_metric_work_system() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let qgis = CrsQgis::new(1, &qgis_project);
+    let orders = qgis.buffers.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    // Couche en degrés : le noyau remplit `work_epsg`, journalisé, transmis au geste.
+    let out = s
+        .call(
+            "analysis.nearest",
+            json!({"layer_id": "gares", "target_layer_id": "zonage",
+                   "max_distance": {"value": 500, "unit": "m"}}),
+        )
+        .unwrap();
+    assert_eq!(out["unit"], "m");
+    // Couche en mètres : rien n'est rempli, même si l'appelant en donne un.
+    s.call(
+        "analysis.nearest",
+        json!({"layer_id": "zonage", "target_layer_id": "gares", "work_epsg": 4326}),
+    )
+    .unwrap();
+    // Même couche des deux côtés : refus du noyau, rien n'est exécuté ni journalisé.
+    let err = s
+        .call(
+            "analysis.nearest",
+            json!({"layer_id": "gares", "target_layer_id": "gares"}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "registry.invalid_params");
+    let l = lines(&s);
+    assert_eq!(l[0]["params"]["work_epsg"], 2154, "{}", l[0]);
+    assert_eq!(orders.borrow()[0]["work_epsg"], 2154);
+    assert!(l[1]["params"].get("work_epsg").is_none(), "{}", l[1]);
+    assert!(orders.borrow()[1].get("work_epsg").is_none());
+    assert_eq!(orders.borrow().len(), 2);
     drop(s);
     let _ = fs::remove_dir_all(dir);
 }

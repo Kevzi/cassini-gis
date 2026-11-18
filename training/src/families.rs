@@ -191,6 +191,13 @@ pub static FAMILIES: &[Family] = &[
         weight: 8,
         make: decompte_par_zone,
     },
+    // Entrée 10.10 : `analysis.nearest`, la jointure au plus proche voisin (limite en mètres
+    // une fois sur trois).
+    Family {
+        name: "plus_proche_voisin",
+        weight: 4,
+        make: plus_proche_voisin,
+    },
     Family {
         name: "ouverture",
         weight: 4,
@@ -533,10 +540,11 @@ pub static FAMILIES: &[Family] = &[
     // famille, tirée selon les poids, posé dans un projet de 20 à 60 couches et rendu par la vue
     // triée du noyau. Chaque famille garde ainsi son compte, petits et gros projets ensemble.
     // Relevé de 128 à 148 en 5.54, lot 2, avec les familles de la première séance (22,5 % sinon ;
-    // 25,8 % au jeu graine 1).
+    // 25,8 % au jeu graine 1). Entrée 10.10 (`plus_proche_voisin`, poids 4) : 148 → 152, pour rester
+    // au-dessus de 23 % (22,6 % à 148).
     Family {
         name: "gros_projet",
-        weight: 148,
+        weight: 152,
         make: gros_projet,
     },
 ];
@@ -3504,6 +3512,55 @@ fn decompte_par_zone(rng: &mut Rng) -> Option<Example> {
         json!({"command": "analysis.zonal_statistics", "params": params}),
     ]);
     Some(example("decompte_par_zone", b, rng, request, expected))
+}
+
+/// « Pour chaque parcelle, trouve la gare la plus proche » : `analysis.nearest`, la couche qui
+/// reçoit le voisin d'abord, la couche des voisins ensuite ; la limite en mètres seulement quand
+/// la phrase la donne.
+fn plus_proche_voisin(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let a = pick_theme(rng, &b, ordinary)?;
+    let layer = b.add(rng, a.key, &[], &[], &[]);
+    let t = pick_theme(rng, &b, ordinary)?;
+    let target = b.add(rng, t.key, &[], &[], &[]);
+    let (the, closest) = if t.noun.fem {
+        ("la", "la plus proche")
+    } else {
+        ("le", "le plus proche")
+    };
+    let (a_sg, t_sg) = (a.noun.sg, t.noun.sg);
+    let (mut body, q) = match rng.below(4) {
+        0 => (
+            format!("Pour chaque {a_sg}, trouve {the} {t_sg} {closest}"),
+            false,
+        ),
+        1 => (
+            format!("Associe à chaque {a_sg} {the} {t_sg} {closest}, avec la distance"),
+            false,
+        ),
+        2 => (
+            format!(
+                "Quel{} est {the} {t_sg} {closest} de chaque {a_sg}",
+                if t.noun.fem { "le" } else { "" }
+            ),
+            true,
+        ),
+        _ => (
+            format!("Joins chaque {a_sg} à {the} {t_sg} {closest}"),
+            false,
+        ),
+    };
+    let mut params = json!({"layer_id": layer.id, "target_layer_id": target.id});
+    if rng.chance(1, 3) {
+        let d = dist(rng);
+        body.push_str(&format!(", à moins {}", d.de()));
+        params["max_distance"] = d.json();
+    }
+    let request = finish(rng, &body, q, false);
+    let expected = calls(vec![
+        json!({"command": "analysis.nearest", "params": params}),
+    ]);
+    Some(example("plus_proche_voisin", b, rng, request, expected))
 }
 
 // -- ouverture et description ----------------------------------------------
@@ -15442,6 +15499,24 @@ mod tests {
             .iter()
             .map(|f| f["name"].as_str().unwrap())
             .collect()
+    }
+
+    #[test]
+    fn a_nearest_neighbour_request_gives_two_different_layers_and_a_limit_only_when_written() {
+        let (mut limited, mut free) = (0, 0);
+        for e in valid(plus_proche_voisin, 600) {
+            assert_eq!(commands(&e), ["analysis.nearest"], "{}", e.request);
+            let p = &call(&e, 0)["params"];
+            assert_ne!(p["layer_id"], p["target_layer_id"], "{}", e.request);
+            if p.get("max_distance").is_some() {
+                limited += 1;
+                assert!(e.request.contains("à moins d"), "{}", e.request);
+            } else {
+                free += 1;
+                assert!(!e.request.contains("à moins d"), "{}", e.request);
+            }
+        }
+        assert!(limited > 50 && free > 100, "{limited} {free}");
     }
 
     #[test]

@@ -127,8 +127,8 @@ fn the_families_option_draws_only_the_named_families_and_refuses_an_unknown_one(
         .iter()
         .map(|f| f.name)
         .collect();
-    // Une famille de `FOCUS_EXCLUDED` est refusée au jeu ciblé ; la liste est vide depuis 5.54,
-    // lot 2 (le contrôle reste pour les familles futures).
+    // Une famille de `FOCUS_EXCLUDED` est refusée au jeu ciblé ; la liste était vide depuis 5.54,
+    // lot 2, et `redemande` y est entrée avec l'entrée 10.10.
     let mut refusals = vec![("tampon,nexiste_pas", "nexiste_pas")];
     if let Some(excluded) = cassini_training::FOCUS_EXCLUDED.first() {
         refusals.push((excluded, "refusée au jeu ciblé"));

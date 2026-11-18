@@ -287,6 +287,30 @@ def _zonal(lang, p, r, names):
     return text
 
 
+def _nearest(lang, p, r, names):
+    text = texts.tr(
+        lang,
+        "sum_nearest",
+        target=names.layer(p.get("target_layer_id")),
+        layer=names.layer(p.get("layer_id")),
+    )
+    limit = p.get("max_distance")
+    if limit is not None:
+        if not isinstance(limit, dict) or limit.get("unit") not in ("m", "km"):
+            raise _Unreadable()
+        text += texts.tr(
+            lang, "sum_nearest_within", distance="%s %s" % (number(lang, limit.get("value")), limit["unit"])
+        )
+    text += _computed_in(lang, p, r, names)
+    if not r:
+        return text
+    text += _out_layer(lang, r)
+    unmatched = r.get("unmatched_count")
+    if _is_int(unmatched) and unmatched > 0:
+        text += texts.tr(lang, "sum_nearest_unmatched", count=count(lang, "entities", unmatched))
+    return text
+
+
 def _layer_add(lang, p, r, names):
     file = file_name(p.get("path"))
     name = r.get("name") if r else None
@@ -927,6 +951,7 @@ _SENTENCES = {
     "analysis.select_by_attribute": _select,
     "analysis.isochrone": _isochrone,
     "analysis.zonal_statistics": _zonal,
+    "analysis.nearest": _nearest,
     "layer.add": _layer_add,
     "layer.describe": _layer_describe,
     "layout.export_pdf": _export_pdf,
