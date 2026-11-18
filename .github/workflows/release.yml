@@ -329,7 +329,7 @@ jobs:
             $dirM = "$proof\inst-maj"
             $urlA = 'http://127.0.0.1:8000/maj-a/manifeste.json'
             $urlB = 'http://127.0.0.1:8000/maj-b/manifeste.json'
-            $maj = @('/MISEAJOUR','/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$dirM","/MANIFESTE=$urlB")
+            $maj = @('/MISEAJOUR','/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$dirM","/MANIFESTE=$urlB","/LOG=$proof\maj.log")
 
             # Cassini non installé : refusé, rien posé, code non nul.
             $dirVide = "$proof\inst-maj-vide"
@@ -354,7 +354,7 @@ jobs:
 
             # Mise à jour de A vers B.
             $p = Start-Process $inst -ArgumentList $maj -Wait -PassThru
-            if ($p.ExitCode -ne 0) { throw "/MISEAJOUR : code $($p.ExitCode)" }
+            if ($p.ExitCode -ne 0) { if (Test-Path "$proof\maj.log") { Get-Content "$proof\maj.log" -Tail 60 }; throw "/MISEAJOUR : code $($p.ExitCode)" }
             foreach ($f in Get-ChildItem dist\noyau -File) {
               if ((Get-FileHash $f.FullName).Hash -ne (Get-FileHash "$dirM\bin\$($f.Name)").Hash) { throw "mise à jour : $($f.Name) différent" }
             }
