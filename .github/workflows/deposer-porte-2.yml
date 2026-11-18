@@ -1,0 +1,126 @@
+# Dépôt de la porte 2 sur Hugging Face, à la main (rattrapage d'une release publiée sans HF_TOKEN).
+#
+# La release construit l'installeur complet Windows et le tar Linux complet, trop gros pour une release
+# GitHub, et les garde 14 jours comme artefacts de son exécution. Sans le secret HF_TOKEN au moment de
+# l'étiquette, rien n'est déposé et le manifeste annonce des adresses qui répondent 404. Ce workflow,
+# lancé à la main, prend ces deux artefacts, vérifie leur SHA-256 contre `manifeste.json` de la release,
+# puis les dépose sur le dépôt Hugging Face du modèle. Rien ne passe par le poste du propriétaire.
+# Il ne publie ni ne modifie aucune release.
+
+name: Déposer la porte 2 sur Hugging Face
+
+on:
+  workflow_dispatch:
+    inputs:
+      etiquette:
+        description: "Étiquette de la release (ex. v0.1.3)"
+        required: true
+      execution:
+        description: "Numéro de l'exécution de la release qui a construit les artefacts (ex. 44368631969)"
+        required: true
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  deposer:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      TAG: ${{ inputs.etiquette }}
+      RUN_ID: ${{ inputs.execution }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Jeton présent
+        run: |
+          if [ -z "$HF_TOKEN" ]; then echo "::error::le secret HF_TOKEN du dépôt est absent"; exit 1; fi
+
+      - name: Manifeste et artefacts de la release
+        run: |
+          set -euo pipefail
+          mkdir -p manifeste artefacts
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -p manifeste.json -D manifeste
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" -n "cassini-installeur-complet-$TAG" -n "cassini-linux-$TAG" -D artefacts
+          find artefacts -type f -size +1M -printf '%s %p\n'
+
+      - name: Vérification des empreintes puis dépôt
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet "huggingface_hub==0.26.2"
+          python - <<'PY'
+          import hashlib, json, os, sys
+          from pathlib import Path
+          from huggingface_hub import HfApi
+
+          manifeste = json.loads(Path("manifeste/manifeste.json").read_text(encoding="utf-8"))
+          modele = json.loads(Path("installer/modele.json").read_text(encoding="utf-8"))
+          from urllib.parse import urlparse
+          depot = "/".join(urlparse(modele["url"]).path.strip("/").split("/")[:2])
+
+          def sha256(chemin):
+              h = hashlib.sha256()
+              with open(chemin, "rb") as f:
+                  for bloc in iter(lambda: f.read(1 << 24), b""):
+                      h.update(bloc)
+              return h.hexdigest()
+
+          def trouver(motif):
+              trouves = sorted(Path("artefacts").rglob(motif))
+              if len(trouves) != 1:
+                  sys.exit(f"{motif} : {len(trouves)} fichier(s) trouvé(s) dans les artefacts, un attendu")
+              return trouves[0]
+
+          lots = [
+              (trouver("cassini-installeur-complet.exe"), manifeste["porte2"]),
+              (trouver("cassini-complet-linux-*.tar"), manifeste["linux"]["porte2"]),
+          ]
+          os.makedirs("hf-depot", exist_ok=True)
+          # Vérifier TOUT avant de déposer quoi que ce soit.
+          for source, entree in lots:
+              obtenu = sha256(source)
+              print(f"{entree['nom']} : {obtenu}")
+              if obtenu != entree["sha256"]:
+                  sys.exit(f"{entree['nom']} : SHA-256 {obtenu} différent du manifeste {entree['sha256']}")
+              if source.stat().st_size != entree["taille"]:
+                  sys.exit(f"{entree['nom']} : taille {source.stat().st_size} différente du manifeste {entree['taille']}")
+
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          for source, entree in lots:
+              nom = entree["nom"]
+              api.upload_file(
+                  path_or_fileobj=str(source), path_in_repo=nom, repo_id=depot, repo_type="model",
+                  commit_message=f"Porte 2 {manifeste['version']} : {nom}",
+              )
+              fiche = Path("hf-depot") / (nom.rsplit(".", 1)[0] + ".empreintes.json")
+              fiche.write_text(json.dumps({
+                  "version": manifeste["version"], "nom": nom,
+                  "sha256": entree["sha256"], "taille": entree["taille"],
+              }, indent=2), encoding="utf-8")
+              api.upload_file(
+                  path_or_fileobj=str(fiche), path_in_repo=fiche.name, repo_id=depot, repo_type="model",
+                  commit_message=f"Empreintes de {nom}",
+              )
+              print("déposé :", nom)
+          PY
+
+      - name: Contrôle des adresses annoncées
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, sys, urllib.request
+          m = json.load(open("manifeste/manifeste.json", encoding="utf-8"))
+          urls = [m["porte2"]["url"], m["linux"]["porte2"]["url"]]
+          for u in urls:
+              r = urllib.request.urlopen(urllib.request.Request(u, method="HEAD"), timeout=60)
+              print(r.status, u)
+              if r.status != 200:
+                  sys.exit(f"{u} ne répond pas 200")
+          PY
