@@ -5,16 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cassini</title>
 <meta name="description" content="Cassini : un SIG en français, piloté par une IA locale, qui fonctionne entièrement hors ligne.">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' fill='none' stroke='%230E8F86' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M72 14A40 40 0 0 1 72 86'/%3E%3Cg transform='rotate(-23 50 48)'%3E%3Ccircle cx='50' cy='48' r='26'/%3E%3Cellipse cx='50' cy='48' rx='11' ry='26'/%3E%3Cpath d='M24 48h52M29 36h42M29 60h42'/%3E%3C/g%3E%3Cpath d='M38 86h28M52 86v-6'/%3E%3C/svg%3E">
 <style>
   :root {
-    --fond: #f6f8fb; --carte: #ffffff; --texte: #16202c; --doux: #55637a; --lien: #0b5cad;
-    --accent: #0f6fdc; --accent-texte: #ffffff; --bord: #dbe2ec; --ombre: 0 1px 2px rgba(16,32,60,.06), 0 8px 24px rgba(16,32,60,.07);
-    --halo: radial-gradient(60rem 28rem at 50% -8rem, rgba(15,111,220,.16), transparent 70%);
+    --fond: #f6f8fb; --carte: #ffffff; --texte: #16202c; --doux: #55637a; --lien: #0a6e67;
+    --logo: #0e8f86; --accent: #0b7d75; --accent-texte: #ffffff; --bord: #dbe2ec; --ombre: 0 1px 2px rgba(16,32,60,.06), 0 8px 24px rgba(16,32,60,.07);
+    --halo: radial-gradient(60rem 28rem at 50% -8rem, rgba(14,143,134,.16), transparent 70%);
   }
   @media (prefers-color-scheme: dark) { :root {
-    --fond: #0e1319; --carte: #161d26; --texte: #e8edf3; --doux: #9aa9bd; --lien: #7db9ff;
-    --accent: #3b8df0; --accent-texte: #06101c; --bord: #28323f; --ombre: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
-    --halo: radial-gradient(60rem 28rem at 50% -8rem, rgba(59,141,240,.22), transparent 70%);
+    --fond: #0e1319; --carte: #161d26; --texte: #e8edf3; --doux: #9aa9bd; --lien: #5fe0d5;
+    --logo: #3fd0c4; --accent: #3fd0c4; --accent-texte: #04201d; --bord: #28323f; --ombre: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+    --halo: radial-gradient(60rem 28rem at 50% -8rem, rgba(63,208,196,.2), transparent 70%);
   } }
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
@@ -23,7 +24,9 @@
   .haut, main, .pied { max-width: 56rem; margin: 0 auto; padding-left: 1rem; padding-right: 1rem; }
   .haut { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-top: 1.1rem; padding-bottom: 1.1rem; }
   .marque { display: inline-flex; align-items: center; gap: .6rem; font-weight: 700; font-size: 1.15rem; color: var(--texte); text-decoration: none; letter-spacing: .01em; }
-  .marque svg { width: 1.7rem; height: 1.7rem; }
+  .marque svg { width: 2.2rem; height: 2.2rem; }
+  .grand-logo { width: 5.5rem; height: 5.5rem; margin: 0 auto .4rem; display: block; }
+  .grand-logo svg { width: 100%; height: 100%; }
   .haut nav { display: flex; gap: 1.25rem; font-size: .95rem; }
   .haut nav a { color: var(--doux); text-decoration: none; }
   .haut nav a:hover { color: var(--texte); }
@@ -65,9 +68,10 @@
 </style>
 </head>
 <body>
-<header class="haut"><a class="marque" href="index.html"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="6" fill="var(--accent)"/><ellipse cx="16" cy="16" rx="14" ry="5" fill="none" stroke="var(--accent)" stroke-width="2" transform="rotate(-20 16 16)"/></svg>Cassini</a><nav><a href="index.html#installer">Installer</a><a href="faq.html">FAQ</a><a href="https://github.com/Kevzi/cassini-gis">Code source</a></nav></header>
+<header class="haut"><a class="marque" href="index.html"><svg viewBox="0 0 100 100" fill="none" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" stroke="var(--logo)" aria-hidden="true"><path d="M72 14 A40 40 0 0 1 72 86"/><g transform="rotate(-23 50 48)"><circle cx="50" cy="48" r="26"/><ellipse cx="50" cy="48" rx="11" ry="26"/><path d="M24 48h52M29 36h42M29 60h42"/></g><path d="M38 86h28M52 86v-6"/></svg>Cassini</a><nav><a href="index.html#installer">Installer</a><a href="faq.html">FAQ</a><a href="https://github.com/Kevzi/cassini-gis">Code source</a></nav></header>
 <main>
   <section class="accroche">
+  <div class="grand-logo"><svg viewBox="0 0 100 100" fill="none" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" stroke="var(--logo)" aria-hidden="true"><path d="M72 14 A40 40 0 0 1 72 86"/><g transform="rotate(-23 50 48)"><circle cx="50" cy="48" r="26"/><ellipse cx="50" cy="48" rx="11" ry="26"/><path d="M24 48h52M29 36h42M29 60h42"/></g><path d="M38 86h28M52 86v-6"/></svg></div>
   <h1>Votre SIG, en français.<br><span>Sans réseau.</span></h1>
   <p>Cassini est l'interface en français d'un SIG qui fonctionne entièrement hors ligne : vous décrivez ce que vous voulez, il propose les opérations, vous les validez, il les exécute et les journalise.</p>
   <p>C'est une extension pour QGIS, posée sur un moteur indépendant ; vos données restent sur votre poste et rien n'est envoyé sur le réseau.</p>
