@@ -21,7 +21,7 @@ mod plans;
 pub use plans::Composer;
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::io::{self, BufRead, Write};
 use std::path::Path;
 use std::rc::Rc;
@@ -241,6 +241,10 @@ struct State<'a> {
     announced: HashSet<String>,
     /// Formes de `StyleSpec` annoncées à `session.hello` (`style_kinds`), pour le rejeu.
     style_kinds: HashSet<String>,
+    /// Version de QGIS annoncée à `session.hello` (`qgis_version`), facultative (AD-25).
+    qgis_version: Option<String>,
+    /// Version de chaîne de chaque commande annoncée (`chain_versions`), facultative (AD-25).
+    chain_versions: BTreeMap<String, u64>,
     /// Chemin du projet de la session, tel que reçu à `session.hello`.
     project: Option<String>,
     /// Compositeur de plans, absent si le noyau n'en a pas (`agent.unavailable`).
@@ -346,6 +350,8 @@ fn serve_with<'a>(
             session: None,
             announced: HashSet::new(),
             style_kinds: HashSet::new(),
+            qgis_version: None,
+            chain_versions: BTreeMap::new(),
             project: None,
             composer,
             pending: None,
@@ -895,6 +901,31 @@ fn hello(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, RpcErro
             })
             .ok_or_else(|| invalid_params("style_kinds doit être une liste de noms de formes."))?,
     };
+    // Version de QGIS et versions de chaîne : ajouts compatibles (AD-25), absents d'une extension
+    // plus ancienne ; une version de chaîne est un entier au moins égal à 1.
+    let qgis_version = match params.get("qgis_version") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(
+            v.as_str()
+                .map(str::to_string)
+                .ok_or_else(|| invalid_params("qgis_version doit être un texte."))?,
+        ),
+    };
+    let chain_versions = match params.get("chain_versions") {
+        None | Some(Value::Null) => BTreeMap::new(),
+        Some(v) => v
+            .as_object()
+            .and_then(|o| {
+                o.iter()
+                    .map(|(id, n)| n.as_u64().filter(|n| *n >= 1).map(|n| (id.clone(), n)))
+                    .collect::<Option<BTreeMap<String, u64>>>()
+            })
+            .ok_or_else(|| {
+                invalid_params(
+                    "chain_versions doit associer un identifiant à un entier au moins égal à 1.",
+                )
+            })?,
+    };
     let project = params
         .get("project")
         .and_then(Value::as_str)
@@ -914,7 +945,9 @@ fn hello(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, RpcErro
         // Une mise en forme n'est exécutée que si l'extension annonce ses gestes (entrée 11.20).
         .with_gestures(commands.iter().cloned())
         // Le style d'un raster de résultat demande la forme `result_ramp` (2026-11-09).
-        .with_style_kinds(style_kinds.iter().cloned());
+        .with_style_kinds(style_kinds.iter().cloned())
+        // Versions journalisées sous `versions.qgis` et `versions.chain` (AD-25, AD-11).
+        .with_versions(qgis_version.clone(), chain_versions.clone());
     // La session dit dès la poignée de main si elle est en lecture seule : l'extension
     // n'a plus à lancer une commande pour le découvrir (ticket 5.32).
     let read_only = session.mode() == Mode::ReadOnly;
@@ -925,6 +958,8 @@ fn hello(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, RpcErro
     state.project = Some(project.to_string());
     state.announced = commands;
     state.style_kinds = style_kinds;
+    state.qgis_version = qgis_version;
+    state.chain_versions = chain_versions;
     // Les relais ne voient que les commandes disponibles, sans aucun chemin (AD-25, AD-9).
     // Le système de calcul en mètres est choisi par le noyau (entrée 9.16) : l'outil du relais ne
     // le montre pas, comme le modèle et le formulaire.
@@ -1079,7 +1114,8 @@ fn journal_replay(state: &mut State<'_>) -> Result<Value, RpcError> {
     let replay = Replay::load(state.registry, Path::new(&project))
         .map_err(RpcError::business)?
         .with_gestures(state.announced.iter().cloned())
-        .with_style_kinds(state.style_kinds.iter().cloned());
+        .with_style_kinds(state.style_kinds.iter().cloned())
+        .with_chain_versions(state.chain_versions.clone());
     let router = Router::new(state.registry).with_qgis(Announced {
         announced: state.announced.clone(),
         inner: Channel {
@@ -1428,6 +1464,44 @@ mod tests {
         assert_eq!(code_of(&r[1]), "registry.unavailable");
         assert!(!dir.join("p.cassini/journal.jsonl").exists());
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn announced_versions_are_journaled_and_malformed_ones_are_invalid_params() {
+        let dir = temp_dir();
+        let project = project_in(&dir);
+        let hello = json!({"jsonrpc":"2.0","id":1,"method":"session.hello",
+            "params":{"protocol_version":2,"commands":["test.qgis_probe"],"project":project,
+                "qgis_version":"3.44.1","chain_versions":{"test.qgis_probe":4}}})
+        .to_string();
+        let r = exchange(&[
+            hello,
+            run_line(2, "test.qgis_probe", json!({"layer": "l"})),
+            json!({"jsonrpc":"2.0","id":"core-1","result":{"ok":true}}).to_string(),
+        ]);
+        assert!(r[0].get("result").is_some(), "{r:?}");
+        let lines = journal_lines(&dir);
+        assert_eq!(lines[0]["versions"]["qgis"], "3.44.1");
+        assert_eq!(lines[0]["versions"]["chain"], 4);
+        let _ = std::fs::remove_dir_all(dir);
+
+        for bad in [
+            json!({"qgis_version": 3}),
+            json!({"chain_versions": {"a": 0}}),
+        ] {
+            let dir = temp_dir();
+            let mut params = json!({"protocol_version":2,"commands":[],"project":project_in(&dir)});
+            params
+                .as_object_mut()
+                .unwrap()
+                .extend(bad.as_object().unwrap().clone());
+            let r = exchange(&[
+                json!({"jsonrpc":"2.0","id":1,"method":"session.hello","params":params})
+                    .to_string(),
+            ]);
+            assert_eq!(r[0]["error"]["code"], -32602, "{r:?}");
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 
     fn probe_exchange(dir: &Path, reply: Value) -> Vec<Value> {
@@ -3033,6 +3107,33 @@ mod tests {
         assert_eq!(code_of(&c.recv()), "plan.unknown");
         c.assert_silent();
         assert!(c.journal().is_empty());
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn a_command_left_out_of_the_hello_is_unavailable_and_a_plan_naming_it_is_refused() {
+        let plan = json!({"kind":"calls","calls":[
+            {"command":"test.render","params":{"layer":"x"}}
+        ]});
+        let mut c = Client::start_with(CANCEL_GRACE, composer(plan));
+        c.send(json!({"jsonrpc":"2.0","id":1,"method":"session.hello",
+            "params":{"protocol_version":2,"commands":["test.fixed","project.inventory"],
+                "chain_versions":{"test.fixed":1},"qgis_version":"3.44.1",
+                "project":c.project}}));
+        let hello = c.recv();
+        let entry = |id: &str| {
+            hello["result"]["commands"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|e| e["id"] == id)
+                .cloned()
+                .unwrap()
+        };
+        assert_eq!(entry("test.render")["available"], json!(false));
+        assert_eq!(entry("test.fixed")["available"], json!(true));
+        let r = c.propose(2);
+        assert_eq!(code_of(&r), "agent.plan_invalid");
         c.close().1.unwrap();
     }
 

@@ -41,6 +41,13 @@ class FakeBackend:
         self.encodings, self.driver = [], None
         self.nulls, self.null_call = 0, None
         self.out_fields = None  # champs des couches temporaire et produite, quand un test les fixe
+        self.missing_algorithms = set()  # algorithmes absents du registre de traitement (AD-25)
+
+    def algorithm_exists(self, algorithm_id):
+        return algorithm_id not in self.missing_algorithms
+
+    def qgis_version(self):
+        return "3.44.1-Test"
 
     def layer(self, layer_id):
         return self.items.get(layer_id)

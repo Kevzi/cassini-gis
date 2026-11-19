@@ -1226,3 +1226,19 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-resultat-valide-par-le-noyau-et-gabarit-unique-de-resume-plan.md`
   summary: `CLAUDE.md` §2 et §8 listent MIT, Apache-2.0 et BSD pour le noyau ; `deny.toml` admet aussi MIT-0 et Zlib (jsonschema) depuis le 2026-11-19.
   evidence: licences acceptées par le propriétaire ; le correctif édite `CLAUDE.md`, fichier d'instructions, donc reporté.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-annonce-fidele-chaine-presente-fournisseurs-charges-versions-plan.md`
+  summary: Le rejeu qui diverge (`replay.diverged`) perd les avertissements de version de chaîne qui l'expliqueraient.
+  evidence: `chain_warnings` n'est ajouté qu'au `Ok(ReplayReport)` final ; sur erreur rien n'est rendu. Le correctif touche la forme de l'erreur.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-annonce-fidele-chaine-presente-fournisseurs-charges-versions-plan.md`
+  summary: Le panneau n'affiche pas `warnings` du bilan de rejeu (REPLAY_DONE ne relaie que `steps` et `identical`).
+  evidence: client.py, gestionnaire de REPLAY_DONE, lit seulement ces deux clés.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-annonce-fidele-chaine-presente-fournisseurs-charges-versions-plan.md`
+  summary: La version de QGIS journalisée n'est jamais comparée au rejeu (seule la version de chaîne avertit).
+  evidence: `versions.qgis` écrit, jamais relu dans `Replay`. Amélioration, hors du « rejeu signale une version de chaîne changée » du ticket.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-annonce-fidele-chaine-presente-fournisseurs-charges-versions-plan.md`
+  summary: Démarrage de l'extension non prouvé sous vrai QGIS (non vérifié, gravité medium) : repli `mainWindow().isVisible()`, attente sans fin possible, `gdal:warpreproject` fourni par le plugin Traitement.
+  evidence: Aucun test ne tourne dans QGIS. À trancher par une sonde sous QGIS 3.44 et 4.x (AD-18) : hello envoyé avant ou après le chargement des fournisseurs, `data.reproject` annoncée.

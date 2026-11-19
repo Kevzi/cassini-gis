@@ -288,5 +288,90 @@ class TableInvariantsTest(unittest.TestCase):
         self.assertIn("table fermée", errors[0])
 
 
+class AnnouncementTest(unittest.TestCase):
+    """Annonce fidele (AD-25) : une commande n'est annoncee que si toute sa chaine existe."""
+
+    def announce(self, missing=()):
+        backend = FakeBackend()
+        backend.missing_algorithms = set(missing)
+        registry = delegated.build_registry(lambda: None)
+        commands, versions = delegated.announcement(registry, backend)
+        return registry, set(commands), versions
+
+    def test_a_complete_chain_is_announced_with_its_chain_version(self):
+        registry, commands, versions = self.announce()
+        self.assertEqual(commands, set(registry.ids()))
+        self.assertEqual(versions["analysis.buffer"], analysis.ALGORITHMS["analysis.buffer"]["chain_version"])
+        # Le geste fixe sans algorithme est annonce lui aussi, avec sa version.
+        self.assertIn("layer.remove", versions)
+
+    def test_a_removed_algorithm_makes_its_command_unavailable(self):
+        registry, commands, versions = self.announce(missing={"native:buffer"})
+        self.assertNotIn("analysis.buffer", commands)
+        self.assertNotIn("analysis.buffer", versions)
+        self.assertIn("analysis.nearest", commands)  # une autre ligne n'en souffre pas
+
+    def test_a_conditional_step_counts_as_required(self):
+        # La reprojection de travail est une etape `when` de `analysis.buffer` : sans elle, pas d'annonce.
+        self.assertIn("native:reprojectlayer", analysis.required_algorithms(analysis.ALGORITHMS["analysis.buffer"]))
+        _, commands, _ = self.announce(missing={"native:reprojectlayer"})
+        self.assertNotIn("analysis.buffer", commands)
+        self.assertNotIn("data.reproject", commands)  # meme regle pour data.reproject
+
+    def test_every_row_follows_the_same_rule(self):
+        rows = delegated.table_rows()
+        for command_id, row in rows.items():
+            for algorithm in analysis.required_algorithms(row):
+                _, commands, versions = self.announce(missing={algorithm})
+                self.assertNotIn(command_id, commands, (command_id, algorithm))
+                self.assertNotIn(command_id, versions)
+
+    def test_the_other_gestures_are_still_announced(self):
+        _, commands, _ = self.announce(missing={"native:buffer"})
+        for command_id in ("layer.add", "layout.export_pdf", "layer.set_style"):
+            self.assertIn(command_id, commands)
+
+    def test_a_row_without_chain_version_is_not_announced(self):
+        row = two_step_row()
+        del row["chain_version"]
+        self.assertEqual(analysis.available_chains({"test.row": row}, FakeBackend()), {})
+
+    def test_an_unreadable_row_is_not_announced(self):
+        self.assertEqual(analysis.available_chains({"test.row": {"chain_version": 1, "chain": [{}]}}, FakeBackend()), {})
+
+
+class HelloParamsTest(unittest.TestCase):
+    """`CoreClient.start` joint les versions a `session.hello` (ajout compatible, protocole 2)."""
+
+    def hello(self, **kw):
+        import client
+
+        sent = []
+
+        class Process:
+            def start(self, program, args):
+                pass
+
+        c = client.CoreClient.__new__(client.CoreClient)
+        c._p = Process()
+        c._gestures = delegated.build_registry(lambda: None)
+        c._request = lambda method, params, step: sent.append((method, params, step))
+        c.start("cassini", r"C:\a\p.qgz", **kw)
+        return sent[0][1], client.PROTOCOL_VERSION
+
+    def test_the_versions_are_joined_when_given(self):
+        params, version = self.hello(commands=["layer.add"], chain_versions={"layer.add": 1}, qgis_version="3.44.1")
+        self.assertEqual(version, 2)
+        self.assertEqual(params["project"], "C:/a/p.qgz")
+        self.assertEqual(params["commands"], ["layer.add"])
+        self.assertEqual(params["chain_versions"], {"layer.add": 1})
+        self.assertEqual(params["qgis_version"], "3.44.1")
+
+    def test_without_versions_the_hello_is_as_before(self):
+        params, _ = self.hello()
+        self.assertNotIn("chain_versions", params)
+        self.assertNotIn("qgis_version", params)
+
+
 if __name__ == "__main__":
     unittest.main()

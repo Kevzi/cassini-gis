@@ -38,6 +38,17 @@ Réponse d'une seconde session, quand le journal du projet est déjà tenu :
   `layer.set_style` de forme `result_ramp` s'arrête sur `style.unavailable` si la forme n'est
   pas annoncée. Une valeur qui n'est pas une liste de textes est refusée (`-32602`). Le
   protocole reste à la version 2.
+- `qgis_version` et `chain_versions` (facultatifs, ajout compatible, AD-25) : la version du QGIS
+  hôte (texte) et la version de chaîne de chaque commande annoncée (`{"analysis.buffer": 1, …}`,
+  entiers au moins égaux à 1). L'extension n'envoie `session.hello` qu'une fois l'initialisation
+  de QGIS finie, fournisseurs de traitement chargés, et n'y annonce (`commands`) une commande
+  déléguée que si chaque algorithme de sa chaîne, étapes conditionnelles comprises, existe dans le
+  registre de traitement de QGIS ; sinon la commande est indisponible, et un plan qui la nomme
+  est refusé avant d'être montré. Le noyau journalise sous `versions.qgis` et `versions.chain` de
+  chaque ligne d'une commande déléguée annoncée. Au rejeu, une `versions.chain` différente de la
+  version annoncée donne un avertissement dans `warnings` du bilan, jamais un échec ; une ligne
+  sans `versions.chain` (journal ancien) n'est pas comparée. Une valeur mal formée est refusée
+  (`-32602`). Le protocole reste à la version 2.
 - `read_only` est toujours présent (ticket 5.32). Il vaut `true` quand le journal du projet
   est déjà tenu par une autre session (une seconde fenêtre QGIS sur le même projet). La
   réponse porte alors aussi `message`, le texte même de l'erreur `journal.read_only`.
@@ -131,7 +142,9 @@ Aucun paramètre :
 {"jsonrpc":"2.0","id":4,"method":"journal.replay"}
 ```
 
-Réponse en cas de succès : `{"steps": 3, "identical": true}`. Le rejeu s'arrête au
+Réponse en cas de succès : `{"steps": 3, "identical": true}`, plus `warnings` (liste de
+textes, absente quand elle est vide) pour les entrées hors du projet et les chaînes dont la
+version a changé depuis le journal : le rejeu va au bout malgré eux. Il s'arrête au
 premier écart et répond l'erreur `replay.diverged`, dont le `step` est l'étape fautive
 et dont le message nomme la commande.
 

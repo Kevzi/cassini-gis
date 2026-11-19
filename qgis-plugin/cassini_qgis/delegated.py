@@ -42,6 +42,16 @@ def table_rows():
     return rows
 
 
+def announcement(registry, backend):
+    """Ce que `session.hello` annonce (AD-25) : `(commandes, chain_versions)`. Une commande de la
+    table fermée n'est annoncée que si toute sa chaîne existe dans le QGIS hôte ; les autres gestes
+    le sont toujours. `chain_versions` porte la version de chaîne de chaque ligne annoncée."""
+    rows = table_rows()
+    available = analysis.available_chains(rows, backend)
+    commands = [i for i in registry.ids() if i not in rows or i in available]
+    return commands, {i: available[i] for i in commands if i in available}
+
+
 def build_registry(probe):
     """Rend le registre des gestes ; `probe` est la fabrique du geste de test."""
     registry = gestures.GestureRegistry()

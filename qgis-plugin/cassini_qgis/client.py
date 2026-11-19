@@ -156,21 +156,27 @@ class CoreClient:
         process.errorOccurred.connect(self._error)
 
     # -- cycle de vie -------------------------------------------------
-    def start(self, program, project):
-        """Lance `cassini serve` ; `project` est un chemin absolu."""
+    def start(self, program, project, commands=None, chain_versions=None, qgis_version=None):
+        """Lance `cassini serve` ; `project` est un chemin absolu.
+
+        `commands` : les commandes annoncées (par défaut, tous les gestes enregistrés) ;
+        `chain_versions` et `qgis_version` : ajouts compatibles de `session.hello` (AD-25), omis
+        quand ils ne sont pas donnés.
+        """
         self._project = project.replace("\\", "/")
         self._p.start(program, ["serve"])
-        self._request(
-            "session.hello",
-            {
-                "protocol_version": PROTOCOL_VERSION,
-                "commands": self._gestures.ids(),
-                # Formes de style que l'extension sait appliquer (ajout compatible, 2026-11-09).
-                "style_kinds": self._gestures.style_kinds(),
-                "project": self._project,
-            },
-            "hello",
-        )
+        params = {
+            "protocol_version": PROTOCOL_VERSION,
+            "commands": self._gestures.ids() if commands is None else list(commands),
+            # Formes de style que l'extension sait appliquer (ajout compatible, 2026-11-09).
+            "style_kinds": self._gestures.style_kinds(),
+            "project": self._project,
+        }
+        if chain_versions is not None:
+            params["chain_versions"] = dict(chain_versions)
+        if qgis_version is not None:
+            params["qgis_version"] = qgis_version
+        self._request("session.hello", params, "hello")
 
     def stop(self, wait_ms=3000):
         """Ferme l'entrée du noyau, qui s'arrête seul.

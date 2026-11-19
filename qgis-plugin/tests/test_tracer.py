@@ -926,22 +926,33 @@ class PanelBannerTest(unittest.TestCase):
 class PluginBehaviourTest(unittest.TestCase):
     def setUp(self):
         self.mod = load_plugin()
-        self.p = self.mod.CassiniPlugin(None)
+        self.window = type("W", (), {"visible": True, "isVisible": lambda w: w.visible})()
+        self.iface = type("I", (), {"mainWindow": lambda i: self.window})()
+        self.p = self.mod.CassiniPlugin(self.iface)
         self.p.panel = FakePanel(self.p)
         StubProcess.created = 0
+        # Le registre de traitement de QGIS est remplace par une doublure (AD-25).
+        self.missing = set()
+        backend = type("B", (), {
+            "algorithm_exists": lambda b, a: a not in self.missing,
+            "qgis_version": lambda b: "3.44.1-Test"})
+        real_backend = self.mod.analysis.QgisBackend
+        self.mod.analysis.QgisBackend = backend
+        self.addCleanup(setattr, self.mod.analysis, 'QgisBackend', real_backend)
         self.addCleanup(setattr, self.mod.locator, 'locate', self.mod.locator.locate)
 
     def fake_client(self):
         real = self.mod.client.CoreClient
         self.addCleanup(setattr, self.mod.client, 'CoreClient', real)
         self.gestures = None
+        self.started = []
 
         def init(s, proc, cb, reg=None):
             self.gestures = reg
 
         self.mod.client.CoreClient = type("C", (), {
             "__init__": init,
-            "start": lambda s, prog, proj: None,
+            "start": lambda s, prog, proj, **kw: self.started.append(kw),
             "stop": lambda s: None})
 
     def test_no_project(self):
@@ -1029,6 +1040,31 @@ class PluginBehaviourTest(unittest.TestCase):
             self.gestures.create("layer.open_vector"),
             self.mod.delegated.vector_output.LayerOpenVectorGesture,
         )
+
+    def test_hello_announces_only_commands_whose_chain_exists_with_versions(self):
+        StubProject.name = "/a/p.qgz"
+        self.mod.locator.locate = lambda s: ("/x/cassini", "PATH")
+        self.missing = {"native:buffer"}
+        self.fake_client()
+        self.p._refresh()
+        sent = self.started[0]
+        self.assertNotIn("analysis.buffer", sent["commands"])
+        self.assertIn("layer.add", sent["commands"])
+        self.assertNotIn("analysis.buffer", sent["chain_versions"])
+        self.assertEqual(sent["chain_versions"]["analysis.nearest"], 1)
+        self.assertEqual(sent["qgis_version"], "3.44.1-Test")
+
+    def test_hello_waits_for_qgis_to_finish_initialising(self):
+        StubProject.name = "/a/p.qgz"
+        self.mod.locator.locate = lambda s: ("/x/cassini", "PATH")
+        self.window.visible = False
+        self.fake_client()
+        self.p._refresh()
+        self.assertEqual(StubProcess.created, 0)  # rien n'est lance, donc aucun hello
+        self.assertEqual(self.started, [])
+        self.p._on_initialized()
+        self.assertEqual(StubProcess.created, 1)
+        self.assertEqual(len(self.started), 1)
 
     def test_protocol_refusal_is_not_a_relaunchable_death(self):
         StubProject.name = "/a/p.qgz"

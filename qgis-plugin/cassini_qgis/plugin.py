@@ -12,7 +12,7 @@ from qgis.PyQt.QtCore import QProcess, QSettings, Qt, QTimer, QUrl
 from qgis.PyQt.QtGui import QDesktopServices
 from qgis.PyQt.QtWidgets import QDockWidget, QFileDialog
 
-from . import client, delegated, gestures, installation, locator, panel, texts
+from . import analysis, client, delegated, gestures, installation, locator, panel, texts
 
 PROBE_MS = 3000  # resonde du noyau tant que le bandeau « moteur introuvable » est affiché
 SLOW_TICKS = 100  # 100 x 100 ms : un geste de test de dix secondes
@@ -62,6 +62,8 @@ class CassiniPlugin:
         self.process = None
         self.project_path = None
         self._probe = None
+        self._init_done = False  # QGIS a fini de s'initialiser : fournisseurs de traitement chargés
+        self._waiting_init = False  # un lancement attend la fin de l'initialisation
 
     # -- QGIS ---------------------------------------------------------
     def initGui(self):
@@ -74,6 +76,11 @@ class CassiniPlugin:
         QgsProject.instance().projectSaved.connect(self._refresh)
         QgsProject.instance().cleared.connect(self._refresh)
         QgsApplication.instance().aboutToQuit.connect(self._stop)
+        # `session.hello` n'est envoyé qu'une fois les fournisseurs de traitement chargés (AD-25).
+        try:
+            self.iface.initializationCompleted.connect(self._on_initialized)
+        except AttributeError:  # pragma: no cover - interface sans ce signal
+            self._init_done = True
         self._refresh()
 
     def unload(self):
@@ -82,11 +89,14 @@ class CassiniPlugin:
         project = QgsProject.instance()
         app = QgsApplication.instance()
         for signal, slot in (
+            (getattr(self.iface, "initializationCompleted", None), self._on_initialized),
             (project.readProject, self._refresh),
             (project.projectSaved, self._refresh),
             (project.cleared, self._refresh),
             (app.aboutToQuit, self._stop),
         ):
+            if signal is None:
+                continue
             try:
                 signal.disconnect(slot)
             except (TypeError, RuntimeError):
@@ -180,7 +190,23 @@ class CassiniPlugin:
             self.panel.project_file = path
         self._launch()
 
+    def _initialized(self):
+        """Vrai quand les fournisseurs de traitement sont chargés : l'initialisation de QGIS est
+        finie (signal reçu, ou fenêtre principale déjà affichée quand l'extension est activée après)."""
+        return self._init_done or self.iface.mainWindow().isVisible()
+
+    def _on_initialized(self, *_):
+        self._init_done = True
+        if self._waiting_init:
+            self._waiting_init = False
+            self._launch()
+
     def _launch(self):
+        if not self._initialized():
+            # Hello différé jusqu'au chargement des fournisseurs : rien n'est lancé avant (AD-25).
+            self._waiting_init = True
+            self._banner("starting")
+            return
         setting = QSettings().value(locator.SETTING_KEY, "") or ""
         found = locator.locate(str(setting))
         if found is None:
@@ -198,10 +224,21 @@ class CassiniPlugin:
             due = info is not None and installation.reminder_due(info["installed_at"], now)
             self.panel.set_install_info(info, due)
         self._banner("starting")
-        self.process = QProcess()
         registry = delegated.build_registry(SlowProbe)
+        # Une commande n'est annoncée que si toute sa chaîne existe dans ce QGIS (AD-25). Tout est
+        # calculé avant de créer le processus : un échec ici ne laisse pas de client à demi lancé.
+        backend = analysis.QgisBackend()
+        commands, chain_versions = delegated.announcement(registry, backend)
+        qgis_version = backend.qgis_version()
+        self.process = QProcess()
         self.client = client.CoreClient(self.process, self._on_event, registry)
-        self.client.start(program, self.project_path)
+        self.client.start(
+            program,
+            self.project_path,
+            commands=commands,
+            chain_versions=chain_versions,
+            qgis_version=qgis_version,
+        )
 
     def _start_probe(self):
         if self._probe is None:
@@ -257,6 +294,7 @@ class CassiniPlugin:
             self.panel.on_event(kind, payload)
 
     def _stop(self, *_):
+        self._waiting_init = False
         if self.client is not None:
             self.client.stop()
         self.client = None

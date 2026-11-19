@@ -11,7 +11,7 @@
 //! par une session en lecture seule, y compris sous Windows, où un verrou pris sur
 //! un fichier en interdit la lecture aux autres.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::Write;
@@ -164,6 +164,13 @@ pub struct Session<'a> {
     /// `session.hello`). Le style d'un raster de résultat n'est dicté que si `result_ramp` y est
     /// (décision du propriétaire, 2026-11-09). Vide sans QGIS ou pour une extension plus ancienne.
     style_kinds: HashSet<String>,
+    /// Version de QGIS annoncée à `session.hello` (`qgis_version`), journalisée sous
+    /// `versions.qgis` d'une commande déléguée (AD-25, AD-11). `None` sans QGIS ou pour une
+    /// extension plus ancienne.
+    qgis_version: Option<String>,
+    /// Version de chaîne de chaque commande déléguée annoncée (`chain_versions`), journalisée sous
+    /// `versions.chain` (AD-25, AD-11).
+    chain_versions: BTreeMap<String, u64>,
     /// Ordres que la dernière étape demande de dicter juste après sa ligne (amendement d'AD-30).
     pending_orders: Vec<(String, Value)>,
     /// Ligne du journal où la session a commencé le plan en cours (sa première étape, même
@@ -210,6 +217,8 @@ impl<'a> Session<'a> {
             opens_vectors: false,
             gestures: HashSet::new(),
             style_kinds: HashSet::new(),
+            qgis_version: None,
+            chain_versions: BTreeMap::new(),
             pending_orders: Vec::new(),
             plan_start: None,
         })
@@ -255,6 +264,21 @@ impl<'a> Session<'a> {
     pub fn with_style_kinds<I: IntoIterator<Item = String>>(self, announced: I) -> Self {
         Session {
             style_kinds: announced.into_iter().collect(),
+            ..self
+        }
+    }
+
+    /// Dit quelle version de QGIS et quelles versions de chaîne l'extension annonce
+    /// (`qgis_version`, `chain_versions` de `session.hello`) : une commande déléguée les journalise
+    /// sous `versions.qgis` et `versions.chain` (AD-25, AD-11).
+    pub fn with_versions(
+        self,
+        qgis_version: Option<String>,
+        chain_versions: BTreeMap<String, u64>,
+    ) -> Self {
+        Session {
+            qgis_version,
+            chain_versions,
             ..self
         }
     }
@@ -760,14 +784,22 @@ impl<'a> Session<'a> {
                 line.insert("error".into(), json!(e.code()));
             }
         };
-        line.insert(
-            "versions".into(),
-            json!({
-                "core": crate::VERSION,
-                "protocol": PROTOCOL_VERSION,
-                "registry": self.registry_version,
-            }),
-        );
+        let mut versions = json!({
+            "core": crate::VERSION,
+            "protocol": PROTOCOL_VERSION,
+            "registry": self.registry_version,
+        });
+        // Une commande déléguée annoncée porte la version de QGIS et celle de sa chaîne : un rejeu
+        // sur un autre QGIS peut ainsi s'expliquer (AD-25, AD-11). Absentes si rien n'a été annoncé.
+        if spec.runs_in == Some(crate::registry::RunsIn::Qgis) {
+            if let Some(qgis) = &self.qgis_version {
+                versions["qgis"] = json!(qgis);
+            }
+            if let Some(chain) = self.chain_versions.get(id) {
+                versions["chain"] = json!(chain);
+            }
+        }
+        line.insert("versions".into(), versions);
         if cancelled {
             // Une étape annulée ne laisse pas de sortie partielle derrière elle (AD-12), ni
             // les fichiers compagnons d'un Shapefile.
@@ -1355,6 +1387,10 @@ pub struct ReplayReport {
     pub steps: usize,
     /// Toujours vrai pour un rejeu réussi : le premier écart l'arrête.
     pub identical: bool,
+    /// Avertissements du rejeu (entrées non portables, version de chaîne changée) : le rejeu va
+    /// au bout malgré eux. Absent du JSON quand il n'y en a pas.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 /// Rejeu d'un journal : même résolution, même `Router`, comparaison à ce que le
@@ -1375,6 +1411,9 @@ pub struct Replay<'a> {
     /// Formes de `StyleSpec` que l'exécutant du rejeu annonce. Une ligne `layer.set_style` de
     /// forme `result_ramp` s'arrête sur `style.unavailable` si elle n'y est pas.
     style_kinds: HashSet<String>,
+    /// Version de chaîne de chaque commande que l'exécutant du rejeu annonce. Une ligne dont
+    /// `versions.chain` diffère donne un avertissement, jamais un échec (AD-25, AD-11).
+    chain_versions: BTreeMap<String, u64>,
 }
 
 impl<'a> Replay<'a> {
@@ -1440,7 +1479,41 @@ impl<'a> Replay<'a> {
             warnings,
             gestures: HashSet::new(),
             style_kinds: HashSet::new(),
+            chain_versions: BTreeMap::new(),
         })
+    }
+
+    /// Dit quelle version de chaîne l'exécutant du rejeu annonce pour chaque commande déléguée.
+    pub fn with_chain_versions(mut self, announced: BTreeMap<String, u64>) -> Self {
+        self.chain_versions = announced;
+        self
+    }
+
+    /// Avertissements de version : une ligne qui porte `versions.chain` différente de la version
+    /// annoncée. Une ligne sans `versions.chain` (journal ancien) n'est pas comparée.
+    fn chain_warnings(&self) -> Vec<String> {
+        let mut seen = BTreeSet::new();
+        let mut warnings = Vec::new();
+        for (i, line) in self.lines.iter().enumerate() {
+            let Some(logged) = line
+                .get("versions")
+                .and_then(|v| v.get("chain"))
+                .and_then(Value::as_u64)
+            else {
+                continue;
+            };
+            let id = self.ids[i].as_str();
+            let Some(now) = self.chain_versions.get(id) else {
+                continue;
+            };
+            if logged != *now && seen.insert((id, logged)) {
+                warnings.push(format!(
+                    "Étape {} : la chaîne de {id} est en version {now}, le journal l'a enregistrée en version {logged} ; le rejeu continue, le résultat peut différer.",
+                    i + 1
+                ));
+            }
+        }
+        warnings
     }
 
     /// Dit quelles formes de `StyleSpec` l'exécutant du rejeu sait appliquer.
@@ -1770,9 +1843,12 @@ impl<'a> Replay<'a> {
                 }
             }
         }
+        let mut warnings = self.warnings.clone();
+        warnings.extend(self.chain_warnings());
         Ok(ReplayReport {
             steps: replayed,
             identical: true,
+            warnings,
         })
     }
 }

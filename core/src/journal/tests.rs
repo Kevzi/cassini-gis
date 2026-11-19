@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::*;
@@ -289,7 +290,8 @@ fn an_output_reference_is_journaled_as_is_and_replays_identically() {
         report,
         ReplayReport {
             steps: 2,
-            identical: true
+            identical: true,
+            warnings: vec![]
         }
     );
     assert!(warnings.is_empty());
@@ -373,7 +375,8 @@ fn a_magnetic_azimuth_replays_with_its_journaled_date() {
         report,
         ReplayReport {
             steps: 2,
-            identical: true
+            identical: true,
+            warnings: vec![]
         }
     );
     drop(s);
@@ -420,7 +423,8 @@ fn a_magnetic_azimuth_replays_with_its_journaled_date() {
         report,
         ReplayReport {
             steps: 3,
-            identical: true
+            identical: true,
+            warnings: vec![]
         }
     );
     let _ = fs::remove_dir_all(dir);
@@ -456,7 +460,8 @@ fn an_old_geometry_journal_and_a_grid_bearing_replay_identically() {
         report,
         ReplayReport {
             steps: 2,
-            identical: true
+            identical: true,
+            warnings: vec![]
         }
     );
     let _ = fs::remove_dir_all(dir);
@@ -493,7 +498,8 @@ fn an_old_geometry_journal_and_a_grid_bearing_replay_identically() {
         report,
         ReplayReport {
             steps: 2,
-            identical: true
+            identical: true,
+            warnings: vec![]
         }
     );
     drop(s);
@@ -676,7 +682,8 @@ fn a_project_copied_with_its_journal_folder_replays_identically() {
         report,
         ReplayReport {
             steps: 2,
-            identical: true
+            identical: true,
+            warnings: vec![]
         }
     );
     let copied = fs::read_to_string(moved.join("p.cassini").join(JOURNAL_FILE)).unwrap();
@@ -876,7 +883,8 @@ fn an_inventory_after_created_layers_replays_identically() {
             replay_inventory(short, |_| {}).unwrap(),
             ReplayReport {
                 steps: 4,
-                identical: true
+                identical: true,
+                warnings: vec![]
             },
             "inventaire court : {short}"
         );
@@ -1035,7 +1043,8 @@ fn a_replay_binds_new_layer_ids_and_accepts_other_qgis_bytes() {
         report,
         ReplayReport {
             steps: 2,
-            identical: true
+            identical: true,
+            warnings: vec![]
         }
     );
     let work = dir.join("p.cassini");
@@ -1107,7 +1116,8 @@ fn a_qgis_step_refused_again_replays_identically_and_the_replay_goes_on() {
         report,
         ReplayReport {
             steps: 3,
-            identical: true
+            identical: true,
+            warnings: vec![]
         }
     );
     let _ = fs::remove_dir_all(dir);
@@ -1300,7 +1310,8 @@ fn an_external_origin_is_journaled_and_ignored_by_the_replay() {
         report,
         ReplayReport {
             steps: 2,
-            identical: true
+            identical: true,
+            warnings: vec![]
         }
     );
     // Le rejeu n'écrit rien : les lignes gardent leur origine.
@@ -1345,7 +1356,8 @@ fn a_held_replay_folder_falls_back_to_a_fresh_one() {
         report,
         ReplayReport {
             steps: 2,
-            identical: true
+            identical: true,
+            warnings: vec![]
         }
     );
     assert_eq!(
@@ -1454,7 +1466,8 @@ fn a_qgis_journal_replays_identically_into_a_fallback_folder() {
         outcome.unwrap(),
         ReplayReport {
             steps: 4,
-            identical: true
+            identical: true,
+            warnings: vec![]
         }
     );
     assert_eq!(
@@ -1650,6 +1663,7 @@ fn two_replays_in_a_row_leave_earlier_layers_out_of_the_map() {
     let identical = ReplayReport {
         steps: 2,
         identical: true,
+        warnings: vec![],
     };
 
     // Premier rejeu, projet resté ouvert : la couche de la session d'origine est laissée hors.
@@ -1700,6 +1714,7 @@ fn an_export_without_scale_and_one_with_scale_replay_identically() {
         ReplayReport {
             steps: 2,
             identical: true,
+            warnings: vec![],
         }
     );
     let _ = fs::remove_dir_all(dir);
@@ -1750,6 +1765,7 @@ fn a_replay_after_the_view_moved_gets_the_logged_center() {
         ReplayReport {
             steps: 2,
             identical: true,
+            warnings: vec![],
         }
     );
     assert_eq!(*replay_centers.borrow(), vec![Value::Null, logged]);
@@ -1794,6 +1810,7 @@ fn the_logged_center_survives_a_summarized_result() {
         ReplayReport {
             steps: 1,
             identical: true,
+            warnings: vec![],
         }
     );
     assert_eq!(*replay_centers.borrow(), vec![logged]);
@@ -1904,7 +1921,8 @@ fn a_plan_step_is_written_only_by_a_plan_and_replay_ignores_it() {
         report,
         ReplayReport {
             steps: 3,
-            identical: true
+            identical: true,
+            warnings: vec![]
         }
     );
     let _ = fs::remove_dir_all(dir);
@@ -2269,6 +2287,7 @@ fn a_raster_then_an_export_replays_identically_twice_in_the_same_session() {
     let identical = ReplayReport {
         steps: 3,
         identical: true,
+        warnings: vec![],
     };
     let mut replayed = HashSet::new();
     // Premier rejeu, sans rouvrir : le raster d'origine est laissé hors de la carte.
@@ -2656,6 +2675,7 @@ fn a_geojson_then_an_export_replays_identically_twice_in_the_same_session() {
     let identical = ReplayReport {
         steps: 3,
         identical: true,
+        warnings: vec![],
     };
     let mut replayed = HashSet::new();
     // Premier rejeu, sans rouvrir : la couche d'origine est laissée hors de la carte.
@@ -2806,7 +2826,8 @@ fn a_path_inside_a_list_of_objects_is_journaled_relative_and_replays_identically
         report,
         ReplayReport {
             steps: 1,
-            identical: true
+            identical: true,
+            warnings: vec![]
         }
     );
     assert!(warnings.is_empty(), "{warnings:?}");
@@ -2875,7 +2896,8 @@ fn a_slope_reclassify_least_cost_path_plan_replays_identically() {
         report,
         ReplayReport {
             steps: 3,
-            identical: true
+            identical: true,
+            warnings: vec![]
         }
     );
     assert!(warnings.is_empty(), "{warnings:?}");
@@ -3158,7 +3180,8 @@ fn a_styling_journal_replays_identically_and_applies_each_style_once() {
         report,
         ReplayReport {
             steps: 10,
-            identical: true
+            identical: true,
+            warnings: vec![]
         }
     );
     let count = |id: &str| seen.borrow().iter().filter(|(c, _)| c == id).count();
@@ -3247,7 +3270,8 @@ fn a_styling_replays_identically_when_the_legend_was_rearranged() {
             replay_styling(legacy, qgis).unwrap(),
             ReplayReport {
                 steps: 8,
-                identical: true
+                identical: true,
+                warnings: vec![]
             },
             "journal ancien : {legacy}"
         );
@@ -3766,7 +3790,8 @@ fn a_styled_result_raster_replays_identically_on_the_replayed_layer() {
         report,
         ReplayReport {
             steps: 3,
-            identical: true
+            identical: true,
+            warnings: vec![]
         }
     );
     let seen = seen.borrow();
@@ -3875,7 +3900,8 @@ fn a_conversion_is_named_by_its_format_and_replays_identically() {
         report,
         ReplayReport {
             steps: 3,
-            identical: true
+            identical: true,
+            warnings: vec![]
         }
     );
     // Le rejeu écrit sous `replay/`, compagnons compris, dans un dossier qu'il vide d'abord.
@@ -4062,6 +4088,7 @@ fn identical(steps: usize) -> ReplayReport {
     ReplayReport {
         steps,
         identical: true,
+        warnings: vec![],
     }
 }
 
@@ -4421,6 +4448,7 @@ fn a_converted_raster_replays_identically_in_a_new_session_and_twice_in_the_same
     let identical = ReplayReport {
         steps: 4,
         identical: true,
+        warnings: vec![],
     };
     let mut replayed = HashSet::new();
     let (outcome, _) = replay_in(&project_file, &project, 2, &mut replayed);
@@ -5196,7 +5224,8 @@ fn the_demo_plan_journals_its_focus_and_replays_it_with_bound_ids() {
         report,
         ReplayReport {
             steps: 6,
-            identical: true
+            identical: true,
+            warnings: vec![]
         }
     );
     assert_eq!(replayed.borrow()[0]["focus"], demo_focus(2));
@@ -5419,7 +5448,8 @@ fn a_second_plan_hides_the_outputs_of_the_first_and_replays_identically() {
         report,
         ReplayReport {
             steps: 7,
-            identical: true
+            identical: true,
+            warnings: vec![]
         }
     );
     // Le `focus` relu garde la même forme, ids liés aux neufs.
@@ -5673,4 +5703,107 @@ fn a_core_raster_result_is_highlighted_without_style() {
     assert_eq!(focus["hidden"], json!([l[1]["layer_id"]]));
     assert_eq!(focus["frame"], json!([l[3]["layer_id"]]));
     assert_eq!(focus["framed_on"], "results");
+}
+
+// -- Versions annoncées par l'extension (AD-25, AD-11) -------------------------------------
+
+fn probe_chain(version: u64) -> BTreeMap<String, u64> {
+    BTreeMap::from([("test.qgis_probe".to_string(), version)])
+}
+
+/// Journal d'une session qui a annoncé `versions` et exécuté la commande déléguée de sonde.
+fn probe_journal(versions: Option<(&str, u64)>) -> (PathBuf, PathBuf, Registry) {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(FakeQgis);
+    if let Some((qgis, chain)) = versions {
+        s = s.with_versions(Some(qgis.to_string()), probe_chain(chain));
+    }
+    s.call("test.qgis_probe", json!({"layer": "l"})).unwrap();
+    s.call("system.about", json!({})).unwrap();
+    drop(s);
+    (dir, project, registry)
+}
+
+fn replay_with(
+    registry: &Registry,
+    project: &Path,
+    announced: BTreeMap<String, u64>,
+) -> ReplayReport {
+    Replay::load(registry, project)
+        .unwrap()
+        .with_chain_versions(announced)
+        .run(
+            &Router::new(registry).with_qgis(FakeQgis),
+            &mut HashSet::new(),
+        )
+        .unwrap()
+}
+
+#[test]
+fn a_delegated_command_journals_the_qgis_and_chain_versions() {
+    let (dir, project, registry) = probe_journal(Some(("3.44.1", 3)));
+    let _ = &project;
+    let text = fs::read_to_string(dir.join("p.cassini/journal.jsonl")).unwrap();
+    let l: Vec<Value> = text
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(l[0]["versions"]["qgis"], "3.44.1");
+    assert_eq!(l[0]["versions"]["chain"], 3);
+    // Les versions de base restent celles d'avant ; une commande du noyau n'en porte pas de plus.
+    assert_eq!(l[0]["versions"]["protocol"], PROTOCOL_VERSION);
+    assert!(l[1]["versions"].get("qgis").is_none());
+    assert!(l[1]["versions"].get("chain").is_none());
+    let _ = registry;
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_changed_chain_version_warns_and_the_replay_goes_to_the_end() {
+    let (dir, project, registry) = probe_journal(Some(("3.44.1", 1)));
+    let report = replay_with(&registry, &project, probe_chain(2));
+    assert_eq!(report.steps, 2);
+    assert!(report.identical);
+    assert_eq!(report.warnings.len(), 1, "{:?}", report.warnings);
+    assert!(report.warnings[0].contains("test.qgis_probe"));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_unchanged_chain_version_gives_no_warning() {
+    let (dir, project, registry) = probe_journal(Some(("3.44.1", 2)));
+    assert!(replay_with(&registry, &project, probe_chain(2))
+        .warnings
+        .is_empty());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_old_journal_line_without_chain_version_is_not_compared() {
+    let (dir, project, registry) = probe_journal(None);
+    assert!(replay_with(&registry, &project, probe_chain(5))
+        .warnings
+        .is_empty());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_delegated_command_without_a_chain_row_still_journals_the_qgis_version() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(FakeQgis)
+        .with_versions(Some("3.44.1".to_string()), BTreeMap::new());
+    s.call("test.qgis_probe", json!({"layer": "l"})).unwrap();
+    s.call("system.about", json!({})).unwrap();
+    let l = lines(&s);
+    assert_eq!(l[0]["versions"]["qgis"], "3.44.1");
+    assert!(l[0]["versions"].get("chain").is_none());
+    assert!(l[1]["versions"].get("qgis").is_none());
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
 }

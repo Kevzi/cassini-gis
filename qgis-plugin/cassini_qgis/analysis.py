@@ -642,6 +642,30 @@ NETWORK_BLACKLIST = frozenset(
 _NETWORK_NAMES = frozenset(name.split(":", 1)[-1] for name in NETWORK_BLACKLIST)
 
 
+def required_algorithms(entry):
+    """Algorithmes dont une ligne a besoin : ceux de toutes ses étapes, les étapes `when` comprises
+    (AD-25). Vide pour un geste fixe sans algorithme. Lève `KeyError`/`TypeError` sur une ligne illisible."""
+    if "gesture" in entry:
+        return []
+    return [step["algorithm"] for step in chain_of(entry)]
+
+
+def available_chains(table, backend):
+    """Lignes de la table dont toute la chaîne existe dans le registre de traitement du QGIS hôte :
+    id de commande -> `chain_version` (AD-25). Règle unique pour toute ligne, `data.reproject`
+    comprise ; une ligne illisible n'est pas annoncée. Un geste fixe sans algorithme l'est toujours."""
+    available = {}
+    for command_id, entry in table.items():
+        try:
+            present = all(backend.algorithm_exists(a) for a in required_algorithms(entry))
+            version = entry["chain_version"]
+        except (KeyError, TypeError, AttributeError):
+            present = False
+        if present:
+            available[command_id] = version
+    return available
+
+
 def derived_cancellable(table):
     """Annulabilité de chaque ligne, déduite de sa chaîne : id -> bool. Une ligne de geste fixe
     (`gesture`), une chaîne vide ou une ligne illisible ne sont pas annulables."""
@@ -742,6 +766,18 @@ class QgisBackend(_ReadBackend):
 
         crs = QgsCoordinateReferenceSystem("EPSG:%d" % epsg)
         return crs.isValid() and crs.mapUnits() == Qgis.DistanceUnit.Meters
+
+    def algorithm_exists(self, algorithm_id):
+        """Vrai si le registre de traitement du QGIS hôte connaît l'algorithme (AD-25)."""
+        from qgis.core import QgsApplication
+
+        return QgsApplication.processingRegistry().algorithmById(algorithm_id) is not None
+
+    def qgis_version(self):
+        """Version du QGIS hôte, annoncée à `session.hello` (AD-25)."""
+        from qgis.core import Qgis
+
+        return str(Qgis.version())
 
     def run_algorithm(self, algorithm_id, parameters, finished, previous=None, encoding=None):
         """Lance l'algorithme en tâche annulable ; `finished(ok, results)` à la fin.
