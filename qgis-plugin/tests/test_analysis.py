@@ -40,6 +40,8 @@ class FakeBackend:
         self.near, self.near_call, self.temporary_count = True, None, 1
         self.encodings, self.driver = [], None
         self.nulls, self.null_call = 0, None
+        self.numbers, self.numbers_call = [], None  # (étiquette, nombre) lus sur la couche produite
+        self.table, self.table_call = (["cat", "count"], [], 0), None  # tableau écrit : (colonnes, lignes, total)
         self.out_fields = None  # champs des couches temporaire et produite, quand un test les fixe
         self.missing_algorithms = set()  # algorithmes absents du registre de traitement (AD-25)
 
@@ -91,6 +93,15 @@ class FakeBackend:
     def null_count(self, layer, field):
         self.null_call = (layer.lid, field)
         return self.nulls
+
+    def numbers_of(self, layer, field, label_field, limit):
+        self.numbers_call = (layer.lid, field, label_field, limit)
+        return self.numbers[:limit], len(self.numbers) > limit
+
+    def table_rows(self, path, limit):
+        header, rows, total = self.table
+        self.table_call = (path, limit)
+        return header, rows[:limit], total
 
     def has_feature_near(self, layer, x, y, epsg, radius):
         self.near_call = (layer.lid, x, y, epsg, radius)
@@ -1413,6 +1424,309 @@ class ConvertRasterTest(unittest.TestCase):
         registry = gestures.GestureRegistry()
         analysis.register_all(registry, backend_factory=lambda: self.backend())
         self.assertIn("data.convert_raster", registry.ids())
+
+
+STATS_HEADER = ["cat", "count", "unique", "min", "max", "range", "sum", "mean"]
+
+
+class StatisticsByCategoryTest(unittest.TestCase):
+    """Statistiques par catégorie : un tableau CSV sans géométrie, jamais ajouté au projet ; avec
+    `sum_field`, le champ est d'abord préparé (nuls à 0) pour que le décompte reste exact."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.out = os.path.join(self.dir.name, "2-analysis.statistics_by_category.csv")
+        self.entry = analysis.ALGORITHMS["analysis.statistics_by_category"]
+        layer = FakeLayer("z", name="parcelles", geometry="Polygon")
+        layer.fields = [("zonage", "String"), ("surface", "Real"), ("niveau", "Integer64"), ("liste", "StringList")]
+        self.backend = FakeBackend([layer, FakeLayer("r", vector=False)])
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def params(self, **extra):
+        p = {"layer_id": "z", "category_field": "zonage", "out": self.out}
+        p.update(extra)
+        return p
+
+    def test_counts_per_category_in_one_pass(self):
+        self.backend.table = (["zonage", "count"], [["U", "5"], ["N", "3"], ["", "1"]], 3)
+        _, calls = start(self.entry, self.backend, self.params())
+        self.assertEqual(len(self.backend.calls), 1)
+        algo, p = self.backend.calls[0]
+        self.assertEqual(algo, "qgis:statisticsbycategories")
+        self.assertEqual(p["INPUT"].lid, "z")
+        self.assertEqual(p["CATEGORIES_FIELD_NAME"], ["zonage"])
+        self.assertNotIn("VALUES_FIELD_NAME", p)
+        self.assertEqual(p["OUTPUT"], self.out)
+        self.backend.finished(True, {})
+        result, error = calls[0]
+        self.assertIsNone(error)
+        self.assertEqual(sorted(result), ["file", "rows", "truncated"])
+        self.assertEqual(result["file"], self.out)
+        self.assertFalse(result["truncated"])
+        self.assertEqual(
+            result["rows"],
+            [
+                {"label": "U", "values": {"count": {"value": 5.0, "unit": "entités"}}},
+                {"label": "N", "values": {"count": {"value": 3.0, "unit": "entités"}}},
+                {"label": "3", "values": {"count": {"value": 1.0, "unit": "entités"}}},  # catégorie nulle : le rang
+            ],
+        )
+        self.assertEqual(self.table_limit(), 100)
+
+    def table_limit(self):
+        return self.backend.table_call[1]
+
+    def test_the_table_is_never_added_to_the_project(self):
+        self.backend.table = (["zonage", "count"], [["U", "5"]], 1)
+        _, calls = start(self.entry, self.backend, self.params())
+        self.backend.finished(True, {})
+        self.assertIsNone(calls[0][1])
+        self.assertFalse(hasattr(self.backend, "loaded"))
+        self.assertTrue(os.path.exists(self.out))
+
+    def test_a_sum_prepares_the_field_with_nulls_at_zero_then_runs_the_statistics(self):
+        self.backend.table = (STATS_HEADER, [["U", "5", "5", "1", "9", "8", "41.5", "8.3"]], 1)
+        _, calls = start(self.entry, self.backend, self.params(sum_field="surface"))
+        algo, first = self.backend.calls[0]
+        self.assertEqual(algo, "native:fieldcalculator")
+        self.assertEqual(first["INPUT"].lid, "z")
+        self.assertEqual(first["FORMULA"], 'coalesce("surface", 0)')
+        self.assertEqual(first["OUTPUT"], "TEMPORARY_OUTPUT")
+        self.backend.finished(True, {"OUTPUT": "preparee"})
+        algo, second = self.backend.calls[1]
+        self.assertEqual(algo, "qgis:statisticsbycategories")
+        self.assertEqual(second["INPUT"].lid, "preparee")
+        self.assertEqual(second["VALUES_FIELD_NAME"], first["FIELD_NAME"])
+        self.assertEqual(second["OUTPUT"], self.out)
+        self.backend.finished(True, {})
+        result, error = calls[0]
+        self.assertIsNone(error)
+        self.assertEqual(
+            result["rows"],
+            [{"label": "U", "values": {"count": {"value": 5.0, "unit": "entités"}, "sum": {"value": 41.5, "unit": None}}}],
+        )
+
+    def test_the_field_name_is_quoted_in_the_preparation(self):
+        self.backend.layer("z").fields.append(('a"b', "Real"))
+        start(self.entry, self.backend, self.params(sum_field='a"b'))
+        self.assertEqual(self.backend.calls[0][1]["FORMULA"], 'coalesce("a""b", 0)')
+
+    def test_columns_are_read_by_place_not_by_name(self):
+        # La catégorie porte le nom du champ de l'utilisateur : même s'il s'appelle « sum » ou « count ».
+        self.backend.table = (["sum", "count"], [["x", "2"]], 1)
+        _, calls = start(self.entry, self.backend, self.params(category_field="zonage"))
+        self.backend.finished(True, {})
+        self.assertIsNone(calls[0][1])
+        self.assertEqual(calls[0][0]["rows"][0]["values"]["count"]["value"], 2.0)
+
+    def test_unexpected_columns_fail_cleanly_without_a_file(self):
+        self.backend.table = (["zonage", "total"], [["U", "5"]], 1)
+        _, calls = start(self.entry, self.backend, self.params())
+        self.backend.finished(True, {})
+        self.assertEqual(calls[0][1].code, "analysis.failed")
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_more_than_100_categories_are_truncated(self):
+        rows = [[str(i), "1"] for i in range(150)]
+        self.backend.table = (["zonage", "count"], rows, 150)
+        _, calls = start(self.entry, self.backend, self.params())
+        self.backend.finished(True, {})
+        result, _ = calls[0]
+        self.assertEqual(len(result["rows"]), 100)
+        self.assertTrue(result["truncated"])
+
+    def test_a_non_numeric_sum_field_is_refused_before_any_write(self):
+        for bad in ("zonage", "liste"):
+            _, calls = start(self.entry, self.backend, self.params(sum_field=bad))
+            self.assertEqual(calls[0][1].code, "analysis.bad_params", bad)
+        self.assertEqual(self.backend.calls, [])
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_an_integer_sum_field_is_numeric(self):
+        start(self.entry, self.backend, self.params(sum_field="niveau"))
+        self.assertEqual(len(self.backend.calls), 1)
+
+    def test_unknown_fields_are_refused(self):
+        for extra in ({"category_field": "absent"}, {"sum_field": "absent"}):
+            _, calls = start(self.entry, self.backend, self.params(**extra))
+            self.assertEqual(calls[0][1].code, "analysis.unknown_field", extra)
+        self.assertEqual(self.backend.calls, [])
+
+    def test_a_raster_and_an_unknown_layer_are_refused(self):
+        _, calls = start(self.entry, self.backend, self.params(layer_id="r"))
+        self.assertEqual(calls[0][1].code, "layer.not_vector")
+        _, calls = start(self.entry, self.backend, self.params(layer_id="nope"))
+        self.assertEqual(calls[0][1].code, "layer.not_found")
+
+    def test_a_failed_algorithm_leaves_no_file(self):
+        _, calls = start(self.entry, self.backend, self.params())
+        self.backend.finished(False, {})
+        self.assertEqual(calls[0][1].code, "analysis.failed")
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_cancelling_stops_the_running_task(self):
+        g, calls = start(self.entry, self.backend, self.params())
+        g.cancel()
+        self.assertTrue(self.backend.handle.cancelled)
+        self.backend.finished(False, {})
+        self.assertEqual(calls[0][1].code, "qgis.cancelled")
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_the_chain_is_registered_and_cancellable(self):
+        self.assertEqual(self.entry["chain_version"], 1)
+        self.assertEqual(analysis.validate_table(), [])
+        self.assertTrue(analysis.derived_cancellable(analysis.ALGORITHMS)["analysis.statistics_by_category"])
+
+    def test_a_missing_algorithm_makes_the_command_unavailable(self):
+        self.backend.missing_algorithms = {"qgis:statisticsbycategories"}
+        available = analysis.available_chains(analysis.ALGORITHMS, self.backend)
+        self.assertNotIn("analysis.statistics_by_category", available)
+        self.assertIn("analysis.buffer", available)
+        self.backend.missing_algorithms = {"native:fieldcalculator"}
+        available = analysis.available_chains(analysis.ALGORITHMS, self.backend)
+        self.assertNotIn("analysis.statistics_by_category", available)
+
+
+class SumLineLengthsTest(unittest.TestCase):
+    """Longueurs de lignes par polygone : une couche de polygones avec un champ de longueur en mètres ;
+    une couche en degrés est reprojetée d'abord vers `work_epsg` ; les lignes sont celles de la seconde couche."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.out = os.path.join(self.dir.name, "3-analysis.sum_line_lengths.gpkg")
+        self.entry = analysis.ALGORITHMS["analysis.sum_line_lengths"]
+        self.backend = FakeBackend(
+            [
+                FakeLayer("c", name="communes", geometry="Polygon", fields=("nom",)),
+                FakeLayer("w", name="communes_wgs", crs="EPSG:4326", metric=False, geometry="Polygon", fields=("nom",)),
+                FakeLayer("l", name="routes", geometry="Line"),
+                FakeLayer("g", name="gares"),
+                FakeLayer("r", vector=False),
+            ],
+            loaded_count=3,
+        )
+        self.backend.out_fields = ("nom", "length_m", "line_count")
+        self.backend.numbers = [("Nord", 6206.0), ("Sud", 3885.5), ("Vide", 0.0)]
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def params(self, **extra):
+        p = {"layer_id": "c", "lines_layer_id": "l", "label_field": "nom", "out": self.out}
+        p.update(extra)
+        return p
+
+    def test_a_metric_layer_is_measured_without_reprojection(self):
+        _, calls = start(self.entry, self.backend, self.params())
+        self.assertEqual(len(self.backend.calls), 1)
+        algo, p = self.backend.calls[0]
+        self.assertEqual(algo, "native:sumlinelengths")
+        self.assertEqual((p["POLYGONS"].lid, p["LINES"].lid), ("c", "l"))
+        self.assertEqual(p["OUTPUT"], self.out)
+        self.backend.finished(True, {})
+        result, error = calls[0]
+        self.assertIsNone(error)
+        self.assertEqual(
+            result,
+            {
+                "layer_id": "out_1", "name": "3-analysis.sum_line_lengths", "feature_count": 3, "crs": "EPSG:2154",
+                "rows": [
+                    {"label": "Nord", "values": {"length": {"value": 6206.0, "unit": "m"}}},
+                    {"label": "Sud", "values": {"length": {"value": 3885.5, "unit": "m"}}},
+                    {"label": "Vide", "values": {"length": {"value": 0.0, "unit": "m"}}},
+                ],
+                "truncated": False,
+            },
+        )
+        self.assertEqual(self.backend.numbers_call, ("out_1", p["LEN_FIELD"], "nom", 100))
+
+    def test_kilometers_divide_the_values_by_1000(self):
+        _, calls = start(self.entry, self.backend, self.params(unit="km"))
+        self.backend.finished(True, {})
+        rows = calls[0][0]["rows"]
+        self.assertEqual(rows[0]["values"]["length"], {"value": 6.206, "unit": "km"})
+        self.assertEqual(rows[2]["values"]["length"], {"value": 0.0, "unit": "km"})  # polygone sans ligne : 0, présent
+
+    def test_the_layer_keeps_the_length_in_meters_whatever_the_unit(self):
+        start(self.entry, self.backend, self.params(unit="km"))
+        self.assertEqual(self.backend.calls[0][0], "native:sumlinelengths")  # pas d'étape de conversion
+
+    def test_a_layer_in_degrees_is_reprojected_first_into_the_work_system(self):
+        _, calls = start(self.entry, self.backend, self.params(layer_id="w", work_epsg=2154))
+        algo, p = self.backend.calls[0]
+        self.assertEqual((algo, p["TARGET_CRS"]), ("native:reprojectlayer", "EPSG:2154"))
+        self.assertEqual(p["OUTPUT"], "TEMPORARY_OUTPUT")
+        self.backend.finished(True, {"OUTPUT": "reprojetee"})
+        algo, p = self.backend.calls[1]
+        self.assertEqual(algo, "native:sumlinelengths")
+        self.assertEqual((p["POLYGONS"].lid, p["LINES"].lid), ("reprojetee", "l"))
+        self.assertEqual(p["OUTPUT"], self.out)
+        self.backend.finished(True, {})
+        self.assertIsNone(calls[0][1])
+
+    def test_without_work_crs_a_layer_in_degrees_is_refused(self):
+        _, calls = start(self.entry, self.backend, self.params(layer_id="w"))
+        self.assertEqual(calls[0][1].code, "analysis.crs_not_metric")
+        self.assertEqual(self.backend.calls, [])
+
+    def test_a_work_system_not_in_meters_or_unknown_is_refused(self):
+        _, calls = start(self.entry, self.backend, self.params(layer_id="w", work_epsg=4326))
+        self.assertEqual(calls[0][1].code, "analysis.crs_not_metric")
+        _, calls = start(self.entry, self.backend, self.params(layer_id="w", work_epsg=99999))
+        self.assertEqual(calls[0][1].code, "data.unknown_crs")
+        self.assertEqual(self.backend.calls, [])
+
+    def test_the_polygon_layer_must_be_polygons_and_the_other_lines(self):
+        _, calls = start(self.entry, self.backend, self.params(layer_id="g"))
+        self.assertEqual(calls[0][1].code, "analysis.bad_params")
+        _, calls = start(self.entry, self.backend, self.params(lines_layer_id="g"))
+        self.assertEqual(calls[0][1].code, "analysis.bad_params")
+        _, calls = start(self.entry, self.backend, self.params(lines_layer_id="c"))
+        self.assertEqual(calls[0][1].code, "analysis.bad_params")
+        self.assertEqual(self.backend.calls, [])
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_the_same_layer_twice_and_an_unknown_layer_are_refused(self):
+        _, calls = start(self.entry, self.backend, self.params(lines_layer_id="c"))
+        self.assertEqual(calls[0][1].code, "analysis.bad_params")
+        _, calls = start(self.entry, self.backend, self.params(lines_layer_id="nope"))
+        self.assertEqual(calls[0][1].code, "layer.not_found")
+        _, calls = start(self.entry, self.backend, self.params(lines_layer_id="r"))
+        self.assertEqual(calls[0][1].code, "layer.not_vector")
+
+    def test_the_label_field_is_optional_and_checked(self):
+        p = self.params()
+        del p["label_field"]
+        _, calls = start(self.entry, self.backend, p)
+        self.backend.finished(True, {})
+        self.assertIsNone(calls[0][1])
+        self.assertIsNone(self.backend.numbers_call[2])
+        _, calls = start(self.entry, self.backend, self.params(label_field="absent"))
+        self.assertEqual(calls[0][1].code, "analysis.unknown_field")
+
+    def test_more_than_100_polygons_are_truncated_but_the_layer_keeps_all(self):
+        self.backend.numbers = [(str(i), 1.0) for i in range(150)]
+        self.backend.loaded_count = 150
+        _, calls = start(self.entry, self.backend, self.params())
+        self.backend.finished(True, {})
+        result, _ = calls[0]
+        self.assertEqual(len(result["rows"]), 100)
+        self.assertTrue(result["truncated"])
+        self.assertEqual(result["feature_count"], 150)
+
+    def test_a_layer_without_the_length_field_fails_cleanly(self):
+        self.backend.out_fields = ("nom",)
+        _, calls = start(self.entry, self.backend, self.params())
+        self.backend.finished(True, {})
+        self.assertEqual(calls[0][1].code, "analysis.failed")
+
+    def test_the_chain_is_registered_cancellable_and_work_crs_goes_with_the_reprojection(self):
+        self.assertEqual(self.entry["chain_version"], 1)
+        self.assertEqual(self.entry["work_crs"], analysis.WORK_EPSG)
+        self.assertEqual(analysis.validate_table(), [])
+        self.assertTrue(analysis.derived_cancellable(analysis.ALGORITHMS)["analysis.sum_line_lengths"])
 
 
 class FormHidesCoreFilledTest(unittest.TestCase):

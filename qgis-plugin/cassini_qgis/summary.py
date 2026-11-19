@@ -312,6 +312,52 @@ def _nearest(lang, p, r, names):
     return text
 
 
+def _statistics_by_category(lang, p, r, names):
+    """Le tableau écrit par QGIS : un fichier, jamais une couche ; affichage seul (AD-5)."""
+    field = p.get("category_field")
+    if not isinstance(field, str) or not field:
+        raise _Unreadable()
+    text = texts.tr(lang, "sum_stats", field=field, layer=names.layer(p.get("layer_id")))
+    if p.get("sum_field"):
+        text += texts.tr(lang, "sum_stats_sum", field=p["sum_field"])
+    if not r:
+        return text
+    try:
+        file = file_name(r.get("file"))
+    except _Unreadable:
+        return text
+    rows = r.get("rows")
+    if not isinstance(rows, list) or r.get("truncated") is not False:
+        return text + texts.tr(lang, "sum_file", file=file)  # 100 premières lignes : le total n'est pas sûr
+    text += texts.tr(lang, "sum_stats_file", file=file, count=count(lang, "categories", len(rows)))
+    best = None
+    for row in rows:
+        values = row.get("values") if isinstance(row, dict) else None
+        cell = values.get("count") if isinstance(values, dict) else None
+        n = cell.get("value") if isinstance(cell, dict) else None
+        if isinstance(row, dict) and isinstance(row.get("label"), str) and _is_number(n) and float(n).is_integer():
+            if best is None or n > best[1]:
+                best = (row["label"], int(n))
+    if best is not None and best[1] > 0 and len(rows) > 1:
+        text += texts.tr(lang, "sum_stats_top", label=best[0], count=count(lang, "entities", best[1]))
+    return text
+
+
+def _sum_line_lengths(lang, p, r, names):
+    unit = p.get("unit", "m")
+    if unit not in ("m", "km"):
+        raise _Unreadable()
+    text = texts.tr(
+        lang,
+        "sum_lengths",
+        lines=names.layer(p.get("lines_layer_id")),
+        layer=names.layer(p.get("layer_id")),
+        unit=unit,
+    )
+    text += _computed_in(lang, p, r, names)
+    return text + (_out_layer(lang, r) if r else "")
+
+
 def _layer_add(lang, p, r, names):
     file = file_name(p.get("path"))
     name = r.get("name") if r else None
@@ -953,6 +999,8 @@ _SENTENCES = {
     "analysis.isochrone": _isochrone,
     "analysis.count_points_in_polygon": _count_points,
     "analysis.nearest": _nearest,
+    "analysis.statistics_by_category": _statistics_by_category,
+    "analysis.sum_line_lengths": _sum_line_lengths,
     "layer.add": _layer_add,
     "layer.describe": _layer_describe,
     "layout.export_pdf": _export_pdf,

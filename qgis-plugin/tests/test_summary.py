@@ -178,6 +178,72 @@ class NearestSummaryTest(unittest.TestCase):
         )
 
 
+class StatisticsByCategorySummaryTest(unittest.TestCase):
+    PARAMS = {"layer_id": "parcelles_2", "category_field": "zonage"}
+    OUT = {
+        "file": "C:/d/cassini/3-analysis.statistics_by_category.csv",
+        "rows": [
+            {"label": "U", "values": {"count": {"value": 5, "unit": "entités"}}},
+            {"label": "N", "values": {"count": {"value": 3, "unit": "entités"}}},
+        ],
+        "truncated": False,
+    }
+
+    def test_the_table_is_a_file_with_its_largest_category(self):
+        self.assertEqual(
+            say("analysis.statistics_by_category", self.PARAMS, self.OUT),
+            "Statistiques par catégorie du champ zonage de Parcelles : tableau "
+            "3-analysis.statistics_by_category.csv, 2 catégories ; catégorie la plus fournie : U, 5 entités.",
+        )
+        self.assertEqual(
+            say("analysis.statistics_by_category", self.PARAMS, self.OUT, lang="en"),
+            "Statistics by category of the field zonage of Parcelles: table "
+            "3-analysis.statistics_by_category.csv, 2 categories; largest category: U, 5 features.",
+        )
+
+    def test_the_sum_field_is_named(self):
+        text = say("analysis.statistics_by_category", dict(self.PARAMS, sum_field="surface"))
+        self.assertEqual(text, "Statistiques par catégorie du champ zonage de Parcelles, avec la somme du champ surface.")
+
+    def test_a_truncated_table_names_no_largest_category(self):
+        text = say("analysis.statistics_by_category", self.PARAMS, dict(self.OUT, truncated=True))
+        self.assertEqual(
+            text,
+            "Statistiques par catégorie du champ zonage de Parcelles : fichier 3-analysis.statistics_by_category.csv.",
+        )
+
+    def test_no_path_is_shown(self):
+        self.assertNotIn("C:/", say("analysis.statistics_by_category", self.PARAMS, self.OUT))
+
+    def test_an_unreadable_parameter_falls_back(self):
+        self.assertNotIn("zonage", say("analysis.statistics_by_category", {"layer_id": "parcelles_2"}))
+
+
+class SumLineLengthsSummaryTest(unittest.TestCase):
+    PARAMS = {"layer_id": "communes_2", "lines_layer_id": "routes_1"}
+
+    def test_lengths_in_meters_by_default(self):
+        out = {"name": "Longueurs", "feature_count": 3}
+        self.assertEqual(
+            say("analysis.sum_line_lengths", self.PARAMS, out),
+            "Longueur des lignes de routes_1 dans chaque polygone de communes_2, en m : "
+            "nouvelle couche Longueurs, 3 entités.",
+        )
+
+    def test_unit_and_work_system(self):
+        params = dict(self.PARAMS, unit="km", work_epsg=2154)
+        out = {"name": "Longueurs", "feature_count": 3}
+        text = say("analysis.sum_line_lengths", params, out, lang="en")
+        self.assertEqual(
+            text,
+            "Length of the lines of routes_1 in each polygon of communes_2, in km, computed in EPSG:2154: "
+            "new layer Longueurs, 3 features.",
+        )
+
+    def test_an_unknown_unit_falls_back(self):
+        self.assertNotIn("mi", say("analysis.sum_line_lengths", dict(self.PARAMS, unit="mi")).split())
+
+
 class OtherCommandsTest(unittest.TestCase):
     def test_layer_add_shows_only_the_file_name(self):
         params = {"path": "C:\\Users\\camille\\donnees\\gares.gpkg"}
@@ -886,6 +952,13 @@ SAMPLES = {
     "analysis.nearest": ({"layer_id": "parcelles_2", "target_layer_id": "gares_1"},
                          {"layer_id": "v_6", "name": "Voisin", "feature_count": 4, "crs": "EPSG:2154",
                           "distance_field": "distance", "unit": "m", "unmatched_count": 0}),
+    "analysis.statistics_by_category": ({"layer_id": "parcelles_2", "category_field": "zonage"},
+        {"file": "C:/d/3-analysis.statistics_by_category.csv",
+         "rows": [{"label": "U", "values": {"count": {"value": 5, "unit": "entités"}}},
+                  {"label": "N", "values": {"count": {"value": 3, "unit": "entités"}}}],
+         "truncated": False}),
+    "analysis.sum_line_lengths": ({"layer_id": "communes_2", "lines_layer_id": "routes_1"},
+        {"layer_id": "l_7", "name": "Longueurs", "feature_count": 3, "crs": "EPSG:2154", "rows": [], "truncated": False}),
     "analysis.isochrone": ({"layer_id": "routes_1", "duration": {"value": 10, "unit": "min"},
                             "mode": "walk"},
                            {"layer_id": "iso_1", "name": "Isochrone", "feature_count": 1}),

@@ -9400,7 +9400,7 @@ const ABSENT_FUNCTIONS: &[(&str, &[&str])] = &[
     (NO_CUT_FILL, &["cut_fill", "volume"]),
     (NO_SMOOTHING, &["smooth", "focal"]),
     (NO_ROUGHNESS, &["rough", "rugos"]),
-    (NO_CATEGORIES, &["categor", "unique_value"]),
+    (NO_CATEGORIES, &["categorized", "unique_value"]),
     (NO_LABELS, &["label"]),
     (NO_OPACITY, &["opacity", "transparen"]),
     (NO_PROPORTIONAL, &["proportional"]),

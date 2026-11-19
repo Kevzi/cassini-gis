@@ -373,8 +373,8 @@ donne l'esquisse.
 | `layer.remove` | faite | qgis | epic 10, entrée 27 |
 | `analysis.nearest` | faite | qgis | epic 10, entrée 10 |
 | `analysis.distance_matrix` | planifiée | qgis | epic 10, entrée 10 |
-| `analysis.statistics_by_category` | planifiée | qgis | epic 10, entrée 11 |
-| `analysis.sum_line_lengths` | planifiée | qgis | epic 10, entrée 11 |
+| `analysis.statistics_by_category` | faite | qgis | epic 10, entrée 11 |
+| `analysis.sum_line_lengths` | faite | qgis | epic 10, entrée 11 |
 | `analysis.join_table` | planifiée | qgis | epic 10, entrée 23 |
 | `analysis.dissolve` | planifiée | qgis | epic 10, entrée 24 |
 | `raster.zonal_statistics` | planifiée | qgis | epic 10, entrée 12 |
@@ -1992,7 +1992,7 @@ Compte et somme par valeur d'un champ de catégorie (epic 10, entrée 11). Chaqu
 | `truncated` | booléen | Vrai si les catégories dépassent `rows`. |
 
 ```json fiche
-{"id": "analysis.statistics_by_category", "status": "planifiee", "runs_in": "qgis", "dictated_by_core": false,
+{"id": "analysis.statistics_by_category", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
  "params": {"layer_id": {"type": "string", "required": true},
             "category_field": {"type": "string", "required": true},
             "sum_field": {"type": "string", "required": false},
@@ -2013,17 +2013,19 @@ calcul dans le système en mètres choisi par le noyau (`work_epsg`), comme `ana
 | `label_field` | chaîne | non | — | Champ qui nomme chaque polygone ; sinon son rang. |
 | `unit` | chaîne | non | `m` (défaut), `km` | Unité des longueurs. |
 | `out` | chaîne | non | — | Fourni par le noyau. |
+| `work_epsg` | entier | non | code EPSG | Fourni par le noyau, pour une couche en degrés seulement, comme `analysis.buffer` : les longueurs sont en mètres. |
 
 Résultat : `layer_id`, `name`, `crs`, `feature_count`, `rows` (valeur `length` avec
 unité), `truncated`.
 
 ```json fiche
-{"id": "analysis.sum_line_lengths", "status": "planifiee", "runs_in": "qgis", "dictated_by_core": false,
+{"id": "analysis.sum_line_lengths", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
  "params": {"layer_id": {"type": "string", "required": true},
             "lines_layer_id": {"type": "string", "required": true},
             "label_field": {"type": "string", "required": false},
             "unit": {"type": "string", "required": false, "enum": ["m", "km"]},
-            "out": {"type": "string", "required": false}},
+            "out": {"type": "string", "required": false},
+            "work_epsg": {"type": "integer", "required": false}},
  "result": ["crs", "feature_count", "layer_id", "name", "rows", "truncated"]}
 ```
 

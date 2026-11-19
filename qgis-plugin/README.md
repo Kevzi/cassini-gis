@@ -202,6 +202,35 @@ Recette manuelle de `analysis.count_points_in_polygon` [ticket 10.2] (jeu `../do
 4. Sonde sous le vrai QGIS : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat"
    qgis-plugin/tests/probe_count_points_in_polygon.py` doit finir par `RÉSULTAT : OK`.
 
+Recette manuelle de `analysis.statistics_by_category` [ticket 11, epic 10] (jeu `../donnees-test-cassini/`) :
+
+1. Une couche (communes, parcelles) ouverte. Choisissez `analysis.statistics_by_category` : `layer_id` est une
+   liste de couches, `category_field` la liste des champs de la couche choisie, `sum_field` une liste des mêmes
+   champs avec une entrée vide (pas de somme) ; un champ non numérique est refusé au lancement
+   (`analysis.bad_params`, aucun fichier écrit).
+2. Lancez : un fichier `.csv` apparaît dans le dossier de travail, à côté du projet, sans géométrie ; il n'est
+   pas ajouté à la carte. `rows` donne un décompte par catégorie (unité « entités ») et, avec `sum_field`,
+   une `sum` sans unité ; les entités à valeur nulle sont comptées et valent 0 dans la somme. Une catégorie vide
+   est nommée par son rang. Au-delà de 100 catégories, `rows` en garde 100 et `truncated` est vrai, le fichier les
+   garde toutes.
+3. Sonde sous le vrai QGIS : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat"
+   qgis-plugin/tests/probe_statistics_by_category.py` doit finir par `RÉSULTAT : OK`. L'algorithme est
+   `qgis:statisticsbycategories` (fournisseur « qgis » du module Processing, pas `native:`) ; il est annoncé
+   seulement si ce fournisseur est chargé (AD-25).
+
+Recette manuelle de `analysis.sum_line_lengths` [ticket 11, epic 10] :
+
+1. Une couche de polygones (communes) et une couche de lignes (routes) ouvertes. Choisissez
+   `analysis.sum_line_lengths` : `layer_id` (polygones) et `lines_layer_id` (lignes) sont deux listes de couches,
+   `label_field` une liste des champs des polygones avec une entrée vide, `unit` une liste (`m`, `km`).
+2. Lancez : une couche des polygones avec un champ `length_m` apparaît, et `rows` donne la longueur des lignes
+   contenues dans chaque polygone (une ligne qui sort du polygone n'est comptée que pour sa partie intérieure ;
+   0 pour un polygone sans ligne). En `km`, les valeurs de `rows` sont divisées par 1000 ; la couche garde les mètres.
+   Polygones en degrés : le noyau remplit `work_epsg` et les longueurs sont en mètres (pas de saisie).
+3. Une couche de points à la place des lignes, ou la même couche deux fois, donne `analysis.bad_params`.
+4. Sonde sous le vrai QGIS : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat"
+   qgis-plugin/tests/probe_sum_line_lengths.py` doit finir par `RÉSULTAT : OK`, avec le cas en degrés.
+
 Recette manuelle de `analysis.isochrone` [ticket 11] (réseau apporté par l'utilisateur ;
 `fixtures/reseau-grille-2154.geojson` pour l'essai) :
 

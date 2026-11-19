@@ -368,6 +368,92 @@ def summarize_nearest(backend, layer, params):
     }
 
 
+# Champ temporaire qui porte le champ à sommer, nuls ramenés à 0 : `qgis:statisticsbycategories` ignore
+# les entités dont la valeur est nulle, ce qui fausserait le décompte. Il n'existe que dans la chaîne.
+_SUM_PREPARED_FIELD = "cassini_sum"
+_STATS_COUNT_COLUMN = 1  # table de l'algorithme : `cat,count,unique,min,max,range,sum,...`
+_STATS_SUM_COLUMN = 6
+
+
+def translate_sum_prepared(params, layer):
+    """Première étape, seulement avec `sum_field` : `native:fieldcalculator` copie le champ à sommer
+    dans `cassini_sum`, nuls ramenés à 0 ; le nom du champ est cité, jamais mis en expression brute."""
+    quoted = '"%s"' % params["sum_field"].replace('"', '""')
+    return {
+        "INPUT": layer,
+        "FIELD_NAME": _SUM_PREPARED_FIELD,
+        "FIELD_TYPE": 0,  # décimal
+        "FIELD_LENGTH": 0,
+        "FIELD_PRECISION": 0,
+        "FORMULA": "coalesce(%s, 0)" % quoted,
+    }
+
+
+def translate_statistics_by_category(params, layer):
+    """Paramètres neutres de `analysis.statistics_by_category` -> `qgis:statisticsbycategories`.
+    Sans `sum_field`, la table ne porte que le décompte ; avec lui, les statistiques du champ préparé."""
+    parameters = {"INPUT": layer, "CATEGORIES_FIELD_NAME": [params["category_field"]]}
+    if params.get("sum_field"):
+        parameters["VALUES_FIELD_NAME"] = _SUM_PREPARED_FIELD
+    return parameters
+
+
+def summarize_statistics_by_category(backend, out, params):
+    """Résultat de la table écrite (clé `table` de la table) : `file` et les lignes des 100 premières
+    catégories, `count` en entités et `sum` sans unité quand `sum_field` est donné. Les colonnes se
+    lisent par leur place, jamais par un nom : la catégorie porte le nom du champ de l'utilisateur."""
+    summed = bool(params.get("sum_field"))
+    header, rows, total = backend.table_rows(out, _MAX_ROWS)
+    need = (_STATS_SUM_COLUMN if summed else _STATS_COUNT_COLUMN) + 1
+    if len(header) < need or header[_STATS_COUNT_COLUMN] != "count" or (summed and header[_STATS_SUM_COLUMN] != "sum"):
+        raise GestureError(FAILED, "Les statistiques par catégorie n'ont pas rendu les colonnes attendues.")
+    summary = []
+    for rank, row in enumerate(rows, start=1):
+        label = "" if row[0] is None else str(row[0]).strip()
+        values = {"count": {"value": _as_number(row[_STATS_COUNT_COLUMN]), "unit": "entités"}}
+        if summed:
+            values["sum"] = {"value": _as_number(row[_STATS_SUM_COLUMN]), "unit": None}
+        summary.append({"label": label or str(rank), "values": values})
+    return {"file": out, "rows": summary, "truncated": total > len(rows)}
+
+
+def _as_number(text):
+    """Nombre lu dans une cellule de la table écrite ; une cellule vide vaut 0."""
+    try:
+        return float(text) if text not in (None, "") else 0.0
+    except (TypeError, ValueError):
+        raise GestureError(FAILED, "La table des statistiques contient une valeur qui n'est pas un nombre.")
+
+
+# Champs écrits par `native:sumlinelengths` : la longueur, puis le nombre de lignes. Si l'entrée porte
+# déjà un champ de ce nom, QGIS le remplace sur place (sonde) : on lit donc la longueur par son nom.
+_LENGTH_FIELD = "length_m"
+_LINE_COUNT_FIELD = "line_count"
+
+
+def translate_sum_line_lengths(params, layer):
+    """Paramètres neutres de `analysis.sum_line_lengths` -> `native:sumlinelengths`. La longueur est
+    en mètres, dans le système de la couche de polygones, que la chaîne a mis en mètres ; la couche de
+    lignes est ajoutée par le geste (clé `overlay_key`)."""
+    return {
+        "POLYGONS": layer,
+        "LEN_FIELD": _LENGTH_FIELD,
+        "COUNT_FIELD": _LINE_COUNT_FIELD,
+    }
+
+
+def summarize_sum_line_lengths(backend, layer, params):
+    """Longueur par polygone des 100 premiers polygones de la couche produite (clé `summary`), dans
+    l'unité demandée ; un polygone sans ligne vaut 0."""
+    if _LENGTH_FIELD not in [name for name, _ in backend.fields_of(layer)]:
+        raise GestureError(FAILED, "La somme des longueurs n'a pas rendu le champ attendu.")
+    unit = params.get("unit") or "m"
+    factor = _UNIT_TO_METERS[unit]
+    pairs, truncated = backend.numbers_of(layer, _LENGTH_FIELD, params.get("label_field") or None, _MAX_ROWS)
+    rows = [{"label": label, "values": {"length": {"value": value / factor, "unit": unit}}} for label, value in pairs]
+    return {"rows": rows, "truncated": truncated}
+
+
 # Table fermée : id de commande -> chaîne fixe d'algorithmes (AD-24).
 #
 # Une ligne est une chaîne fixe d'étapes plus des attributs de la ligne :
@@ -392,6 +478,13 @@ def summarize_nearest(backend, layer, params):
 #               `_ORIGIN_SNAP_METERS` d'une entité de la couche d'entrée (sinon
 #               `analysis.origin_off_network`, avant tout lancement) ;
 #   summary   : (facultatif) (fond, couche produite, params) -> dict qui complète le résultat ;
+#   table     : (facultatif) genre de sortie `table` (AD-24) : `out` est un tableau sans géométrie (CSV),
+#               jamais ajouté au projet ; (fond, `out`, params) -> dict qui est le résultat (`file`,
+#               `rows`, `truncated`) ;
+#   numeric_field : (facultatif) paramètre du noyau qui nomme un champ numérique de la couche d'entrée ;
+#               absent, rien n'est vérifié ; présent, un champ inconnu est `analysis.unknown_field` et un
+#               champ non numérique `analysis.bad_params`, avant tout lancement ;
+#   overlay_geometry : (facultatif, avec `overlay`) type de géométrie exigé de la seconde couche ;
 #   target_crs: (facultatif) paramètre du noyau qui porte un code EPSG d'arrivée ; le fond
 #               doit le connaître (`crs_is_known`), sinon `data.unknown_crs`, avant tout
 #               lancement ;
@@ -519,6 +612,47 @@ ALGORITHMS = {
         "overlay": "target_layer_id",
         "summary": summarize_nearest,
     },
+    "analysis.statistics_by_category": {
+        "chain_version": 1,
+        "chain": [
+            {
+                "algorithm": "native:fieldcalculator",
+                "translate": translate_sum_prepared,
+                "output": "OUTPUT",
+                "when": "sum_field",
+            },
+            {
+                "algorithm": "qgis:statisticsbycategories",
+                "translate": translate_statistics_by_category,
+                "output": "OUTPUT",
+            },
+        ],
+        "input": "layer_id",
+        "field": "category_field",
+        "numeric_field": "sum_field",
+        "table": summarize_statistics_by_category,
+    },
+    "analysis.sum_line_lengths": {
+        "chain_version": 1,
+        "chain": [
+            _REPROJECT_TO_WORK,
+            {
+                "algorithm": "native:sumlinelengths",
+                "translate": translate_sum_line_lengths,
+                "output": "OUTPUT",
+                "overlay_key": "LINES",
+            },
+        ],
+        "input": "layer_id",
+        "metric": True,
+        "work_crs": WORK_EPSG,
+        "overlay": "lines_layer_id",
+        "overlay_geometry": "Line",
+        "field": "label_field",
+        "field_optional": True,
+        "geometry": "Polygon",
+        "summary": summarize_sum_line_lengths,
+    },
     "analysis.isochrone": {
         "chain_version": 1,
         "chain": [
@@ -621,6 +755,9 @@ CANCELLABLE_ALGORITHMS = frozenset(
         "native:countpointsinpolygon",
         "native:joinbynearest",
         "native:extractbyexpression",
+        "native:fieldcalculator",
+        "qgis:statisticsbycategories",
+        "native:sumlinelengths",
         "native:serviceareafrompoint",
         "native:convexhull",
         "native:reprojectlayer",
@@ -746,6 +883,11 @@ def _validate_row(command_id, entry, errors):
         errors.append("%s : une étape dépend de %s mais la ligne n'a pas de work_crs" % (command_id, WORK_EPSG))
 
 
+def _is_null(value):
+    """Vrai pour une valeur nulle de QGIS (`None` ou `QVariant` nul)."""
+    return value is None or (hasattr(value, "isNull") and value.isNull())
+
+
 class QgisBackend(_ReadBackend):
     """Accès réel à QGIS. Seul ce type touche `qgis.core`."""
 
@@ -867,6 +1009,48 @@ class QgisBackend(_ReadBackend):
                     weighted = 0.0
             triples.append((text, int(count) if count is not None else 0, weighted))
         return triples, self.feature_count(layer) > limit
+
+    def numbers_of(self, layer, field, label_field, limit):
+        """Paires (étiquette, nombre) des `limit` premières entités, et si la couche en a plus. Le
+        nombre est celui du champ `field` (0 s'il est nul) ; l'étiquette, la valeur de `label_field`,
+        ou le rang de l'entité (à partir de 1) si le champ est absent, vide ou nul : jamais
+        l'identifiant d'entité."""
+        from qgis.core import QgsFeatureRequest
+
+        request = QgsFeatureRequest()
+        request.setLimit(limit)
+        pairs = []
+        for rank, feature in enumerate(layer.getFeatures(request), start=1):
+            label = feature[label_field] if label_field else None
+            text = "" if label is None else str(label).strip()
+            if text in ("", "NULL"):
+                text = str(rank)
+            raw = feature[field]
+            try:
+                number = float(raw) if raw is not None else 0.0
+            except (TypeError, ValueError):
+                number = 0.0
+            pairs.append((text, number))
+        return pairs, self.feature_count(layer) > limit
+
+    def table_rows(self, path, limit):
+        """(noms des colonnes, `limit` premières lignes en textes, nombre total de lignes) du tableau
+        écrit, ouvert à part sans l'ajouter au projet ; `GestureError` s'il est illisible."""
+        from qgis.core import QgsVectorLayer
+
+        layer = QgsVectorLayer(path, "lecture", "ogr")
+        try:
+            if not layer.isValid():
+                raise GestureError(FAILED, "Le tableau écrit est illisible.")
+            header = [field.name() for field in layer.fields()]
+            rows = []
+            for feature in layer.getFeatures():
+                if len(rows) >= limit:
+                    break
+                rows.append([None if _is_null(v) else str(v) for v in feature.attributes()])
+            return header, rows, int(layer.featureCount())
+        finally:
+            del layer  # le fournisseur relâche le fichier
 
     def null_count(self, layer, field):
         """Nombre d'entités de la couche dont le champ `field` est nul ou vide."""
@@ -1100,8 +1284,17 @@ class ProcessingGesture:
             overlay = self._overlay(params, layer_id)
             if entry.get("overlay_numeric_field") and params.get(entry["overlay_numeric_field"]) is not None:
                 self._check_numeric_field(params[entry["overlay_numeric_field"]], overlay)
+            kind = entry.get("overlay_geometry")
+            if kind and backend.geometry_of(overlay) != kind:
+                raise GestureError(
+                    BAD_PARAMS,
+                    "La couche « %s » n'est pas une couche %s : choisissez une couche %s."
+                    % (backend.name_of(overlay), _GEOMETRY_LABELS[kind], _GEOMETRY_LABELS[kind]),
+                )
         if entry.get("field") and not (entry.get("field_optional") and not params.get(entry["field"])):
             self._check_field(params.get(entry["field"]), layer)
+        if entry.get("numeric_field") and params.get(entry["numeric_field"]) is not None:
+            self._check_numeric_field(params[entry["numeric_field"]], layer)
         # Traduits dès maintenant, sur la couche d'entrée : un paramètre invalide est refusé avant
         # tout lancement, même quand une reprojection ouvre la chaîne. `out` n'est à ce geste (et
         # nettoyé par lui) qu'une fois tous les refus passés.
@@ -1278,6 +1471,8 @@ class ProcessingGesture:
         backend = self._backend
         if self._entry.get("file_result"):
             return self._written()
+        if self._entry.get("table"):
+            return self._entry["table"](backend, self._out, self._params or {})
         if self._entry.get("raster"):
             epsg = backend.read_written_raster(self._out)
             if epsg is False:

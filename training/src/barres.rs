@@ -51,7 +51,7 @@ const STYLE_REEL_PHRASES: &str = include_str!("../../ai/tests/style_reel/phrases
 
 /// Les fichiers `phrases.json` écrits à la main pour 5.53, chacun avec son nom et son compte.
 pub const HAND_WRITTEN: [(&str, &str, usize); 7] = [
-    ("par_commande", PAR_COMMANDE, 102),
+    ("par_commande", PAR_COMMANDE, 108),
     ("plan_reel", PLAN_REEL_PHRASES, 23),
     ("question_reel", QUESTION_REEL_PHRASES, 35),
     ("echelle_utm_reel", ECHELLE_UTM_REEL_PHRASES, 36),

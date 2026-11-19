@@ -118,6 +118,8 @@ Une couche que Cassini ne reconnaît pas garde son style : il ne devine pas.
 | `analysis.select_by_attribute` | sélection par attribut |
 | `analysis.count_points_in_polygon` | nombre de points dans chaque zone, avec somme pondérée facultative |
 | `analysis.nearest` | jointure au plus proche voisin : attributs de l'entité la plus proche d'une autre couche, et distance en mètres |
+| `analysis.statistics_by_category` | nombre d'entités, et somme d'un champ numérique, par valeur d'un champ de catégorie ; tableau écrit à côté du projet, sans géométrie |
+| `analysis.sum_line_lengths` | longueur des lignes d'une couche dans chaque polygone d'une autre, en mètres ou en kilomètres (couche en degrés mesurée dans un système en mètres) |
 | `analysis.isochrone` | isochrones à pied et en voiture sur un réseau |
 | `layout.export_pdf` | carte en PDF : titre, légende, échelle, flèche du nord, sources détaillées (résolution, date), format, orientation, carroyage (dont MGRS étiqueté), en-tête et pied de page ; au bout d'un plan, cadrée sur le résultat mis en évidence |
 

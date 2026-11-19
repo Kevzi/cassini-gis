@@ -4781,6 +4781,26 @@ impl Executor for CrsQgis {
                           "distance_field": "distance", "unit": "m", "unmatched_count": 0}),
                 )
             }
+            "analysis.sum_line_lengths" => {
+                self.buffers.borrow_mut().push(p.clone());
+                let n = self.count.get() + 1;
+                self.count.set(n);
+                fs::write(p["out"].as_str().unwrap(), "gpkg").unwrap();
+                Ok(
+                    json!({"layer_id": format!("longueurs_g{}_{n}", self.generation),
+                          "name": "longueurs", "feature_count": 2, "crs": "EPSG:2154",
+                          "rows": [{"label": "Nord", "values": {"length": {"value": 6206.4, "unit": "m"}}},
+                                   {"label": "Vide", "values": {"length": {"value": 0.0, "unit": "m"}}}],
+                          "truncated": false}),
+                )
+            }
+            "analysis.statistics_by_category" => {
+                self.buffers.borrow_mut().push(p.clone());
+                fs::write(p["out"].as_str().unwrap(), "zonage,count\nU,5\n").unwrap();
+                Ok(json!({"file": p["out"],
+                          "rows": [{"label": "U", "values": {"count": {"value": 5.0, "unit": "entités"}}}],
+                          "truncated": false}))
+            }
             other => panic!("commande inattendue : {other}"),
         }
     }
@@ -4872,6 +4892,68 @@ fn a_nearest_join_of_a_layer_in_degrees_logs_the_metric_work_system() {
     assert!(l[1]["params"].get("work_epsg").is_none(), "{}", l[1]);
     assert!(orders.borrow()[1].get("work_epsg").is_none());
     assert_eq!(orders.borrow().len(), 2);
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_line_length_sum_of_a_layer_in_degrees_logs_the_metric_work_system() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let qgis = CrsQgis::new(1, &qgis_project);
+    let orders = qgis.buffers.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    // Polygones en degrés : le noyau remplit `work_epsg`, journalisé, transmis au geste.
+    let out = s
+        .call(
+            "analysis.sum_line_lengths",
+            json!({"layer_id": "gares", "lines_layer_id": "zonage", "unit": "km"}),
+        )
+        .unwrap();
+    assert_eq!(out["rows"][0]["values"]["length"]["unit"], "m");
+    // Polygones en mètres : rien n'est rempli, même si l'appelant en donne un.
+    s.call(
+        "analysis.sum_line_lengths",
+        json!({"layer_id": "zonage", "lines_layer_id": "gares", "work_epsg": 4326}),
+    )
+    .unwrap();
+    let l = lines(&s);
+    assert_eq!(l[0]["params"]["work_epsg"], 2154, "{}", l[0]);
+    assert_eq!(l[0]["params"]["unit"], "km", "{}", l[0]);
+    assert_eq!(orders.borrow()[0]["work_epsg"], 2154);
+    assert!(l[1]["params"].get("work_epsg").is_none(), "{}", l[1]);
+    assert!(orders.borrow()[1].get("work_epsg").is_none());
+    assert_eq!(orders.borrow().len(), 2);
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_statistics_table_is_written_by_the_core_named_csv_and_logged_without_a_work_system() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let qgis = CrsQgis::new(1, &qgis_project);
+    let orders = qgis.buffers.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    let out = s
+        .call(
+            "analysis.statistics_by_category",
+            json!({"layer_id": "gares", "category_field": "nom", "sum_field": "pop"}),
+        )
+        .unwrap();
+    assert_eq!(out["rows"][0]["label"], "U");
+    let order = orders.borrow()[0].clone();
+    let file = order["out"].as_str().unwrap().replace('\\', "/");
+    assert!(
+        file.ends_with("-analysis.statistics_by_category.csv"),
+        "{file}"
+    );
+    assert!(order.get("work_epsg").is_none(), "{order}");
+    let l = lines(&s);
+    assert_eq!(l[0]["params"]["category_field"], "nom", "{}", l[0]);
+    assert!(l[0]["params"].get("work_epsg").is_none(), "{}", l[0]);
     drop(s);
     let _ = fs::remove_dir_all(dir);
 }

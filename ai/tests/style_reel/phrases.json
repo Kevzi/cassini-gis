@@ -449,7 +449,7 @@
     "expected": {
       "kind": "refusal",
       "missing": [
-        "categor",
+        "categorized",
         "unique_value"
       ]
     }

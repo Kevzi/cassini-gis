@@ -4,6 +4,8 @@
   "analysis.select_by_attribute": true,
   "analysis.count_points_in_polygon": true,
   "analysis.nearest": true,
+  "analysis.statistics_by_category": true,
+  "analysis.sum_line_lengths": true,
   "analysis.isochrone": true,
   "data.reproject": true,
   "data.convert": true,

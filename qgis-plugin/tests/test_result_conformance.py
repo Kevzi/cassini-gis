@@ -171,6 +171,24 @@ def _nearest():
         t.tearDown()
 
 
+def _statistics(table, summed=False, params=None):
+    def setup(t):
+        t.backend.table = table
+        extra = {"sum_field": "surface"} if summed else {}
+        return t.backend, t.params(**extra)
+
+    return lambda: _analysis(ta.StatisticsByCategoryTest, setup)
+
+
+def _line_lengths(unit):
+    def setup(t):
+        t.backend.numbers = [("Nord", 6206.4), ("Sud", 3885.5), ("Vide", 0.0)][: 3 if unit == "m" else 2]
+        t.backend.loaded_count = len(t.backend.numbers)
+        return t.backend, t.params(unit=unit)
+
+    return lambda: _analysis(ta.SumLineLengthsTest, setup)
+
+
 def _isochrone():
     t = ta.IsochroneTest("setUp")
     t.setUp()
@@ -379,6 +397,18 @@ def producers():
         ("analysis.isochrone", "un polygone"): _isochrone,
         ("analysis.nearest", "couche créée"): _nearest,
         ("analysis.select_by_attribute", "entités retenues"): _select,
+        ("analysis.statistics_by_category", "comptes seuls"): _statistics(
+            (["zonage", "count"], [["U", "5"], ["N", "3"]], 2)
+        ),
+        ("analysis.statistics_by_category", "avec somme"): _statistics(
+            (ta.STATS_HEADER, [["U", "5", "5", "1", "9", "8", "41.5", "8"], ["N", "3", "3", "1", "9", "8", "12", "4"]], 2),
+            summed=True,
+        ),
+        ("analysis.statistics_by_category", "tronqué"): _statistics(
+            (["zonage", "count"], [[str(i), "1"] for i in range(150)], 150)
+        ),
+        ("analysis.sum_line_lengths", "en mètres"): _line_lengths("m"),
+        ("analysis.sum_line_lengths", "en kilomètres"): _line_lengths("km"),
         ("analysis.count_points_in_polygon", "avec zones"): _count_points([("Nord", 5), ("Sud", 3), ("Vide", 0)], 3),
         ("analysis.count_points_in_polygon", "pondéré"): _count_points([("Nord", 5), ("Sud", 3)], 2, "poids"),
         ("analysis.count_points_in_polygon", "tronqué"): _count_points([(str(i), i) for i in range(150)], 150),

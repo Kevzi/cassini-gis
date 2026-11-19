@@ -368,6 +368,111 @@
     }
   },
   {
+    "id": "CAT1",
+    "command": "analysis.statistics_by_category",
+    "phrase": "Combien de parcelles y a-t-il par section ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.statistics_by_category",
+          "params": {
+            "layer_id": "parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3",
+            "category_field": "section"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "CAT2",
+    "command": "analysis.statistics_by_category",
+    "phrase": "Donne la surface totale des parcelles par section.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.statistics_by_category",
+          "params": {
+            "layer_id": "parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3",
+            "category_field": "section",
+            "sum_field": "surface_m2"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "CAT3",
+    "command": "analysis.statistics_by_category",
+    "phrase": "Nombre de bâtiments par usage.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.statistics_by_category",
+          "params": {
+            "layer_id": "batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649",
+            "category_field": "usage"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "LON1",
+    "command": "analysis.sum_line_lengths",
+    "phrase": "Quelle longueur de routes y a-t-il dans chaque commune ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.sum_line_lengths",
+          "params": {
+            "layer_id": "communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946",
+            "lines_layer_id": "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "LON2",
+    "command": "analysis.sum_line_lengths",
+    "phrase": "Longueur des routes par commune, en kilomètres, avec le nom de chaque commune.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.sum_line_lengths",
+          "params": {
+            "layer_id": "communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946",
+            "lines_layer_id": "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67",
+            "label_field": "nom",
+            "unit": "km"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "LON3",
+    "command": "analysis.sum_line_lengths",
+    "phrase": "Somme les longueurs de routes dans chaque zone du PLU.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.sum_line_lengths",
+          "params": {
+            "layer_id": "plu_zonage_a81d5c06_2e9f_4a37_b6c4_5f13e07d92a8",
+            "lines_layer_id": "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67"
+          }
+        }
+      ]
+    }
+  },
+  {
     "id": "CC1",
     "command": "coord.convert",
     "phrase": "Convertis le point 48,7412 N, 2,4196 E (WGS84) en coordonnées UTM.",
