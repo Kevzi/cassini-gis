@@ -153,9 +153,11 @@ class TableInvariantsTest(unittest.TestCase):
     def test_every_row_has_a_chain_version_and_the_table_is_valid(self):
         rows = delegated.table_rows()
         self.assertEqual(analysis.validate_table(rows), [])
+        # Version de chaîne attendue par ligne : 1 sauf montée décidée (AD-11, AD-25).
+        raised = {"analysis.isochrone": 2}  # reprojection du réseau en tête de chaîne (entrée 10.32)
         for command_id, row in rows.items():
             with self.subTest(command=command_id):
-                self.assertEqual(row["chain_version"], 1)
+                self.assertEqual(row["chain_version"], raised.get(command_id, 1))
 
     def test_layer_remove_is_a_fixed_gesture_row(self):
         row = delegated.table_rows()["layer.remove"]
@@ -304,6 +306,11 @@ class AnnouncementTest(unittest.TestCase):
         self.assertEqual(versions["analysis.buffer"], analysis.ALGORITHMS["analysis.buffer"]["chain_version"])
         # Le geste fixe sans algorithme est annonce lui aussi, avec sa version.
         self.assertIn("layer.remove", versions)
+
+    def test_the_isochrone_is_announced_in_chain_version_2_and_the_others_stay_in_1(self):
+        _, _, versions = self.announce()
+        self.assertEqual(versions["analysis.isochrone"], 2)
+        self.assertEqual(versions["analysis.buffer"], 1)
 
     def test_a_removed_algorithm_makes_its_command_unavailable(self):
         registry, commands, versions = self.announce(missing={"native:buffer"})

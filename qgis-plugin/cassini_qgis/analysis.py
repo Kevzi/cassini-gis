@@ -181,10 +181,12 @@ def _network_tolerance_meters(network):
     return meters
 
 
-def translate_isochrone(params, layer):
+def translate_isochrone(params, layer, backend):
     """Paramètres neutres de `analysis.isochrone` -> paramètres de `native:serviceareafrompoint`.
 
-    Stratégie « plus rapide », coût en secondes ; l'origine porte son SCR, que QGIS reprojette
+    Stratégie « plus rapide », coût en secondes ; l'origine porte son SCR. Quand le noyau donne
+    `work_epsg` (réseau en degrés, reprojeté en tête de chaîne), l'origine est transformée par
+    QGIS vers ce système : le réseau que lit l'algorithme est en mètres. Sinon QGIS la reprojette
     dans celui du réseau. Vitesse, champ de vitesse et sens viennent du contrat de réseau
     résolu par le noyau (`network`) : l'extension n'a aucune valeur par défaut.
     """
@@ -196,6 +198,10 @@ def translate_isochrone(params, layer):
     if params.get("mode") not in ("walk", "car"):
         raise GestureError(BAD_PARAMS, "Le mode doit être « walk » (à pied) ou « car » (en voiture).")
     network = _network_of(params)
+    work_epsg = params.get(WORK_EPSG)
+    if work_epsg is not None and work_epsg != epsg:
+        x, y = backend.transform_point(x, y, epsg, work_epsg)
+        epsg = work_epsg
     direction = network.get("direction")
     algorithm = {
         "INPUT": layer,
@@ -698,9 +704,16 @@ ALGORITHMS = {
         "summary": summarize_sum_line_lengths,
     },
     "analysis.isochrone": {
-        "chain_version": 1,
+        # Version 2 : reprojection du réseau vers `work_epsg` en tête de chaîne (entrée 10.32).
+        "chain_version": 2,
         "chain": [
-            {"algorithm": "native:serviceareafrompoint", "translate": translate_isochrone, "output": "OUTPUT_LINES"},
+            _REPROJECT_TO_WORK,
+            {
+                "algorithm": "native:serviceareafrompoint",
+                "translate": translate_isochrone,
+                "output": "OUTPUT_LINES",
+                "with_backend": True,
+            },
             {
                 "algorithm": "native:convexhull",
                 "translate": translate_convex_hull,
@@ -716,6 +729,7 @@ ALGORITHMS = {
         ],
         "input": "layer_id",
         "metric": True,
+        "work_crs": WORK_EPSG,
         "geometry": "Line",
         "origin": "origin",
         "network": "network",
@@ -998,8 +1012,20 @@ class QgisBackend(_ReadBackend):
         QgsApplication.taskManager().addTask(task)
         return handle
 
-    def has_feature_near(self, layer, x, y, epsg, radius):
-        """Vrai si une entité de la couche passe à `radius` (unités de la couche) du point."""
+    def transform_point(self, x, y, epsg, target_epsg):
+        """Point (x, y) en EPSG:`epsg` transformé par QGIS vers EPSG:`target_epsg`."""
+        from qgis.core import QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsPointXY, QgsProject
+
+        source = QgsCoordinateReferenceSystem("EPSG:%d" % epsg)
+        target = QgsCoordinateReferenceSystem("EPSG:%d" % target_epsg)
+        if not source.isValid() or not target.isValid():
+            raise GestureError(BAD_PARAMS, "Le code EPSG de l'origine est inconnu.")
+        point = QgsCoordinateTransform(source, target, QgsProject.instance()).transform(QgsPointXY(x, y))
+        return point.x(), point.y()
+
+    def has_feature_near(self, layer, x, y, epsg, radius, work_epsg=None):
+        """Vrai si une entité de la couche passe à `radius` du point : en unités de la couche, ou,
+        avec `work_epsg` (système en mètres), en mètres dans ce système, point et entités transformés."""
         from qgis.core import (
             QgsCoordinateReferenceSystem,
             QgsCoordinateTransform,
@@ -1014,6 +1040,27 @@ class QgisBackend(_ReadBackend):
         source = QgsCoordinateReferenceSystem("EPSG:%d" % epsg)
         if not source.isValid():
             raise GestureError(BAD_PARAMS, "Le code EPSG de l'origine est inconnu.")
+        if work_epsg is not None:
+            work = QgsCoordinateReferenceSystem("EPSG:%d" % work_epsg)
+            if not work.isValid():
+                raise GestureError(BAD_PARAMS, "Le code EPSG du système de calcul est inconnu.")
+            context = QgsProject.instance()
+            if source != work:
+                point = QgsCoordinateTransform(source, work, context).transform(point)
+            around = QgsRectangle(point.x() - radius, point.y() - radius, point.x() + radius, point.y() + radius)
+            to_layer = None
+            if work != layer.crs():
+                to_layer = QgsCoordinateTransform(work, layer.crs(), context)
+                around = to_layer.transformBoundingBox(around)
+            to_work = QgsCoordinateTransform(layer.crs(), work, context) if work != layer.crs() else None
+            target = QgsGeometry.fromPointXY(point)
+            for feature in layer.getFeatures(QgsFeatureRequest().setFilterRect(around)):
+                geometry = QgsGeometry(feature.geometry())
+                if to_work is not None:
+                    geometry.transform(to_work)
+                if geometry.distance(target) <= radius:
+                    return True
+            return False
         if source != layer.crs():
             point = QgsCoordinateTransform(source, layer.crs(), QgsProject.instance()).transform(point)
         around = QgsRectangle(point.x() - radius, point.y() - radius, point.x() + radius, point.y() + radius)
@@ -1325,7 +1372,7 @@ class ProcessingGesture:
         if entry.get("network"):
             self._check_network(params, layer)
         if entry.get("origin"):
-            self._check_origin(params.get(entry["origin"]), layer, params.get(entry.get("network")))
+            self._check_origin(params.get(entry["origin"]), layer, params.get(entry.get("network")), work_epsg)
         overlay = None
         if entry.get("overlay"):
             overlay = self._overlay(params, layer_id)
@@ -1439,14 +1486,17 @@ class ProcessingGesture:
         if direction:
             self._check_field(direction.get("field") if isinstance(direction, dict) else None, layer)
 
-    def _check_origin(self, origin, layer, network=None):
+    def _check_origin(self, origin, layer, network=None, work_epsg=None):
         backend = self._backend
         snap = _network_tolerance_meters(network if isinstance(network, dict) else {})
         try:
             x, y, epsg = float(origin["x"]), float(origin["y"]), int(origin["epsg"])
         except (KeyError, TypeError, ValueError):
             raise GestureError(BAD_PARAMS, "L'origine doit être de la forme {x, y, epsg}.")
-        if not backend.has_feature_near(layer, x, y, epsg, snap):
+        # Réseau en degrés : l'accrochage se vérifie en mètres, dans `work_epsg` (origine et
+        # tronçons transformés par QGIS), jamais avec un rayon en mètres sur des degrés.
+        extra = {"work_epsg": work_epsg} if work_epsg is not None else {}
+        if not backend.has_feature_near(layer, x, y, epsg, snap, **extra):
             raise GestureError(
                 ORIGIN_OFF_NETWORK,
                 "L'origine est à plus de %d m du réseau « %s » : vérifiez ses coordonnées et son système."

@@ -76,6 +76,10 @@ pub struct AnalysisIsochroneParams {
     /// Fichier de sortie : fourni par le noyau, dans le dossier de travail.
     #[serde(default)]
     pub out: String,
+    /// Système en mètres du calcul, en code EPSG : fourni par le noyau d'après l'inventaire
+    /// (changement de cap du 2026-11-12), jamais par l'appelant.
+    #[serde(default)]
+    pub work_epsg: Option<u32>,
 }
 
 /// Résultat de `analysis.isochrone`.
@@ -111,6 +115,9 @@ impl Delegated for AnalysisIsochrone {
         // Le noyau écrit les valeurs résolues du contrat de réseau (vitesse du mode, 100 m) dans
         // les paramètres envoyés et journalisés ; l'extension n'en porte aucune (AD-28).
         .network_param("network", "mode")
+        // Un réseau en degrés est reprojeté par QGIS, dans la même étape, vers le système en
+        // mètres que choisit le noyau (`crate::work_crs`, entrée 9.16) : longueurs et accrochage en mètres.
+        .work_crs_param("work_epsg", "layer_id")
         .example(serde_json::json!({"layer_id": "routes_1a2b3c", "origin": {"x": 652000, "y": 6850000, "epsg": 2154}, "mode": "car", "duration": {"value": 10, "unit": "min"}, "network": {"speed": {"value": 20, "unit": "km/h"}, "tolerance": {"value": 250, "unit": "m"}}}))
         .example(serde_json::json!({"layer_id": "routes_1a2b3c", "origin": {"x": 652000, "y": 6850000, "epsg": 2154}, "mode": "walk", "duration": {"value": 10, "unit": "min"}}))
         .example(serde_json::json!({"layer_id": "routes_1a2b3c", "origin": {"x": 652000, "y": 6850000, "epsg": 2154}, "mode": "car", "duration": {"value": 300, "unit": "s"}}))
@@ -122,6 +129,7 @@ impl Delegated for AnalysisIsochrone {
             "analysis_isochrone_description_states_the_snap_distance",
             "analysis_isochrone_network_is_optional_and_closed",
             "analysis_isochrone_declares_its_network_param",
+            "analysis_isochrone_declares_its_work_crs",
         ])
     }
 }
@@ -233,6 +241,22 @@ mod tests {
         assert!(with(json!({"speed": {"value": 5, "unit": "m/s"}})).is_err());
         assert!(with(json!({"vitesse": 5})).is_err());
         assert!(with(json!({"direction": {"field": "sens"}})).is_err());
+    }
+
+    #[test]
+    fn analysis_isochrone_declares_its_work_crs() {
+        let registry = Registry::standard();
+        let spec = registry.spec("analysis.isochrone").unwrap();
+        assert_eq!(
+            spec.work_crs_param,
+            Some(("work_epsg".to_string(), "layer_id".to_string()))
+        );
+        let mut ok = params("walk", json!(3), "min");
+        ok["work_epsg"] = json!(2154);
+        assert!(registry.validate_params("analysis.isochrone", &ok).is_ok());
+        let mut bad = params("walk", json!(3), "min");
+        bad["work_epsg"] = json!(-1);
+        assert!(registry.validate_params("analysis.isochrone", &bad).is_err());
     }
 
     #[test]

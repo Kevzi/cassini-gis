@@ -656,7 +656,10 @@ Résultat : `layer_id`, `name`, `crs`, `feature_count`.
 ### `analysis.isochrone`
 
 Zone atteignable en un temps donné depuis un point, sur un réseau de lignes apporté par
-l'utilisateur (`analysis.origin_off_network` si le point est trop loin du réseau).
+l'utilisateur (`analysis.origin_off_network` si le point est trop loin du réseau). Réseau en
+degrés : calcul dans le système en mètres choisi par le noyau (`work_epsg`), comme
+`analysis.buffer` (changement de cap du 2026-11-12, entrée 10.32) ; l'origine est transformée
+vers ce système et l'accrochage se vérifie en mètres.
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
@@ -666,6 +669,7 @@ l'utilisateur (`analysis.origin_off_network` si le point est trop loin du résea
 | `mode` | chaîne | oui | `walk` (5 km/h), `car` (50 km/h) | Mode de déplacement. |
 | `out` | chaîne | non | — | Fourni par le noyau. |
 | `network` | `NetworkOptions` | non | — | Vitesse, sens et tolérance (AD-28, epic 10, entrée 6) ; absent, les valeurs du `mode`. Le noyau écrit les valeurs résolues (vitesse du mode, 100 m) dans les paramètres journalisés. |
+| `work_epsg` | entier | non | code EPSG | Fourni par le noyau, pour un réseau en degrés seulement, comme `analysis.buffer` : longueurs et accrochage en mètres. |
 
 Résultat : `layer_id`, `name`, `crs`, `feature_count` (un polygone).
 
@@ -676,7 +680,8 @@ Résultat : `layer_id`, `name`, `crs`, `feature_count` (un polygone).
             "duration": {"type": "Duration", "required": true},
             "mode": {"type": "string", "required": true, "enum": ["walk", "car"]},
             "network": {"type": "NetworkOptions", "required": false},
-            "out": {"type": "string", "required": false}},
+            "out": {"type": "string", "required": false},
+            "work_epsg": {"type": "integer", "required": false}},
  "result": ["crs", "feature_count", "layer_id", "name"]}
 ```
 

@@ -4781,6 +4781,17 @@ impl Executor for CrsQgis {
                           "distance_field": "distance", "unit": "m", "unmatched_count": 0}),
                 )
             }
+            "analysis.isochrone" => {
+                self.buffers.borrow_mut().push(p.clone());
+                let n = self.count.get() + 1;
+                self.count.set(n);
+                fs::write(p["out"].as_str().unwrap(), "gpkg").unwrap();
+                Ok(
+                    json!({"layer_id": format!("isochrone_g{}_{n}", self.generation),
+                          "name": "isochrone", "feature_count": 1,
+                          "crs": format!("EPSG:{}", p.get("work_epsg").and_then(Value::as_u64).unwrap_or(2154))}),
+                )
+            }
             "analysis.sum_line_lengths" => {
                 self.buffers.borrow_mut().push(p.clone());
                 let n = self.count.get() + 1;
@@ -4926,6 +4937,72 @@ fn a_line_length_sum_of_a_layer_in_degrees_logs_the_metric_work_system() {
     assert!(orders.borrow()[1].get("work_epsg").is_none());
     assert_eq!(orders.borrow().len(), 2);
     drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+fn isochrone_of(layer: &str) -> Value {
+    json!({"layer_id": layer, "origin": {"x": 6.12, "y": 45.9, "epsg": 4326},
+           "mode": "walk", "duration": {"value": 10, "unit": "min"}})
+}
+
+#[test]
+fn an_isochrone_on_a_network_in_degrees_logs_the_metric_work_system() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let qgis = CrsQgis::new(1, &qgis_project);
+    let orders = qgis.buffers.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    // Réseau en degrés : le noyau remplit `work_epsg`, journalisé, transmis au geste.
+    let out = s.call("analysis.isochrone", isochrone_of("gares")).unwrap();
+    assert_eq!(out["crs"], "EPSG:2154");
+    // Réseau en mètres : rien n'est rempli, même si l'appelant en donne un.
+    let mut forced = isochrone_of("zonage");
+    forced["work_epsg"] = json!(4326);
+    s.call("analysis.isochrone", forced).unwrap();
+    let l = lines(&s);
+    assert_eq!(l[0]["params"]["work_epsg"], 2154, "{}", l[0]);
+    assert_eq!(orders.borrow()[0]["work_epsg"], 2154);
+    assert!(l[1]["params"].get("work_epsg").is_none(), "{}", l[1]);
+    assert!(orders.borrow()[1].get("work_epsg").is_none());
+    drop(s);
+    // Rejeu : `work_epsg` est relu dans la ligne, sans relire le projet.
+    let qgis = CrsQgis::new(2, &qgis_project);
+    let (orders, reads) = (qgis.buffers.clone(), qgis.reads.clone());
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(&Router::new(&registry).with_qgis(qgis), &mut HashSet::new())
+        .unwrap();
+    assert_eq!(report, identical(2));
+    assert_eq!(orders.borrow()[0]["work_epsg"], 2154);
+    assert!(orders.borrow()[1].get("work_epsg").is_none());
+    assert_eq!(reads.get(), 0);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_isochrone_line_without_work_crs_replays_as_before() {
+    let registry = Registry::standard();
+    let (dir, project, _) = temp_project();
+    let work = project.with_extension("cassini");
+    fs::create_dir_all(&work).unwrap();
+    let mut params = isochrone_of("zonage");
+    params["out"] = json!("1-analysis.isochrone.gpkg");
+    let line = json!({"step": 1, "id": "analysis.isochrone", "params": params, "inputs": [],
+        "layer_id": "isochrone_g1_1",
+        "result": {"layer_id": "isochrone_g1_1", "name": "isochrone", "feature_count": 1,
+                   "crs": "EPSG:2154"}});
+    fs::write(work.join("1-analysis.isochrone.gpkg"), "gpkg").unwrap();
+    fs::write(work.join("journal.jsonl"), format!("{line}\n")).unwrap();
+    let qgis = CrsQgis::new(2, &annecy_project());
+    let (orders, reads) = (qgis.buffers.clone(), qgis.reads.clone());
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(&Router::new(&registry).with_qgis(qgis), &mut HashSet::new())
+        .unwrap();
+    assert_eq!(report, identical(1));
+    assert!(orders.borrow()[0].get("work_epsg").is_none());
+    assert_eq!(reads.get(), 0);
     let _ = fs::remove_dir_all(dir);
 }
 
@@ -5894,7 +5971,13 @@ struct IsochroneQgis {
     seen: std::rc::Rc<std::cell::RefCell<Vec<Value>>>,
 }
 impl Executor for IsochroneQgis {
-    fn execute(&self, _id: &str, p: Value) -> Result<Value, RegistryError> {
+    fn execute(&self, id: &str, p: Value) -> Result<Value, RegistryError> {
+        if id == "project.inventory" {
+            // Réseau « n » en mètres : le noyau ne remplit pas `work_epsg`.
+            return Ok(json!({"layers": [{"layer_id": "n", "name": "n", "crs": "EPSG:2154",
+                                         "crs_unit": "m"}],
+                             "project_crs": "EPSG:2154", "project_crs_unit": "m", "extent": null}));
+        }
         if let Some(out) = p.get("out").and_then(Value::as_str) {
             fs::write(out, "gpkg").unwrap();
         }

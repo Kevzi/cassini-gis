@@ -38,6 +38,7 @@ class FakeBackend:
         self.write, self.loaded_count, self.loadable = write, loaded_count, loadable
         self.pairs, self.counts_call, self.sums = [], None, {}
         self.near, self.near_call, self.temporary_count = True, None, 1
+        self.near_work, self.transform_call = None, None
         self.encodings, self.driver = [], None
         self.nulls, self.null_call = 0, None
         self.numbers, self.numbers_call = [], None  # (étiquette, nombre) lus sur la couche produite
@@ -103,9 +104,14 @@ class FakeBackend:
         self.table_call = (path, limit)
         return header, rows[:limit], total
 
-    def has_feature_near(self, layer, x, y, epsg, radius):
+    def has_feature_near(self, layer, x, y, epsg, radius, work_epsg=None):
         self.near_call = (layer.lid, x, y, epsg, radius)
+        self.near_work = work_epsg
         return self.near
+
+    def transform_point(self, x, y, epsg, target_epsg):
+        self.transform_call = (x, y, epsg, target_epsg)
+        return x + 1000.0, y + 2000.0  # valeur de test, reconnaissable
 
     def temporary_layer(self, handle, reference):
         extra = {} if self.out_fields is None else {"fields": self.out_fields}
@@ -1008,6 +1014,49 @@ class IsochroneTest(unittest.TestCase):
 
     def test_degrees_crs_refused(self):
         _, calls = start(self.entry, self.backend, self.params(layer_id="w"))
+        self.assertEqual(calls[0][1].code, "analysis.crs_not_metric")
+        self.assertEqual(self.backend.calls, [])
+
+    def test_a_metric_network_is_unchanged_no_reprojection_no_transform(self):
+        start(self.entry, self.backend, self.params())
+        self.assertEqual(self.backend.calls[0][0], "native:serviceareafrompoint")
+        self.assertIsNone(self.backend.transform_call)
+        self.assertIsNone(self.backend.near_work)
+
+    def test_a_network_in_degrees_is_reprojected_first_and_the_origin_follows(self):
+        params = self.params(layer_id="w", work_epsg=2154, origin={"x": 6.1, "y": 45.9, "epsg": 4326})
+        _, calls = start(self.entry, self.backend, params)
+        algo, p = self.backend.calls[0]
+        self.assertEqual((algo, p["TARGET_CRS"], p["OUTPUT"]), ("native:reprojectlayer", "EPSG:2154", "TEMPORARY_OUTPUT"))
+        # Accrochage vérifié en mètres, dans le système de calcul.
+        self.assertEqual(self.backend.near_work, 2154)
+        self.assertEqual(self.backend.near_call, ("w", 6.1, 45.9, 4326, 100.0))
+        self.backend.finished(True, {"OUTPUT": "reprojete"})
+        algo, p = self.backend.calls[1]
+        self.assertEqual(algo, "native:serviceareafrompoint")
+        self.assertEqual(p["INPUT"].lid, "reprojete")
+        self.assertEqual(self.backend.transform_call, (6.1, 45.9, 4326, 2154))
+        self.assertEqual(p["START_POINT"], "1006.1,2045.9 [EPSG:2154]")
+        self.backend.finished(True, {"OUTPUT_LINES": "tmp_1"})
+        algo, p = self.backend.calls[2]
+        self.assertEqual((algo, p["OUTPUT"]), ("native:convexhull", self.out))
+        self.backend.finished(True, {"OUTPUT": self.out})
+        self.assertIsNone(calls[0][1])
+
+    def test_an_origin_already_in_the_work_system_is_not_transformed(self):
+        start(self.entry, self.backend, self.params(layer_id="w", work_epsg=2154))
+        self.backend.finished(True, {"OUTPUT": "reprojete"})
+        self.assertIsNone(self.backend.transform_call)
+        self.assertEqual(self.backend.calls[1][1]["START_POINT"], "652500.0,6850500.0 [EPSG:2154]")
+
+    def test_a_network_in_degrees_with_an_origin_off_the_network_is_refused_before_launch(self):
+        self.backend.near = False
+        _, calls = start(self.entry, self.backend, self.params(layer_id="w", work_epsg=2154))
+        self.assertEqual(calls[0][1].code, "analysis.origin_off_network")
+        self.assertEqual(self.backend.calls, [])
+
+    def test_a_work_system_not_in_meters_is_refused_before_launch(self):
+        _, calls = start(self.entry, self.backend, self.params(layer_id="w", work_epsg=4326))
         self.assertEqual(calls[0][1].code, "analysis.crs_not_metric")
         self.assertEqual(self.backend.calls, [])
 
