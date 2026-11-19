@@ -25,6 +25,7 @@ avec une exception pour ce dossier.
 | `demo/parcelles-2154.geojson` | 16 parcelles carrées de 125 m (grille 4 × 4) sur la même emprise, champs `id_parcelle` (`P01` à `P16`), `section` | **Synthétique**, calculé | Idem : réponse attendue de la phrase de démo, 7 parcelles en zone U à 500 m au plus d'une gare |
 | `demo/gares-2154.geojson` | 1 gare en Lambert-93, dans l'emprise, au coin sud-est (652490, 6850010), champ `nom` (nom inventé) : la parcelle U du coin nord-ouest est à plus de 500 m, des parcelles N sont à moins de 500 m | **Synthétique**, calculé | Idem |
 | `style-cases.json` | Styles de couche (`StyleSpec`) admis et refusés, chacun avec le code attendu ; aucune donnée géographique | **Synthétique**, écrit à la main | Les deux côtés de la vérification des styles : `core/src/style/spec.rs` (`the_shared_style_cases_agree_with_the_extension`) et `qgis-plugin/tests/test_style_gestures.py` |
+| `resultats-extension.json` | Résultats d'extension (`[{id, case, result}]`) : un exemple par commande déléguée à QGIS, plusieurs quand une option change la forme ; noms inventés, aucune donnée géographique | **Synthétique**, écrit à la main | Les deux côtés de la conformité des résultats : `core/tests/conformite_resultats.rs` (`Registry::validate_output`) et `qgis-plugin/tests/test_result_conformance.py` (forme produite par chaque geste) |
 
 ## Les MNT de recette
 

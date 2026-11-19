@@ -1,0 +1,113 @@
+[
+  {"id": "analysis.buffer", "case": "couche créée",
+   "result": {"layer_id": "tampon_1", "name": "1-analysis.buffer", "feature_count": 8, "crs": "EPSG:2154"}},
+
+  {"id": "analysis.intersect", "case": "couche créée",
+   "result": {"layer_id": "inter_1", "name": "2-analysis.intersect", "feature_count": 3, "crs": "EPSG:2154"}},
+
+  {"id": "analysis.isochrone", "case": "un polygone",
+   "result": {"layer_id": "iso_1", "name": "5-analysis.isochrone", "feature_count": 1, "crs": "EPSG:2154"}},
+
+  {"id": "analysis.nearest", "case": "couche créée",
+   "result": {"layer_id": "voisin_1", "name": "3-analysis.nearest", "feature_count": 5, "crs": "EPSG:2154",
+              "distance_field": "distance", "unit": "m", "unmatched_count": 0}},
+
+  {"id": "analysis.select_by_attribute", "case": "entités retenues",
+   "result": {"layer_id": "sel_1", "name": "3-analysis.select_by_attribute", "feature_count": 4, "crs": "EPSG:2154"}},
+
+  {"id": "analysis.zonal_statistics", "case": "avec zones",
+   "result": {"layer_id": "zones_1", "name": "4-analysis.zonal_statistics", "feature_count": 3, "crs": "EPSG:2154",
+              "zones": [{"label": "Nord", "count": 5}, {"label": "Sud", "count": 3}, {"label": "Vide", "count": 0}],
+              "truncated": false}},
+  {"id": "analysis.zonal_statistics", "case": "tronqué",
+   "result": {"layer_id": "zones_2", "name": "4-analysis.zonal_statistics", "feature_count": 150, "crs": "EPSG:2154",
+              "zones": [{"label": "Z000", "count": 1}, {"label": "Z001", "count": 2}],
+              "truncated": true}},
+  {"id": "analysis.zonal_statistics", "case": "sans zone",
+   "result": {"layer_id": "zones_3", "name": "4-analysis.zonal_statistics", "feature_count": 0, "crs": "EPSG:2154",
+              "zones": [], "truncated": false}},
+
+  {"id": "data.convert", "case": "GeoPackage",
+   "result": {"file": "2-data.convert.gpkg", "format": "gpkg", "feature_count": 5}},
+
+  {"id": "data.convert_raster", "case": "avec EPSG",
+   "result": {"file": "1-data.convert_raster.tif", "epsg": 2154}},
+  {"id": "data.convert_raster", "case": "sans EPSG",
+   "result": {"file": "1-data.convert_raster.tif", "epsg": null}},
+
+  {"id": "data.reproject", "case": "couche créée",
+   "result": {"layer_id": "repro_1", "name": "1-data.reproject", "feature_count": 5, "crs": "EPSG:2154"}},
+
+  {"id": "data.transform_point", "case": "point reprojeté",
+   "result": {"point": {"x": 700000.0, "y": 6600000.0, "epsg": 2154}}},
+
+  {"id": "layer.add", "case": "reprojetée à l'affichage",
+   "result": {"layer_id": "layer_1", "name": "parcelles-test", "source_crs": "EPSG:4326",
+              "project_crs": "EPSG:2154", "reprojected": true}},
+  {"id": "layer.add", "case": "non reprojetée",
+   "result": {"layer_id": "layer_2", "name": "gares", "source_crs": "EPSG:2154",
+              "project_crs": "EPSG:2154", "reprojected": false}},
+
+  {"id": "layer.arrange", "case": "trois groupes",
+   "result": {"group_count": 3, "layer_count": 5}},
+
+  {"id": "layer.describe", "case": "avec emprise",
+   "result": {"name": "gares", "fields": [{"name": "nom", "type": "String"}, {"name": "pop", "type": "Integer64"}],
+              "crs": "EPSG:2154",
+              "extent": {"xmin": 0.0, "ymin": 1.0, "xmax": 10.0, "ymax": 11.0, "crs": "EPSG:2154"},
+              "feature_count": 8, "geometry": "Point"}},
+  {"id": "layer.describe", "case": "sans emprise",
+   "result": {"name": "vide", "fields": [], "crs": "EPSG:2154", "extent": null,
+              "feature_count": 0, "geometry": "Point"}},
+
+  {"id": "layer.open_raster", "case": "raster ouvert",
+   "result": {"layer_id": "raster_1", "name": "1-terrain.slope"}},
+
+  {"id": "layer.open_vector", "case": "vecteur ouvert",
+   "result": {"layer_id": "vector_1", "name": "1-terrain.peaks", "crs": "EPSG:2154"}},
+
+  {"id": "layer.remove", "case": "couche retirée",
+   "result": {"layer_id": "routes_1a2b3c"}},
+
+  {"id": "layer.set_style", "case": "couche mise en forme",
+   "result": {"layer_id": "plu_1"}},
+
+  {"id": "layout.export_pdf", "case": "sans échelle",
+   "result": {"file": "1-layout.export_pdf.pdf", "page_count": 1, "layer_count": 2,
+              "sources": ["gares.gpkg", "communes.shp"], "truncated": false,
+              "source_details": [
+                {"source": "gares.gpkg", "resolution": null, "date": null, "date_origin": null},
+                {"source": "communes.shp", "resolution": null, "date": null, "date_origin": null}]}},
+  {"id": "layout.export_pdf", "case": "avec échelle et centre",
+   "result": {"file": "1-layout.export_pdf.pdf", "page_count": 1, "layer_count": 2,
+              "sources": ["mnt.tif", "gares.gpkg"], "truncated": false,
+              "source_details": [
+                {"source": "mnt.tif", "resolution": {"value": 10.0, "unit": "m"}, "date": "2026-03-14", "date_origin": "file"},
+                {"source": "gares.gpkg", "resolution": null, "date": "2025-12-01", "date_origin": "metadata"}],
+              "scale": 25000, "center": {"x": 652341.5, "y": 6851234.25, "epsg": 2154}}},
+  {"id": "layout.export_pdf", "case": "avec avertissements",
+   "result": {"file": "1-layout.export_pdf.pdf", "page_count": 1, "layer_count": 1,
+              "sources": ["gares.gpkg"], "truncated": false,
+              "source_details": [{"source": "gares.gpkg", "resolution": null, "date": null, "date_origin": null}],
+              "warnings": ["Un résultat n'a pas pu être mis en évidence."]}},
+  {"id": "layout.export_pdf", "case": "tronqué",
+   "result": {"file": "1-layout.export_pdf.pdf", "page_count": 1, "layer_count": 60,
+              "sources": ["f0.shp", "f1.shp"], "truncated": true,
+              "source_details": [
+                {"source": "f0.shp", "resolution": null, "date": null, "date_origin": null},
+                {"source": "f1.shp", "resolution": null, "date": null, "date_origin": null}]}},
+
+  {"id": "project.inventory", "case": "projet vide",
+   "result": {"project_name": null, "layers": [], "project_crs": "EPSG:2154", "extent": null}},
+  {"id": "project.inventory", "case": "vecteur et raster",
+   "result": {"project_name": "projet-test", "project_crs": "EPSG:2154", "project_crs_unit": "m",
+              "layers": [
+                {"layer_id": "plu_1", "name": "Zonage du PLU", "source": "plu.gpkg", "crs": "EPSG:2154", "crs_unit": "m",
+                 "kind": "vector", "geometry": "MultiPolygon", "feature_count": 3,
+                 "fields": [{"name": "typezone", "type": "String", "values": ["N", "Nh", "U"]},
+                            {"name": "surface", "type": "Real"}]},
+                {"layer_id": "mnt_1", "name": "MNT", "source": "dem/mnt.tif", "crs": "EPSG:2154", "crs_unit": "m",
+                 "kind": "raster", "geometry": null, "fields": []}],
+              "extent": {"xmin": 0.0, "ymin": 1.0, "xmax": 10.0, "ymax": 11.0, "crs": "EPSG:2154",
+                         "lonlat": {"west": 6.0, "south": 45.8, "east": 6.2, "north": 45.95, "crs": "EPSG:4326"}}}}
+]
