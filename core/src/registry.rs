@@ -149,6 +149,13 @@ pub struct CommandSpec {
     /// sérialisée.
     #[serde(skip)]
     pub work_crs_param: Option<(String, String)>,
+    /// Contrat de réseau (AD-28) : (paramètre `NetworkOptions`, paramètre qui porte le mode
+    /// `walk` ou `car`). Le noyau y écrit les valeurs par défaut résolues
+    /// (`NetworkOptions::resolve`) avant l'exécution et le journal ; le rejeu les relit telles
+    /// quelles. Visible du modèle, contrairement à `work_crs_param`. Métadonnée interne : jamais
+    /// sérialisée.
+    #[serde(skip)]
+    pub network_param: Option<(String, String)>,
     /// Mise en évidence du résultat d'un plan dans son PDF (changement de cap du 2026-11-12,
     /// entrée 7.9) : paramètre que le noyau remplit, pour un export lancé dans un plan, d'après
     /// les lignes du plan en cours au journal (`crate::focus`). Ôté des paramètres de l'appelant,
@@ -193,6 +200,7 @@ impl CommandSpec {
             result_style: None,
             attribute_filter: None,
             work_crs_param: None,
+            network_param: None,
             focus_param: None,
             params_schema: schema_value::<P>(),
             output_schema: schema_value::<O>(),
@@ -328,6 +336,13 @@ impl CommandSpec {
     /// pour la couche désignée par le paramètre `layer` (entrée 9.16).
     pub fn work_crs_param(mut self, name: &str, layer: &str) -> Self {
         self.work_crs_param = Some((name.to_string(), layer.to_string()));
+        self
+    }
+
+    /// Déclare le paramètre `name` du contrat de réseau, dont le noyau écrit les valeurs par
+    /// défaut d'après le mode lu dans le paramètre `mode` (AD-28).
+    pub fn network_param(mut self, name: &str, mode: &str) -> Self {
+        self.network_param = Some((name.to_string(), mode.to_string()));
         self
     }
 

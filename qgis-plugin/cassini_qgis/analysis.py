@@ -128,11 +128,9 @@ def translate_select_by_attribute(params, layer):
     }
 
 
-# Vitesses fixes du geste, en km/h (pas de champ de vitesse du réseau).
-_SPEEDS_KMH = {"walk": 5.0, "car": 50.0}
 _UNIT_TO_SECONDS = {"s": 1.0, "min": 60.0}
 _COST_SECONDS_PER_UNIT = 3600.0  # le coût « plus rapide » de l'algorithme est en heures (vérifié par la sonde)
-_ORIGIN_SNAP_METERS = 100.0  # distance maximale entre l'origine et le réseau (contrôlée avant de lancer)
+_DISTANCE_TO_METERS = {"m": 1.0, "km": 1000.0}
 
 
 def _duration_in_seconds(duration):
@@ -146,33 +144,79 @@ def _duration_in_seconds(duration):
     return seconds
 
 
+def _network_of(params):
+    """Contrat de réseau (AD-28) résolu par le noyau : vitesse et tolérance toujours présentes.
+
+    Le noyau écrit les valeurs par défaut dans les paramètres (`NetworkOptions::resolve`) ;
+    l'extension n'en connaît aucune, et refuse un plan qui ne les porte pas.
+    """
+    network = params.get("network")
+    if not isinstance(network, dict):
+        raise GestureError(BAD_PARAMS, "Le contrat de réseau (vitesse, tolérance) manque : le noyau le résout.")
+    return network
+
+
+def _network_speed(network):
+    """Vitesse uniforme du réseau en km/h (repli quand un tronçon n'a pas de vitesse propre)."""
+    speed = network.get("speed")
+    try:
+        value = float(speed["value"])
+        unit = speed["unit"]
+    except (KeyError, TypeError, ValueError):
+        raise GestureError(BAD_PARAMS, "La vitesse doit être de la forme {value, unit}, en km/h.")
+    if unit != "km/h" or not value > 0:
+        raise GestureError(BAD_PARAMS, "La vitesse doit être strictement positive, en km/h.")
+    return value
+
+
+def _network_tolerance_meters(network):
+    """Tolérance d'accrochage du réseau en mètres."""
+    tolerance = network.get("tolerance")
+    try:
+        meters = float(tolerance["value"]) * _DISTANCE_TO_METERS[tolerance["unit"]]
+    except (KeyError, TypeError, ValueError):
+        raise GestureError(BAD_PARAMS, "La tolérance doit être de la forme {value, unit}, en m ou km.")
+    if not meters > 0:
+        raise GestureError(BAD_PARAMS, "La tolérance doit être strictement positive.")
+    return meters
+
+
 def translate_isochrone(params, layer):
     """Paramètres neutres de `analysis.isochrone` -> paramètres de `native:serviceareafrompoint`.
 
-    Stratégie « plus rapide », vitesse du mode, coût en secondes ; l'origine porte son SCR,
-    que QGIS reprojette dans celui du réseau. Aucun champ de sens ni de vitesse : tous les
-    tronçons sont parcourus dans les deux sens, à la même vitesse.
+    Stratégie « plus rapide », coût en secondes ; l'origine porte son SCR, que QGIS reprojette
+    dans celui du réseau. Vitesse, champ de vitesse et sens viennent du contrat de réseau
+    résolu par le noyau (`network`) : l'extension n'a aucune valeur par défaut.
     """
     origin = params.get("origin")
     try:
         x, y, epsg = float(origin["x"]), float(origin["y"]), int(origin["epsg"])
     except (KeyError, TypeError, ValueError):
         raise GestureError(BAD_PARAMS, "L'origine doit être de la forme {x, y, epsg}.")
-    speed = _SPEEDS_KMH.get(params.get("mode"))
-    if speed is None:
+    if params.get("mode") not in ("walk", "car"):
         raise GestureError(BAD_PARAMS, "Le mode doit être « walk » (à pied) ou « car » (en voiture).")
-    return {
+    network = _network_of(params)
+    direction = network.get("direction")
+    algorithm = {
         "INPUT": layer,
         "STRATEGY": 1,  # plus rapide
         "DIRECTION_FIELD": "",
         "DEFAULT_DIRECTION": 2,  # deux sens
-        "SPEED_FIELD": "",
-        "DEFAULT_SPEED": speed,
+        "SPEED_FIELD": network.get("speed_field") or "",
+        "DEFAULT_SPEED": _network_speed(network),
         "TOLERANCE": 0,
         "START_POINT": "%r,%r [EPSG:%d]" % (x, y, epsg),
         "TRAVEL_COST2": _duration_in_seconds(params.get("duration")) / _COST_SECONDS_PER_UNIT,
         "INCLUDE_BOUNDS": False,
     }
+    if direction:
+        try:
+            algorithm["DIRECTION_FIELD"] = direction["field"]
+            algorithm["VALUE_FORWARD"] = direction["forward"]
+            algorithm["VALUE_BACKWARD"] = direction["backward"]
+        except (KeyError, TypeError):
+            raise GestureError(BAD_PARAMS, "Le sens doit être de la forme {field, forward, backward}.")
+    return algorithm
 
 
 def translate_convex_hull(params, previous):
@@ -475,7 +519,7 @@ def summarize_sum_line_lengths(backend, layer, params):
 #               avec `field_optional`, il peut être absent ;
 #   geometry  : (facultatif) type de géométrie exigé de la couche d'entrée (ex. `Polygon`) ;
 #   origin    : (facultatif) paramètre du noyau `{x, y, epsg}` qui doit tomber à moins de
-#               `_ORIGIN_SNAP_METERS` d'une entité de la couche d'entrée (sinon
+#               `network.tolerance` (résolue par le noyau, AD-28) d'une entité de la couche d'entrée (sinon
 #               `analysis.origin_off_network`, avant tout lancement) ;
 #   summary   : (facultatif) (fond, couche produite, params) -> dict qui complète le résultat ;
 #   table     : (facultatif) genre de sortie `table` (AD-24) : `out` est un tableau sans géométrie (CSV),
@@ -674,6 +718,7 @@ ALGORITHMS = {
         "metric": True,
         "geometry": "Line",
         "origin": "origin",
+        "network": "network",
     },
     "data.reproject": {
         "chain_version": 1,
@@ -1277,8 +1322,10 @@ class ProcessingGesture:
                 "un Shapefile en demande un. Choisissez le GeoPackage ou le GeoJSON."
                 % backend.name_of(layer),
             )
+        if entry.get("network"):
+            self._check_network(params, layer)
         if entry.get("origin"):
-            self._check_origin(params.get(entry["origin"]), layer)
+            self._check_origin(params.get(entry["origin"]), layer, params.get(entry.get("network")))
         overlay = None
         if entry.get("overlay"):
             overlay = self._overlay(params, layer_id)
@@ -1381,17 +1428,29 @@ class ProcessingGesture:
         self._out = out
         return backend.run_algorithm(step["algorithm"], algorithm_params, self._on_finished)
 
-    def _check_origin(self, origin, layer):
+    def _check_network(self, params, layer):
+        """Champ de vitesse numérique et champ de sens présents dans la couche, avant tout lancement."""
+        network = _network_of(params)
+        _network_speed(network)
+        _network_tolerance_meters(network)
+        if network.get("speed_field"):
+            self._check_numeric_field(network["speed_field"], layer)
+        direction = network.get("direction")
+        if direction:
+            self._check_field(direction.get("field") if isinstance(direction, dict) else None, layer)
+
+    def _check_origin(self, origin, layer, network=None):
         backend = self._backend
+        snap = _network_tolerance_meters(network if isinstance(network, dict) else {})
         try:
             x, y, epsg = float(origin["x"]), float(origin["y"]), int(origin["epsg"])
         except (KeyError, TypeError, ValueError):
             raise GestureError(BAD_PARAMS, "L'origine doit être de la forme {x, y, epsg}.")
-        if not backend.has_feature_near(layer, x, y, epsg, _ORIGIN_SNAP_METERS):
+        if not backend.has_feature_near(layer, x, y, epsg, snap):
             raise GestureError(
                 ORIGIN_OFF_NETWORK,
                 "L'origine est à plus de %d m du réseau « %s » : vérifiez ses coordonnées et son système."
-                % (_ORIGIN_SNAP_METERS, backend.name_of(layer)),
+                % (snap, backend.name_of(layer)),
             )
 
     def _overlay(self, params, layer_id):

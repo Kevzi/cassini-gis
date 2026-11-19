@@ -5889,3 +5889,100 @@ fn a_delegated_command_without_a_chain_row_still_journals_the_qgis_version() {
     drop(s);
     let _ = fs::remove_dir_all(dir);
 }
+
+struct IsochroneQgis {
+    seen: std::rc::Rc<std::cell::RefCell<Vec<Value>>>,
+}
+impl Executor for IsochroneQgis {
+    fn execute(&self, _id: &str, p: Value) -> Result<Value, RegistryError> {
+        if let Some(out) = p.get("out").and_then(Value::as_str) {
+            fs::write(out, "gpkg").unwrap();
+        }
+        self.seen.borrow_mut().push(p);
+        Ok(json!({"layer_id": "iso_1", "name": "iso", "feature_count": 1, "crs": "EPSG:2154"}))
+    }
+}
+
+#[test]
+fn an_isochrone_logs_and_sends_the_resolved_network_contract() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(IsochroneQgis { seen: seen.clone() });
+    let plain = json!({"layer_id": "n", "origin": {"x": 1, "y": 2, "epsg": 2154},
+                       "mode": "car", "duration": {"value": 3, "unit": "min"}});
+    s.call("analysis.isochrone", plain.clone()).unwrap();
+    let mut given = plain;
+    given["mode"] = json!("walk");
+    given["network"] = json!({"speed": {"value": 20, "unit": "km/h"},
+                              "tolerance": {"value": 250, "unit": "m"}});
+    s.call("analysis.isochrone", given).unwrap();
+    let l = lines(&s);
+    // Sans `network` : les défauts du mode, écrits par le noyau, journalisés et transmis.
+    assert_eq!(
+        l[0]["params"]["network"]["speed"],
+        json!({"value": 50.0, "unit": "km/h"})
+    );
+    assert_eq!(
+        l[0]["params"]["network"]["tolerance"],
+        json!({"value": 100.0, "unit": "m"})
+    );
+    assert_eq!(seen.borrow()[0]["network"], l[0]["params"]["network"]);
+    // Avec `network` : les valeurs données, jamais écrasées par le défaut du mode.
+    assert_eq!(l[1]["params"]["network"]["speed"]["value"], 20.0);
+    assert_eq!(l[1]["params"]["network"]["tolerance"]["value"], 250.0);
+    assert_eq!(seen.borrow()[1]["network"], l[1]["params"]["network"]);
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_isochrone_line_without_network_replays_identically_with_the_resolved_defaults() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(IsochroneQgis { seen: seen.clone() });
+    for mode in ["walk", "car"] {
+        s.call(
+            "analysis.isochrone",
+            json!({"layer_id": "n", "origin": {"x": 1, "y": 2, "epsg": 2154},
+                   "mode": mode, "duration": {"value": 3, "unit": "min"}}),
+        )
+        .unwrap();
+    }
+    // Journal d'avant le contrat de réseau : aucune ligne ne porte `network`.
+    let path = s.journal_path();
+    let old: Vec<String> = fs::read_to_string(&path)
+        .unwrap()
+        .lines()
+        .map(|l| {
+            let mut v: Value = serde_json::from_str(l).unwrap();
+            v["params"].as_object_mut().unwrap().remove("network");
+            v.to_string()
+        })
+        .collect();
+    fs::write(&path, old.join("\n") + "\n").unwrap();
+    seen.borrow_mut().clear();
+    let replay = Replay::load(&registry, &project).unwrap();
+    let report = replay
+        .run(
+            &Router::new(&registry).with_qgis(IsochroneQgis { seen: seen.clone() }),
+            &mut HashSet::new(),
+        )
+        .unwrap();
+    assert!(report.identical, "{report:?}");
+    let sent = seen.borrow();
+    assert_eq!(sent[0]["network"]["speed"]["value"], 5.0);
+    assert_eq!(sent[1]["network"]["speed"]["value"], 50.0);
+    assert_eq!(
+        sent[0]["network"]["tolerance"],
+        json!({"value": 100.0, "unit": "m"})
+    );
+    drop(sent);
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}

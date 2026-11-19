@@ -866,6 +866,16 @@ class NearestTest(unittest.TestCase):
         self.assertFalse(os.path.exists(self.out))
 
 
+def resolved_network(mode, **extra):
+    """Contrat de réseau tel que le noyau le résout (`NetworkOptions::resolve`) : défauts du mode, 100 m."""
+    network = {
+        "speed": {"value": {"walk": 5.0, "car": 50.0}.get(mode, 5.0), "unit": "km/h"},
+        "tolerance": {"value": 100.0, "unit": "m"},
+    }
+    network.update(extra)
+    return network
+
+
 class IsochroneTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
@@ -894,6 +904,8 @@ class IsochroneTest(unittest.TestCase):
             "out": self.out,
         }
         p.update(extra)
+        # Le noyau écrit le contrat de réseau résolu (AD-28) : l'extension n'a aucune valeur par défaut.
+        p.setdefault("network", resolved_network(p["mode"]))
         return p
 
     def test_service_area_then_convex_hull_write_one_file(self):
@@ -931,6 +943,51 @@ class IsochroneTest(unittest.TestCase):
         secs = FakeBackend([FakeLayer("n", geometry="Line")])
         start(self.entry, secs, self.params(duration={"value": 180, "unit": "s"}))
         self.assertEqual(secs.calls[0][1]["TRAVEL_COST2"], walk.calls[0][1]["TRAVEL_COST2"])
+
+    def test_network_contract_changes_the_calls(self):
+        # Vitesse donnée : c'est elle, pas celle du mode.
+        _, _ = start(self.entry, self.backend, self.params(network=resolved_network("walk", speed={"value": 20.0, "unit": "km/h"})))
+        self.assertEqual(self.backend.calls[0][1]["DEFAULT_SPEED"], 20.0)
+        # Champ de vitesse : posé, le champ numérique de la couche.
+        backend = FakeBackend([FakeLayer("n", geometry="Line")])
+        backend.layer("n").fields = [("vit", "Real"), ("sens", "String")]
+        start(self.entry, backend, self.params(network=resolved_network("walk", speed_field="vit")))
+        self.assertEqual(backend.calls[0][1]["SPEED_FIELD"], "vit")
+        # Sens : champ et valeurs transmis.
+        direction = {"field": "sens", "forward": "FT", "backward": "TF"}
+        backend = FakeBackend([FakeLayer("n", geometry="Line")])
+        backend.layer("n").fields = [("vit", "Real"), ("sens", "String")]
+        start(self.entry, backend, self.params(network=resolved_network("walk", direction=direction)))
+        p = backend.calls[0][1]
+        self.assertEqual((p["DIRECTION_FIELD"], p["VALUE_FORWARD"], p["VALUE_BACKWARD"]), ("sens", "FT", "TF"))
+
+    def test_tolerance_sets_the_origin_snap_distance(self):
+        start(self.entry, self.backend, self.params(network=resolved_network("walk", tolerance={"value": 250.0, "unit": "m"})))
+        self.assertEqual(self.backend.near_call[4], 250.0)
+        backend = FakeBackend([FakeLayer("n", geometry="Line")])
+        start(self.entry, backend, self.params(network=resolved_network("walk", tolerance={"value": 1.5, "unit": "km"})))
+        self.assertEqual(backend.near_call[4], 1500.0)
+
+    def test_unknown_speed_or_direction_field_refused_before_launch(self):
+        for network in (
+            resolved_network("walk", speed_field="absent"),
+            resolved_network("walk", direction={"field": "absent", "forward": "a", "backward": "b"}),
+        ):
+            backend = FakeBackend([FakeLayer("n", geometry="Line")])
+            _, calls = start(self.entry, backend, self.params(network=network))
+            self.assertEqual(calls[0][1].code, "analysis.unknown_field")
+            self.assertEqual(backend.calls, [])
+
+    def test_missing_network_contract_refused_the_extension_has_no_default(self):
+        params = self.params()
+        del params["network"]
+        _, calls = start(self.entry, self.backend, params)
+        self.assertEqual(calls[0][1].code, "analysis.bad_params")
+        self.assertEqual(self.backend.calls, [])
+
+    def test_no_default_speed_or_snap_constant_in_the_table(self):
+        for name in ("_SPEEDS_KMH", "_ORIGIN_SNAP_METERS"):
+            self.assertFalse(hasattr(analysis, name), name)
 
     def test_no_speed_or_direction_field(self):
         start(self.entry, self.backend, self.params())

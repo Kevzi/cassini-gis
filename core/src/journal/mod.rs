@@ -441,6 +441,20 @@ impl<'a> Session<'a> {
         Ok(())
     }
 
+    /// Écrit le contrat de réseau résolu (`NetworkOptions::resolve`) dans le paramètre `name`,
+    /// d'après le mode lu dans `mode`. Idempotent : le rejeu relit un contrat déjà résolu.
+    fn fill_network(
+        &self,
+        id: &str,
+        params: &mut Value,
+        name: &str,
+        mode: &str,
+    ) -> Result<(), ErrorReport> {
+        self.registry.validate_params(id, params)?;
+        resolve_network(params, name, mode);
+        Ok(())
+    }
+
     /// Remplit le paramètre `name` du système de calcul en mètres de la couche que désigne le
     /// paramètre `layer` (`crate::work_crs`). Des paramètres invalides sont refusés tels quels,
     /// avant toute lecture auprès de QGIS. Sans QGIS : `registry.unavailable`, qui nomme la
@@ -683,6 +697,11 @@ impl<'a> Session<'a> {
         // avec les paramètres et le rejeu le relit, sans le recalculer (entrée 9.16, AD-11).
         if let Some((name, layer)) = &spec.work_crs_param {
             self.fill_work_crs(id, &mut params, name, layer)?;
+        }
+        // Le contrat de réseau (AD-28) : le noyau écrit les valeurs par défaut (vitesse du mode,
+        // tolérance) dans les paramètres, donc dans le journal ; le rejeu les relit telles quelles.
+        if let Some((name, mode)) = &spec.network_param {
+            self.fill_network(id, &mut params, name, mode)?;
         }
         // Un export lancé dans un plan : le noyau désigne le résultat, le nomme, le met en
         // évidence et cache les couches intermédiaires, d'après les lignes du plan en cours au
@@ -1739,6 +1758,12 @@ impl<'a> Replay<'a> {
             // évidence du résultat d'un export de plan (entrée 7.9) : relue telle que journalisée,
             // ses ids liés aux neufs par la substitution ci-dessus, jamais recalculée ; une ligne
             // qui ne la porte pas se rejoue sans elle.
+            // Une ligne d'avant le contrat de réseau (AD-28), sans `network` ou avec un contrat
+            // partiel, reçoit les valeurs par défaut du mode, sans lecture auprès de QGIS ; une
+            // ligne déjà résolue reste telle que journalisée.
+            if let Some((name, mode)) = &spec.network_param {
+                resolve_network(&mut params, name, mode);
+            }
             let resolved = resolver
                 .resolve_call(id, spec, step, params, &self.ids[..i])
                 .map_err(|e| e.at_step(step))?;
@@ -1986,4 +2011,21 @@ fn input_entry(relative: &str, absolute: &Path, portable: bool) -> Value {
         .map(|d| json!(d.as_millis() as u64))
         .unwrap_or(Value::Null);
     json!({"path": relative, "portable": portable, "size": size, "modified": modified})
+}
+
+/// Écrit dans `params[name]` le contrat de réseau résolu d'après le mode lu dans `params[mode]`
+/// (`NetworkOptions::resolve`). Idempotent ; sans mode lisible, ne touche à rien.
+fn resolve_network(params: &mut Value, name: &str, mode: &str) {
+    let Some(mode) = params.get(mode).and_then(Value::as_str).map(str::to_string) else {
+        return;
+    };
+    let given: crate::commands::network_options::NetworkOptions = match params.get(name) {
+        Some(v) if !v.is_null() => serde_json::from_value(v.clone()).unwrap_or_default(),
+        _ => Default::default(),
+    };
+    if let Value::Object(map) = params {
+        if let Ok(resolved) = serde_json::to_value(given.resolve(&mode)) {
+            map.insert(name.to_string(), resolved);
+        }
+    }
 }

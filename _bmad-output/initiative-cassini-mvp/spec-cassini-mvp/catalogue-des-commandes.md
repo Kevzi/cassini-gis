@@ -665,7 +665,7 @@ l'utilisateur (`analysis.origin_off_network` si le point est trop loin du résea
 | `duration` | `Duration` | oui | `s`, `min` | Durée maximale du trajet. |
 | `mode` | chaîne | oui | `walk` (5 km/h), `car` (50 km/h) | Mode de déplacement. |
 | `out` | chaîne | non | — | Fourni par le noyau. |
-| `network` | `NetworkOptions` | non | — | **Epic 10, entrée 6** : vitesse, sens et tolérance (AD-28) ; absent, les valeurs du `mode`. |
+| `network` | `NetworkOptions` | non | — | Vitesse, sens et tolérance (AD-28, epic 10, entrée 6) ; absent, les valeurs du `mode`. Le noyau écrit les valeurs résolues (vitesse du mode, 100 m) dans les paramètres journalisés. |
 
 Résultat : `layer_id`, `name`, `crs`, `feature_count` (un polygone).
 
@@ -675,10 +675,9 @@ Résultat : `layer_id`, `name`, `crs`, `feature_count` (un polygone).
             "origin": {"type": "Point", "required": true},
             "duration": {"type": "Duration", "required": true},
             "mode": {"type": "string", "required": true, "enum": ["walk", "car"]},
+            "network": {"type": "NetworkOptions", "required": false},
             "out": {"type": "string", "required": false}},
- "result": ["crs", "feature_count", "layer_id", "name"],
- "planned_by": "epic 10, entrée 6",
- "planned_params": {"network": {"type": "NetworkOptions", "required": false}}}
+ "result": ["crs", "feature_count", "layer_id", "name"]}
 ```
 
 ### `layout.export_pdf`

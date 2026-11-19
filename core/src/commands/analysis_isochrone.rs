@@ -5,6 +5,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use super::network_options::NetworkOptions;
 use crate::point::Point;
 use crate::registry::{CommandSpec, Delegated, Registration, RunsIn};
 
@@ -66,6 +67,12 @@ pub struct AnalysisIsochroneParams {
     pub mode: TravelMode,
     /// Durée maximale du trajet.
     pub duration: Duration,
+    /// Contrat de réseau, facultatif : vitesse uniforme (`speed`) ou lue par tronçon
+    /// (`speed_field`, prioritaire), sens de circulation (`direction`) et distance d'accrochage
+    /// de l'origine (`tolerance`). Absent, les valeurs du `mode` : 5 km/h à pied, 50 km/h en
+    /// voiture, deux sens, 100 m. À poser seulement si la phrase le demande.
+    #[serde(default)]
+    pub network: Option<NetworkOptions>,
     /// Fichier de sortie : fourni par le noyau, dans le dossier de travail.
     #[serde(default)]
     pub out: String,
@@ -94,13 +101,17 @@ impl Delegated for AnalysisIsochrone {
     fn spec() -> CommandSpec {
         CommandSpec::new::<AnalysisIsochroneParams, AnalysisIsochroneOutput>(
             "analysis.isochrone",
-            "Calcule la zone atteignable en un temps donné, à pied ou en voiture, depuis un point, sur un réseau routier (couche de lignes) apporté par l'utilisateur, et l'ajoute au projet comme une couche d'un polygone. Vitesses fixes (marche 5 km/h, voiture 50 km/h), tronçons parcourus dans les deux sens. Le polygone est l'enveloppe convexe des tronçons atteints : il peut surestimer la zone sur un réseau en étoile ou coupé par une rivière. Le réseau doit être en mètres. L'origine doit être à moins de 100 m du réseau, sinon la commande est refusée. Ne modifie pas le réseau.",
-            "Computes the area reachable within a given time, on foot or by car, from a point, on a road network (line layer) provided by the user, and adds it to the project as a one-polygon layer. Fixed speeds (walking 5 km/h, car 50 km/h), segments travelled both ways. The polygon is the convex hull of the reached segments: it may overestimate the area on a star-shaped network or one cut by a river. The network must use a metric coordinate system. The origin must be within 100 m of the network, otherwise the command is refused. Does not modify the network.",
+            "Calcule la zone atteignable en un temps donné, à pied ou en voiture, depuis un point, sur un réseau routier (couche de lignes) apporté par l'utilisateur, et l'ajoute au projet comme une couche d'un polygone. Vitesse du mode par défaut (marche 5 km/h, voiture 50 km/h) ou donnée par `network` (vitesse uniforme ou champ de vitesse), tronçons parcourus dans les deux sens sauf champ de sens donné par `network`. Le polygone est l'enveloppe convexe des tronçons atteints : il peut surestimer la zone sur un réseau en étoile ou coupé par une rivière. Le réseau doit être en mètres. L'origine doit être à moins de 100 m du réseau (ou de `network.tolerance`), sinon la commande est refusée. Ne modifie pas le réseau.",
+            "Computes the area reachable within a given time, on foot or by car, from a point, on a road network (line layer) provided by the user, and adds it to the project as a one-polygon layer. Speed of the mode by default (walking 5 km/h, car 50 km/h) or given by `network` (uniform speed or speed field), segments travelled both ways unless `network` gives a direction field. The polygon is the convex hull of the reached segments: it may overestimate the area on a star-shaped network or one cut by a river. The network must use a metric coordinate system. The origin must be within 100 m of the network (or `network.tolerance`), otherwise the command is refused. Does not modify the network.",
         )
         .runs_in(RunsIn::Qgis)
         .cancellable(true)
         .output_params(&["out"])
         .output_ext(".gpkg")
+        // Le noyau écrit les valeurs résolues du contrat de réseau (vitesse du mode, 100 m) dans
+        // les paramètres envoyés et journalisés ; l'extension n'en porte aucune (AD-28).
+        .network_param("network", "mode")
+        .example(serde_json::json!({"layer_id": "routes_1a2b3c", "origin": {"x": 652000, "y": 6850000, "epsg": 2154}, "mode": "car", "duration": {"value": 10, "unit": "min"}, "network": {"speed": {"value": 20, "unit": "km/h"}, "tolerance": {"value": 250, "unit": "m"}}}))
         .example(serde_json::json!({"layer_id": "routes_1a2b3c", "origin": {"x": 652000, "y": 6850000, "epsg": 2154}, "mode": "walk", "duration": {"value": 10, "unit": "min"}}))
         .example(serde_json::json!({"layer_id": "routes_1a2b3c", "origin": {"x": 652000, "y": 6850000, "epsg": 2154}, "mode": "car", "duration": {"value": 300, "unit": "s"}}))
         .tests(&[
@@ -109,6 +120,8 @@ impl Delegated for AnalysisIsochrone {
             "analysis_isochrone_mode_is_closed",
             "analysis_isochrone_output_is_a_gpkg_named_by_the_core",
             "analysis_isochrone_description_states_the_snap_distance",
+            "analysis_isochrone_network_is_optional_and_closed",
+            "analysis_isochrone_declares_its_network_param",
         ])
     }
 }
@@ -198,5 +211,37 @@ mod tests {
         let spec = registry.spec("analysis.isochrone").unwrap();
         assert!(spec.description_fr.contains("100 m du réseau"));
         assert!(spec.description_en.contains("100 m of the network"));
+    }
+
+    #[test]
+    fn analysis_isochrone_network_is_optional_and_closed() {
+        let registry = Registry::standard();
+        // Un plan sans `network` reste valide.
+        assert!(registry
+            .validate_params("analysis.isochrone", &params("walk", json!(3), "min"))
+            .is_ok());
+        let with = |network: serde_json::Value| {
+            let mut p = params("walk", json!(3), "min");
+            p["network"] = network;
+            registry.validate_params("analysis.isochrone", &p)
+        };
+        assert!(with(
+            json!({"speed": {"value": 20, "unit": "km/h"}, "tolerance": {"value": 250, "unit": "m"}})
+        )
+        .is_ok());
+        assert!(with(json!({"speed": {"value": 0, "unit": "km/h"}})).is_err());
+        assert!(with(json!({"speed": {"value": 5, "unit": "m/s"}})).is_err());
+        assert!(with(json!({"vitesse": 5})).is_err());
+        assert!(with(json!({"direction": {"field": "sens"}})).is_err());
+    }
+
+    #[test]
+    fn analysis_isochrone_declares_its_network_param() {
+        let registry = Registry::standard();
+        let spec = registry.spec("analysis.isochrone").unwrap();
+        assert_eq!(
+            spec.network_param,
+            Some(("network".to_string(), "mode".to_string()))
+        );
     }
 }

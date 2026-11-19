@@ -56,6 +56,16 @@ wgs = QgsCoordinateTransform(
 centre_wgs = wgs.transform(QgsPointXY(CX, CY))
 
 
+def network(mode, **extra):
+    """Contrat de réseau tel que le noyau le résout : l'extension n'a aucune valeur par défaut."""
+    n = {
+        "speed": {"value": {"walk": 5.0, "car": 50.0}[mode], "unit": "km/h"},
+        "tolerance": {"value": 100.0, "unit": "m"},
+    }
+    n.update(extra)
+    return n
+
+
 def base(**extra):
     p = {
         "layer_id": grid.id(),
@@ -64,6 +74,7 @@ def base(**extra):
         "duration": {"value": 3, "unit": "min"},
     }
     p.update(extra)
+    p.setdefault("network", network(p["mode"]))
     return p
 
 
@@ -101,6 +112,19 @@ def check_seconds(result, error):
     )
 
 
+def check_speed(result, error):
+    # 10 km/h pendant 3 min : 500 m, comme la voiture à 50 km/h le ferait en 36 s ; plus que la marche.
+    if error is not None or result["feature_count"] != 1:
+        return False
+    box = extent_of(result)
+    return state["walk"] is not None and (box[2] - box[0]) > (state["walk"][2] - state["walk"][0]) and near(box, 500.0)
+
+
+def check_tolerance(result, error):
+    # Origine à 200 m du bord nord du réseau : refusée à 100 m (voir la ligne suivante), acceptée à 250 m.
+    return error is None and result["feature_count"] == 1
+
+
 def check_wgs(result, error):
     return error is None and all(abs(a - b) <= 20.0 for a, b in zip(extent_of(result), state["walk"]))
 
@@ -113,8 +137,11 @@ steps = [
     ("marche", base(), check_walk),
     ("voiture", base(mode="car"), check_car),
     ("durée en s", base(duration={"value": 180, "unit": "s"}), check_seconds),
+    ("vitesse 10 km/h", base(network=network("walk", speed={"value": 10.0, "unit": "km/h"})), check_speed),
+    ("tolérance 250 m", base(origin={"x": CX, "y": CY + 500.0 + 200.0, "epsg": 2154}, network=network("walk", tolerance={"value": 250.0, "unit": "m"})), check_tolerance),
     ("origine en WGS84", base(origin={"x": centre_wgs.x(), "y": centre_wgs.y(), "epsg": 4326}), check_wgs),
     ("origine hors réseau", base(origin={"x": CX + 5000.0, "y": CY + 5000.0, "epsg": 2154}), code("analysis.origin_off_network")),
+    ("200 m du réseau, tolérance 100 m", base(origin={"x": CX, "y": CY + 500.0 + 200.0, "epsg": 2154}), code("analysis.origin_off_network")),
     ("réseau en degrés", base(layer_id=degrees.id()), code("analysis.crs_not_metric")),
     ("couche de points", base(layer_id=points.id()), code("analysis.bad_params")),
     ("réseau absent", base(layer_id="nope"), code("layer.not_found")),

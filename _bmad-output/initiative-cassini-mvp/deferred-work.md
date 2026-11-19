@@ -1242,3 +1242,15 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-annonce-fidele-chaine-presente-fournisseurs-charges-versions-plan.md`
   summary: Démarrage de l'extension non prouvé sous vrai QGIS (non vérifié, gravité medium) : repli `mainWindow().isVisible()`, attente sans fin possible, `gdal:warpreproject` fourni par le plugin Traitement.
   evidence: Aucun test ne tourne dans QGIS. À trancher par une sonde sous QGIS 3.44 et 4.x (AD-18) : hello envoyé avant ou après le chargement des fournisseurs, `data.reproject` annoncée.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-contrat-de-reseau-unique-et-isochrones-parametrees-plan.md`
+  summary: Le modèle voit le paramètre `network` d'`analysis.isochrone` sans exemple ni entraînement (non vérifié, gravité medium) : il peut en émettre sans que la phrase le demande.
+  evidence: `network` est un paramètre facultatif du schéma, donc de la grammaire et du prompt. À mesurer au ré-entraînement de fin d'epic 10 (phrases d'isochrone avec et sans vitesse), puis ajouter des exemples si besoin.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-contrat-de-reseau-unique-et-isochrones-parametrees-plan.md`
+  summary: Le résumé d'une isochrone ignore `network` : il dit « à pied » ou « en voiture » même avec une vitesse donnée.
+  evidence: `qgis-plugin/cassini_qgis/summary.py`, `_isochrone`, ne lit que `mode` et `duration`.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-contrat-de-reseau-unique-et-isochrones-parametrees-plan.md`
+  summary: `contract.rs` ne vérifie pas `network_param` (nom du paramètre, type, facultatif) comme il le fait pour `work_crs_param`.
+  evidence: une faute de frappe dans `.network_param("network","mode")` n'apparaît qu'à l'exécution.
