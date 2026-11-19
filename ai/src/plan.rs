@@ -7,6 +7,7 @@
 //! invalide n'est jamais réparé : on redemande une fois en citant les écarts,
 //! puis on rejette. Rien n'est montré ni exécuté avant cette validation.
 
+use std::collections::BTreeSet;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -114,8 +115,18 @@ impl From<AiError> for AgentError {
 
 /// Les commandes offertes au modèle : toutes, sauf celles que le noyau dicte seul
 /// (`dictated_by_core`, ticket 4.9). Le prompt et la grammaire restent ceux d'avant à l'octet.
-fn offered(registry: &Registry) -> impl Iterator<Item = &CommandSpec> {
-    registry.specs().filter(|s| !s.dictated_by_core)
+///
+/// `available` (ticket 5 de l'epic du catalogue étendu) : l'ensemble des commandes que la session
+/// peut exécuter (la règle `is_available` du noyau) ; `None` les offre toutes. L'ordre est celui du
+/// registre, jamais celui de l'ensemble : deux sessions qui annoncent le même ensemble donnent le
+/// même texte, donc le même préfixe de jetons repris par le cache.
+fn offered<'a>(
+    registry: &'a Registry,
+    available: Option<&'a BTreeSet<String>>,
+) -> impl Iterator<Item = &'a CommandSpec> {
+    registry
+        .specs()
+        .filter(move |s| !s.dictated_by_core && available.is_none_or(|set| set.contains(&s.id)))
 }
 
 /// Grammaire GBNF d'un plan : `{"kind":"calls","calls":[{"command":<id du
@@ -129,7 +140,12 @@ fn offered(registry: &Registry) -> impl Iterator<Item = &CommandSpec> {
 /// propres à la désérialisation, sens des références) est vérifié ensuite par `check_plan`.
 /// Format compact, sans espaces : c'est celui des exemples du prompt.
 pub fn plan_grammar(registry: &Registry) -> String {
-    plan_grammar_built(registry).0
+    plan_grammar_built(registry, None).0
+}
+
+/// La grammaire d'un plan limitée aux commandes de `available` (voir `offered`).
+pub fn plan_grammar_for(registry: &Registry, available: &BTreeSet<String>) -> String {
+    plan_grammar_built(registry, Some(available)).0
 }
 
 /// Écrit les replis de la grammaire sur la sortie d'erreur, une seule fois par processus : un
@@ -149,9 +165,12 @@ fn report_fallbacks(fallbacks: &[String]) {
 
 /// La grammaire d'un plan, et les champs dont le schéma n'a pas su se traduire (retombés sur le
 /// JSON libre), chacun par son chemin `commande/champ/...`.
-pub(crate) fn plan_grammar_built(registry: &Registry) -> (String, Vec<String>) {
+pub(crate) fn plan_grammar_built(
+    registry: &Registry,
+    available: Option<&BTreeSet<String>>,
+) -> (String, Vec<String>) {
     let mut params = ParamsGrammar::new();
-    let steps: Vec<String> = offered(registry)
+    let steps: Vec<String> = offered(registry, available)
         .map(|spec| params.step(&spec.id, &model_params(spec)))
         .collect();
     let mut text = if steps.is_empty() {
@@ -378,8 +397,8 @@ fn strip_marks(node: &mut Value) {
 
 /// La partie fixe du message système : consignes, catalogue et exemples. Elle ne dépend
 /// que du registre : c'est elle que le moteur garde lue d'une demande à l'autre.
-fn fixed_system_text(registry: &Registry) -> String {
-    let catalog: Vec<Value> = offered(registry).map(catalog_entry).collect();
+fn fixed_system_text(registry: &Registry, available: Option<&BTreeSet<String>>) -> String {
+    let catalog: Vec<Value> = offered(registry, available).map(catalog_entry).collect();
     let mut text = format!(
         "{SYSTEM}\n\nCATALOGUE :\n{}\n\nEXEMPLES :\n",
         Value::Array(catalog)
@@ -492,7 +511,7 @@ fn inventory_parts(
 /// Le message système : consignes, catalogue, exemples, puis inventaire (la partie fixe
 /// d'abord, ce qui change ensuite). Tout y est du texte (jamais lu comme balise de structure).
 pub fn system_text(registry: &Registry, inventory: &Value) -> String {
-    fixed_system_text(registry) + &inventory_text(inventory)
+    fixed_system_text(registry, None) + &inventory_text(inventory)
 }
 
 /// Consignes du prompt court. Copie, à l'octet près, de `SYSTEM` dans `training/src/prompt.rs`,
@@ -520,7 +539,7 @@ fn first_turns(
     inventory: &Value,
     request: &str,
 ) -> Vec<Turn> {
-    first_turns_anchored(style, registry, inventory, None, request)
+    first_turns_anchored(style, registry, None, inventory, None, request)
 }
 
 /// Les tours de la première tentative, dans le prompt `style`. La fin de la partie fixe est un
@@ -530,12 +549,13 @@ fn first_turns(
 fn first_turns_anchored(
     style: PromptStyle,
     registry: &Registry,
+    available: Option<&BTreeSet<String>>,
     inventory: &Value,
     user_layers: Option<usize>,
     request: &str,
 ) -> Vec<Turn> {
     let (head, lead) = match style {
-        PromptStyle::Full => (fixed_system_text(registry), FULL_INVENTORY_LEAD),
+        PromptStyle::Full => (fixed_system_text(registry, available), FULL_INVENTORY_LEAD),
         PromptStyle::Short => (SHORT_SYSTEM.to_string(), SHORT_INVENTORY_LEAD),
     };
     let (parts, anchor, rest) = inventory_parts(lead, inventory, user_layers);
@@ -687,6 +707,7 @@ pub fn compose_plan_anchored(
     compose_plan_anchored_cut(
         style,
         registry,
+        None,
         inventory,
         user_layers,
         None,
@@ -698,13 +719,17 @@ pub fn compose_plan_anchored(
 /// Même composition que `compose_plan_anchored`, quand on sait quelles couches détaillées de la
 /// vue triée ont perdu des champs (`cut_layers`, ticket 5.57) : le garde-fou des attributs
 /// contrôle alors un champ absent d'une couche entière. `None` : comportement de
-/// `compose_plan_anchored`.
+/// `compose_plan_anchored`. `available` : les seules commandes décrites au modèle, dans le prompt
+/// fixe et dans la grammaire (`None` : toutes les commandes offertes) ; un plan qui en nomme une
+/// autre reste refusé par `check_plan` puis par la vérification du noyau.
+#[allow(clippy::too_many_arguments)]
 pub fn compose_plan_anchored_cut(
     style: PromptStyle,
     registry: &Registry,
+    available: Option<&BTreeSet<String>>,
     inventory: &Value,
     user_layers: Option<usize>,
-    cut_layers: Option<&std::collections::BTreeSet<String>>,
+    cut_layers: Option<&BTreeSet<String>>,
     request: &str,
     generate: &mut dyn FnMut(&GenerationRequest) -> Result<Completion, AiError>,
 ) -> Result<Plan, AgentError> {
@@ -712,10 +737,11 @@ pub fn compose_plan_anchored_cut(
         return Err(AiError::EmptyPrompt.into());
     }
     let grammar_start = std::time::Instant::now();
-    let (grammar, fallbacks) = plan_grammar_built(registry);
+    let (grammar, fallbacks) = plan_grammar_built(registry, available);
     let grammar_build = grammar_start.elapsed();
     report_fallbacks(&fallbacks);
-    let mut turns = first_turns_anchored(style, registry, inventory, user_layers, request);
+    let mut turns =
+        first_turns_anchored(style, registry, available, inventory, user_layers, request);
     let mut last_errors = Vec::new();
     for attempt in 0..2 {
         let completion = match generate(&GenerationRequest {
@@ -1251,7 +1277,7 @@ mod tests {
     fn the_catalog_comes_from_the_real_registry_and_hides_output_paths() {
         let text = system_text(&registry(), &inventory());
         let reg = registry();
-        for spec in offered(&reg) {
+        for spec in offered(&reg, None) {
             assert!(
                 text.contains(&format!("\"id\":\"{}\"", spec.id)),
                 "{}",
@@ -1416,6 +1442,96 @@ mod tests {
         assert_eq!(retry[0], a[0]);
     }
 
+    /// Les identifiants offerts au modèle, sauf `without`.
+    fn available_without(reg: &Registry, without: &[&str]) -> BTreeSet<String> {
+        offered(reg, None)
+            .map(|s| s.id.clone())
+            .filter(|id| !without.contains(&id.as_str()))
+            .collect()
+    }
+
+    fn head_for(reg: &Registry, available: &BTreeSet<String>) -> String {
+        first_turns_anchored(
+            PromptStyle::Full,
+            reg,
+            Some(available),
+            &inventory(),
+            None,
+            "x",
+        )[0]
+        .cached_head
+        .clone()
+    }
+
+    #[test]
+    fn an_unannounced_command_is_in_neither_the_fixed_head_nor_the_grammar() {
+        let reg = registry();
+        let all = available_without(&reg, &[]);
+        // Tout annoncé : tête et grammaire comme sans ensemble, à l'octet.
+        assert_eq!(
+            fixed_system_text(&reg, Some(&all)),
+            fixed_system_text(&reg, None)
+        );
+        assert_eq!(plan_grammar_for(&reg, &all), plan_grammar(&reg));
+        // `data.reproject` non annoncée : absente des deux.
+        let fewer = available_without(&reg, &["data.reproject"]);
+        assert!(plan_grammar(&reg).contains("data.reproject"));
+        assert!(fixed_system_text(&reg, None).contains("\"id\":\"data.reproject\""));
+        assert!(!plan_grammar_for(&reg, &fewer).contains("data.reproject"));
+        // Une description voisine peut la citer ; sa propre entrée du catalogue, non.
+        assert!(!head_for(&reg, &fewer).contains("\"id\":\"data.reproject\""));
+        assert!(head_for(&reg, &fewer).contains("\"id\":\"analysis.buffer\""));
+        // Ensembles différents : têtes différentes.
+        assert_ne!(head_for(&reg, &all), head_for(&reg, &fewer));
+    }
+
+    #[test]
+    fn the_same_available_set_gives_the_same_head_byte_for_byte() {
+        let reg = registry();
+        let a = available_without(&reg, &["data.reproject"]);
+        // Un ensemble construit dans un autre ordre d'insertion donne la même tête.
+        let b: BTreeSet<String> = a.iter().rev().cloned().collect();
+        assert_eq!(head_for(&reg, &a), head_for(&reg, &b));
+        assert_eq!(plan_grammar_for(&reg, &a), plan_grammar_for(&reg, &b));
+    }
+
+    #[test]
+    fn an_empty_available_set_describes_no_command() {
+        let reg = registry();
+        let none = BTreeSet::new();
+        let grammar = plan_grammar_for(&reg, &none);
+        assert!(
+            grammar.starts_with(
+                "root ::= refusal | question
+"
+            ),
+            "{grammar}"
+        );
+        assert!(!head_for(&reg, &none).contains("\"id\":\"analysis.buffer\""));
+    }
+
+    #[test]
+    fn only_core_commands_are_described_when_no_qgis_command_is_announced() {
+        use cassini_core::registry::RunsIn;
+        let reg = registry();
+        let core: BTreeSet<String> = offered(&reg, None)
+            .filter(|s| s.runs_in != Some(RunsIn::Qgis))
+            .map(|s| s.id.clone())
+            .collect();
+        assert!(!core.is_empty());
+        let head = head_for(&reg, &core);
+        for spec in offered(&reg, None) {
+            let in_head = head.contains(&format!("\"id\":\"{}\"", spec.id));
+            assert_eq!(in_head, spec.runs_in != Some(RunsIn::Qgis), "{}", spec.id);
+            assert_eq!(
+                plan_grammar_for(&reg, &core).contains(&format!("\\\"{}\\\"", spec.id)),
+                spec.runs_in != Some(RunsIn::Qgis),
+                "{}",
+                spec.id
+            );
+        }
+    }
+
     #[test]
     fn the_examples_are_valid_plans_of_the_real_registry() {
         let reg = registry();
@@ -1462,8 +1578,8 @@ mod tests {
             .expect("une règle step");
         let alternatives: Vec<&str> = step.split(" | ").collect();
         // Une alternative par commande offerte, chacune avec sa règle de paramètres.
-        assert_eq!(alternatives.len(), offered(&reg).count());
-        for (spec, alt) in offered(&reg).zip(&alternatives) {
+        assert_eq!(alternatives.len(), offered(&reg, None).count());
+        for (spec, alt) in offered(&reg, None).zip(&alternatives) {
             let head = format!(
                 r#"{alt} ::= "{{\"command\":\"{}\",\"params\":" p-"#,
                 spec.id
@@ -1713,7 +1829,7 @@ mod tests {
     fn the_grammar_is_identical_measured_and_without_fallback() {
         let reg = registry();
         let start = std::time::Instant::now();
-        let (first, fallbacks) = plan_grammar_built(&reg);
+        let (first, fallbacks) = plan_grammar_built(&reg, None);
         let elapsed = start.elapsed();
         assert!(fallbacks.is_empty(), "replis : {fallbacks:?}");
         assert_eq!(first, plan_grammar(&reg));
@@ -1751,7 +1867,10 @@ mod tests {
             assert!(bare.remove(id));
         }
         assert_eq!(plan_grammar(&full), plan_grammar(&bare));
-        assert_eq!(fixed_system_text(&full), fixed_system_text(&bare));
+        assert_eq!(
+            fixed_system_text(&full, None),
+            fixed_system_text(&bare, None)
+        );
         assert_eq!(
             system_text(&full, &inventory()),
             system_text(&bare, &inventory())
@@ -1759,7 +1878,7 @@ mod tests {
         for id in &dictated {
             let id = id.as_str();
             assert!(!plan_grammar(&full).contains(id), "{id}");
-            assert!(!fixed_system_text(&full).contains(id), "{id}");
+            assert!(!fixed_system_text(&full, None).contains(id), "{id}");
             assert!(!system_text(&full, &inventory()).contains(id), "{id}");
         }
     }
@@ -2134,7 +2253,8 @@ mod tests {
         let after = epreuve();
         let mut removed = epreuve();
         removed["layers"].as_array_mut().unwrap().remove(users);
-        let turns = |inv: &Value| first_turns_anchored(style, &reg, inv, Some(users), request);
+        let turns =
+            |inv: &Value| first_turns_anchored(style, &reg, None, inv, Some(users), request);
         let run = |inv: &Value| {
             crate::generate_files_measured(
                 &files,

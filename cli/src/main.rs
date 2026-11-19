@@ -270,6 +270,7 @@ impl cassini_core::serve::Composer for ModelComposer {
     fn compose(
         &self,
         registry: &Registry,
+        available: &std::collections::BTreeSet<String>,
         request: &str,
         model: Option<&str>,
         inventory: &mut dyn FnMut() -> Result<
@@ -289,6 +290,7 @@ impl cassini_core::serve::Composer for ModelComposer {
         chosen
             .compose_cut(
                 registry,
+                Some(available),
                 &view.inventory,
                 Some(view.user_layers),
                 Some(&view.cut_layers),
@@ -374,14 +376,24 @@ impl ChosenModel {
             &cassini_ai::plan::GenerationRequest,
         ) -> Result<cassini_ai::Completion, cassini_ai::AiError>,
     ) -> Result<cassini_core::plan::Plan, cassini_ai::plan::AgentError> {
-        self.compose_cut(registry, inventory, user_layers, None, request, generate)
+        self.compose_cut(
+            registry,
+            None,
+            inventory,
+            user_layers,
+            None,
+            request,
+            generate,
+        )
     }
 
     /// Comme `compose`, avec la liste des couches coupées de la vue triée (ticket 5.57), que le
     /// garde-fou des attributs utilise pour contrôler un champ absent d'une couche entière.
+    #[allow(clippy::too_many_arguments)]
     fn compose_cut(
         &self,
         registry: &Registry,
+        available: Option<&std::collections::BTreeSet<String>>,
         inventory: &Value,
         user_layers: Option<usize>,
         cut_layers: Option<&std::collections::BTreeSet<String>>,
@@ -393,6 +405,7 @@ impl ChosenModel {
         cassini_ai::plan::compose_plan_anchored_cut(
             self.style,
             registry,
+            available,
             inventory,
             user_layers,
             cut_layers,
@@ -1696,15 +1709,21 @@ mod tests {
         ] {
             let mut asked = false;
             let e = composer
-                .compose(&registry, "Ouvre les gares.", Some(model), &mut || {
-                    asked = true;
-                    Ok(cassini_core::agent_inventory::ModelInventory {
-                        inventory: json!({}),
-                        user_layers: 0,
-                        left_out: Vec::new(),
-                        cut_layers: Default::default(),
-                    })
-                })
+                .compose(
+                    &registry,
+                    &Default::default(),
+                    "Ouvre les gares.",
+                    Some(model),
+                    &mut || {
+                        asked = true;
+                        Ok(cassini_core::agent_inventory::ModelInventory {
+                            inventory: json!({}),
+                            user_layers: 0,
+                            left_out: Vec::new(),
+                            cut_layers: Default::default(),
+                        })
+                    },
+                )
                 .unwrap_err();
             assert_eq!(e.code, code, "{model}");
             assert!(e.message.contains(model), "{}", e.message);

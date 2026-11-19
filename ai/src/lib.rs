@@ -951,6 +951,75 @@ mod tests {
         assert!(c.best(&toks(&[1, 2, 4, 5])).is_none());
     }
 
+    /// Un jeton par octet : assez pour comparer des préfixes sans charger de modèle (le préfixe de
+    /// jetons d'un vrai tokeniseur suit celui du texte à la coupe du prompt fixe).
+    fn byte_tokens(text: &str) -> Vec<LlamaToken> {
+        text.bytes()
+            .map(|b| LlamaToken::new(i32::from(b)))
+            .collect()
+    }
+
+    /// La tête et le tour système d'une composition, avec `available` pour ensemble des commandes
+    /// décrites (modèle factice, rien n'est chargé).
+    fn composed_system(
+        available: &std::collections::BTreeSet<String>,
+        inventory: &serde_json::Value,
+    ) -> (String, String) {
+        let registry = cassini_core::registry::Registry::standard();
+        let mut seen = None;
+        let _ = plan::compose_plan_anchored_cut(
+            plan::PromptStyle::Full,
+            &registry,
+            Some(available),
+            inventory,
+            None,
+            None,
+            "x",
+            &mut |r| {
+                let t = &r.turns[0];
+                seen = Some((
+                    t.cached_head.clone(),
+                    t.cached_head.clone() + &t.cached_parts.concat() + &t.text,
+                ));
+                Err(AiError::PromptTooLong)
+            },
+        );
+        seen.expect("la composition demande une génération")
+    }
+
+    /// Ticket 5 de l'epic du catalogue étendu : deux sessions qui annoncent le même ensemble ont la
+    /// même tête, donc le cache de 5.12 reprend le préfixe ; un autre ensemble ne le reprend pas.
+    #[test]
+    fn the_same_available_set_reuses_the_cached_head_and_another_does_not() {
+        use std::collections::BTreeSet;
+        let registry = cassini_core::registry::Registry::standard();
+        let all: BTreeSet<String> = registry
+            .specs()
+            .filter(|s| !s.dictated_by_core)
+            .map(|s| s.id.clone())
+            .collect();
+        let fewer: BTreeSet<String> = all
+            .iter()
+            .filter(|id| id.as_str() != "data.reproject")
+            .cloned()
+            .collect();
+        let first = serde_json::json!({"layers": [{"layer_id": "gares_1", "name": "Gares"}]});
+        let second = serde_json::json!({"layers": [{"layer_id": "routes_9", "name": "Routes"}]});
+        let (head_a, whole_a) = composed_system(&all, &first);
+        let mut c: Checkpoints<&str> = Checkpoints::default();
+        c.put(SLOT_HEAD, byte_tokens(&head_a), "tête");
+        // Deuxième session, même ensemble, autre inventaire : la tête est reprise en entier.
+        let (head_b, whole_b) = composed_system(&all, &second);
+        assert_eq!(head_a, head_b);
+        assert_ne!(whole_a, whole_b);
+        let taken = c.best(&byte_tokens(&whole_b)).expect("préfixe repris");
+        assert_eq!(taken.tokens, byte_tokens(&head_a));
+        // Un ensemble différent : la tête diffère, rien n'est repris.
+        let (head_c, whole_c) = composed_system(&fewer, &first);
+        assert_ne!(head_a, head_c);
+        assert!(c.best(&byte_tokens(&whole_c)).is_none());
+    }
+
     #[test]
     fn a_refused_restore_forgets_every_checkpoint_and_reads_everything() {
         let mut c: Checkpoints<&str> = Checkpoints::default();

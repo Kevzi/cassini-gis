@@ -135,6 +135,7 @@ impl Composer for FakeComposer {
     fn compose(
         &self,
         _registry: &Registry,
+        _available: &std::collections::BTreeSet<String>,
         _request: &str,
         _model: Option<&str>,
         _inventory: &mut dyn FnMut() -> Result<ModelInventory, ErrorReport>,

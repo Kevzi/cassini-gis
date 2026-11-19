@@ -661,3 +661,46 @@ Limites à connaître :
 
 Mesures avec le modèle (base `e912a11` contre la branche, GPU) : à faire, après la fin de
 l'entraînement en cours.
+
+## Le modèle ne voit que les commandes disponibles (epic du catalogue étendu, ticket 5, 2026-11-19)
+
+Le noyau passe à l'agent l'ensemble des commandes disponibles (la règle `is_available` de
+`serve.rs`) ; le prompt fixe et la grammaire n'y décrivent que celles-là, dans l'ordre du registre.
+Deux sessions qui annoncent le même ensemble ont donc la même tête, octet pour octet, et le cache
+de 5.12 reprend son préfixe ; un ensemble différent repart de zéro (un seul `SLOT_HEAD`).
+
+**Mesure avec le catalogue complet** (registre standard, toutes les commandes offertes, donc le plus
+long cas), modèle livré `cassini-composition-4b.modele.json` (prompt court), construit sans CUDA,
+`CASSINI_TEST_THREADS=4`, masque `0x55` (4 cœurs physiques, Ryzen 7 5800X), inventaire traduit de
+Villeneuve-le-Roi (hors dépôt), phrases A0 à E. L'essai `duree_reel` compose avec toutes les
+commandes offertes (`compose_plan_anchored`), sans filtrer : c'est le cas du catalogue complet.
+
+```powershell
+$env:CARGO_TARGET_DIR = "C:\ct"
+cargo test --release -p cassini-ai --test duree_reel --no-run
+$exe = Get-ChildItem C:\ct\release\deps\duree_reel-*.exe | Where-Object Extension -eq ".exe" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$env:CASSINI_TEST_MODEL = "$env:LOCALAPPDATA\Cassini\bin\models\cassini-composition-4b.modele.json"
+$env:CASSINI_TEST_THREADS = "4"
+$env:CASSINI_TEST_INVENTORY = "<donnees-test-cassini>\inventaire-villeneuve-traduit-4b.json"
+$p = Start-Process $exe.FullName -ArgumentList "--ignored","--nocapture","duree_reel" -NoNewWindow -PassThru -RedirectStandardOutput mesure-4.txt
+$p.ProcessorAffinity = [IntPtr]0x55
+$p.WaitForExit()
+```
+
+| id | lecture du prompt (s) | jetons repris | écriture (s) | jetons écrits | total (s) | issue |
+|---|---|---|---|---|---|---|
+| amorce (première phrase) | 27,1 | 0 | 2,9 | 17 | 33,1 | plan, 1 étape |
+| A0 (phrase de démo) | 1,3 | 1 554 | 27,2 | 165 | **28,5** | plan, 5 étapes |
+| A | 1,1 | 1 554 | 26,8 | 169 | 28,0 | plan, 5 étapes |
+| B1 | 0,5 | 1 554 | 6,7 | 42 | 7,3 | plan, 1 étape |
+| B2 | 0,7 | 1 554 | 15,1 | 97 | 15,8 | plan, 3 étapes |
+| B3 | 0,5 | 1 554 | 3,8 | 23 | 4,4 | plan, 1 étape |
+| C | 0,7 | 1 554 | 10,4 | 63 | 11,2 | plan, 2 étapes |
+| D | 0,6 | 1 554 | 6,0 | 27 | 6,7 | question |
+| E | 0,8 | 1 554 | 6,4 | 37 | 7,2 | question |
+
+Moyenne hors amorce : 13,6 s ; la plus longue, A0, 28,5 s : toutes sous 30 s hors première phrase,
+comme avant (A0 : 27,9 s au 5.9). Avec le prompt court du modèle livré, seule la grammaire
+s'allège quand une commande n'est pas annoncée ; la tête du prompt long (`SYSTEM` + catalogue +
+exemples) ne sert qu'aux modèles non ajustés. Pas de mesure d'un ensemble réduit : le critère est
+celui du catalogue complet.

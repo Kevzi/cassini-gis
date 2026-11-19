@@ -1931,6 +1931,8 @@ mod tests {
         seen: std::sync::Arc<std::sync::Mutex<Vec<Value>>>,
         /// Modèle demandé à chaque composition, dans l'ordre.
         chosen: std::sync::Arc<std::sync::Mutex<Vec<Option<String>>>>,
+        /// Ensemble des commandes disponibles reçu à chaque composition, dans l'ordre.
+        available: std::sync::Arc<std::sync::Mutex<Vec<std::collections::BTreeSet<String>>>>,
         /// Applique le garde-fou des attributs au plan rendu, sur la vue reçue, comme le
         /// compositeur réel (ticket 5.57).
         guard_attributes: bool,
@@ -1940,6 +1942,7 @@ mod tests {
         fn compose(
             &self,
             registry: &Registry,
+            available: &std::collections::BTreeSet<String>,
             _request: &str,
             model: Option<&str>,
             inventory: &mut dyn FnMut() -> Result<
@@ -1948,6 +1951,7 @@ mod tests {
             >,
         ) -> Result<crate::plan::Plan, ErrorReport> {
             self.chosen.lock().unwrap().push(model.map(str::to_string));
+            self.available.lock().unwrap().push(available.clone());
             let mut shown = Value::Null;
             let mut cut_layers = std::collections::BTreeSet::new();
             if self.inventory {
@@ -2012,6 +2016,7 @@ mod tests {
             first: Default::default(),
             seen: Default::default(),
             chosen: Default::default(),
+            available: Default::default(),
             guard_attributes: false,
         })
     }
@@ -2969,6 +2974,7 @@ mod tests {
                 first: Default::default(),
                 seen: Default::default(),
                 chosen: Default::default(),
+                available: Default::default(),
                 guard_attributes: false,
             };
             let mut c = Client::start_with(CANCEL_GRACE, Some(failing));
@@ -3873,6 +3879,7 @@ mod tests {
             ),
             seen: Default::default(),
             chosen: Default::default(),
+            available: Default::default(),
             guard_attributes: false,
         };
         let mut c = Client::start_with(CANCEL_GRACE, Some(composer));
@@ -4607,6 +4614,21 @@ mod tests {
             *chosen.lock().unwrap(),
             vec![None, Some("b.gguf".to_string()), None]
         );
+        c.close().1.unwrap();
+    }
+
+    #[test]
+    fn propose_hands_the_composer_exactly_the_available_commands() {
+        let composer = composer(three_steps()).unwrap();
+        let seen = composer.available.clone();
+        let mut c = Client::start_with(CANCEL_GRACE, Some(composer));
+        // `test.render` n'est pas annoncée : le compositeur ne la reçoit pas.
+        c.hello_with(&["test.make", "test.fixed", "project.inventory"]);
+        assert_eq!(c.propose(2)["result"]["plan_id"], "plan-1");
+        let sets = seen.lock().unwrap().clone();
+        assert_eq!(sets.len(), 1);
+        assert!(sets[0].contains("test.make") && sets[0].contains("test.fixed"));
+        assert!(!sets[0].contains("test.render"), "{:?}", sets[0]);
         c.close().1.unwrap();
     }
 

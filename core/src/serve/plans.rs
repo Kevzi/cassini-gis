@@ -10,6 +10,7 @@
 //! Avant d'être gardé, le plan du modèle est complété par les conversions de points
 //! (`plan_completion`, ticket 11.22) : seul `plan.propose` le fait, jamais `command.run`.
 
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use serde_json::{json, Value};
@@ -37,10 +38,13 @@ pub trait Composer {
     /// vérifié ensuite par le noyau ; un refus du modèle se rend en erreur `agent.refused`, une
     /// question (`Plan::Question`) en résultat `{"question", "source"}`, sans `plan_id` : elle n'est
     /// jamais gardée, donc jamais exécutable. `model` est un nom de la liste de `models`
-    /// (comparé tel quel) ; absent, le premier modèle sans problème.
+    /// (comparé tel quel) ; absent, le premier modèle sans problème. `available` : les
+    /// identifiants des commandes que la session peut exécuter (la règle `is_available`, AD-7) ;
+    /// le modèle n'en décrit pas d'autres, et un plan qui en nomme une reste refusé par `verify`.
     fn compose(
         &self,
         registry: &Registry,
+        available: &BTreeSet<String>,
         request: &str,
         model: Option<&str>,
         inventory: &mut dyn FnMut() -> Result<ModelInventory, ErrorReport>,
@@ -145,6 +149,13 @@ pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<V
     let work_dir = state.session.as_ref().map(|s| s.work_dir().to_path_buf());
     let journal = state.session.as_ref().map(|s| s.journal_path());
     let registry = state.registry;
+    // Les commandes que le modèle peut voir : celles de la règle d'AD-7, ni plus ni moins que
+    // `verify` en acceptera.
+    let available: BTreeSet<String> = registry
+        .specs()
+        .filter(|spec| is_available(state, &spec.id, spec.runs_in))
+        .map(|spec| spec.id.clone())
+        .collect();
     // L'inventaire lu pour la première composition, gardé pour la redemande élargie : ni second
     // ordre à l'extension, ni autre état du projet entre les deux vues.
     let mut read: Option<Snapshot> = None;
@@ -196,7 +207,7 @@ pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<V
             Ok(model_view)
         };
         composer
-            .compose(state.registry, request, model, &mut inventory)
+            .compose(state.registry, &available, request, model, &mut inventory)
             .map_err(RpcError::business)?
     };
     // Redemande élargie (ticket 5.48, AD-23) : un plan qui fait porter un paramètre de champ sur
@@ -219,7 +230,7 @@ pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<V
             Ok(model_view)
         };
         plan = composer
-            .compose(state.registry, request, model, &mut inventory)
+            .compose(state.registry, &available, request, model, &mut inventory)
             .map_err(RpcError::business)?;
     }
     let (short_ids, left_out) = match shown {
