@@ -389,10 +389,11 @@ class BrowsePathTest(unittest.TestCase):
         fields = form.build_fields(
             {"type": "object", "properties": {
                 "path": {"type": "string"}, "out_path": {"type": "string"},
+                "table": {"type": ["string", "null"]},
                 "name": {"type": "string"}, "flag": {"type": "boolean"}}}
         )
         found = sorted(f.name for f in fields if form.is_path_field(f))
-        self.assertEqual(found, ["out_path", "path"])
+        self.assertEqual(found, ["out_path", "path", "table"])
 
     def test_layer_fields_are_recognised(self):
         fields = form.build_fields(

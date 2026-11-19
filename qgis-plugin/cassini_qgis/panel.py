@@ -1925,8 +1925,13 @@ class CassiniPanel(QWidget):
             self.form_layout.addRow(label, row)
         layers = self._inputs.get("layer_id")
         for name, widget in self._inputs.items():
-            # `weight_field` désigne un champ des points, pas des zones : il suit la couche de points.
-            source = self._inputs.get("points_layer_id") if name == "weight_field" else layers
+            # `weight_field` désigne un champ des points, pas des zones : il suit la couche de points ;
+            # `table_field`, un champ du tableau : il suit la couche du tableau (`analysis.join_table`).
+            source = layers
+            if name == "weight_field":
+                source = self._inputs.get("points_layer_id")
+            elif name == "table_field":
+                source = self._inputs.get("table_layer_id")
             if isinstance(widget, FieldCombo) and source is not None:
                 widget.bind(source)
 

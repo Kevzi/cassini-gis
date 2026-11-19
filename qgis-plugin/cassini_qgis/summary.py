@@ -312,6 +312,26 @@ def _nearest(lang, p, r, names):
     return text
 
 
+def _join_table(lang, p, r, names):
+    field, table_field = p.get("field"), p.get("table_field")
+    if not isinstance(field, str) or not field or not isinstance(table_field, str) or not table_field:
+        raise _Unreadable()
+    text = texts.tr(
+        lang,
+        "sum_join",
+        table=names.layer(p.get("table_layer_id")),
+        layer=names.layer(p.get("layer_id")),
+        field=field if field == table_field else "%s = %s" % (field, table_field),
+    )
+    if not r:
+        return text
+    text += _out_layer(lang, r)
+    unmatched = r.get("unmatched_count")
+    if _is_int(unmatched) and unmatched > 0:
+        text += texts.tr(lang, "sum_join_unmatched", count=count(lang, "entities", unmatched))
+    return text
+
+
 def _statistics_by_category(lang, p, r, names):
     """Le tableau écrit par QGIS : un fichier, jamais une couche ; affichage seul (AD-5)."""
     field = p.get("category_field")
@@ -359,7 +379,7 @@ def _sum_line_lengths(lang, p, r, names):
 
 
 def _layer_add(lang, p, r, names):
-    file = file_name(p.get("path"))
+    file = file_name(p.get("path") if p.get("path") is not None else p.get("table"))
     name = r.get("name") if r else None
     if not isinstance(name, str) or not name:
         return texts.tr(lang, "sum_layer_add", file=file)
@@ -999,6 +1019,7 @@ _SENTENCES = {
     "analysis.isochrone": _isochrone,
     "analysis.count_points_in_polygon": _count_points,
     "analysis.nearest": _nearest,
+    "analysis.join_table": _join_table,
     "analysis.statistics_by_category": _statistics_by_category,
     "analysis.sum_line_lengths": _sum_line_lengths,
     "layer.add": _layer_add,

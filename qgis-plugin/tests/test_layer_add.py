@@ -30,7 +30,7 @@ class FakeBackend:
     def load(self, path, name, provider, csv=None):
         self.loaded.append((path, name, provider))
         self.csv = csv
-        if csv is not None:
+        if csv is not None and "crs" in csv:
             self.crs = csv["crs"]  # le SCR est dans l'URI du fournisseur
         if self.valid and os.path.exists(path):
             with open(path, "rb") as f:
@@ -74,6 +74,14 @@ class Harness:
     def pump(self):
         while self.queue:
             self.queue.pop(0)()
+
+
+def run_params(backend, params):
+    h = Harness(backend)
+    h.gesture.start(params, lambda result=None, error=None: h.calls.append((result, error)))
+    h.pump()
+    assert len(h.calls) == 1
+    return h.calls[0]
 
 
 def run(backend, path, crs=None, **extra):
@@ -179,7 +187,7 @@ class LayerAddTest(unittest.TestCase):
 
     def test_missing_path(self):
         h = Harness(FakeBackend())
-        h.gesture.start({}, lambda result=None, error=None: h.calls.append((result, error)))
+        h.gesture.start({"path": ""}, lambda result=None, error=None: h.calls.append((result, error)))
         h.pump()
         self.assertEqual(h.calls[0][1].code, "layer.invalid_source")
 
@@ -217,6 +225,43 @@ class LayerAddTest(unittest.TestCase):
         b = FakeBackend()
         _, error = run(b, "g.csv", "EPSG:2154", x_field="  ")
         self.assertEqual(error.code, "layer.invalid_column")
+        self.assertEqual(b.loaded, [])
+
+    def test_a_table_opens_without_geometry_and_without_crs(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "prix.csv")
+            with open(p, "wb") as f:
+                f.write(b"code,prix\n01001,100\n")
+            before = os.stat(p)
+            b = FakeBackend(crs="", project_crs="EPSG:2154")
+            result, error = run_params(b, {"table": p})
+            self.assertIsNone(error)
+            self.assertEqual(b.loaded[0][2], "delimitedtext")
+            self.assertEqual(b.csv, {"table": True})
+            self.assertEqual(
+                result,
+                {"layer_id": "layer_1", "name": "prix", "source_crs": "", "project_crs": "EPSG:2154", "reprojected": False},
+            )
+            self.assertEqual(len(b.added), 1)
+            after = os.stat(p)
+            self.assertEqual((before.st_size, before.st_mtime_ns), (after.st_size, after.st_mtime_ns))
+
+    def test_path_and_table_together_or_neither_are_refused(self):
+        for params in ({"path": "a.gpkg", "table": "t.csv"}, {}):
+            b = FakeBackend()
+            _, error = run_params(b, params)
+            self.assertEqual(error.code, "layer.one_input", params)
+            self.assertEqual((b.loaded, b.added), ([], []))
+
+    def test_a_table_takes_no_coordinate_option_and_only_csv(self):
+        for extra in ({"crs": "EPSG:2154"}, {"x_field": "X"}, {"y_field": "Y"}):
+            b = FakeBackend(crs="")
+            _, error = run_params(b, dict(extra, table="t.csv"))
+            self.assertEqual(error.code, "layer.one_input", extra)
+            self.assertEqual(b.loaded, [])
+        b = FakeBackend(crs="")
+        _, error = run_params(b, {"table": "t.xlsx"})
+        self.assertEqual(error.code, "layer.unsupported_format")
         self.assertEqual(b.loaded, [])
 
     def test_parquet_goes_through_ogr(self):

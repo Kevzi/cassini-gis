@@ -375,7 +375,7 @@ donne l'esquisse.
 | `analysis.distance_matrix` | planifiée | qgis | epic 10, entrée 10 |
 | `analysis.statistics_by_category` | faite | qgis | epic 10, entrée 11 |
 | `analysis.sum_line_lengths` | faite | qgis | epic 10, entrée 11 |
-| `analysis.join_table` | planifiée | qgis | epic 10, entrée 23 |
+| `analysis.join_table` | faite | qgis | epic 10, entrée 23 |
 | `analysis.dissolve` | planifiée | qgis | epic 10, entrée 24 |
 | `raster.zonal_statistics` | planifiée | qgis | epic 10, entrée 12 |
 | `raster.polygonize` | planifiée | qgis | epic 10 (entrée ajoutée après la 12) |
@@ -454,15 +454,15 @@ Ajoute au projet une couche d'un fichier GeoPackage, Shapefile, GeoJSON, GeoParq
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
-| `path` | chaîne | oui | `.gpkg`, `.shp`, `.geojson`, `.parquet`, `.csv` | Fichier à ouvrir, relatif au projet. |
+| `path` | chaîne | non | `.gpkg`, `.shp`, `.geojson`, `.parquet`, `.csv` | Fichier à ouvrir, relatif au projet. |
 | `crs` | chaîne | non | code explicite (`EPSG:2154`) | Système à donner quand le fichier n'en dit rien ; obligatoire pour un CSV. |
 | `x_field` | chaîne | non | défaut `X` | CSV : colonne des abscisses. |
 | `y_field` | chaîne | non | défaut `Y` | CSV : colonne des ordonnées. |
 | `raster` | `RasterPath` | non | GeoTIFF | **Epic 10, entrée 20** : raster à ouvrir (AD-24 amendée : un raster se désigne par `RasterPath`, jamais par un identifiant de couche). |
-| `table` | chaîne | non | `.csv`, relatif au projet | **Epic 10, entrée 23** : table sans géométrie, ouverte comme couche vecteur sans géométrie (ni `crs`, ni `x_field`, ni `y_field`). |
+| `table` | chaîne | non | `.csv`, relatif au projet | Entrée 10.23, faite : table sans géométrie, ouverte comme couche vecteur sans géométrie (ni `crs`, ni `x_field`, ni `y_field`), toutes ses colonnes en texte (les zéros de tête des codes sont conservés). |
 
-Après les entrées 10.20 et 10.23, `path` devient facultatif : exactement un de `path`,
-`raster` et `table` est donné, sinon l'erreur `layer.one_input`.
+Depuis l'entrée 10.23, `path` est facultatif : exactement un de `path` et `table` est donné,
+sinon l'erreur `layer.one_input` (l'entrée 10.20 y ajoutera `raster`).
 
 | Résultat | Type | Sens |
 |---|---|---|
@@ -471,19 +471,18 @@ Après les entrées 10.20 et 10.23, `path` devient facultatif : exactement un de
 | `project_crs` | chaîne | Système du projet. |
 | `reprojected` | booléen | Vrai si QGIS reprojette à l'affichage. |
 | `source_crs` | chaîne | Système de la couche (vide pour une table sans géométrie). |
-| `kind` | chaîne | **Epics 10.20 et 10.23** : `vector`, `raster` ou `table`. |
+| `kind` | chaîne | **Epic 10.20** : `vector` ou `raster`. Une table sans géométrie reste `vector` (AD-24, pas de nouveau genre). |
 
 ```json fiche
 {"id": "layer.add", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
- "params": {"path": {"type": "string", "required": true},
+ "params": {"path": {"type": "string", "required": false},
             "crs": {"type": "string", "required": false},
             "x_field": {"type": "string", "required": false},
-            "y_field": {"type": "string", "required": false}},
+            "y_field": {"type": "string", "required": false},
+            "table": {"type": "string", "required": false}},
  "result": ["layer_id", "name", "project_crs", "reprojected", "source_crs"],
- "planned_by": "epic 10, entrée 20 (raster) et entrée 23 (table)",
- "planned_params": {"path": {"type": "string", "required": false},
-                    "raster": {"type": "RasterPath", "required": false},
-                    "table": {"type": "string", "required": false}},
+ "planned_by": "epic 10, entrée 20 (raster)",
+ "planned_params": {"raster": {"type": "RasterPath", "required": false}},
  "planned_result": ["kind"]}
 ```
 
@@ -2052,7 +2051,7 @@ vecteur sans géométrie, par un champ commun (epic 10, entrée 23).
 | `unmatched_count` | entier | Entités sans correspondance dans la table. |
 
 ```json fiche
-{"id": "analysis.join_table", "status": "planifiee", "runs_in": "qgis", "dictated_by_core": false,
+{"id": "analysis.join_table", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
  "params": {"layer_id": {"type": "string", "required": true},
             "field": {"type": "string", "required": true},
             "table_layer_id": {"type": "string", "required": true},

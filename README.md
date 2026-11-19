@@ -108,7 +108,7 @@ Une couche que Cassini ne reconnaît pas garde son style : il ne devine pas.
 
 | Commande | Ce qu'elle fait |
 |---|---|
-| `layer.add` | ouvre un fichier vecteur sans le toucher |
+| `layer.add` | ouvre un fichier vecteur sans le toucher, ou, par `table`, un tableau CSV sans géométrie (prix DVF, données INSEE) |
 | `project.inventory`, `layer.describe` | décrivent le projet et ses couches, pour vous et pour l'IA |
 | `layer.remove` | retire une couche du projet, sans effacer ni modifier son fichier |
 | `data.reproject`, `data.convert`, `data.convert_raster` | reprojettent une couche, la convertissent dans un autre format, écrivent un raster (ASCII Grid, IMG, JP2…) en GeoTIFF pour les commandes de terrain |
@@ -118,6 +118,7 @@ Une couche que Cassini ne reconnaît pas garde son style : il ne devine pas.
 | `analysis.select_by_attribute` | sélection par attribut |
 | `analysis.count_points_in_polygon` | nombre de points dans chaque zone, avec somme pondérée facultative |
 | `analysis.nearest` | jointure au plus proche voisin : attributs de l'entité la plus proche d'une autre couche, et distance en mètres |
+| `analysis.join_table` | joint les colonnes d'un tableau CSV à une couche par un champ commun (code INSEE, numéro de parcelle) ; première ligne retenue en cas de clé en double, entités sans ligne gardées et comptées |
 | `analysis.statistics_by_category` | nombre d'entités, et somme d'un champ numérique, par valeur d'un champ de catégorie ; tableau écrit à côté du projet, sans géométrie |
 | `analysis.sum_line_lengths` | longueur des lignes d'une couche dans chaque polygone d'une autre, en mètres ou en kilomètres (couche en degrés mesurée dans un système en mètres) |
 | `analysis.isochrone` | isochrones à pied et en voiture sur un réseau |

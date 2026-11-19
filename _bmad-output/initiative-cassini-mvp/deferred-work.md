@@ -1254,3 +1254,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-contrat-de-reseau-unique-et-isochrones-parametrees-plan.md`
   summary: `contract.rs` ne vérifie pas `network_param` (nom du paramètre, type, facultatif) comme il le fait pour `work_crs_param`.
   evidence: une faute de frappe dans `.network_param("network","mode")` n'apparaît qu'à l'exécution.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-jointure-d-une-table-a-une-couche-analysis-join-table-plan.md`
+  summary: Jointure dont la couche d'entrée est elle-même une table sans géométrie (non vérifié, gravité medium si vrai).
+  evidence: `analysis.join_table` accepte toute couche vecteur en `layer_id` ; avec une entrée sans géométrie, le `crs` de sortie est vide et `_load` peut échouer ; une sonde sous QGIS 3.44 le tranchera.

@@ -4,6 +4,7 @@
   "analysis.select_by_attribute": true,
   "analysis.count_points_in_polygon": true,
   "analysis.nearest": true,
+  "analysis.join_table": true,
   "analysis.statistics_by_category": true,
   "analysis.sum_line_lengths": true,
   "analysis.isochrone": true,

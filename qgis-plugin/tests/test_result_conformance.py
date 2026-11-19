@@ -157,6 +157,18 @@ def _count_points(pairs, loaded_count, weight=None):
     return lambda: _analysis(ta.CountPointsInPolygonTest, setup)
 
 
+def _join_table():
+    t = ta.JoinTableTest("setUp")
+    t.setUp()
+    try:
+        _, calls = ta.start(t.entry, t.backend, t.params())
+        t.backend.finished(True, {"OUTPUT": "jointe", "UNJOINABLE_COUNT": 1})
+        assert calls[0][1] is None, calls
+        return calls[0][0]
+    finally:
+        t.tearDown()
+
+
 def _nearest():
     t = ta.NearestTest("setUp")
     t.setUp()
@@ -260,6 +272,12 @@ def _layer_add(crs):
         return result
 
     return produce
+
+
+def _layer_add_table():
+    result, error = tla.run_params(tla.FakeBackend(crs=""), {"table": "prix.csv"})
+    assert error is None, error
+    return result
 
 
 def _arrange():
@@ -395,6 +413,7 @@ def producers():
         ("analysis.buffer", "couche créée"): _buffer,
         ("analysis.intersect", "couche créée"): _intersect,
         ("analysis.isochrone", "un polygone"): _isochrone,
+        ("analysis.join_table", "une entité sans ligne"): _join_table,
         ("analysis.nearest", "couche créée"): _nearest,
         ("analysis.select_by_attribute", "entités retenues"): _select,
         ("analysis.statistics_by_category", "comptes seuls"): _statistics(
@@ -420,6 +439,7 @@ def producers():
         ("data.transform_point", "point reprojeté"): _transform_point,
         ("layer.add", "reprojetée à l'affichage"): _layer_add("EPSG:4326"),
         ("layer.add", "non reprojetée"): _layer_add("EPSG:2154"),
+        ("layer.add", "tableau sans géométrie"): _layer_add_table,
         ("layer.arrange", "trois groupes"): _arrange,
         ("layer.describe", "avec emprise"): _describe(gares),
         ("layer.describe", "sans emprise"): _describe(vide),

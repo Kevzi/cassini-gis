@@ -8,6 +8,10 @@
   {"id": "analysis.isochrone", "case": "un polygone",
    "result": {"layer_id": "iso_1", "name": "5-analysis.isochrone", "feature_count": 1, "crs": "EPSG:2154"}},
 
+  {"id": "analysis.join_table", "case": "une entité sans ligne",
+   "result": {"layer_id": "jointe_1", "name": "4-analysis.join_table", "feature_count": 5, "crs": "EPSG:2154",
+              "unmatched_count": 1}},
+
   {"id": "analysis.nearest", "case": "couche créée",
    "result": {"layer_id": "voisin_1", "name": "3-analysis.nearest", "feature_count": 5, "crs": "EPSG:2154",
               "distance_field": "distance", "unit": "m", "unmatched_count": 0}},
@@ -82,6 +86,9 @@
               "project_crs": "EPSG:2154", "reprojected": true}},
   {"id": "layer.add", "case": "non reprojetée",
    "result": {"layer_id": "layer_2", "name": "gares", "source_crs": "EPSG:2154",
+              "project_crs": "EPSG:2154", "reprojected": false}},
+  {"id": "layer.add", "case": "tableau sans géométrie",
+   "result": {"layer_id": "layer_1", "name": "prix", "source_crs": "",
               "project_crs": "EPSG:2154", "reprojected": false}},
 
   {"id": "layer.arrange", "case": "trois groupes",

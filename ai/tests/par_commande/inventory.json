@@ -242,6 +242,29 @@
       "feature_count": null,
       "source": "donnees/releve_terrain_2019.asc",
       "fields": []
+    },
+    {
+      "layer_id": "prix_mutations_7d2b9e4c_3a58_4f01_b6e7_2c9a1d80f354",
+      "name": "Prix des mutations",
+      "kind": "vector",
+      "geometry": "NoGeometry",
+      "epsg": null,
+      "feature_count": 4310,
+      "source": "donnees/prix_mutations.csv",
+      "fields": [
+        {
+          "name": "id_parcelle",
+          "type": "string"
+        },
+        {
+          "name": "prix_eur",
+          "type": "string"
+        },
+        {
+          "name": "annee",
+          "type": "string"
+        }
+      ]
     }
   ],
   "unloaded_files": [

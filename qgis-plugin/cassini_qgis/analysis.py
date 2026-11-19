@@ -418,6 +418,38 @@ def summarize_nearest(backend, layer, params):
     }
 
 
+def translate_join_table(params, layer):
+    """Paramètres neutres de `analysis.join_table` -> paramètres de `native:joinattributestable`.
+
+    Tous les champs de la table sont copiés (liste vide), `METHOD=1` : une seule correspondance par
+    entité, la première de la table (déterministe, `feature_count` inchangé) ; aucune entité écartée :
+    une entité sans ligne reste, colonnes vides. Un nom de colonne déjà pris est renommé par QGIS
+    (`_2`), la clé de la table est recopiée aussi (sonde `probe_join_table.py`). La table est la
+    seconde couche, ajoutée par le geste (clé `overlay`) ; ses champs sont des textes, car `layer.add`
+    l'ouvre sans détection de types.
+    """
+    return {
+        "INPUT": layer,
+        "FIELD": params["field"],
+        "FIELD_2": params["table_field"],
+        "FIELDS_TO_COPY": [],  # liste vide : tous les champs de la table
+        "METHOD": 1,  # première correspondance
+        "DISCARD_NONMATCHING": False,
+        "PREFIX": "",
+    }
+
+
+_UNJOINED_COUNT = "UNJOINABLE_COUNT"  # sortie de `native:joinattributestable` : entités sans ligne
+
+
+def summarize_join_table(backend, layer, params, results):
+    """Nombre d'entités sans ligne correspondante, lu sur la sortie de l'algorithme (clé `summary`)."""
+    count = results.get(_UNJOINED_COUNT) if isinstance(results, dict) else None
+    if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+        raise GestureError(FAILED, "La jointure n'a pas rendu le nombre d'entités sans correspondance.")
+    return {"unmatched_count": count}
+
+
 # Champ temporaire qui porte le champ à sommer, nuls ramenés à 0 : `qgis:statisticsbycategories` ignore
 # les entités dont la valeur est nulle, ce qui fausserait le décompte. Il n'existe que dans la chaîne.
 _SUM_PREPARED_FIELD = "cassini_sum"
@@ -534,6 +566,11 @@ def summarize_sum_line_lengths(backend, layer, params):
 #   numeric_field : (facultatif) paramètre du noyau qui nomme un champ numérique de la couche d'entrée ;
 #               absent, rien n'est vérifié ; présent, un champ inconnu est `analysis.unknown_field` et un
 #               champ non numérique `analysis.bad_params`, avant tout lancement ;
+#   overlay_field : (facultatif, avec `overlay`) paramètre du noyau qui nomme un champ de la seconde
+#               couche, de n'importe quel type ; un champ inconnu est `analysis.unknown_field`, avant
+#               tout lancement ;
+#   summary_results : (facultatif, avec `summary`) le résumé reçoit aussi les sorties de l'algorithme
+#               de la dernière étape : `summary(fond, couche, params, résultats)` ;
 #   overlay_geometry : (facultatif, avec `overlay`) type de géométrie exigé de la seconde couche ;
 #   target_crs: (facultatif) paramètre du noyau qui porte un code EPSG d'arrivée ; le fond
 #               doit le connaître (`crs_is_known`), sinon `data.unknown_crs`, avant tout
@@ -661,6 +698,23 @@ ALGORITHMS = {
         "work_crs": WORK_EPSG,
         "overlay": "target_layer_id",
         "summary": summarize_nearest,
+    },
+    "analysis.join_table": {
+        "chain_version": 1,
+        "chain": [
+            {
+                "algorithm": "native:joinattributestable",
+                "translate": translate_join_table,
+                "output": "OUTPUT",
+                "overlay_key": "INPUT_2",
+            },
+        ],
+        "input": "layer_id",
+        "overlay": "table_layer_id",
+        "overlay_field": "table_field",
+        "field": "field",
+        "summary": summarize_join_table,
+        "summary_results": True,
     },
     "analysis.statistics_by_category": {
         "chain_version": 1,
@@ -813,6 +867,7 @@ CANCELLABLE_ALGORITHMS = frozenset(
         "native:extractbyattribute",
         "native:countpointsinpolygon",
         "native:joinbynearest",
+        "native:joinattributestable",
         "native:extractbyexpression",
         "native:fieldcalculator",
         "qgis:statisticsbycategories",
@@ -1288,6 +1343,7 @@ class ProcessingGesture:
         self._steps = []  # étapes actives de la chaîne (celles dont `when` est rempli)
         self._index = 0  # étape en cours
         self._overlay_layer = None
+        self._results = None
 
     def start(self, params, done):
         self._done = done
@@ -1378,6 +1434,8 @@ class ProcessingGesture:
             overlay = self._overlay(params, layer_id)
             if entry.get("overlay_numeric_field") and params.get(entry["overlay_numeric_field"]) is not None:
                 self._check_numeric_field(params[entry["overlay_numeric_field"]], overlay)
+            if entry.get("overlay_field"):
+                self._check_field(params.get(entry["overlay_field"]), overlay)
             kind = entry.get("overlay_geometry")
             if kind and backend.geometry_of(overlay) != kind:
                 raise GestureError(
@@ -1555,6 +1613,7 @@ class ProcessingGesture:
             if self._index + 1 < len(self._steps):
                 self._advance(results)
                 return
+            self._results = results
             self._finish(result=self._load())
         except GestureError as exc:
             self._fail(exc)
@@ -1600,7 +1659,8 @@ class ProcessingGesture:
         }
         summary = self._entry.get("summary")
         if summary is not None:
-            result.update(summary(backend, layer, self._params or {}))
+            extra = (self._results,) if self._entry.get("summary_results") else ()
+            result.update(summary(backend, layer, self._params or {}, *extra))
         return result
 
     def _written(self):

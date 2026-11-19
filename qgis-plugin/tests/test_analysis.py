@@ -725,6 +725,84 @@ class CountPointsInPolygonTest(unittest.TestCase):
 TAIL = ("n", "distance", "feature_x", "feature_y", "nearest_x", "nearest_y")
 
 
+class JoinTableTest(unittest.TestCase):
+    """Jointure d'un tableau : `native:joinattributestable`, première correspondance, aucune entité
+    écartée ; le compte des entités sans ligne vient de la sortie de l'algorithme."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.out = os.path.join(self.dir.name, "4-analysis.join_table.gpkg")
+        self.entry = analysis.ALGORITHMS["analysis.join_table"]
+        self.backend = FakeBackend(
+            [
+                FakeLayer("c", name="communes", geometry="Polygon", fields=("code", "nom")),
+                FakeLayer("t", name="prix", geometry="NoGeometry", fields=("CODGEO", "prix")),
+                FakeLayer("r", vector=False),
+            ],
+            loaded_count=5,
+        )
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def params(self, **extra):
+        p = {"layer_id": "c", "table_layer_id": "t", "field": "code", "table_field": "CODGEO", "out": self.out}
+        p.update(extra)
+        return p
+
+    def test_the_table_is_joined_on_the_two_named_fields(self):
+        _, calls = start(self.entry, self.backend, self.params())
+        algo, p = self.backend.calls[0]
+        self.assertEqual(algo, "native:joinattributestable")
+        self.assertEqual((p["INPUT"].lid, p["INPUT_2"].lid), ("c", "t"))
+        self.assertEqual((p["FIELD"], p["FIELD_2"]), ("code", "CODGEO"))
+        self.assertEqual(p["FIELDS_TO_COPY"], [])
+        self.assertEqual(p["METHOD"], 1)  # première correspondance : une ligne par entité
+        self.assertFalse(p["DISCARD_NONMATCHING"])
+        self.assertEqual(p["PREFIX"], "")
+        self.assertEqual(p["OUTPUT"], self.out)
+        self.assertEqual(len(self.backend.calls), 1)
+        self.backend.finished(True, {"OUTPUT": self.out, "UNJOINABLE_COUNT": 1})
+        result, error = calls[0]
+        self.assertIsNone(error)
+        self.assertEqual(
+            result,
+            {"layer_id": "out_1", "name": "4-analysis.join_table", "feature_count": 5, "crs": "EPSG:2154",
+             "unmatched_count": 1},
+        )
+
+    def test_no_unmatched_feature(self):
+        _, calls = start(self.entry, self.backend, self.params())
+        self.backend.finished(True, {"OUTPUT": self.out, "UNJOINABLE_COUNT": 0})
+        self.assertEqual(calls[0][0]["unmatched_count"], 0)
+
+    def test_a_missing_count_fails_cleanly(self):
+        _, calls = start(self.entry, self.backend, self.params())
+        self.backend.finished(True, {"OUTPUT": self.out})
+        self.assertEqual(calls[0][1].code, "analysis.failed")
+
+    def test_an_unknown_field_is_refused_on_either_side(self):
+        for extra in ({"field": "absent"}, {"table_field": "absent"}):
+            _, calls = start(self.entry, self.backend, self.params(**extra))
+            self.assertEqual(calls[0][1].code, "analysis.unknown_field", extra)
+            self.assertEqual(self.backend.calls, [])
+
+    def test_the_table_must_be_a_known_vector_layer_and_not_the_input(self):
+        for extra, code in (
+            ({"table_layer_id": "r"}, "layer.not_vector"),
+            ({"table_layer_id": "absente"}, "layer.not_found"),
+            ({"table_layer_id": "c"}, "analysis.bad_params"),
+        ):
+            _, calls = start(self.entry, self.backend, self.params(**extra))
+            self.assertEqual(calls[0][1].code, code, extra)
+        self.assertEqual(self.backend.calls, [])
+
+    def test_the_row_has_one_step_and_is_cancellable(self):
+        self.assertEqual([s["algorithm"] for s in analysis.chain_of(self.entry)], ["native:joinattributestable"])
+        self.assertEqual(self.entry["chain_version"], 1)
+        self.assertIn("native:joinattributestable", analysis.CANCELLABLE_ALGORITHMS)
+
+
 class NearestTest(unittest.TestCase):
     """Plus proche voisin : `native:joinbynearest` puis une seule ligne par entité ; limite en
     mètres, aucune entité écartée ; une couche en degrés est reprojetée d'abord vers `work_epsg`

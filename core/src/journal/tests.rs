@@ -4781,6 +4781,17 @@ impl Executor for CrsQgis {
                           "distance_field": "distance", "unit": "m", "unmatched_count": 0}),
                 )
             }
+            "analysis.join_table" => {
+                self.buffers.borrow_mut().push(p.clone());
+                let n = self.count.get() + 1;
+                self.count.set(n);
+                fs::write(p["out"].as_str().unwrap(), "gpkg").unwrap();
+                Ok(
+                    json!({"layer_id": format!("jointe_g{}_{n}", self.generation),
+                          "name": "jointe", "feature_count": 3, "crs": "EPSG:2154",
+                          "unmatched_count": 1}),
+                )
+            }
             "analysis.isochrone" => {
                 self.buffers.borrow_mut().push(p.clone());
                 let n = self.count.get() + 1;
@@ -4904,6 +4915,43 @@ fn a_nearest_join_of_a_layer_in_degrees_logs_the_metric_work_system() {
     assert!(orders.borrow()[1].get("work_epsg").is_none());
     assert_eq!(orders.borrow().len(), 2);
     drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_table_join_logs_its_output_and_replays_identically() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let qgis = CrsQgis::new(1, &qgis_project);
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    let params = json!({"layer_id": "zonage", "table_layer_id": "gares",
+                        "field": "code", "table_field": "CODGEO"});
+    let out = s.call("analysis.join_table", params.clone()).unwrap();
+    assert_eq!(out["unmatched_count"], 1);
+    // Même couche des deux côtés : refus du noyau, rien n'est exécuté ni journalisé.
+    let err = s
+        .call(
+            "analysis.join_table",
+            json!({"layer_id": "zonage", "table_layer_id": "zonage",
+                   "field": "code", "table_field": "code"}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "registry.invalid_params");
+    let l = lines(&s);
+    assert_eq!(l.len(), 1, "{l:?}");
+    assert_eq!(l[0]["params"]["field"], "code");
+    assert!(l[0]["params"]["out"]
+        .as_str()
+        .is_some_and(|o| o.ends_with(".gpkg")));
+    drop(s);
+    // Rejeu : le même résultat (hors identifiant de couche, valeur de session).
+    let qgis = CrsQgis::new(2, &qgis_project);
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(&Router::new(&registry).with_qgis(qgis), &mut HashSet::new())
+        .unwrap();
+    assert_eq!(report, identical(1));
     let _ = fs::remove_dir_all(dir);
 }
 
@@ -5974,9 +6022,11 @@ impl Executor for IsochroneQgis {
     fn execute(&self, id: &str, p: Value) -> Result<Value, RegistryError> {
         if id == "project.inventory" {
             // Réseau « n » en mètres : le noyau ne remplit pas `work_epsg`.
-            return Ok(json!({"layers": [{"layer_id": "n", "name": "n", "crs": "EPSG:2154",
+            return Ok(
+                json!({"layers": [{"layer_id": "n", "name": "n", "crs": "EPSG:2154",
                                          "crs_unit": "m"}],
-                             "project_crs": "EPSG:2154", "project_crs_unit": "m", "extent": null}));
+                             "project_crs": "EPSG:2154", "project_crs_unit": "m", "extent": null}),
+            );
         }
         if let Some(out) = p.get("out").and_then(Value::as_str) {
             fs::write(out, "gpkg").unwrap();

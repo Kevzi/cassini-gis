@@ -368,6 +368,63 @@
     }
   },
   {
+    "id": "JOI1",
+    "command": "analysis.join_table",
+    "phrase": "Joins le tableau des prix à la couche des parcelles.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.join_table",
+          "params": {
+            "layer_id": "parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3",
+            "table_layer_id": "prix_mutations_7d2b9e4c_3a58_4f01_b6e7_2c9a1d80f354",
+            "field": "id_parcelle",
+            "table_field": "id_parcelle"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "JOI2",
+    "command": "analysis.join_table",
+    "phrase": "Rattache les prix des mutations aux parcelles, par le numéro de parcelle.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.join_table",
+          "params": {
+            "layer_id": "parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3",
+            "table_layer_id": "prix_mutations_7d2b9e4c_3a58_4f01_b6e7_2c9a1d80f354",
+            "field": "id_parcelle",
+            "table_field": "id_parcelle"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "JOI3",
+    "command": "analysis.join_table",
+    "phrase": "Ajoute à chaque parcelle les colonnes du tableau des prix des mutations.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.join_table",
+          "params": {
+            "layer_id": "parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3",
+            "table_layer_id": "prix_mutations_7d2b9e4c_3a58_4f01_b6e7_2c9a1d80f354",
+            "field": "id_parcelle",
+            "table_field": "id_parcelle"
+          }
+        }
+      ]
+    }
+  },
+  {
     "id": "CAT1",
     "command": "analysis.statistics_by_category",
     "phrase": "Combien de parcelles y a-t-il par section ?",

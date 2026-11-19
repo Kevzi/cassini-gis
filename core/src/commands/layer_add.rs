@@ -7,12 +7,47 @@ use serde::{Deserialize, Serialize};
 
 use crate::registry::{CommandSpec, Delegated, Registration, RunsIn};
 
-/// Paramètres de `layer.add`.
+/// Paramètres de `layer.add`, tels que les écrit l'appelant.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct RawParams {
+    /// Fichier à ouvrir, relatif au projet : `.gpkg`, `.shp`, `.geojson`, `.parquet` ou `.csv`
+    /// à coordonnées. Exactement un de `path` et `table`.
+    #[serde(default)]
+    path: Option<String>,
+    /// Tableau CSV sans géométrie à ouvrir, relatif au projet (ex. prix DVF, données INSEE) :
+    /// toutes ses colonnes sont lues en texte, les zéros de tête des codes sont conservés. Il
+    /// s'ouvre comme une couche sans géométrie, sans `crs`, que `analysis.join_table` rattache
+    /// à une couche. Exactement un de `path` et `table`.
+    #[serde(default)]
+    table: Option<String>,
+    /// SCR à donner à la couche quand le fichier n'en indique aucun (ex. `EPSG:2154`) ;
+    /// refusé s'il contredit celui du fichier. **Obligatoire pour un CSV**, qui n'en porte
+    /// jamais. Le fichier n'est jamais modifié.
+    #[serde(default)]
+    crs: Option<String>,
+    /// CSV seulement : colonne des abscisses (défaut `X`).
+    #[serde(default)]
+    x_field: Option<String>,
+    /// CSV seulement : colonne des ordonnées (défaut `Y`).
+    #[serde(default)]
+    y_field: Option<String>,
+}
+
+/// Paramètres de `layer.add`.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(try_from = "RawParams")]
 pub struct LayerAddParams {
-    /// Fichier à ouvrir, relatif au projet : `.gpkg`, `.shp`, `.geojson`, `.parquet` ou `.csv`.
-    pub path: String,
+    /// Fichier à ouvrir, relatif au projet : `.gpkg`, `.shp`, `.geojson`, `.parquet` ou `.csv`
+    /// à coordonnées. Exactement un de `path` et `table`.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// Tableau CSV sans géométrie à ouvrir, relatif au projet (ex. prix DVF, données INSEE) :
+    /// toutes ses colonnes sont lues en texte, les zéros de tête des codes sont conservés. Il
+    /// s'ouvre comme une couche sans géométrie, sans `crs`, que `analysis.join_table` rattache
+    /// à une couche. Exactement un de `path` et `table`.
+    #[serde(default)]
+    pub table: Option<String>,
     /// SCR à donner à la couche quand le fichier n'en indique aucun (ex. `EPSG:2154`) ;
     /// refusé s'il contredit celui du fichier. **Obligatoire pour un CSV**, qui n'en porte
     /// jamais. Le fichier n'est jamais modifié.
@@ -26,6 +61,24 @@ pub struct LayerAddParams {
     pub y_field: Option<String>,
 }
 
+impl TryFrom<RawParams> for LayerAddParams {
+    type Error = String;
+
+    /// Refuse, avant tout ordre à QGIS, zéro ou deux entrées parmi `path` et `table`.
+    fn try_from(raw: RawParams) -> Result<Self, String> {
+        if raw.path.is_some() == raw.table.is_some() {
+            return Err("donnez exactement un de `path` et `table`".into());
+        }
+        Ok(Self {
+            path: raw.path,
+            table: raw.table,
+            crs: raw.crs,
+            x_field: raw.x_field,
+            y_field: raw.y_field,
+        })
+    }
+}
+
 /// Résultat de `layer.add`.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct LayerAddOutput {
@@ -33,7 +86,7 @@ pub struct LayerAddOutput {
     pub layer_id: String,
     /// Nom affiché de la couche.
     pub name: String,
-    /// SCR de la couche, en code explicite (ex. `EPSG:4326`).
+    /// SCR de la couche, en code explicite (ex. `EPSG:4326`) ; vide pour un tableau sans géométrie.
     pub source_crs: String,
     /// SCR du projet, en code explicite.
     pub project_crs: String,
@@ -51,16 +104,23 @@ impl Delegated for LayerAdd {
     fn spec() -> CommandSpec {
         CommandSpec::new::<LayerAddParams, LayerAddOutput>(
             "layer.add",
-            "Ajoute au projet une couche issue d'un fichier GeoPackage, Shapefile, GeoJSON, GeoParquet ou CSV à coordonnées (crs obligatoire pour un CSV).",
-            "Adds to the project a layer read from a GeoPackage, Shapefile, GeoJSON, GeoParquet or coordinate CSV file (crs required for a CSV).",
+            "Ajoute au projet une couche issue d'un fichier GeoPackage, Shapefile, GeoJSON, GeoParquet ou CSV à coordonnées (crs obligatoire pour un CSV), ou, par `table`, un tableau CSV sans géométrie à joindre ensuite à une couche (exactement un de path et table).",
+            "Adds to the project a layer read from a GeoPackage, Shapefile, GeoJSON, GeoParquet or coordinate CSV file (crs required for a CSV), or, with `table`, a CSV table without geometry to join to a layer afterwards (exactly one of path and table).",
         )
         .runs_in(RunsIn::Qgis)
         .cancellable(true)
-        .path_params(&["path"])
+        .path_params(&["path", "table"])
         .example(serde_json::json!({"path": "donnees/parcelles.gpkg"}))
         .example(serde_json::json!({"path": "donnees/gares.shp", "crs": "EPSG:2154"}))
         .example(serde_json::json!({"path": "donnees/gares.csv", "crs": "EPSG:2154", "x_field": "X", "y_field": "Y"}))
-        .tests(&["layer_add_is_delegated", "layer_add_takes_an_optional_crs", "layer_add_takes_csv_columns"])
+        .example(serde_json::json!({"table": "donnees/prix.csv"}))
+        .tests(&[
+            "layer_add_is_delegated",
+            "layer_add_takes_an_optional_crs",
+            "layer_add_takes_csv_columns",
+            "layer_add_opens_a_table_without_geometry",
+            "layer_add_needs_exactly_one_of_path_and_table",
+        ])
     }
 }
 
@@ -77,7 +137,10 @@ mod tests {
         let spec = registry.spec("layer.add").unwrap();
         assert_eq!(spec.runs_in, Some(RunsIn::Qgis));
         assert_eq!(spec.cancellable, Some(true));
-        assert_eq!(spec.path_params, vec!["path".to_string()]);
+        assert_eq!(
+            spec.path_params,
+            vec!["path".to_string(), "table".to_string()]
+        );
         let err = registry
             .call("layer.add", json!({"path": "a.gpkg"}))
             .unwrap_err();
@@ -103,5 +166,24 @@ mod tests {
             )
             .unwrap_err();
         assert_eq!(err.code(), "registry.unavailable");
+    }
+
+    #[test]
+    fn layer_add_opens_a_table_without_geometry() {
+        let registry = Registry::standard();
+        let ok = json!({"table": "donnees/prix.csv"});
+        assert!(registry.validate_params("layer.add", &ok).is_ok());
+        let err = registry.call("layer.add", ok).unwrap_err();
+        assert_eq!(err.code(), "registry.unavailable");
+        assert!(registry.check_contract().is_empty());
+    }
+
+    #[test]
+    fn layer_add_needs_exactly_one_of_path_and_table() {
+        let registry = Registry::standard();
+        for bad in [json!({}), json!({"path": "a.gpkg", "table": "t.csv"})] {
+            let err = registry.validate_params("layer.add", &bad).unwrap_err();
+            assert_eq!(err.code(), "registry.invalid_params");
+        }
     }
 }

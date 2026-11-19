@@ -76,8 +76,9 @@ def _kind(prop):
 
 
 def is_path_field(field):
-    """Un champ texte nommé `path` ou `*_path` désigne un fichier du projet."""
-    return field.kind == TEXT and (field.name == "path" or field.name.endswith("_path"))
+    """Un champ texte nommé `path`, `table` (tableau CSV de `layer.add`) ou `*_path` désigne un fichier
+    du projet."""
+    return field.kind == TEXT and (field.name in ("path", "table") or field.name.endswith("_path"))
 
 
 def is_layer_field(field):

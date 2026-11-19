@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "cassini_qgis"))
 import summary  # noqa: E402
 import texts  # noqa: E402
 
-NAMES = {"gares_1": "Gares", "parcelles_2": "Parcelles", "tampon_3": "Tampon"}
+NAMES = {"gares_1": "Gares", "parcelles_2": "Parcelles", "tampon_3": "Tampon", "prix_4": "Prix"}
 
 
 def qgis_name(layer_id):
@@ -150,6 +150,34 @@ class LayerCommandsTest(unittest.TestCase):
         self.assertIn("with the sum of the voyageurs field", say("analysis.count_points_in_polygon", params, lang="en"))
 
 
+class JoinTableSummaryTest(unittest.TestCase):
+    PARAMS = {"layer_id": "parcelles_2", "table_layer_id": "prix_4", "field": "id", "table_field": "id"}
+
+    def test_join(self):
+        out = {"name": "Jointure", "feature_count": 4, "unmatched_count": 0}
+        self.assertEqual(
+            say("analysis.join_table", self.PARAMS, out),
+            "Jointure du tableau Prix à la couche Parcelles par le champ id : nouvelle couche Jointure, 4 entités.",
+        )
+        self.assertEqual(
+            say("analysis.join_table", self.PARAMS, out, lang="en"),
+            "Join of the table Prix to the layer Parcelles on the field id: new layer Jointure, 4 features.",
+        )
+
+    def test_different_field_names_and_unmatched(self):
+        params = dict(self.PARAMS, table_field="CODGEO")
+        out = {"name": "Jointure", "feature_count": 4, "unmatched_count": 1}
+        text = say("analysis.join_table", params, out)
+        self.assertIn("par le champ id = CODGEO", text)
+        self.assertTrue(text.endswith("4 entités ; sans correspondance dans le tableau : 1 entité."), text)
+
+    def test_without_result_only_parameters(self):
+        self.assertEqual(
+            say("analysis.join_table", self.PARAMS),
+            "Jointure du tableau Prix à la couche Parcelles par le champ id.",
+        )
+
+
 class NearestSummaryTest(unittest.TestCase):
     PARAMS = {"layer_id": "parcelles_2", "target_layer_id": "gares_1"}
 
@@ -255,6 +283,13 @@ class OtherCommandsTest(unittest.TestCase):
             "Fichier gares.gpkg ouvert : couche Gares, reprojetée de EPSG:4326 vers EPSG:2154.",
         )
         self.assertEqual(say("layer.add", {"path": "/home/c/gares.gpkg"}), "Ouverture du fichier gares.gpkg.")
+
+    def test_layer_add_of_a_table_shows_only_the_file_name(self):
+        out = {"layer_id": "p_1", "name": "prix", "source_crs": "", "project_crs": "EPSG:2154", "reprojected": False}
+        self.assertEqual(
+            say("layer.add", {"table": r"C:\donnees\prix.csv"}, out), "Fichier prix.csv ouvert : couche prix."
+        )
+        self.assertEqual(say("layer.add", {"table": "donnees/prix.csv"}), "Ouverture du fichier prix.csv.")
 
     def test_layer_describe(self):
         out = {"name": "Gares", "fields": [{"name": "nom"}], "feature_count": 12, "geometry": "Point"}
@@ -949,6 +984,10 @@ SAMPLES = {
     "analysis.count_points_in_polygon": ({"layer_id": "parcelles_2", "points_layer_id": "gares_1"},
                                           {"name": "Décompte", "feature_count": 4, "rows": [],
                                            "truncated": False}),
+    "analysis.join_table": ({"layer_id": "parcelles_2", "table_layer_id": "prix_4", "field": "id",
+                             "table_field": "id"},
+                            {"layer_id": "j_8", "name": "Jointure", "feature_count": 4, "crs": "EPSG:2154",
+                             "unmatched_count": 0}),
     "analysis.nearest": ({"layer_id": "parcelles_2", "target_layer_id": "gares_1"},
                          {"layer_id": "v_6", "name": "Voisin", "feature_count": 4, "crs": "EPSG:2154",
                           "distance_field": "distance", "unit": "m", "unmatched_count": 0}),

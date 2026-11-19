@@ -159,6 +159,22 @@ Recette manuelle de `project.inventory` et `layer.describe` (jeu
    son dossier `<projet>.cassini/` ailleurs ; le journal s'y rejoue à l'identique
    (couvert par `cargo test`, test du journal).
 
+Recette manuelle de `analysis.join_table` [ticket 23] (un CSV sans géométrie, par exemple un
+tableau de prix par code INSEE, et une couche de communes ou de parcelles) :
+
+1. `layer.add` avec le champ `table` (sélecteur de fichier ; `path` reste vide, `crs` n'a pas
+   de sens) : une couche sans géométrie apparaît, tous ses champs en texte (le code `01001`
+   garde son zéro). Donner `path` et `table` ensemble, ou aucun, donne `layer.one_input`.
+2. `analysis.join_table` : `layer_id` et `table_layer_id` sont deux listes de couches, `field`
+   et `table_field` les champs communs, chacun dans la liste de sa couche. Une couche nouvelle
+   porte les colonnes du tableau (un nom déjà pris devient `nom_2`, la clé est recopiée en
+   `code_2`) ; `feature_count` est celui de la couche d'origine, `unmatched_count` compte ses
+   entités sans ligne dans le tableau, gardées avec des colonnes vides.
+3. Une clé en double dans le tableau : la première ligne est retenue. Un champ inconnu donne
+   `analysis.unknown_field` ; la même couche des deux côtés, `registry.invalid_params` (refus du noyau, avant tout geste).
+4. Sonde sous QGIS 3.44 : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat" qgis-plugin/tests/probe_join_table.py`
+   doit finir par `VERDICT : OK`.
+
 Recette manuelle de `analysis.buffer` [ticket 8] (jeu `../donnees-test-cassini/`) :
 
 1. Ouvrez `gares-2154.csv` avec `layer.add` (`crs` = `EPSG:2154`), puis choisissez

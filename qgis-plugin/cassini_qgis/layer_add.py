@@ -33,6 +33,7 @@ INVALID = "layer.invalid_source"
 UNKNOWN_CRS = "layer.unknown_crs"
 INVALID_CRS = "layer.invalid_crs"
 INVALID_COLUMN = "layer.invalid_column"
+ONE_INPUT = "layer.one_input"
 CRS_CONFLICT = "layer.crs_conflict"
 CANCELLED = "qgis.cancelled"
 CRS_FORMAT = re.compile(r"^EPSG:[0-9]+$")
@@ -46,14 +47,19 @@ class QgisBackend:
         from qgis.PyQt.QtCore import QUrl
 
         source = path
-        if csv is not None:  # URI du fournisseur delimitedtext (X, Y et SCR explicites)
+        if csv is not None:  # URI du fournisseur delimitedtext
             url = QUrl.fromLocalFile(path)
-            # Le fournisseur décode lui-même les noms de colonnes ; le SCR est déjà validé.
-            enc = lambda v: bytes(QUrl.toPercentEncoding(v)).decode("ascii")  # noqa: E731
-            url.setQuery(
-                "type=csv&delimiter=,;&detectTypes=yes&geomType=point"
-                "&xField=%s&yField=%s&crs=%s" % (enc(csv["x"]), enc(csv["y"]), csv["crs"])
-            )
+            if csv.get("table"):
+                # Tableau sans géométrie : aucun SCR, aucun type deviné (`detectTypes=no` : tous les
+                # champs en texte, les zéros de tête d'un code INSEE sont conservés).
+                url.setQuery("type=csv&delimiter=,;&detectTypes=no&geomType=none")
+            else:
+                # Le fournisseur décode lui-même les noms de colonnes ; le SCR est déjà validé.
+                enc = lambda v: bytes(QUrl.toPercentEncoding(v)).decode("ascii")  # noqa: E731
+                url.setQuery(
+                    "type=csv&delimiter=,;&detectTypes=yes&geomType=point"
+                    "&xField=%s&yField=%s&crs=%s" % (enc(csv["x"]), enc(csv["y"]), csv["crs"])
+                )
             source = url.toString()
         options = QgsVectorLayer.LayerOptions()
         options.forceReadOnly = True  # ouverture en lecture seule, pas seulement l'édition
@@ -127,11 +133,21 @@ class LayerAddGesture:
             self._finish(error=GestureError("qgis.gesture_failed", "Échec inattendu de l'ouverture."))
 
     def _open(self):
-        path = (self._params or {}).get("path")
+        params = self._params or {}
+        path, table = params.get("path"), params.get("table")
+        if (path is None) == (table is None):
+            raise GestureError(ONE_INPUT, "Donnez exactement un de path (couche) et table (tableau sans géométrie).")
+        is_table = table is not None
+        path = table if is_table else path
         if not isinstance(path, str) or not path:
             raise GestureError(INVALID, "Aucun fichier à ouvrir.")
         name = os.path.basename(path)
         provider = FORMATS.get(os.path.splitext(name)[1].lower())
+        if is_table and provider != "delimitedtext":
+            raise GestureError(
+                UNSUPPORTED,
+                "Un tableau est un fichier .csv : %s n'en est pas un." % (os.path.splitext(name)[1] or "sans extension"),
+            )
         if provider is None:
             raise GestureError(
                 UNSUPPORTED,
@@ -140,7 +156,10 @@ class LayerAddGesture:
             )
         backend = self._backend
         csv = None
-        if provider == "delimitedtext":  # un CSV ne porte aucun SCR : il doit être donné
+        if is_table:  # sans géométrie : ni crs, ni colonnes X/Y
+            self._refuse_coordinate_options()
+            csv = {"table": True}
+        elif provider == "delimitedtext":  # un CSV ne porte aucun SCR : il doit être donné
             csv = self._csv_options()
         # Message sans chemin absolu : seul le nom du fichier est cité.
         layer = backend.load(path, os.path.splitext(name)[0], provider, csv)
@@ -148,7 +167,7 @@ class LayerAddGesture:
             raise GestureError(INVALID, "Le fichier « %s » n'est pas lisible." % name)
         if self._cancelled:
             raise GestureError(CANCELLED, "Geste annulé.")
-        source_crs = self._resolve_crs(layer)
+        source_crs = "" if is_table else self._resolve_crs(layer)  # un tableau n'a pas de SCR
         project_crs = backend.project_crs()
         layer_id = backend.add(layer)
         return {
@@ -156,8 +175,16 @@ class LayerAddGesture:
             "name": backend.name_of(layer),
             "source_crs": source_crs,
             "project_crs": project_crs,
-            "reprojected": source_crs != project_crs,
+            "reprojected": bool(source_crs) and source_crs != project_crs,
         }
+
+    def _refuse_coordinate_options(self):
+        params = self._params or {}
+        for key in ("crs", "x_field", "y_field"):
+            if params.get(key) is not None:
+                raise GestureError(
+                    ONE_INPUT, "Un tableau sans géométrie n'a ni crs, ni x_field, ni y_field : retirez %s." % key
+                )
 
     def _csv_options(self):
         params = self._params or {}
