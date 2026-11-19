@@ -29,6 +29,17 @@ Sans QGIS : `python -I -m unittest discover -s qgis-plugin/tests`.
 Sonde d'annulation sous le vrai QGIS (jeu hors dépôt `../donnees-test-cassini/`) :
 `python-qgis-ltr.bat qgis-plugin/tests/probe_cancel.py` -> `RÉSULTAT : OK`.
 
+Sonde de la chaîne fixe d'une ligne de la table fermée [AD-24] sous le vrai QGIS (aucune donnée :
+des points synthétiques écrits en GeoJSON dans un dossier temporaire) :
+`python-qgis-ltr.bat qgis-plugin/tests/probe_chain.py` -> `RÉSULTAT : OK`, **à lancer sur la série 3
+(LTR 3.44) et sur la série 4 si elle est installée** (la CI n'a pas QGIS : ses tests de chaîne sont à
+fond double). Elle joue une ligne à deux étapes (tampon fusionné puis enveloppe convexe : un seul
+fichier de sortie, la première étape reste un temporaire de QGIS), la ligne `analysis.buffer` avec
+`work_epsg` (reprojection puis tampon) et une annulation en cours de chaîne (`qgis.cancelled`, aucun
+fichier). Une ligne de la table est une chaîne fixe d'étapes avec sa `chain_version` ; `validate_table`
+(lancée par `check_extension.py`) refuse la liste noire du réseau, et l'annulabilité déduite de la
+chaîne est écrite dans `tests/table_annulable.json`, que `core/tests/catalogue.rs` confronte au registre.
+
 Sonde de bout en bout sous le vrai QGIS et le vrai binaire (fixture synthétique
 `fixtures/points-2154.csv` et `fixtures/reseau-grille-2154.geojson`, aucune donnée hors dépôt) : `cargo build --release` puis
 `python-qgis-ltr.bat qgis-plugin/tests/probe_end_to_end.py` -> `RÉSULTAT : OK`. Elle

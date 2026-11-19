@@ -75,6 +75,15 @@ def translate_work_crs(work_epsg, layer):
     return {"INPUT": layer, "TARGET_CRS": "EPSG:%d" % work_epsg, "CONVERT_CURVED_GEOMETRIES": False}
 
 
+# Paramètre du noyau qui porte le système de calcul (AD-19) : la condition de l'étape de reprojection.
+WORK_EPSG = "work_epsg"
+
+
+def translate_work_reprojection(params, layer):
+    """Traduction de l'étape de reprojection vers le système de calcul, lu du paramètre du noyau."""
+    return translate_work_crs(params[WORK_EPSG], layer)
+
+
 def translate_intersect(params, layer):
     """Paramètres neutres de `analysis.intersect` -> paramètres de `native:intersection`.
 
@@ -334,26 +343,25 @@ def summarize_nearest(backend, layer, params):
     }
 
 
-# Table fermée : id de commande -> algorithme et traduction.
-#   algorithm : id de l'algorithme du cadre de traitement ;
-#   translate : (params du noyau, couche d'entrée) -> paramètres de l'algorithme, sans la sortie ;
-#   output    : nom du paramètre de sortie de l'algorithme ;
+# Table fermée : id de commande -> chaîne fixe d'algorithmes (AD-24).
+#
+# Une ligne est une chaîne fixe d'étapes plus des attributs de la ligne :
+#   chain_version : entier, version de la chaîne (AD-11), incrémenté à chaque changement de la
+#                   ligne ; 1 pour toutes les lignes à l'origine de la version de chaîne ;
+#   chain         : liste d'étapes, exécutées dans l'ordre. Chaque étape travaille sur la couche
+#                   d'entrée (la première) ou sur la sortie temporaire de la précédente ; seule la
+#                   dernière écrit `out`, dicté par le noyau (AD-10), les autres écrivent des
+#                   temporaires de QGIS, jamais nommés ni journalisés ;
 #   input     : nom du paramètre du noyau qui désigne la couche d'entrée ;
 #   metric    : l'algorithme mesure en unités de la couche, donc le SCR doit être en mètres ;
-#   overlay   : (facultatif) paramètre du noyau qui désigne une seconde couche, et clé de
-#               l'algorithme qui la reçoit (`overlay_key`) ;
+#   overlay   : (facultatif) paramètre du noyau qui désigne une seconde couche ; l'étape qui la reçoit
+#               porte `overlay_key`, la clé de l'algorithme ;
 #   field     : (facultatif) paramètre du noyau qui nomme un champ de la couche d'entrée ;
 #               avec `field_optional`, il peut être absent ;
 #   geometry  : (facultatif) type de géométrie exigé de la couche d'entrée (ex. `Polygon`) ;
 #   origin    : (facultatif) paramètre du noyau `{x, y, epsg}` qui doit tomber à moins de
 #               `_ORIGIN_SNAP_METERS` d'une entité de la couche d'entrée (sinon
 #               `analysis.origin_off_network`, avant tout lancement) ;
-#   then      : (facultatif) étape suivante, sur la sortie temporaire de l'algorithme : dict
-#               {algorithm, translate(params, sortie précédente), output, empty_error} ;
-#               seule cette dernière étape écrit `out`, la première écrit en sortie
-#               temporaire ; `empty_error` (code, message) si la sortie de la première
-#               étape n'a aucune entité (sans `empty_error`, une sortie vide est acceptée) ;
-#               `with_backend` : la traduction reçoit aussi le fond (lecture des champs) ;
 #   summary   : (facultatif) (fond, couche produite, params) -> dict qui complète le résultat ;
 #   target_crs: (facultatif) paramètre du noyau qui porte un code EPSG d'arrivée ; le fond
 #               doit le connaître (`crs_is_known`), sinon `data.unknown_crs`, avant tout
@@ -364,7 +372,7 @@ def summarize_nearest(backend, layer, params):
 #               être du pilote du format (`data.format_mismatch` sinon) ; un Shapefile
 #               demande une couche d'un seul type de géométrie, vérifié avant tout lancement ;
 #   encoding  : (facultatif) encodage des textes écrits, posé sur le contexte de traitement
-#               de cette seule commande ;
+#               de cette seule commande (étape finale) ;
 #   raster    : (facultatif) genre d'entrée `raster` (AD-24) : `input` nomme un `RasterPath`,
 #               chemin absolu donné par le noyau (AD-9), et non un identifiant de couche ; le
 #               fichier doit exister et se lire en raster, sinon `layer.not_found` ou
@@ -375,105 +383,306 @@ def summarize_nearest(backend, layer, params):
 #               (`analysis.bad_params`) si la source a déjà un autre système ;
 #   work_crs  : (facultatif) paramètre du noyau qui porte le système de calcul en mètres, que le
 #               noyau ne remplit que pour une couche en degrés (changement de cap du 2026-11-12,
-#               amendement RA06 d'AD-24). Présent : inconnu de QGIS, `data.unknown_crs` ; pas en
-#               mètres, `analysis.crs_not_metric`, avant tout lancement ; la chaîne commence alors
-#               par `native:reprojectlayer` vers ce système, en sortie temporaire, et l'algorithme
-#               de la ligne travaille sur la couche reprojetée, vide ou non. Absent : l'algorithme
-#               seul, avec la garde `metric`, comme avant. Le choix est dicté par le paramètre du
-#               noyau ; le geste ne calcule ni ne choisit aucun système (AD-5, AD-24).
+#               amendement RA06 d'AD-24). Rempli : inconnu de QGIS, `data.unknown_crs` ; pas en
+#               mètres, `analysis.crs_not_metric`, avant tout lancement. Il va avec l'étape de
+#               reprojection `_REPROJECT_TO_WORK`, qui porte `when` : étape exécutée seulement si ce
+#               paramètre est rempli. Absent : la chaîne sans elle, avec la garde `metric`, comme avant.
+#               Le choix est dicté par le paramètre du noyau ; le geste ne calcule ni ne choisit
+#               aucun système (AD-5, AD-24).
+#
+# Une étape :
+#   algorithm : id de l'algorithme du cadre de traitement ;
+#   translate : (params du noyau, couche d'entrée de l'étape[, fond]) -> paramètres de
+#               l'algorithme, sans la sortie ;
+#   output    : nom du paramètre de sortie de l'algorithme (`OUTPUT` par défaut) ;
+#   when      : (facultatif) paramètre du noyau : l'étape n'est exécutée que s'il est rempli ;
+#   guard     : (facultatif) `{"empty": (code, message)}` : erreur nommée si la couche d'entrée de
+#               l'étape (sortie de la précédente) n'a aucune entité ;
+#   with_backend : (facultatif) la traduction reçoit aussi le fond (lecture des champs) ;
+#   overlay_key  : (facultatif) clé de l'algorithme qui reçoit la seconde couche de la ligne ;
+#   nothing   : (facultatif) message si l'étape ne rend aucune sortie temporaire.
+# Aucune étape ne choisit entre deux suites : chaque valeur vient des paramètres du noyau.
+_REPROJECT_TO_WORK = {
+    "algorithm": _WORK_CRS_ALGORITHM,
+    "translate": translate_work_reprojection,
+    "output": "OUTPUT",
+    "when": WORK_EPSG,
+    "nothing": "La reprojection de la couche d'entrée n'a rien rendu.",
+}
+
 ALGORITHMS = {
     "analysis.buffer": {
-        "algorithm": "native:buffer",
-        "translate": translate_buffer,
-        "output": "OUTPUT",
+        "chain_version": 1,
+        "chain": [
+            _REPROJECT_TO_WORK,
+            {"algorithm": "native:buffer", "translate": translate_buffer, "output": "OUTPUT"},
+        ],
         "input": "layer_id",
         "metric": True,
-        "work_crs": "work_epsg",
+        "work_crs": WORK_EPSG,
     },
     "analysis.intersect": {
-        "algorithm": "native:intersection",
-        "translate": translate_intersect,
-        "output": "OUTPUT",
+        "chain_version": 1,
+        "chain": [
+            {
+                "algorithm": "native:intersection",
+                "translate": translate_intersect,
+                "output": "OUTPUT",
+                "overlay_key": "OVERLAY",
+            },
+        ],
         "input": "layer_id",
         "overlay": "overlay_layer_id",
-        "overlay_key": "OVERLAY",
     },
     "analysis.select_by_attribute": {
-        "algorithm": "native:extractbyattribute",
-        "translate": translate_select_by_attribute,
-        "output": "OUTPUT",
+        "chain_version": 1,
+        "chain": [
+            {"algorithm": "native:extractbyattribute", "translate": translate_select_by_attribute, "output": "OUTPUT"},
+        ],
         "input": "layer_id",
         "field": "field",
     },
     "analysis.zonal_statistics": {
-        "algorithm": "native:countpointsinpolygon",
-        "translate": translate_zonal_statistics,
-        "output": "OUTPUT",
+        "chain_version": 1,
+        "chain": [
+            {
+                "algorithm": "native:countpointsinpolygon",
+                "translate": translate_zonal_statistics,
+                "output": "OUTPUT",
+                "overlay_key": "POINTS",
+            },
+        ],
         "input": "layer_id",
         "overlay": "points_layer_id",
-        "overlay_key": "POINTS",
         "field": "label_field",
         "field_optional": True,
         "geometry": "Polygon",
         "summary": summarize_zonal_statistics,
     },
     "analysis.nearest": {
-        "algorithm": "native:joinbynearest",
-        "translate": translate_nearest,
-        "output": "OUTPUT",
+        "chain_version": 1,
+        "chain": [
+            _REPROJECT_TO_WORK,
+            {
+                "algorithm": "native:joinbynearest",
+                "translate": translate_nearest,
+                "output": "OUTPUT",
+                "overlay_key": "INPUT_2",
+            },
+            {
+                "algorithm": "native:extractbyexpression",
+                "translate": translate_nearest_first,
+                "output": "OUTPUT",
+                "with_backend": True,
+            },
+        ],
         "input": "layer_id",
         "metric": True,
-        "work_crs": "work_epsg",
+        "work_crs": WORK_EPSG,
         "overlay": "target_layer_id",
-        "overlay_key": "INPUT_2",
-        "then": {
-            "algorithm": "native:extractbyexpression",
-            "translate": translate_nearest_first,
-            "output": "OUTPUT",
-            "with_backend": True,
-        },
         "summary": summarize_nearest,
     },
     "analysis.isochrone": {
-        "algorithm": "native:serviceareafrompoint",
-        "translate": translate_isochrone,
-        "output": "OUTPUT_LINES",
+        "chain_version": 1,
+        "chain": [
+            {"algorithm": "native:serviceareafrompoint", "translate": translate_isochrone, "output": "OUTPUT_LINES"},
+            {
+                "algorithm": "native:convexhull",
+                "translate": translate_convex_hull,
+                "output": "OUTPUT",
+                "guard": {
+                    "empty": (
+                        ORIGIN_OFF_NETWORK,
+                        "Aucun tronçon du réseau n'est atteint depuis cette origine : "
+                        "vérifiez qu'elle se trouve sur le réseau choisi.",
+                    )
+                },
+            },
+        ],
         "input": "layer_id",
         "metric": True,
         "geometry": "Line",
         "origin": "origin",
-        "then": {
-            "algorithm": "native:convexhull",
-            "translate": translate_convex_hull,
-            "output": "OUTPUT",
-            "empty_error": (ORIGIN_OFF_NETWORK, "Aucun tronçon du réseau n'est atteint depuis cette origine : "
-                            "vérifiez qu'elle se trouve sur le réseau choisi."),
-        },
     },
     "data.reproject": {
-        "algorithm": "native:reprojectlayer",
-        "translate": translate_reproject,
-        "output": "OUTPUT",
+        "chain_version": 1,
+        "chain": [
+            {"algorithm": "native:reprojectlayer", "translate": translate_reproject, "output": "OUTPUT"},
+        ],
         "input": "layer_id",
         "target_crs": "target_epsg",
     },
     "data.convert": {
-        "algorithm": "native:extractbyexpression",
-        "translate": translate_convert,
-        "output": "OUTPUT",
+        "chain_version": 1,
+        "chain": [
+            {"algorithm": "native:extractbyexpression", "translate": translate_convert, "output": "OUTPUT"},
+        ],
         "input": "layer_id",
         "file_result": "format",
         "encoding": "UTF-8",
     },
     "data.convert_raster": {
-        "algorithm": "gdal:warpreproject",
-        "translate": translate_convert_raster,
-        "output": "OUTPUT",
+        "chain_version": 1,
+        "chain": [
+            {"algorithm": "gdal:warpreproject", "translate": translate_convert_raster, "output": "OUTPUT"},
+        ],
         "input": "raster",
         "raster": True,
         "assign_crs": "assign_epsg",
     },
 }
+
+
+for _row in ALGORITHMS.values():
+    # Lecture seule, dérivée de la chaîne : l'algorithme de la première étape inconditionnelle, pour les
+    # lecteurs de la table qui ne regardent qu'un algorithme par ligne.
+    _row["algorithm"] = next(s for s in _row["chain"] if "when" not in s)["algorithm"]
+del _row
+
+
+def chain_of(entry):
+    """Étapes d'une ligne. Une ligne à l'ancienne forme (`algorithm`, `then`, `work_crs` au premier
+    niveau, sans `chain`) est lue comme la chaîne qu'elle décrit : le même geste les exécute."""
+    if "chain" in entry:
+        return list(entry["chain"])
+    steps = []
+    if entry.get("work_crs"):
+        param = entry["work_crs"]
+        steps.append(
+            {
+                "algorithm": _WORK_CRS_ALGORITHM,
+                "translate": lambda params, layer: translate_work_crs(params[param], layer),
+                "output": "OUTPUT",
+                "when": param,
+                "nothing": _REPROJECT_TO_WORK["nothing"],
+            }
+        )
+    main = {"algorithm": entry["algorithm"], "translate": entry["translate"], "output": entry["output"]}
+    if entry.get("overlay"):
+        main["overlay_key"] = entry["overlay_key"]
+    steps.append(main)
+    then = entry.get("then")
+    if then is not None:
+        step = {"algorithm": then["algorithm"], "translate": then["translate"], "output": then["output"]}
+        if then.get("with_backend"):
+            step["with_backend"] = True
+        if then.get("empty_error"):
+            step["guard"] = {"empty": then["empty_error"]}
+        steps.append(step)
+    return steps
+
+
+# Algorithmes de traitement que le geste sait interrompre (AD-12) : tous passent par
+# `QgsProcessingAlgRunnerTask` et son retour d'information annulable. Une commande n'est annulable que si
+# chaque algorithme de sa chaîne est ici ; un algorithme qui n'accepte pas d'objet de retour annulable
+# n'y entre pas, et rend sa commande non annulable.
+CANCELLABLE_ALGORITHMS = frozenset(
+    {
+        "native:buffer",
+        "native:intersection",
+        "native:extractbyattribute",
+        "native:countpointsinpolygon",
+        "native:joinbynearest",
+        "native:extractbyexpression",
+        "native:serviceareafrompoint",
+        "native:convexhull",
+        "native:reprojectlayer",
+        "gdal:warpreproject",
+    }
+)
+
+# Algorithmes qui accèdent au réseau ou ouvrent une page (AD-14, AD-24) : aucune ligne n'en cite un. La
+# comparaison porte sur le nom sans le fournisseur, pour qu'un autre préfixe ne la contourne pas.
+NETWORK_BLACKLIST = frozenset(
+    {
+        "native:filedownloader",
+        "native:ht" "tprequest",  # écrit en deux morceaux : la garde de source refuse ce mot partout
+        "native:downloadvectortiles",
+        "native:openurl",
+        "native:batchnominatimgeocoder",
+    }
+)
+_NETWORK_NAMES = frozenset(name.split(":", 1)[-1] for name in NETWORK_BLACKLIST)
+
+
+def derived_cancellable(table):
+    """Annulabilité de chaque ligne, déduite de sa chaîne : id -> bool. Une ligne de geste fixe
+    (`gesture`), une chaîne vide ou une ligne illisible ne sont pas annulables."""
+    result = {}
+    for command_id, entry in table.items():
+        try:
+            chain = [] if "gesture" in entry else chain_of(entry)
+            result[command_id] = bool(chain) and all(s["algorithm"] in CANCELLABLE_ALGORITHMS for s in chain)
+        except (KeyError, TypeError, AttributeError):
+            result[command_id] = False
+    return result
+
+
+def validate_table(table=None):
+    """Invariants de la table fermée (AD-24) : liste de messages, vide si la table est valide ; ne lève jamais.
+
+    Chaque ligne porte une `chain_version` entière, soit une chaîne non vide d'étapes, soit un geste
+    fixe d'entrée `project` et de sortie `none` ; aucune étape ne cite un algorithme de la liste noire
+    du réseau ; une garde est une paire (code, message), jamais sur la première étape ; la dernière étape
+    n'est jamais conditionnelle et la chaîne a une étape inconditionnelle ; le `work_crs` de la ligne et le
+    `when` de l'étape de reprojection vont ensemble.
+    """
+    errors = []
+    for command_id, entry in (ALGORITHMS if table is None else table).items():
+        try:
+            _validate_row(command_id, entry, errors)
+        except Exception as exc:  # une ligne illisible est un message, jamais une trace
+            errors.append("%s : ligne illisible (%s)" % (command_id, type(exc).__name__))
+    return errors
+
+
+def _validate_row(command_id, entry, errors):
+    version = entry.get("chain_version")
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        errors.append("%s : chain_version absente ou invalide (un entier au moins égal à 1)" % command_id)
+    if "gesture" in entry:
+        if "chain" in entry:
+            errors.append("%s : ligne de geste fixe qui porte aussi une chaîne" % command_id)
+        if entry.get("input") != "project" or entry.get("output") != "none":
+            errors.append("%s : un geste fixe est d'entrée project et de sortie none" % command_id)
+        return
+    if "chain" not in entry and "algorithm" not in entry:
+        errors.append("%s : ligne sans chaîne ni algorithme" % command_id)
+        return
+    chain = chain_of(entry)
+    if not chain:
+        errors.append("%s : chaîne vide" % command_id)
+        return
+    for index, step in enumerate(chain):
+        algorithm = step.get("algorithm")
+        if not isinstance(algorithm, str) or not algorithm:
+            errors.append("%s : étape %d sans algorithme" % (command_id, index + 1))
+            continue
+        lowered = algorithm.lower()
+        if lowered in NETWORK_BLACKLIST or lowered.split(":", 1)[-1] in _NETWORK_NAMES:
+            errors.append(
+                "%s : l'algorithme « %s » accède au réseau ou ouvre une page, il est interdit (AD-14, AD-24)"
+                % (command_id, algorithm)
+            )
+        if "guard" in step:
+            guard = step["guard"]
+            empty = guard.get("empty") if isinstance(guard, dict) else None
+            if not (isinstance(empty, tuple) and len(empty) == 2):
+                errors.append(
+                    "%s : étape %d, la garde est {\"empty\": (code, message)}" % (command_id, index + 1)
+                )
+            if index == 0:
+                errors.append("%s : la première étape ne peut pas porter de garde (rien à contrôler)" % command_id)
+        if "when" in step and index == len(chain) - 1:
+            errors.append("%s : la dernière étape ne peut pas être conditionnelle" % command_id)
+    if all("when" in s for s in chain):
+        errors.append("%s : la chaîne n'a aucune étape inconditionnelle" % command_id)
+    whens = {s["when"] for s in chain if "when" in s}
+    work = entry.get("work_crs")
+    if work is not None and work not in whens:
+        errors.append("%s : work_crs « %s » sans étape dont `when` est ce paramètre" % (command_id, work))
+    if WORK_EPSG in whens and work != WORK_EPSG:
+        errors.append("%s : une étape dépend de %s mais la ligne n'a pas de work_crs" % (command_id, WORK_EPSG))
 
 
 class QgisBackend(_ReadBackend):
@@ -672,9 +881,6 @@ class _TaskHandle:
 
 
 _TEMPORARY = "TEMPORARY_OUTPUT"
-# Stade de la reprojection qui ouvre une ligne `work_crs` ; 0 et 1 sont l'algorithme de la ligne
-# et l'étape `then`.
-_WORK_CRS_STAGE = "work_crs"
 _GEOMETRY_LABELS = {"Polygon": "de polygones", "Line": "de lignes", "Point": "de points"}
 
 
@@ -722,7 +928,8 @@ class ProcessingGesture:
         self._handle = None
         self._loaded = False
         self._cancelling = False
-        self._stage = 0  # `_WORK_CRS_STAGE` : reprojection ; 0 : algorithme de la ligne ; 1 : `then`
+        self._steps = []  # étapes actives de la chaîne (celles dont `when` est rempli)
+        self._index = 0  # étape en cours
         self._overlay_layer = None
 
     def start(self, params, done):
@@ -776,7 +983,7 @@ class ProcessingGesture:
         # lui ; sinon la garde porte sur la couche, comme avant l'entrée 9.16.
         work_epsg = params.get(entry["work_crs"]) if entry.get("work_crs") else None
         if work_epsg is not None:
-            work_epsg = self._check_work_crs(work_epsg, layer)
+            self._check_work_crs(work_epsg, layer)
         elif entry.get("metric") and not backend.crs_is_metric(layer):
             raise GestureError(
                 CRS_NOT_METRIC,
@@ -815,32 +1022,38 @@ class ProcessingGesture:
         # Traduits dès maintenant, sur la couche d'entrée : un paramètre invalide est refusé avant
         # tout lancement, même quand une reprojection ouvre la chaîne. `out` n'est à ce geste (et
         # nettoyé par lui) qu'une fois tous les refus passés.
-        algorithm_params = self._line_parameters(layer, overlay, out)
+        self._overlay_layer = overlay
+        self._steps = [s for s in chain_of(entry) if s.get("when") is None or params.get(s["when"]) is not None]
+        # La première étape inconditionnelle est traduite dès maintenant, sur la couche d'entrée.
+        first = next(s for s in self._steps if s.get("when") is None)
+        # Un paramètre invalide est refusé avant tout lancement, même quand une reprojection ouvre la
+        # chaîne. `out` n'est à ce geste (et nettoyé par lui) qu'une fois tous les refus passés.
+        self._step_parameters(first, layer, first is self._steps[-1], out)
         self._out = out
-        if work_epsg is not None:
-            self._overlay_layer = overlay
-            self._stage = _WORK_CRS_STAGE
-            reprojection = translate_work_crs(work_epsg, layer)
-            reprojection["OUTPUT"] = _TEMPORARY
-            return backend.run_algorithm(_WORK_CRS_ALGORITHM, reprojection, self._on_finished)
-        return self._run_line(algorithm_params)
+        self._index = 0
+        return self._run_step(layer)
 
-    def _line_parameters(self, source, overlay, out):
-        """Paramètres de l'algorithme de la ligne, sur la couche `source`, vers `out`."""
-        entry = self._entry
-        algorithm_params = entry["translate"](self._params or {}, source)
-        if overlay is not None:
-            algorithm_params[entry["overlay_key"]] = overlay
-        # Avec une étape suivante, la première écrit en sortie temporaire : un seul fichier, `out`.
-        algorithm_params[entry["output"]] = _TEMPORARY if entry.get("then") else out
-        return algorithm_params
+    def _step_parameters(self, step, source, final, out):
+        """Paramètres de l'algorithme de l'étape, sur la couche `source` ; seule la dernière étape
+        écrit `out`, les autres une sortie temporaire de QGIS."""
+        extra = (self._backend,) if step.get("with_backend") else ()
+        parameters = step["translate"](self._params or {}, source, *extra)
+        if self._overlay_layer is not None and step.get("overlay_key"):
+            parameters[step["overlay_key"]] = self._overlay_layer
+        parameters[step.get("output", "OUTPUT")] = out if final else _TEMPORARY
+        return parameters
 
-    def _run_line(self, algorithm_params, previous=None):
-        entry = self._entry
-        extra = {"encoding": entry["encoding"]} if entry.get("encoding") else {}
-        if previous is not None:
-            extra["previous"] = previous
-        return self._backend.run_algorithm(entry["algorithm"], algorithm_params, self._on_finished, **extra)
+    def _run_step(self, source):
+        """Lance l'étape `self._index` de la chaîne sur la couche `source`."""
+        step = self._steps[self._index]
+        final = self._index == len(self._steps) - 1
+        parameters = self._step_parameters(step, source, final, self._out)
+        extra = {}
+        if final and self._entry.get("encoding"):
+            extra["encoding"] = self._entry["encoding"]
+        if self._handle is not None:
+            extra["previous"] = self._handle  # garde en vie la couche temporaire de l'étape d'avant
+        return self._backend.run_algorithm(step["algorithm"], parameters, self._on_finished, **extra)
 
     def _check_work_crs(self, value, layer):
         """Système de calcul donné par le noyau : entier, connu de QGIS, en mètres."""
@@ -886,10 +1099,11 @@ class ProcessingGesture:
         # La source n'est plus tenue ouverte pendant le travail de QGIS (Windows garderait le
         # fichier d'origine verrouillé).
         source = None
-        algorithm_params = entry["translate"](params, path)
-        algorithm_params[entry["output"]] = out
+        step = chain_of(entry)[-1]
+        algorithm_params = step["translate"](params, path)
+        algorithm_params[step.get("output", "OUTPUT")] = out
         self._out = out
-        return backend.run_algorithm(entry["algorithm"], algorithm_params, self._on_finished)
+        return backend.run_algorithm(step["algorithm"], algorithm_params, self._on_finished)
 
     def _check_origin(self, origin, layer):
         backend = self._backend
@@ -937,12 +1151,8 @@ class ProcessingGesture:
         try:
             if not ok:
                 raise GestureError(FAILED, "L'analyse a échoué dans QGIS.")
-            if self._stage == _WORK_CRS_STAGE:
-                self._after_reprojection(results)
-                return
-            then = self._entry.get("then")
-            if then is not None and self._stage == 0:
-                self._chain(then, results)
+            if self._index + 1 < len(self._steps):
+                self._advance(results)
                 return
             self._finish(result=self._load())
         except GestureError as exc:
@@ -950,32 +1160,20 @@ class ProcessingGesture:
         except Exception:
             self._fail(GestureError(FAILED, "Échec inattendu de l'analyse."))
 
-    def _after_reprojection(self, results):
-        """Lance l'algorithme de la ligne sur la couche reprojetée, vide ou non."""
+    def _advance(self, results):
+        """Lance l'étape suivante sur la sortie temporaire de celle qui vient de finir."""
         backend = self._backend
-        reference = results.get("OUTPUT")
+        current, following = self._steps[self._index], self._steps[self._index + 1]
+        reference = results.get(current.get("output", "OUTPUT"))
         temporary = backend.temporary_layer(self._handle, reference) if reference else None
         if temporary is None:
-            raise GestureError(FAILED, "La reprojection de la couche d'entrée n'a rien rendu.")
-        parameters = self._line_parameters(temporary, self._overlay_layer, self._out)
-        self._stage = 0
-        self._handle = self._run_line(parameters, previous=self._handle)
-
-    def _chain(self, then, results):
-        """Lance l'étape suivante sur la sortie temporaire de la première."""
-        backend = self._backend
-        reference = results.get(self._entry["output"])
-        temporary = backend.temporary_layer(self._handle, reference) if reference else None
-        if temporary is None:
-            raise GestureError(FAILED, "L'étape intermédiaire de l'analyse n'a rien rendu.")
-        if then.get("empty_error") and backend.feature_count(temporary) == 0:
-            code, message = then["empty_error"]
+            raise GestureError(FAILED, current.get("nothing", "L'étape intermédiaire de l'analyse n'a rien rendu."))
+        empty = (following.get("guard") or {}).get("empty")
+        if empty and backend.feature_count(temporary) == 0:
+            code, message = empty
             raise GestureError(code, message)
-        extra = (backend,) if then.get("with_backend") else ()
-        parameters = then["translate"](self._params or {}, temporary, *extra)
-        parameters[then["output"]] = self._out
-        self._stage = 1
-        self._handle = backend.run_algorithm(then["algorithm"], parameters, self._on_finished, self._handle)
+        self._index += 1
+        self._handle = self._run_step(temporary)
 
     def _load(self):
         backend = self._backend

@@ -1,0 +1,12 @@
+{
+  "analysis.buffer": true,
+  "analysis.intersect": true,
+  "analysis.select_by_attribute": true,
+  "analysis.zonal_statistics": true,
+  "analysis.nearest": true,
+  "analysis.isochrone": true,
+  "data.reproject": true,
+  "data.convert": true,
+  "data.convert_raster": true,
+  "layer.remove": false
+}

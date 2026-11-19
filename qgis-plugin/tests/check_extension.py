@@ -1,6 +1,7 @@
 """Garde statique du Python de l'extension QGIS (AD-14, AD-18).
 
-Elle lit les sources par analyse `ast` et n'exécute rien de l'extension.
+Elle lit les sources par analyse `ast` et n'exécute rien de l'extension, à une exception : elle
+charge la table fermée (`analysis`, `delegated`, sans QGIS) pour en valider les invariants (AD-24).
 Usage : python -I qgis-plugin/tests/check_extension.py [dossier_extension]
 Bibliothèque standard seule. Code 0 si tout est propre, 1 sinon.
 """
@@ -144,8 +145,27 @@ def check_publication(pkg):
     return errors
 
 
+def check_table(pkg, rows=None):
+    """Invariants de la table fermée (AD-24) : `validate_table` de l'extension, dont la liste noire des
+    algorithmes qui accèdent au réseau (AD-14). `rows` : une table à valider à la place de la vraie.
+    Un dossier sans `analysis.py` ni `delegated.py` n'a pas de table : rien à valider."""
+    if rows is None and not all(os.path.isfile(os.path.join(pkg, n)) for n in ("analysis.py", "delegated.py")):
+        return []
+    path = os.path.abspath(pkg)
+    if path not in sys.path:
+        sys.path.insert(0, path)
+    try:
+        import analysis
+        import delegated
+
+        found = analysis.validate_table(delegated.table_rows() if rows is None else rows)
+    except Exception as exc:
+        return [f"table fermée : chargement impossible : {type(exc).__name__}: {exc}"]
+    return [f"table fermée : {e}" for e in found]
+
+
 def run(pkg, publication=False):
-    errors = check_imports(pkg) + check_size(pkg) + check_metadata(pkg)
+    errors = check_imports(pkg) + check_size(pkg) + check_metadata(pkg) + check_table(pkg)
     return errors + check_publication(pkg) if publication else errors
 
 

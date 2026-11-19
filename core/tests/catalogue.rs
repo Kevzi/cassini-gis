@@ -1655,3 +1655,89 @@ fn the_identifier_table_matches_the_fiches() {
         assert_eq!(runs_in, &fiche.runs_in, "{} : exécution", fiche.id);
     }
 }
+
+// ---- Annulabilité : la table fermée de l'extension face au registre (AD-24, AD-12) ----
+
+/// Annulabilité déduite de la chaîne de chaque ligne de la table fermée, écrite par l'extension
+/// (`qgis-plugin/tests/table_annulable.json`, que son test Python égale à la table). Une commande
+/// n'est annulable que si chaque algorithme de sa chaîne l'est ; le registre doit dire la même chose.
+fn cancellable_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("qgis-plugin")
+        .join("tests")
+        .join("table_annulable.json")
+}
+
+/// Confronte l'annulabilité de la table au registre : un message par écart, qui nomme la commande.
+fn confront_cancellable(table: &BTreeMap<String, bool>, specs: &[CommandSpec]) -> Vec<String> {
+    let mut errors = Vec::new();
+    for (id, derived) in table {
+        match specs.iter().find(|s| &s.id == id) {
+            None => errors.push(format!("{id} : ligne de la table fermée sans commande au registre")),
+            Some(spec) if spec.runs_in != Some(RunsIn::Qgis) => {
+                errors.push(format!("{id} : ligne de la table fermée, mais commande qui ne s'exécute pas dans QGIS"))
+            }
+            Some(spec) if spec.cancellable != Some(*derived) => errors.push(format!(
+                "{id} : annulable au registre : {:?}, déduit de la chaîne de la table fermée : {derived}",
+                spec.cancellable
+            )),
+            Some(_) => {}
+        }
+    }
+    errors
+}
+
+fn read_cancellable_table() -> BTreeMap<String, bool> {
+    let text = std::fs::read_to_string(cancellable_path()).expect("table_annulable.json");
+    serde_json::from_str(&text).expect("table_annulable.json : un objet id -> booléen")
+}
+
+#[test]
+fn the_registry_cancellability_matches_the_closed_table() {
+    let table = read_cancellable_table();
+    assert!(
+        table.len() >= 10,
+        "garde contre une lecture vide : {} lignes",
+        table.len()
+    );
+    let specs: Vec<CommandSpec> = Registry::standard().specs().cloned().collect();
+    let errors = confront_cancellable(&table, &specs);
+    assert!(
+        errors.is_empty(),
+        "le registre s'écarte de la table fermée sur l'annulabilité :\n- {}",
+        errors.join("\n- ")
+    );
+}
+
+#[test]
+fn a_command_declared_cancellable_over_a_non_cancellable_chain_fails_and_names_it() {
+    let specs: Vec<CommandSpec> = Registry::standard().specs().cloned().collect();
+    // Une ligne dont un algorithme n'est pas annulable : la table déduit `false`, le registre dit `true`.
+    let table = BTreeMap::from([("analysis.buffer".to_string(), false)]);
+    let errors = confront_cancellable(&table, &specs);
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(
+        errors[0].starts_with("analysis.buffer : annulable au registre"),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn a_closed_table_row_for_an_unknown_or_core_command_fails_and_names_it() {
+    let specs: Vec<CommandSpec> = Registry::standard().specs().cloned().collect();
+    let table = BTreeMap::from([
+        ("analysis.fake".to_string(), true),
+        ("terrain.slope".to_string(), true),
+    ]);
+    let errors = confront_cancellable(&table, &specs);
+    assert_eq!(errors.len(), 2, "{errors:?}");
+    assert!(
+        errors[0].starts_with("analysis.fake : ligne de la table fermée sans commande"),
+        "{errors:?}"
+    );
+    assert!(
+        errors[1].starts_with("terrain.slope : ligne de la table fermée, mais commande qui ne"),
+        "{errors:?}"
+    );
+}

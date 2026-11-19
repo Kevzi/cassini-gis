@@ -29,6 +29,12 @@ except ImportError:  # pragma: no cover
 
 UNSAVED = "layer.unsaved"
 
+# Ligne de la table fermée (AD-24, amendement du 2026-11-08) : un geste fixe de l'API de projet de
+# QGIS, d'entrée `project` et de sortie `none`, et non une chaîne d'algorithmes. Il garde sa version
+# de chaîne ; il n'est pas annulable (`layer.remove` du registre, `cancellable: false`).
+COMMAND_ID = "layer.remove"
+TABLE_ROW = {"chain_version": 1, "gesture": COMMAND_ID, "input": "project", "output": "none"}
+
 # Noms des couches retirées par ce geste, par identifiant : affichage seul.
 _REMOVED_NAMES = {}
 

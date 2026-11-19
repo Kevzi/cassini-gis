@@ -34,6 +34,14 @@ except ImportError:  # pragma: no cover
 PROBE_ID = "test.qgis_probe"
 
 
+def table_rows():
+    """Lignes de la table fermée qui portent une version de chaîne : les analyses (`ALGORITHMS`) et
+    les gestes fixes déclarés par leur module (`layer.remove`). Sert à la recette (AD-24)."""
+    rows = dict(analysis.ALGORITHMS)
+    rows[layer_remove.COMMAND_ID] = layer_remove.TABLE_ROW
+    return rows
+
+
 def build_registry(probe):
     """Rend le registre des gestes ; `probe` est la fabrique du geste de test."""
     registry = gestures.GestureRegistry()
