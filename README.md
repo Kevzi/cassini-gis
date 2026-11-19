@@ -116,7 +116,7 @@ Une couche que Cassini ne reconnaît pas garde son style : il ne devine pas.
 | `analysis.buffer` | zone tampon |
 | `analysis.intersect` | intersection de deux couches |
 | `analysis.select_by_attribute` | sélection par attribut |
-| `analysis.zonal_statistics` | nombre de points dans chaque zone |
+| `analysis.count_points_in_polygon` | nombre de points dans chaque zone, avec somme pondérée facultative |
 | `analysis.nearest` | jointure au plus proche voisin : attributs de l'entité la plus proche d'une autre couche, et distance en mètres |
 | `analysis.isochrone` | isochrones à pied et en voiture sur un réseau |
 | `layout.export_pdf` | carte en PDF : titre, légende, échelle, flèche du nord, sources détaillées (résolution, date), format, orientation, carroyage (dont MGRS étiqueté), en-tête et pied de page ; au bout d'un plan, cadrée sur le résultat mis en évidence |

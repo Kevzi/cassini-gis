@@ -258,32 +258,33 @@ def _isochrone(lang, p, r, names):
     return text + (_out_layer(lang, r) if r else "")
 
 
-def _zonal(lang, p, r, names):
+def _count_points(lang, p, r, names):
     text = texts.tr(
         lang,
         "sum_zonal",
         points=names.layer(p.get("points_layer_id")),
         layer=names.layer(p.get("layer_id")),
     )
+    if p.get("weight_field"):
+        text += texts.tr(lang, "sum_zonal_weighted", field=p["weight_field"])
     if not r:
         return text
     text += _out_layer(lang, r)
     if r.get("truncated") is not False:
-        return text  # zones tronquées (100 premières) : la plus fournie n'est pas sûre
-    zones = r.get("zones")
+        return text  # lignes tronquées (100 premières) : la zone la plus fournie n'est pas sûre
+    rows = r.get("rows")
     best = None
-    for zone in zones if isinstance(zones, list) else []:
-        if (
-            isinstance(zone, dict)
-            and isinstance(zone.get("label"), str)
-            and _is_int(zone.get("count"))
-            and (best is None or zone["count"] > best["count"])
-        ):
-            best = zone
-    if best is not None and best["count"] > 0:
-        text += texts.tr(
-            lang, "sum_zonal_top", label=best["label"], count=count(lang, "points", best["count"])
-        )
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        values = row.get("values")
+        cell = values.get("count") if isinstance(values, dict) else None
+        n = cell.get("value") if isinstance(cell, dict) else None
+        if isinstance(row.get("label"), str) and _is_number(n) and float(n).is_integer():
+            if best is None or n > best[1]:
+                best = (row["label"], int(n))
+    if best is not None and best[1] > 0:
+        text += texts.tr(lang, "sum_zonal_top", label=best[0], count=count(lang, "points", best[1]))
     return text
 
 
@@ -950,7 +951,7 @@ _SENTENCES = {
     "analysis.intersect": _intersect,
     "analysis.select_by_attribute": _select,
     "analysis.isochrone": _isochrone,
-    "analysis.zonal_statistics": _zonal,
+    "analysis.count_points_in_polygon": _count_points,
     "analysis.nearest": _nearest,
     "layer.add": _layer_add,
     "layer.describe": _layer_describe,

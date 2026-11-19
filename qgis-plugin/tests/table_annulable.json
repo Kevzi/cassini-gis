@@ -2,7 +2,7 @@
   "analysis.buffer": true,
   "analysis.intersect": true,
   "analysis.select_by_attribute": true,
-  "analysis.zonal_statistics": true,
+  "analysis.count_points_in_polygon": true,
   "analysis.nearest": true,
   "analysis.isochrone": true,
   "data.reproject": true,

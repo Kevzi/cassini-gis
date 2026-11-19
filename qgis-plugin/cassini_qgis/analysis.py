@@ -266,23 +266,48 @@ def translate_convert_raster(params, raster):
     }
 
 
-# Champ de décompte écrit par `native:countpointsinpolygon` ; le noyau ne le connaît pas.
+# Champs écrits par `native:countpointsinpolygon` ; le noyau ne les connaît pas. Avec `WEIGHT`,
+# l'algorithme écrit la somme pondérée à la place du décompte dans son champ : le décompte et la
+# somme sont donc deux passes, chacune avec son propre champ.
 _COUNT_FIELD = "NUMPOINTS"
-_MAX_ZONES = 100  # borne du schéma de sortie du noyau (AD-8)
+_WEIGHT_RESULT_FIELD = "SUMWEIGHT"
+_MAX_ROWS = 100  # borne du schéma de sortie du noyau (AD-8)
+_NUMERIC_MARKERS = ("int", "real", "double", "float", "decimal", "numeric", "long", "short")
 
 
-def translate_zonal_statistics(params, layer):
-    """Paramètres neutres de `analysis.zonal_statistics` -> `native:countpointsinpolygon`.
+def is_numeric_type(type_name):
+    """Vrai si le nom de type d'un champ (celui que QGIS rend) désigne un nombre."""
+    name = str(type_name).lower()
+    return "list" not in name and any(marker in name for marker in _NUMERIC_MARKERS)
 
-    La couche de points est ajoutée par le geste (clé `overlay` de la table).
-    """
+
+def translate_count_points(params, layer):
+    """Paramètres neutres de `analysis.count_points_in_polygon` -> `native:countpointsinpolygon`,
+    passe du décompte, toujours la dernière (celle qui écrit `out`). La couche de points est ajoutée
+    par le geste (clé `overlay_key`)."""
     return {"POLYGONS": layer, "WEIGHT": "", "CLASSFIELD": "", "FIELD": _COUNT_FIELD}
 
 
-def summarize_zonal_statistics(backend, layer, params):
-    """Décomptes des 100 premières zones de la couche produite (clé `summary` de la table)."""
-    pairs, truncated = backend.counts_of(layer, _COUNT_FIELD, params.get("label_field") or None, _MAX_ZONES)
-    return {"zones": [{"label": label, "count": count} for label, count in pairs], "truncated": truncated}
+def translate_count_points_weighted(params, layer):
+    """Première passe, seulement avec `weight_field` : la somme du champ, dans son propre champ ;
+    la passe du décompte, qui suit, ajoute le sien (la dernière étape ne peut pas être conditionnelle)."""
+    return {"POLYGONS": layer, "WEIGHT": params["weight_field"], "CLASSFIELD": "", "FIELD": _WEIGHT_RESULT_FIELD}
+
+
+def summarize_count_points(backend, layer, params):
+    """Lignes du résumé des 100 premières zones de la couche produite (clé `summary` de la table) :
+    `count` en points, et `weighted_sum` sans unité quand `weight_field` est donné."""
+    weight = params.get("weight_field")
+    triples, truncated = backend.counts_of(
+        layer, _COUNT_FIELD, params.get("label_field") or None, _MAX_ROWS, _WEIGHT_RESULT_FIELD if weight else None
+    )
+    rows = []
+    for label, count, weighted in triples:
+        values = {"count": {"value": count, "unit": "points"}}
+        if weight:
+            values["weighted_sum"] = {"value": weighted, "unit": None}
+        rows.append({"label": label, "values": values})
+    return {"rows": rows, "truncated": truncated}
 
 
 def translate_nearest(params, layer):
@@ -356,6 +381,10 @@ def summarize_nearest(backend, layer, params):
 #   metric    : l'algorithme mesure en unités de la couche, donc le SCR doit être en mètres ;
 #   overlay   : (facultatif) paramètre du noyau qui désigne une seconde couche ; l'étape qui la reçoit
 #               porte `overlay_key`, la clé de l'algorithme ;
+#   overlay_numeric_field : (facultatif, avec `overlay`) paramètre du noyau qui nomme un champ
+#               numérique de la seconde couche ; absent, rien n'est vérifié ; présent, un champ
+#               inconnu est `analysis.unknown_field` et un champ non numérique `analysis.bad_params`,
+#               avant tout lancement ;
 #   field     : (facultatif) paramètre du noyau qui nomme un champ de la couche d'entrée ;
 #               avec `field_optional`, il peut être absent ;
 #   geometry  : (facultatif) type de géométrie exigé de la couche d'entrée (ex. `Polygon`) ;
@@ -442,22 +471,30 @@ ALGORITHMS = {
         "input": "layer_id",
         "field": "field",
     },
-    "analysis.zonal_statistics": {
+    "analysis.count_points_in_polygon": {
         "chain_version": 1,
         "chain": [
             {
                 "algorithm": "native:countpointsinpolygon",
-                "translate": translate_zonal_statistics,
+                "translate": translate_count_points_weighted,
+                "output": "OUTPUT",
+                "overlay_key": "POINTS",
+                "when": "weight_field",
+            },
+            {
+                "algorithm": "native:countpointsinpolygon",
+                "translate": translate_count_points,
                 "output": "OUTPUT",
                 "overlay_key": "POINTS",
             },
         ],
         "input": "layer_id",
         "overlay": "points_layer_id",
+        "overlay_numeric_field": "weight_field",
         "field": "label_field",
         "field_optional": True,
         "geometry": "Polygon",
-        "summary": summarize_zonal_statistics,
+        "summary": summarize_count_points,
     },
     "analysis.nearest": {
         "chain_version": 1,
@@ -767,25 +804,33 @@ class QgisBackend(_ReadBackend):
 
         return QgsProcessingUtils.mapLayerFromString(reference, handle.context)
 
-    def counts_of(self, layer, count_field, label_field, limit):
-        """Couples (étiquette, décompte) des `limit` premières entités, et si la couche en a plus.
+    def counts_of(self, layer, count_field, label_field, limit, weight_field=None):
+        """Triplets (étiquette, décompte, somme pondérée) des `limit` premières entités, et si la
+        couche en a plus. La somme est None sans `weight_field`, 0 si elle est nulle.
 
-        L'étiquette est la valeur de `label_field`, ou le numéro d'entité si le champ est
-        absent, vide ou nul.
+        L'étiquette est la valeur de `label_field`, ou le rang de l'entité (à partir de 1) si le
+        champ est absent, vide ou nul : jamais l'identifiant d'entité.
         """
         from qgis.core import QgsFeatureRequest
 
         request = QgsFeatureRequest()
         request.setLimit(limit)
-        pairs = []
-        for feature in layer.getFeatures(request):
+        triples = []
+        for rank, feature in enumerate(layer.getFeatures(request), start=1):
             label = feature[label_field] if label_field else None
             text = "" if label is None else str(label).strip()
             if text in ("", "NULL"):
-                text = str(feature.id())
+                text = str(rank)
             count = feature[count_field]
-            pairs.append((text, int(count) if count is not None else 0))
-        return pairs, self.feature_count(layer) > limit
+            weighted = None
+            if weight_field:
+                raw = feature[weight_field]
+                try:
+                    weighted = float(raw) if raw is not None else 0.0
+                except (TypeError, ValueError):
+                    weighted = 0.0
+            triples.append((text, int(count) if count is not None else 0, weighted))
+        return triples, self.feature_count(layer) > limit
 
     def null_count(self, layer, field):
         """Nombre d'entités de la couche dont le champ `field` est nul ou vide."""
@@ -1017,6 +1062,8 @@ class ProcessingGesture:
         overlay = None
         if entry.get("overlay"):
             overlay = self._overlay(params, layer_id)
+            if entry.get("overlay_numeric_field") and params.get(entry["overlay_numeric_field"]) is not None:
+                self._check_numeric_field(params[entry["overlay_numeric_field"]], overlay)
         if entry.get("field") and not (entry.get("field_optional") and not params.get(entry["field"])):
             self._check_field(params.get(entry["field"]), layer)
         # Traduits dès maintenant, sur la couche d'entrée : un paramètre invalide est refusé avant
@@ -1139,6 +1186,22 @@ class ProcessingGesture:
             raise GestureError(
                 UNKNOWN_FIELD,
                 "La couche « %s » n'a pas de champ « %s »." % (backend.name_of(layer), name),
+            )
+
+    def _check_numeric_field(self, name, layer):
+        """Champ de `layer` qui doit exister et être numérique (pondération)."""
+        backend = self._backend
+        types = dict(backend.fields_of(layer))
+        if not isinstance(name, str) or name not in types:
+            raise GestureError(
+                UNKNOWN_FIELD,
+                "La couche « %s » n'a pas de champ « %s »." % (backend.name_of(layer), name),
+            )
+        if not is_numeric_type(types[name]):
+            raise GestureError(
+                BAD_PARAMS,
+                "Le champ « %s » de la couche « %s » n'est pas numérique : choisissez un champ de nombres."
+                % (name, backend.name_of(layer)),
             )
 
     def _on_finished(self, ok, results):

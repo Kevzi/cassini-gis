@@ -270,7 +270,7 @@
       "kind": "calls",
       "calls": [
         {
-          "command": "analysis.zonal_statistics",
+          "command": "analysis.count_points_in_polygon",
           "params": {
             "layer_id": "quartiers_iris_8b2c47e1_0f6d_4a93_b528_c13e9d7a6f40",
             "points_layer_id": "equipements_3a5f60d2_8e19_4c7b_a640_2d97f1b5e083",
@@ -288,7 +288,7 @@
       "kind": "calls",
       "calls": [
         {
-          "command": "analysis.zonal_statistics",
+          "command": "analysis.count_points_in_polygon",
           "params": {
             "layer_id": "quartiers_iris_8b2c47e1_0f6d_4a93_b528_c13e9d7a6f40",
             "points_layer_id": "gares_rer_b93d0f12_6e48_4a7c_95d1_e07f2b8c3a64"

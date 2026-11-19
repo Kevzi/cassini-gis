@@ -20,7 +20,7 @@
      "layer_id": "@cours_d_eau", "distance": {"value": 10, "unit": "m"}}}]}},
   {"id": "RA07", "text": "Combien de gares dans chaque commune ? Donne-moi le nom des communes.",
    "note": "le nom est dans nom_officiel, parmi 17 champs : le raté connu des nuits du 2026-11-10",
-   "expect": {"plan": [{"command": "analysis.zonal_statistics", "params": {
+   "expect": {"plan": [{"command": "analysis.count_points_in_polygon", "params": {
      "layer_id": "@communes", "points_layer_id": "@gares", "label_field": "nom_officiel"}}]}},
   {"id": "RA08", "text": "Trouve les parcelles à moins de 500 m d'une gare",
    "note": "reprise de la recette à cinq phrases ; les gares sont en EPSG:4326",

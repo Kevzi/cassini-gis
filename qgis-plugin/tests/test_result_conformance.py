@@ -123,7 +123,10 @@ def _analysis(test_class, setup):
     try:
         backend, params = setup(t)
         _, calls = ta.start(t.entry, backend, params)
-        backend.finished(True, {})
+        for _ in range(4):  # une chaîne à plusieurs passes : la dernière seule répond
+            if calls:
+                break
+            backend.finished(True, {"OUTPUT": "temporaire"})
         assert len(calls) == 1 and calls[0][1] is None, calls
         return calls[0][0]
     finally:
@@ -142,13 +145,16 @@ def _select():
     return _analysis(ta.SelectByAttributeTest, lambda t: (t.backend, t.params()))
 
 
-def _zonal(pairs, loaded_count):
+def _count_points(pairs, loaded_count, weight=None):
     def setup(t):
         t.backend.pairs = pairs
         t.backend.loaded_count = loaded_count
+        if weight:
+            t.backend.sums = {label: 41.5 for label, _ in pairs}
+            return t.backend, t.params(weight_field=weight)
         return t.backend, t.params()
 
-    return lambda: _analysis(ta.ZonalStatisticsTest, setup)
+    return lambda: _analysis(ta.CountPointsInPolygonTest, setup)
 
 
 def _nearest():
@@ -373,9 +379,10 @@ def producers():
         ("analysis.isochrone", "un polygone"): _isochrone,
         ("analysis.nearest", "couche créée"): _nearest,
         ("analysis.select_by_attribute", "entités retenues"): _select,
-        ("analysis.zonal_statistics", "avec zones"): _zonal([("Nord", 5), ("Sud", 3), ("Vide", 0)], 3),
-        ("analysis.zonal_statistics", "tronqué"): _zonal([(str(i), i) for i in range(150)], 150),
-        ("analysis.zonal_statistics", "sans zone"): _zonal([], 0),
+        ("analysis.count_points_in_polygon", "avec zones"): _count_points([("Nord", 5), ("Sud", 3), ("Vide", 0)], 3),
+        ("analysis.count_points_in_polygon", "pondéré"): _count_points([("Nord", 5), ("Sud", 3)], 2, "poids"),
+        ("analysis.count_points_in_polygon", "tronqué"): _count_points([(str(i), i) for i in range(150)], 150),
+        ("analysis.count_points_in_polygon", "sans zone"): _count_points([], 0),
         ("data.convert", "GeoPackage"): _convert,
         ("data.convert_raster", "avec EPSG"): _convert_raster(2154),
         ("data.convert_raster", "sans EPSG"): _convert_raster(None),

@@ -105,8 +105,9 @@ fn the_shape_variants_are_all_present() {
         ("layer.add", "non reprojetée"),
         ("layer.describe", "sans emprise"),
         ("project.inventory", "projet vide"),
-        ("analysis.zonal_statistics", "tronqué"),
-        ("analysis.zonal_statistics", "sans zone"),
+        ("analysis.count_points_in_polygon", "pondéré"),
+        ("analysis.count_points_in_polygon", "tronqué"),
+        ("analysis.count_points_in_polygon", "sans zone"),
         ("data.convert_raster", "sans EPSG"),
     ] {
         assert!(

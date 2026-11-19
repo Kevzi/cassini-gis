@@ -1924,9 +1924,11 @@ class CassiniPanel(QWidget):
             self._inputs[f.name] = widget
             self.form_layout.addRow(label, row)
         layers = self._inputs.get("layer_id")
-        for widget in self._inputs.values():
-            if isinstance(widget, FieldCombo) and layers is not None:
-                widget.bind(layers)
+        for name, widget in self._inputs.items():
+            # `weight_field` désigne un champ des points, pas des zones : il suit la couche de points.
+            source = self._inputs.get("points_layer_id") if name == "weight_field" else layers
+            if isinstance(widget, FieldCombo) and source is not None:
+                widget.bind(source)
 
     def _browse(self, widget):
         if not self.project_file:

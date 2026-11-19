@@ -137,7 +137,7 @@ class AnnecyFile(unittest.TestCase):
 
     def test_a_count_by_commune_with_its_name(self):
         counts = [c for p in self.phrases if p["plan"] for c in p["plan"]
-                  if c["command"] == "analysis.zonal_statistics" and c["params"].get("label_field")]
+                  if c["command"] == "analysis.count_points_in_polygon" and c["params"].get("label_field")]
         self.assertTrue(counts)
 
     def test_every_command_family_is_there(self):

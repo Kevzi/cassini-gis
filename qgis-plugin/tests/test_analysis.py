@@ -36,7 +36,7 @@ class FakeBackend:
         self.loaded_crs, self.known, self.known_calls = loaded_crs, {2154, 4326, 32631, 32632}, []
         self.calls, self.handle, self.finished = [], FakeHandle(), None
         self.write, self.loaded_count, self.loadable = write, loaded_count, loadable
-        self.pairs, self.counts_call = [], None
+        self.pairs, self.counts_call, self.sums = [], None, {}
         self.near, self.near_call, self.temporary_count = True, None, 1
         self.encodings, self.driver = [], None
         self.nulls, self.null_call = 0, None
@@ -76,10 +76,10 @@ class FakeBackend:
     def geometry_of(self, layer):
         return layer.geometry
 
-    def counts_of(self, layer, count_field, label_field, limit):
-        self.counts_call = (count_field, label_field, limit)
-        pairs = self.pairs[:limit]
-        return pairs, len(self.pairs) > limit
+    def counts_of(self, layer, count_field, label_field, limit, weight_field=None):
+        self.counts_call = (count_field, label_field, limit, weight_field)
+        triples = [(label, n, (self.sums.get(label, 0.0) if weight_field else None)) for label, n in self.pairs[:limit]]
+        return triples, len(self.pairs) > limit
 
     def null_count(self, layer, field):
         self.null_call = (layer.lid, field)
@@ -427,7 +427,7 @@ class BufferTest(unittest.TestCase):
         self.assertIn("analysis.buffer", registry.ids())
         self.assertIn("analysis.intersect", registry.ids())
         self.assertIn("analysis.select_by_attribute", registry.ids())
-        self.assertIn("analysis.zonal_statistics", registry.ids())
+        self.assertIn("analysis.count_points_in_polygon", registry.ids())
 
 
 class IntersectTest(unittest.TestCase):
@@ -542,15 +542,17 @@ class SelectByAttributeTest(unittest.TestCase):
         self.assertEqual(len(self.backend.calls), 1)
 
 
-class ZonalStatisticsTest(unittest.TestCase):
+class CountPointsInPolygonTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
-        self.out = os.path.join(self.dir.name, "4-analysis.zonal_statistics.gpkg")
-        self.entry = analysis.ALGORITHMS["analysis.zonal_statistics"]
+        self.out = os.path.join(self.dir.name, "4-analysis.count_points_in_polygon.gpkg")
+        self.entry = analysis.ALGORITHMS["analysis.count_points_in_polygon"]
+        points = FakeLayer("p", name="gares", fields=("nom", "poids"))
+        points.fields = [("nom", "String"), ("poids", "Real"), ("entier", "Integer64")]
         self.backend = FakeBackend(
             [
                 FakeLayer("z", name="communes", geometry="Polygon", fields=("nom", "pop")),
-                FakeLayer("p", name="gares"),
+                points,
                 FakeLayer("r", vector=False),
             ],
             loaded_count=3,
@@ -570,17 +572,67 @@ class ZonalStatisticsTest(unittest.TestCase):
         algo, p = self.backend.calls[0]
         self.assertEqual(algo, "native:countpointsinpolygon")
         self.assertEqual((p["POLYGONS"].lid, p["POINTS"].lid), ("z", "p"))
+        self.assertEqual(p["WEIGHT"], "")
         self.assertEqual(p["OUTPUT"], self.out)
         self.backend.finished(True, {})
+        self.assertEqual(len(self.backend.calls), 1)  # sans pondération : une seule passe
         result, error = calls[0]
         self.assertIsNone(error)
         self.assertEqual(result["feature_count"], 3)
+        self.assertNotIn("zones", result)
         self.assertEqual(
-            result["zones"],
-            [{"label": "Villeneuve", "count": 5}, {"label": "Orly", "count": 3}, {"label": "Vide", "count": 0}],
+            result["rows"],
+            [
+                {"label": "Villeneuve", "values": {"count": {"value": 5, "unit": "points"}}},
+                {"label": "Orly", "values": {"count": {"value": 3, "unit": "points"}}},
+                {"label": "Vide", "values": {"count": {"value": 0, "unit": "points"}}},
+            ],
         )
         self.assertFalse(result["truncated"])
-        self.assertEqual(self.backend.counts_call, (p["FIELD"], "nom", 100))
+        self.assertEqual(self.backend.counts_call, (p["FIELD"], "nom", 100, None))
+
+    def test_weighted_count_runs_two_passes_with_distinct_fields(self):
+        self.backend.pairs = [("Nord", 5), ("Sud", 3)]
+        self.backend.sums = {"Nord": 41.5, "Sud": 12.0}
+        _, calls = start(self.entry, self.backend, self.params(weight_field="poids"))
+        algo, first = self.backend.calls[0]
+        self.assertEqual((algo, first["WEIGHT"], first["OUTPUT"]), ("native:countpointsinpolygon", "poids", "TEMPORARY_OUTPUT"))
+        self.backend.finished(True, {"OUTPUT": "ponderee"})
+        algo, second = self.backend.calls[1]
+        self.assertEqual(algo, "native:countpointsinpolygon")
+        self.assertEqual(second["POLYGONS"].lid, "ponderee")
+        self.assertEqual(second["POINTS"].lid, "p")
+        self.assertEqual((second["WEIGHT"], second["OUTPUT"]), ("", self.out))
+        self.assertNotEqual(first["FIELD"], second["FIELD"])
+        self.backend.finished(True, {})
+        result, error = calls[0]
+        self.assertIsNone(error)
+        self.assertEqual(
+            result["rows"][0],
+            {
+                "label": "Nord",
+                "values": {
+                    "count": {"value": 5, "unit": "points"},
+                    "weighted_sum": {"value": 41.5, "unit": None},
+                },
+            },
+        )
+        self.assertEqual(self.backend.counts_call, (second["FIELD"], "nom", 100, first["FIELD"]))
+
+    def test_non_numeric_weight_field_refused_before_any_write(self):
+        _, calls = start(self.entry, self.backend, self.params(weight_field="nom"))
+        self.assertEqual(calls[0][1].code, "analysis.bad_params")
+        self.assertEqual(self.backend.calls, [])
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_unknown_weight_field_refused(self):
+        _, calls = start(self.entry, self.backend, self.params(weight_field="absent"))
+        self.assertEqual(calls[0][1].code, "analysis.unknown_field")
+        self.assertEqual(self.backend.calls, [])
+
+    def test_integer_weight_field_is_numeric(self):
+        start(self.entry, self.backend, self.params(weight_field="entier"))
+        self.assertEqual(len(self.backend.calls), 1)
 
     def test_label_field_is_optional(self):
         p = self.params()
@@ -602,9 +654,20 @@ class ZonalStatisticsTest(unittest.TestCase):
         _, calls = start(self.entry, self.backend, self.params())
         self.backend.finished(True, {})
         result = calls[0][0]
-        self.assertEqual(len(result["zones"]), 100)
+        self.assertEqual(len(result["rows"]), 100)
         self.assertTrue(result["truncated"])
         self.assertEqual(result["feature_count"], 150)
+
+    def test_no_zone_gives_empty_rows(self):
+        self.backend.pairs = []
+        self.backend.loaded_count = 0
+        _, calls = start(self.entry, self.backend, self.params())
+        self.backend.finished(True, {})
+        result = calls[0][0]
+        self.assertEqual((result["rows"], result["truncated"]), ([], False))
+
+    def test_old_id_is_gone_from_the_table(self):
+        self.assertNotIn("analysis.zonal_statistics", analysis.ALGORITHMS)
 
     def test_same_layer_refused(self):
         _, calls = start(self.entry, self.backend, self.params(points_layer_id="z"))

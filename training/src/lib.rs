@@ -331,7 +331,9 @@ pub const FOCUS_COUNT: usize = 1800;
 /// Entrée 10.10 : `redemande` y entre. Tirée seule à `FOCUS_SEED`, elle emballe une autre famille
 /// selon les poids, et l'ajout de `plus_proche_voisin` a déplacé ce tirage sur « Sélectionne les
 /// routes départementales » (essai réel GA06). Le jeu complet, lui, ne copie rien (le test le tient).
-pub const FOCUS_EXCLUDED: &[&str] = &["redemande"];
+/// Entrée 10.2 : `redemande` en sort. Le tirage de `decompte_par_zone` (somme pondérée une fois sur cinq)
+/// a déplacé le sien, qui ne copie plus aucune phrase : le test tient la liste vide.
+pub const FOCUS_EXCLUDED: &[&str] = &[];
 
 /// Les familles du jeu ciblé de la première séance continue (5.54, lot 2) : les six familles
 /// neuves ou renforcées d'après les leçons de la remesure du 2026-11-11 (format gardé avec

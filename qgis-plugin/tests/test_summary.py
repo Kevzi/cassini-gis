@@ -122,20 +122,32 @@ class LayerCommandsTest(unittest.TestCase):
             "Area reachable in 10 min by car on the network routes_9.",
         )
 
-    def test_zonal_statistics(self):
+    def test_count_points_in_polygon(self):
         params = {"layer_id": "parcelles_2", "points_layer_id": "gares_1"}
         out = {
             "layer_id": "z_5",
             "name": "Décompte",
             "feature_count": 3,
-            "zones": [{"label": "A", "count": 1}, {"label": "B", "count": 4}],
+            "rows": [
+                {"label": "A", "values": {"count": {"value": 1, "unit": "points"}}},
+                {"label": "B", "values": {"count": {"value": 4, "unit": "points"}}},
+            ],
             "truncated": False,
         }
         self.assertEqual(
-            say("analysis.zonal_statistics", params, out),
+            say("analysis.count_points_in_polygon", params, out),
             "Décompte des points de Gares dans chaque zone de Parcelles : nouvelle couche "
             "Décompte, 3 entités ; zone la plus fournie : B, 4 points.",
         )
+
+    def test_weighted_count_names_the_field(self):
+        params = {"layer_id": "parcelles_2", "points_layer_id": "gares_1", "weight_field": "voyageurs"}
+        self.assertTrue(
+            say("analysis.count_points_in_polygon", params).startswith(
+                "Décompte des points de Gares dans chaque zone de Parcelles, avec la somme du champ voyageurs"
+            )
+        )
+        self.assertIn("with the sum of the voyageurs field", say("analysis.count_points_in_polygon", params, lang="en"))
 
 
 class NearestSummaryTest(unittest.TestCase):
@@ -828,8 +840,9 @@ class ReviewFixesTest(unittest.TestCase):
     def test_truncated_zones_give_no_busiest_zone(self):
         params = {"layer_id": "parcelles_2", "points_layer_id": "gares_1"}
         out = {"name": "Décompte", "feature_count": 300,
-               "zones": [{"label": "B", "count": 4}], "truncated": True}
-        text = say("analysis.zonal_statistics", params, out)
+               "rows": [{"label": "B", "values": {"count": {"value": 4, "unit": "points"}}}],
+               "truncated": True}
+        text = say("analysis.count_points_in_polygon", params, out)
         self.assertNotIn("fournie", text)
         self.assertTrue(text.endswith("nouvelle couche Décompte, 300 entités."))
 
@@ -867,9 +880,9 @@ SAMPLES = {
     "analysis.select_by_attribute": (
         {"layer_id": "parcelles_2", "field": "zone", "operator": "eq", "value": "U"},
         {"layer_id": "x_5", "name": "Sélection", "feature_count": 12}),
-    "analysis.zonal_statistics": ({"layer_id": "parcelles_2", "points_layer_id": "gares_1"},
-                                  {"name": "Décompte", "feature_count": 4, "zones": [],
-                                   "truncated": False}),
+    "analysis.count_points_in_polygon": ({"layer_id": "parcelles_2", "points_layer_id": "gares_1"},
+                                          {"name": "Décompte", "feature_count": 4, "rows": [],
+                                           "truncated": False}),
     "analysis.nearest": ({"layer_id": "parcelles_2", "target_layer_id": "gares_1"},
                          {"layer_id": "v_6", "name": "Voisin", "feature_count": 4, "crs": "EPSG:2154",
                           "distance_field": "distance", "unit": "m", "unmatched_count": 0}),

@@ -2313,7 +2313,7 @@ fn an_opened_raster_consumed_by_a_later_plan_step_is_intermediate() {
             "result": {}}),
         json!({"id": "layer.open_raster", "plan_step": 1, "params": {"path": "out:1.1"},
             "layer_id": "R", "result": {}}),
-        json!({"id": "analysis.zonal_statistics", "plan_step": 2,
+        json!({"id": "analysis.count_points_in_polygon", "plan_step": 2,
             "params": {"layer_id": "R", "points_layer_id": "p"}, "layer_id": "S",
             "result": {}}),
     ];
@@ -4317,7 +4317,7 @@ fn the_last_plan_is_read_from_the_last_first_step() {
             "result": {}}),
         json!({"id": "layer.open_raster", "plan_step": 1, "params": {"path": "out:2.1"},
             "layer_id": "R", "result": {}}),
-        json!({"id": "analysis.zonal_statistics", "plan_step": 2,
+        json!({"id": "analysis.count_points_in_polygon", "plan_step": 2,
             "params": {"layer_id": "R", "points_layer_id": {"layer_id": "gares", "n": 3}},
             "layer_id": "S", "result": {}}),
         // Une étape en échec : elle cite, mais ne laisse aucun fichier.
@@ -4333,7 +4333,10 @@ fn the_last_plan_is_read_from_the_last_first_step() {
     results.sort_unstable();
     assert_eq!(
         results,
-        ["2-terrain.slope.tif", "4-analysis.zonal_statistics.gpkg"]
+        [
+            "2-terrain.slope.tif",
+            "4-analysis.count_points_in_polygon.gpkg"
+        ]
     );
     // Les couches produites par le plan (R, S) n'y sont pas ; la sortie entière cite sa couche.
     for id in ["gares", "communes", "dem/plan.tif"] {

@@ -3483,8 +3483,19 @@ fn decompte_par_zone(rng: &mut Rng) -> Option<Example> {
     }
     let zones = b.add(rng, zkey, require, &[], &[]);
     let z = &zones.theme.noun;
-    let p = pick_theme(rng, &b, |t| t.geom == Geom::Point)?;
-    let points = b.add(rng, p.key, &[], &[], &[]);
+    // Une fois sur cinq : somme pondérée (`weight_field`), sur les parkings dont le champ de
+    // capacité se recopie de l'inventaire ; sinon, un simple décompte de points quelconques.
+    let weighted = rng.chance(1, 5);
+    let p = if weighted {
+        theme("parkings")
+    } else {
+        pick_theme(rng, &b, |t| t.geom == Geom::Point)?
+    };
+    let points = if weighted {
+        b.add(rng, p.key, &["capacite"], &[], &[])
+    } else {
+        b.add(rng, p.key, &[], &[], &[])
+    };
     let pl = p.noun.pl;
     let de_pl = de_plural(pl);
     let (mut body, q) = match rng.below(5) {
@@ -3503,13 +3514,22 @@ fn decompte_par_zone(rng: &mut Rng) -> Option<Example> {
             _ => format!(", avec le nom des {}", z.pl),
         });
     }
+    if weighted {
+        body.push_str(&match rng.below(2) {
+            0 => ", en additionnant leur capacité".to_string(),
+            _ => ", avec la somme des capacités".to_string(),
+        });
+    }
     let request = finish(rng, &body, q, false);
     let mut params = json!({"layer_id": zones.id, "points_layer_id": points.id});
     if labelled {
         params["label_field"] = json!(zones.field("nom")?.name);
     }
+    if weighted {
+        params["weight_field"] = json!(points.field("capacite")?.name);
+    }
     let expected = calls(vec![
-        json!({"command": "analysis.zonal_statistics", "params": params}),
+        json!({"command": "analysis.count_points_in_polygon", "params": params}),
     ]);
     Some(example("decompte_par_zone", b, rng, request, expected))
 }
@@ -9733,7 +9753,7 @@ fn refus_fonction_absente(rng: &mut Rng) -> Option<Example> {
 /// (`terrain.least_cost_path`, voisin du plus court chemin sur les routes et de la durée d'un
 /// trajet), un dégradé selon un champ numérique dit par d'autres verbes, le nombre de classes seul
 /// une fois sur deux (`class_count`, voisin des symboles proportionnels et des catégories), le
-/// décompte par zone avec le nom de chaque zone (`analysis.zonal_statistics` et `label_field`,
+/// décompte par zone avec le nom de chaque zone (`analysis.count_points_in_polygon` et `label_field`,
 /// voisin des étiquettes), et les questions sur le poste (`model.list`, `system.about`).
 fn presque_refus(rng: &mut Rng) -> Option<Example> {
     let mut b = Builder::new();
@@ -9918,7 +9938,7 @@ fn presque_refus(rng: &mut Rng) -> Option<Example> {
             (
                 body,
                 q,
-                vec![json!({"command": "analysis.zonal_statistics", "params": params})],
+                vec![json!({"command": "analysis.count_points_in_polygon", "params": params})],
             )
         }
         7 => {
@@ -15520,6 +15540,25 @@ mod tests {
     }
 
     #[test]
+    fn a_weighted_count_names_a_numeric_field_of_the_points_and_the_others_do_not() {
+        let (mut weighted, mut plain) = (0, 0);
+        for e in valid(decompte_par_zone, 1500) {
+            let p = &call(&e, 0)["params"];
+            assert_eq!(call(&e, 0)["command"], "analysis.count_points_in_polygon");
+            let Some(weight) = p.get("weight_field").and_then(Value::as_str) else {
+                assert!(!e.request.contains("capacité"), "{}", e.request);
+                plain += 1;
+                continue;
+            };
+            weighted += 1;
+            let points = layer_of(&e, p["points_layer_id"].as_str().unwrap());
+            assert!(field_names(points).contains(&weight), "{}", e.request);
+            assert!(e.request.contains("capacité"), "{}", e.request);
+        }
+        assert!(weighted > 100 && plain > 800, "{weighted} {plain}");
+    }
+
+    #[test]
     fn a_label_field_is_the_name_field_of_the_zones_as_written_never_a_decoy() {
         let (mut names, mut with_decoys, mut labelled, mut wide) = (HashSet::new(), 0, 0, 0);
         for e in valid(decompte_par_zone, 1500) {
@@ -16622,7 +16661,7 @@ mod tests {
             .chain([
                 "raster.reclassify",
                 "terrain.least_cost_path",
-                "analysis.zonal_statistics",
+                "analysis.count_points_in_polygon",
                 "model.list",
                 "system.about",
             ])
@@ -16638,7 +16677,7 @@ mod tests {
                 assert!(near.contains(commands[0]), "{}", e.request);
                 planned.insert(commands[0].to_string());
                 let p = &e.expected["calls"][0]["params"];
-                if commands[0] == "analysis.zonal_statistics" {
+                if commands[0] == "analysis.count_points_in_polygon" {
                     assert!(p["label_field"].is_string(), "{}", e.request);
                     labelled_zones += 1;
                 }

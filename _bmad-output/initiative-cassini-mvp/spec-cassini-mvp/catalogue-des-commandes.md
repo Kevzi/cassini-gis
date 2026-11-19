@@ -345,7 +345,6 @@ donne l'esquisse.
 | `analysis.buffer` | faite | qgis | — |
 | `analysis.intersect` | faite | qgis | — |
 | `analysis.select_by_attribute` | faite | qgis | — |
-| `analysis.zonal_statistics` | faite, renommée par 10.2 | qgis | — |
 | `analysis.isochrone` | faite | qgis | — |
 | `layout.export_pdf` | faite | qgis | — |
 | `terrain.slope` | faite | core | — |
@@ -365,7 +364,7 @@ donne l'esquisse.
 | `raster.weighted_overlay` | faite | core | epic 11, entrée 9 |
 | `terrain.cost_distance` | faite | core | epic 11, entrée 10 |
 | `terrain.least_cost_path` | faite | core | epic 11, entrée 10 |
-| `analysis.count_points_in_polygon` | planifiée | qgis | epic 10, entrée 2 |
+| `analysis.count_points_in_polygon` | faite | qgis | epic 10, entrée 2 |
 | `data.reproject` | faite | qgis | epic 10, entrée 7 |
 | `analysis.difference` | planifiée | qgis | epic 10, entrée 21 |
 | `analysis.area` | planifiée | qgis | epic 10, entrée 22 |
@@ -652,32 +651,6 @@ Résultat : `layer_id`, `name`, `crs`, `feature_count`.
             "value": {"type": "string", "required": true},
             "out": {"type": "string", "required": false}},
  "result": ["crs", "feature_count", "layer_id", "name"]}
-```
-
-### `analysis.zonal_statistics`
-
-Compte, pour chaque polygone d'une couche de zones, les points d'une seconde couche. **Remplacée
-par `analysis.count_points_in_polygon`** (epic 10, entrée 2), qui retire cette fiche et passe
-la sienne en `faite` dans le même commit.
-
-| Paramètre | Type | Oblig. | Unité / valeurs | Sens |
-|---|---|---|---|---|
-| `layer_id` | chaîne | oui | — | Couche de zones (polygones). |
-| `points_layer_id` | chaîne | oui | — | Couche de points, différente de `layer_id`. |
-| `label_field` | chaîne | non | — | Champ qui nomme chaque zone ; sinon son numéro. |
-| `out` | chaîne | non | — | Fourni par le noyau. |
-
-Résultat : `layer_id`, `name`, `crs`, `feature_count`, `zones` (liste de `{label, count}`,
-100 au plus), `truncated`.
-
-```json fiche
-{"id": "analysis.zonal_statistics", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
- "replaced_by": "analysis.count_points_in_polygon",
- "params": {"layer_id": {"type": "string", "required": true},
-            "points_layer_id": {"type": "string", "required": true},
-            "label_field": {"type": "string", "required": false},
-            "out": {"type": "string", "required": false}},
- "result": ["crs", "feature_count", "layer_id", "name", "truncated", "zones"]}
 ```
 
 ### `analysis.isochrone`
@@ -1736,7 +1709,7 @@ si `weight_field` est donné, `weighted_sum` (unité vide).
 Résultat : `layer_id`, `name`, `crs`, `feature_count`, `rows`, `truncated`.
 
 ```json fiche
-{"id": "analysis.count_points_in_polygon", "status": "planifiee", "runs_in": "qgis", "dictated_by_core": false,
+{"id": "analysis.count_points_in_polygon", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
  "params": {"layer_id": {"type": "string", "required": true},
             "points_layer_id": {"type": "string", "required": true},
             "label_field": {"type": "string", "required": false},
