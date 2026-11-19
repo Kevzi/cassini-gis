@@ -175,6 +175,19 @@ tableau de prix par code INSEE, et une couche de communes ou de parcelles) :
 4. Sonde sous QGIS 3.44 : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat" qgis-plugin/tests/probe_join_table.py`
    doit finir par `VERDICT : OK`.
 
+Recette manuelle de `analysis.dissolve` [ticket 24] (une couche de parcelles ou de zones) :
+
+1. `analysis.dissolve` : `layer_id` est une liste de couches, `fields` une liste à cases à cocher des
+   champs de cette couche (de un à quatre ; rien à saisir à la main). Une couche nouvelle a une entité par
+   combinaison de valeurs ; sa surface est la somme de celles du groupe. Toute géométrie est acceptée.
+2. Les entités dont le champ est nul forment un groupe à part ; des morceaux disjoints d'un même
+   groupe donnent une seule entité multipartie ; les autres champs ne sont pas agrégés (valeur de
+   la première entité du groupe).
+3. Un champ inconnu donne `analysis.unknown_field` (avant tout lancement, aucun fichier écrit) ; une
+   liste vide, de plus de quatre noms, avec un nom vide ou en double : `registry.invalid_params`.
+4. Sonde sous QGIS 3.44 : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat" qgis-plugin/tests/probe_dissolve.py`
+   doit finir par `VERDICT : OK`.
+
 Recette manuelle de `analysis.buffer` [ticket 8] (jeu `../donnees-test-cassini/`) :
 
 1. Ouvrez `gares-2154.csv` avec `layer.add` (`crs` = `EPSG:2154`), puis choisissez

@@ -332,6 +332,16 @@ def _join_table(lang, p, r, names):
     return text
 
 
+def _dissolve(lang, p, r, names):
+    fields = p.get("fields")
+    if not isinstance(fields, list) or not fields or not all(isinstance(f, str) and f for f in fields):
+        raise _Unreadable()
+    text = texts.tr(
+        lang, "sum_dissolve", layer=names.layer(p.get("layer_id")), fields=", ".join(fields)
+    )
+    return text + (_out_layer(lang, r) if r else "")
+
+
 def _statistics_by_category(lang, p, r, names):
     """Le tableau écrit par QGIS : un fichier, jamais une couche ; affichage seul (AD-5)."""
     field = p.get("category_field")
@@ -1019,6 +1029,7 @@ _SENTENCES = {
     "analysis.isochrone": _isochrone,
     "analysis.count_points_in_polygon": _count_points,
     "analysis.nearest": _nearest,
+    "analysis.dissolve": _dissolve,
     "analysis.join_table": _join_table,
     "analysis.statistics_by_category": _statistics_by_category,
     "analysis.sum_line_lengths": _sum_line_lengths,

@@ -425,6 +425,57 @@
     }
   },
   {
+    "id": "DIS1",
+    "command": "analysis.dissolve",
+    "phrase": "Fusionne les parcelles par commune.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.dissolve",
+          "params": {
+            "layer_id": "parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3",
+            "fields": ["commune"]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "DIS2",
+    "command": "analysis.dissolve",
+    "phrase": "Regroupe les zones du PLU par type de zone.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.dissolve",
+          "params": {
+            "layer_id": "plu_zonage_a81d5c06_2e9f_4a37_b6c4_5f13e07d92a8",
+            "fields": ["typezone"]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "DIS3",
+    "command": "analysis.dissolve",
+    "phrase": "Fusionne les zones du PLU par type de zone et par destination dominante.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.dissolve",
+          "params": {
+            "layer_id": "plu_zonage_a81d5c06_2e9f_4a37_b6c4_5f13e07d92a8",
+            "fields": ["typezone", "destdomi"]
+          }
+        }
+      ]
+    }
+  },
+  {
     "id": "CAT1",
     "command": "analysis.statistics_by_category",
     "phrase": "Combien de parcelles y a-t-il par section ?",

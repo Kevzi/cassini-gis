@@ -1,7 +1,8 @@
 """Formulaire engendré depuis le schéma JSON des paramètres d'une commande.
 
 Sans Qt. Le panneau ne valide rien : le noyau valide. Sous-ensemble compris :
-texte, nombre, entier, booléen, énumération (éventuellement « ou null »). Toute
+texte, nombre, entier, booléen, énumération (éventuellement « ou null »), liste de noms de
+champs d'une couche (tableau de textes nommé `fields` ou `*_fields`). Toute
 autre propriété reçoit un champ JSON brut, jamais un formulaire deviné.
 """
 
@@ -14,6 +15,7 @@ INTEGER = "integer"
 BOOLEAN = "boolean"
 ENUM = "enum"
 JSON = "json"
+FIELD_LIST = "field_list"
 
 # Paramètres remplis par le noyau (AD-10 ; au rejeu seulement : `leave_out`, ticket 5.36, et
 # `center`, ticket 5.38 ; le système de calcul `work_epsg`, entrée 9.16 ; la mise en évidence
@@ -73,6 +75,17 @@ def _kind(prop):
     if kind == "boolean":
         return BOOLEAN, []
     return JSON, []
+
+
+def _is_field_list(name, prop):
+    """Un tableau de textes nommé `fields` ou `*_fields` désigne des champs (attributs) d'une couche."""
+    if not (name == "fields" or name.endswith("_fields")) or not isinstance(prop, dict):
+        return False
+    items = prop.get("items")
+    kind = prop.get("type")
+    if isinstance(kind, list):
+        kind = next((k for k in kind if k != "null"), None)
+    return kind == "array" and isinstance(items, dict) and items.get("type") == "string"
 
 
 def is_path_field(field):
@@ -135,13 +148,15 @@ def build_fields(schema):
             continue
         prop = _follow(props[name], schema)
         kind, choices = _kind(prop)
+        if _is_field_list(name, prop):
+            kind = FIELD_LIST
         description = prop.get("description", "") if isinstance(prop, dict) else ""
         fields.append(Field(name, kind, name in required, choices, str(description)))
     return fields
 
 
 def build_params(fields, values):
-    """Construit `params` depuis les valeurs saisies (`nom -> str ou bool`).
+    """Construit `params` depuis les valeurs saisies (`nom -> str, bool ou liste de noms`).
 
     Un champ facultatif vide est omis. Lève FormError pour une saisie que le
     panneau ne sait pas convertir (JSON brut invalide, nombre illisible) : rien
@@ -152,6 +167,11 @@ def build_params(fields, values):
         raw = values.get(f.name)
         if f.kind == BOOLEAN:
             params[f.name] = bool(raw)
+            continue
+        if f.kind == FIELD_LIST:
+            names = [n for n in raw if isinstance(n, str)] if isinstance(raw, (list, tuple)) else []
+            if names or f.required:
+                params[f.name] = names  # une liste vide exigée est refusée par le noyau
             continue
         text = (raw if isinstance(raw, str) else "").strip()
         if not text:

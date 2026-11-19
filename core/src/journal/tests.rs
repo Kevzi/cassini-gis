@@ -4781,6 +4781,16 @@ impl Executor for CrsQgis {
                           "distance_field": "distance", "unit": "m", "unmatched_count": 0}),
                 )
             }
+            "analysis.dissolve" => {
+                self.buffers.borrow_mut().push(p.clone());
+                let n = self.count.get() + 1;
+                self.count.set(n);
+                fs::write(p["out"].as_str().unwrap(), "gpkg").unwrap();
+                Ok(
+                    json!({"layer_id": format!("fusion_g{}_{n}", self.generation),
+                          "name": "fusion", "feature_count": 2, "crs": "EPSG:2154"}),
+                )
+            }
             "analysis.join_table" => {
                 self.buffers.borrow_mut().push(p.clone());
                 let n = self.count.get() + 1;
@@ -4915,6 +4925,41 @@ fn a_nearest_join_of_a_layer_in_degrees_logs_the_metric_work_system() {
     assert!(orders.borrow()[1].get("work_epsg").is_none());
     assert_eq!(orders.borrow().len(), 2);
     drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_dissolve_logs_its_output_and_replays_identically() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let qgis = CrsQgis::new(1, &qgis_project);
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    let params = json!({"layer_id": "zonage", "fields": ["commune", "typezone"]});
+    let out = s.call("analysis.dissolve", params.clone()).unwrap();
+    assert_eq!(out["feature_count"], 2);
+    // Liste invalide : refus du noyau, rien n'est exécuté ni journalisé.
+    let err = s
+        .call(
+            "analysis.dissolve",
+            json!({"layer_id": "zonage", "fields": ["commune", "commune"]}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "registry.invalid_params");
+    let l = lines(&s);
+    assert_eq!(l.len(), 1, "{l:?}");
+    assert_eq!(l[0]["params"]["fields"], json!(["commune", "typezone"]));
+    assert!(l[0]["params"]["out"]
+        .as_str()
+        .is_some_and(|o| o.ends_with(".gpkg")));
+    drop(s);
+    // Rejeu : le même résultat (hors identifiant de couche, valeur de session).
+    let qgis = CrsQgis::new(2, &qgis_project);
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(&Router::new(&registry).with_qgis(qgis), &mut HashSet::new())
+        .unwrap();
+    assert_eq!(report, identical(1));
     let _ = fs::remove_dir_all(dir);
 }
 

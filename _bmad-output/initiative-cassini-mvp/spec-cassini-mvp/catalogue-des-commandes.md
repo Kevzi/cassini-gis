@@ -376,7 +376,7 @@ donne l'esquisse.
 | `analysis.statistics_by_category` | faite | qgis | epic 10, entrée 11 |
 | `analysis.sum_line_lengths` | faite | qgis | epic 10, entrée 11 |
 | `analysis.join_table` | faite | qgis | epic 10, entrée 23 |
-| `analysis.dissolve` | planifiée | qgis | epic 10, entrée 24 |
+| `analysis.dissolve` | faite | qgis | epic 10, entrée 24 |
 | `raster.zonal_statistics` | planifiée | qgis | epic 10, entrée 12 |
 | `raster.polygonize` | planifiée | qgis | epic 10 (entrée ajoutée après la 12) |
 | `raster.align` | planifiée | qgis | epic 10 (entrée ajoutée après la 12) |
@@ -2074,7 +2074,7 @@ entrée 24).
 Résultat : `layer_id`, `name`, `crs`, `feature_count`.
 
 ```json fiche
-{"id": "analysis.dissolve", "status": "planifiee", "runs_in": "qgis", "dictated_by_core": false,
+{"id": "analysis.dissolve", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
  "params": {"layer_id": {"type": "string", "required": true},
             "fields": {"type": "array", "required": true, "items": "string"},
             "out": {"type": "string", "required": false}},

@@ -30,6 +30,10 @@
           ]
         },
         {
+          "name": "commune",
+          "type": "string"
+        },
+        {
           "name": "surface_m2",
           "type": "number"
         }

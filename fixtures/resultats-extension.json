@@ -8,6 +8,9 @@
   {"id": "analysis.isochrone", "case": "un polygone",
    "result": {"layer_id": "iso_1", "name": "5-analysis.isochrone", "feature_count": 1, "crs": "EPSG:2154"}},
 
+  {"id": "analysis.dissolve", "case": "couche créée",
+   "result": {"layer_id": "fusion_1", "name": "4-analysis.dissolve", "feature_count": 2, "crs": "EPSG:2154"}},
+
   {"id": "analysis.join_table", "case": "une entité sans ligne",
    "result": {"layer_id": "jointe_1", "name": "4-analysis.join_table", "feature_count": 5, "crs": "EPSG:2154",
               "unmatched_count": 1}},

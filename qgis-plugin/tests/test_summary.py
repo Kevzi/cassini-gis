@@ -150,6 +150,26 @@ class LayerCommandsTest(unittest.TestCase):
         self.assertIn("with the sum of the voyageurs field", say("analysis.count_points_in_polygon", params, lang="en"))
 
 
+class DissolveSummaryTest(unittest.TestCase):
+    PARAMS = {"layer_id": "parcelles_2", "fields": ["commune", "zone"]}
+
+    def test_dissolve(self):
+        out = {"name": "Fusion", "feature_count": 2}
+        self.assertEqual(
+            say("analysis.dissolve", self.PARAMS, out),
+            "Fusion des entités de Parcelles par commune, zone : nouvelle couche Fusion, 2 entités.",
+        )
+        self.assertEqual(
+            say("analysis.dissolve", self.PARAMS, out, lang="en"),
+            "Dissolve of the features of Parcelles by commune, zone: new layer Fusion, 2 features.",
+        )
+
+    def test_without_result_only_parameters(self):
+        self.assertEqual(
+            say("analysis.dissolve", self.PARAMS), "Fusion des entités de Parcelles par commune, zone."
+        )
+
+
 class JoinTableSummaryTest(unittest.TestCase):
     PARAMS = {"layer_id": "parcelles_2", "table_layer_id": "prix_4", "field": "id", "table_field": "id"}
 
@@ -984,6 +1004,8 @@ SAMPLES = {
     "analysis.count_points_in_polygon": ({"layer_id": "parcelles_2", "points_layer_id": "gares_1"},
                                           {"name": "Décompte", "feature_count": 4, "rows": [],
                                            "truncated": False}),
+    "analysis.dissolve": ({"layer_id": "parcelles_2", "fields": ["zone"]},
+                          {"layer_id": "d_7", "name": "Fusion", "feature_count": 2, "crs": "EPSG:2154"}),
     "analysis.join_table": ({"layer_id": "parcelles_2", "table_layer_id": "prix_4", "field": "id",
                              "table_field": "id"},
                             {"layer_id": "j_8", "name": "Jointure", "feature_count": 4, "crs": "EPSG:2154",

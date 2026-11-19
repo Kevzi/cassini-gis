@@ -267,6 +267,26 @@ class FormTest(unittest.TestCase):
         self.assertEqual(fields["lost"].kind, form.JSON)
         self.assertEqual(form.build_params([fields["dem"]], {"dem": "mnt.tif"}), {"dem": "mnt.tif"})
 
+    def test_an_array_of_field_names_is_a_field_list(self):
+        # `analysis.dissolve` (ticket 24) : `fields` devient un sélecteur à choix multiples, jamais
+        # un champ JSON brut ; un autre tableau reste du JSON.
+        schema = {"type": "object", "required": ["fields"], "properties": {
+            "fields": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 4},
+            "group_fields": {"type": "array", "items": {"type": "string"}},
+            "values": {"type": "array", "items": {"type": "string"}},
+            "fields_count": {"type": "array", "items": {"type": "integer"}},
+            "tags_fields": {"type": "array", "items": {"type": "integer"}}}}
+        fields = {f.name: f for f in form.build_fields(schema)}
+        self.assertEqual(fields["fields"].kind, form.FIELD_LIST)
+        self.assertEqual(fields["group_fields"].kind, form.FIELD_LIST)
+        for name in ("values", "fields_count", "tags_fields"):
+            self.assertEqual(fields[name].kind, form.JSON, name)
+        only = [fields["fields"], fields["group_fields"]]
+        self.assertEqual(form.build_params(only, {"fields": ["a", "b"], "group_fields": []}),
+                         {"fields": ["a", "b"]})
+        # Rien de coché : le noyau refuse la liste vide exigée.
+        self.assertEqual(form.build_params(only, {}), {"fields": []})
+
     def test_required_flag_and_choices(self):
         fields = {f.name: f for f in form.build_fields(SCHEMA)}
         self.assertTrue(fields["name"].required)

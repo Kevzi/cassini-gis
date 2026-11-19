@@ -110,6 +110,44 @@ class FieldCombo(QComboBox):
         super().showPopup()
 
 
+class FieldList(QListWidget):
+    """Liste à cases à cocher des champs de la couche choisie dans une `LayerCombo`, relue quand
+    cette couche change. Les noms cochés restent cochés si la nouvelle couche les porte aussi."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._layer_combo = None
+        self.setMaximumHeight(120)
+
+    def bind(self, layer_combo):
+        self._layer_combo = layer_combo
+        layer_combo.currentIndexChanged.connect(lambda _=0: self.reload())
+        self.reload()
+
+    def reload(self):
+        from qgis.core import QgsProject
+
+        keep = set(self.checked())
+        self.clear()
+        layer_id = self._layer_combo.currentData() if self._layer_combo is not None else None
+        layer = QgsProject.instance().mapLayer(layer_id or "")
+        if layer is not None and hasattr(layer, "fields"):
+            for f in layer.fields():
+                item = QListWidgetItem(f.name())
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                item.setCheckState(Qt.CheckState.Checked if f.name() in keep else Qt.CheckState.Unchecked)
+                self.addItem(item)
+
+    def checked(self):
+        """Noms cochés, dans l'ordre de la couche."""
+        names = []
+        for i in range(self.count()):
+            item = self.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                names.append(item.text())
+        return names
+
+
 class RequestEdit(QPlainTextEdit):
     """Saisie principale : Entrée envoie, Maj+Entrée saute une ligne, Tab change de champ."""
 
@@ -1898,6 +1936,8 @@ class CassiniPanel(QWidget):
                 widget = QCheckBox()
             elif form.is_layer_field(f):
                 widget = LayerCombo()
+            elif f.kind == form.FIELD_LIST and any(g.name == "layer_id" for g in self._fields):
+                widget = FieldList()
             elif form.is_field_field(f) and any(g.name == "layer_id" for g in self._fields):
                 widget = FieldCombo(optional=not f.required, empty_text=self.t("optional_empty"))
             elif f.kind == form.ENUM:
@@ -1932,7 +1972,7 @@ class CassiniPanel(QWidget):
                 source = self._inputs.get("points_layer_id")
             elif name == "table_field":
                 source = self._inputs.get("table_layer_id")
-            if isinstance(widget, FieldCombo) and source is not None:
+            if isinstance(widget, (FieldCombo, FieldList)) and source is not None:
                 widget.bind(source)
 
     def _browse(self, widget):
@@ -1955,6 +1995,8 @@ class CassiniPanel(QWidget):
             widget = self._inputs[f.name]
             if f.kind == form.BOOLEAN:
                 values[f.name] = widget.isChecked()
+            elif isinstance(widget, FieldList):
+                values[f.name] = widget.checked()
             elif f.kind == form.ENUM or form.is_layer_field(f) or isinstance(widget, FieldCombo):
                 values[f.name] = widget.currentData() or ""
             else:

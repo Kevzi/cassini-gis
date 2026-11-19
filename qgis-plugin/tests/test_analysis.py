@@ -725,6 +725,75 @@ class CountPointsInPolygonTest(unittest.TestCase):
 TAIL = ("n", "distance", "feature_x", "feature_y", "nearest_x", "nearest_y")
 
 
+class DissolveTest(unittest.TestCase):
+    """Fusion par champ : `native:dissolve`, une entité par groupe, champs vérifiés un à un."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.out = os.path.join(self.dir.name, "4-analysis.dissolve.gpkg")
+        self.entry = analysis.ALGORITHMS["analysis.dissolve"]
+        self.backend = FakeBackend(
+            [
+                FakeLayer("c", name="parcelles", geometry="Polygon", fields=("commune", "zone", "nom")),
+                FakeLayer("r", vector=False),
+            ],
+            loaded_count=2,
+        )
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def params(self, **extra):
+        p = {"layer_id": "c", "fields": ["commune"], "out": self.out}
+        p.update(extra)
+        return p
+
+    def test_the_layer_is_dissolved_on_the_named_fields(self):
+        _, calls = start(self.entry, self.backend, self.params(fields=["commune", "zone"]))
+        algo, p = self.backend.calls[0]
+        self.assertEqual(algo, "native:dissolve")
+        self.assertEqual(p["INPUT"].lid, "c")
+        self.assertEqual(p["FIELD"], ["commune", "zone"])
+        self.assertIs(p["SEPARATE_DISJOINT"], False)
+        self.assertEqual(p["OUTPUT"], self.out)
+        self.assertEqual(len(self.backend.calls), 1)
+        self.backend.finished(True, {"OUTPUT": self.out})
+        result, error = calls[0]
+        self.assertIsNone(error)
+        self.assertEqual(
+            result,
+            {"layer_id": "out_1", "name": "4-analysis.dissolve", "feature_count": 2, "crs": "EPSG:2154"},
+        )
+
+    def test_every_field_is_checked_before_any_launch(self):
+        for fields in (["absent"], ["commune", "absent"], ["absent", "commune"]):
+            _, calls = start(self.entry, self.backend, self.params(fields=fields))
+            self.assertEqual(calls[0][1].code, "analysis.unknown_field", fields)
+            self.assertEqual(self.backend.calls, [])
+
+    def test_a_missing_or_empty_field_list_is_refused_before_any_launch(self):
+        for bad in ("absent", "commune", [], None, {"commune": 1}):
+            params = self.params()
+            if bad == "absent":
+                del params["fields"]
+            else:
+                params["fields"] = bad
+            _, calls = start(self.entry, self.backend, params)
+            self.assertEqual(calls[0][1].code, "analysis.bad_params", bad)
+            self.assertEqual(self.backend.calls, [])
+
+    def test_the_input_must_be_a_known_vector_layer(self):
+        for extra, code in (({"layer_id": "r"}, "layer.not_vector"), ({"layer_id": "absente"}, "layer.not_found")):
+            _, calls = start(self.entry, self.backend, self.params(**extra))
+            self.assertEqual(calls[0][1].code, code, extra)
+        self.assertEqual(self.backend.calls, [])
+
+    def test_the_row_has_one_step_and_is_cancellable(self):
+        self.assertEqual([s["algorithm"] for s in analysis.chain_of(self.entry)], ["native:dissolve"])
+        self.assertEqual(self.entry["chain_version"], 1)
+        self.assertIn("native:dissolve", analysis.CANCELLABLE_ALGORITHMS)
+
+
 class JoinTableTest(unittest.TestCase):
     """Jointure d'un tableau : `native:joinattributestable`, première correspondance, aucune entité
     écartée ; le compte des entités sans ligne vient de la sortie de l'algorithme."""

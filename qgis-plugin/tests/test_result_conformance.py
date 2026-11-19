@@ -157,6 +157,18 @@ def _count_points(pairs, loaded_count, weight=None):
     return lambda: _analysis(ta.CountPointsInPolygonTest, setup)
 
 
+def _dissolve():
+    t = ta.DissolveTest("setUp")
+    t.setUp()
+    try:
+        _, calls = ta.start(t.entry, t.backend, t.params())
+        t.backend.finished(True, {"OUTPUT": "fusion"})
+        assert calls[0][1] is None, calls
+        return calls[0][0]
+    finally:
+        t.tearDown()
+
+
 def _join_table():
     t = ta.JoinTableTest("setUp")
     t.setUp()
@@ -413,6 +425,7 @@ def producers():
         ("analysis.buffer", "couche créée"): _buffer,
         ("analysis.intersect", "couche créée"): _intersect,
         ("analysis.isochrone", "un polygone"): _isochrone,
+        ("analysis.dissolve", "couche créée"): _dissolve,
         ("analysis.join_table", "une entité sans ligne"): _join_table,
         ("analysis.nearest", "couche créée"): _nearest,
         ("analysis.select_by_attribute", "entités retenues"): _select,

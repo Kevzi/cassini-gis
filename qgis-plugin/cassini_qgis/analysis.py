@@ -439,6 +439,20 @@ def translate_join_table(params, layer):
     }
 
 
+def translate_dissolve(params, layer):
+    """Paramètres neutres de `analysis.dissolve` -> paramètres de `native:dissolve`.
+
+    Les champs de regroupement sont ceux du noyau, dans l'ordre. `SEPARATE_DISJOINT=False` : une
+    entité par groupe, même si ses morceaux sont disjoints (multipartie). Aucun champ n'est agrégé :
+    ce que QGIS garde des autres attributs est constaté par `probe_dissolve.py`.
+    """
+    return {
+        "INPUT": layer,
+        "FIELD": list(params["fields"]),
+        "SEPARATE_DISJOINT": False,
+    }
+
+
 _UNJOINED_COUNT = "UNJOINABLE_COUNT"  # sortie de `native:joinattributestable` : entités sans ligne
 
 
@@ -571,6 +585,8 @@ def summarize_sum_line_lengths(backend, layer, params):
 #               tout lancement ;
 #   summary_results : (facultatif, avec `summary`) le résumé reçoit aussi les sorties de l'algorithme
 #               de la dernière étape : `summary(fond, couche, params, résultats)` ;
+#   fields_list : (facultatif) paramètre du noyau qui nomme une liste de champs de la couche d'entrée ;
+#               chacun est vérifié, un champ inconnu est `analysis.unknown_field`, avant tout lancement ;
 #   overlay_geometry : (facultatif, avec `overlay`) type de géométrie exigé de la seconde couche ;
 #   target_crs: (facultatif) paramètre du noyau qui porte un code EPSG d'arrivée ; le fond
 #               doit le connaître (`crs_is_known`), sinon `data.unknown_crs`, avant tout
@@ -715,6 +731,18 @@ ALGORITHMS = {
         "field": "field",
         "summary": summarize_join_table,
         "summary_results": True,
+    },
+    "analysis.dissolve": {
+        "chain_version": 1,
+        "chain": [
+            {
+                "algorithm": "native:dissolve",
+                "translate": translate_dissolve,
+                "output": "OUTPUT",
+            },
+        ],
+        "input": "layer_id",
+        "fields_list": "fields",
     },
     "analysis.statistics_by_category": {
         "chain_version": 1,
@@ -868,6 +896,7 @@ CANCELLABLE_ALGORITHMS = frozenset(
         "native:countpointsinpolygon",
         "native:joinbynearest",
         "native:joinattributestable",
+        "native:dissolve",
         "native:extractbyexpression",
         "native:fieldcalculator",
         "qgis:statisticsbycategories",
@@ -1445,6 +1474,12 @@ class ProcessingGesture:
                 )
         if entry.get("field") and not (entry.get("field_optional") and not params.get(entry["field"])):
             self._check_field(params.get(entry["field"]), layer)
+        if entry.get("fields_list"):
+            names = params.get(entry["fields_list"])
+            if not isinstance(names, list) or not names:
+                raise GestureError(BAD_PARAMS, "Nommez au moins un champ de regroupement.")
+            for name in names:
+                self._check_field(name, layer)
         if entry.get("numeric_field") and params.get(entry["numeric_field"]) is not None:
             self._check_numeric_field(params[entry["numeric_field"]], layer)
         # Traduits dès maintenant, sur la couche d'entrée : un paramètre invalide est refusé avant

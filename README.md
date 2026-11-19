@@ -119,6 +119,7 @@ Une couche que Cassini ne reconnaît pas garde son style : il ne devine pas.
 | `analysis.count_points_in_polygon` | nombre de points dans chaque zone, avec somme pondérée facultative |
 | `analysis.nearest` | jointure au plus proche voisin : attributs de l'entité la plus proche d'une autre couche, et distance en mètres |
 | `analysis.join_table` | joint les colonnes d'un tableau CSV à une couche par un champ commun (code INSEE, numéro de parcelle) ; première ligne retenue en cas de clé en double, entités sans ligne gardées et comptées |
+| `analysis.dissolve` | fusionne les entités d'une couche par un à quatre champs (parcelles par commune, zones par type), sans agréger les autres champs ; une couche nouvelle |
 | `analysis.statistics_by_category` | nombre d'entités, et somme d'un champ numérique, par valeur d'un champ de catégorie ; tableau écrit à côté du projet, sans géométrie |
 | `analysis.sum_line_lengths` | longueur des lignes d'une couche dans chaque polygone d'une autre, en mètres ou en kilomètres (couche en degrés mesurée dans un système en mètres) |
 | `analysis.isochrone` | isochrones à pied et en voiture sur un réseau |
