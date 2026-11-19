@@ -73,6 +73,32 @@ class HistoryTest(unittest.TestCase):
         self.assertIsNone(entry.step)  # un booléen n'est pas un numéro d'étape
         self.assertEqual(entry.label, "c None")  # le libellé ne reçoit pas l'empreinte
 
+    def test_the_reserved_summary_key_is_taken_for_a_summary_too(self):
+        stub = {"$summary": {"truncated": True, "bytes": 900, "fingerprint": "ab12"}}
+        log = runlog.RunLog.from_history(
+            [{"step": 1, "command": "c", "params": stub, "result": stub, "plan_step": True}],
+            lambda c, p: "%s %r" % (c, p),
+        )
+        self.assertIsNone(log.entries[0].result)
+        self.assertIsNone(log.entries[0].params)
+
+    def test_a_reserved_key_without_a_true_truncated_is_not_a_summary(self):
+        for bad in ({"$summary": {"bytes": 9}}, {"$summary": {"truncated": False}},
+                    {"$summary": 3}, {"$summary": {"truncated": True}, "x": 1}):
+            log = runlog.RunLog.from_history(
+                [{"step": 1, "command": "c", "params": {}, "result": bad, "plan_step": True}],
+                lambda c, p: "%s %r" % (c, p),
+            )
+            self.assertEqual(log.entries[0].result, bad)
+
+    def test_a_short_result_carrying_its_own_truncated_is_kept(self):
+        own = {"truncated": True, "zones": []}
+        log = runlog.RunLog.from_history(
+            [{"step": 1, "command": "c", "params": {}, "result": own, "plan_step": True}],
+            lambda c, p: "%s %r" % (c, p),
+        )
+        self.assertEqual(log.entries[0].result, own)
+
     def test_no_history_gives_an_empty_log(self):
         self.assertEqual(runlog.RunLog.from_history(None, str).entries, [])
         self.assertEqual(runlog.RunLog.from_history([], str).entries, [])

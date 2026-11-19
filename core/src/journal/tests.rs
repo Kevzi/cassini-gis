@@ -237,8 +237,8 @@ fn a_result_path_under_the_output_folder_becomes_a_file_name() {
 fn a_big_result_is_summarized() {
     let big = json!({"text": "x".repeat(500)});
     let summary = summarize(&big);
-    assert_eq!(summary["truncated"], true);
-    assert_eq!(summary["bytes"], big.to_string().len());
+    assert_eq!(summary["$summary"]["truncated"], true);
+    assert_eq!(summary["$summary"]["bytes"], big.to_string().len());
     assert_eq!(
         summarize(&json!({"b": 1, "a": 2})).to_string(),
         r#"{"a":2,"b":1}"#
@@ -854,7 +854,7 @@ fn replay_inventory(
     let (dir, project, _) = temp_project();
     let registry = Registry::standard();
     let kept = inventory_journal(&project, short);
-    assert_eq!(kept.get("truncated") == Some(&json!(true)), !short);
+    assert_eq!(kept.get("$summary").is_some(), !short);
     if short {
         // L'inventaire ne compte pas dans les ids (lecture du noyau avant le tampon, 9.16).
         assert!(kept.to_string().contains("couche_g1_2"));
@@ -1201,10 +1201,13 @@ fn a_big_result_is_compared_by_fingerprint() {
     let a = json!({"text": "a".repeat(500), "layer_id": "L1"});
     let b = json!({"text": "b".repeat(500), "layer_id": "L1"});
     let kept = summarize(&a);
-    assert_eq!(kept["truncated"], true);
-    assert!(kept["fingerprint"].is_string());
+    assert_eq!(kept["$summary"]["truncated"], true);
+    assert!(kept["$summary"]["fingerprint"].is_string());
     // Même longueur, autre contenu : ce n'est plus « identique ».
-    assert_eq!(summarize(&a)["bytes"], summarize(&b)["bytes"]);
+    assert_eq!(
+        summarize(&a)["$summary"]["bytes"],
+        summarize(&b)["$summary"]["bytes"]
+    );
     assert!(!same_result(&b, &kept));
     assert!(same_result(&a, &kept));
     // Le `layer_id` est une valeur de session : il ne compte pas dans l'empreinte.
@@ -1214,6 +1217,40 @@ fn a_big_result_is_compared_by_fingerprint() {
     let legacy = json!({"truncated": true, "bytes": a.to_string().len()});
     assert!(same_result(&b, &legacy));
     assert!(!same_result(&json!({"text": "c".repeat(400)}), &legacy));
+    // Ancienne ligne avec empreinte : lue comme un résumé, comparée par l'empreinte.
+    let legacy_print = json!({"truncated": true, "bytes": a.to_string().len(),
+        "fingerprint": summarize(&a)["$summary"]["fingerprint"]});
+    assert!(same_result(&a, &legacy_print));
+    assert!(!same_result(&b, &legacy_print));
+}
+
+#[test]
+fn the_reserved_summary_key_counts_only_alone_and_holding_an_object() {
+    let a = json!({"text": "a".repeat(500)});
+    let kept = summarize(&a);
+    assert!(same_result(&a, &kept));
+    // Une clé voisine, ou un contenu qui n'est pas un objet : pas un résumé.
+    let mut with_sibling = kept.clone();
+    with_sibling["extra"] = json!(1);
+    assert!(!same_result(&a, &with_sibling));
+    assert!(!same_result(&a, &json!({"$summary": 3})));
+}
+
+#[test]
+fn a_short_result_carrying_truncated_true_is_compared_in_clear() {
+    // Un résultat court, propre à la commande, qui porte `truncated: true` n'est pas un résumé.
+    let own = json!({"rows": [], "truncated": true});
+    let kept = summarize(&own);
+    assert_eq!(kept, own);
+    assert!(same_result(&own, &kept));
+    assert!(!same_result(
+        &json!({"rows": [], "truncated": false}),
+        &kept
+    ));
+    // Il ne passe pas pour le résumé d'un gros résultat, ni l'inverse.
+    let big = json!({"text": "x".repeat(500)});
+    assert!(!same_result(&big, &json!({"truncated": true, "other": 1})));
+    assert!(!same_result(&own, &summarize(&big)));
 }
 
 #[test]
@@ -3167,7 +3204,7 @@ fn styling_journal(project: &Path, legacy: bool) -> PathBuf {
     s.call("map.topographic_style", json!({})).unwrap();
     let l = lines(&s);
     // Assez long pour être résumé : seules taille et empreinte sont gardées.
-    assert_eq!(l[1]["result"]["truncated"], true);
+    assert_eq!(l[1]["result"]["$summary"]["truncated"], true);
     assert_eq!(
         l[1]["replay"],
         json!({"legend": ["mnt_1", "parcelles_2", "plu_3", "gares_4", "routes_5", "ajout_g1"]})
@@ -4569,7 +4606,7 @@ fn an_export_journaled_before_source_details_replays_identically() {
         s.call("layout.export_pdf", json!({"title": "Carte"}))
             .unwrap();
         let kept = lines(&s)[0]["result"].clone();
-        assert_eq!(kept.get("truncated") == Some(&json!(true)), many, "{kept}");
+        assert_eq!(kept.get("$summary").is_some(), many, "{kept}");
         drop(s);
         // Le geste d'aujourd'hui rend `source_details` : la ligne ancienne se rejoue à l'identique.
         let report = Replay::load(&registry, &project)

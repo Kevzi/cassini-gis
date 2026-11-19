@@ -1025,8 +1025,8 @@ mod tests {
         let journal = std::fs::read_to_string(dir.join("p.cassini/journal.jsonl")).unwrap();
         let line: Value = serde_json::from_str(journal.trim()).unwrap();
         assert_eq!(line["params"]["dem"], "dem/colline.tif");
-        assert_eq!(line["result"]["truncated"], true);
-        assert!(line["result"]["fingerprint"].is_string());
+        assert_eq!(line["result"]["$summary"]["truncated"], true);
+        assert!(line["result"]["$summary"]["fingerprint"].is_string());
 
         let (code, out, err) = call(&["replay", &project]);
         assert_eq!((code, err.as_str()), (0, ""));

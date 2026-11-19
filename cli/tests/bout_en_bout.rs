@@ -133,7 +133,8 @@ fn answer_step(session: &mut QgisSession, order: &Value, prefix: &str) {
     let result = match order["params"]["command"].as_str().unwrap() {
         "project.inventory" => inventory(),
         "layout.export_pdf" => json!({"file": params["out"], "page_count": 1, "layer_count": 6,
-            "sources": ["parcelles.gpkg", "plu_zonage.gpkg", "gares.gpkg"], "truncated": false}),
+            "sources": ["parcelles.gpkg", "plu_zonage.gpkg", "gares.gpkg"], "truncated": false,
+            "source_details": []}),
         _ => json!({"layer_id": format!("{prefix}_{step}"), "name": "Résultat",
             "feature_count": 7, "crs": "EPSG:2154"}),
     };

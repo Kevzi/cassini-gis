@@ -19,6 +19,10 @@ pub const INVENTORY: &str = "project.inventory";
 /// liste de `{command, params}`, ôtée du résultat avant toute journalisation ou comparaison.
 pub const ORDERS_FIELD: &str = "orders";
 
+/// Code rendu quand l'extension répond à un ordre par un résultat qui ne suit pas le schéma de
+/// sortie de la commande (AD-27).
+pub const BAD_RESULT: &str = "qgis.bad_result";
+
 /// Version du protocole du noyau.
 pub const PROTOCOL_VERSION: u32 = 2;
 
@@ -478,6 +482,8 @@ pub trait Delegated {
 
 struct Entry {
     spec: CommandSpec,
+    /// Validateur du schéma de sortie, compilé à la première demande (AD-27).
+    output_validator: std::sync::OnceLock<Result<jsonschema::Validator, String>>,
     /// Valide les paramètres par le type Rust qui a engendré le schéma.
     validate: Validator,
     /// `None` pour une commande déléguée : il n'y a rien à exécuter en processus.
@@ -530,6 +536,7 @@ impl Registry {
             spec.id.clone(),
             Entry {
                 spec,
+                output_validator: std::sync::OnceLock::new(),
                 validate,
                 handler: Some(handler),
             },
@@ -553,6 +560,7 @@ impl Registry {
             spec.id.clone(),
             Entry {
                 spec,
+                output_validator: std::sync::OnceLock::new(),
                 validate,
                 handler: None,
             },
@@ -566,6 +574,52 @@ impl Registry {
             .get(id)
             .ok_or_else(|| RegistryError::UnknownCommand(id.to_string()))?;
         (entry.validate)(params)
+    }
+
+    /// Valide un résultat rendu par l'extension contre le schéma de sortie de sa commande, sur le
+    /// JSON brut (AD-27). Un écart est `qgis.bad_result` ; le message nomme le chemin fautif dans
+    /// le résultat, jamais sa valeur (elle pourrait porter un chemin absolu, AD-9).
+    pub fn validate_output(&self, id: &str, result: &Value) -> Result<(), RegistryError> {
+        let entry = self
+            .entries
+            .get(id)
+            .ok_or_else(|| RegistryError::UnknownCommand(id.to_string()))?;
+        let validator = entry
+            .output_validator
+            .get_or_init(|| {
+                jsonschema::validator_for(&entry.spec.output_schema).map_err(|e| e.to_string())
+            })
+            .as_ref()
+            .map_err(|_| RegistryError::Failed {
+                code: BAD_RESULT.to_string(),
+                message: format!("Le schéma de sortie de `{id}` est inutilisable."),
+            })?;
+        // Les ordres cachés d'une commande qui en dicte (`ORDERS_FIELD`) ne font pas partie de son
+        // résultat typé : un schéma fermé les refuserait. On valide une copie sans eux.
+        let mut typed = result.clone();
+        if let Some(map) = typed.as_object_mut() {
+            map.remove(ORDERS_FIELD);
+        }
+        let first = validator
+            .iter_errors(&typed)
+            .next()
+            .map(|error| error.instance_path().to_string());
+        match first {
+            None => Ok(()),
+            Some(at) => {
+                let at = if at.is_empty() {
+                    "à la racine".to_string()
+                } else {
+                    format!("à `{at}`")
+                };
+                Err(RegistryError::Failed {
+                    code: BAD_RESULT.to_string(),
+                    message: format!(
+                        "Le résultat rendu par l'extension pour `{id}` ne suit pas son schéma ({at}) ; rien n'est journalisé."
+                    ),
+                })
+            }
+        }
     }
 
     /// Chaque description, avec un booléen vrai si la commande a une implémentation Rust.
@@ -707,6 +761,82 @@ mod tests {
             }
         }
         assert!(seen >= 1);
+    }
+
+    #[test]
+    fn validate_output_accepts_the_already_built_delegated_commands() {
+        let registry = Registry::standard();
+        registry
+            .validate_output(
+                "data.reproject",
+                &json!({"layer_id": "r_1", "name": "Reprojetée", "feature_count": 12, "crs": "EPSG:2154"}),
+            )
+            .unwrap();
+        registry
+            .validate_output("layer.remove", &json!({"layer_id": "routes_1a2b3c"}))
+            .unwrap();
+        // Et refuse un résultat mal formé de ces mêmes commandes.
+        for (id, bad) in [
+            ("data.reproject", json!({"layer_id": "r_1"})),
+            ("layer.remove", json!({"layer_id": 5})),
+        ] {
+            let err = registry.validate_output(id, &bad).unwrap_err();
+            assert_eq!(err.code(), BAD_RESULT);
+        }
+    }
+
+    #[test]
+    fn every_registered_output_schema_compiles() {
+        let registry = Registry::standard();
+        for spec in registry.specs() {
+            jsonschema::validator_for(&spec.output_schema)
+                .unwrap_or_else(|e| panic!("{} : {e}", spec.id));
+        }
+    }
+
+    #[test]
+    fn validate_output_on_an_unknown_id_is_an_unknown_command() {
+        let err = Registry::standard()
+            .validate_output("foo.bar", &json!({}))
+            .unwrap_err();
+        assert_eq!(err.code(), "registry.unknown_command");
+    }
+
+    #[derive(serde::Deserialize, JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    struct NoParams {}
+
+    #[derive(Serialize, JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    struct ClosedOutput {
+        ok: bool,
+    }
+
+    struct Closed;
+    impl Delegated for Closed {
+        type Params = NoParams;
+        type Output = ClosedOutput;
+        fn spec() -> CommandSpec {
+            CommandSpec::new::<NoParams, ClosedOutput>("test.closed", "Fermée.", "Closed.")
+                .runs_in(RunsIn::Qgis)
+                .cancellable(false)
+                .tests(&["validate_output_ignores_the_hidden_orders"])
+        }
+    }
+
+    #[test]
+    fn validate_output_ignores_the_hidden_orders() {
+        let mut registry = Registry::new();
+        registry.register_delegated::<Closed>();
+        let orders = json!([{"command": "layer.open_raster", "params": {}}]);
+        registry
+            .validate_output("test.closed", &json!({"ok": true, ORDERS_FIELD: orders}))
+            .unwrap();
+        // Un autre champ en trop reste refusé : le schéma est bien fermé.
+        let err = registry
+            .validate_output("test.closed", &json!({"ok": true, "extra": 1}))
+            .unwrap_err();
+        assert_eq!(err.code(), BAD_RESULT);
     }
 
     #[test]

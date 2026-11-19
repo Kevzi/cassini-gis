@@ -689,6 +689,13 @@ impl<'a> Session<'a> {
         }
 
         let outcome = self.router.call(id, exec);
+        // Un résultat de l'extension qui ne suit pas le schéma de sa commande n'est pas une
+        // étape : rien n'est écrit, la numérotation ne bouge pas (AD-27).
+        if let Err(e) = &outcome {
+            if e.code() == crate::registry::BAD_RESULT {
+                return Err(ErrorReport::from(e.clone()));
+            }
+        }
         // Les ordres cachés du résultat sont ôtés avant tout : ils ne sont ni journalisés, ni
         // rendus à l'appelant, mais dictés juste après cette ligne.
         let outcome = outcome.and_then(|value| {

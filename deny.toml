@@ -6,7 +6,7 @@
 exclude = ["cassini-app"]
 
 [licenses]
-allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "Unlicense"]
+allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "Unlicense", "MIT-0", "Zlib"]
 confidence-threshold = 0.9
 
 [advisories]

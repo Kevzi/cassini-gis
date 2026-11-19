@@ -804,7 +804,17 @@ impl Executor for Channel<'_> {
                         if cancelling.is_some() {
                             return Err(cancelled());
                         }
-                        return outcome.map_err(|error| delegated_error(&error));
+                        // Le résultat de l'extension est confronté au schéma de sortie de la
+                        // commande avant toute journalisation (AD-27). `Channel` est le seul
+                        // exécutant qui reçoit un résultat de l'extension : la ligne de commande
+                        // et le MCP autonome n'ont que le bouchon, le relais d'IA externe passe
+                        // par cet exécutant.
+                        return match outcome {
+                            Ok(result) => {
+                                link.registry.validate_output(id, &result).map(|()| result)
+                            }
+                            Err(error) => Err(delegated_error(&error)),
+                        };
                     }
                 }
                 Ok(Incoming::Call {
@@ -1277,7 +1287,7 @@ mod tests {
         assert_eq!(history[1]["at"], 1_762_600_000_000_u64);
         assert_eq!(history[2]["layer_id"], "c_1");
         // Des paramètres longs sont résumés, comme un résultat.
-        assert_eq!(history[2]["params"]["truncated"], true);
+        assert_eq!(history[2]["params"]["$summary"]["truncated"], true);
         assert_eq!(
             crate::journal::history_of(&dir.join("absent.jsonl"), 3),
             Vec::<Value>::new()
@@ -1418,6 +1428,89 @@ mod tests {
         assert_eq!(code_of(&r[1]), "registry.unavailable");
         assert!(!dir.join("p.cassini/journal.jsonl").exists());
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn probe_exchange(dir: &Path, reply: Value) -> Vec<Value> {
+        let project = project_in(dir);
+        exchange(&[
+            hello_line(2, &["test.qgis_probe"], &project),
+            run_line(2, "test.qgis_probe", json!({"layer": "l"})),
+            json!({"jsonrpc":"2.0","id":"core-1","result":reply}).to_string(),
+        ])
+    }
+
+    #[test]
+    fn a_conforming_extension_result_is_journaled() {
+        let dir = temp_dir();
+        let r = probe_exchange(&dir, json!({"ok": true}));
+        assert_eq!(r.last().unwrap()["result"], json!({"ok": true}));
+        assert!(dir.join("p.cassini/journal.jsonl").exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn journal_lines(dir: &Path) -> Vec<Value> {
+        std::fs::read_to_string(dir.join("p.cassini/journal.jsonl"))
+            .unwrap_or_default()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect()
+    }
+
+    fn reply_line(order: u64, result: Value) -> String {
+        json!({"jsonrpc":"2.0","id":format!("core-{order}"),"result":result}).to_string()
+    }
+
+    #[test]
+    fn a_rejected_result_then_a_valid_call_gives_one_line_numbered_step_1() {
+        let dir = temp_dir();
+        let project = project_in(&dir);
+        let r = exchange(&[
+            hello_line(2, &["test.qgis_probe"], &project),
+            run_line(2, "test.qgis_probe", json!({"layer": "l"})),
+            reply_line(1, json!({"ok": "oui"})),
+            run_line(3, "test.qgis_probe", json!({"layer": "l"})),
+            reply_line(2, json!({"ok": true})),
+        ]);
+        assert_eq!(r.last().unwrap()["result"], json!({"ok": true}));
+        let lines = journal_lines(&dir);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0]["step"], 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_rejection_after_a_success_adds_no_line_and_no_step_number() {
+        let dir = temp_dir();
+        let project = project_in(&dir);
+        let r = exchange(&[
+            hello_line(2, &["test.qgis_probe"], &project),
+            run_line(2, "test.qgis_probe", json!({"layer": "l"})),
+            reply_line(1, json!({"ok": true})),
+            run_line(3, "test.qgis_probe", json!({"layer": "l"})),
+            reply_line(2, json!({})),
+            run_line(4, "test.qgis_probe", json!({"layer": "l"})),
+            reply_line(3, json!({"ok": true})),
+        ]);
+        let rejected = r.iter().find(|m| m["id"] == 3).unwrap();
+        assert_eq!(code_of(rejected), "qgis.bad_result");
+        let steps: Vec<Value> = journal_lines(&dir)
+            .iter()
+            .map(|l| l["step"].clone())
+            .collect();
+        assert_eq!(steps, vec![json!(1), json!(2)]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_malformed_extension_result_is_refused_and_not_journaled() {
+        // Champ requis absent, mauvais type, puis résultat qui n'est pas un objet.
+        for reply in [json!({}), json!({"ok": "oui"}), json!([1, 2])] {
+            let dir = temp_dir();
+            let r = probe_exchange(&dir, reply);
+            assert_eq!(code_of(r.last().unwrap()), "qgis.bad_result");
+            assert!(!dir.join("p.cassini/journal.jsonl").exists());
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 
     #[test]
@@ -2314,7 +2407,7 @@ mod tests {
         c.send(reply(
             &order["id"],
             json!({"file": out, "page_count": 1, "layer_count": 1,
-                "sources": ["pts.csv"], "truncated": false}),
+                "sources": ["pts.csv"], "truncated": false, "source_details": []}),
         ));
     }
 
@@ -2510,7 +2603,8 @@ mod tests {
         std::fs::write(out, b"sortie de la fausse extension").unwrap();
         let result = match order["params"]["command"].as_str().unwrap() {
             "layout.export_pdf" => json!({"file": out, "page_count": 1, "layer_count": 4,
-                "sources": ["plu.gpkg", "gares.gpkg", "parcelles.gpkg"], "truncated": false}),
+                "sources": ["plu.gpkg", "gares.gpkg", "parcelles.gpkg"], "truncated": false,
+                "source_details": []}),
             _ => json!({"layer_id": format!("{prefix}_{step}"), "name": format!("Étape {step}"),
                 "feature_count": count, "crs": "EPSG:2154"}),
         };
@@ -3723,7 +3817,10 @@ mod tests {
         // La composition n'est pas annulable.
         c.send(json!({"jsonrpc":"2.0","id":4,"method":"request.cancel","params":{"id":2}}));
         assert_eq!(code_of(&c.recv()), "request.unknown");
-        c.send(reply(&order["id"], json!({"layers": []})));
+        c.send(reply(
+            &order["id"],
+            json!({"layers": [], "project_crs": "EPSG:2154", "extent": null}),
+        ));
         assert_eq!(c.recv()["result"]["plan_id"], "plan-1");
         c.close().1.unwrap();
     }
@@ -4367,7 +4464,10 @@ mod tests {
         let busy = c.recv();
         assert_eq!(busy["id"], 3);
         assert_eq!(code_of(&busy), "session.busy");
-        c.send(reply(&order["id"], json!({"layers": []})));
+        c.send(reply(
+            &order["id"],
+            json!({"layers": [], "project_crs": "EPSG:2154", "extent": null}),
+        ));
         assert_eq!(c.recv()["result"]["plan_id"], "plan-1");
         c.close().1.unwrap();
     }
@@ -4382,13 +4482,19 @@ mod tests {
         c.send(json!({"jsonrpc":"2.0","id":3,"method":"plan.propose",
             "params":{"request":"x","model":"b.gguf"}}));
         let order = c.recv();
-        c.send(reply(&order["id"], json!({"layers": []})));
+        c.send(reply(
+            &order["id"],
+            json!({"layers": [], "project_crs": "EPSG:2154", "extent": null}),
+        ));
         assert_eq!(c.recv()["result"]["plan_id"], "plan-2");
         // `model: null` vaut absent.
         c.send(json!({"jsonrpc":"2.0","id":6,"method":"plan.propose",
             "params":{"request":"x","model":null}}));
         let order = c.recv();
-        c.send(reply(&order["id"], json!({"layers": []})));
+        c.send(reply(
+            &order["id"],
+            json!({"layers": [], "project_crs": "EPSG:2154", "extent": null}),
+        ));
         assert_eq!(c.recv()["result"]["plan_id"], "plan-3");
         c.send(json!({"jsonrpc":"2.0","id":4,"method":"plan.propose",
             "params":{"request":"x","model":3}}));

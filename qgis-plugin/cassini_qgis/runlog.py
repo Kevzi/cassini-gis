@@ -146,8 +146,14 @@ class RunLog:
 
 
 def _summarized(value):
-    """Vrai pour la valeur qu'un journal a résumée : `{truncated, bytes, fingerprint}`."""
-    return isinstance(value, dict) and value.get("truncated") is True and "fingerprint" in value
+    """Vrai pour la valeur qu'un journal a résumée : `{"$summary": {truncated, bytes, fingerprint}}`,
+    ou l'ancienne forme `{truncated, bytes, fingerprint}` des journaux déjà écrits."""
+    if not isinstance(value, dict):
+        return False
+    if set(value) == {"$summary"}:
+        inner = value["$summary"]
+        return isinstance(inner, dict) and inner.get("truncated") is True
+    return value.get("truncated") is True and "fingerprint" in value
 
 
 def past_time(at):

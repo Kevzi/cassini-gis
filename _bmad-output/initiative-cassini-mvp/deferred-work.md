@@ -1214,3 +1214,15 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-plus-proche-voisin-et-matrice-de-distances-plan.md`
   summary: `analysis.distance_matrix` (matrice de distances, sortie `table`) reste à construire une fois 10.1 (gabarit SummaryRow, qgis.bad_result) et 10.3 (geste à chaîne fixe, sortie table) faits.
   evidence: le ticket 10.10 ne déclare que `after: [9]` mais exige la sortie table du geste générique, que seuls 10.1 et 10.3 livrent ; découpe décidée par le propriétaire le 2026-11-18, `analysis.nearest` seule dans ce plan.
+
+- source_plan: none
+  summary: `model.list` doit cesser de rendre son dossier en chemin absolu (AD-9) ; livrable séparé de la validation des résultats par le noyau (10.1).
+  evidence: découpe décidée par le propriétaire le 2026-11-19 : 10.1 se construit sur le gabarit de résumé, la validation en `qgis.bad_result` et la clé réservée des marqueurs du journal ; `model.list` est indépendant des deux.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-resultat-valide-par-le-noyau-et-gabarit-unique-de-resume-plan.md`
+  summary: Aucun test ne confronte les résultats réels de l'extension aux schémas de sortie du noyau (balayage de toutes les commandes déléguées) ; une dérive Python/Rust devient désormais un `qgis.bad_result` visible.
+  evidence: la validation de 10.1 rejette tout résultat non conforme ; seules des fixtures écrites à la main la couvrent, et `bout_en_bout.rs` avait déjà dérivé. À traiter avant la publication (gravité medium, non vérifiée commande par commande).
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-resultat-valide-par-le-noyau-et-gabarit-unique-de-resume-plan.md`
+  summary: `CLAUDE.md` §2 et §8 listent MIT, Apache-2.0 et BSD pour le noyau ; `deny.toml` admet aussi MIT-0 et Zlib (jsonschema) depuis le 2026-11-19.
+  evidence: licences acceptées par le propriétaire ; le correctif édite `CLAUDE.md`, fichier d'instructions, donc reporté.
