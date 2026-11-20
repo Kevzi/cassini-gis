@@ -675,11 +675,27 @@
   },
   {
     "id": "EU34",
-    "phrase": "Calcule l'itinéraire le plus court par les routes entre 452 000 / 5 410 000 et 458 500 / 5 404 000 en UTM 31N.",
+    "phrase": "Calcule l'itinéraire le plus court en voiture par les routes entre 452 000 / 5 410 000 (UTM 31N) et 458 500 / 5 404 000 (UTM 31N).",
     "expected": {
-      "kind": "refusal",
-      "missing": [
-        "shortest_path"
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "network.shortest_path",
+          "params": {
+            "layer_id": "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67",
+            "start": {
+              "x": 452000,
+              "y": 5410000,
+              "epsg": 32631
+            },
+            "end": {
+              "x": 458500,
+              "y": 5404000,
+              "epsg": 32631
+            },
+            "mode": "car"
+          }
+        }
       ]
     }
   },

@@ -243,6 +243,18 @@ def _area(unit):
     return lambda: _analysis(ta.AreaTest, setup)
 
 
+def _shortest_path():
+    t = ta.ShortestPathTest("setUp")
+    t.setUp()
+    try:
+        _, calls = ta.start(t.entry, t.backend, t.params())
+        t.backend.finished(True, {"OUTPUT": t.out, "TRAVEL_COST": 0.12})
+        assert calls[0][1] is None, calls
+        return calls[0][0]
+    finally:
+        t.tearDown()
+
+
 def _isochrone():
     t = ta.IsochroneTest("setUp")
     t.setUp()
@@ -478,6 +490,7 @@ def producers():
             (["zonage", "count"], [[str(i), "1"] for i in range(150)], 150)
         ),
         ("analysis.sum_line_lengths", "en mètres"): _line_lengths("m"),
+        ("network.shortest_path", "une ligne"): _shortest_path,
         ("analysis.area", "en mètres carrés"): _area("m2"),
         ("analysis.area", "en hectares"): _area("ha"),
         ("analysis.sum_line_lengths", "en kilomètres"): _line_lengths("km"),

@@ -381,7 +381,7 @@ donne l'esquisse.
 | `raster.polygonize` | planifiée | qgis | epic 10 (entrée ajoutée après la 12) |
 | `raster.align` | planifiée | qgis | epic 10 (entrée ajoutée après la 12) |
 | `raster.contour` | faite | qgis | epic 10, entrée 26 |
-| `network.shortest_path` | planifiée | qgis | epic 10, entrée 13 |
+| `network.shortest_path` | faite | qgis | — |
 | `network.prepare` | planifiée | qgis | epic 10, entrée 14 |
 | `layout.export_atlas` | planifiée | qgis | epic 10, entrée 15 |
 | `geocode.ban` | faite | core | epic 10, entrée 16 |
@@ -2199,7 +2199,12 @@ Résultat : `layer_id`, `name`, `crs`, `feature_count`.
 ### `network.shortest_path`
 
 Plus court chemin entre deux points sur un réseau de lignes, sur le contrat de réseau
-(AD-28 ; epic 10, entrée 13). Un point trop loin du réseau : `analysis.origin_off_network`.
+(AD-28 ; epic 10, entrée 13). Un point (départ ou arrivée) trop loin du réseau :
+`analysis.origin_off_network`, dont le message nomme le point ; deux points qu'aucun chemin ne
+relie (réseau non connecté, sens interdit) : `analysis.no_path`, jamais une couche vide muette.
+Un seul chemin, une entité. Réseau en degrés : calcul dans le système en mètres choisi par le
+noyau (`work_epsg`), comme `analysis.isochrone` ; la longueur se lit sur la géométrie dans ce
+système, la durée vient de la stratégie « plus rapide » à la vitesse du contrat de réseau.
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
@@ -2209,21 +2214,23 @@ Plus court chemin entre deux points sur un réseau de lignes, sur le contrat de 
 | `mode` | chaîne | oui | `walk` (5 km/h), `car` (50 km/h) | Mode, comme `analysis.isochrone`. |
 | `network` | `NetworkOptions` | non | — | Vitesse, sens, tolérance ; absent, les valeurs du mode. |
 | `out` | chaîne | non | — | Fourni par le noyau. |
+| `work_epsg` | entier | non | code EPSG | Fourni par le noyau, pour un réseau en degrés seulement. |
 
 | Résultat | Type | Sens |
 |---|---|---|
-| `layer_id`, `name`, `crs`, `feature_count` | — | Couche du chemin. |
-| `length` | `Distance` | Longueur du chemin. |
-| `duration` | `Duration` | Durée du trajet. |
+| `layer_id`, `name`, `crs`, `feature_count` | — | Couche du chemin (`feature_count` : 1). |
+| `length` | `{value, unit}` | Longueur du chemin, `unit` toujours `m`. |
+| `duration` | `{value, unit}` | Durée du trajet, `unit` toujours `s`. |
 
 ```json fiche
-{"id": "network.shortest_path", "status": "planifiee", "runs_in": "qgis", "dictated_by_core": false,
+{"id": "network.shortest_path", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
  "params": {"layer_id": {"type": "string", "required": true},
             "start": {"type": "Point", "required": true},
             "end": {"type": "Point", "required": true},
             "mode": {"type": "string", "required": true, "enum": ["walk", "car"]},
             "network": {"type": "NetworkOptions", "required": false},
-            "out": {"type": "string", "required": false}},
+            "out": {"type": "string", "required": false},
+            "work_epsg": {"type": "integer", "required": false}},
  "result": ["crs", "duration", "feature_count", "layer_id", "length", "name"]}
 ```
 

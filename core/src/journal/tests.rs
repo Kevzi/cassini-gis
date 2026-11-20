@@ -4880,6 +4880,18 @@ impl Executor for CrsQgis {
                           "unit": unit}),
                 )
             }
+            "network.shortest_path" => {
+                self.buffers.borrow_mut().push(p.clone());
+                let n = self.count.get() + 1;
+                self.count.set(n);
+                fs::write(p["out"].as_str().unwrap(), "gpkg").unwrap();
+                Ok(
+                    json!({"layer_id": format!("chemin_g{}_{n}", self.generation),
+                          "name": "chemin", "feature_count": 1, "crs": "EPSG:2154",
+                          "length": {"value": 600.0, "unit": "m"},
+                          "duration": {"value": 432.0, "unit": "s"}}),
+                )
+            }
             "analysis.difference" => {
                 self.buffers.borrow_mut().push(p.clone());
                 let n = self.count.get() + 1;
@@ -5082,6 +5094,57 @@ fn an_area_logs_its_unit_and_work_system_and_replays_identically() {
         .run(&Router::new(&registry).with_qgis(qgis), &mut HashSet::new())
         .unwrap();
     assert_eq!(report, identical(2));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_shortest_path_logs_its_network_contract_and_work_system_and_replays_identically() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let qgis = CrsQgis::new(1, &qgis_project);
+    let orders = qgis.buffers.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    let wgs = |x: f64, y: f64| json!({"x": x, "y": y, "epsg": 4326});
+    // Couche en degrés : le noyau remplit `work_epsg` et écrit le contrat de réseau résolu.
+    let out = s
+        .call(
+            "network.shortest_path",
+            json!({"layer_id": "gares", "start": wgs(6.12, 45.9), "end": wgs(6.13, 45.91),
+                   "mode": "walk"}),
+        )
+        .unwrap();
+    assert_eq!(out["length"], json!({"value": 600.0, "unit": "m"}));
+    assert_eq!(out["duration"], json!({"value": 432.0, "unit": "s"}));
+    // Un point manquant : refus du noyau, rien n'est exécuté ni journalisé.
+    let err = s
+        .call(
+            "network.shortest_path",
+            json!({"layer_id": "gares", "start": wgs(6.12, 45.9), "mode": "walk"}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "registry.invalid_params");
+    let l = lines(&s);
+    assert_eq!(l.len(), 1, "{l:?}");
+    assert_eq!(l[0]["params"]["work_epsg"], 2154, "{}", l[0]);
+    assert_eq!(l[0]["params"]["network"]["speed"]["value"], 5.0, "{}", l[0]);
+    assert_eq!(
+        l[0]["params"]["network"]["tolerance"]["value"], 100.0,
+        "{}",
+        l[0]
+    );
+    assert!(l[0]["params"]["out"]
+        .as_str()
+        .is_some_and(|o| o.ends_with(".gpkg")));
+    assert_eq!(orders.borrow()[0]["work_epsg"], 2154);
+    drop(s);
+    // Rejeu : le même résultat (hors identifiant de couche, valeur de session).
+    let qgis = CrsQgis::new(2, &qgis_project);
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(&Router::new(&registry).with_qgis(qgis), &mut HashSet::new())
+        .unwrap();
+    assert_eq!(report, identical(1));
     let _ = fs::remove_dir_all(dir);
 }
 

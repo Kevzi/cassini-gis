@@ -312,6 +312,15 @@ class AnnouncementTest(unittest.TestCase):
         self.assertEqual(versions["analysis.isochrone"], 2)
         self.assertEqual(versions["analysis.buffer"], 1)
 
+    def test_the_shortest_path_is_announced_only_when_its_algorithm_exists(self):
+        _, _, versions = self.announce()
+        self.assertEqual(versions["network.shortest_path"], 1)
+        backend = FakeBackend()
+        backend.missing_algorithms = {"native:shortestpathpointtopoint"}
+        available = analysis.available_chains(analysis.ALGORITHMS, backend)
+        self.assertNotIn("network.shortest_path", available)
+        self.assertIn("analysis.isochrone", available)
+
     def test_a_removed_algorithm_makes_its_command_unavailable(self):
         registry, commands, versions = self.announce(missing={"native:buffer"})
         self.assertNotIn("analysis.buffer", commands)

@@ -139,6 +139,34 @@ class LayerCommandsTest(unittest.TestCase):
             "Area reachable in 10 min by car on the network routes_9.",
         )
 
+    def test_shortest_path(self):
+        params = {"layer_id": "routes_9", "mode": "walk"}
+        self.assertEqual(
+            say("network.shortest_path", params),
+            "Plus court chemin à pied sur le réseau routes_9.",  # repli : l'identifiant
+        )
+        out = {
+            "layer_id": "c_1", "name": "Chemin", "feature_count": 1, "crs": "EPSG:2154",
+            "length": {"value": 1250.0, "unit": "m"}, "duration": {"value": 900.0, "unit": "s"},
+        }
+        self.assertEqual(
+            say("network.shortest_path", params, out),
+            "Plus court chemin à pied sur le réseau routes_9 : 1,25 km, 15 min, nouvelle couche Chemin, 1 entité.",
+        )
+        self.assertEqual(
+            say("network.shortest_path", dict(params, mode="car"), dict(out, length={"value": 600.0, "unit": "m"},
+                                                                   duration={"value": 43.2, "unit": "s"}), lang="en"),
+            "Shortest path by car on the network routes_9: 600 m, 43 s, new layer Chemin, 1 feature.",
+        )
+        # Une durée mêlant minutes et secondes, puis des heures.
+        for seconds, text in ((432.0, "7 min 12 s"), (3900.0, "1 h 05 min")):
+            self.assertIn(text, say("network.shortest_path", params, dict(out, duration={"value": seconds, "unit": "s"})))
+        # Résultat illisible : phrase des paramètres, avec la couche.
+        self.assertIn(
+            "nouvelle couche Chemin",
+            say("network.shortest_path", params, {"name": "Chemin", "feature_count": 1}),
+        )
+
     def test_count_points_in_polygon(self):
         params = {"layer_id": "parcelles_2", "points_layer_id": "gares_1"}
         out = {
@@ -1088,6 +1116,10 @@ SAMPLES = {
     "analysis.isochrone": ({"layer_id": "routes_1", "duration": {"value": 10, "unit": "min"},
                             "mode": "walk"},
                            {"layer_id": "iso_1", "name": "Isochrone", "feature_count": 1}),
+    "network.shortest_path": ({"layer_id": "routes_1", "mode": "walk"},
+                              {"layer_id": "chemin_1", "name": "Chemin", "feature_count": 1,
+                               "crs": "EPSG:2154", "length": {"value": 600.0, "unit": "m"},
+                               "duration": {"value": 432.0, "unit": "s"}}),
     "layout.export_pdf": ({"title": "Gares"}, {"file": "C:/d/gares.pdf", "page_count": 1}),
     "terrain.slope": ({"dem": DEM, "unit": "percent"},
                       {"file": "C:/d/pente.tif", "unit": "percent", "min": 0.0, "max": 152.34,

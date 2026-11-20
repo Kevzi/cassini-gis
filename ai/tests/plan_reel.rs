@@ -473,9 +473,9 @@ fn an_invalid_expected_answer_or_a_wrong_refusal_is_named() {
 fn a_refusal_turns_red_when_its_command_reaches_the_registry() {
     let mut ids = common::registry_ids(&Registry::standard());
     assert!(common::refusals_now_wrong(&ids, &all_phrases()).is_empty());
-    // PL23 (courbes de niveau) est un plan depuis le ticket 26 : le refus qui devient faux est
-    // celui du plus court chemin (PL22).
-    ids.push("network.shortest_path".to_string());
+    // PL22 (plus court chemin) est un plan depuis le ticket 13 et remplacée par un refus encore
+    // vrai : celui qui devient faux est le bassin versant (PL22).
+    ids.push("hydro.watershed".to_string());
     let wrong = common::refusals_now_wrong(&ids, &all_phrases());
     assert_eq!(wrong.len(), 1, "{wrong:?}");
     assert!(

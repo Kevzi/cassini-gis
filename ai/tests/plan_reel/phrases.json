@@ -399,11 +399,11 @@
   },
   {
     "id": "PL22",
-    "phrase": "Donne-moi le plus court chemin en voiture entre la gare et le lycée.",
+    "phrase": "Délimite le bassin versant du ruisseau qui passe derrière la gare.",
     "expected": {
       "kind": "refusal",
       "missing": [
-        "shortest"
+        "watershed"
       ]
     }
   },

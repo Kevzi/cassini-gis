@@ -192,6 +192,68 @@
     }
   },
   {
+    "id": "CHE1",
+    "command": "network.shortest_path",
+    "phrase": "Quel est le plus court chemin à pied entre le point 656 800 / 6 847 500 et le point 657 050 / 6 848 150 (Lambert-93), par les routes ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "network.shortest_path",
+          "params": {
+            "layer_id": "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67",
+            "start": {
+              "x": 656800,
+              "y": 6847500,
+              "epsg": 2154
+            },
+            "end": {
+              "x": 657050,
+              "y": 6848150,
+              "epsg": 2154
+            },
+            "mode": "walk"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "CHE2",
+    "command": "network.shortest_path",
+    "phrase": "Itinéraire le plus court en voiture de 656 600 / 6 847 800 à 657 300 / 6 848 400 (Lambert-93) sur le réseau routier.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "network.shortest_path",
+          "params": {
+            "layer_id": "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67",
+            "start": {
+              "x": 656600,
+              "y": 6847800,
+              "epsg": 2154
+            },
+            "end": {
+              "x": 657300,
+              "y": 6848400,
+              "epsg": 2154
+            },
+            "mode": "car"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "CHE3",
+    "command": "network.shortest_path",
+    "phrase": "Quel est le plus court chemin à pied de la gare à la mairie ?",
+    "expected": {
+      "kind": "question"
+    }
+  },
+  {
     "id": "ISO3",
     "command": "analysis.isochrone",
     "phrase": "Fais une isochrone à pied autour du point 656 600 / 6 847 800 (Lambert-93).",

@@ -2610,15 +2610,16 @@ engendrées, jamais recopiées d'une autre barre), sur l'inventaire de l'épreuv
 
 | Barre | Phrases | Fichier des phrases neuves | Refus attendus | Seuil |
 |---|---|---|---|---|
-| `echelle_utm_reel` | 8 + 36 = **44** | `ai/tests/echelle_utm_reel/phrases.json` (`EU01`…`EU36`) | 4 neufs : `atlas`, `shortest_path`, `export_image`/`image`, `distance_matrix` | ≥ 7/8 de réponses attendues arrondi vers le bas, soit **38/44** (86,4 %) |
+| `echelle_utm_reel` | 8 + 36 = **44** | `ai/tests/echelle_utm_reel/phrases.json` (`EU01`…`EU36`) | 3 neufs : `atlas`, `export_image`/`image`, `distance_matrix` (le quatrième, `shortest_path`, EU34, est un plan depuis `network.shortest_path`, ticket 13 de l'epic 10) | ≥ 7/8 de réponses attendues arrondi vers le bas, soit **38/44** (86,4 %) |
 | `terrain_reel` | 8 + 36 = **44** | `ai/tests/terrain_reel/phrases.json` (`TR01`…`TR36`) | 4 neufs : `flood`, `flow_accum`, `cut_fill`/`volume`, `solar`/`insolation` | ≥ 7/8 de réponses attendues arrondi vers le bas, soit **38/44** (86,4 %) |
 
 - `echelle_utm_reel` : exports à une échelle sous toutes ses écritures (« 1 : 2 500 », « 1/50 000e »,
   « au 75 000e », « 1:20k », « au vingt-cinq millième »), avec page, orientation ou titre ; exports
   au bout d'une sélection, d'un tampon ou d'une isochrone ; isochrones depuis un point UTM 31N ou
   32N (est et nord écrits « E … / N … », nord avant l'est, « EPSG:32631 », relevé GPS
-  et « UTM31N »). Refus : atlas par commune, itinéraire le plus court par les routes, export
-  en image, temps de trajet entre deux points.
+  et « UTM31N »), plus un itinéraire le plus court en voiture entre deux points UTM 31N (EU34,
+  `network.shortest_path`, ticket 13). Refus : atlas par commune, export en image, temps de trajet
+  entre deux points.
 - `terrain_reel` : pentes en degrés ou en pourcentage (déclivité, inclinaison, raideur) ; lignes de
   vue et champs de vision, points en Lambert-93 seuls, hauteurs, rayon (au plus 2 500 m sur le MNT
   de 5 m), courbure ou réfraction écrits et jamais égaux au défaut ; 6 exports seuls sans le
@@ -2627,8 +2628,7 @@ engendrées, jamais recopiées d'une autre barre), sur l'inventaire de l'épreuv
   déblai/remblai, rayonnement solaire annuel. La crue est écrite sans cote ni rivière : une cote
   se ferait par `raster.reclassify` du MNT, une rivière absente de l'inventaire appellerait une
   question.
-- Mots-clés des refus : `atlas` (`layout.export_atlas`), `shortest_path`
-  (`network.shortest_path`), `distance_matrix` (`analysis.distance_matrix`), `flood`
+- Mots-clés des refus : `atlas` (`layout.export_atlas`), `distance_matrix` (`analysis.distance_matrix`), `flood`
   (`terrain.flood_extent`) et `flow_accum` (`terrain.flow_accumulation`) sont des morceaux
   d'identifiants planifiés ou réservés du catalogue ; `export_image`, `image`, `cut_fill`,
   `volume`, `solar` et `insolation` sont des mots-clés anglais choisis pour un futur identifiant,

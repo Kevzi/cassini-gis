@@ -4387,7 +4387,7 @@ fn subset_phrase(rng: &mut Rng, t: &Theme) -> Option<String> {
 const NO_EMAIL: &str = "Aucune commande du catalogue n'envoie de courriel.";
 const NO_FEATURE_DELETION: &str = "Aucune commande du catalogue ne supprime d'entités dans une couche : les analyses créent de nouvelles couches.";
 const NO_RENAME: &str = "Aucune commande du catalogue ne renomme une couche.";
-const NO_ROUTE: &str = "Aucune commande du catalogue ne calcule d'itinéraire sur un réseau routier entre deux objets d'une couche : le chemin de moindre coût demande un raster de coût et deux points en coordonnées.";
+const NO_ROUTE: &str = "Aucune commande du catalogue ne calcule d'itinéraire entre deux objets d'une couche désignés par leur nom : le plus court chemin sur un réseau demande deux points en coordonnées.";
 const NO_DOWNLOAD: &str = "Aucune commande du catalogue ne télécharge de données : le projet utilise les fichiers de l'utilisateur.";
 const NO_PUBLISHING: &str = "Aucune commande du catalogue ne publie de carte en ligne.";
 const NO_3D: &str = "Aucune commande du catalogue n'affiche de vue en 3D.";
@@ -9451,8 +9451,6 @@ fn export_pdf_echelle_format(rng: &mut Rng) -> Option<Example> {
 // ne vise plus que l'adresse seule. Famille à revoir au ré-entraînement (ticket 17).
 const NO_GEOCODING: &str =
     "Aucune commande du catalogue ne place une adresse isolée ; le géocodage ne traite qu'un fichier CSV d'adresses.";
-const NO_SHORTEST_PATH: &str =
-    "Aucune commande du catalogue ne calcule de plus court chemin sur un réseau routier.";
 const NO_IMAGE_EXPORT: &str =
     "Aucune commande du catalogue n'exporte la carte en image, ni en PNG ni en JPEG.";
 const NO_TRAVEL_TIME: &str =
@@ -9494,7 +9492,6 @@ const KNOWN_REFUSALS: &[&str] = &[
     NO_VISIBILITY_STATS,
     NO_MULTI_ORIGIN,
     NO_GEOCODING,
-    NO_SHORTEST_PATH,
     NO_IMAGE_EXPORT,
     NO_TRAVEL_TIME,
     NO_FLOOD,
@@ -9517,7 +9514,7 @@ const OTHER_REFUSALS: &[(&str, &[&str])] = &[
     (NO_EMAIL, &["mail", "send"]),
     (NO_FEATURE_DELETION, &["delete", "feature"]),
     (NO_RENAME, &["rename"]),
-    (NO_ROUTE, &["route", "network"]),
+    (NO_ROUTE, &["route"]),
     (NO_DOWNLOAD, &["download", "fetch"]),
     (NO_PUBLISHING, &["publish", "upload"]),
     (NO_SPREADSHEET, &["csv", "excel", "xlsx"]),
@@ -9538,7 +9535,6 @@ const OTHER_REFUSALS: &[(&str, &[&str])] = &[
 #[cfg(test)]
 const ABSENT_FUNCTIONS: &[(&str, &[&str])] = &[
     (NO_GEOCODING, &["single_address", "address_lookup"]),
-    (NO_SHORTEST_PATH, &["shortest_path", "network"]),
     (NO_IMAGE_EXPORT, &["image", "png"]),
     (NO_TRAVEL_TIME, &["travel_time", "distance_matrix"]),
     (NO_FLOOD, &["flood"]),
@@ -9554,7 +9550,7 @@ const ABSENT_FUNCTIONS: &[(&str, &[&str])] = &[
 ];
 
 /// Ce que le registre ne fait pas (leçon de la remesure : les refus neufs des barres élargies) :
-/// géocodage, plus court chemin sur un réseau, export en image, durée de trajet,
+/// géocodage, export en image, durée de trajet,
 /// crue, écoulements, bassin versant, déblai et remblai, lissage, rugosité, couleurs par catégories,
 /// étiquettes, opacité, symboles proportionnels. Un refus affirmatif, aucun appel, jamais une
 /// commande voisine en substitut. Les étiquettes ne se refusent que sur une couche seule : « le
@@ -9568,9 +9564,13 @@ fn refus_fonction_absente(rng: &mut Rng) -> Option<Example> {
         return presque_refus(rng);
     }
     let mut b = Builder::new();
-    // La branche 0 (courbes de niveau) a disparu avec `raster.contour` (ticket 26) : les autres gardent
-    // leur numéro et leur compte.
-    let branch = 1 + rng.below(14);
+    // La branche 0 (courbes de niveau) a disparu avec `raster.contour` (ticket 26), et la branche 2
+    // (plus court chemin) avec `network.shortest_path` (ticket 13) : les autres gardent leur numéro.
+    // Le tirage garde ses 14 issues (le flux du générateur ne bouge pas) : la 2 retombe sur la 1.
+    let branch = match 1 + rng.below(14) {
+        2 => 1,
+        n => n,
+    };
     // Les fonctions du terrain ont un MNT dans l'inventaire : le refus n'est pas celui d'un MNT
     // absent.
     let of = if matches!(branch, 5..=10) {
@@ -9615,41 +9615,6 @@ fn refus_fonction_absente(rng: &mut Rng) -> Option<Example> {
                 _ => (format!("Place le {number} {street} sur la carte"), false),
             };
             (body, q, NO_GEOCODING)
-        }
-        2 => {
-            network(rng, &mut b);
-            let commune = *rng.pick(COMMUNES);
-            let (a, c) = *rng.pick(&[
-                ("la mairie", "la gare"),
-                ("le collège", "la piscine"),
-                ("l'hôpital", "la caserne des pompiers"),
-                ("la médiathèque", "le stade"),
-            ]);
-            let place = de_place(commune);
-            let (de_a, a_c) = (de_np(a), a_np(c));
-            let (body, q) = match rng.below(4) {
-                0 => (
-                    format!("Calcule le plus court chemin par les routes entre {a} et {c} {place}"),
-                    false,
-                ),
-                1 => (
-                    format!("Trouve l'itinéraire routier le plus court {de_a} {a_c}"),
-                    false,
-                ),
-                2 => (
-                    format!(
-                        "Quel est le chemin le plus court sur le réseau routier entre {a} et {c}"
-                    ),
-                    true,
-                ),
-                _ => (
-                    format!(
-                        "Trace le trajet le plus direct en suivant les routes, {de_a} jusqu'{a_c}"
-                    ),
-                    false,
-                ),
-            };
-            (body, q, NO_SHORTEST_PATH)
         }
         3 => {
             b.distract(rng, 2, vector);

@@ -45,6 +45,7 @@ class FakeBackend:
         self.table, self.table_call = (["cat", "count"], [], 0), None  # tableau écrit : (colonnes, lignes, total)
         self.out_fields = None  # champs des couches temporaire et produite, quand un test les fixe
         self.missing_algorithms = set()  # algorithmes absents du registre de traitement (AD-25)
+        self.path_length, self.length_call = 600.0, None  # longueur lue sur la géométrie de la couche produite
 
     def algorithm_exists(self, algorithm_id):
         return algorithm_id not in self.missing_algorithms
@@ -98,6 +99,10 @@ class FakeBackend:
     def numbers_of(self, layer, field, label_field, limit):
         self.numbers_call = (layer.lid, field, label_field, limit)
         return self.numbers[:limit], len(self.numbers) > limit
+
+    def total_length(self, layer):
+        self.length_call = layer.lid
+        return self.path_length
 
     def table_rows(self, path, limit):
         header, rows, total = self.table
@@ -1308,6 +1313,198 @@ class IsochroneTest(unittest.TestCase):
         registry = gestures.GestureRegistry()
         analysis.register_all(registry, backend_factory=lambda: self.backend)
         self.assertIn("analysis.isochrone", registry.ids())
+
+
+class ShortestPathTest(unittest.TestCase):
+    """`network.shortest_path` : même contrat de réseau que l'isochrone, deux points accrochés, longueur
+    lue sur la géométrie et durée lue sur le coût de l'algorithme (en heures), `analysis.no_path`."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.out = os.path.join(self.dir.name, "13-network.shortest_path.gpkg")
+        self.entry = analysis.ALGORITHMS["network.shortest_path"]
+        self.backend = FakeBackend(
+            [
+                FakeLayer("n", name="rues", geometry="Line"),
+                FakeLayer("w", name="rues4326", crs="EPSG:4326", metric=False, geometry="Line"),
+                FakeLayer("p", name="gares"),
+                FakeLayer("r", vector=False),
+            ],
+            loaded_count=1,
+        )
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def params(self, **extra):
+        p = {
+            "layer_id": "n",
+            "start": {"x": 652100, "y": 6850100, "epsg": 2154},
+            "end": {"x": 652400, "y": 6850400, "epsg": 2154},
+            "mode": "walk",
+            "out": self.out,
+        }
+        p.update(extra)
+        p.setdefault("network", resolved_network(p["mode"]))
+        return p
+
+    def test_one_step_writes_the_file_and_gives_length_and_duration(self):
+        _, calls = start(self.entry, self.backend, self.params())
+        algo, p = self.backend.calls[0]
+        self.assertEqual(algo, "native:shortestpathpointtopoint")
+        self.assertEqual(p["STRATEGY"], 1)  # plus rapide
+        self.assertEqual(p["DEFAULT_SPEED"], 5.0)
+        self.assertEqual(p["START_POINT"], "652100.0,6850100.0 [EPSG:2154]")
+        self.assertEqual(p["END_POINT"], "652400.0,6850400.0 [EPSG:2154]")
+        self.assertEqual(p["OUTPUT"], self.out)
+        self.assertEqual((p["SPEED_FIELD"], p["DIRECTION_FIELD"], p["DEFAULT_DIRECTION"]), ("", "", 2))
+        self.assertEqual(len(self.backend.calls), 1)
+        self.backend.finished(True, {"OUTPUT": self.out, "TRAVEL_COST": 0.12})  # coût en heures
+        result, error = calls[0]
+        self.assertIsNone(error)
+        self.assertEqual(
+            result,
+            {
+                "layer_id": "out_1",
+                "name": "13-network.shortest_path",
+                "feature_count": 1,
+                "crs": "EPSG:2154",
+                "length": {"value": 600.0, "unit": "m"},
+                "duration": {"value": 432.0, "unit": "s"},
+            },
+        )
+        self.assertEqual(self.backend.length_call, "out_1")  # la longueur vient de la géométrie
+        self.assertTrue(os.path.exists(self.out))
+
+    def test_both_points_are_snapped_and_each_one_is_named_when_refused(self):
+        start(self.entry, self.backend, self.params())
+        self.assertEqual(self.backend.near_call, ("n", 652400.0, 6850400.0, 2154, 100.0))  # le dernier contrôlé
+        os.remove(self.out)  # écrit par le lancement ci-dessus
+        for key, word in (("start", "départ"), ("end", "arrivée")):
+            backend = FakeBackend([FakeLayer("n", name="rues", geometry="Line")], loaded_count=1)
+
+            def near(layer, x, y, epsg, radius, work_epsg=None):
+                return (x, y) != (1.0, 2.0)
+
+            backend.has_feature_near = near
+            point = {"x": 1.0, "y": 2.0, "epsg": 2154}
+            _, calls = start(self.entry, backend, self.params(**{key: point}))
+            self.assertEqual(calls[0][1].code, "analysis.origin_off_network")
+            self.assertIn(word.lower(), calls[0][1].message.lower())
+            self.assertIn("rues", calls[0][1].message)
+            self.assertEqual(backend.calls, [])
+            self.assertFalse(os.path.exists(self.out))
+
+    def test_tolerance_sets_the_snap_distance_of_both_points(self):
+        seen = []
+        backend = FakeBackend([FakeLayer("n", geometry="Line")], loaded_count=1)
+        backend.has_feature_near = lambda layer, x, y, epsg, radius, work_epsg=None: seen.append(radius) or True
+        start(self.entry, backend, self.params(network=resolved_network("walk", tolerance={"value": 1.5, "unit": "km"})))
+        self.assertEqual(seen, [1500.0, 1500.0])
+
+    def test_network_contract_changes_the_call(self):
+        start(self.entry, self.backend, self.params(mode="car"))
+        self.assertEqual(self.backend.calls[0][1]["DEFAULT_SPEED"], 50.0)
+        backend = FakeBackend([FakeLayer("n", geometry="Line")])
+        backend.layer("n").fields = [("vit", "Real"), ("sens", "String")]
+        direction = {"field": "sens", "forward": "FT", "backward": "TF"}
+        start(self.entry, backend, self.params(network=resolved_network("walk", speed_field="vit", direction=direction)))
+        p = backend.calls[0][1]
+        self.assertEqual((p["SPEED_FIELD"], p["DIRECTION_FIELD"], p["VALUE_FORWARD"], p["VALUE_BACKWARD"]), ("vit", "sens", "FT", "TF"))
+        # Champ inconnu : refus avant lancement.
+        backend = FakeBackend([FakeLayer("n", geometry="Line")])
+        _, calls = start(self.entry, backend, self.params(network=resolved_network("walk", speed_field="absent")))
+        self.assertEqual(calls[0][1].code, "analysis.unknown_field")
+        self.assertEqual(backend.calls, [])
+
+    def test_missing_network_contract_is_refused(self):
+        params = self.params()
+        del params["network"]
+        _, calls = start(self.entry, self.backend, params)
+        self.assertEqual(calls[0][1].code, "analysis.bad_params")
+        self.assertEqual(self.backend.calls, [])
+
+    def test_a_network_in_degrees_is_reprojected_first_and_both_points_follow(self):
+        params = self.params(
+            layer_id="w",
+            work_epsg=2154,
+            start={"x": 6.1, "y": 45.9, "epsg": 4326},
+            end={"x": 6.2, "y": 45.8, "epsg": 2154},
+        )
+        _, calls = start(self.entry, self.backend, params)
+        algo, p = self.backend.calls[0]
+        self.assertEqual((algo, p["TARGET_CRS"], p["OUTPUT"]), ("native:reprojectlayer", "EPSG:2154", "TEMPORARY_OUTPUT"))
+        self.assertEqual(self.backend.near_work, 2154)  # accrochage vérifié en mètres
+        self.backend.finished(True, {"OUTPUT": "reprojete"})
+        algo, p = self.backend.calls[1]
+        self.assertEqual(algo, "native:shortestpathpointtopoint")
+        self.assertEqual(p["INPUT"].lid, "reprojete")
+        self.assertEqual(p["START_POINT"], "1006.1,2045.9 [EPSG:2154]")  # transformé par QGIS
+        self.assertEqual(p["END_POINT"], "6.2,45.8 [EPSG:2154]")  # déjà dans le système de calcul
+        self.assertEqual(p["OUTPUT"], self.out)
+        self.backend.finished(True, {"OUTPUT": self.out, "TRAVEL_COST": 0.5})
+        self.assertIsNone(calls[0][1])
+        self.assertEqual(calls[0][0]["duration"], {"value": 1800.0, "unit": "s"})
+
+    def test_a_metric_network_is_not_reprojected(self):
+        start(self.entry, self.backend, self.params())
+        self.assertIsNone(self.backend.transform_call)
+        self.assertIsNone(self.backend.near_work)
+
+    def test_degrees_without_a_work_system_and_non_line_layers_are_refused(self):
+        _, calls = start(self.entry, self.backend, self.params(layer_id="w"))
+        self.assertEqual(calls[0][1].code, "analysis.crs_not_metric")
+        _, calls = start(self.entry, self.backend, self.params(layer_id="p"))
+        self.assertEqual(calls[0][1].code, "analysis.bad_params")
+        self.assertIn("couche de lignes", calls[0][1].message)
+        _, calls = start(self.entry, self.backend, self.params(layer_id="nope"))
+        self.assertEqual(calls[0][1].code, "layer.not_found")
+        self.assertEqual(self.backend.calls, [])
+
+    def test_no_route_is_the_named_error_no_path_and_leaves_no_file(self):
+        _, calls = start(self.entry, self.backend, self.params())
+        self.assertTrue(os.path.exists(self.out))
+        self.backend.finished(False, {})
+        self.assertEqual(calls[0][1].code, "analysis.no_path")
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_a_cancelled_run_is_a_cancellation_not_a_missing_path(self):
+        g, calls = start(self.entry, self.backend, self.params())
+        g.cancel()
+        self.assertTrue(self.backend.handle.cancelled)
+        self.backend.finished(False, {})
+        self.assertEqual(calls[0][1].code, "qgis.cancelled")
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_a_result_without_cost_or_with_several_lines_is_a_failure_not_a_guess(self):
+        _, calls = start(self.entry, self.backend, self.params())
+        self.backend.finished(True, {"OUTPUT": self.out})
+        self.assertEqual(calls[0][1].code, "analysis.failed")
+        self.backend.loaded_count = 2
+        _, calls = start(self.entry, self.backend, self.params())
+        self.backend.finished(True, {"OUTPUT": self.out, "TRAVEL_COST": 0.1})
+        self.assertEqual(calls[0][1].code, "analysis.failed")
+
+    def test_bad_mode_or_point_refused_even_if_the_core_let_it_through(self):
+        for extra in ({"mode": "bike"}, {"start": {"x": 1, "y": 2}}, {"end": None}):
+            backend = FakeBackend([FakeLayer("n", geometry="Line")])
+            _, calls = start(self.entry, backend, self.params(**extra))
+            self.assertEqual(calls[0][1].code, "analysis.bad_params", extra)
+            self.assertEqual(backend.calls, [])
+
+    def test_the_isochrone_is_unchanged_and_the_table_is_valid(self):
+        self.assertEqual(analysis.validate_table(), [])
+        self.assertEqual(analysis.ALGORITHMS["analysis.isochrone"]["chain_version"], 2)
+        self.assertNotIn("points", analysis.ALGORITHMS["analysis.isochrone"])
+        self.assertEqual(analysis.ALGORITHMS["network.shortest_path"]["chain_version"], 1)
+        self.assertTrue(analysis.derived_cancellable({"x": self.entry})["x"])
+        bad = {"x": dict(self.entry, chain=[{"algorithm": "native:buffer", "translate": None, "on_failure": "oups"}])}
+        self.assertTrue(any("on_failure" in e for e in analysis.validate_table(bad)))
+
+    def test_the_command_is_registered(self):
+        registry = gestures.GestureRegistry()
+        analysis.register_all(registry, backend_factory=lambda: self.backend)
+        self.assertIn("network.shortest_path", registry.ids())
 
 
 class ReprojectTest(unittest.TestCase):

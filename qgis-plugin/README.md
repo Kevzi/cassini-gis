@@ -328,6 +328,24 @@ Recette manuelle de `analysis.sum_line_lengths` [ticket 11, epic 10] :
 4. Sonde sous le vrai QGIS : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat"
    qgis-plugin/tests/probe_sum_line_lengths.py` doit finir par `RÉSULTAT : OK`, avec le cas en degrés.
 
+Recette manuelle de `network.shortest_path` [ticket 13] (même réseau et même contrat de réseau que
+l'isochrone ; `fixtures/reseau-grille-2154.geojson` pour l'essai) :
+
+1. Ouvrez la grille de rues (couche de lignes en Lambert-93). Choisissez `network.shortest_path` :
+   `layer_id` et `mode` sont des listes, `start` et `end` se saisissent en `{x, y, epsg}` (ou se
+   reprennent d'une étape précédente par `step:k`) ; aucun champ `out`.
+2. Départ `{652100, 6850100, 2154}`, arrivée `{652400, 6850400, 2154}`, `walk` : une couche d'une
+   ligne apparaît, le résultat rend `length` = 600 m et `duration` = 432 s (7 min 12 s) ; en `car`, 43,2 s.
+3. Un point à plus de 100 m du réseau (ou de `network.tolerance`) : `analysis.origin_off_network`, dont
+   le message dit si c'est le départ ou l'arrivée. Deux points qu'aucun chemin ne relie (réseau coupé, sens
+   interdit, points confondus) : `analysis.no_path`. Aucun fichier dans ces cas.
+4. Réseau en degrés : le noyau remplit `work_epsg`, le chemin est calculé en mètres (longueur en `m`).
+5. Sonde sous le vrai QGIS : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat"
+   qgis-plugin/tests/probe_shortest_path.py` doit finir par `VERDICT OK`. Constats consignés : le coût
+   `TRAVEL_COST` de `native:shortestpathpointtopoint` est en heures (stratégie « plus rapide »), un
+   chemin introuvable fait échouer l'algorithme (jamais une couche vide), un point lointain est accroché
+   au nœud le plus proche sans tolérance (d'où la garde d'accrochage avant lancement).
+
 Recette manuelle de `analysis.isochrone` [ticket 11] (réseau apporté par l'utilisateur ;
 `fixtures/reseau-grille-2154.geojson` pour l'essai) :
 

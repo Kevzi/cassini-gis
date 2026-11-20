@@ -32,6 +32,7 @@ UNKNOWN_FIELD = "analysis.unknown_field"
 FAILED = "analysis.failed"
 CANCELLED = "qgis.cancelled"
 ORIGIN_OFF_NETWORK = "analysis.origin_off_network"
+NO_PATH = "analysis.no_path"
 UNKNOWN_CRS = "data.unknown_crs"
 FORMAT_MISMATCH = "data.format_mismatch"
 INVALID_SOURCE = "layer.invalid_source"
@@ -232,6 +233,76 @@ def translate_isochrone(params, layer, backend):
         except (KeyError, TypeError):
             raise GestureError(BAD_PARAMS, "Le sens doit être de la forme {field, forward, backward}.")
     return algorithm
+
+
+_POINT_LABELS = {"start": "Le départ", "end": "L'arrivée"}
+
+
+def _point_of(params, key, backend, work_epsg):
+    """Point `{x, y, epsg}` du paramètre `key`, en texte de QGIS ; transformé par QGIS vers `work_epsg`
+    quand le noyau en donne un (réseau en degrés, reprojeté en tête de chaîne)."""
+    point = params.get(key)
+    try:
+        x, y, epsg = float(point["x"]), float(point["y"]), int(point["epsg"])
+    except (KeyError, TypeError, ValueError):
+        raise GestureError(BAD_PARAMS, "%s doit être de la forme {x, y, epsg}." % _POINT_LABELS[key])
+    if work_epsg is not None and work_epsg != epsg:
+        x, y = backend.transform_point(x, y, epsg, work_epsg)
+        epsg = work_epsg
+    return "%r,%r [EPSG:%d]" % (x, y, epsg)
+
+
+def translate_shortest_path(params, layer, backend):
+    """Paramètres neutres de `network.shortest_path` -> paramètres de `native:shortestpathpointtopoint`.
+
+    Même contrat de réseau que l'isochrone (`network`, résolu par le noyau : l'extension n'a aucune valeur
+    par défaut) et même stratégie « plus rapide », qui donne la durée ; la longueur se lit à part, sur la
+    géométrie. Départ et arrivée portent leur SCR et sont transformés par QGIS vers `work_epsg` quand le
+    noyau en donne un. `TOLERANCE` (topologie du graphe) reste à 0 : l'accrochage des deux points a été
+    vérifié avant le lancement."""
+    if params.get("mode") not in ("walk", "car"):
+        raise GestureError(BAD_PARAMS, "Le mode doit être « walk » (à pied) ou « car » (en voiture).")
+    network = _network_of(params)
+    work_epsg = params.get(WORK_EPSG)
+    algorithm = {
+        "INPUT": layer,
+        "STRATEGY": 1,  # plus rapide
+        "DIRECTION_FIELD": "",
+        "DEFAULT_DIRECTION": 2,  # deux sens
+        "SPEED_FIELD": network.get("speed_field") or "",
+        "DEFAULT_SPEED": _network_speed(network),
+        "TOLERANCE": 0,
+        "START_POINT": _point_of(params, "start", backend, work_epsg),
+        "END_POINT": _point_of(params, "end", backend, work_epsg),
+    }
+    direction = network.get("direction")
+    if direction:
+        try:
+            algorithm["DIRECTION_FIELD"] = direction["field"]
+            algorithm["VALUE_FORWARD"] = direction["forward"]
+            algorithm["VALUE_BACKWARD"] = direction["backward"]
+        except (KeyError, TypeError):
+            raise GestureError(BAD_PARAMS, "Le sens doit être de la forme {field, forward, backward}.")
+    return algorithm
+
+
+def summarize_shortest_path(backend, layer, params, results):
+    """Longueur (mètres, lue sur la géométrie dans le système en mètres du calcul) et durée (secondes,
+    coût « plus rapide » de l'algorithme, en heures) du chemin ; une seule entité est exigée."""
+    if backend.feature_count(layer) != 1:
+        raise GestureError(FAILED, "Le calcul du chemin n'a pas rendu exactement une ligne.")
+    cost = results.get("TRAVEL_COST") if isinstance(results, dict) else None
+    try:
+        hours = float(cost)
+    except (TypeError, ValueError):
+        raise GestureError(FAILED, "Le calcul du chemin n'a pas rendu son coût de parcours.")
+    length = backend.total_length(layer)
+    if not hours >= 0 or length is None:
+        raise GestureError(FAILED, "Le calcul du chemin n'a pas rendu une longueur et une durée lisibles.")
+    return {
+        "length": {"value": float(length), "unit": "m"},
+        "duration": {"value": hours * _COST_SECONDS_PER_UNIT, "unit": "s"},
+    }
 
 
 def translate_convex_hull(params, previous):
@@ -732,6 +803,10 @@ def summarize_area(backend, layer, params):
 #   origin    : (facultatif) paramètre du noyau `{x, y, epsg}` qui doit tomber à moins de
 #               `network.tolerance` (résolue par le noyau, AD-28) d'une entité de la couche d'entrée (sinon
 #               `analysis.origin_off_network`, avant tout lancement) ;
+#   points    : (facultatif, avec `network`) noms de paramètres du noyau (départ, arrivée), chacun un point
+#               `{x, y, epsg}` qui doit tomber, comme `origin`, à moins de `network.tolerance` d'une entité
+#               de la couche d'entrée, sinon `analysis.origin_off_network` (le message nomme le point),
+#               avant tout lancement ;
 #   summary   : (facultatif) (fond, couche produite, params) -> dict qui complète le résultat ;
 #   table     : (facultatif) genre de sortie `table` (AD-24) : `out` est un tableau sans géométrie (CSV),
 #               jamais ajouté au projet ; (fond, `out`, params) -> dict qui est le résultat (`file`,
@@ -792,6 +867,8 @@ def summarize_area(backend, layer, params):
 #   guard     : (facultatif) `{"empty": (code, message)}` : erreur nommée si la couche d'entrée de
 #               l'étape (sortie de la précédente) n'a aucune entité ;
 #   with_backend : (facultatif) la traduction reçoit aussi le fond (lecture des champs) ;
+#   on_failure : (facultatif) `(code, message)` : erreur nommée quand l'algorithme de cette étape échoue
+#               (sans être annulé), au lieu de `analysis.failed` (ex. aucun chemin) ;
 #   overlay_key  : (facultatif) clé de l'algorithme qui reçoit la seconde couche de la ligne ;
 #   nothing   : (facultatif) message si l'étape ne rend aucune sortie temporaire.
 # Aucune étape ne choisit entre deux suites : chaque valeur vient des paramètres du noyau.
@@ -1030,6 +1107,31 @@ ALGORITHMS = {
         "origin": "origin",
         "network": "network",
     },
+    "network.shortest_path": {
+        "chain_version": 1,
+        "chain": [
+            _REPROJECT_TO_WORK,
+            {
+                "algorithm": "native:shortestpathpointtopoint",
+                "translate": translate_shortest_path,
+                "output": "OUTPUT",
+                "with_backend": True,
+                "on_failure": (
+                    NO_PATH,
+                    "Aucun chemin ne relie le départ à l'arrivée sur ce réseau : il n'est pas connecté entre "
+                    "ces deux points, un sens interdit les sépare, ou ils tombent au même endroit.",
+                ),
+            },
+        ],
+        "input": "layer_id",
+        "metric": True,
+        "work_crs": WORK_EPSG,
+        "geometry": "Line",
+        "network": "network",
+        "points": ("start", "end"),
+        "summary": summarize_shortest_path,
+        "summary_results": True,
+    },
     "data.reproject": {
         "chain_version": 1,
         "chain": [
@@ -1119,6 +1221,7 @@ CANCELLABLE_ALGORITHMS = frozenset(
         "qgis:statisticsbycategories",
         "native:sumlinelengths",
         "native:serviceareafrompoint",
+        "native:shortestpathpointtopoint",
         "native:convexhull",
         "native:reprojectlayer",
         "gdal:warpreproject",
@@ -1231,6 +1334,10 @@ def _validate_row(command_id, entry, errors):
                 )
             if index == 0:
                 errors.append("%s : la première étape ne peut pas porter de garde (rien à contrôler)" % command_id)
+        if "on_failure" in step:
+            failure = step["on_failure"]
+            if not (isinstance(failure, tuple) and len(failure) == 2 and all(isinstance(t, str) for t in failure)):
+                errors.append("%s : étape %d, on_failure est (code, message)" % (command_id, index + 1))
         if "when" in step and index == len(chain) - 1:
             errors.append("%s : la dernière étape ne peut pas être conditionnelle" % command_id)
     if all("when" in s for s in chain):
@@ -1368,6 +1475,17 @@ class QgisBackend(_ReadBackend):
         target = QgsGeometry.fromPointXY(point)
         request = QgsFeatureRequest().setFilterRect(around)
         return any(f.geometry().distance(target) <= radius for f in layer.getFeatures(request))
+
+    def total_length(self, layer):
+        """Somme des longueurs des géométries de la couche, dans son propre système (la chaîne l'a mis
+        en mètres) ; None si une entité n'a pas de géométrie."""
+        total = 0.0
+        for feature in layer.getFeatures():
+            geometry = feature.geometry()
+            if geometry is None or geometry.isNull():
+                return None
+            total += geometry.length()
+        return total
 
     def temporary_layer(self, handle, reference):
         """Couche temporaire écrite par l'étape que `handle` vient de finir ; None si absente."""
@@ -1723,6 +1841,10 @@ class ProcessingGesture:
             self._check_network(params, layer)
         if entry.get("origin"):
             self._check_origin(params.get(entry["origin"]), layer, params.get(entry.get("network")), work_epsg)
+        for key in entry.get("points", ()):
+            self._check_origin(
+                params.get(key), layer, params.get(entry.get("network")), work_epsg, label=_POINT_LABELS[key]
+            )
         overlay = None
         if entry.get("overlay"):
             overlay = self._overlay(params, layer_id)
@@ -1886,21 +2008,21 @@ class ProcessingGesture:
         if direction:
             self._check_field(direction.get("field") if isinstance(direction, dict) else None, layer)
 
-    def _check_origin(self, origin, layer, network=None, work_epsg=None):
+    def _check_origin(self, origin, layer, network=None, work_epsg=None, label="L'origine"):
         backend = self._backend
         snap = _network_tolerance_meters(network if isinstance(network, dict) else {})
         try:
             x, y, epsg = float(origin["x"]), float(origin["y"]), int(origin["epsg"])
         except (KeyError, TypeError, ValueError):
-            raise GestureError(BAD_PARAMS, "L'origine doit être de la forme {x, y, epsg}.")
+            raise GestureError(BAD_PARAMS, "%s doit être de la forme {x, y, epsg}." % label)
         # Réseau en degrés : l'accrochage se vérifie en mètres, dans `work_epsg` (origine et
         # tronçons transformés par QGIS), jamais avec un rayon en mètres sur des degrés.
         extra = {"work_epsg": work_epsg} if work_epsg is not None else {}
         if not backend.has_feature_near(layer, x, y, epsg, snap, **extra):
             raise GestureError(
                 ORIGIN_OFF_NETWORK,
-                "L'origine est à plus de %d m du réseau « %s » : vérifiez ses coordonnées et son système."
-                % (snap, backend.name_of(layer)),
+                "%s est à plus de %d m du réseau « %s » : vérifiez ses coordonnées et son système."
+                % (label, snap, backend.name_of(layer)),
             )
 
     def _overlay(self, params, layer_id):
@@ -1951,6 +2073,9 @@ class ProcessingGesture:
             return
         try:
             if not ok:
+                failure = self._steps[self._index].get("on_failure")
+                if failure:
+                    raise GestureError(*failure)
                 raise GestureError(FAILED, "L'analyse a échoué dans QGIS.")
             if self._index + 1 < len(self._steps):
                 self._advance(results)

@@ -289,6 +289,53 @@ def _isochrone(lang, p, r, names):
     return text + (_out_layer(lang, r) if r else "")
 
 
+def _duration_text(lang, value):
+    """Une durée rendue en secondes par le noyau : `43 s`, `7 min 12 s`, `1 h 05 min` ; illisible : _Unreadable."""
+    if not isinstance(value, dict) or value.get("unit") != "s" or not _is_number(value.get("value")):
+        raise _Unreadable()
+    seconds = value["value"]
+    if not math.isfinite(seconds) or seconds < 0:
+        raise _Unreadable()
+    total = int(round(seconds))
+    hours, rest = divmod(total, 3600)
+    minutes, secs = divmod(rest, 60)
+    if hours:
+        return "%d h %02d min" % (hours, minutes)
+    if minutes:
+        return "%d min %02d s" % (minutes, secs) if secs else "%d min" % minutes
+    return "%d s" % secs
+
+
+def _shortest_path(lang, p, r, names):
+    mode = p.get("mode")
+    if mode not in ("walk", "car"):
+        raise _Unreadable()
+    text = texts.tr(
+        lang,
+        "sum_shortest_path",
+        mode=texts.tr(lang, "sum_mode_" + mode),
+        layer=names.layer(p.get("layer_id")),
+    )
+    text += _computed_in(lang, p, r, names)
+    if not r:
+        return text
+    try:
+        measures = texts.tr(
+            lang,
+            "sum_path_measures",
+            length=_length(lang, r.get("length")),
+            duration=_duration_text(lang, r.get("duration")),
+        )
+    except _Unreadable:
+        measures = ""
+    if not measures:
+        return text + _out_layer(lang, r)
+    name, n = r.get("name"), r.get("feature_count")
+    if not isinstance(name, str) or not name or not _is_int(n):
+        return text + measures
+    return text + measures + texts.tr(lang, "sum_path_out", name=name, count=count(lang, "entities", n))
+
+
 def _count_points(lang, p, r, names):
     text = texts.tr(
         lang,
@@ -1102,6 +1149,7 @@ _SENTENCES = {
     "analysis.area": _area,
     "analysis.select_by_attribute": _select,
     "analysis.isochrone": _isochrone,
+    "network.shortest_path": _shortest_path,
     "analysis.count_points_in_polygon": _count_points,
     "raster.zonal_statistics": _raster_zonal,
     "raster.contour": _contour,

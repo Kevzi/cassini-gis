@@ -11,6 +11,7 @@
   "analysis.sum_line_lengths": true,
   "analysis.area": true,
   "analysis.isochrone": true,
+  "network.shortest_path": true,
   "data.reproject": true,
   "data.convert": true,
   "data.convert_raster": true,
