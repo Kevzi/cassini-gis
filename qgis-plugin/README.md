@@ -143,6 +143,18 @@ Recette manuelle du CSV et du GeoParquet [9.6] (jeu `../donnees-test-cassini/`) 
    dans votre QGIS, `layer.invalid_source`.
 4. Les fichiers restent intacts (taille et date inchangées).
 
+Recette manuelle de `layer.add` avec `raster` [10.20] (`fixtures/mnt-colline-2154.tif`) :
+
+1. Mode expert, `layer.add`, champ `raster` (bouton de choix de fichier) : le MNT
+   s'ouvre comme couche raster ; le résultat donne `kind` = `raster` et son SCR. `path`,
+   `table` et `raster` sont exclusifs (`layer.one_input`) ; `x_field` et `y_field` sont
+   refusés avec `raster` ; un `.asc` donne `layer.unsupported_format`.
+2. `project.inventory` montre la couche avec `kind` = `raster`, son SCR, `width` et
+   `height` en pixels.
+3. Un GeoTIFF sans système demande `crs` (`layer.unknown_crs` sinon) ; le fichier reste
+   intact, aucun `.aux.xml` n'apparaît à côté.
+4. Sonde automatique : `python-qgis-ltr.bat qgis-plugin/tests/probe_layer_add_raster.py`.
+
 Recette manuelle de `project.inventory` et `layer.describe` (jeu
 `../donnees-test-cassini/`, noyau qui annonce les commandes) :
 

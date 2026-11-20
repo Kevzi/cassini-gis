@@ -311,6 +311,12 @@ class OtherCommandsTest(unittest.TestCase):
         )
         self.assertEqual(say("layer.add", {"table": "donnees/prix.csv"}), "Ouverture du fichier prix.csv.")
 
+    def test_layer_add_of_a_raster_shows_only_the_file_name(self):
+        out = {"kind": "raster", "layer_id": "r_1", "name": "mnt", "source_crs": "EPSG:2154",
+               "project_crs": "EPSG:2154", "reprojected": False}
+        self.assertEqual(say("layer.add", {"raster": r"C:\dem\mnt.tif"}, out), "Raster mnt.tif ouvert : couche mnt.")
+        self.assertEqual(say("layer.add", {"raster": "dem/mnt.tif"}), "Ouverture du raster mnt.tif.")
+
     def test_layer_describe(self):
         out = {"name": "Gares", "fields": [{"name": "nom"}], "feature_count": 12, "geometry": "Point"}
         self.assertEqual(

@@ -89,9 +89,9 @@ def _is_field_list(name, prop):
 
 
 def is_path_field(field):
-    """Un champ texte nommé `path`, `table` (tableau CSV de `layer.add`) ou `*_path` désigne un fichier
-    du projet."""
-    return field.kind == TEXT and (field.name in ("path", "table") or field.name.endswith("_path"))
+    """Un champ texte nommé `path`, `table` (tableau CSV de `layer.add`), `raster` (MNT GeoTIFF de
+    `layer.add`) ou `*_path` désigne un fichier du projet."""
+    return field.kind == TEXT and (field.name in ("path", "table", "raster") or field.name.endswith("_path"))
 
 
 def is_layer_field(field):
@@ -119,6 +119,14 @@ def relative_path(chosen, project_file):
 def _follow(prop, schema):
     """Un `$ref` local vers une définition du schéma est remplacé par elle, les clés du champ
     (sa description) gardées : un `RasterPath` reste un champ texte. Sinon `prop` inchangé."""
+    if isinstance(prop, dict) and isinstance(prop.get("anyOf"), list):
+        # `Option<RasterPath>` s'engendre en `anyOf: [{$ref}, {type: null}]` : un champ texte facultatif.
+        refs = [a for a in prop["anyOf"] if isinstance(a, dict) and a.get("type") != "null"]
+        if len(refs) == 1 and isinstance(refs[0].get("$ref"), str) and len(prop["anyOf"]) == 2:
+            followed = _follow({**refs[0], **{k: v for k, v in prop.items() if k != "anyOf"}}, schema)
+            if isinstance(followed, dict) and followed.get("x-cassini") == "raster":
+                return followed
+        return prop
     if not isinstance(prop, dict) or not isinstance(prop.get("$ref"), str):
         return prop
     for prefix, key in (("#/$defs/", "$defs"), ("#/definitions/", "definitions")):

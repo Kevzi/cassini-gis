@@ -389,11 +389,13 @@ def _sum_line_lengths(lang, p, r, names):
 
 
 def _layer_add(lang, p, r, names):
-    file = file_name(p.get("path") if p.get("path") is not None else p.get("table"))
+    given = next((p.get(k) for k in ("path", "table", "raster") if p.get(k) is not None), None)
+    file = file_name(given)
+    is_raster = p.get("raster") is not None
     name = r.get("name") if r else None
     if not isinstance(name, str) or not name:
-        return texts.tr(lang, "sum_layer_add", file=file)
-    text = texts.tr(lang, "sum_layer_added", file=file, name=name)
+        return texts.tr(lang, "sum_open_raster" if is_raster else "sum_layer_add", file=file)
+    text = texts.tr(lang, "sum_opened_raster" if is_raster else "sum_layer_added", file=file, name=name)
     source, project = r.get("source_crs"), r.get("project_crs")
     if r.get("reprojected") is True and isinstance(source, str) and isinstance(project, str):
         text += texts.tr(lang, "sum_reprojected", source=source, target=project)

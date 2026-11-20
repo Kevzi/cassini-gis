@@ -1,10 +1,11 @@
 //! Commande `layer.add` : ajoute au projet QGIS une couche vectorielle issue d'un
-//! fichier de l'utilisateur (`.gpkg`, `.shp`, `.geojson`, `.parquet`, `.csv`). Déclaration seule : le
+//! fichier de l'utilisateur (`.gpkg`, `.shp`, `.geojson`, `.parquet`, `.csv`) ou un MNT GeoTIFF. Déclaration seule : le
 //! geste vit dans l'extension, QGIS lit le fichier et reprojette (AD-19).
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::raster_path::RasterPath;
 use crate::registry::{CommandSpec, Delegated, Registration, RunsIn};
 
 /// Paramètres de `layer.add`, tels que les écrit l'appelant.
@@ -12,15 +13,20 @@ use crate::registry::{CommandSpec, Delegated, Registration, RunsIn};
 #[serde(deny_unknown_fields)]
 struct RawParams {
     /// Fichier à ouvrir, relatif au projet : `.gpkg`, `.shp`, `.geojson`, `.parquet` ou `.csv`
-    /// à coordonnées. Exactement un de `path` et `table`.
+    /// à coordonnées. Exactement un de `path`, `table` et `raster`.
     #[serde(default)]
     path: Option<String>,
     /// Tableau CSV sans géométrie à ouvrir, relatif au projet (ex. prix DVF, données INSEE) :
     /// toutes ses colonnes sont lues en texte, les zéros de tête des codes sont conservés. Il
     /// s'ouvre comme une couche sans géométrie, sans `crs`, que `analysis.join_table` rattache
-    /// à une couche. Exactement un de `path` et `table`.
+    /// à une couche. Exactement un de `path`, `table` et `raster`.
     #[serde(default)]
     table: Option<String>,
+    /// MNT GeoTIFF (`.tif` ou `.tiff`) à ouvrir comme couche raster, relatif au projet : le
+    /// fichier n'est jamais modifié, `crs` ne sert que s'il n'indique aucun SCR. Rend un `layer_id`
+    /// que les commandes raster désignent ensuite. Exactement un de `path`, `table` et `raster`.
+    #[serde(default)]
+    raster: Option<RasterPath>,
     /// SCR à donner à la couche quand le fichier n'en indique aucun (ex. `EPSG:2154`) ;
     /// refusé s'il contredit celui du fichier. **Obligatoire pour un CSV**, qui n'en porte
     /// jamais. Le fichier n'est jamais modifié.
@@ -39,15 +45,20 @@ struct RawParams {
 #[serde(try_from = "RawParams")]
 pub struct LayerAddParams {
     /// Fichier à ouvrir, relatif au projet : `.gpkg`, `.shp`, `.geojson`, `.parquet` ou `.csv`
-    /// à coordonnées. Exactement un de `path` et `table`.
+    /// à coordonnées. Exactement un de `path`, `table` et `raster`.
     #[serde(default)]
     pub path: Option<String>,
     /// Tableau CSV sans géométrie à ouvrir, relatif au projet (ex. prix DVF, données INSEE) :
     /// toutes ses colonnes sont lues en texte, les zéros de tête des codes sont conservés. Il
     /// s'ouvre comme une couche sans géométrie, sans `crs`, que `analysis.join_table` rattache
-    /// à une couche. Exactement un de `path` et `table`.
+    /// à une couche. Exactement un de `path`, `table` et `raster`.
     #[serde(default)]
     pub table: Option<String>,
+    /// MNT GeoTIFF (`.tif` ou `.tiff`) à ouvrir comme couche raster, relatif au projet : le
+    /// fichier n'est jamais modifié, `crs` ne sert que s'il n'indique aucun SCR. Rend un `layer_id`
+    /// que les commandes raster désignent ensuite. Exactement un de `path`, `table` et `raster`.
+    #[serde(default)]
+    pub raster: Option<RasterPath>,
     /// SCR à donner à la couche quand le fichier n'en indique aucun (ex. `EPSG:2154`) ;
     /// refusé s'il contredit celui du fichier. **Obligatoire pour un CSV**, qui n'en porte
     /// jamais. Le fichier n'est jamais modifié.
@@ -64,14 +75,20 @@ pub struct LayerAddParams {
 impl TryFrom<RawParams> for LayerAddParams {
     type Error = String;
 
-    /// Refuse, avant tout ordre à QGIS, zéro ou deux entrées parmi `path` et `table`.
+    /// Refuse, avant tout ordre à QGIS, zéro, deux ou trois entrées parmi `path`, `table` et `raster`.
     fn try_from(raw: RawParams) -> Result<Self, String> {
-        if raw.path.is_some() == raw.table.is_some() {
-            return Err("donnez exactement un de `path` et `table`".into());
+        let given = [
+            raw.path.is_some(),
+            raw.table.is_some(),
+            raw.raster.is_some(),
+        ];
+        if given.iter().filter(|g| **g).count() != 1 {
+            return Err("donnez exactement un de `path`, `table` et `raster`".into());
         }
         Ok(Self {
             path: raw.path,
             table: raw.table,
+            raster: raw.raster,
             crs: raw.crs,
             x_field: raw.x_field,
             y_field: raw.y_field,
@@ -86,6 +103,8 @@ pub struct LayerAddOutput {
     pub layer_id: String,
     /// Nom affiché de la couche.
     pub name: String,
+    /// Sorte de la couche ouverte : `vector` (y compris un tableau) ou `raster`.
+    pub kind: String,
     /// SCR de la couche, en code explicite (ex. `EPSG:4326`) ; vide pour un tableau sans géométrie.
     pub source_crs: String,
     /// SCR du projet, en code explicite.
@@ -104,22 +123,25 @@ impl Delegated for LayerAdd {
     fn spec() -> CommandSpec {
         CommandSpec::new::<LayerAddParams, LayerAddOutput>(
             "layer.add",
-            "Ajoute au projet une couche issue d'un fichier GeoPackage, Shapefile, GeoJSON, GeoParquet ou CSV à coordonnées (crs obligatoire pour un CSV), ou, par `table`, un tableau CSV sans géométrie à joindre ensuite à une couche (exactement un de path et table).",
-            "Adds to the project a layer read from a GeoPackage, Shapefile, GeoJSON, GeoParquet or coordinate CSV file (crs required for a CSV), or, with `table`, a CSV table without geometry to join to a layer afterwards (exactly one of path and table).",
+            "Ajoute au projet une couche issue d'un fichier GeoPackage, Shapefile, GeoJSON, GeoParquet ou CSV à coordonnées (crs obligatoire pour un CSV), ou, par `table`, un tableau CSV sans géométrie à joindre ensuite à une couche, ou, par `raster`, un MNT GeoTIFF (exactement un de path, table et raster).",
+            "Adds to the project a layer read from a GeoPackage, Shapefile, GeoJSON, GeoParquet or coordinate CSV file (crs required for a CSV), or, with `table`, a CSV table without geometry to join to a layer afterwards, or, with `raster`, a GeoTIFF elevation model (exactly one of path, table and raster).",
         )
         .runs_in(RunsIn::Qgis)
         .cancellable(true)
-        .path_params(&["path", "table"])
+        .path_params(&["path", "table", "raster"])
         .example(serde_json::json!({"path": "donnees/parcelles.gpkg"}))
         .example(serde_json::json!({"path": "donnees/gares.shp", "crs": "EPSG:2154"}))
         .example(serde_json::json!({"path": "donnees/gares.csv", "crs": "EPSG:2154", "x_field": "X", "y_field": "Y"}))
         .example(serde_json::json!({"table": "donnees/prix.csv"}))
+        .example(serde_json::json!({"raster": "dem/mnt.tif"}))
         .tests(&[
             "layer_add_is_delegated",
             "layer_add_takes_an_optional_crs",
             "layer_add_takes_csv_columns",
             "layer_add_opens_a_table_without_geometry",
             "layer_add_needs_exactly_one_of_path_and_table",
+            "layer_add_opens_a_raster",
+            "layer_add_needs_exactly_one_of_three_inputs",
         ])
     }
 }
@@ -139,7 +161,11 @@ mod tests {
         assert_eq!(spec.cancellable, Some(true));
         assert_eq!(
             spec.path_params,
-            vec!["path".to_string(), "table".to_string()]
+            vec![
+                "path".to_string(),
+                "table".to_string(),
+                "raster".to_string()
+            ]
         );
         let err = registry
             .call("layer.add", json!({"path": "a.gpkg"}))
@@ -182,6 +208,29 @@ mod tests {
     fn layer_add_needs_exactly_one_of_path_and_table() {
         let registry = Registry::standard();
         for bad in [json!({}), json!({"path": "a.gpkg", "table": "t.csv"})] {
+            let err = registry.validate_params("layer.add", &bad).unwrap_err();
+            assert_eq!(err.code(), "registry.invalid_params");
+        }
+    }
+
+    #[test]
+    fn layer_add_opens_a_raster() {
+        let registry = Registry::standard();
+        let ok = json!({"raster": "dem/mnt.tif"});
+        assert!(registry.validate_params("layer.add", &ok).is_ok());
+        let err = registry.call("layer.add", ok).unwrap_err();
+        assert_eq!(err.code(), "registry.unavailable");
+        assert!(registry.check_contract().is_empty());
+    }
+
+    #[test]
+    fn layer_add_needs_exactly_one_of_three_inputs() {
+        let registry = Registry::standard();
+        for bad in [
+            json!({"path": "a.gpkg", "raster": "m.tif"}),
+            json!({"table": "t.csv", "raster": "m.tif"}),
+            json!({"path": "a.gpkg", "table": "t.csv", "raster": "m.tif"}),
+        ] {
             let err = registry.validate_params("layer.add", &bad).unwrap_err();
             assert_eq!(err.code(), "registry.invalid_params");
         }

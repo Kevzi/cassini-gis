@@ -436,7 +436,7 @@ Inventaire du projet ouvert : couches dans l'ordre de la légende, système du p
 | Résultat | Type | Sens |
 |---|---|---|
 | `extent` | emprise ou `null` | Étendue de l'ensemble, dans le système du projet ; porte aussi `lonlat` (`west`, `south`, `east`, `north`, `crs` = `EPSG:4326`), la même étendue en degrés WGS84 reprojetée par QGIS, absente quand aucune couche ne se reprojette en degrés valides. Le noyau en déduit le fuseau UTM du projet vu par le modèle (`project.utm_epsg`). |
-| `layers` | liste de couches | `layer_id`, `name`, `crs`, `crs_unit`, `kind`, `source`, `geometry`, `feature_count`, `fields`. `crs_unit` : `m`, `deg` ou `other`, unité du système lue par QGIS ; lue par le noyau, jamais montrée au modèle. |
+| `layers` | liste de couches | `layer_id`, `name`, `crs`, `crs_unit`, `kind`, `source`, `geometry`, `feature_count`, `fields`, et, pour un raster seulement, `width` et `height` en pixels (entrée 10.20). `crs_unit` : `m`, `deg` ou `other`, unité du système lue par QGIS ; lue par le noyau, jamais montrée au modèle. |
 | `project_crs` | chaîne | Système du projet, code explicite. |
 | `project_crs_unit` | chaîne | Unité du système du projet : `m`, `deg` ou `other`. |
 | `project_name` | chaîne ou `null` | Nom du fichier de projet sans extension. |
@@ -458,11 +458,11 @@ Ajoute au projet une couche d'un fichier GeoPackage, Shapefile, GeoJSON, GeoParq
 | `crs` | chaîne | non | code explicite (`EPSG:2154`) | Système à donner quand le fichier n'en dit rien ; obligatoire pour un CSV. |
 | `x_field` | chaîne | non | défaut `X` | CSV : colonne des abscisses. |
 | `y_field` | chaîne | non | défaut `Y` | CSV : colonne des ordonnées. |
-| `raster` | `RasterPath` | non | GeoTIFF | **Epic 10, entrée 20** : raster à ouvrir (AD-24 amendée : un raster se désigne par `RasterPath`, jamais par un identifiant de couche). |
+| `raster` | `RasterPath` | non | GeoTIFF | **Entrée 10.20, faite** : MNT GeoTIFF (`.tif`, `.tiff`) à ouvrir, relatif au projet, fichier intact ; `x_field` et `y_field` refusés ; raster à ouvrir (AD-24 amendée : un raster se désigne par `RasterPath`, jamais par un identifiant de couche). |
 | `table` | chaîne | non | `.csv`, relatif au projet | Entrée 10.23, faite : table sans géométrie, ouverte comme couche vecteur sans géométrie (ni `crs`, ni `x_field`, ni `y_field`), toutes ses colonnes en texte (les zéros de tête des codes sont conservés). |
 
 Depuis l'entrée 10.23, `path` est facultatif : exactement un de `path` et `table` est donné,
-sinon l'erreur `layer.one_input` (l'entrée 10.20 y ajoutera `raster`).
+sinon l'erreur `layer.one_input` ; depuis l'entrée 10.20, `raster` est la troisième entrée du « exactement un de » (`path`, `table`, `raster`).
 
 | Résultat | Type | Sens |
 |---|---|---|
@@ -471,7 +471,7 @@ sinon l'erreur `layer.one_input` (l'entrée 10.20 y ajoutera `raster`).
 | `project_crs` | chaîne | Système du projet. |
 | `reprojected` | booléen | Vrai si QGIS reprojette à l'affichage. |
 | `source_crs` | chaîne | Système de la couche (vide pour une table sans géométrie). |
-| `kind` | chaîne | **Epic 10.20** : `vector` ou `raster`. Une table sans géométrie reste `vector` (AD-24, pas de nouveau genre). |
+| `kind` | chaîne | **Entrée 10.20** : `vector` ou `raster`. Une table sans géométrie reste `vector` (AD-24, pas de nouveau genre). |
 
 ```json fiche
 {"id": "layer.add", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
@@ -479,11 +479,9 @@ sinon l'erreur `layer.one_input` (l'entrée 10.20 y ajoutera `raster`).
             "crs": {"type": "string", "required": false},
             "x_field": {"type": "string", "required": false},
             "y_field": {"type": "string", "required": false},
-            "table": {"type": "string", "required": false}},
- "result": ["layer_id", "name", "project_crs", "reprojected", "source_crs"],
- "planned_by": "epic 10, entrée 20 (raster)",
- "planned_params": {"raster": {"type": "RasterPath", "required": false}},
- "planned_result": ["kind"]}
+            "table": {"type": "string", "required": false},
+            "raster": {"type": "RasterPath", "required": false}},
+ "result": ["kind", "layer_id", "name", "project_crs", "reprojected", "source_crs"]}
 ```
 
 ### `layer.describe`

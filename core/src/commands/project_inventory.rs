@@ -70,6 +70,12 @@ pub struct InventoryLayer {
     /// Nombre d'objets d'une couche vecteur (0 si le fournisseur ne sait pas compter).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub feature_count: Option<u64>,
+    /// Largeur d'un raster, en pixels ; absente d'une couche vecteur.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u64>,
+    /// Hauteur d'un raster, en pixels ; absente d'une couche vecteur.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<u64>,
     /// Champs d'une couche vecteur, dans l'ordre de la couche ; vide pour un raster.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fields: Option<Vec<InventoryField>>,

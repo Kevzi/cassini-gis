@@ -108,7 +108,7 @@ Une couche que Cassini ne reconnaît pas garde son style : il ne devine pas.
 
 | Commande | Ce qu'elle fait |
 |---|---|
-| `layer.add` | ouvre un fichier vecteur sans le toucher, ou, par `table`, un tableau CSV sans géométrie (prix DVF, données INSEE) |
+| `layer.add` | ouvre un fichier vecteur sans le toucher, ou, par `table`, un tableau CSV sans géométrie (prix DVF, données INSEE), ou, par `raster`, un MNT GeoTIFF (`.tif`, `.tiff`) comme couche raster |
 | `project.inventory`, `layer.describe` | décrivent le projet et ses couches, pour vous et pour l'IA |
 | `layer.remove` | retire une couche du projet, sans effacer ni modifier son fichier |
 | `data.reproject`, `data.convert`, `data.convert_raster` | reprojettent une couche, la convertissent dans un autre format, écrivent un raster (ASCII Grid, IMG, JP2…) en GeoTIFF pour les commandes de terrain |

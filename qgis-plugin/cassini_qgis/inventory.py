@@ -128,6 +128,10 @@ class QgisBackend:
             return "raster"
         return "other"
 
+    def raster_size(self, layer):
+        """Largeur et hauteur d'un raster, en pixels."""
+        return int(layer.width()), int(layer.height())
+
     def wkb_name(self, layer):
         """Nom WKB de la géométrie (ex. `MultiPolygon`, `PointZ`, `NoGeometry`)."""
         from qgis.core import QgsWkbTypes
@@ -466,7 +470,15 @@ class ProjectInventoryGesture(_ReadGesture):
         vectorielle inchangée sont repris de la phrase précédente (`_FACTS`)."""
         backend = self._backend
         if kind != "vector":
-            return {"kind": kind, "geometry": None, "fields": []}
+            facts = {"kind": kind, "geometry": None, "fields": []}
+            if kind == "raster" and hasattr(backend, "raster_size"):
+                try:
+                    width, height = backend.raster_size(layer)
+                    if width > 0 and height > 0:
+                        facts["width"], facts["height"] = width, height
+                except Exception:  # des dimensions illisibles n'empêchent pas l'inventaire
+                    pass
+            return facts
         try:
             key = backend.facts_key(layer) if hasattr(backend, "facts_key") else None
         except Exception:  # une clé illisible : la couche est relue, l'inventaire n'échoue pas

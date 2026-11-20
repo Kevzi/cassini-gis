@@ -27,6 +27,13 @@ class FakeBackend:
         self.added = []
         self.loaded = []
 
+    def load_raster(self, path, name):
+        self.loaded.append((path, name, "gdal"))
+        if self.valid and os.path.exists(path):
+            with open(path, "rb") as f:
+                f.read()
+        return FakeLayer(self.valid, self.crs, name)
+
     def load(self, path, name, provider, csv=None):
         self.loaded.append((path, name, provider))
         self.csv = csv
@@ -101,6 +108,7 @@ class LayerAddTest(unittest.TestCase):
         self.assertEqual(
             result,
             {
+                "kind": "vector",
                 "layer_id": "layer_1",
                 "name": "parcelles-test",
                 "source_crs": "EPSG:4326",
@@ -240,7 +248,7 @@ class LayerAddTest(unittest.TestCase):
             self.assertEqual(b.csv, {"table": True})
             self.assertEqual(
                 result,
-                {"layer_id": "layer_1", "name": "prix", "source_crs": "", "project_crs": "EPSG:2154", "reprojected": False},
+                {"kind": "vector", "layer_id": "layer_1", "name": "prix", "source_crs": "", "project_crs": "EPSG:2154", "reprojected": False},
             )
             self.assertEqual(len(b.added), 1)
             after = os.stat(p)
@@ -263,6 +271,60 @@ class LayerAddTest(unittest.TestCase):
         _, error = run_params(b, {"table": "t.xlsx"})
         self.assertEqual(error.code, "layer.unsupported_format")
         self.assertEqual(b.loaded, [])
+
+    def test_a_geotiff_opens_as_a_raster_layer(self):
+        b = FakeBackend(crs="EPSG:2154")
+        result, error = run_params(b, {"raster": "dem/mnt-colline-2154.tif"})
+        self.assertIsNone(error)
+        self.assertEqual(
+            result,
+            {
+                "kind": "raster",
+                "layer_id": "layer_1",
+                "name": "mnt-colline-2154",
+                "source_crs": "EPSG:2154",
+                "project_crs": "EPSG:2154",
+                "reprojected": False,
+            },
+        )
+        self.assertEqual(b.loaded[0][2], "gdal")
+        _, error = run_params(FakeBackend(crs="EPSG:2154"), {"raster": "a/MNT.TIFF"})
+        self.assertIsNone(error)
+
+    def test_a_raster_without_crs_needs_one_and_a_given_one_is_assigned(self):
+        _, error = run_params(FakeBackend(crs=""), {"raster": "mnt.tif"})
+        self.assertEqual(error.code, "layer.unknown_crs")
+        b = FakeBackend(crs="")
+        result, error = run_params(b, {"raster": "mnt.tif", "crs": "EPSG:2154"})
+        self.assertIsNone(error)
+        self.assertEqual(result["source_crs"], "EPSG:2154")
+        self.assertEqual(len(b.added), 1)
+
+    def test_a_raster_crs_contradicting_the_file_is_refused(self):
+        _, error = run_params(FakeBackend(crs="EPSG:2154"), {"raster": "mnt.tif", "crs": "EPSG:4326"})
+        self.assertEqual(error.code, "layer.crs_conflict")
+
+    def test_a_raster_refuses_other_formats_and_coordinate_columns(self):
+        b = FakeBackend(crs="EPSG:2154")
+        for name in ("mnt.asc", "mnt.vrt", "mnt"):
+            _, error = run_params(b, {"raster": name})
+            self.assertEqual(error.code, "layer.unsupported_format", name)
+        for key in ("x_field", "y_field"):
+            _, error = run_params(b, {"raster": "mnt.tif", key: "X"})
+            self.assertEqual(error.code, "layer.one_input", key)
+        self.assertEqual(b.added, [])
+        _, error = run_params(FakeBackend(crs="EPSG:2154", valid=False), {"raster": "mnt.tif"})
+        self.assertEqual(error.code, "layer.invalid_source")
+
+    def test_zero_two_or_three_inputs_are_refused(self):
+        for params in (
+            {},
+            {"path": "a.gpkg", "raster": "m.tif"},
+            {"table": "t.csv", "raster": "m.tif"},
+            {"path": "a.gpkg", "table": "t.csv", "raster": "m.tif"},
+        ):
+            _, error = run_params(FakeBackend(), params)
+            self.assertEqual(error.code, "layer.one_input", params)
 
     def test_parquet_goes_through_ogr(self):
         b = FakeBackend(crs="EPSG:4326")

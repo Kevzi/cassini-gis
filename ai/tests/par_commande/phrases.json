@@ -1222,6 +1222,22 @@
     }
   },
   {
+    "id": "LA4",
+    "command": "layer.add",
+    "phrase": "Ouvre le MNT de la zone nord.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "layer.add",
+          "params": {
+            "raster": "donnees/mnt_zone_nord.tif"
+          }
+        }
+      ]
+    }
+  },
+  {
     "id": "LD1",
     "command": "layer.describe",
     "phrase": "De quels attributs dispose la couche des bâtiments ?",

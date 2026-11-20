@@ -777,7 +777,7 @@ impl Executor for SessionQgis {
                 self.created
                     .borrow_mut()
                     .push((layer.clone(), "pts.csv".into()));
-                Ok(json!({"layer_id": layer, "name": "points"}))
+                Ok(json!({"kind": "vector", "layer_id": layer, "name": "points"}))
             }
             "analysis.buffer" => {
                 // Le paramètre `layer_id` doit être une couche de CETTE session.
@@ -1534,7 +1534,7 @@ impl Executor for ProjectQgis {
                     .borrow_mut()
                     .push((layer.clone(), "pts.csv".into()));
                 Ok(json!({
-                    "layer_id": layer, "name": "pts", "source_crs": "EPSG:2154",
+                    "kind": "vector", "layer_id": layer, "name": "pts", "source_crs": "EPSG:2154",
                     "project_crs": "EPSG:2154", "reprojected": false
                 }))
             }
@@ -2996,7 +2996,7 @@ impl Executor for StyleQgis {
             "layer.add" => {
                 let id = format!("ajout_g{}", self.generation);
                 self.created.borrow_mut().push(id.clone());
-                Ok(json!({"layer_id": id, "name": "points"}))
+                Ok(json!({"kind": "vector", "layer_id": id, "name": "points"}))
             }
             "layer.set_style" => {
                 if self.refuse_style == Some(self.count("layer.set_style")) {
@@ -4958,6 +4958,89 @@ fn a_dissolve_logs_its_output_and_replays_identically() {
     let report = Replay::load(&registry, &project)
         .unwrap()
         .run(&Router::new(&registry).with_qgis(qgis), &mut HashSet::new())
+        .unwrap();
+    assert_eq!(report, identical(1));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_raster_layer_add_logs_a_portable_relative_input_and_replays_identically() {
+    let (dir, project, token) = temp_project();
+    fs::create_dir_all(dir.join("dem")).unwrap();
+    fs::write(dir.join("dem").join("mnt.tif"), "II*  mnt").unwrap();
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(SessionQgis::new(1));
+    let out = s
+        .call("layer.add", json!({"raster": "dem/mnt.tif"}))
+        .unwrap();
+    // La doublure QGIS répond toujours `vector` : ce test vérifie le journal (entrée portable,
+    // rejeu identique), pas la lecture d'un vrai raster, que la sonde sous QGIS constate.
+    assert_eq!(out["kind"], "vector");
+    let l = lines(&s);
+    assert_eq!(l[0]["params"], json!({"raster": "dem/mnt.tif"}));
+    assert_eq!(l[0]["inputs"][0]["path"], "dem/mnt.tif");
+    assert_eq!(l[0]["inputs"][0]["portable"], true);
+    let raw = fs::read_to_string(s.journal_path()).unwrap();
+    assert!(
+        !raw.contains(&token),
+        "chemin absolu dans le journal : {raw}"
+    );
+    drop(s);
+    // Rejeu du journal que cette session vient d'écrire (l'ancien format a son test à part).
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(
+            &Router::new(&registry).with_qgis(SessionQgis::new(2)),
+            &mut HashSet::new(),
+        )
+        .unwrap();
+    assert_eq!(report, identical(1));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_old_layer_add_line_without_kind_replays_identically() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(SessionQgis::new(1));
+    s.call("layer.add", json!({"path": "pts.csv", "crs": "EPSG:2154"}))
+        .unwrap();
+    let journal = s.journal_path();
+    drop(s);
+    // Ligne écrite avant l'entrée 10.20 : `path`, et un résultat sans `kind`.
+    let text = fs::read_to_string(&journal).unwrap();
+    let old: Vec<String> = text
+        .lines()
+        .map(|l| {
+            let mut v: Value = serde_json::from_str(l).unwrap();
+            assert!(v["result"]
+                .as_object_mut()
+                .unwrap()
+                .remove("kind")
+                .is_some());
+            assert!(v["params"].get("raster").is_none());
+            v.to_string()
+        })
+        .collect();
+    fs::write(
+        &journal,
+        old.join(
+            "
+",
+        ) + "
+",
+    )
+    .unwrap();
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(
+            &Router::new(&registry).with_qgis(SessionQgis::new(2)),
+            &mut HashSet::new(),
+        )
         .unwrap();
     assert_eq!(report, identical(1));
     let _ = fs::remove_dir_all(dir);

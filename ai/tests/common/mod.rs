@@ -409,8 +409,11 @@ pub fn invalid(registry: &Registry, inventory: &Value, phrases: &[Value]) -> Vec
                     out.push(format!("{id} : couche absente de l'inventaire {layer}"));
                 }
             }
+            // `layer.add{raster}` nomme un fichier pas encore ouvert : il est vérifié contre les
+            // fichiers non chargés, plus bas, pas contre les rasters déjà ouverts.
+            let opens_a_file = call["command"] == "layer.add";
             for raster in named_rasters.iter().filter(|r| !r.starts_with("step:")) {
-                if !known.rasters.contains(raster) {
+                if !opens_a_file && !known.rasters.contains(raster) {
                     out.push(format!("{id} : raster absent de l'inventaire {raster}"));
                 }
             }
@@ -447,7 +450,11 @@ pub fn invalid(registry: &Registry, inventory: &Value, phrases: &[Value]) -> Vec
                 }
             }
             if call["command"] == "layer.add" {
-                let path = params["path"].as_str().unwrap_or_default();
+                let path = params["path"]
+                    .as_str()
+                    .or_else(|| params["raster"].as_str())
+                    .or_else(|| params["table"].as_str())
+                    .unwrap_or_default();
                 if !known.unloaded.contains(path) {
                     out.push(format!(
                         "{id} : fichier absent des fichiers non chargés {path}"

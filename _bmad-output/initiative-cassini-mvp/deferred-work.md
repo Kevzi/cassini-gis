@@ -1258,3 +1258,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-jointure-d-une-table-a-une-couche-analysis-join-table-plan.md`
   summary: Jointure dont la couche d'entrée est elle-même une table sans géométrie (non vérifié, gravité medium si vrai).
   evidence: `analysis.join_table` accepte toute couche vecteur en `layer_id` ; avec une entrée sans géométrie, le `crs` de sortie est vide et `_load` peut échouer ; une sonde sous QGIS 3.44 le tranchera.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-couches-raster-ouverture-et-inventaire-d-un-mnt-plan.md`
+  summary: `width` et `height` des rasters de `project.inventory` sont dans `layers[]` : `LATE_FIELDS` (champs de premier niveau) ne les couvre pas pour une ancienne ligne d'inventaire contenant un raster (non vérifié, gravité low à medium si le rejeu compare l'inventaire).
+  evidence: `core/src/journal/summary.rs` `same_result` ne retire que des clés de premier niveau ; à trancher en rejouant une ligne `project.inventory` écrite avant 10.20 avec un raster.

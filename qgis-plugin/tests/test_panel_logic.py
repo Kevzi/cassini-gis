@@ -267,6 +267,19 @@ class FormTest(unittest.TestCase):
         self.assertEqual(fields["lost"].kind, form.JSON)
         self.assertEqual(form.build_params([fields["dem"]], {"dem": "mnt.tif"}), {"dem": "mnt.tif"})
 
+    def test_an_optional_raster_path_is_a_text_field(self):
+        # Un Option de RasterPath (layer.add, raster) s'engendre en anyOf : un champ texte facultatif.
+        schema = {"type": "object", "properties": {
+            "raster": {"anyOf": [{"$ref": "#/$defs/RasterPath"}, {"type": "null"}], "description": "MNT"},
+            "other": {"anyOf": [{"$ref": "#/$defs/Point"}, {"type": "null"}]}},
+            "$defs": {"RasterPath": {"type": "string", "x-cassini": "raster"},
+                      "Point": {"type": "object"}}}
+        fields = {f.name: f for f in form.build_fields(schema)}
+        self.assertEqual(fields["raster"].kind, form.TEXT)
+        self.assertFalse(fields["raster"].required)
+        self.assertTrue(form.is_path_field(fields["raster"]))
+        self.assertEqual(fields["other"].kind, form.JSON)
+
     def test_an_array_of_field_names_is_a_field_list(self):
         # `analysis.dissolve` (ticket 24) : `fields` devient un sélecteur à choix multiples, jamais
         # un champ JSON brut ; un autre tableau reste du JSON.
@@ -410,10 +423,11 @@ class BrowsePathTest(unittest.TestCase):
             {"type": "object", "properties": {
                 "path": {"type": "string"}, "out_path": {"type": "string"},
                 "table": {"type": ["string", "null"]},
+                "raster": {"type": "string"},
                 "name": {"type": "string"}, "flag": {"type": "boolean"}}}
         )
         found = sorted(f.name for f in fields if form.is_path_field(f))
-        self.assertEqual(found, ["out_path", "path", "table"])
+        self.assertEqual(found, ["out_path", "path", "raster", "table"])
 
     def test_layer_fields_are_recognised(self):
         fields = form.build_fields(

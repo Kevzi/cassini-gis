@@ -18,8 +18,9 @@ fn without_layer_id(value: &Value) -> Value {
 
 /// Champs de résultat ajoutés à une commande déjà faite : une ligne écrite avant leur ajout ne
 /// les porte pas, et le rejeu ne les compare pas pour elle (`source_details` de
-/// `layout.export_pdf`, epic 10, entrée 31). Une ligne qui les porte les compare comme le reste.
-const LATE_FIELDS: [&str; 1] = ["source_details"];
+/// `layout.export_pdf`, epic 10, entrée 31 ; `kind` de `layer.add`, `width` et `height` d'une couche
+/// raster de `project.inventory`, entrée 10.20). Une ligne qui les porte les compare comme le reste.
+const LATE_FIELDS: [&str; 4] = ["source_details", "kind", "width", "height"];
 
 /// Le résultat rejoué redonne le résultat gardé, au `layer_id` près. Un résumé
 /// se compare par taille et par empreinte du contenu ; un journal plus ancien,

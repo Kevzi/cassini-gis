@@ -292,6 +292,12 @@ def _layer_add_table():
     return result
 
 
+def _layer_add_raster():
+    result, error = tla.run_params(tla.FakeBackend(crs="EPSG:2154"), {"raster": "mnt-colline-2154.tif"})
+    assert error is None, error
+    return result
+
+
 def _arrange():
     result, error = tsg.arrange(tsg.project(), tsg.ArrangeTest.GROUPS)
     assert error is None, error
@@ -453,6 +459,7 @@ def producers():
         ("layer.add", "reprojetée à l'affichage"): _layer_add("EPSG:4326"),
         ("layer.add", "non reprojetée"): _layer_add("EPSG:2154"),
         ("layer.add", "tableau sans géométrie"): _layer_add_table,
+        ("layer.add", "MNT raster"): _layer_add_raster,
         ("layer.arrange", "trois groupes"): _arrange,
         ("layer.describe", "avec emprise"): _describe(gares),
         ("layer.describe", "sans emprise"): _describe(vide),

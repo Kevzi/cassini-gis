@@ -88,6 +88,11 @@ class FakeBackend:
     def fields_of(self, layer):
         return layer.fields
 
+    def raster_size(self, layer):
+        if getattr(layer, "size", None) is None:
+            raise RuntimeError("dimensions illisibles")
+        return layer.size
+
     def feature_count(self, layer):
         return layer.count
 
@@ -238,6 +243,20 @@ class InventoryTest(unittest.TestCase):
         self.assertEqual(layer["fields"], [])
         self.assertNotIn("feature_count", layer)
         self.assertEqual(backend.value_reads, [])
+
+    def test_a_raster_gives_its_width_and_height_in_pixels(self):
+        mnt = FakeLayer("r", "MNT", "mnt.tif", "EPSG:2154", (0, 0, 1, 1), vector=False)
+        mnt.size = (120, 80)
+        vide = FakeLayer("q", "Illisible", "x.tif", "EPSG:2154", (0, 0, 1, 1), vector=False)
+        plu = FakeLayer("v", "PLU", "plu.gpkg", "EPSG:2154", (0, 0, 1, 1))
+        plu.size = (5, 5)
+        result, error = run(inventory.ProjectInventoryGesture, FakeBackend([mnt, vide, plu]), {})
+        self.assertIsNone(error)
+        raster, unreadable, vector = result["layers"]
+        self.assertEqual((raster["kind"], raster["width"], raster["height"]), ("raster", 120, 80))
+        self.assertNotIn("width", unreadable)  # dimensions illisibles : l'inventaire n'échoue pas
+        self.assertNotIn("width", vector)
+        self.assertNotIn("height", vector)
 
     def test_a_raster_source_is_relative_to_the_project_file(self):
         # Les quatre lignes d'inventaire de la matrice du ticket 4.3, Windows et POSIX.

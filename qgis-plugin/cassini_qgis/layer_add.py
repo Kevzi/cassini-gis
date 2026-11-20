@@ -26,6 +26,7 @@ FORMATS = {
     ".parquet": "ogr",
     ".csv": "delimitedtext",  # colonnes X/Y, lu par le fournisseur de texte délimité
 }
+RASTER_EXTENSIONS = (".tif", ".tiff")  # un MNT GeoTIFF, lu par GDAL dans QGIS
 DEFAULT_X, DEFAULT_Y = "X", "Y"
 
 UNSUPPORTED = "layer.unsupported_format"
@@ -67,6 +68,27 @@ class QgisBackend:
         if layer.isValid():
             layer.setReadOnly(True)  # jamais d'édition du fichier d'origine
         return layer
+
+    def load_raster(self, path, name):
+        """Ouvre un GeoTIFF par GDAL, en lecture. QGIS calcule les statistiques du raster à
+        l'ouverture et GDAL les écrirait dans un `.aux.xml` à côté du fichier : GDAL n'est donc
+        invité à ne pas écrire ce fichier (`GDAL_PAM_ENABLED=NO`) que le temps de l'ouverture,
+        puis l'option est rendue telle quelle, sans toucher aux autres rasters de la session."""
+        from qgis.core import QgsRasterLayer
+
+        try:
+            from osgeo import gdal
+        except ImportError:  # pragma: no cover - GDAL accompagne toujours QGIS
+            return QgsRasterLayer(path, name, "gdal")
+        previous = gdal.GetConfigOption("GDAL_PAM_ENABLED")
+        gdal.SetConfigOption("GDAL_PAM_ENABLED", "NO")
+        try:
+            layer = QgsRasterLayer(path, name, "gdal")
+            if layer.isValid():  # lit tout ce que l'inventaire lira, pendant que l'option tient
+                layer.width(), layer.height(), layer.crs()
+            return layer
+        finally:
+            gdal.SetConfigOption("GDAL_PAM_ENABLED", previous)
 
     def is_valid(self, layer):
         return layer is not None and layer.isValid()
@@ -134,14 +156,20 @@ class LayerAddGesture:
 
     def _open(self):
         params = self._params or {}
-        path, table = params.get("path"), params.get("table")
-        if (path is None) == (table is None):
-            raise GestureError(ONE_INPUT, "Donnez exactement un de path (couche) et table (tableau sans géométrie).")
+        path, table, raster = params.get("path"), params.get("table"), params.get("raster")
+        if sum(v is not None for v in (path, table, raster)) != 1:
+            raise GestureError(
+                ONE_INPUT,
+                "Donnez exactement un de path (couche), table (tableau sans géométrie) et raster (MNT GeoTIFF).",
+            )
         is_table = table is not None
-        path = table if is_table else path
+        is_raster = raster is not None
+        path = table if is_table else raster if is_raster else path
         if not isinstance(path, str) or not path:
             raise GestureError(INVALID, "Aucun fichier à ouvrir.")
         name = os.path.basename(path)
+        if is_raster:
+            return self._open_raster(path, name)
         provider = FORMATS.get(os.path.splitext(name)[1].lower())
         if is_table and provider != "delimitedtext":
             raise GestureError(
@@ -171,11 +199,42 @@ class LayerAddGesture:
         project_crs = backend.project_crs()
         layer_id = backend.add(layer)
         return {
+            "kind": "vector",
             "layer_id": layer_id,
             "name": backend.name_of(layer),
             "source_crs": source_crs,
             "project_crs": project_crs,
             "reprojected": bool(source_crs) and source_crs != project_crs,
+        }
+
+    def _open_raster(self, path, name):
+        """Ouvre un MNT GeoTIFF : `.tif`/`.tiff` seulement, SCR du fichier ou donné (AD-19)."""
+        ext = os.path.splitext(name)[1].lower()
+        if ext not in RASTER_EXTENSIONS:
+            raise GestureError(
+                UNSUPPORTED,
+                "Format raster non pris en charge : %s (attendu .tif ou .tiff)." % (ext or "sans extension"),
+            )
+        params = self._params or {}
+        for key in ("x_field", "y_field"):
+            if params.get(key) is not None:
+                raise GestureError(ONE_INPUT, "Un raster n'a ni x_field, ni y_field : retirez %s." % key)
+        backend = self._backend
+        layer = backend.load_raster(path, os.path.splitext(name)[0])
+        if not backend.is_valid(layer):
+            raise GestureError(INVALID, "Le fichier « %s » n'est pas lisible." % name)
+        if self._cancelled:
+            raise GestureError(CANCELLED, "Geste annulé.")
+        source_crs = self._resolve_crs(layer)
+        project_crs = backend.project_crs()
+        layer_id = backend.add(layer)
+        return {
+            "kind": "raster",
+            "layer_id": layer_id,
+            "name": backend.name_of(layer),
+            "source_crs": source_crs,
+            "project_crs": project_crs,
+            "reprojected": source_crs != project_crs,
         }
 
     def _refuse_coordinate_options(self):
