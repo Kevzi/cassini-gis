@@ -167,6 +167,27 @@ class LayerCommandsTest(unittest.TestCase):
             say("network.shortest_path", params, {"name": "Chemin", "feature_count": 1}),
         )
 
+    def test_prepare(self):
+        params = {"layer_id": "chemins_9", "tolerance": {"value": 1.0, "unit": "m"}}
+        self.assertEqual(
+            say("network.prepare", params),
+            "Préparation du réseau de chemins chemins_9, accrochage des extrémités à 1 m.",  # repli : l'identifiant
+        )
+        out = {"layer_id": "r_1", "name": "Réseau", "feature_count": 12, "crs": "EPSG:2154"}
+        self.assertEqual(
+            say("network.prepare", params, out),
+            "Préparation du réseau de chemins chemins_9, accrochage des extrémités à 1 m"
+            " : réseau préparé, 12 tronçons, nouvelle couche Réseau.",
+        )
+        self.assertEqual(
+            say("network.prepare", dict(params, tolerance={"value": 0.5, "unit": "km"}, work_epsg=2154),
+                dict(out, feature_count=1), lang="en"),
+            "Preparation of the path network chemins_9, endpoints snapped within 0.5 km, computed in EPSG:2154"
+            ": network prepared, 1 segment, new layer Réseau.",
+        )
+        # Résultat illisible : phrase des paramètres seule.
+        self.assertEqual(say("network.prepare", params, {"name": "Réseau"}), say("network.prepare", params))
+
     def test_count_points_in_polygon(self):
         params = {"layer_id": "parcelles_2", "points_layer_id": "gares_1"}
         out = {
@@ -1120,6 +1141,8 @@ SAMPLES = {
                               {"layer_id": "chemin_1", "name": "Chemin", "feature_count": 1,
                                "crs": "EPSG:2154", "length": {"value": 600.0, "unit": "m"},
                                "duration": {"value": 432.0, "unit": "s"}}),
+    "network.prepare": ({"layer_id": "chemins_1", "tolerance": {"value": 1.0, "unit": "m"}},
+                        {"layer_id": "reseau_1", "name": "Réseau", "feature_count": 12, "crs": "EPSG:2154"}),
     "layout.export_pdf": ({"title": "Gares"}, {"file": "C:/d/gares.pdf", "page_count": 1}),
     "terrain.slope": ({"dem": DEM, "unit": "percent"},
                       {"file": "C:/d/pente.tif", "unit": "percent", "min": 0.0, "max": 152.34,

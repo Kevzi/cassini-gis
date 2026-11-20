@@ -253,6 +253,25 @@ def _area(lang, p, r, names):
     return text + texts.tr(lang, "sum_area_out", field=field, name=name, count=count(lang, "entities", n))
 
 
+def _prepare(lang, p, r, names):
+    tolerance = p.get("tolerance")
+    if not isinstance(tolerance, dict) or tolerance.get("unit") not in ("m", "km"):
+        raise _Unreadable()
+    text = texts.tr(
+        lang,
+        "sum_prepare",
+        layer=names.layer(p.get("layer_id")),
+        tolerance="%s %s" % (number(lang, tolerance.get("value")), tolerance["unit"]),
+    )
+    text += _computed_in(lang, p, r, names)
+    if not r:
+        return text
+    name, n = r.get("name"), r.get("feature_count")
+    if not isinstance(name, str) or not name or not _is_int(n):
+        return text
+    return text + texts.tr(lang, "sum_prepare_out", name=name, count=count(lang, "segments", n))
+
+
 _OPERATORS = ("eq", "ne", "lt", "lte", "gt", "gte", "contains", "begins_with")
 
 
@@ -1150,6 +1169,7 @@ _SENTENCES = {
     "analysis.select_by_attribute": _select,
     "analysis.isochrone": _isochrone,
     "network.shortest_path": _shortest_path,
+    "network.prepare": _prepare,
     "analysis.count_points_in_polygon": _count_points,
     "raster.zonal_statistics": _raster_zonal,
     "raster.contour": _contour,

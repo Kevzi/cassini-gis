@@ -126,6 +126,7 @@ Une couche que Cassini ne reconnaît pas garde son style : il ne devine pas.
 | `analysis.sum_line_lengths` | longueur des lignes d'une couche dans chaque polygone d'une autre, en mètres ou en kilomètres (couche en degrés mesurée dans un système en mètres) |
 | `analysis.isochrone` | isochrones à pied et en voiture sur un réseau |
 | `network.shortest_path` | plus court chemin entre deux points sur un réseau, à pied ou en voiture : une couche d'une ligne, avec sa longueur en mètres et sa durée en secondes (départ et arrivée à moins de 100 m du réseau, `analysis.no_path` si rien ne les relie ; réseau en degrés mesuré dans un système en mètres) |
+| `network.prepare` | prépare des chemins bruts en réseau : accroche les extrémités (1 m par défaut, ou `tolerance`), découpe aux croisements, retire les géométries nulles et en double ; une couche de lignes que l'isochrone et le plus court chemin lisent telle quelle (couche en degrés mesurée dans un système en mètres, résultat dans son système) |
 | `layout.export_pdf` | carte en PDF : titre, légende, échelle, flèche du nord, sources détaillées (résolution, date), format, orientation, carroyage (dont MGRS étiqueté), en-tête et pied de page ; au bout d'un plan, cadrée sur le résultat mis en évidence |
 
 **Calculées par le noyau**, en Rust, testées sans QGIS :

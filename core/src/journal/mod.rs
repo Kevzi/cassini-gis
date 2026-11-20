@@ -703,6 +703,16 @@ impl<'a> Session<'a> {
         if let Some((name, mode)) = &spec.network_param {
             self.fill_network(id, &mut params, name, mode)?;
         }
+        // Un paramètre facultatif à valeur par défaut du noyau : écrite dans les paramètres, donc
+        // au journal, que le rejeu relit tel quel.
+        if let Some((name, value)) = &spec.default_param {
+            self.registry.validate_params(id, &params)?;
+            if let Value::Object(map) = &mut params {
+                if map.get(name).is_none_or(Value::is_null) {
+                    map.insert(name.clone(), value.clone());
+                }
+            }
+        }
         // Un export lancé dans un plan : le noyau désigne le résultat, le nomme, le met en
         // évidence et cache les couches intermédiaires, d'après les lignes du plan en cours au
         // journal ; journalisé avec les paramètres, relu au rejeu sans recalcul (7.9, AD-11).

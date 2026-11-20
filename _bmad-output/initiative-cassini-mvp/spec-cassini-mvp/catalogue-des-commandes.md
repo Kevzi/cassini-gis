@@ -382,7 +382,7 @@ donne l'esquisse.
 | `raster.align` | planifiée | qgis | epic 10 (entrée ajoutée après la 12) |
 | `raster.contour` | faite | qgis | epic 10, entrée 26 |
 | `network.shortest_path` | faite | qgis | — |
-| `network.prepare` | planifiée | qgis | epic 10, entrée 14 |
+| `network.prepare` | faite | qgis | epic 10, entrée 14 |
 | `layout.export_atlas` | planifiée | qgis | epic 10, entrée 15 |
 | `geocode.ban` | faite | core | epic 10, entrée 16 |
 | `map.topographic_style` | faite | core | epic 11, entrée 20 (geste : 21) |
@@ -2246,14 +2246,16 @@ entrée 14).
 | `layer_id` | chaîne | oui | — | Couche de lignes brutes. |
 | `tolerance` | `Distance` | non | défaut 1 m | Distance d'accrochage des extrémités. |
 | `out` | chaîne | non | — | Fourni par le noyau. |
+| `work_epsg` | entier | non | code EPSG | Rempli par le noyau pour une couche en degrés : la tolérance se mesure dans ce système en mètres. |
 
 Résultat : `layer_id`, `name`, `crs`, `feature_count`.
 
 ```json fiche
-{"id": "network.prepare", "status": "planifiee", "runs_in": "qgis", "dictated_by_core": false,
+{"id": "network.prepare", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
  "params": {"layer_id": {"type": "string", "required": true},
             "tolerance": {"type": "Distance", "required": false},
-            "out": {"type": "string", "required": false}},
+            "out": {"type": "string", "required": false},
+            "work_epsg": {"type": "integer", "required": false}},
  "result": ["crs", "feature_count", "layer_id", "name"]}
 ```
 

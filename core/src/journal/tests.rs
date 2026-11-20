@@ -4880,6 +4880,16 @@ impl Executor for CrsQgis {
                           "unit": unit}),
                 )
             }
+            "network.prepare" => {
+                self.buffers.borrow_mut().push(p.clone());
+                let n = self.count.get() + 1;
+                self.count.set(n);
+                fs::write(p["out"].as_str().unwrap(), "gpkg").unwrap();
+                Ok(
+                    json!({"layer_id": format!("reseau_g{}_{n}", self.generation),
+                          "name": "reseau", "feature_count": 5, "crs": "EPSG:2154"}),
+                )
+            }
             "network.shortest_path" => {
                 self.buffers.borrow_mut().push(p.clone());
                 let n = self.count.get() + 1;
@@ -5084,6 +5094,59 @@ fn an_area_logs_its_unit_and_work_system_and_replays_identically() {
     assert_eq!(orders.borrow()[0]["work_epsg"], 2154);
     assert!(l[1]["params"].get("work_epsg").is_none(), "{}", l[1]);
     assert!(l[1]["params"]["out"]
+        .as_str()
+        .is_some_and(|o| o.ends_with(".gpkg")));
+    drop(s);
+    // Rejeu : le même résultat (hors identifiant de couche, valeur de session).
+    let qgis = CrsQgis::new(2, &qgis_project);
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(&Router::new(&registry).with_qgis(qgis), &mut HashSet::new())
+        .unwrap();
+    assert_eq!(report, identical(2));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_network_preparation_logs_its_tolerance_and_work_system_and_replays_identically() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let qgis = CrsQgis::new(1, &qgis_project);
+    let orders = qgis.buffers.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    // Couche en degrés, tolérance omise : le noyau écrit 1 m et remplit `work_epsg`.
+    let out = s
+        .call("network.prepare", json!({"layer_id": "gares"}))
+        .unwrap();
+    assert_eq!(out["feature_count"], 5);
+    // Couche en mètres, tolérance donnée en kilomètres : gardée telle quelle.
+    s.call(
+        "network.prepare",
+        json!({"layer_id": "zonage", "tolerance": {"value": 0.005, "unit": "km"}}),
+    )
+    .unwrap();
+    // Paramètre inconnu : refus du noyau, rien n'est exécuté ni journalisé.
+    let err = s
+        .call(
+            "network.prepare",
+            json!({"layer_id": "zonage", "mode": "car"}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "registry.invalid_params");
+    let l = lines(&s);
+    assert_eq!(l.len(), 2, "{l:?}");
+    assert_eq!(l[0]["params"]["work_epsg"], 2154, "{}", l[0]);
+    assert_eq!(
+        l[0]["params"]["tolerance"],
+        json!({"value": 1.0, "unit": "m"}),
+        "{}",
+        l[0]
+    );
+    assert_eq!(orders.borrow()[0]["tolerance"]["value"], 1.0);
+    assert_eq!(l[1]["params"]["tolerance"]["unit"], "km", "{}", l[1]);
+    assert!(l[1]["params"].get("work_epsg").is_none(), "{}", l[1]);
+    assert!(l[0]["params"]["out"]
         .as_str()
         .is_some_and(|o| o.ends_with(".gpkg")));
     drop(s);

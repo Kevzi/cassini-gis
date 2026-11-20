@@ -18,6 +18,9 @@
   {"id": "analysis.isochrone", "case": "un polygone",
    "result": {"layer_id": "iso_1", "name": "5-analysis.isochrone", "feature_count": 1, "crs": "EPSG:2154"}},
 
+  {"id": "network.prepare", "case": "couche créée",
+   "result": {"layer_id": "reseau_1", "name": "14-network.prepare", "feature_count": 12, "crs": "EPSG:2154"}},
+
   {"id": "network.shortest_path", "case": "une ligne",
    "result": {"layer_id": "chemin_1", "name": "13-network.shortest_path", "feature_count": 1, "crs": "EPSG:2154",
               "length": {"value": 600.0, "unit": "m"}, "duration": {"value": 432.0, "unit": "s"}}},

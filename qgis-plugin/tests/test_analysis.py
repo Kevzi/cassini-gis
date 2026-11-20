@@ -2331,6 +2331,133 @@ class AreaTest(unittest.TestCase):
         self.assertTrue(analysis.derived_cancellable(analysis.ALGORITHMS)["analysis.area"])
 
 
+class PrepareTest(unittest.TestCase):
+    """Préparation d'un réseau : accrochage, découpe aux croisements, retrait des nulles, retrait des doublons,
+    par des algorithmes `native:` seuls ; une couche en degrés est calculée dans `work_epsg` puis rendue dans son
+    système."""
+
+    CHAIN = (
+        "native:snapgeometries",
+        "native:splitwithlines",
+        "native:removenullgeometries",
+        "native:deleteduplicategeometries",
+    )
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.out = os.path.join(self.dir.name, "14-network.prepare.gpkg")
+        self.entry = analysis.ALGORITHMS["network.prepare"]
+        self.backend = FakeBackend(
+            [
+                FakeLayer("c", name="chemins", geometry="Line"),
+                FakeLayer("w", name="chemins_wgs", crs="EPSG:4326", metric=False, geometry="Line"),
+                FakeLayer("p", name="parcelles", geometry="Polygon"),
+                FakeLayer("g", name="gares"),
+                FakeLayer("r", vector=False),
+            ],
+            loaded_count=12,
+        )
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def params(self, **extra):
+        p = {"layer_id": "c", "tolerance": {"value": 1.0, "unit": "m"}, "out": self.out}
+        p.update(extra)
+        return p
+
+    def run_chain(self, steps, **extra):
+        _, calls = start(self.entry, self.backend, self.params(**extra))
+        for _ in range(steps):
+            self.backend.finished(True, {"OUTPUT": "temporaire"})
+        return calls
+
+    def test_the_chain_is_four_native_steps_and_only_the_last_writes_out(self):
+        calls = self.run_chain(4)
+        self.assertEqual([a for a, _ in self.backend.calls], list(self.CHAIN))
+        self.assertTrue(all(a.startswith("native:") for a, _ in self.backend.calls))
+        self.assertEqual([p["OUTPUT"] for _, p in self.backend.calls], ["TEMPORARY_OUTPUT"] * 3 + [self.out])
+        self.assertIsNone(calls[0][1])
+        self.assertEqual(
+            calls[0][0],
+            {"layer_id": "out_1", "name": "14-network.prepare", "feature_count": 12, "crs": "EPSG:2154"},
+        )
+
+    def test_the_tolerance_is_read_in_meters_and_the_layer_snaps_against_itself(self):
+        self.run_chain(0, tolerance={"value": 0.005, "unit": "km"})
+        _, p = self.backend.calls[0]
+        self.assertEqual(p["TOLERANCE"], 5.0)
+        self.assertIs(p["INPUT"], p["REFERENCE_LAYER"])
+        self.assertEqual(p["BEHAVIOR"], 4)  # extrémités seules, nœuds d'abord
+
+    def test_the_split_crosses_the_snapped_layer_with_itself(self):
+        self.run_chain(1)
+        _, p = self.backend.calls[1]
+        self.assertEqual((p["INPUT"].lid, p["LINES"].lid), ("temporaire", "temporaire"))
+
+    def test_nulls_and_empties_are_removed_without_the_rejected_output(self):
+        self.run_chain(2)
+        algo, p = self.backend.calls[2]
+        self.assertEqual((algo, p["REMOVE_EMPTY"]), ("native:removenullgeometries", True))
+        self.assertNotIn("NULL_OUTPUT", p)
+
+    def test_without_a_tolerance_the_extension_has_no_default(self):
+        params = self.params()
+        del params["tolerance"]
+        _, calls = start(self.entry, self.backend, params)
+        self.assertEqual(calls[0][1].code, "analysis.bad_params")
+        self.assertEqual(self.backend.calls, [])
+
+    def test_a_layer_in_degrees_goes_through_the_work_system_and_comes_back(self):
+        calls = self.run_chain(6, layer_id="w", work_epsg=2154)
+        names = [a for a, _ in self.backend.calls]
+        self.assertEqual(
+            names,
+            ["native:reprojectlayer", self.CHAIN[0], self.CHAIN[1], self.CHAIN[2], "native:reprojectlayer", self.CHAIN[3]],
+        )
+        self.assertEqual(self.backend.calls[0][1]["TARGET_CRS"], "EPSG:2154")
+        self.assertEqual(self.backend.calls[4][1]["TARGET_CRS"], "EPSG:4326")  # le système de la couche
+        self.assertEqual(self.backend.calls[5][1]["OUTPUT"], self.out)
+        self.assertIsNone(calls[0][1])
+
+    def test_a_layer_in_meters_is_never_reprojected(self):
+        self.run_chain(4)
+        self.assertNotIn("native:reprojectlayer", [a for a, _ in self.backend.calls])
+
+    def test_without_work_crs_a_layer_in_degrees_is_refused(self):
+        _, calls = start(self.entry, self.backend, self.params(layer_id="w"))
+        self.assertEqual(calls[0][1].code, "analysis.crs_not_metric")
+        self.assertEqual(self.backend.calls, [])
+
+    def test_polygons_points_and_unknown_layers_are_refused_before_any_launch(self):
+        for layer in ("p", "g"):
+            _, calls = start(self.entry, self.backend, self.params(layer_id=layer))
+            self.assertEqual(calls[0][1].code, "analysis.bad_params")
+        _, calls = start(self.entry, self.backend, self.params(layer_id="r"))
+        self.assertEqual(calls[0][1].code, "layer.not_vector")
+        _, calls = start(self.entry, self.backend, self.params(layer_id="nope"))
+        self.assertEqual(calls[0][1].code, "layer.not_found")
+        self.assertEqual(self.backend.calls, [])
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_a_failure_leaves_no_file(self):
+        _, calls = start(self.entry, self.backend, self.params())
+        for _ in range(3):
+            self.backend.finished(True, {"OUTPUT": "t"})
+        self.assertTrue(os.path.exists(self.out))  # la dernière étape l'a écrit
+        self.backend.finished(False, {})
+        self.assertEqual(calls[0][1].code, "analysis.failed")
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_the_chain_is_registered_cancellable_and_valid(self):
+        self.assertEqual(self.entry["chain_version"], 1)
+        self.assertEqual(analysis.validate_table(), [])
+        self.assertTrue(analysis.derived_cancellable(analysis.ALGORITHMS)["network.prepare"])
+        for algorithm in self.CHAIN + ("native:reprojectlayer",):
+            self.assertIn(algorithm, analysis.CANCELLABLE_ALGORITHMS)
+        self.assertEqual(set(analysis.required_algorithms(self.entry)), set(self.CHAIN) | {"native:reprojectlayer"})
+
+
 class ZonalBackend(RasterBackend):
     """Doublure de `raster.zonal_statistics` : rasters lisibles (système, bandes), unité du fichier,
     statistiques lues sur la couche produite."""

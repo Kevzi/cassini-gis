@@ -156,6 +156,12 @@ pub struct CommandSpec {
     /// sérialisée.
     #[serde(skip)]
     pub network_param: Option<(String, String)>,
+    /// Paramètre facultatif dont le noyau écrit la valeur par défaut quand l'appelant le tait :
+    /// (paramètre, valeur). Écrite avant l'exécution, donc au journal, que le rejeu relit tel
+    /// quel ; l'extension n'en porte aucune (AD-28). Visible du modèle. Métadonnée interne :
+    /// jamais sérialisée.
+    #[serde(skip)]
+    pub default_param: Option<(String, Value)>,
     /// Mise en évidence du résultat d'un plan dans son PDF (changement de cap du 2026-11-12,
     /// entrée 7.9) : paramètre que le noyau remplit, pour un export lancé dans un plan, d'après
     /// les lignes du plan en cours au journal (`crate::focus`). Ôté des paramètres de l'appelant,
@@ -201,6 +207,7 @@ impl CommandSpec {
             attribute_filter: None,
             work_crs_param: None,
             network_param: None,
+            default_param: None,
             focus_param: None,
             params_schema: schema_value::<P>(),
             output_schema: schema_value::<O>(),
@@ -343,6 +350,13 @@ impl CommandSpec {
     /// défaut d'après le mode lu dans le paramètre `mode` (AD-28).
     pub fn network_param(mut self, name: &str, mode: &str) -> Self {
         self.network_param = Some((name.to_string(), mode.to_string()));
+        self
+    }
+
+    /// Déclare le paramètre facultatif `name` dont le noyau écrit la valeur `value` quand
+    /// l'appelant le tait.
+    pub fn default_param(mut self, name: &str, value: Value) -> Self {
+        self.default_param = Some((name.to_string(), value));
         self
     }
 

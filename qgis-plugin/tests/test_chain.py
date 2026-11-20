@@ -321,6 +321,16 @@ class AnnouncementTest(unittest.TestCase):
         self.assertNotIn("network.shortest_path", available)
         self.assertIn("analysis.isochrone", available)
 
+    def test_the_preparation_is_announced_only_when_its_whole_chain_exists(self):
+        _, _, versions = self.announce()
+        self.assertEqual(versions["network.prepare"], 1)
+        for missing in ("native:snapgeometries", "native:splitwithlines", "native:deleteduplicategeometries"):
+            backend = FakeBackend()
+            backend.missing_algorithms = {missing}
+            available = analysis.available_chains(analysis.ALGORITHMS, backend)
+            self.assertNotIn("network.prepare", available, missing)
+            self.assertIn("analysis.isochrone", available)
+
     def test_a_removed_algorithm_makes_its_command_unavailable(self):
         registry, commands, versions = self.announce(missing={"native:buffer"})
         self.assertNotIn("analysis.buffer", commands)

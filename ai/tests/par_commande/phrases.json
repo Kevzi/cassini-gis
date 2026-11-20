@@ -262,6 +262,66 @@
     }
   },
   {
+    "id": "PRE1",
+    "command": "network.prepare",
+    "phrase": "Prépare le réseau de chemins avant l'isochrone, puis fais l'isochrone à pied de 10 minutes autour du point 656 800 / 6 847 500 (Lambert-93).",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "network.prepare",
+          "params": {
+            "layer_id": "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67"
+          }
+        },
+        {
+          "command": "analysis.isochrone",
+          "params": {
+            "layer_id": "step:1.layer_id",
+            "origin": {
+              "x": 656800,
+              "y": 6847500,
+              "epsg": 2154
+            },
+            "mode": "walk",
+            "duration": {
+              "value": 10,
+              "unit": "min"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "PRE2",
+    "command": "network.prepare",
+    "phrase": "Nettoie le réseau de chemins : accroche les extrémités à moins de 5 mètres, découpe aux croisements.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "network.prepare",
+          "params": {
+            "layer_id": "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67",
+            "tolerance": {
+              "value": 5,
+              "unit": "m"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "PRE3",
+    "command": "network.prepare",
+    "phrase": "Prépare mon réseau en accrochant les extrémités à la distance qui convient.",
+    "expected": {
+      "kind": "question"
+    }
+  },
+  {
     "id": "SEL1",
     "command": "analysis.select_by_attribute",
     "phrase": "Isole les bâtiments à usage industriel.",

@@ -12,6 +12,7 @@
   "analysis.area": true,
   "analysis.isochrone": true,
   "network.shortest_path": true,
+  "network.prepare": true,
   "data.reproject": true,
   "data.convert": true,
   "data.convert_raster": true,

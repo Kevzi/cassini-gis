@@ -305,6 +305,47 @@ def summarize_shortest_path(backend, layer, params, results):
     }
 
 
+def translate_prepare_snap(params, layer):
+    """Paramètres neutres de `network.prepare` -> `native:snapgeometries`, la couche contre elle-même.
+
+    La tolérance vient du noyau (qui écrit son défaut, AD-28) et se lit en mètres : la couche est en mètres
+    (ou reprojetée vers `work_epsg` en tête de chaîne). `BEHAVIOR` 4 : « Move end points only, prefer
+    aligning nodes » (constat de la sonde) : seules les extrémités bougent, vers un nœud d'abord, sinon vers
+    le segment le plus proche ; les sommets intermédiaires restent où ils sont."""
+    return {
+        "INPUT": layer,
+        "REFERENCE_LAYER": layer,
+        "TOLERANCE": _distance_in_meters(params.get("tolerance")),
+        "BEHAVIOR": 4,
+    }
+
+
+def translate_prepare_split(params, layer):
+    """Étape suivante : `native:splitwithlines` de la couche accrochée sur elle-même (nœud à chaque croisement)."""
+    return {"INPUT": layer, "LINES": layer}
+
+
+def translate_prepare_remove_null(params, layer):
+    """Étape suivante : `native:removenullgeometries`, géométries nulles et vides retirées (la sortie des
+    écartées, facultative, n'est pas demandée)."""
+    return {"INPUT": layer, "REMOVE_EMPTY": True}
+
+
+def translate_prepare_back(params, layer, backend):
+    """Étape de retour : `native:reprojectlayer` vers le système de la couche d'origine, que le noyau n'a pas
+    changé (la préparation se calcule dans `work_epsg`, le résultat reste dans le système de la couche)."""
+    original = backend.layer(params.get("layer_id"))
+    if original is None:
+        raise GestureError(NOT_FOUND, "Aucune couche du projet ne porte cet identifiant.")
+    return {"INPUT": layer, "TARGET_CRS": backend.crs_of(original), "CONVERT_CURVED_GEOMETRIES": False}
+
+
+def translate_prepare_dedupe(params, layer):
+    """Dernière étape : `native:deleteduplicategeometries` (égalité topologique : un tronçon à l'envers est un
+    doublon). Écrit `out`."""
+    return {"INPUT": layer}
+
+
 def translate_convex_hull(params, previous):
     """Étape suivante : enveloppe convexe de la couche temporaire de l'étape précédente."""
     return {"INPUT": previous}
@@ -1132,6 +1173,32 @@ ALGORITHMS = {
         "summary": summarize_shortest_path,
         "summary_results": True,
     },
+    "network.prepare": {
+        "chain_version": 1,
+        "chain": [
+            _REPROJECT_TO_WORK,
+            {"algorithm": "native:snapgeometries", "translate": translate_prepare_snap, "output": "OUTPUT"},
+            {"algorithm": "native:splitwithlines", "translate": translate_prepare_split, "output": "OUTPUT"},
+            {
+                "algorithm": "native:removenullgeometries",
+                "translate": translate_prepare_remove_null,
+                "output": "OUTPUT",
+            },
+            {
+                "algorithm": "native:reprojectlayer",
+                "translate": translate_prepare_back,
+                "output": "OUTPUT",
+                "when": WORK_EPSG,
+                "with_backend": True,
+                "nothing": "Le retour au système de la couche n'a rien rendu.",
+            },
+            {"algorithm": "native:deleteduplicategeometries", "translate": translate_prepare_dedupe, "output": "OUTPUT"},
+        ],
+        "input": "layer_id",
+        "metric": True,
+        "work_crs": WORK_EPSG,
+        "geometry": "Line",
+    },
     "data.reproject": {
         "chain_version": 1,
         "chain": [
@@ -1223,6 +1290,10 @@ CANCELLABLE_ALGORITHMS = frozenset(
         "native:serviceareafrompoint",
         "native:shortestpathpointtopoint",
         "native:convexhull",
+        "native:snapgeometries",
+        "native:splitwithlines",
+        "native:removenullgeometries",
+        "native:deleteduplicategeometries",
         "native:reprojectlayer",
         "gdal:warpreproject",
     }

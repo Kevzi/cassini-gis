@@ -243,6 +243,10 @@ def _area(unit):
     return lambda: _analysis(ta.AreaTest, setup)
 
 
+def _prepare():
+    return _analysis(ta.PrepareTest, lambda t: (t.backend, t.params()))
+
+
 def _shortest_path():
     t = ta.ShortestPathTest("setUp")
     t.setUp()
@@ -491,6 +495,7 @@ def producers():
         ),
         ("analysis.sum_line_lengths", "en mètres"): _line_lengths("m"),
         ("network.shortest_path", "une ligne"): _shortest_path,
+        ("network.prepare", "couche créée"): _prepare,
         ("analysis.area", "en mètres carrés"): _area("m2"),
         ("analysis.area", "en hectares"): _area("ha"),
         ("analysis.sum_line_lengths", "en kilomètres"): _line_lengths("km"),

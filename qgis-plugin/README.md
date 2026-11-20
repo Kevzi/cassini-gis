@@ -346,6 +346,22 @@ l'isochrone ; `fixtures/reseau-grille-2154.geojson` pour l'essai) :
    chemin introuvable fait échouer l'algorithme (jamais une couche vide), un point lointain est accroché
    au nœud le plus proche sans tolérance (d'où la garde d'accrochage avant lancement).
 
+Recette manuelle de `network.prepare` [ticket 14] (chemins bruts : extrémités disjointes, croisements sans
+nœud, doublons ; la chaîne n'emploie que des algorithmes `native:`) :
+
+1. Ouvrez une couche de lignes brutes en Lambert-93. Choisissez `network.prepare` : `layer_id` est une liste,
+   `tolerance` est facultative (1 m si vous n'en donnez pas, écrit par le noyau) ; aucun champ `out`.
+2. Une couche apparaît : extrémités proches accrochées, lignes découpées à chaque croisement, doublons (même à
+   l'envers) et géométries nulles retirés. `analysis.isochrone` et `network.shortest_path` la lisent telle quelle,
+   là où la couche brute donnait une isochrone vide ou `analysis.no_path`.
+3. Des extrémités plus éloignées que la tolérance ne sont pas reliées (la couche est rendue sans erreur).
+4. Couche en degrés : le noyau remplit `work_epsg`, l'accrochage se mesure en mètres, la couche rendue reste dans
+   le système de la couche. Polygones ou points : `analysis.bad_params`, aucun fichier.
+5. Sonde sous le vrai QGIS : `"C:\Program Files\QGIS 3.44.15in\python-qgis-ltr.bat"
+   qgis-plugin/tests/probe_prepare.py` doit finir par `VERDICT OK`. Constats consignés : `native:snapgeometries`
+   avec `BEHAVIOR` 4 (extrémités seules, nœuds d'abord) contre elle-même, `native:splitwithlines` de la couche
+   sur elle-même, `native:removenullgeometries`, `native:deleteduplicategeometries` (égalité topologique).
+
 Recette manuelle de `analysis.isochrone` [ticket 11] (réseau apporté par l'utilisateur ;
 `fixtures/reseau-grille-2154.geojson` pour l'essai) :
 
