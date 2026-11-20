@@ -54,7 +54,7 @@ const COUVERTURE_REELLE_PHRASES: &str =
 
 /// Les fichiers `phrases.json` écrits à la main (5.53, puis 7.11), chacun avec son nom et son compte.
 pub const HAND_WRITTEN: [(&str, &str, usize); 8] = [
-    ("par_commande", PAR_COMMANDE, 127),
+    ("par_commande", PAR_COMMANDE, 130),
     ("plan_reel", PLAN_REEL_PHRASES, 23),
     ("question_reel", QUESTION_REEL_PHRASES, 35),
     ("echelle_utm_reel", ECHELLE_UTM_REEL_PHRASES, 36),

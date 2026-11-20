@@ -674,6 +674,41 @@ def summarize_sum_line_lengths(backend, layer, params):
     return {"rows": rows, "truncated": truncated}
 
 
+_AREA_UNITS = {"m2": 1.0, "ha": 10000.0}
+
+
+def _area_field(params):
+    """Nom fixe du champ de surface : il porte l'unité (`area_m2`, `area_ha`), pour que la sélection
+    numérique qui suit compare dans la bonne unité."""
+    return "area_%s" % params["unit"]
+
+
+def translate_area(params, layer):
+    """Paramètres neutres de `analysis.area` -> `native:fieldcalculator`. Formule fixe de la ligne de
+    table, jamais écrite par le modèle : `area($geometry)` est plane, dans le système de la couche (mis
+    en mètres par la chaîne), donc indépendante de l'ellipsoïde du projet (jamais `$area`). Un champ du
+    même nom est remplacé."""
+    formula = "area($geometry)"
+    if _AREA_UNITS[params["unit"]] != 1.0:
+        formula += " / %d" % _AREA_UNITS[params["unit"]]
+    return {
+        "INPUT": layer,
+        "FIELD_NAME": _area_field(params),
+        "FIELD_TYPE": 0,  # décimal
+        "FIELD_LENGTH": 0,
+        "FIELD_PRECISION": 0,
+        "FORMULA": formula,
+    }
+
+
+def summarize_area(backend, layer, params):
+    """Champ de surface (lu sur la couche produite) et son unité (clé `summary`)."""
+    field = _area_field(params)
+    if field not in [name for name, _ in backend.fields_of(layer)]:
+        raise GestureError(FAILED, "Le calcul des surfaces n'a pas rendu le champ attendu.")
+    return {"field": field, "unit": params["unit"]}
+
+
 # Table fermée : id de commande -> chaîne fixe d'algorithmes (AD-24).
 #
 # Une ligne est une chaîne fixe d'étapes plus des attributs de la ligne :
@@ -951,6 +986,18 @@ ALGORITHMS = {
         "field_optional": True,
         "geometry": "Polygon",
         "summary": summarize_sum_line_lengths,
+    },
+    "analysis.area": {
+        "chain_version": 1,
+        "chain": [
+            _REPROJECT_TO_WORK,
+            {"algorithm": "native:fieldcalculator", "translate": translate_area, "output": "OUTPUT"},
+        ],
+        "input": "layer_id",
+        "metric": True,
+        "work_crs": WORK_EPSG,
+        "geometry": "Polygon",
+        "summary": summarize_area,
     },
     "analysis.isochrone": {
         # Version 2 : reprojection du réseau vers `work_epsg` en tête de chaîne (entrée 10.32).

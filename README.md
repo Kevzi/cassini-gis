@@ -116,6 +116,7 @@ Une couche que Cassini ne reconnaît pas garde son style : il ne devine pas.
 | `analysis.buffer` | zone tampon |
 | `analysis.intersect` | intersection de deux couches |
 | `analysis.difference` | différence de deux couches : la première privée des parties que la seconde recouvre (parcelles hors d'une zone) ; une couche nouvelle, vide en cas de recouvrement total |
+| `analysis.area` | surface des entités : un champ `area_m2` (mètres carrés) ou `area_ha` (hectares) sur une couche nouvelle, à comparer ensuite par une sélection par attribut (couche en degrés mesurée dans un système en mètres) |
 | `analysis.select_by_attribute` | sélection par attribut |
 | `analysis.count_points_in_polygon` | nombre de points dans chaque zone, avec somme pondérée facultative |
 | `analysis.nearest` | jointure au plus proche voisin : attributs de l'entité la plus proche d'une autre couche, et distance en mètres |

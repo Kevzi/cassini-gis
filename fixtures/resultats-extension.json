@@ -5,6 +5,13 @@
   {"id": "analysis.intersect", "case": "couche créée",
    "result": {"layer_id": "inter_1", "name": "2-analysis.intersect", "feature_count": 3, "crs": "EPSG:2154"}},
 
+  {"id": "analysis.area", "case": "en mètres carrés",
+   "result": {"layer_id": "surface_1", "name": "7-analysis.area", "feature_count": 4, "crs": "EPSG:2154",
+              "field": "area_m2", "unit": "m2"}},
+  {"id": "analysis.area", "case": "en hectares",
+   "result": {"layer_id": "surface_2", "name": "7-analysis.area", "feature_count": 4, "crs": "EPSG:2154",
+              "field": "area_ha", "unit": "ha"}},
+
   {"id": "analysis.difference", "case": "couche créée",
    "result": {"layer_id": "diff_1", "name": "6-analysis.difference", "feature_count": 2, "crs": "EPSG:2154"}},
 

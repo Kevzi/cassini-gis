@@ -367,7 +367,7 @@ donne l'esquisse.
 | `analysis.count_points_in_polygon` | faite | qgis | epic 10, entrée 2 |
 | `data.reproject` | faite | qgis | epic 10, entrée 7 |
 | `analysis.difference` | faite | qgis | epic 10, entrée 21 |
-| `analysis.area` | planifiée | qgis | epic 10, entrée 22 |
+| `analysis.area` | faite | qgis | epic 10, entrée 22 |
 | `data.convert` | faite | qgis | epic 10, entrée 9 |
 | `data.convert_raster` | faite | qgis | epic 10, entrée 30 |
 | `layer.remove` | faite | qgis | epic 10, entrée 27 |
@@ -1782,6 +1782,7 @@ dans le système en mètres choisi par le noyau (`work_epsg`), comme `analysis.b
 | `layer_id` | chaîne | oui | — | Couche de polygones. |
 | `unit` | chaîne | oui | `m2`, `ha` | Unité du champ de surface. |
 | `out` | chaîne | non | — | Fourni par le noyau. |
+| `work_epsg` | entier | non | code EPSG | Fourni par le noyau, pour une couche en degrés seulement, comme `analysis.buffer` : la surface est en mètres carrés ou en hectares. |
 
 | Résultat | Type | Sens |
 |---|---|---|
@@ -1790,10 +1791,11 @@ dans le système en mètres choisi par le noyau (`work_epsg`), comme `analysis.b
 | `unit` | chaîne | Unité du champ (`m2` ou `ha`), que reprend la sélection qui suit. |
 
 ```json fiche
-{"id": "analysis.area", "status": "planifiee", "runs_in": "qgis", "dictated_by_core": false,
+{"id": "analysis.area", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
  "params": {"layer_id": {"type": "string", "required": true},
             "unit": {"type": "string", "required": true, "enum": ["m2", "ha"]},
-            "out": {"type": "string", "required": false}},
+            "out": {"type": "string", "required": false},
+            "work_epsg": {"type": "integer", "required": false}},
  "result": ["crs", "feature_count", "field", "layer_id", "name", "unit"]}
 ```
 

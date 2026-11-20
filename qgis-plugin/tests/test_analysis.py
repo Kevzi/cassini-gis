@@ -2029,6 +2029,111 @@ class SumLineLengthsTest(unittest.TestCase):
         self.assertTrue(analysis.derived_cancellable(analysis.ALGORITHMS)["analysis.sum_line_lengths"])
 
 
+class AreaTest(unittest.TestCase):
+    """Surface des entités : un champ `area_m2` ou `area_ha` (formule fixe, plane) sur une couche
+    nouvelle ; une couche en degrés est reprojetée d'abord vers `work_epsg`."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.out = os.path.join(self.dir.name, "7-analysis.area.gpkg")
+        self.entry = analysis.ALGORITHMS["analysis.area"]
+        self.backend = FakeBackend(
+            [
+                FakeLayer("p", name="parcelles", geometry="Polygon", fields=("nom",)),
+                FakeLayer("w", name="parcelles_wgs", crs="EPSG:4326", metric=False, geometry="Polygon"),
+                FakeLayer("l", name="routes", geometry="Line"),
+                FakeLayer("g", name="gares"),
+                FakeLayer("r", vector=False),
+            ],
+            loaded_count=4,
+        )
+        self.backend.out_fields = ("nom", "area_m2", "area_ha")
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def params(self, **extra):
+        p = {"layer_id": "p", "unit": "m2", "out": self.out}
+        p.update(extra)
+        return p
+
+    def test_square_meters_use_the_fixed_planar_formula(self):
+        _, calls = start(self.entry, self.backend, self.params())
+        self.assertEqual(len(self.backend.calls), 1)
+        algo, p = self.backend.calls[0]
+        self.assertEqual(algo, "native:fieldcalculator")
+        self.assertEqual((p["INPUT"].lid, p["FIELD_NAME"], p["FORMULA"]), ("p", "area_m2", "area($geometry)"))
+        self.assertEqual(p["FIELD_TYPE"], 0)
+        self.assertEqual(p["OUTPUT"], self.out)
+        self.backend.finished(True, {})
+        result, error = calls[0]
+        self.assertIsNone(error)
+        self.assertEqual(
+            result,
+            {"layer_id": "out_1", "name": "7-analysis.area", "feature_count": 4, "crs": "EPSG:2154",
+             "field": "area_m2", "unit": "m2"},
+        )
+
+    def test_hectares_divide_by_10000_and_name_the_field_after_the_unit(self):
+        _, calls = start(self.entry, self.backend, self.params(unit="ha"))
+        _, p = self.backend.calls[0]
+        self.assertEqual((p["FIELD_NAME"], p["FORMULA"]), ("area_ha", "area($geometry) / 10000"))
+        self.backend.finished(True, {})
+        self.assertEqual((calls[0][0]["field"], calls[0][0]["unit"]), ("area_ha", "ha"))
+
+    def test_the_formula_is_never_the_ellipsoidal_one(self):
+        for unit in ("m2", "ha"):
+            start(self.entry, self.backend, self.params(unit=unit))
+        for _, p in self.backend.calls:
+            self.assertNotIn("$area", p["FORMULA"].replace("area($geometry)", ""))
+
+    def test_a_layer_in_degrees_is_reprojected_first_into_the_work_system(self):
+        _, calls = start(self.entry, self.backend, self.params(layer_id="w", work_epsg=2154))
+        algo, p = self.backend.calls[0]
+        self.assertEqual((algo, p["TARGET_CRS"]), ("native:reprojectlayer", "EPSG:2154"))
+        self.assertEqual(p["OUTPUT"], "TEMPORARY_OUTPUT")
+        self.backend.finished(True, {"OUTPUT": "reprojetee"})
+        algo, p = self.backend.calls[1]
+        self.assertEqual((algo, p["INPUT"].lid, p["OUTPUT"]), ("native:fieldcalculator", "reprojetee", self.out))
+        self.backend.finished(True, {})
+        self.assertIsNone(calls[0][1])
+
+    def test_without_work_crs_a_layer_in_degrees_is_refused(self):
+        _, calls = start(self.entry, self.backend, self.params(layer_id="w"))
+        self.assertEqual(calls[0][1].code, "analysis.crs_not_metric")
+        self.assertEqual(self.backend.calls, [])
+
+    def test_a_work_system_not_in_meters_or_unknown_is_refused(self):
+        _, calls = start(self.entry, self.backend, self.params(layer_id="w", work_epsg=4326))
+        self.assertEqual(calls[0][1].code, "analysis.crs_not_metric")
+        _, calls = start(self.entry, self.backend, self.params(layer_id="w", work_epsg=99999))
+        self.assertEqual(calls[0][1].code, "data.unknown_crs")
+        self.assertEqual(self.backend.calls, [])
+
+    def test_lines_and_points_are_refused_before_any_launch(self):
+        for layer in ("l", "g"):
+            _, calls = start(self.entry, self.backend, self.params(layer_id=layer))
+            self.assertEqual(calls[0][1].code, "analysis.bad_params")
+        _, calls = start(self.entry, self.backend, self.params(layer_id="r"))
+        self.assertEqual(calls[0][1].code, "layer.not_vector")
+        _, calls = start(self.entry, self.backend, self.params(layer_id="nope"))
+        self.assertEqual(calls[0][1].code, "layer.not_found")
+        self.assertEqual(self.backend.calls, [])
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_a_layer_without_the_area_field_fails_cleanly(self):
+        self.backend.out_fields = ("nom",)
+        _, calls = start(self.entry, self.backend, self.params())
+        self.backend.finished(True, {})
+        self.assertEqual(calls[0][1].code, "analysis.failed")
+
+    def test_the_chain_is_registered_cancellable_and_work_crs_goes_with_the_reprojection(self):
+        self.assertEqual(self.entry["chain_version"], 1)
+        self.assertEqual(self.entry["work_crs"], analysis.WORK_EPSG)
+        self.assertEqual(analysis.validate_table(), [])
+        self.assertTrue(analysis.derived_cancellable(analysis.ALGORITHMS)["analysis.area"])
+
+
 class ZonalBackend(RasterBackend):
     """Doublure de `raster.zonal_statistics` : rasters lisibles (système, bandes), unité du fichier,
     statistiques lues sur la couche produite."""

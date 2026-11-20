@@ -232,6 +232,27 @@ def _difference(lang, p, r, names):
     return text + (_out_layer(lang, r) if r else "")
 
 
+def _area(lang, p, r, names):
+    unit = p.get("unit")
+    if unit not in ("m2", "ha"):
+        raise _Unreadable()
+    text = texts.tr(
+        lang,
+        "sum_area",
+        layer=names.layer(p.get("layer_id")),
+        unit=texts.tr(lang, "sum_area_" + unit),
+    )
+    text += _computed_in(lang, p, r, names)
+    if not r:
+        return text
+    name = r.get("name")
+    n = r.get("feature_count")
+    field = r.get("field")
+    if not isinstance(field, str) or not field or not isinstance(name, str) or not name or not _is_int(n):
+        return text + _out_layer(lang, r)
+    return text + texts.tr(lang, "sum_area_out", field=field, name=name, count=count(lang, "entities", n))
+
+
 _OPERATORS = ("eq", "ne", "lt", "lte", "gt", "gte", "contains", "begins_with")
 
 
@@ -1078,6 +1099,7 @@ _SENTENCES = {
     "analysis.buffer": _buffer,
     "analysis.intersect": _intersect,
     "analysis.difference": _difference,
+    "analysis.area": _area,
     "analysis.select_by_attribute": _select,
     "analysis.isochrone": _isochrone,
     "analysis.count_points_in_polygon": _count_points,

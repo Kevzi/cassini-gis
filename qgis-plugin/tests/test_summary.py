@@ -309,6 +309,35 @@ class SumLineLengthsSummaryTest(unittest.TestCase):
         self.assertNotIn("mi", say("analysis.sum_line_lengths", dict(self.PARAMS, unit="mi")).split())
 
 
+class AreaSummaryTest(unittest.TestCase):
+    PARAMS = {"layer_id": "parcelles_2", "unit": "ha"}
+    OUT = {"layer_id": "s_3", "name": "Surface", "feature_count": 4, "crs": "EPSG:2154",
+           "field": "area_ha", "unit": "ha"}
+
+    def test_hectares_name_the_field_and_the_new_layer(self):
+        self.assertEqual(
+            say("analysis.area", self.PARAMS, self.OUT),
+            "Surface des entités de Parcelles, en hectares : champ area_ha, nouvelle couche Surface, 4 entités.",
+        )
+
+    def test_square_meters_and_work_system_in_english(self):
+        out = dict(self.OUT, field="area_m2", unit="m2")
+        text = say("analysis.area", dict(self.PARAMS, unit="m2", work_epsg=2154), out, lang="en")
+        self.assertEqual(
+            text,
+            "Area of the features of Parcelles, in square meters, computed in EPSG:2154: "
+            "field area_m2, new layer Surface, 4 features.",
+        )
+
+    def test_before_the_result_the_sentence_has_no_layer_name(self):
+        self.assertEqual(
+            say("analysis.area", self.PARAMS), "Surface des entités de Parcelles, en hectares."
+        )
+
+    def test_an_unknown_unit_falls_back(self):
+        self.assertNotIn("Surface des entités", say("analysis.area", dict(self.PARAMS, unit="km2")))
+
+
 class OtherCommandsTest(unittest.TestCase):
     def test_layer_add_shows_only_the_file_name(self):
         params = {"path": "C:\\Users\\camille\\donnees\\gares.gpkg"}
@@ -1053,6 +1082,9 @@ SAMPLES = {
          "truncated": False}),
     "analysis.sum_line_lengths": ({"layer_id": "communes_2", "lines_layer_id": "routes_1"},
         {"layer_id": "l_7", "name": "Longueurs", "feature_count": 3, "crs": "EPSG:2154", "rows": [], "truncated": False}),
+    "analysis.area": ({"layer_id": "parcelles_2", "unit": "m2"},
+                      {"layer_id": "s_5", "name": "Surface", "feature_count": 4, "crs": "EPSG:2154",
+                       "field": "area_m2", "unit": "m2"}),
     "analysis.isochrone": ({"layer_id": "routes_1", "duration": {"value": 10, "unit": "min"},
                             "mode": "walk"},
                            {"layer_id": "iso_1", "name": "Isochrone", "feature_count": 1}),

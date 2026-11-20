@@ -111,6 +111,7 @@ fn the_shape_variants_are_all_present() {
         ("analysis.statistics_by_category", "avec somme"),
         ("analysis.statistics_by_category", "tronqué"),
         ("analysis.sum_line_lengths", "en kilomètres"),
+        ("analysis.area", "en hectares"),
         ("data.convert_raster", "sans EPSG"),
     ] {
         assert!(

@@ -425,6 +425,91 @@
     }
   },
   {
+    "id": "ARE1",
+    "command": "analysis.area",
+    "phrase": "Les parcelles de plus de 2 500 m² en zone U.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "plu_zonage_a81d5c06_2e9f_4a37_b6c4_5f13e07d92a8",
+            "field": "typezone",
+            "operator": "eq",
+            "value": "U"
+          }
+        },
+        {
+          "command": "analysis.area",
+          "params": {
+            "layer_id": "parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3",
+            "unit": "m2"
+          }
+        },
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "step:2.layer_id",
+            "field": "area_m2",
+            "operator": "gt",
+            "value": "2500"
+          }
+        },
+        {
+          "command": "analysis.intersect",
+          "params": {
+            "layer_id": "step:3.layer_id",
+            "overlay_layer_id": "step:1.layer_id"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "ARE2",
+    "command": "analysis.area",
+    "phrase": "Donne la surface en hectares de chaque parcelle.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.area",
+          "params": {
+            "layer_id": "parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3",
+            "unit": "ha"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "ARE3",
+    "command": "analysis.area",
+    "phrase": "Quelles parcelles font plus de 1 hectare ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.area",
+          "params": {
+            "layer_id": "parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3",
+            "unit": "ha"
+          }
+        },
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "step:1.layer_id",
+            "field": "area_ha",
+            "operator": "gt",
+            "value": "1"
+          }
+        }
+      ]
+    }
+  },
+  {
     "id": "DIF1",
     "command": "analysis.difference",
     "phrase": "Les parcelles hors zone N du PLU.",

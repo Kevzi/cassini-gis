@@ -9,6 +9,7 @@
   "analysis.dissolve": true,
   "analysis.statistics_by_category": true,
   "analysis.sum_line_lengths": true,
+  "analysis.area": true,
   "analysis.isochrone": true,
   "data.reproject": true,
   "data.convert": true,

@@ -236,6 +236,13 @@ def _line_lengths(unit):
     return lambda: _analysis(ta.SumLineLengthsTest, setup)
 
 
+def _area(unit):
+    def setup(t):
+        return t.backend, t.params(unit=unit)
+
+    return lambda: _analysis(ta.AreaTest, setup)
+
+
 def _isochrone():
     t = ta.IsochroneTest("setUp")
     t.setUp()
@@ -471,6 +478,8 @@ def producers():
             (["zonage", "count"], [[str(i), "1"] for i in range(150)], 150)
         ),
         ("analysis.sum_line_lengths", "en mètres"): _line_lengths("m"),
+        ("analysis.area", "en mètres carrés"): _area("m2"),
+        ("analysis.area", "en hectares"): _area("ha"),
         ("analysis.sum_line_lengths", "en kilomètres"): _line_lengths("km"),
         ("analysis.count_points_in_polygon", "avec zones"): _count_points([("Nord", 5), ("Sud", 3), ("Vide", 0)], 3),
         ("analysis.count_points_in_polygon", "pondéré"): _count_points([("Nord", 5), ("Sud", 3)], 2, "poids"),

@@ -255,6 +255,21 @@ Recette manuelle de `analysis.intersect` et `analysis.select_by_attribute` [tick
 3. Sonde sous le vrai QGIS : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat"
    qgis-plugin/tests/probe_intersect_select.py` doit finir par `RÉSULTAT : OK`.
 
+Recette manuelle de `analysis.area` [ticket 22] (une couche de polygones) :
+
+1. `analysis.area` : `layer_id` est une liste de couches de polygones, `unit` une liste (`m2` ou `ha`).
+   La couche nouvelle porte un champ `area_m2` ou `area_ha` (nom fixe, qui porte l'unité) ; l'original ne
+   bouge pas. Une couche de lignes ou de points donne `analysis.bad_params`, un raster `layer.not_vector`.
+2. Un carré de 100 m de côté en Lambert-93 vaut 10 000 en `m2` et 1 en `ha`. La formule est plane et fixe
+   (`area($geometry)`, divisée par 10 000 pour les hectares) : elle ne dépend pas de l'ellipsoïde du projet.
+3. Une couche en degrés est mesurée dans le système en mètres que choisit le noyau, sans refus ; le résumé
+   le dit (« calculée en EPSG:2154 »). Un champ du même nom déjà présent est remplacé, une entité sans
+   géométrie garde une surface vide.
+4. Enchaînement : `analysis.area` puis `analysis.select_by_attribute` sur `area_m2` avec `gt 2500` ne garde que
+   les entités de plus de 2 500 m².
+5. Sonde sous QGIS 3.44 : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat"
+   qgis-plugin/tests/probe_area.py` doit finir par `VERDICT : OK`.
+
 Recette manuelle de `analysis.difference` [ticket 21] (deux couches de polygones) :
 
 1. `analysis.difference` : `layer_id` et `overlay_layer_id` sont deux listes de couches. La couche

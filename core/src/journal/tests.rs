@@ -4867,6 +4867,19 @@ impl Executor for CrsQgis {
                           "distance_field": "distance", "unit": "m", "unmatched_count": 0}),
                 )
             }
+            "analysis.area" => {
+                self.buffers.borrow_mut().push(p.clone());
+                let n = self.count.get() + 1;
+                self.count.set(n);
+                fs::write(p["out"].as_str().unwrap(), "gpkg").unwrap();
+                let unit = p["unit"].as_str().unwrap();
+                Ok(
+                    json!({"layer_id": format!("surface_g{}_{n}", self.generation),
+                          "name": "surface", "feature_count": 3, "crs": "EPSG:2154",
+                          "field": format!("area_{}", if unit == "ha" { "ha" } else { "m2" }),
+                          "unit": unit}),
+                )
+            }
             "analysis.difference" => {
                 self.buffers.borrow_mut().push(p.clone());
                 let n = self.count.get() + 1;
@@ -5019,6 +5032,56 @@ fn a_nearest_join_of_a_layer_in_degrees_logs_the_metric_work_system() {
     assert!(orders.borrow()[1].get("work_epsg").is_none());
     assert_eq!(orders.borrow().len(), 2);
     drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_area_logs_its_unit_and_work_system_and_replays_identically() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let qgis = CrsQgis::new(1, &qgis_project);
+    let orders = qgis.buffers.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    // Couche en degrés : le noyau remplit `work_epsg`, journalisé, transmis au geste.
+    let out = s
+        .call("analysis.area", json!({"layer_id": "gares", "unit": "ha"}))
+        .unwrap();
+    assert_eq!(
+        (out["field"].as_str(), out["unit"].as_str()),
+        (Some("area_ha"), Some("ha"))
+    );
+    // Couche en mètres : rien n'est rempli, même si l'appelant en donne un.
+    s.call(
+        "analysis.area",
+        json!({"layer_id": "zonage", "unit": "m2", "work_epsg": 4326}),
+    )
+    .unwrap();
+    // Unité inconnue : refus du noyau, rien n'est exécuté ni journalisé.
+    let err = s
+        .call(
+            "analysis.area",
+            json!({"layer_id": "zonage", "unit": "km2"}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "registry.invalid_params");
+    let l = lines(&s);
+    assert_eq!(l.len(), 2, "{l:?}");
+    assert_eq!(l[0]["params"]["work_epsg"], 2154, "{}", l[0]);
+    assert_eq!(l[0]["params"]["unit"], "ha");
+    assert_eq!(orders.borrow()[0]["work_epsg"], 2154);
+    assert!(l[1]["params"].get("work_epsg").is_none(), "{}", l[1]);
+    assert!(l[1]["params"]["out"]
+        .as_str()
+        .is_some_and(|o| o.ends_with(".gpkg")));
+    drop(s);
+    // Rejeu : le même résultat (hors identifiant de couche, valeur de session).
+    let qgis = CrsQgis::new(2, &qgis_project);
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(&Router::new(&registry).with_qgis(qgis), &mut HashSet::new())
+        .unwrap();
+    assert_eq!(report, identical(2));
     let _ = fs::remove_dir_all(dir);
 }
 
