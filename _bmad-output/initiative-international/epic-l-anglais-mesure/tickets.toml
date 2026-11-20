@@ -1,0 +1,34 @@
+# tickets.toml — les tickets de l'epic, en ordre de construction.
+
+[[entry]]
+id = 1
+type = "story"
+title = "Jeu de phrases anglaises jumeau de par_commande"
+description = "Écrit à la main une phrase anglaise par phrase française de ai/tests/par_commande/phrases.json, de tournures variées, avec le même plan attendu, dans ai/tests/par_commande_en/ ; le test sans modèle vérifie que chaque plan attendu est valide pour le registre et l'inventaire."
+verify = "Le test sans modèle passe sur le jeu anglais : autant de phrases que le français, mêmes commandes et mêmes paramètres, plans attendus valides ; les phrases anglaises n'entrent pas dans les données d'entraînement."
+covers = ["E1"]
+after = []
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 2
+type = "story"
+title = "Mesure du taux de plans corrects en anglais et en français"
+description = "Ajoute le test jumeau, gardé par CASSINI_TEST_MODEL, qui passe le jeu anglais au modèle installé par le même chemin que par_commande_reel, et produit le taux par commande pour l'anglais et pour le français dans un même rapport."
+verify = "Avec le modèle installé, la commande documentée imprime pour chaque commande le taux en anglais, le taux en français et l'écart, et le rapport est enregistré dans docs/."
+covers = ["E2"]
+after = [1]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 3
+type = "story"
+title = "Verdict écrit et recommandation pour l'épic 2"
+description = "Lit le rapport, nomme l'écart global et par commande, les commandes qui échouent en anglais et pourquoi (tournure, mot-clé français, noms de champs), et recommande la suite : ré-entraînement bilingue, autre modèle de base, ou rien."
+verify = "Le verdict est un fichier de l'épic qui cite les chiffres du rapport et se termine par une recommandation, relue par le propriétaire."
+covers = ["E3"]
+after = [2]
+hitl = true
+risk = "low"

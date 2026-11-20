@@ -1,0 +1,23 @@
+# tickets.toml — les epics de l'initiative, en ordre de construction.
+# L'ordre des tables est l'ordre de construction ; `id` nomme un epic pour de bon.
+# Creee le 2026-11-20. Seul l'epic 1 est detaille ; les deux autres attendent le verdict de la mesure.
+
+[[epic]]
+id = 1
+slug = "epic-l-anglais-mesure"
+title = "L'anglais mesuré sur le modèle actuel"
+covers = ["INT-1"]
+
+[[epic]]
+id = 2
+slug = "epic-cassini-comprend-l-anglais"
+title = "Cassini comprend l'anglais"
+covers = ["INT-2", "INT-3"]
+after = [{ epic = 1, needs = "le verdict chiffré de la mesure, qui choisit entre ré-entraînement bilingue et autre modèle de base" }]
+
+[[epic]]
+id = 3
+slug = "epic-hors-de-france"
+title = "Cassini hors de France : documentation et démo"
+covers = ["INT-4"]
+after = [{ epic = 2, needs = "un produit qui comprend l'anglais à la barre fixée" }]
