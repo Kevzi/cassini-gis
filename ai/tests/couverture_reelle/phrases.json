@@ -1,0 +1,694 @@
+[
+ {
+  "id": "CV01",
+  "phrase": "Fais une zone de 500 mètres autour de chaque gare.",
+  "source": {
+   "type": "doc",
+   "ref": "QGIS Training Manual (docs.qgis.org), CC BY-SA 4.0",
+   "topic": "zone tampon autour de points",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "plan",
+   "commands": [
+    "analysis.buffer"
+   ]
+  }
+ },
+ {
+  "id": "CV02",
+  "phrase": "Sélectionne les parcelles dont la surface dépasse 1000 m².",
+  "source": {
+   "type": "forum",
+   "ref": "gis.stackexchange.com, question récurrente, CC BY-SA 4.0 ; thème repris, formulation réécrite",
+   "topic": "sélection par expression sur un champ",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "plan",
+   "commands": [
+    "analysis.select_by_attribute"
+   ]
+  }
+ },
+ {
+  "id": "CV03",
+  "phrase": "Combien y a-t-il de gares dans chaque commune ?",
+  "source": {
+   "type": "doc",
+   "ref": "QGIS Training Manual (docs.qgis.org), CC BY-SA 4.0",
+   "topic": "compter les points dans les polygones",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "plan",
+   "commands": [
+    "analysis.count_points_in_polygon"
+   ]
+  }
+ },
+ {
+  "id": "CV04",
+  "phrase": "Quelle est la longueur totale de routes dans chaque commune ?",
+  "source": {
+   "type": "forum",
+   "ref": "gis.stackexchange.com, question récurrente, CC BY-SA 4.0 ; thème repris, formulation réécrite",
+   "topic": "somme des longueurs de lignes par polygone",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "plan",
+   "commands": [
+    "analysis.sum_line_lengths"
+   ]
+  }
+ },
+ {
+  "id": "CV05",
+  "phrase": "Calcule la pente à partir du modèle numérique de terrain.",
+  "source": {
+   "type": "doc",
+   "ref": "QGIS Training Manual (docs.qgis.org), CC BY-SA 4.0",
+   "topic": "pente d'un MNT",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "plan",
+   "commands": [
+    "terrain.slope"
+   ]
+  }
+ },
+ {
+  "id": "CV06",
+  "phrase": "Fais-moi un ombrage du relief.",
+  "source": {
+   "type": "doc",
+   "ref": "Documentation QGIS en français (docs.qgis.org/fr), CC BY-SA 4.0",
+   "topic": "ombrage d'un MNT",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "plan",
+   "commands": [
+    "terrain.hillshade"
+   ]
+  }
+ },
+ {
+  "id": "CV07",
+  "phrase": "Exporte la carte en PDF avec le titre « Zonage communal ».",
+  "source": {
+   "type": "cours",
+   "ref": "supports de cours et de TP de SIG publics des universités françaises ; thème repris, formulation réécrite",
+   "topic": "mise en page et export PDF",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "plan",
+   "commands": [
+    "layout.export_pdf"
+   ]
+  }
+ },
+ {
+  "id": "CV08",
+  "phrase": "Ouvre le fichier ecoles.geojson dans le projet.",
+  "source": {
+   "type": "doc",
+   "ref": "Documentation QGIS en français (docs.qgis.org/fr), CC BY-SA 4.0",
+   "topic": "ajout d'une couche vecteur",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "plan",
+   "commands": [
+    "layer.add"
+   ]
+  }
+ },
+ {
+  "id": "CV09",
+  "phrase": "Fusionne les zones du PLU qui ont le même type de zone.",
+  "source": {
+   "type": "doc",
+   "ref": "QGIS User Guide, algorithmes de traitement (docs.qgis.org), CC BY-SA 4.0",
+   "topic": "regrouper des entités par attribut",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "plan",
+   "commands": [
+    "analysis.dissolve"
+   ]
+  }
+ },
+ {
+  "id": "CV10",
+  "phrase": "Reprojette les parcelles en WGS 84.",
+  "source": {
+   "type": "forum",
+   "ref": "gis.stackexchange.com, question récurrente, CC BY-SA 4.0 ; thème repris, formulation réécrite",
+   "topic": "changement de système de coordonnées",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "plan",
+   "commands": [
+    "data.reproject"
+   ]
+  }
+ },
+ {
+  "id": "CV11",
+  "phrase": "Colorie les parcelles par tranches de surface.",
+  "source": {
+   "type": "doc",
+   "ref": "QGIS Training Manual (docs.qgis.org), CC BY-SA 4.0",
+   "topic": "symbologie graduée",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "plan",
+   "commands": [
+    "map.graduated_style"
+   ]
+  }
+ },
+ {
+  "id": "CV12",
+  "phrase": "Pour chaque commune, trouve la gare la plus proche.",
+  "source": {
+   "type": "doc",
+   "ref": "QGIS User Guide, algorithmes de traitement (docs.qgis.org), CC BY-SA 4.0",
+   "topic": "plus proche voisin",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "plan",
+   "commands": [
+    "analysis.nearest"
+   ]
+  }
+ },
+ {
+  "id": "CV13",
+  "phrase": "Rattache les prix de mutation aux parcelles grâce à l'identifiant de parcelle.",
+  "source": {
+   "type": "forum",
+   "ref": "gis.stackexchange.com, question récurrente, CC BY-SA 4.0 ; thème repris, formulation réécrite",
+   "topic": "jointure d'un tableau sur un champ",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "plan",
+   "commands": [
+    "analysis.join_table"
+   ]
+  }
+ },
+ {
+  "id": "CV14",
+  "phrase": "Quelle distance et quel azimut entre le point 5.90 E 45.90 N et le point 6.10 E 45.80 N ?",
+  "source": {
+   "type": "cours",
+   "ref": "supports de cours et de TP de SIG publics des universités françaises ; thème repris, formulation réécrite",
+   "topic": "distance et azimut entre deux points",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "plan",
+   "commands": [
+    "geo.distance_azimuth"
+   ]
+  }
+ },
+ {
+  "id": "CV15",
+  "phrase": "Convertis le point MGRS 32TLR1234567890 en latitude et longitude.",
+  "source": {
+   "type": "forum",
+   "ref": "gis.stackexchange.com, question récurrente, CC BY-SA 4.0 ; thème repris, formulation réécrite",
+   "topic": "conversion MGRS vers WGS 84",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "plan",
+   "commands": [
+    "coord.convert"
+   ]
+  }
+ },
+ {
+  "id": "CV16",
+  "phrase": "Quels bâtiments sont à moins de 100 m d'une route nationale ?",
+  "source": {
+   "type": "doc",
+   "ref": "QGIS Training Manual (docs.qgis.org), CC BY-SA 4.0",
+   "topic": "sélection par distance à un objet",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "plan",
+   "commands": [
+    "analysis.buffer",
+    "analysis.intersect"
+   ]
+  }
+ },
+ {
+  "id": "CV17",
+  "phrase": "Reclasse le modèle de terrain en trois classes : moins de 500 m, de 500 à 1000 m, plus de 1000 m.",
+  "source": {
+   "type": "forum",
+   "ref": "gis.stackexchange.com, question récurrente, CC BY-SA 4.0 ; thème repris, formulation réécrite",
+   "topic": "reclassification d'un raster",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "plan",
+   "commands": [
+    "raster.reclassify"
+   ]
+  }
+ },
+ {
+  "id": "CV18",
+  "phrase": "Trouve le chemin de moindre coût du point 6.10 E 45.90 N au point 6.20 E 45.85 N sur la couche de coût de déplacement.",
+  "source": {
+   "type": "cours",
+   "ref": "supports de cours et de TP de SIG publics des universités françaises ; thème repris, formulation réécrite",
+   "topic": "chemin de moindre coût",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "plan",
+   "commands": [
+    "terrain.least_cost_path"
+   ]
+  }
+ },
+ {
+  "id": "CV19",
+  "phrase": "Donne-moi les points hauts du relief.",
+  "source": {
+   "type": "doc",
+   "ref": "QGIS User Guide, algorithmes de traitement (docs.qgis.org), CC BY-SA 4.0",
+   "topic": "sommets d'un MNT",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "plan",
+   "commands": [
+    "terrain.peaks"
+   ]
+  }
+ },
+ {
+  "id": "CV20",
+  "phrase": "Qu'est-ce qui est ouvert dans mon projet ?",
+  "source": {
+   "type": "doc",
+   "ref": "Documentation QGIS en français (docs.qgis.org/fr), CC BY-SA 4.0",
+   "topic": "liste des couches du projet",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "plan",
+   "commands": [
+    "project.inventory"
+   ]
+  }
+ },
+ {
+  "id": "CV21",
+  "phrase": "Retire la couche des routes du projet.",
+  "source": {
+   "type": "doc",
+   "ref": "Documentation QGIS en français (docs.qgis.org/fr), CC BY-SA 4.0",
+   "topic": "suppression d'une couche",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "plan",
+   "commands": [
+    "layer.remove"
+   ]
+  }
+ },
+ {
+  "id": "CV22",
+  "phrase": "Calcule l'exposition des versants.",
+  "source": {
+   "type": "forum",
+   "ref": "gis.stackexchange.com, question récurrente, CC BY-SA 4.0 ; thème repris, formulation réécrite",
+   "topic": "exposition d'un MNT",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "plan",
+   "commands": [
+    "terrain.aspect"
+   ]
+  }
+ },
+ {
+  "id": "CV23",
+  "phrase": "Superpose la note d'accessibilité et la note de calme, à 60 % et 40 %.",
+  "source": {
+   "type": "doc",
+   "ref": "QGIS Training Manual (docs.qgis.org), CC BY-SA 4.0",
+   "topic": "analyse multicritère",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "plan",
+   "commands": [
+    "raster.weighted_overlay"
+   ]
+  }
+ },
+ {
+  "id": "CV24",
+  "phrase": "Enregistre les communes en GeoPackage.",
+  "source": {
+   "type": "doc",
+   "ref": "Documentation QGIS en français (docs.qgis.org/fr), CC BY-SA 4.0",
+   "topic": "conversion de format vecteur",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "plan",
+   "commands": [
+    "data.convert"
+   ]
+  }
+ },
+ {
+  "id": "CV25",
+  "phrase": "Décris la couche des bâtiments : champs et nombre d'entités.",
+  "source": {
+   "type": "doc",
+   "ref": "Documentation QGIS en français (docs.qgis.org/fr), CC BY-SA 4.0",
+   "topic": "description d'une couche",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "plan",
+   "commands": [
+    "layer.describe"
+   ]
+  }
+ },
+ {
+  "id": "CV26",
+  "phrase": "Donne l'altitude moyenne de chaque commune d'après le modèle de terrain.",
+  "source": {
+   "type": "forum",
+   "ref": "gis.stackexchange.com, question récurrente, CC BY-SA 4.0 ; thème repris, formulation réécrite",
+   "topic": "statistiques zonales d'un raster",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "refusal",
+   "missing": [
+    "zonal"
+   ]
+  }
+ },
+ {
+  "id": "CV27",
+  "phrase": "Quelle est la surface totale des parcelles pour chaque section ?",
+  "source": {
+   "type": "doc",
+   "ref": "QGIS Training Manual (docs.qgis.org), CC BY-SA 4.0",
+   "topic": "statistiques par catégorie",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "plan",
+   "commands": [
+    "analysis.statistics_by_category"
+   ]
+  }
+ },
+ {
+  "id": "CV28",
+  "phrase": "Quelles zones atteint-on en 10 minutes de voiture depuis le point 6.12 E 45.90 N en suivant les routes ?",
+  "source": {
+   "type": "doc",
+   "ref": "QGIS User Guide, algorithmes de traitement (docs.qgis.org), CC BY-SA 4.0",
+   "topic": "zones de desserte sur un réseau",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "plan",
+   "commands": [
+    "analysis.isochrone"
+   ]
+  }
+ },
+ {
+  "id": "CV29",
+  "phrase": "Que voit-on à 5 km à la ronde depuis le point 6.13 E 45.90 N, un observateur à 2 m du sol ?",
+  "source": {
+   "type": "cours",
+   "ref": "supports de cours et de TP de SIG publics des universités françaises ; thème repris, formulation réécrite",
+   "topic": "analyse de visibilité",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "plan",
+   "commands": [
+    "terrain.viewshed"
+   ]
+  }
+ },
+ {
+  "id": "CV30",
+  "phrase": "Fais une zone tampon.",
+  "source": {
+   "type": "forum",
+   "ref": "gis.stackexchange.com, question récurrente, CC BY-SA 4.0 ; thème repris, formulation réécrite",
+   "topic": "zone tampon sans couche ni distance",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "question"
+  }
+ },
+ {
+  "id": "CV31",
+  "phrase": "Fais une zone tampon de 200 m autour des hôpitaux.",
+  "source": {
+   "type": "doc",
+   "ref": "QGIS Training Manual (docs.qgis.org), CC BY-SA 4.0",
+   "topic": "zone tampon sur une couche absente du projet",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "question"
+  }
+ },
+ {
+  "id": "CV32",
+  "phrase": "Garde les bâtiments les plus anciens.",
+  "source": {
+   "type": "forum",
+   "ref": "gis.stackexchange.com, question récurrente, CC BY-SA 4.0 ; thème repris, formulation réécrite",
+   "topic": "filtre sur un champ qui n'existe pas",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "question"
+  }
+ },
+ {
+  "id": "CV33",
+  "phrase": "Garde les parcelles proches de la mairie.",
+  "source": {
+   "type": "cours",
+   "ref": "supports de cours et de TP de SIG publics des universités françaises ; thème repris, formulation réécrite",
+   "topic": "proximité à un objet absent, distance non donnée",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "question"
+  }
+ },
+ {
+  "id": "CV34",
+  "phrase": "Montre la visibilité depuis le sommet.",
+  "source": {
+   "type": "doc",
+   "ref": "Documentation QGIS en français (docs.qgis.org/fr), CC BY-SA 4.0",
+   "topic": "visibilité sans point d'observation",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "question"
+  }
+ },
+ {
+  "id": "CV35",
+  "phrase": "Géocode cette liste d'adresses et place-les sur la carte.",
+  "source": {
+   "type": "forum",
+   "ref": "gis.stackexchange.com, question récurrente, CC BY-SA 4.0 ; thème repris, formulation réécrite",
+   "topic": "géocodage d'adresses",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "refusal",
+   "missing": [
+    "geocode"
+   ]
+  }
+ },
+ {
+  "id": "CV36",
+  "phrase": "Calcule le bassin versant de ce ruisseau.",
+  "source": {
+   "type": "forum",
+   "ref": "gis.stackexchange.com, question récurrente, CC BY-SA 4.0 ; thème repris, formulation réécrite",
+   "topic": "hydrologie, bassin versant",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "refusal",
+   "missing": [
+    "watershed",
+    "hydrology"
+   ]
+  }
+ },
+ {
+  "id": "CV37",
+  "phrase": "Transforme les bâtiments de cette image satellite en polygones.",
+  "source": {
+   "type": "forum",
+   "ref": "gis.stackexchange.com, question récurrente, CC BY-SA 4.0 ; thème repris, formulation réécrite",
+   "topic": "vectorisation d'une image",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "refusal",
+   "missing": [
+    "polygonize",
+    "vectorize"
+   ]
+  }
+ },
+ {
+  "id": "CV38",
+  "phrase": "Fais une carte de chaleur des accidents de la route.",
+  "source": {
+   "type": "cours",
+   "ref": "supports de cours et de TP de SIG publics des universités françaises ; thème repris, formulation réécrite",
+   "topic": "carte de chaleur",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "refusal",
+   "missing": [
+    "heatmap"
+   ]
+  }
+ },
+ {
+  "id": "CV39",
+  "phrase": "Mets en étiquette le nom de chaque commune sur la carte.",
+  "source": {
+   "type": "doc",
+   "ref": "QGIS Training Manual (docs.qgis.org), CC BY-SA 4.0",
+   "topic": "étiquettes de la carte",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "refusal",
+   "missing": [
+    "label"
+   ]
+  }
+ },
+ {
+  "id": "CV40",
+  "phrase": "Découpe le modèle de terrain selon l'emprise de la commune.",
+  "source": {
+   "type": "forum",
+   "ref": "gis.stackexchange.com, question récurrente, CC BY-SA 4.0 ; thème repris, formulation réécrite",
+   "topic": "découpage d'un raster par un masque",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "refusal",
+   "missing": [
+    "clip"
+   ]
+  }
+ },
+ {
+  "id": "CV41",
+  "phrase": "Fais un profil d'altitude le long de la route nationale.",
+  "source": {
+   "type": "doc",
+   "ref": "QGIS User Guide, algorithmes de traitement (docs.qgis.org), CC BY-SA 4.0",
+   "topic": "profil en long",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "refusal",
+   "missing": [
+    "profile"
+   ]
+  }
+ },
+ {
+  "id": "CV42",
+  "phrase": "Soustrais le relevé de terrain de 2019 au modèle de terrain actuel.",
+  "source": {
+   "type": "forum",
+   "ref": "gis.stackexchange.com, question récurrente, CC BY-SA 4.0 ; thème repris, formulation réécrite",
+   "topic": "calculatrice raster, différence de deux MNT",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "refusal",
+   "missing": [
+    "raster_calculator"
+   ]
+  }
+ },
+ {
+  "id": "CV43",
+  "phrase": "Télécharge le cadastre de la commune.",
+  "source": {
+   "type": "cours",
+   "ref": "supports de cours et de TP de SIG publics des universités françaises ; thème repris, formulation réécrite",
+   "topic": "téléchargement de données (hors ligne par principe)",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "refusal",
+   "missing": [
+    "download"
+   ]
+  }
+ },
+ {
+  "id": "CV44",
+  "phrase": "Calcule la couverture radio de cette antenne.",
+  "source": {
+   "type": "doc",
+   "ref": "Documentation QGIS en français (docs.qgis.org/fr), CC BY-SA 4.0",
+   "topic": "couverture radio",
+   "treatment": "paraphrase"
+  },
+  "expected": {
+   "kind": "refusal",
+   "missing": [
+    "radio_coverage"
+   ]
+  }
+ }
+]
