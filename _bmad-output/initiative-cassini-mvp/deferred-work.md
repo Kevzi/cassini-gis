@@ -1277,3 +1277,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `epic-catalogue-etendu-qgis/story-geocodage-sur-la-base-adresse-nationale-dans-le-noyau-plan.md`
   summary: Géocodage BAN (10.16) : les messages d'erreur d'un CSV d'adresses vide, à ligne irrégulière ou à colonne d'en-tête avec espace disent « pas un CSV UTF-8 » ou « colonne absente », et les lignes de la BAN à lon/lat illisibles sont écartées sans compte ni avertissement.
   evidence: `run()` et `read_ban` de `geocode_ban.rs` ; message trompeur, pas de résultat faux.
+
+- source_plan: `epic-catalogue-etendu-qgis/story-courbes-de-niveau-d-un-mnt-raster-contour-plan.md`
+  summary: `raster.contour` (10.26) : les noms de paramètres de `gdal:contour` ne sont vérifiés que sous QGIS 3.44 ; le jeu sous 4.x et un GeoTIFF réel sans système de coordonnées (la matrice nomme un `.asc`, refusé plus tôt comme non-`.tif`) ne sont pas essayés sous QGIS.
+  evidence: `probe_contour.py` n'a tourné que sur 3.44.15 ; la traduction est un jeu fixe de clés dans `translate_raster_contour`. À régler en lançant la sonde sur une série 4 installée, avant la livraison (10.19).

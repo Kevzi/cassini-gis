@@ -2559,5 +2559,65 @@
         }
       ]
     }
+  },
+  {
+    "id": "NV1",
+    "command": "raster.contour",
+    "phrase": "Je voudrais les courbes de niveau du MNT, espacées de 10 mètres.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "raster.contour",
+          "params": {
+            "raster": "donnees/mnt_5m.tif",
+            "interval": {
+              "value": 10,
+              "unit": "m"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "NV2",
+    "command": "raster.contour",
+    "phrase": "Dessine les lignes de niveau du terrain avec une équidistance de 25 m.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "raster.contour",
+          "params": {
+            "raster": "donnees/mnt_5m.tif",
+            "interval": {
+              "value": 25,
+              "unit": "m"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "NV3",
+    "command": "raster.contour",
+    "phrase": "Fais-moi les courbes d'altitude du MNT, une tous les 0,1 km.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "raster.contour",
+          "params": {
+            "raster": "donnees/mnt_5m.tif",
+            "interval": {
+              "value": 0.1,
+              "unit": "km"
+            }
+          }
+        }
+      ]
+    }
   }
 ]

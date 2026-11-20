@@ -201,6 +201,20 @@ Recette manuelle de `raster.zonal_statistics` [ticket 12] (un MNT GeoTIFF et une
 4. Sonde sous QGIS 3.44 : `"C:\Program Files\QGIS 3.44.15in\python-qgis-ltr.bat" qgis-plugin/tests/probe_zonal_statistics.py`
    doit finir par `VERDICT : OK`.
 
+Recette manuelle de `raster.contour` [ticket 26] (un MNT GeoTIFF d'une bande, avec système) :
+
+1. `raster.contour` : `raster` est un sélecteur de fichier GeoTIFF (jamais `step:k` : le noyau refuse un
+   raster chaîné, dont les valeurs ne sont pas des altitudes en mètres), `interval` une distance en m ou km.
+   Une couche de lignes nouvelle, champ `elevation`, est ajoutée au projet (`gdal:contour`) ; l'équidistance
+   est verticale, donc un MNT en degrés convient si ses altitudes sont en mètres.
+2. Le raster d'origine reste intact et aucun `.aux.xml` n'apparaît à côté (`GDAL_PAM_ENABLED=NO`, réglage de
+   la configuration et de l'environnement, car `gdal:contour` lance un programme GDAL à part).
+3. Un raster absent : `layer.not_found` ; un fichier qui n'est pas un GeoTIFF : `layer.invalid_source` ; un
+   raster à plusieurs bandes ou sans système : `analysis.bad_params`. Un QGIS sans `gdal:contour` n'annonce
+   pas la commande.
+4. Sonde sous QGIS 3.44 : `"C:\Program Files\QGIS 3.44.15in\python-qgis-ltr.bat" qgis-plugin/tests/probe_contour.py`
+   doit finir par `VERDICT : OK`.
+
 Recette manuelle de `analysis.dissolve` [ticket 24] (une couche de parcelles ou de zones) :
 
 1. `analysis.dissolve` : `layer_id` est une liste de couches, `fields` une liste à cases à cocher des

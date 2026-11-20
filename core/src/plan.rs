@@ -323,6 +323,17 @@ impl Registry {
                                 ),
                             ));
                         }
+                        // Des courbes de niveau exigent des altitudes en mètres : un raster d'étape
+                        // (pente, coût) n'en est pas un, et donnerait des courbes fausses en silence.
+                        if spec.id == "raster.contour" {
+                            return Err(error(
+                                "plan.bad_reference",
+                                step,
+                                format!(
+                                    "raster.contour ne prend pas le raster de l'étape {k} : ses valeurs ne sont pas des altitudes en mètres. Donnez le chemin du MNT."
+                                ),
+                            ));
+                        }
                         // Les valeurs d'un raster d'étape n'ont pas d'unité connue : les statistiques
                         // par zone la demandent, au lieu de la supposer en mètres.
                         let unit_given = call.params.get("unit").is_some_and(|u| !u.is_null());

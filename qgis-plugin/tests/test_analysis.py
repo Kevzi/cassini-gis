@@ -2187,6 +2187,103 @@ class RasterZonalStatisticsTest(unittest.TestCase):
             analysis._pam_off, analysis._pam_restore = original
 
 
+class ContourTest(unittest.TestCase):
+    """`raster.contour` (epic 10, entrée 26) : entrée raster par chemin, sortie en couche de lignes,
+    `gdal:contour`, équidistance verticale en mètres, champ `elevation`."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.out = os.path.join(self.dir.name, "1-raster.contour.gpkg")
+        self.entry = analysis.ALGORITHMS["raster.contour"]
+        self.raster = os.path.join(self.dir.name, "mnt.tif")
+        for name in ("mnt.tif", "multi.tif", "sans-systeme.tif", "mnt.asc"):
+            with open(os.path.join(self.dir.name, name), "wb") as f:
+                f.write(b"x")
+        self.originals = {n: self.read(n) for n in os.listdir(self.dir.name)}
+        self.backend = ZonalBackend(
+            {"mnt.tif": "EPSG:2154", "multi.tif": "EPSG:2154", "sans-systeme.tif": None, "mnt.asc": "EPSG:2154"},
+            bands={"multi.tif": 3},
+            loaded_count=11,
+        )
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def read(self, name):
+        with open(os.path.join(self.dir.name, name), "rb") as f:
+            return f.read()
+
+    def path(self, name):
+        return os.path.join(self.dir.name, name)
+
+    def params(self, **extra):
+        p = {"raster": self.raster, "interval": {"value": 5, "unit": "m"}, "out": self.out}
+        p.update(extra)
+        return p
+
+    def test_the_row_is_gdal_contour_with_the_elevation_field(self):
+        self.assertEqual(self.entry["algorithm"], "gdal:contour")
+        self.assertEqual(analysis.required_algorithms(self.entry), ["gdal:contour"])
+        _, calls = start(self.entry, self.backend, self.params())
+        algo, p = self.backend.calls[0]
+        self.assertEqual(algo, "gdal:contour")
+        self.assertEqual((p["INPUT"], p["BAND"], p["INTERVAL"]), (self.raster, 1, 5.0))
+        self.assertEqual(p["FIELD_NAME"], "elevation")
+        self.assertEqual(p["OUTPUT"], self.out)
+        self.backend.finished(True, {})
+        result, error = calls[0]
+        self.assertIsNone(error)
+        self.assertEqual(
+            result, {"layer_id": "out_1", "name": "1-raster.contour", "feature_count": 11, "crs": "EPSG:2154"}
+        )
+        self.assertEqual(self.backend.loaded, self.out)  # la couche produite entre au projet
+
+    def test_kilometres_are_converted_to_metres(self):
+        for interval, expected in (({"value": 0.005, "unit": "km"}, 5.0), ({"value": 12.5, "unit": "m"}, 12.5)):
+            self.backend.calls.clear()
+            start(self.entry, self.backend, self.params(interval=interval))
+            self.assertEqual(self.backend.calls[0][1]["INTERVAL"], expected)
+
+    def test_a_bad_interval_is_refused_before_any_launch(self):
+        for interval in ({"value": 0, "unit": "m"}, {"value": -5, "unit": "m"}, {"value": 5, "unit": "ft"}, 5, None):
+            backend = ZonalBackend({"mnt.tif": "EPSG:2154"})
+            _, calls = start(self.entry, backend, self.params(interval=interval))
+            self.assertEqual(backend.calls, [])
+            self.assertEqual(calls[0][0], None)
+            self.assertEqual(calls[0][1].code, analysis.BAD_PARAMS)
+            self.assertFalse(os.path.exists(self.out))
+
+    def test_unreadable_rasters_are_refused_with_the_existing_codes(self):
+        cases = (
+            (self.path("absent.tif"), analysis.NOT_FOUND),
+            (self.path("mnt.asc"), analysis.INVALID_SOURCE),
+            (self.path("multi.tif"), analysis.BAD_PARAMS),
+            (self.path("sans-systeme.tif"), analysis.BAD_PARAMS),
+        )
+        for raster, code in cases:
+            backend = ZonalBackend(self.backend.sources, bands={"multi.tif": 3})
+            _, calls = start(self.entry, backend, self.params(raster=raster))
+            self.assertEqual(backend.calls, [], raster)
+            self.assertEqual(calls[0][1].code, code, raster)
+        self.assertEqual({n: self.read(n) for n in os.listdir(self.dir.name)}, self.originals)
+
+    def test_a_failure_leaves_no_partial_file_and_the_source_intact(self):
+        _, calls = start(self.entry, self.backend, self.params())
+        self.backend.finished(False, {})
+        self.assertEqual(calls[0][1].code, analysis.FAILED)
+        self.assertFalse(os.path.exists(self.out))
+        self.assertEqual({n: self.read(n) for n in os.listdir(self.dir.name) if n in self.originals}, self.originals)
+
+    def test_a_missing_algorithm_is_not_announced(self):
+        backend = FakeBackend()
+        self.assertIn("raster.contour", analysis.available_chains(analysis.ALGORITHMS, backend))
+        backend.missing_algorithms = {"gdal:contour"}
+        self.assertNotIn("raster.contour", analysis.available_chains(analysis.ALGORITHMS, backend))
+
+    def test_the_command_can_be_cancelled(self):
+        self.assertTrue(analysis.derived_cancellable(analysis.ALGORITHMS)["raster.contour"])
+
+
 class FormHidesCoreFilledTest(unittest.TestCase):
     def test_out_is_not_a_form_field(self):
         schema = {

@@ -35,7 +35,7 @@ Proposition d'après la couverture, à valider par le propriétaire (étape huma
 2. Géocodage (entrée 16) : seule primitive de la voie unique qu'une phrase réelle demande (CV35), et PL22 de l'épreuve le demande aussi ; le sortir de sa place en bout de voie (derrière 15) serait un gain de couverture net.
 3. Vectorisation d'un raster (`raster.polygonize`, ajoutée par le changement de cap du 2026-11-05) : CV37.
 4. Entrées à créer si la couverture doit encore monter : découpage par masque (CV40), calculatrice raster (CV42), étiquettes (CV39). Carte de chaleur et profil (CV38, CV41) ensuite ; hydrologie et couverture radio restent hors périmètre (V2).
-5. En queue : courbes de niveau (26), plus court chemin (13), préparation de réseau (14) et atlas (15). Aucune des 44 phrases ne les demande ; le jeu est petit (44), donc ce n'est pas la preuve qu'elles sont inutiles, mais aucune mesure ne les soutient.
+5. En queue : plus court chemin (13), préparation de réseau (14) et atlas (15). Aucune des 44 phrases ne les demande ; le jeu est petit (44), donc ce n'est pas la preuve qu'elles sont inutiles, mais aucune mesure ne les soutient.
 
 Le reclassement d'un raster (entrée 25) est à `dropped` selon la décision du 2026-11-05 (calculé par le noyau, epic 11) ; CV17 est comptée couverte par ce motif.
 

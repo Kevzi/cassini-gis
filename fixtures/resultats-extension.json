@@ -83,6 +83,9 @@
               "rows": [{"label": "1", "values": {"mean": {"value": 10.0, "unit": "°"}, "min": {"value": 1.0, "unit": "°"}, "max": {"value": 20.0, "unit": "°"}}}],
               "truncated": true}},
 
+  {"id": "raster.contour", "case": "couche de lignes",
+   "result": {"layer_id": "courbes_1", "name": "1-raster.contour", "feature_count": 21, "crs": "EPSG:2154"}},
+
   {"id": "data.convert", "case": "GeoPackage",
    "result": {"file": "2-data.convert.gpkg", "format": "gpkg", "feature_count": 5}},
 

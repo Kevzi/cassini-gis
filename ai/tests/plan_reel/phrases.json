@@ -411,9 +411,18 @@
     "id": "PL23",
     "phrase": "Trace les courbes de niveau du MNT tous les 5 m.",
     "expected": {
-      "kind": "refusal",
-      "missing": [
-        "contour"
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "raster.contour",
+          "params": {
+            "raster": "donnees/mnt_5m.tif",
+            "interval": {
+              "value": 5,
+              "unit": "m"
+            }
+          }
+        }
       ]
     }
   }

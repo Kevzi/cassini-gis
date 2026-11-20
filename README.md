@@ -137,6 +137,7 @@ Une couche que Cassini ne reconnaît pas garde son style : il ne devine pas.
 | `terrain.cost_distance`, `terrain.least_cost_path` | coût de déplacement cumulé, chemin de moindre coût |
 | `raster.reclassify`, `raster.weighted_overlay` | reclassement, superposition pondérée |
 | `raster.zonal_statistics` | moyenne, minimum et maximum d'un raster (altitudes d'un MNT, pente) par polygone, avec l'unité ; le raster se désigne par son chemin (ou `step:k`), les polygones par leur couche ; une couche nouvelle |
+| `raster.contour` | courbes de niveau d'un MNT à l'équidistance demandée (en m ou km) ; le MNT se désigne par son chemin (pas `step:k`, dont les valeurs ne sont pas des mètres) ; une couche de lignes nouvelle, champ `elevation` |
 | `geocode.ban` | place les adresses d'un CSV sur la carte : les apparie, sans tenir compte des accents, de la casse ni des abréviations (av, bd, pl, st…), à un CSV de la Base Adresse Nationale que l'utilisateur apporte (`adresses-XX.csv` décompressé), le code postal ou la commune départageant les homonymes ; écrit un CSV avec `lon` et `lat` (EPSG:4326, vides si l'adresse n'est pas trouvée une seule fois) que `layer.add` ouvre ensuite (`step:k.path`) ; aucun réseau |
 | `coord.convert` | conversion d'une coordonnée entre WGS84, UTM et MGRS |
 | `geo.distance_azimuth`, `geo.destination_point`, `geo.bearing_intersection` | géodésie : distance et azimut, point d'arrivée, recoupement |
@@ -223,7 +224,7 @@ flowchart LR
 | 🔨 | **7.** Démo filmée sur Annecy, puis publication : dépôt d'extensions QGIS, installeurs, vidéo | en cours : la phrase de démo va jusqu'au PDF dans QGIS ; restent la vidéo et la publication |
 
 **Ensuite** : un catalogue étendu est déjà décrit — plus proche voisin, plus court
-chemin sur un réseau, atlas PDF, courbes de niveau, vectorisation, statistiques
+chemin sur un réseau, atlas PDF, vectorisation, statistiques
 zonales sur un MNT, géocodage sur la Base Adresse Nationale — et des identifiants
 sont réservés pour l'hydrologie et la couverture radio.
 
@@ -231,8 +232,7 @@ sont réservés pour l'hydrologie et la couverture radio.
 
 - le choix automatique des couches de contexte du PDF ;
 - une option « sans changer les couleurs » à l'export ;
-- l'isochrone sur une couche en degrés, et le terrain sur un MNT en degrés ;
-- les courbes de niveau.
+- l'isochrone sur une couche en degrés, et le terrain sur un MNT en degrés.
 
 <details>
 <summary><b>Limites connues</b></summary>

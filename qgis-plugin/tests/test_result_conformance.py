@@ -164,6 +164,18 @@ def _raster_zonal(stats, loaded_count):
     )
 
 
+def _contour():
+    t = ta.ContourTest("setUp")
+    t.setUp()
+    try:
+        _, calls = ta.start(t.entry, t.backend, t.params())
+        t.backend.finished(True, {})
+        assert calls[0][1] is None, calls
+        return calls[0][0]
+    finally:
+        t.tearDown()
+
+
 def _dissolve():
     t = ta.DissolveTest("setUp")
     t.setUp()
@@ -439,6 +451,7 @@ def producers():
         ("analysis.intersect", "couche créée"): _intersect,
         ("analysis.isochrone", "un polygone"): _isochrone,
         ("analysis.dissolve", "couche créée"): _dissolve,
+        ("raster.contour", "couche de lignes"): _contour,
         ("analysis.join_table", "une entité sans ligne"): _join_table,
         ("analysis.nearest", "couche créée"): _nearest,
         ("analysis.select_by_attribute", "entités retenues"): _select,

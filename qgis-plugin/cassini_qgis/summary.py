@@ -298,6 +298,36 @@ def _raster_zonal(lang, p, r, names):
     return text + (_out_layer(lang, r) if r else "")
 
 
+def _contour(lang, p, r, names):
+    """Courbes de niveau d'un MNT : le raster est un fichier, l'équidistance une distance en m ou km."""
+    value = p.get("raster")
+    interval = p.get("interval")
+    if not isinstance(value, str) or not value:
+        raise _Unreadable()
+    if not isinstance(interval, dict) or interval.get("unit") not in ("m", "km"):
+        raise _Unreadable()
+    text = texts.tr(
+        lang,
+        "sum_contour",
+        raster=file_name(value),
+        interval="%s %s" % (number(lang, interval.get("value")), interval["unit"]),
+    )
+    return text + (_out_layer(lang, r) if r else "")
+
+
+def _geocode(lang, p, r, names):
+    """Géocodage d'un CSV d'adresses sur la BAN : deux fichiers, puis le décompte des adresses."""
+    addresses, ban = p.get("addresses"), p.get("ban")
+    if not isinstance(addresses, str) or not addresses or not isinstance(ban, str) or not ban:
+        raise _Unreadable()
+    text = texts.tr(lang, "sum_geocode", addresses=file_name(addresses), ban=file_name(ban))
+    if r:
+        matched, unmatched = r.get("matched_count"), r.get("unmatched_count")
+        if _is_int(matched) and _is_int(unmatched):
+            text += texts.tr(lang, "sum_geocode_result", matched=matched, unmatched=unmatched)
+    return text
+
+
 def _nearest(lang, p, r, names):
     text = texts.tr(
         lang,
@@ -1041,6 +1071,8 @@ _SENTENCES = {
     "analysis.isochrone": _isochrone,
     "analysis.count_points_in_polygon": _count_points,
     "raster.zonal_statistics": _raster_zonal,
+    "raster.contour": _contour,
+    "geocode.ban": _geocode,
     "analysis.nearest": _nearest,
     "analysis.dissolve": _dissolve,
     "analysis.join_table": _join_table,

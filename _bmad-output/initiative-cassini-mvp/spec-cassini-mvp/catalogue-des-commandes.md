@@ -380,7 +380,7 @@ donne l'esquisse.
 | `raster.zonal_statistics` | faite | qgis | epic 10, entrée 12 |
 | `raster.polygonize` | planifiée | qgis | epic 10 (entrée ajoutée après la 12) |
 | `raster.align` | planifiée | qgis | epic 10 (entrée ajoutée après la 12) |
-| `raster.contour` | planifiée | qgis | epic 10, entrée 26 |
+| `raster.contour` | faite | qgis | epic 10, entrée 26 |
 | `network.shortest_path` | planifiée | qgis | epic 10, entrée 13 |
 | `network.prepare` | planifiée | qgis | epic 10, entrée 14 |
 | `layout.export_atlas` | planifiée | qgis | epic 10, entrée 15 |
@@ -2170,6 +2170,14 @@ dicte ensuite `layer.open_raster`.
 Courbes de niveau d'un MNT à l'équidistance demandée (`gdal:contour`, epic 10, entrée 26),
 champ `elevation` (mètres) sur chaque ligne. Non annoncée si l'algorithme manque (AD-25).
 
+Livrée par l'entrée 26 de l'epic 10 (`core/src/commands/raster_contour.rs`, ligne de la table
+`ALGORITHMS` de `qgis-plugin/cassini_qgis/analysis.py`). Le MNT est un `RasterPath` d'un fichier :
+une référence `step:k` est refusée par le noyau (`plan.bad_reference`), car les valeurs d'une pente
+ou d'un coût ne sont pas des mètres. L'équidistance est verticale : un MNT en degrés convient si ses
+altitudes sont en mètres. Le résultat est une couche de lignes nouvelle (`.gpkg`, champ
+`elevation`). Erreurs : `layer.not_found`, `layer.invalid_source`, `analysis.bad_params` (raster sans
+système, raster à plusieurs bandes), `analysis.failed`.
+
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
 | `raster` | `RasterPath` | oui | MNT une bande | MNT. |
@@ -2179,7 +2187,7 @@ champ `elevation` (mètres) sur chaque ligne. Non annoncée si l'algorithme manq
 Résultat : `layer_id`, `name`, `crs`, `feature_count`.
 
 ```json fiche
-{"id": "raster.contour", "status": "planifiee", "runs_in": "qgis", "dictated_by_core": false,
+{"id": "raster.contour", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
  "params": {"raster": {"type": "RasterPath", "required": true},
             "interval": {"type": "Distance", "required": true},
             "out": {"type": "string", "required": false}},

@@ -395,7 +395,11 @@ def _pam_off():
         return False
     if _pam["holders"] == 0:
         _pam["previous"] = gdal.GetConfigOption("GDAL_PAM_ENABLED")
+        _pam["previous_env"] = os.environ.get("GDAL_PAM_ENABLED")
         gdal.SetConfigOption("GDAL_PAM_ENABLED", "NO")
+        # Les algorithmes `gdal:*` lancent un programme GDAL à part, qui hérite de l'environnement du
+        # processus et non des options de configuration de celui-ci.
+        os.environ["GDAL_PAM_ENABLED"] = "NO"
     _pam["holders"] += 1
     return True
 
@@ -406,6 +410,10 @@ def _pam_restore():
     _pam["holders"] = max(0, _pam["holders"] - 1)
     if _pam["holders"] == 0:
         gdal.SetConfigOption("GDAL_PAM_ENABLED", _pam["previous"])
+        if _pam.get("previous_env") is None:
+            os.environ.pop("GDAL_PAM_ENABLED", None)
+        else:
+            os.environ["GDAL_PAM_ENABLED"] = _pam["previous_env"]
 
 
 def translate_raster_zonal(params, layer):
@@ -418,6 +426,38 @@ def translate_raster_zonal(params, layer):
         "RASTER_BAND": 1,
         "COLUMN_PREFIX": _ZONAL_PREFIX,
         "STATISTICS": [code for _, code in _ZONAL_STATISTICS],
+    }
+
+
+# Courbes de niveau (`gdal:contour`) : champ d'altitude écrit, bande unique. L'équidistance est verticale,
+# en mètres (le noyau a normalisé `km`). Noms des paramètres de QGIS 3.44 et 4.x : `INPUT`, `BAND`,
+# `INTERVAL`, `FIELD_NAME`, `CREATE_3D` ; la sortie est `OUTPUT`.
+_CONTOUR_FIELD = "elevation"
+
+
+def translate_raster_contour(params, raster):
+    """Paramètres neutres de `raster.contour` -> paramètres de `gdal:contour`, qui écrit une couche de
+    lignes nouvelle (jamais le raster). L'équidistance du noyau est une `Distance` : ramenée en mètres ici
+    si elle arrive en kilomètres."""
+    interval = params.get("interval")
+    try:
+        value = float(interval["value"])
+        factor = {"m": 1.0, "km": 1000.0}[interval["unit"]]
+    except (KeyError, TypeError, ValueError):
+        raise GestureError(BAD_PARAMS, "L'équidistance doit être de la forme {value, unit} en m ou km.")
+    metres = value * factor
+    if not (metres > 0) or metres == float("inf"):
+        raise GestureError(BAD_PARAMS, "L'équidistance doit être strictement positive.")
+    return {
+        "INPUT": raster,
+        "BAND": 1,
+        "INTERVAL": metres,
+        "FIELD_NAME": _CONTOUR_FIELD,
+        "CREATE_3D": False,
+        "IGNORE_NODATA": False,
+        "NODATA": None,
+        "OFFSET": 0.0,
+        "EXTRA": None,
     }
 
 
@@ -684,6 +724,9 @@ def summarize_sum_line_lengths(backend, layer, params):
 #               (`layer.not_found`, `layer.invalid_source`, `analysis.bad_params`), avant tout lancement ;
 #               un système différent de celui des polygones est admis : QGIS reprojette les polygones ;
 #               il est libéré avant l'algorithme et jamais modifié ; la sortie reste une couche ;
+#   layer_output : (facultatif, avec `raster`) la sortie est une couche de lignes ou de polygones ajoutée au
+#               projet (résultat `layer_id`, `name`, `feature_count`, `crs`), et non un GeoTIFF ; le raster
+#               d'entrée est contrôlé comme un `raster_input` (GeoTIFF d'une bande, avec système) ;
 #   assign_crs: (facultatif, avec `raster`) paramètre du noyau qui déclare le code EPSG d'une
 #               source sans système : connu de QGIS (`data.unknown_crs` sinon), et refusé
 #               (`analysis.bad_params`) si la source a déjà un autre système ;
@@ -784,6 +827,15 @@ ALGORITHMS = {
         "field_optional": True,
         "geometry": "Polygon",
         "summary": summarize_raster_zonal,
+    },
+    "raster.contour": {
+        "chain_version": 1,
+        "chain": [
+            {"algorithm": "gdal:contour", "translate": translate_raster_contour, "output": "OUTPUT"},
+        ],
+        "input": "raster",
+        "raster": True,
+        "layer_output": True,
     },
     "analysis.nearest": {
         "chain_version": 1,
@@ -988,6 +1040,7 @@ CANCELLABLE_ALGORITHMS = frozenset(
         "native:extractbyattribute",
         "native:countpointsinpolygon",
         "native:zonalstatisticsfb",
+        "gdal:contour",
         "native:joinbynearest",
         "native:joinattributestable",
         "native:dissolve",
@@ -1682,6 +1735,10 @@ class ProcessingGesture:
         """Genre d'entrée `raster` : un fichier désigné par son chemin, jamais une couche."""
         entry, backend = self._entry, self._backend
         path = params.get(entry["input"])
+        if entry.get("layer_output"):
+            # Entrée raster, sortie couche : mêmes gardes qu'un raster lu par une analyse de polygones, et
+            # avant toute ouverture du fichier (le réglage « pas de .aux.xml » doit précéder la première).
+            self._check_raster_input(path, None)
         if not isinstance(path, str) or not path or not os.path.isfile(path):
             raise GestureError(NOT_FOUND, "Aucun fichier raster « %s »." % _file_name(path))
         source = backend.raster_source(path)
@@ -1735,7 +1792,7 @@ class ProcessingGesture:
             if backend.raster_band_count(source) != 1:
                 raise GestureError(
                     BAD_PARAMS,
-                    "« %s » a plusieurs bandes : les statistiques ne portent que sur un raster à une bande."
+                    "« %s » a plusieurs bandes : cette commande ne porte que sur un raster à une bande."
                     % _file_name(path),
                 )
             current = backend.raster_crs(source)
@@ -1856,7 +1913,7 @@ class ProcessingGesture:
             return self._written()
         if self._entry.get("table"):
             return self._entry["table"](backend, self._out, self._params or {})
-        if self._entry.get("raster"):
+        if self._entry.get("raster") and not self._entry.get("layer_output"):
             epsg = backend.read_written_raster(self._out)
             if epsg is False:
                 raise GestureError(FAILED, "Le GeoTIFF écrit est illisible.")

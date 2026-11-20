@@ -252,6 +252,13 @@ pub static FAMILIES: &[Family] = &[
         weight: 5,
         make: statistiques_raster_par_zone,
     },
+    // Ticket 26 (epic 10) : `raster.contour`. Reprend la place du refus des courbes de niveau
+    // (`refus_fonction_absente`, branche 0), que cette commande rend faux.
+    Family {
+        name: "courbes_de_niveau",
+        weight: 3,
+        make: courbes_de_niveau,
+    },
     // Les trois commandes de terrain (4.6) : MNT désigné par sa source, points écrits.
     Family {
         name: "pente",
@@ -4946,6 +4953,79 @@ fn statistiques_raster_par_zone(rng: &mut Rng) -> Option<Example> {
     ))
 }
 
+/// Équidistances des courbes de niveau demandées, en mètres.
+const CONTOUR_INTERVALS: &[u64] = &[1, 2, 5, 10, 20, 25, 50, 100];
+
+/// Ticket 26 (epic 10) : courbes de niveau d'un MNT, `raster.contour`. Le MNT se désigne par son
+/// `source`, recopié de l'inventaire ; l'équidistance est toujours écrite dans la demande, en mètres
+/// (ou en kilomètres pour une équidistance très large). Aucune demande sans équidistance : la valeur
+/// ne se devine pas.
+fn courbes_de_niveau(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let epsg = terrain_epsg(rng);
+    let dem = b.add_dem(rng, epsg);
+    let of = dem_words(rng, &dem);
+    let n = *rng.pick(CONTOUR_INTERVALS);
+    let (interval, text) = if n == 100 && rng.chance(1, 2) {
+        (
+            json!({"value": 0.1, "unit": "km"}),
+            (*rng.pick(&["0,1 km", "0.1 km"])).to_string(),
+        )
+    } else {
+        let text = match rng.below(3) {
+            0 => format!("{n} m"),
+            1 => format!("{n} mètres"),
+            _ => format!("{n}m"),
+        };
+        (json!({"value": n, "unit": "m"}), text)
+    };
+    let (body, q) = match rng.below(9) {
+        0 => (
+            format!("Génère les courbes de niveau {of} tous les {text}"),
+            false,
+        ),
+        1 => (
+            format!("Dessine les isolignes d'altitude {of} avec une équidistance de {text}"),
+            false,
+        ),
+        2 => (
+            format!("Fais les lignes de niveau {of}, une tous les {text}"),
+            false,
+        ),
+        3 => (
+            format!("Extrais les courbes de niveau {of} à {text} d'intervalle"),
+            false,
+        ),
+        4 => (
+            format!("Produis des courbes d'altitude à partir {of} tous les {text}"),
+            false,
+        ),
+        5 => (format!("Trace les courbes de niveau {of} à {text}"), false),
+        6 => (
+            format!("Courbes de niveau {of}, équidistance {text}"),
+            false,
+        ),
+        7 => (
+            format!("Peux-tu tracer les courbes de niveau {of} tous les {text}"),
+            true,
+        ),
+        _ => (
+            format!("Ajoute les courbes de niveau {of} avec un pas de {text}"),
+            false,
+        ),
+    };
+    let request = finish(rng, &body, q, false);
+    let step = json!({"command": "raster.contour",
+        "params": {"raster": dem.source, "interval": interval}});
+    Some(example(
+        "courbes_de_niveau",
+        b,
+        rng,
+        request,
+        calls(vec![step]),
+    ))
+}
+
 /// Après 5.49 (RA09 d'Annecy, « tampon autour des routes » sans distance : 10 m inventés) : un
 /// tampon dont la demande n'écrit aucune distance → la question de la distance, jamais une
 /// distance devinée. Mêmes verbes que `tampon`, son contrepoids ; jamais la tête « Fais un
@@ -9367,7 +9447,6 @@ fn export_pdf_echelle_format(rng: &mut Rng) -> Option<Example> {
 // commande voisine en substitut. `ABSENT_FUNCTIONS` (tests) donne pour chacun des mots-clés
 // qu'aucun identifiant du registre ne contient : le jour où une commande les porte, le refus est
 // faux et le test le nomme.
-const NO_CONTOUR: &str = "Aucune commande du catalogue ne trace de courbes de niveau.";
 // `geocode.ban` (ticket 16) géocode un fichier CSV d'adresses, jamais une adresse isolée : le refus
 // ne vise plus que l'adresse seule. Famille à revoir au ré-entraînement (ticket 17).
 const NO_GEOCODING: &str =
@@ -9414,7 +9493,6 @@ const KNOWN_REFUSALS: &[&str] = &[
     NO_LAYER_CHOICE,
     NO_VISIBILITY_STATS,
     NO_MULTI_ORIGIN,
-    NO_CONTOUR,
     NO_GEOCODING,
     NO_SHORTEST_PATH,
     NO_IMAGE_EXPORT,
@@ -9459,7 +9537,6 @@ const OTHER_REFUSALS: &[(&str, &[&str])] = &[
 /// registre (minuscules ASCII).
 #[cfg(test)]
 const ABSENT_FUNCTIONS: &[(&str, &[&str])] = &[
-    (NO_CONTOUR, &["contour", "isoline"]),
     (NO_GEOCODING, &["single_address", "address_lookup"]),
     (NO_SHORTEST_PATH, &["shortest_path", "network"]),
     (NO_IMAGE_EXPORT, &["image", "png"]),
@@ -9477,7 +9554,7 @@ const ABSENT_FUNCTIONS: &[(&str, &[&str])] = &[
 ];
 
 /// Ce que le registre ne fait pas (leçon de la remesure : les refus neufs des barres élargies) :
-/// courbes de niveau, géocodage, plus court chemin sur un réseau, export en image, durée de trajet,
+/// géocodage, plus court chemin sur un réseau, export en image, durée de trajet,
 /// crue, écoulements, bassin versant, déblai et remblai, lissage, rugosité, couleurs par catégories,
 /// étiquettes, opacité, symboles proportionnels. Un refus affirmatif, aucun appel, jamais une
 /// commande voisine en substitut. Les étiquettes ne se refusent que sur une couche seule : « le
@@ -9491,10 +9568,12 @@ fn refus_fonction_absente(rng: &mut Rng) -> Option<Example> {
         return presque_refus(rng);
     }
     let mut b = Builder::new();
-    let branch = rng.below(15);
+    // La branche 0 (courbes de niveau) a disparu avec `raster.contour` (ticket 26) : les autres gardent
+    // leur numéro et leur compte.
+    let branch = 1 + rng.below(14);
     // Les fonctions du terrain ont un MNT dans l'inventaire : le refus n'est pas celui d'un MNT
     // absent.
-    let of = if matches!(branch, 0 | 5 | 6 | 7 | 8 | 9 | 10) {
+    let of = if matches!(branch, 5..=10) {
         let epsg = terrain_epsg(rng);
         let dem = b.add_dem(rng, epsg);
         dem_words(rng, &dem)
@@ -9502,19 +9581,6 @@ fn refus_fonction_absente(rng: &mut Rng) -> Option<Example> {
         String::new()
     };
     let (body, q, reason): (String, bool, &str) = match branch {
-        0 => {
-            let n = *rng.pick(&[2u64, 5, 10, 20, 25, 50]);
-            let body = match rng.below(5) {
-                0 => format!("Génère les courbes de niveau {of}"),
-                1 => {
-                    format!("Dessine les isolignes d'altitude {of} avec une équidistance de {n} m")
-                }
-                2 => format!("Fais les lignes de niveau {of}, une tous les {n} mètres"),
-                3 => format!("Extrais les courbes de niveau {of} à {n} m d'intervalle"),
-                _ => format!("Produis des courbes d'altitude à partir {of}"),
-            };
-            (body, false, NO_CONTOUR)
-        }
         1 => {
             b.distract(rng, 2, vector);
             let commune = *rng.pick(COMMUNES);
@@ -12815,6 +12881,41 @@ mod tests {
             .iter()
             .find(|l| l["kind"] == "raster" && l["source"] == dem)
             .unwrap_or_else(|| panic!("MNT « {dem} » absent : {}", e.request))
+    }
+
+    #[test]
+    fn contour_lines_are_planned_with_the_written_interval() {
+        // Ticket 26 : le MNT par son `source`, l'équidistance écrite dans la demande, jamais devinée.
+        let examples = valid(courbes_de_niveau, 300);
+        let (mut metres, mut km) = (0, 0);
+        for e in &examples {
+            let calls = e.expected["calls"].as_array().unwrap();
+            assert_eq!(calls.len(), 1, "{}", e.request);
+            assert_eq!(calls[0]["command"], "raster.contour", "{}", e.request);
+            let params = &calls[0]["params"];
+            let raster = params["raster"].as_str().unwrap();
+            assert!(
+                e.inventory["layers"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|l| l["kind"] == "raster" && l["source"] == raster),
+                "MNT « {raster} » absent : {}",
+                e.request
+            );
+            let r = e.request.replace(',', ".").to_lowercase();
+            let value = params["interval"]["value"].as_f64().unwrap();
+            let written = format!("{}", value);
+            assert!(r.contains(&written), "{written} absent : {}", e.request);
+            match params["interval"]["unit"].as_str().unwrap() {
+                "m" => metres += 1,
+                _ => {
+                    km += 1;
+                    assert!(r.contains("km"), "{}", e.request);
+                }
+            }
+        }
+        assert!(metres > 0 && km > 0);
     }
 
     #[test]

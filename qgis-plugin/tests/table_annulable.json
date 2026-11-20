@@ -13,5 +13,6 @@
   "data.convert": true,
   "data.convert_raster": true,
   "raster.zonal_statistics": true,
+  "raster.contour": true,
   "layer.remove": false
 }

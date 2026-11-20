@@ -602,6 +602,43 @@ fn a_geocoding_replays_identically_then_a_changed_address_file_diverges() {
     let _ = fs::remove_dir_all(dir);
 }
 
+struct ContourQgis;
+impl Executor for ContourQgis {
+    fn execute(&self, id: &str, p: Value) -> Result<Value, RegistryError> {
+        assert_eq!(id, "raster.contour");
+        // Le noyau a résolu le chemin du MNT en absolu et normalisé l'équidistance en mètres.
+        assert!(Path::new(p["raster"].as_str().unwrap()).is_absolute());
+        fs::write(p["out"].as_str().unwrap(), "gpkg").unwrap();
+        Ok(json!({"layer_id": "c_1", "name": "courbes", "feature_count": 7, "crs": "EPSG:2154"}))
+    }
+}
+
+#[test]
+fn a_contour_call_journals_its_dem_as_an_input() {
+    // `raster.contour` (epic 10, entrée 26) : le MNT est un `path_param` (taille et date au journal,
+    // AD-11), le chemin journalisé reste relatif au projet.
+    let (dir, project, _) = temp_project();
+    fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/mnt-plan-incline-2154.tif"),
+        dir.join("mnt.tif"),
+    )
+    .unwrap();
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(ContourQgis);
+    s.call(
+        "raster.contour",
+        json!({"raster": "mnt.tif", "interval": {"value": 5, "unit": "m"}}),
+    )
+    .unwrap();
+    let l = lines(&s);
+    assert_eq!(l[0]["params"]["raster"], "mnt.tif");
+    assert_eq!(l[0]["inputs"].as_array().map(Vec::len), Some(1));
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
 #[test]
 fn an_output_with_other_bytes_diverges() {
     let (dir, project, _) = temp_project();
