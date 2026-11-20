@@ -651,6 +651,8 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-re-entrainement-groupe-commandes-de-terrain-et-export-a-l-ec-plan.md`
   summary: Au prochain ré-entraînement groupé, renforcer deux refus du générateur : terrain puis statistique par zone (`NO_RASTER_STATS`, surtout après un champ de vision) et point de terrain écrit dans un autre système que le MNT (`NO_TERRAIN_CRS`, surtout en WGS84).
   evidence: 5.41, entraînement n°2 : `plan_reel` 23/25, S24 (champ de vision puis moyenne par commune → plan du seul champ de vision) et S25 (point WGS84 sur MNT Lambert-93 → champ de vision en EPSG:4326, refusé ensuite par le noyau `terrain.crs_mismatch`). Le jeu n'en contient que quelques dizaines sur 8 000. Décision du propriétaire du 2026-11-05 : accepter le modèle à 23/25 et reporter ce renfort.
+  status: close pour la moitié « statistique par zone », 2026-11-20, entrée 12 (`epic-catalogue-etendu-qgis/story-statistiques-zonales-d-un-raster-altitudes-d-un-mnt-par-poly-plan.md`)
+  resolution: `raster.zonal_statistics` existe ; `NO_RASTER_STATS` est retiré du générateur (famille `statistiques_raster_par_zone`, S15 et S23 attendent un plan dans `plan_reel`, seul S24 reste un refus, `NO_VISIBILITY_STATS`). Le renfort du refus du point hors système (`NO_TERRAIN_CRS`) reste reporté. Le modèle n'est ré-entraîné qu'au ticket 17.
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-re-entrainement-groupe-commandes-de-terrain-et-export-a-l-ec-plan.md`
   summary: Au prochain ré-entraînement groupé, élargir `foreign_point` (point UTM d'un autre fuseau que le MNT, forme « X / Y (WGS84) » de S25) et ajouter à `terrain_reel` des phrases de refus (point hors système, terrain puis statistique) et une ligne de vue au système écrit une fois.
@@ -1029,6 +1031,8 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-generateur-apres-5-49.md`
   summary: `refus_stats_raster`, branche du champ de vision puis statistique (venue de 5.41) : une demande à un mot de S24 (« de hauteur » contre « de haut ») reste possible au tirage.
   evidence: relecture adversariale du 2026-11-11 (graines 3 à 10) ; `recouvrement` ne compare qu'à un nombre ou une commune près.
+  status: close, 2026-11-20, entrée 12 (`epic-catalogue-etendu-qgis/story-statistiques-zonales-d-un-raster-altitudes-d-un-mnt-par-poly-plan.md`)
+  resolution: `refus_stats_raster` est retiré ; sa branche du champ de vision, réécrite dans `statistiques_raster_par_zone`, passe par `recouvrement` (graine de foyer) sans copie de S24.
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-generateur-apres-5-49.md`
   summary: `dissolve_words` accorde au masculin (« fusionné en une seule zone ») après « une zone tampon ».
   evidence: relecture adversariale du 2026-11-11 : « Dessine une zone tampon autour de la couche des gares, fusionné en une seule zone. » ; antérieur, partagé par `tampon`.
@@ -1262,3 +1266,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-couches-raster-ouverture-et-inventaire-d-un-mnt-plan.md`
   summary: `width` et `height` des rasters de `project.inventory` sont dans `layers[]` : `LATE_FIELDS` (champs de premier niveau) ne les couvre pas pour une ancienne ligne d'inventaire contenant un raster (non vérifié, gravité low à medium si le rejeu compare l'inventaire).
   evidence: `core/src/journal/summary.rs` `same_result` ne retire que des clés de premier niveau ; à trancher en rejouant une ligne `project.inventory` écrite avant 10.20 avec un raster.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-jeu-de-phrases-reelles-et-mesure-de-couverture-de-depart-plan.md`
+  summary: Diagnostiquer les baisses de plan_reel de 44/48 à 41/48 hors S15 et S23 (PL04, PL08, PL17, PL22, S24).
+  evidence: Le rapport de départ de 10.8 attribue deux points à S15 et S23 (attendu devenu raster.zonal_statistics) et laisse le reste non analysé ; medium non vérifié, à lever avant la ré-épreuve de 10.17 en relançant plan_reel sur le modèle installé et en comparant phrase par phrase au 2026-11-16.

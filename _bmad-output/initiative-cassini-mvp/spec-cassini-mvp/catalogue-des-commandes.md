@@ -377,7 +377,7 @@ donne l'esquisse.
 | `analysis.sum_line_lengths` | faite | qgis | epic 10, entrée 11 |
 | `analysis.join_table` | faite | qgis | epic 10, entrée 23 |
 | `analysis.dissolve` | faite | qgis | epic 10, entrée 24 |
-| `raster.zonal_statistics` | planifiée | qgis | epic 10, entrée 12 |
+| `raster.zonal_statistics` | faite | qgis | epic 10, entrée 12 |
 | `raster.polygonize` | planifiée | qgis | epic 10 (entrée ajoutée après la 12) |
 | `raster.align` | planifiée | qgis | epic 10 (entrée ajoutée après la 12) |
 | `raster.contour` | planifiée | qgis | epic 10, entrée 26 |
@@ -2091,15 +2091,30 @@ d'AD-24) ; aucun calcul de `terrain.*` n'est refait. Chaque ligne de `rows` port
 | `raster` | `RasterPath` | oui | une bande | Raster à résumer. |
 | `layer_id` | chaîne | oui | — | Couche de polygones. |
 | `label_field` | chaîne | non | — | Champ qui nomme chaque polygone ; sinon son rang. |
+| `unit` | chaîne | non | — | Unité des valeurs si le fichier ne la porte pas ; sinon celle du fichier, à défaut `m`. Obligatoire quand `raster` est une référence `step:k` : le noyau refuse le plan sans elle (`plan.missing_unit`), par exemple « ° » ou « % » pour une pente. |
 | `out` | chaîne | non | — | Fourni par le noyau. |
 
 Résultat : `layer_id`, `name`, `crs`, `feature_count`, `rows`, `truncated`.
 
+Livrée par l'entrée 12 de l'epic 10 (`core/src/commands/raster_zonal_statistics.rs`, ligne de la
+table `ALGORITHMS` de `qgis-plugin/cassini_qgis/analysis.py`, `native:zonalstatisticsfb`, qui
+écrit une nouvelle couche et ne touche ni le raster ni la couche d'entrée). Le texte des tickets
+12 et 20 (« identifiant de couche » pour le raster) était périmé : le raster se désigne par un
+`RasterPath`, `layer.add{raster}` ne sert qu'à l'afficher. Un polygone hors de l'emprise du
+raster reste une ligne, sans valeur. Le raster et la couche peuvent avoir des systèmes de
+coordonnées différents : QGIS reprojette les polygones (résultat exact, constaté par la sonde) et
+la couche produite garde le système des polygones. Un raster désigné par un chemin du projet
+garde `m` pour unité par défaut ; un raster `step:k` sans `unit` est refusé par le noyau
+(`plan.missing_unit`). Erreurs : `layer.not_found`,
+`layer.not_vector`, `analysis.bad_params` (couche non polygonale, raster sans système, raster à
+plusieurs bandes), `analysis.unknown_field`, `layer.invalid_source`, `analysis.failed`.
+
 ```json fiche
-{"id": "raster.zonal_statistics", "status": "planifiee", "runs_in": "qgis", "dictated_by_core": false,
+{"id": "raster.zonal_statistics", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
  "params": {"raster": {"type": "RasterPath", "required": true},
             "layer_id": {"type": "string", "required": true},
             "label_field": {"type": "string", "required": false},
+            "unit": {"type": "string", "required": false},
             "out": {"type": "string", "required": false}},
  "result": ["crs", "feature_count", "layer_id", "name", "rows", "truncated"]}
 ```

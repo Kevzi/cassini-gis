@@ -1672,6 +1672,66 @@
     }
   },
   {
+    "id": "ZS1",
+    "command": "raster.zonal_statistics",
+    "phrase": "Quelle est l'altitude la plus haute et la plus basse dans chaque commune ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "raster.zonal_statistics",
+          "params": {
+            "raster": "donnees/mnt_5m.tif",
+            "layer_id": "communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "ZS2",
+    "command": "raster.zonal_statistics",
+    "phrase": "Pour chaque commune, donne la hauteur moyenne du terrain, en affichant son nom.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "raster.zonal_statistics",
+          "params": {
+            "raster": "donnees/mnt_5m.tif",
+            "layer_id": "communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946",
+            "label_field": "nom"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "ZS3",
+    "command": "raster.zonal_statistics",
+    "phrase": "J'aimerais la pente moyenne de chaque commune, en degrés.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "terrain.slope",
+          "params": {
+            "dem": "donnees/mnt_5m.tif",
+            "unit": "degrees"
+          }
+        },
+        {
+          "command": "raster.zonal_statistics",
+          "params": {
+            "raster": "step:1",
+            "layer_id": "communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946",
+            "unit": "°"
+          }
+        }
+      ]
+    }
+  },
+  {
     "id": "WO1",
     "command": "raster.weighted_overlay",
     "phrase": "Combine la note d'accessibilité avec le poids 3 et le calme avec le poids 1.",

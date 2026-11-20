@@ -157,6 +157,13 @@ def _count_points(pairs, loaded_count, weight=None):
     return lambda: _analysis(ta.CountPointsInPolygonTest, setup)
 
 
+def _raster_zonal(stats, loaded_count):
+    return lambda: _analysis(
+        ta.RasterZonalStatisticsTest,
+        lambda t: (setattr(t.backend, "stats", stats), setattr(t.backend, "loaded_count", loaded_count), (t.backend, t.params()))[2],
+    )
+
+
 def _dissolve():
     t = ta.DissolveTest("setUp")
     t.setUp()
@@ -451,6 +458,15 @@ def producers():
         ("analysis.count_points_in_polygon", "pondéré"): _count_points([("Nord", 5), ("Sud", 3)], 2, "poids"),
         ("analysis.count_points_in_polygon", "tronqué"): _count_points([(str(i), i) for i in range(150)], 150),
         ("analysis.count_points_in_polygon", "sans zone"): _count_points([], 0),
+        ("raster.zonal_statistics", "altitudes par polygone"): _raster_zonal(
+            [("Nord", {"mean": 95.5, "min": 80.0, "max": 120.0}), ("Sud", {"mean": 82.25, "min": 78.0, "max": 90.0})], 2
+        ),
+        ("raster.zonal_statistics", "polygone hors du raster"): _raster_zonal(
+            [("Loin", {"mean": None, "min": None, "max": None})], 1
+        ),
+        ("raster.zonal_statistics", "tronqué"): _raster_zonal(
+            [(str(i), {"mean": 10.0, "min": 1.0, "max": 20.0}) for i in range(150)], 150
+        ),
         ("data.convert", "GeoPackage"): _convert,
         ("data.convert_raster", "avec EPSG"): _convert_raster(2154),
         ("data.convert_raster", "sans EPSG"): _convert_raster(None),

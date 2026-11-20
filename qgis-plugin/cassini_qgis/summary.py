@@ -288,6 +288,16 @@ def _count_points(lang, p, r, names):
     return text
 
 
+def _raster_zonal(lang, p, r, names):
+    """Statistiques d'un raster par polygone : le raster est un fichier (ou `step:k`), les zones une couche."""
+    value = p.get("raster")
+    if not isinstance(value, str) or not value:
+        raise _Unreadable()
+    raster = names.layer(value) if _STEP_REF.match(value) else file_name(value)
+    text = texts.tr(lang, "sum_raster_zonal", raster=raster, layer=names.layer(p.get("layer_id")))
+    return text + (_out_layer(lang, r) if r else "")
+
+
 def _nearest(lang, p, r, names):
     text = texts.tr(
         lang,
@@ -1030,6 +1040,7 @@ _SENTENCES = {
     "analysis.select_by_attribute": _select,
     "analysis.isochrone": _isochrone,
     "analysis.count_points_in_polygon": _count_points,
+    "raster.zonal_statistics": _raster_zonal,
     "analysis.nearest": _nearest,
     "analysis.dissolve": _dissolve,
     "analysis.join_table": _join_table,

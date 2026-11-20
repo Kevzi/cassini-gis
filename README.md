@@ -136,6 +136,7 @@ Une couche que Cassini ne reconnaît pas garde son style : il ne devine pas.
 | `terrain.peaks` | points hauts, par proéminence |
 | `terrain.cost_distance`, `terrain.least_cost_path` | coût de déplacement cumulé, chemin de moindre coût |
 | `raster.reclassify`, `raster.weighted_overlay` | reclassement, superposition pondérée |
+| `raster.zonal_statistics` | moyenne, minimum et maximum d'un raster (altitudes d'un MNT, pente) par polygone, avec l'unité ; le raster se désigne par son chemin (ou `step:k`), les polygones par leur couche ; une couche nouvelle |
 | `coord.convert` | conversion d'une coordonnée entre WGS84, UTM et MGRS |
 | `geo.distance_azimuth`, `geo.destination_point`, `geo.bearing_intersection` | géodésie : distance et azimut, point d'arrivée, recoupement |
 | `map.topographic_style` | couleurs de la carte IGN au 1:25 000 et du standard CNIG des PLU, couches rangées par thème |

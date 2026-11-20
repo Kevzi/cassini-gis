@@ -323,6 +323,18 @@ impl Registry {
                                 ),
                             ));
                         }
+                        // Les valeurs d'un raster d'étape n'ont pas d'unité connue : les statistiques
+                        // par zone la demandent, au lieu de la supposer en mètres.
+                        let unit_given = call.params.get("unit").is_some_and(|u| !u.is_null());
+                        if spec.id == "raster.zonal_statistics" && !unit_given {
+                            return Err(error(
+                                "plan.missing_unit",
+                                step,
+                                format!(
+                                    "Le raster de l'étape {k} n'a pas d'unité connue : donnez celle de ses valeurs dans `unit` (par exemple « ° » ou « % » pour une pente)."
+                                ),
+                            ));
+                        }
                         continue;
                     }
                     self.check_reference(calls, step, spec, name, &expected, k, &field)?;

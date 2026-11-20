@@ -33,7 +33,7 @@
  },
  {
   "id": "CV03",
-  "phrase": "Combien y a-t-il de gares dans chaque commune ?",
+  "phrase": "Dénombre les gares situées dans chaque commune.",
   "source": {
    "type": "doc",
    "ref": "QGIS Training Manual (docs.qgis.org), CC BY-SA 4.0",
@@ -322,7 +322,7 @@
  },
  {
   "id": "CV21",
-  "phrase": "Retire la couche des routes du projet.",
+  "phrase": "Enlève du projet la couche des routes.",
   "source": {
    "type": "doc",
    "ref": "Documentation QGIS en français (docs.qgis.org/fr), CC BY-SA 4.0",
@@ -338,7 +338,7 @@
  },
  {
   "id": "CV22",
-  "phrase": "Calcule l'exposition des versants.",
+  "phrase": "Quelle est l'orientation des versants ?",
   "source": {
    "type": "forum",
    "ref": "gis.stackexchange.com, question récurrente, CC BY-SA 4.0 ; thème repris, formulation réécrite",
@@ -410,9 +410,9 @@
    "treatment": "paraphrase"
   },
   "expected": {
-   "kind": "refusal",
-   "missing": [
-    "zonal"
+   "kind": "plan",
+   "commands": [
+    "raster.zonal_statistics"
    ]
   }
  },

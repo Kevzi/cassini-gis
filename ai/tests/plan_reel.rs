@@ -6,12 +6,14 @@
 //! Les 25 phrases de l'épreuve (`sentences.json`) et l'inventaire de l'épreuve sont lus tels quels,
 //! jamais modifiés. Les plans attendus sont réécrits pour le registre réel, chaînes `step:k.champ`
 //! comprises. Là où le registre réel n'a pas la commande (cadrage,
-//! statistiques sur un raster) ou ne sait pas porter une option demandée (papier A3, couches
+//! moyenne d'un champ de vision par zone) ou ne sait pas porter une option demandée (papier A3, couches
 //! nommées du PDF), le refus est la réponse attendue. Depuis 5.41, le terrain a ses commandes
 //! (ticket 4.6) : S20 (champ de vision), S21 (ligne de vue) et S22 (pente) attendent un plan sur
 //! la `source` du MNT ; S21 écrit le système une seule fois pour deux points, ce que le garde-fou
-//! des coordonnées accepte depuis le ticket 4.10 (décision du propriétaire, 2026-11-05) ; S23 et
-//! S24, terrain puis moyenne par commune, restent des refus (statistiques sur un raster).
+//! des coordonnées accepte depuis le ticket 4.10 (décision du propriétaire, 2026-11-05) ; S15 et S23
+//! attendent depuis le ticket 12 (epic 10) `raster.zonal_statistics` (altitude, puis pente par
+//! `step:1`) ; S24, champ de vision puis moyenne par commune, reste un refus (le raster de
+//! visibilité n'a pas d'unité que la commande sache écrire).
 //! S25, un point écrit en WGS84 sur un MNT en Lambert-93, attend depuis 11.16 le plan
 //! `data.transform_point` vers le système du MNT, puis `terrain.viewshed` sur `step:1.point`.
 //! Depuis 11.23, c'est le **plan complété** qui est mesuré : le modèle recopie le point tel que
@@ -62,6 +64,7 @@ const PLU: &str = "plu_zonage_a81d5c06_2e9f_4a37_b6c4_5f13e07d92a8";
 const GARES: &str = "gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1";
 const ROUTES: &str = "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67";
 const BATIMENTS: &str = "batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649";
+const COMMUNES: &str = "communes_6e1f83a5_9d20_4b74_a3c8_1f5e0b7d2946";
 
 fn select(layer: &str, field: &str, op: &str, value: &str) -> Value {
     json!({"command": "analysis.select_by_attribute",
@@ -153,7 +156,18 @@ fn expected(id: &str) -> Want {
         }
         // Le retrait d'une couche du projet, jamais de son fichier (10.27).
         "S04" => json!([{"command": "layer.remove", "params": {"layer_id": ROUTES}}]),
-        // S10 S15 S18 S23 S24 : refus.
+        // Altitude moyenne et maximale par commune : `raster.zonal_statistics` sur la `source` du MNT
+        // (ticket 12, epic 10) ; la commande rend la moyenne, le minimum et le maximum.
+        "S15" => json!([{"command": "raster.zonal_statistics",
+            "params": {"raster": MNT, "layer_id": COMMUNES}}]),
+        // La pente en degrés puis sa moyenne par commune : `terrain.slope`, puis la statistique du
+        // raster de l'étape 1 (`step:1`), dont la commande ne connaît pas l'unité : elle est dite.
+        "S23" => json!([
+            {"command": "terrain.slope", "params": {"dem": MNT, "unit": "degrees"}},
+            {"command": "raster.zonal_statistics",
+                "params": {"raster": "step:1", "layer_id": COMMUNES, "unit": "°"}}
+        ]),
+        // S10 S18 S24 : refus.
         _ => return Want::Refusal,
     };
     Want::Plan(plan)
@@ -181,13 +195,13 @@ fn epreuve() -> Vec<Value> {
 }
 
 /// L'attendu d'un refus de l'épreuve, avec ce que le registre n'a pas (écrit ici, l'épreuve
-/// restant gelée) : le cadrage de la carte (S10), les statistiques d'un raster par polygone,
-/// identifiant réservé `raster.zonal_statistics` (S15, S23, S24), les couches nommées d'un
+/// restant gelée) : le cadrage de la carte (S10), la moyenne d'un champ de vision par commune (S24 :
+/// le raster de visibilité n'a pas d'unité que la commande sache écrire), les couches nommées d'un
 /// export PDF (S18, option `layers`).
 fn refusal_of(id: &str) -> Value {
     match id {
         "S10" => json!({"kind": "refusal", "missing": ["zoom", "frame", "cadr"]}),
-        "S15" | "S23" | "S24" => json!({"kind": "refusal", "missing": ["raster.zonal"]}),
+        "S24" => json!({"kind": "refusal", "missing": ["visibility_stat"]}),
         "S18" => json!({"kind": "refusal", "missing_params": ["layout.export_pdf:layers"]}),
         _ => panic!("{id} : refus de l'épreuve sans ce qui manque"),
     }
@@ -476,13 +490,30 @@ fn sentence(id: &str) -> String {
 }
 
 #[test]
-fn the_terrain_sentences_expect_plans_except_the_raster_statistics() {
+fn the_terrain_sentences_expect_plans_except_the_visibility_statistics() {
     assert!(matches!(expected("S20"), Want::Plan(_)));
     assert!(matches!(expected("S21"), Want::Plan(_)));
     assert!(matches!(expected("S22"), Want::Plan(_)));
     assert!(matches!(expected("S25"), Want::Plan(_)));
-    assert_eq!(expected("S23"), Want::Refusal);
+    // Ticket 12 : l'altitude et la pente par commune sont des plans ; la moyenne d'un champ de
+    // vision par commune reste un refus.
+    assert!(matches!(expected("S15"), Want::Plan(_)));
+    assert!(matches!(expected("S23"), Want::Plan(_)));
     assert_eq!(expected("S24"), Want::Refusal);
+}
+
+#[test]
+fn the_right_zonal_statistics_for_s15_and_s23_pass_the_guard() {
+    // La statistique de la pente lit `step:1`, le raster écrit par `terrain.slope` ; le plan juste
+    // passe la validation du registre réel.
+    let registry = Registry::standard();
+    for id in ["S15", "S23"] {
+        let Want::Plan(calls) = expected(id) else {
+            panic!("{id} attend un plan");
+        };
+        let plan: Plan = serde_json::from_value(json!({"kind": "calls", "calls": calls})).unwrap();
+        assert_eq!(registry.check_plan(&plan), Ok(()), "{id}");
+    }
 }
 
 #[test]

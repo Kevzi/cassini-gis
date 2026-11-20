@@ -237,18 +237,20 @@ pub static FAMILIES: &[Family] = &[
     },
     // Essais GPU après 11.23 : 7 → 9, le PDF qui choisit ses couches et la statistique
     // d'altitude par zone y prenant plus de place. Après 5.49 : 9 → 6, la statistique sur un
-    // raster sortie dans `refus_stats_raster` ; les autres branches gardent leur compte.
+    // raster sortie dans sa propre famille (aujourd'hui `statistiques_raster_par_zone`) ; les
+    // autres branches gardent leur compte.
     Family {
         name: "refus_hors_registre",
         weight: 6,
         make: refus_hors_registre,
     },
-    // Après 5.49 (S15, S23, S24 de `plan_reel`) : le refus des statistiques par zone d'un
-    // raster reculait. Famille à part, plus lourde (≈ 115 exemples contre ≈ 69 avant).
+    // Ticket 12 (epic 10) : `raster.zonal_statistics`. Reprend le poids de `refus_stats_raster`
+    // (5), la famille de refus que cette commande rend fausse : altitude par zone sur le MNT,
+    // pente par zone en deux étapes (`terrain.slope`, puis `step:1`).
     Family {
-        name: "refus_stats_raster",
+        name: "statistiques_raster_par_zone",
         weight: 5,
-        make: refus_stats_raster,
+        make: statistiques_raster_par_zone,
     },
     // Les trois commandes de terrain (4.6) : MNT désigné par sa source, points écrits.
     Family {
@@ -4559,14 +4561,17 @@ const NO_PRINTING: &str = "L'export PDF du catalogue écrit un fichier PDF : il 
 pub const NO_CHOSEN_COLOR: &str = "Le catalogue ne pose pas une couleur choisie sur une couche : il met les couches aux couleurs topographiques, ou colore une couche en dégradé selon un champ numérique.";
 /// Constat de 11.16 (S18) : l'export met en page la carte affichée, sans choisir ses couches.
 const NO_LAYER_CHOICE: &str = "L'export PDF du catalogue met en page la carte telle qu'elle est affichée : il ne choisit pas les couches à y montrer.";
-const NO_RASTER_STATS: &str = "Aucune commande du catalogue ne calcule de statistiques sur un raster : le décompte par zone ne compte que des points.";
+/// Ticket 12 : `raster.zonal_statistics` rend l'altitude d'un MNT ou une pente par zone, avec
+/// leur unité ; la moyenne d'un champ de vision par zone (une part visible, sans unité) reste
+/// refusée.
+const NO_VISIBILITY_STATS: &str = "Le catalogue ne rend des statistiques par zone que pour les altitudes d'un MNT et sa pente : la moyenne d'un calcul de visibilité par zone n'a pas d'unité qu'il sache écrire.";
 /// Décision du propriétaire (2026-10-23, option a) : « de chaque gare », « de toutes les
 /// gares », « des gares » ; l'isochrone du catalogue part d'un seul point en coordonnées.
 pub const NO_MULTI_ORIGIN: &str = "L'isochrone du catalogue part d'un seul point donné en coordonnées : elle ne se calcule pas depuis plusieurs lieux à la fois.";
 
 /// Ce que le registre ne sait pas encore faire : un refus affirmatif, jamais un plan de
-/// substitution. Les statistiques sur un raster en sont sorties après 5.49
-/// (`refus_stats_raster`). Le point de
+/// substitution. Les statistiques sur un raster n'y sont plus depuis le ticket 12 de l'epic 10
+/// (`statistiques_raster_par_zone`). Le point de
 /// terrain écrit dans un autre système que le MNT n'y est plus depuis 11.12 :
 /// `data.transform_point` le reprojette (`terrain_autre_systeme`). Le seuil sur la pente non
 /// plus depuis 11.12, lot 2a : `raster.reclassify` le fait (`pente_seuil`). Ni le format A3, A0
@@ -4575,8 +4580,8 @@ pub const NO_MULTI_ORIGIN: &str = "L'isochrone du catalogue part d'un seul point
 fn refus_hors_registre(rng: &mut Rng) -> Option<Example> {
     let mut b = Builder::new();
     // Essais GPU après 11.23 : le PDF qui choisit ses couches (1 sur 12 avant) a plus de poids.
-    // Après 5.49, la statistique sur un raster (2 sur 6) est sortie dans `refus_stats_raster` :
-    // les quatre branches restantes, une sur quatre au poids 6, gardent chacune leur compte.
+    // Après 5.49, la statistique sur un raster (2 sur 6) est sortie du refus : les quatre
+    // branches restantes, une sur quatre au poids 6, gardent chacune leur compte.
     let roll = match rng.below(4) {
         0 => 0,
         1 => 1,
@@ -4727,13 +4732,11 @@ fn refus_hors_registre(rng: &mut Rng) -> Option<Example> {
     ))
 }
 
-/// Statistique d'altitude ou de pente : (adjectif au féminin, « sa moyenne »).
-const RASTER_STATS: &[(&str, &str)] = &[
-    ("moyenne", "sa moyenne"),
-    ("maximale", "son maximum"),
-    ("minimale", "son minimum"),
-    ("médiane", "sa médiane"),
-];
+/// Statistique d'un raster demandée, adjectif au féminin (« l'altitude moyenne »). La commande rend
+/// toujours la moyenne, le minimum et le maximum de chaque zone (`raster.zonal_statistics`) : la
+/// phrase en demande une, deux ou les trois, le plan est le même. Aucune médiane, que la commande
+/// ne calcule pas.
+const RASTER_STATS: &[&str] = &["moyenne", "maximale", "minimale"];
 
 /// « de chaque commune », « par commune », « pour chaque commune », « dans chaque commune ».
 fn per_zone(rng: &mut Rng, z: &Noun) -> String {
@@ -4745,25 +4748,38 @@ fn per_zone(rng: &mut Rng, z: &Noun) -> String {
     }
 }
 
-/// Après 5.49 : statistiques par zone d'un raster, refus entier (S15, S23, S24 de `plan_reel`
-/// reculaient au jeu de 5.49). Sortie de `refus_hors_registre`, plus lourde, et surtout faite de
-/// demandes courtes, à une seule proposition (décision D2 du 2026-11-11 : le motif
-/// `NO_RASTER_STATS` est gardé tel quel). Tournures : une statistique, deux à la fois
-/// (« l'altitude moyenne et maximale de chaque quartier »), « par commune », un dérivé du MNT
-/// (pente, champ de vision) puis sa statistique, ou la statistique du dérivé dite d'un trait
-/// (« la pente moyenne par commune »). Le MNT est toujours là : ce n'est pas lui qui manque.
-/// Jamais « Donne-moi l'altitude … par … » ni « Calcule la pente … puis sa … par … », tournures
-/// de S15 et S23.
-fn refus_stats_raster(rng: &mut Rng) -> Option<Example> {
+/// Ticket 12 (epic 10) : moyenne, minimum et maximum d'un raster par polygone,
+/// `raster.zonal_statistics`. Remplace `refus_stats_raster` (après 5.49), dont les demandes
+/// (S15, S23 de `plan_reel`) sont désormais des plans. Le raster est un `RasterPath` : le
+/// `source` du MNT recopié de l'inventaire pour une altitude, `step:1` pour la pente, calculée par
+/// `terrain.slope` à l'étape d'avant, son unité (`degrees` ou `percent`) écrite dans la demande et
+/// redite par `unit` (« ° » ou « % »). Les zones sont les communes ou les quartiers ; leur champ
+/// de nom se recopie de l'inventaire quand la demande l'affiche. Jamais « Donne-moi l'altitude … »
+/// ni « Calcule la pente … puis sa moyenne par … » ni « moyenne et maximale » : les tournures
+/// de S15 et S23, mesurées à part.
+fn statistiques_raster_par_zone(rng: &mut Rng) -> Option<Example> {
     let mut b = Builder::new();
-    b.add(rng, "mnt", &[], &[], &[]);
-    let zkey = *rng.pick(&["communes", "quartiers", "parcelles"]);
-    let zones = b.add(rng, zkey, &[], &[], &[]);
+    let epsg = terrain_epsg(rng);
+    let dem = b.add_dem(rng, epsg);
+    let zkey = *rng.pick(&["communes", "quartiers"]);
+    // Trois fois sur quatre, comme `decompte_par_zone` : le champ de nom se recopie de
+    // l'inventaire, à côté de ses leurres.
+    let labelled = rng.below(4) < 3;
+    let require: &[&str] = if labelled { &["nom"] } else { &[] };
+    if labelled && rng.chance(1, 2) {
+        b.wide_next();
+    }
+    let zones = b.add(rng, zkey, require, &[], &[]);
     let z = &zones.theme.noun;
-    let (stat, its) = *rng.pick(RASTER_STATS);
+    let stat = *rng.pick(RASTER_STATS);
     let per = per_zone(rng, z);
-    let (body, q) = match rng.below(10) {
-        // Une statistique, une proposition : la forme dominante.
+    let of = dem_words(rng, &dem);
+    // La pente écrite (unité de `terrain.slope`), pour les branches qui la demandent.
+    let (slope_unit_value, unit_text) = slope_unit(rng);
+    let mut slope = false;
+    let mut refused = false;
+    let (mut body, q) = match rng.below(13) {
+        // Une statistique d'altitude, une proposition : la forme dominante.
         0 => (format!("Calcule l'altitude {stat} {per}"), false),
         1 => (format!("Quelle est l'altitude {stat} {per}"), true),
         2 => match rng.below(3) {
@@ -4779,13 +4795,12 @@ fn refus_stats_raster(rng: &mut Rng) -> Option<Example> {
                 false,
             ),
         },
-        // Deux statistiques à la fois.
+        // Deux statistiques à la fois ; jamais « moyenne et maximale » (S15).
         4 | 5 => {
-            // Jamais « moyenne et maximale » : la paire de S15.
             let (a, c) = *rng.pick(&[
                 ("minimale", "maximale"),
                 ("moyenne", "minimale"),
-                ("moyenne", "médiane"),
+                ("maximale", "minimale"),
             ]);
             match rng.below(5) {
                 0 => (format!("Calcule l'altitude {a} et {c} {per}"), false),
@@ -4801,34 +4816,67 @@ fn refus_stats_raster(rng: &mut Rng) -> Option<Example> {
                 ),
             }
         }
-        // La statistique d'un dérivé du MNT, dite d'un trait.
+        // L'altitude, le MNT dit autrement.
         6 => match rng.below(3) {
-            0 => (format!("Calcule la pente {stat} {per}"), false),
-            1 => (format!("Quelle est la pente {stat} {per}"), true),
-            _ => (format!("Pente {stat} {per}"), false),
-        },
-        // Un dérivé du MNT puis sa statistique : refus entier, jamais un plan à moitié (5.41).
-        7 => match rng.below(3) {
             0 => (
-                format!(
-                    "Fais la carte des pentes {}, puis donne la pente {stat} de chaque {}",
-                    slope_unit(rng).1,
-                    z.sg
-                ),
+                format!("Calcule l'altitude {stat} {per} à partir {of}"),
                 false,
             ),
             1 => (
-                format!("Calcule la pente du MNT et sa valeur {stat} par {}", z.sg),
-                false,
+                format!("Peux-tu me donner l'altitude {stat} {of} {per}"),
+                true,
             ),
-            // Sans unité : « Pente du MNT en degrés et sa moyenne par commune » serait S23.
-            _ => (format!("Pente du MNT et {its} {per}"), false),
+            _ => (format!("Quelle est l'altitude {stat} {of} {per}"), true),
         },
-        // La forme de S24 (essai terrain-11-18) : point écrit, hauteur et rayon, puis la
-        // statistique par zone ; le plan entier reste refusé.
-        8 => {
+        // La pente d'un trait : `terrain.slope` puis la statistique de la pente (`step:1`).
+        7 | 8 => {
+            slope = true;
+            match rng.below(3) {
+                0 => (format!("Calcule la pente {stat} {per} {unit_text}"), false),
+                1 => (
+                    format!("Quelle est la pente {stat} {per} {unit_text}"),
+                    true,
+                ),
+                _ => (format!("Pente {stat} {per} {unit_text}"), false),
+            }
+        }
+        // La pente, puis sa statistique, dites en deux temps (jamais « Calcule la pente … puis sa
+        // moyenne par … », la phrase S23).
+        9 | 10 => {
+            slope = true;
+            match rng.below(3) {
+                0 => (
+                    format!(
+                        "Fais la carte des pentes {unit_text}, puis donne la pente {stat} de chaque {}",
+                        z.sg
+                    ),
+                    false,
+                ),
+                1 => (
+                    format!(
+                        "Calcule la pente du MNT {unit_text} et sa valeur {stat} par {}",
+                        z.sg
+                    ),
+                    false,
+                ),
+                _ => (
+                    format!(
+                        "Pour chaque {}, donne la pente {stat} du MNT {unit_text}",
+                        z.sg
+                    ),
+                    false,
+                ),
+            }
+        }
+        11 => (
+            format!("Quelle est l'altitude minimale, maximale et moyenne {per}"),
+            true,
+        ),
+        // La forme de S24 : un champ de vision depuis un point écrit, puis sa moyenne par zone.
+        // Refus entier : le raster de visibilité n'a pas d'unité (`NO_VISIBILITY_STATS`).
+        _ => {
+            refused = true;
             let o = lambert_origin(rng);
-            // Une forme « X / Y (système) » parmi les autres, sans figer celle de S24.
             let p = if rng.chance(1, 3) {
                 let x = o.point["x"].as_u64().unwrap();
                 let y = o.point["y"].as_u64().unwrap();
@@ -4849,33 +4897,52 @@ fn refus_stats_raster(rng: &mut Rng) -> Option<Example> {
             if rng.chance(2, 3) {
                 body.push_str(&radius_clause(rng).1);
             }
-            let tail = match rng.below(3) {
-                0 => format!(", puis {its} par {}", z.sg),
+            body.push_str(&match rng.below(3) {
+                0 => format!(", puis la part visible de chaque {}", z.sg),
                 1 => format!(", puis sa valeur {stat} par {}", z.sg),
-                _ => format!(", puis calcule {its} pour chaque {}", z.sg),
-            };
-            body.push_str(&tail);
+                _ => format!(", puis calcule la valeur {stat} pour chaque {}", z.sg),
+            });
             (body, false)
         }
-        _ => {
-            let p = lambert_origin(rng).place;
-            let tail = match rng.below(2) {
-                0 => format!("la part visible de chaque {}", z.sg),
-                _ => format!("fais la moyenne pour chaque {}", z.sg),
-            };
-            (
-                format!("Détermine ce qu'on voit depuis {p}, puis {tail}"),
-                false,
-            )
-        }
     };
+    if labelled && !refused {
+        body.push_str(&match rng.below(2) {
+            0 => format!(", en affichant le nom de chaque {}", z.sg),
+            _ => format!(", avec le nom des {}", z.pl),
+        });
+    }
     let request = finish(rng, &body, q, false);
+    if refused {
+        return Some(example(
+            "statistiques_raster_par_zone",
+            b,
+            rng,
+            request,
+            refusal(NO_VISIBILITY_STATS),
+        ));
+    }
+    let mut params = json!({"raster": dem.source, "layer_id": zones.id});
+    if labelled {
+        params["label_field"] = json!(zones.field("nom")?.name);
+    }
+    let mut steps = Vec::new();
+    if slope {
+        steps.push(json!({"command": "terrain.slope",
+            "params": {"dem": dem.source, "unit": slope_unit_value}}));
+        params["raster"] = json!("step:1");
+        params["unit"] = json!(if slope_unit_value == "degrees" {
+            "°"
+        } else {
+            "%"
+        });
+    }
+    steps.push(json!({"command": "raster.zonal_statistics", "params": params}));
     Some(example(
-        "refus_stats_raster",
+        "statistiques_raster_par_zone",
         b,
         rng,
         request,
-        refusal(NO_RASTER_STATS),
+        calls(steps),
     ))
 }
 
@@ -9342,7 +9409,7 @@ const KNOWN_REFUSALS: &[&str] = &[
     NO_PRINTING,
     NO_CHOSEN_COLOR,
     NO_LAYER_CHOICE,
-    NO_RASTER_STATS,
+    NO_VISIBILITY_STATS,
     NO_MULTI_ORIGIN,
     NO_CONTOUR,
     NO_GEOCODING,
@@ -9381,7 +9448,7 @@ const OTHER_REFUSALS: &[(&str, &[&str])] = &[
     (NO_PRINTING, &["print"]),
     (NO_CHOSEN_COLOR, &["color", "colour", "single_symbol"]),
     (NO_LAYER_CHOICE, &["visible_layers", "layer_visibility"]),
-    (NO_RASTER_STATS, &["raster_stat", "zonal_raster"]),
+    (NO_VISIBILITY_STATS, &["visibility_stat", "viewshed_stat"]),
     (NO_MULTI_ORIGIN, &["multi_origin", "isochrones"]),
 ];
 
@@ -12748,62 +12815,88 @@ mod tests {
     }
 
     #[test]
-    fn a_terrain_computation_then_a_statistic_per_zone_is_refused() {
-        // 5.41 : « la pente puis sa moyenne par commune » est un refus entier. Depuis après
-        // 5.49, dans `refus_stats_raster`.
-        let examples = valid(refus_stats_raster, 600);
-        let stats: Vec<&Example> = examples
-            .iter()
-            .filter(|e| e.expected["reason"] == NO_RASTER_STATS)
-            .collect();
-        assert!(stats.iter().any(|e| e.request.contains("pente")));
-        assert!(stats.iter().any(|e| e.request.contains("voit")));
-        // La forme de S24 : point écrit, puis la statistique par zone.
-        assert!(stats.iter().any(|e| e
-            .request
-            .starts_with("Calcule le champ de vision depuis le point")
-            && e.request.contains(", puis ")));
-        for e in stats {
-            assert_eq!(e.expected["kind"], "refusal", "{}", e.request);
-        }
-    }
-
-    #[test]
-    fn statistics_of_a_raster_per_zone_are_a_whole_refusal() {
-        // Après 5.49 : refus seul, MNT présent, deux statistiques à la fois, « par commune »,
-        // et un dérivé du MNT suivi de sa statistique, tous vus ; aucun autre motif.
-        let examples = valid(refus_stats_raster, 800);
-        let (mut two, mut per, mut derived, mut short) = (0, 0, 0, 0);
+    fn statistics_of_a_raster_per_zone_are_planned() {
+        // Ticket 12 : l'altitude par zone vise le MNT par son `source` ; la pente par zone est
+        // `terrain.slope` puis la statistique de `step:1`, avec l'unité de la pente.
+        let examples = valid(statistiques_raster_par_zone, 800);
+        let (mut altitude, mut slope, mut two, mut labelled, mut short) = (0, 0, 0, 0, 0);
+        let mut refused = 0;
         for e in &examples {
-            assert_eq!(e.expected, refusal(NO_RASTER_STATS), "{}", e.request);
+            if e.expected["kind"] == "refusal" {
+                // La part visible d'un champ de vision par zone : refus entier, MNT présent.
+                refused += 1;
+                assert_eq!(e.expected, refusal(NO_VISIBILITY_STATS), "{}", e.request);
+                assert!(
+                    e.request.to_lowercase().contains("champ de vision"),
+                    "{}",
+                    e.request
+                );
+                assert!(has_theme(e, "mnt"), "MNT présent : {}", e.request);
+                continue;
+            }
+            let calls = e.expected["calls"].as_array().unwrap();
+            let last = calls.last().unwrap();
+            assert_eq!(last["command"], "raster.zonal_statistics", "{}", e.request);
             assert!(has_theme(e, "mnt"), "MNT présent : {}", e.request);
             assert!(
-                ["communes", "quartiers", "parcelles"]
-                    .iter()
-                    .any(|z| has_theme(e, z)),
+                ["communes", "quartiers"].iter().any(|z| has_theme(e, z)),
                 "{}",
                 e.request
             );
+            let params = &last["params"];
+            let raster = params["raster"].as_str().unwrap();
             let r = e.request.to_lowercase();
-            // Jamais les tournures de S15 et S23.
+            if calls.len() == 2 {
+                slope += 1;
+                assert_eq!(calls[0]["command"], "terrain.slope", "{}", e.request);
+                assert_eq!(raster, "step:1", "{}", e.request);
+                // L'unité de la pente est écrite dans la demande et redite par `unit`.
+                let (unit, tokens): (&str, &[&str]) = match calls[0]["params"]["unit"].as_str() {
+                    Some("degrees") => ("°", &["degrés", "°"]),
+                    _ => ("%", &["pourcentage", "%", "pour cent"]),
+                };
+                assert_eq!(params["unit"], unit, "{}", e.request);
+                assert!(tokens.iter().any(|t| r.contains(t)), "{}", e.request);
+                let dem = calls[0]["params"]["dem"].as_str().unwrap();
+                assert!(
+                    e.inventory["layers"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|l| l["kind"] == "raster" && l["source"] == dem),
+                    "MNT « {dem} » absent : {}",
+                    e.request
+                );
+            } else {
+                altitude += 1;
+                assert_eq!(calls.len(), 1, "{}", e.request);
+                // Le MNT est cité par sa source, copiée de l'inventaire, jamais par un identifiant.
+                assert!(
+                    e.inventory["layers"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|l| l["kind"] == "raster" && l["source"] == raster),
+                    "MNT « {raster} » absent : {}",
+                    e.request
+                );
+                assert!(params.get("unit").is_none(), "{}", e.request);
+            }
+            if params.get("label_field").is_some() {
+                labelled += 1;
+            }
+            // Jamais les tournures de S15 et S23 (mesurées à part dans `plan_reel`).
             assert!(!r.starts_with("donne-moi"), "{}", e.request);
+            assert!(!r.contains("moyenne et maximale"), "{}", e.request);
             assert!(
                 !(r.starts_with("calcule la pente") && r.contains(" puis sa moyenne par ")),
                 "{}",
                 e.request
             );
-            // Ni la paire de S15, ni « Fais la pente, puis … », ni la pente du MNT à unité
-            // suivie de sa statistique (S23).
-            assert!(!r.contains("moyenne et maximale"), "{}", e.request);
             assert!(!r.starts_with("fais la pente, puis"), "{}", e.request);
-            assert!(
-                !(r.starts_with("pente du mnt en ") || r.starts_with("pente du mnt à ")),
-                "{}",
-                e.request
-            );
             if RASTER_STATS
                 .iter()
-                .filter(|(stat, _)| {
+                .filter(|stat| {
                     r.contains(&format!(" {stat} ")) || r.contains(&format!(" et {stat}"))
                 })
                 .count()
@@ -12811,28 +12904,39 @@ mod tests {
             {
                 two += 1;
             }
-            if r.contains(" par commune") {
-                per += 1;
-            }
-            if (r.contains("pente") || r.contains("champ de vision") || r.contains("voit"))
-                && (r.contains(", puis") || r.contains(" et sa ") || r.contains(" et son "))
-            {
-                derived += 1;
-            }
-            if !r.contains(", puis") && !r.contains(" et sa ") && !r.contains(" et son ") {
+            if !r.contains(", puis") && !r.contains(" et sa ") {
                 short += 1;
             }
         }
-        assert!(two > 0 && per > 0 && derived > 0, "{two} {per} {derived}");
+        assert!(altitude > 0 && slope > 0 && two > 0 && labelled > 0 && refused > 0);
         // Les demandes courtes, à une seule proposition, dominent.
         assert!(2 * short > examples.len(), "{short}/{}", examples.len());
+        // L'altitude (le cas du jeu de phrases réelles) pèse plus que la pente.
+        assert!(altitude > slope, "{altitude} {slope}");
     }
 
     #[test]
-    fn out_of_registry_requests_no_longer_hold_the_raster_statistics() {
-        // Après 5.49 : la statistique sur un raster vit dans `refus_stats_raster` seulement.
-        for e in valid(refus_hors_registre, 600) {
-            assert_ne!(e.expected["reason"], NO_RASTER_STATS, "{}", e.request);
+    fn the_statistics_of_a_raster_are_no_longer_refused() {
+        // Depuis le ticket 12 la commande est au registre : aucune famille ne dit plus
+        // qu'aucune commande ne calcule de statistiques sur un raster.
+        let registry = cassini_core::registry::Registry::standard();
+        assert!(registry.spec("raster.zonal_statistics").is_some());
+        for make in [
+            refus as fn(&mut Rng) -> Option<Example>,
+            refus_hors_registre,
+        ] {
+            let mut rng = Rng::new(5);
+            for _ in 0..1500 {
+                let Some(e) = make(&mut rng) else {
+                    continue;
+                };
+                let reason = e.expected["reason"].as_str().unwrap_or("");
+                assert!(
+                    !reason.contains("statistiques sur un raster"),
+                    "{}",
+                    e.request
+                );
+            }
         }
     }
 
@@ -12966,9 +13070,6 @@ mod tests {
                 assert!(!reason.contains(word), "{reason}");
             }
             assert!(!selects_no_cell(&e.expected), "{}", e.request);
-            if reason == NO_RASTER_STATS {
-                assert!(has_theme(&e, "mnt"), "MNT présent : {}", e.request);
-            }
         }
     }
 
@@ -13407,7 +13508,6 @@ mod tests {
         for make in [
             refus as fn(&mut Rng) -> Option<Example>,
             refus_hors_registre,
-            refus_stats_raster,
         ] {
             let mut rng = Rng::new(3);
             for _ in 0..2000 {
@@ -14663,7 +14763,6 @@ mod tests {
         assert!(selects_no_cell(&refusal(
             "Aucune commande du catalogue ne sélectionne les cellules d'un raster par leur valeur."
         )));
-        assert!(!selects_no_cell(&refusal(NO_RASTER_STATS)));
     }
 
     // -- coût de déplacement (11.12, lot 2b-1) ---------------------------------

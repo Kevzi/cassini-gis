@@ -12,5 +12,6 @@
   "data.reproject": true,
   "data.convert": true,
   "data.convert_raster": true,
+  "raster.zonal_statistics": true,
   "layer.remove": false
 }

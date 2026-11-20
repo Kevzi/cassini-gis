@@ -6247,3 +6247,116 @@ fn an_isochrone_line_without_network_replays_identically_with_the_resolved_defau
     drop(s);
     let _ = fs::remove_dir_all(dir);
 }
+
+// ---- Ticket 12 : `raster.zonal_statistics` lit le raster d'une étape précédente par `step:k` ----
+
+/// QGIS de test pour la chaîne pente puis statistiques par zone : une couche de polygones, puis le
+/// geste `raster.zonal_statistics`, qui exige un fichier raster absolu et existant.
+struct ZonalQgis {
+    generation: u32,
+    count: std::cell::Cell<u32>,
+    /// Chemins du raster reçus par la commande.
+    rasters: std::rc::Rc<std::cell::RefCell<Vec<String>>>,
+}
+
+impl Executor for ZonalQgis {
+    fn execute(&self, id: &str, p: Value) -> Result<Value, RegistryError> {
+        let n = self.count.get() + 1;
+        self.count.set(n);
+        match id {
+            "layer.add" => Ok(json!({
+                "kind": "vector",
+                "layer_id": format!("communes_g{}_{n}", self.generation),
+                "name": "communes"
+            })),
+            "raster.zonal_statistics" => {
+                let raster = Path::new(p["raster"].as_str().unwrap());
+                assert!(
+                    raster.is_absolute() && raster.is_file(),
+                    "{}",
+                    raster.display()
+                );
+                self.rasters
+                    .borrow_mut()
+                    .push(raster.to_string_lossy().into_owned());
+                let out = p["out"].as_str().unwrap().to_string();
+                assert!(out.ends_with(".gpkg"), "{out}");
+                fs::write(&out, format!("gpkg-{}", self.generation)).unwrap();
+                let stat = |v: f64| json!({"value": v, "unit": "m"});
+                Ok(json!({
+                    "layer_id": format!("alt_g{}_{n}", self.generation),
+                    "name": "alt", "feature_count": 1, "crs": "EPSG:2154",
+                    "rows": [{"label": "Nord", "values": {
+                        "mean": stat(95.5), "min": stat(80.0), "max": stat(120.0)}}],
+                    "truncated": false
+                }))
+            }
+            other => panic!("commande inattendue : {other}"),
+        }
+    }
+}
+
+#[test]
+fn zonal_statistics_on_a_previous_step_raster_keeps_the_marker_and_replays_identically() {
+    let (dir, project, _) = temp_project();
+    with_dem(&dir);
+    let registry = Registry::standard();
+    let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let qgis = ZonalQgis {
+        generation: 1,
+        count: Default::default(),
+        rasters: seen.clone(),
+    };
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    s.call("terrain.slope", slope_params()).unwrap();
+    let added = s
+        .call("layer.add", json!({"path": "communes.gpkg"}))
+        .unwrap();
+    let communes = added["layer_id"].as_str().unwrap().to_string();
+    s.call(
+        "raster.zonal_statistics",
+        json!({"raster": "out:1.1", "layer_id": communes, "label_field": "nom"}),
+    )
+    .unwrap();
+    let l = lines(&s);
+    // Le journal garde le repère, jamais un chemin résolu ; QGIS a reçu le fichier de la pente.
+    assert_eq!(l[2]["params"]["raster"], json!("out:1.1"));
+    assert!(
+        seen.borrow()[0].ends_with("1-terrain.slope.tif"),
+        "{:?}",
+        seen.borrow()
+    );
+    assert_eq!(l[2]["id"], json!("raster.zonal_statistics"));
+    assert_eq!(l[2]["layer_id"], json!("alt_g1_2"));
+    drop(s);
+
+    // Rejeu : le repère est résolu vers le dossier du rejeu, le résultat est identique.
+    let replay_seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let replay_qgis = ZonalQgis {
+        generation: 2,
+        count: Default::default(),
+        rasters: replay_seen.clone(),
+    };
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(
+            &Router::new(&registry).with_qgis(replay_qgis),
+            &mut HashSet::new(),
+        )
+        .unwrap();
+    assert_eq!(
+        report,
+        ReplayReport {
+            steps: 3,
+            identical: true,
+            warnings: vec![]
+        }
+    );
+    let replayed = replay_seen.borrow()[0].clone();
+    assert!(
+        replayed.replace('\\', "/").contains("/replay/"),
+        "{replayed}"
+    );
+    assert!(replayed.ends_with("1-terrain.slope.tif"), "{replayed}");
+    let _ = fs::remove_dir_all(dir);
+}

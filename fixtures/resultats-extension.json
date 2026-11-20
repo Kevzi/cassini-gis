@@ -70,6 +70,19 @@
    "result": {"layer_id": "zones_3", "name": "4-analysis.count_points_in_polygon", "feature_count": 0, "crs": "EPSG:2154",
               "rows": [], "truncated": false}},
 
+  {"id": "raster.zonal_statistics", "case": "altitudes par polygone",
+   "result": {"layer_id": "alt_1", "name": "3-raster.zonal_statistics", "feature_count": 2, "crs": "EPSG:2154",
+              "rows": [{"label": "Nord", "values": {"mean": {"value": 95.5, "unit": "m"}, "min": {"value": 80.0, "unit": "m"}, "max": {"value": 120.0, "unit": "m"}}},
+                       {"label": "Sud", "values": {"mean": {"value": 82.25, "unit": "m"}, "min": {"value": 78.0, "unit": "m"}, "max": {"value": 90.0, "unit": "m"}}}],
+              "truncated": false}},
+  {"id": "raster.zonal_statistics", "case": "polygone hors du raster",
+   "result": {"layer_id": "alt_2", "name": "3-raster.zonal_statistics", "feature_count": 1, "crs": "EPSG:2154",
+              "rows": [{"label": "Loin", "values": {}}], "truncated": false}},
+  {"id": "raster.zonal_statistics", "case": "tronqué",
+   "result": {"layer_id": "alt_3", "name": "3-raster.zonal_statistics", "feature_count": 150, "crs": "EPSG:2154",
+              "rows": [{"label": "1", "values": {"mean": {"value": 10.0, "unit": "°"}, "min": {"value": 1.0, "unit": "°"}, "max": {"value": 20.0, "unit": "°"}}}],
+              "truncated": true}},
+
   {"id": "data.convert", "case": "GeoPackage",
    "result": {"file": "2-data.convert.gpkg", "format": "gpkg", "feature_count": 5}},
 

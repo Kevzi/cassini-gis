@@ -360,6 +360,81 @@ def summarize_count_points(backend, layer, params):
     return {"rows": rows, "truncated": truncated}
 
 
+# Champs écrits par `native:zonalstatisticsfb` : préfixe de colonne `_` + nom de la statistique (vérifié
+# par la sonde). Les trois statistiques demandées : 2 = moyenne, 5 = minimum, 6 = maximum.
+_ZONAL_PREFIX = "_"
+_ZONAL_STATISTICS = (("mean", 2), ("min", 5), ("max", 6))
+_RASTER_SUFFIXES = (".tif", ".tiff")
+_UNIT_NAMES = {
+    "m": "m", "metre": "m", "metres": "m", "meter": "m", "meters": "m",
+    "degree": "°", "degrees": "°", "deg": "°", "°": "°",
+    "percent": "%", "%": "%",
+}
+
+
+def normalize_unit(text):
+    """Unité d'un raster écrite à la manière de GDAL (`metre`, `degrees`) -> forme du résumé (`m`, `°`) ;
+    un nom inconnu est gardé tel quel, vide ou absent : None."""
+    if not isinstance(text, str) or not text.strip():
+        return None
+    name = text.strip()
+    return _UNIT_NAMES.get(name.lower(), name)
+
+
+_pam = {"holders": 0, "previous": None}
+
+
+def _pam_off():
+    """Demande à GDAL de ne pas écrire de `.aux.xml` à côté des rasters qu'il ouvre (`GDAL_PAM_ENABLED=NO`) :
+    QGIS calcule les statistiques d'un raster à l'ouverture et GDAL les y consignerait, ce que le fichier
+    d'origine ne doit pas recevoir (AD-10). Le réglage se lit à l'ouverture du jeu de données ; il tient
+    donc le temps du geste, le dernier à le rendre rétablit la valeur d'avant. Rend True si pris."""
+    try:
+        from osgeo import gdal
+    except ImportError:  # GDAL accompagne toujours QGIS ; sans lui, rien à régler
+        return False
+    if _pam["holders"] == 0:
+        _pam["previous"] = gdal.GetConfigOption("GDAL_PAM_ENABLED")
+        gdal.SetConfigOption("GDAL_PAM_ENABLED", "NO")
+    _pam["holders"] += 1
+    return True
+
+
+def _pam_restore():
+    from osgeo import gdal
+
+    _pam["holders"] = max(0, _pam["holders"] - 1)
+    if _pam["holders"] == 0:
+        gdal.SetConfigOption("GDAL_PAM_ENABLED", _pam["previous"])
+
+
+def translate_raster_zonal(params, layer):
+    """Paramètres neutres de `raster.zonal_statistics` -> `native:zonalstatisticsfb`, qui écrit une
+    nouvelle couche (jamais `qgis:zonalstatistics`, qui écrit dans la couche d'entrée). Le raster est le
+    chemin absolu donné par le noyau ; une seule bande, la première."""
+    return {
+        "INPUT": layer,
+        "INPUT_RASTER": params["raster"],
+        "RASTER_BAND": 1,
+        "COLUMN_PREFIX": _ZONAL_PREFIX,
+        "STATISTICS": [code for _, code in _ZONAL_STATISTICS],
+    }
+
+
+def summarize_raster_zonal(backend, layer, params):
+    """Lignes du résumé des 100 premiers polygones de la couche produite : `mean`, `min` et `max` avec
+    l'unité du raster (déclarée par `unit`, sinon lue du fichier, à défaut le mètre) ; un polygone qui ne
+    recouvre aucune cellule rend une ligne sans valeur."""
+    unit = normalize_unit(params.get("unit")) or normalize_unit(backend.raster_unit(params.get("raster"))) or "m"
+    fields = [(name, _ZONAL_PREFIX + name) for name, _ in _ZONAL_STATISTICS]
+    pairs, truncated = backend.stats_of(layer, fields, params.get("label_field") or None, _MAX_ROWS)
+    rows = []
+    for label, stats in pairs:
+        values = {name: {"value": value, "unit": unit} for name, value in stats.items() if value is not None}
+        rows.append({"label": label, "values": values})
+    return {"rows": rows, "truncated": truncated}
+
+
 def translate_nearest(params, layer):
     """Paramètres neutres de `analysis.nearest` -> paramètres de `native:joinbynearest`.
 
@@ -603,6 +678,12 @@ def summarize_sum_line_lengths(backend, layer, params):
 #               fichier doit exister et se lire en raster, sinon `layer.not_found` ou
 #               `layer.invalid_source` ; la sortie est un GeoTIFF, relu à part, jamais ajouté au
 #               projet (le noyau dicte `layer.open_raster`) ; le résultat est `file` et `epsg` ;
+#   raster_input : (facultatif) genre d'entrée mixte : `input` reste une couche de polygones et ce paramètre du
+#               noyau nomme un `RasterPath` lu en entrée (chemin absolu donné par le noyau, AD-9) ; le fichier
+#               doit exister, être un GeoTIFF lisible d'une seule bande et avoir un système de coordonnées
+#               (`layer.not_found`, `layer.invalid_source`, `analysis.bad_params`), avant tout lancement ;
+#               un système différent de celui des polygones est admis : QGIS reprojette les polygones ;
+#               il est libéré avant l'algorithme et jamais modifié ; la sortie reste une couche ;
 #   assign_crs: (facultatif, avec `raster`) paramètre du noyau qui déclare le code EPSG d'une
 #               source sans système : connu de QGIS (`data.unknown_crs` sinon), et refusé
 #               (`analysis.bad_params`) si la source a déjà un autre système ;
@@ -691,6 +772,18 @@ ALGORITHMS = {
         "field_optional": True,
         "geometry": "Polygon",
         "summary": summarize_count_points,
+    },
+    "raster.zonal_statistics": {
+        "chain_version": 1,
+        "chain": [
+            {"algorithm": "native:zonalstatisticsfb", "translate": translate_raster_zonal, "output": "OUTPUT"},
+        ],
+        "input": "layer_id",
+        "raster_input": "raster",
+        "field": "label_field",
+        "field_optional": True,
+        "geometry": "Polygon",
+        "summary": summarize_raster_zonal,
     },
     "analysis.nearest": {
         "chain_version": 1,
@@ -894,6 +987,7 @@ CANCELLABLE_ALGORITHMS = frozenset(
         "native:intersection",
         "native:extractbyattribute",
         "native:countpointsinpolygon",
+        "native:zonalstatisticsfb",
         "native:joinbynearest",
         "native:joinattributestable",
         "native:dissolve",
@@ -1268,6 +1362,53 @@ class QgisBackend(_ReadBackend):
             return None
         return crs.authid() or crs.description() or "?"
 
+    def raster_band_count(self, layer):
+        """Nombre de bandes du raster ouvert à part."""
+        return int(layer.bandCount())
+
+    def raster_unit(self, path):
+        """Unité de la première bande du GeoTIFF, telle que GDAL la porte (`metre`…) ; None si le fichier n'en
+        déclare pas, si GDAL n'est pas joignable ou si le fichier est illisible. Lecture seule."""
+        try:
+            from osgeo import gdal
+        except ImportError:
+            return None
+        dataset = None
+        try:
+            dataset = gdal.Open(path)
+            if dataset is None:
+                return None
+            return dataset.GetRasterBand(1).GetUnitType() or None
+        except Exception:
+            return None
+        finally:
+            dataset = None  # relâche le fichier
+
+    def stats_of(self, layer, fields, label_field, limit):
+        """Paires (étiquette, {nom: nombre ou None}) des `limit` premières entités, et si la couche en a plus.
+        `fields` : paires (nom de la statistique, champ de la couche). Un champ nul donne None (polygone sans
+        cellule) ; l'étiquette est la valeur de `label_field`, ou le rang de l'entité (à partir de 1) si le
+        champ est absent, vide ou nul : jamais l'identifiant d'entité."""
+        from qgis.core import QgsFeatureRequest
+
+        request = QgsFeatureRequest()
+        request.setLimit(limit)
+        pairs = []
+        for rank, feature in enumerate(layer.getFeatures(request), start=1):
+            label = feature[label_field] if label_field else None
+            text = "" if label is None else str(label).strip()
+            if text in ("", "NULL"):
+                text = str(rank)
+            stats = {}
+            for name, field in fields:
+                raw = feature[field]
+                try:
+                    stats[name] = None if _is_null(raw) else float(raw)
+                except (TypeError, ValueError):
+                    stats[name] = None
+            pairs.append((text, stats))
+        return pairs, self.feature_count(layer) > limit
+
     def same_crs(self, layer, epsg):
         """Vrai si le système du raster est EPSG:`epsg` : même code, ou même définition (un
         `.prj` ESRI du Lambert-93 que QGIS ne rattache pas au code EPSG:2154)."""
@@ -1373,6 +1514,7 @@ class ProcessingGesture:
         self._index = 0  # étape en cours
         self._overlay_layer = None
         self._results = None
+        self._pam = False  # réglage GDAL « pas de .aux.xml » pris par ce geste, à rendre à la fin
 
     def start(self, params, done):
         self._done = done
@@ -1474,6 +1616,8 @@ class ProcessingGesture:
                 )
         if entry.get("field") and not (entry.get("field_optional") and not params.get(entry["field"])):
             self._check_field(params.get(entry["field"]), layer)
+        if entry.get("raster_input"):
+            self._check_raster_input(params.get(entry["raster_input"]), layer)
         if entry.get("fields_list"):
             names = params.get(entry["fields_list"])
             if not isinstance(names, list) or not names:
@@ -1567,6 +1711,42 @@ class ProcessingGesture:
         algorithm_params[step.get("output", "OUTPUT")] = out
         self._out = out
         return backend.run_algorithm(step["algorithm"], algorithm_params, self._on_finished)
+
+    def _check_raster_input(self, path, layer):
+        """Raster lu en entrée d'une analyse de polygones : fichier GeoTIFF existant et lisible, une seule
+        bande, un système de coordonnées. Un système différent de celui de la couche n'est pas refusé : QGIS
+        reprojette lui-même les polygones vers celui du raster (constat de la sonde, résultats exacts).
+        Libéré aussitôt : QGIS le rouvrira seul pour l'algorithme."""
+        backend = self._backend
+        if not isinstance(path, str) or not path or not os.path.isfile(path):
+            raise GestureError(NOT_FOUND, "Aucun fichier raster « %s »." % _file_name(path))
+        if not self._pam:
+            self._pam = _pam_off()  # avant toute ouverture du raster, ici comme dans l'algorithme
+        if os.path.splitext(path)[1].lower() not in _RASTER_SUFFIXES:
+            raise GestureError(
+                INVALID_SOURCE, "« %s » n'est pas un GeoTIFF (.tif) : ouvrez un raster de ce format." % _file_name(path)
+            )
+        source = backend.raster_source(path)
+        if source is None:
+            raise GestureError(
+                INVALID_SOURCE, "QGIS ne sait pas lire « %s » comme un raster." % _file_name(path)
+            )
+        try:
+            if backend.raster_band_count(source) != 1:
+                raise GestureError(
+                    BAD_PARAMS,
+                    "« %s » a plusieurs bandes : les statistiques ne portent que sur un raster à une bande."
+                    % _file_name(path),
+                )
+            current = backend.raster_crs(source)
+            if current is None:
+                raise GestureError(
+                    BAD_PARAMS,
+                    "« %s » n'a pas de système de coordonnées : déclarez-le d'abord (data.convert_raster)."
+                    % _file_name(path),
+                )
+        finally:
+            source = None  # le fichier d'origine n'est plus tenu ouvert (Windows le verrouillerait)
 
     def _check_network(self, params, layer):
         """Champ de vitesse numérique et champ de sens présents dans la couche, avant tout lancement."""
@@ -1724,6 +1904,9 @@ class ProcessingGesture:
             _remove(self._out)
 
     def _finish(self, result=None, error=None):
+        if self._pam:
+            self._pam = False
+            _pam_restore()
         done, self._done = self._done, None
         if done is not None:
             done(result=result, error=error)

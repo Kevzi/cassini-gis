@@ -1982,6 +1982,211 @@ class SumLineLengthsTest(unittest.TestCase):
         self.assertTrue(analysis.derived_cancellable(analysis.ALGORITHMS)["analysis.sum_line_lengths"])
 
 
+class ZonalBackend(RasterBackend):
+    """Doublure de `raster.zonal_statistics` : rasters lisibles (système, bandes), unité du fichier,
+    statistiques lues sur la couche produite."""
+
+    def __init__(self, sources, bands=None, unit=None, **kw):
+        super().__init__(sources, **kw)
+        self.bands, self.file_unit = bands or {}, unit
+        self.stats, self.stats_call, self.unit_call = [], None, None
+
+    load_output = FakeBackend.load_output  # ici la couche produite entre au projet
+
+    def raster_band_count(self, layer):
+        return self.bands.get(os.path.basename(layer.path), 1)
+
+    def raster_unit(self, path):
+        self.unit_call = path
+        return self.file_unit
+
+    def stats_of(self, layer, fields, label_field, limit):
+        self.stats_call = (fields, label_field, limit)
+        return self.stats[:limit], len(self.stats) > limit
+
+
+class RasterZonalStatisticsTest(unittest.TestCase):
+    """`raster.zonal_statistics` (epic 10, entrée 12) : entrée mixte, polygones par `layer_id` et raster par
+    chemin, `native:zonalstatisticsfb` (qui écrit une nouvelle couche), résumé `mean`/`min`/`max` avec unité."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.out = os.path.join(self.dir.name, "3-raster.zonal_statistics.gpkg")
+        self.entry = analysis.ALGORITHMS["raster.zonal_statistics"]
+        self.raster = os.path.join(self.dir.name, "mnt.tif")
+        for name in ("mnt.tif", "multi.tif", "sans-systeme.tif", "table.csv", "mnt.asc"):
+            with open(os.path.join(self.dir.name, name), "wb") as f:
+                f.write(b"x")
+        self.backend = ZonalBackend(
+            {"mnt.tif": "EPSG:2154", "multi.tif": "EPSG:2154", "sans-systeme.tif": None, "mnt.asc": "EPSG:2154"},
+            bands={"multi.tif": 3},
+            layers=[
+                FakeLayer("z", name="communes", geometry="Polygon", fields=("nom", "pop")),
+                FakeLayer("pts", name="gares", geometry="Point", fields=("nom",)),
+                FakeLayer("wgs", name="communes-wgs", crs="EPSG:4326", geometry="Polygon", fields=("nom",)),
+                FakeLayer("r", vector=False),
+            ],
+            loaded_count=2,
+        )
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def path(self, name):
+        return os.path.join(self.dir.name, name)
+
+    def params(self, **extra):
+        p = {"raster": self.raster, "layer_id": "z", "label_field": "nom", "out": self.out}
+        p.update(extra)
+        return p
+
+    def stat(self, value, unit="m"):
+        return {"value": value, "unit": unit}
+
+    def test_native_algorithm_writes_a_new_layer_with_three_statistics(self):
+        self.backend.stats = [
+            ("Nord", {"mean": 95.5, "min": 80.0, "max": 120.0}),
+            ("Sud", {"mean": 82.25, "min": 78.0, "max": 90.0}),
+        ]
+        _, calls = start(self.entry, self.backend, self.params())
+        algo, p = self.backend.calls[0]
+        self.assertEqual(algo, "native:zonalstatisticsfb")  # jamais `qgis:zonalstatistics`, qui écrit dans l'entrée
+        self.assertEqual(p["INPUT"].lid, "z")
+        self.assertEqual((p["INPUT_RASTER"], p["RASTER_BAND"]), (self.raster, 1))
+        self.assertEqual(p["STATISTICS"], [2, 5, 6])  # moyenne, minimum, maximum
+        self.assertEqual(p["OUTPUT"], self.out)
+        self.backend.finished(True, {})
+        result, error = calls[0]
+        self.assertIsNone(error)
+        self.assertEqual((result["feature_count"], result["crs"], result["truncated"]), (2, "EPSG:2154", False))
+        self.assertEqual(
+            result["rows"][0],
+            {"label": "Nord", "values": {"mean": self.stat(95.5), "min": self.stat(80.0), "max": self.stat(120.0)}},
+        )
+        fields, label_field, limit = self.backend.stats_call
+        self.assertEqual((label_field, limit), ("nom", 100))
+        self.assertEqual(fields, [("mean", "_mean"), ("min", "_min"), ("max", "_max")])
+
+    def test_unit_is_declared_then_read_from_the_file_then_the_metre(self):
+        self.backend.stats = [("A", {"mean": 5.0, "min": 1.0, "max": 9.0})]
+        for params, file_unit, expected in (
+            ({"unit": "°"}, "metre", "°"),
+            ({}, "degrees", "°"),
+            ({}, "metre", "m"),
+            ({}, None, "m"),
+            ({}, "", "m"),
+            ({}, "feet", "feet"),
+        ):
+            self.backend.file_unit = file_unit
+            self.backend.calls.clear()
+            _, calls = start(self.entry, self.backend, self.params(**params))
+            self.backend.finished(True, {})
+            self.assertEqual({v["unit"] for v in calls[-1][0]["rows"][0]["values"].values()}, {expected}, params)
+
+    def test_a_polygon_outside_the_raster_is_a_row_without_value(self):
+        self.backend.stats = [("Loin", {"mean": None, "min": None, "max": None}), ("A", {"mean": 1.0, "min": 1.0, "max": 1.0})]
+        _, calls = start(self.entry, self.backend, self.params())
+        self.backend.finished(True, {})
+        rows = calls[0][0]["rows"]
+        self.assertEqual(rows[0], {"label": "Loin", "values": {}})
+        self.assertEqual(set(rows[1]["values"]), {"mean", "min", "max"})
+
+    def test_more_than_100_zones_are_truncated(self):
+        self.backend.stats = [(str(i), {"mean": 1.0, "min": 1.0, "max": 1.0}) for i in range(150)]
+        self.backend.loaded_count = 150
+        _, calls = start(self.entry, self.backend, self.params())
+        self.backend.finished(True, {})
+        result = calls[0][0]
+        self.assertEqual((len(result["rows"]), result["truncated"], result["feature_count"]), (100, True, 150))
+
+    def test_label_field_is_optional_and_checked(self):
+        p = self.params()
+        del p["label_field"]
+        _, calls = start(self.entry, self.backend, p)
+        self.backend.finished(True, {})
+        self.assertIsNone(calls[0][1])
+        self.assertIsNone(self.backend.stats_call[1])
+        _, calls = start(self.entry, self.backend, self.params(label_field="absent"))
+        self.assertEqual(calls[0][1].code, "analysis.unknown_field")
+
+    def test_a_layer_that_is_not_made_of_polygons_is_refused_before_any_run(self):
+        _, calls = start(self.entry, self.backend, self.params(layer_id="pts"))
+        self.assertEqual(calls[0][1].code, "analysis.bad_params")
+        self.assertEqual(self.backend.calls, [])
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_unknown_or_raster_layers_are_refused(self):
+        for layer_id, code in (("nope", "layer.not_found"), ("r", "layer.not_vector")):
+            _, calls = start(self.entry, self.backend, self.params(layer_id=layer_id))
+            self.assertEqual(calls[0][1].code, code)
+        self.assertEqual(self.backend.calls, [])
+
+    def test_a_missing_or_unreadable_raster_is_refused(self):
+        for raster, code in (
+            (self.path("absent.tif"), "layer.not_found"),
+            (None, "layer.not_found"),
+            (self.path("table.csv"), "layer.invalid_source"),  # pas un GeoTIFF
+            (self.path("mnt.asc"), "layer.invalid_source"),  # lisible par QGIS mais pas un .tif
+        ):
+            _, calls = start(self.entry, self.backend, self.params(raster=raster))
+            self.assertEqual(calls[0][1].code, code, raster)
+        self.assertEqual(self.backend.calls, [])
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_several_bands_or_no_system_are_refused(self):
+        for name in ("multi.tif", "sans-systeme.tif"):
+            _, calls = start(self.entry, self.backend, self.params(raster=self.path(name)))
+            self.assertEqual(calls[0][1].code, "analysis.bad_params", name)
+        self.assertEqual(self.backend.calls, [])
+
+    def test_a_layer_in_another_system_is_accepted_qgis_reprojects_it(self):
+        self.backend.stats = [("A", {"mean": 95.0, "min": 90.5, "max": 99.5})]
+        _, calls = start(self.entry, self.backend, self.params(layer_id="wgs"))
+        self.assertEqual(len(self.backend.calls), 1)
+        self.backend.finished(True, {})
+        self.assertIsNone(calls[0][1])
+
+    def test_the_raster_file_is_never_touched(self):
+        before = open(self.raster, "rb").read()
+        _, calls = start(self.entry, self.backend, self.params())
+        self.backend.finished(True, {})
+        self.assertEqual(open(self.raster, "rb").read(), before)
+        self.assertEqual(sorted(os.listdir(self.dir.name)).count("mnt.tif.aux.xml"), 0)
+
+    def test_a_failed_algorithm_leaves_no_file(self):
+        _, calls = start(self.entry, self.backend, self.params())
+        self.backend.finished(False, {})
+        self.assertEqual(calls[0][1].code, "analysis.failed")
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_cancellation_leaves_no_file(self):
+        g, calls = start(self.entry, self.backend, self.params())
+        g.cancel()
+        self.backend.finished(False, {})
+        self.assertEqual(calls[0][1].code, "qgis.cancelled")
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_the_row_is_cancellable_and_the_chain_is_one_algorithm(self):
+        self.assertTrue(analysis.derived_cancellable({"raster.zonal_statistics": self.entry})["raster.zonal_statistics"])
+        self.assertEqual(analysis.validate_table({"raster.zonal_statistics": self.entry}), [])
+        self.assertEqual(analysis.required_algorithms(self.entry), ["native:zonalstatisticsfb"])
+
+    def test_gdal_pam_is_held_for_the_gesture_and_given_back(self):
+        taken, given = [], []
+        original = analysis._pam_off, analysis._pam_restore
+        analysis._pam_off = lambda: taken.append(1) or True
+        analysis._pam_restore = lambda: given.append(1)
+        try:
+            _, calls = start(self.entry, self.backend, self.params())
+            self.assertEqual((len(taken), len(given)), (1, 0))  # tenu pendant l'algorithme
+            self.backend.finished(True, {})
+            self.assertEqual((len(taken), len(given)), (1, 1))
+            _, calls = start(self.entry, self.backend, self.params(layer_id="pts"))  # refus : rendu aussi
+            self.assertEqual(len(given), 1 + (len(taken) - 1))
+        finally:
+            analysis._pam_off, analysis._pam_restore = original
+
+
 class FormHidesCoreFilledTest(unittest.TestCase):
     def test_out_is_not_a_form_field(self):
         schema = {

@@ -187,6 +187,20 @@ tableau de prix par code INSEE, et une couche de communes ou de parcelles) :
 4. Sonde sous QGIS 3.44 : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat" qgis-plugin/tests/probe_join_table.py`
    doit finir par `VERDICT : OK`.
 
+Recette manuelle de `raster.zonal_statistics` [ticket 12] (un MNT GeoTIFF et une couche de communes) :
+
+1. `raster.zonal_statistics` : `raster` est un sélecteur de fichier GeoTIFF (ou `step:k` dans un plan, après
+   `terrain.slope` par exemple), `layer_id` une liste de couches de polygones, `label_field` une liste de
+   champs, `unit` facultative. Une couche nouvelle porte les champs `_mean`, `_min`, `_max` ; le résumé
+   donne une ligne par polygone (100 au plus, `truncated`), chaque valeur avec son unité (`m` par défaut).
+2. Un polygone hors du raster est une ligne sans valeur. Un système différent de celui du raster n'est pas
+   refusé : QGIS reprojette les polygones (résultat exact, constaté par la sonde). Le raster d'origine reste
+   intact et aucun `.aux.xml` n'apparaît à côté (`GDAL_PAM_ENABLED=NO` le temps du geste).
+3. Une couche de points : `analysis.bad_params` ; un raster absent : `layer.not_found` ; un fichier qui n'est
+   pas un GeoTIFF : `layer.invalid_source` ; un raster à plusieurs bandes ou sans système : `analysis.bad_params`.
+4. Sonde sous QGIS 3.44 : `"C:\Program Files\QGIS 3.44.15in\python-qgis-ltr.bat" qgis-plugin/tests/probe_zonal_statistics.py`
+   doit finir par `VERDICT : OK`.
+
 Recette manuelle de `analysis.dissolve` [ticket 24] (une couche de parcelles ou de zones) :
 
 1. `analysis.dissolve` : `layer_id` est une liste de couches, `fields` une liste à cases à cocher des

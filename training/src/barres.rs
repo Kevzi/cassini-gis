@@ -48,10 +48,13 @@ const TERRAIN_REEL_PHRASES: &str = include_str!("../../ai/tests/terrain_reel/phr
 const EPIC11_REEL_PHRASES: &str = include_str!("../../ai/tests/epic11_reel/phrases.json");
 /// Les phrases neuves de `style_reel` (5.53, livrable 3, lot 3), écrites à la main.
 const STYLE_REEL_PHRASES: &str = include_str!("../../ai/tests/style_reel/phrases.json");
+/// Les 44 phrases réelles de 7.11 (couverture du registre), écrites à la main : `{id, phrase, …}`.
+const COUVERTURE_REELLE_PHRASES: &str =
+    include_str!("../../ai/tests/couverture_reelle/phrases.json");
 
-/// Les fichiers `phrases.json` écrits à la main pour 5.53, chacun avec son nom et son compte.
-pub const HAND_WRITTEN: [(&str, &str, usize); 7] = [
-    ("par_commande", PAR_COMMANDE, 115),
+/// Les fichiers `phrases.json` écrits à la main (5.53, puis 7.11), chacun avec son nom et son compte.
+pub const HAND_WRITTEN: [(&str, &str, usize); 8] = [
+    ("par_commande", PAR_COMMANDE, 118),
     ("plan_reel", PLAN_REEL_PHRASES, 23),
     ("question_reel", QUESTION_REEL_PHRASES, 35),
     ("echelle_utm_reel", ECHELLE_UTM_REEL_PHRASES, 36),
@@ -59,6 +62,7 @@ pub const HAND_WRITTEN: [(&str, &str, usize); 7] = [
     // Nommées à part des constantes de leur essai (`epic11_reel`, `style_reel`), comparées à elles.
     ("epic11_reel:phrases", EPIC11_REEL_PHRASES, 20),
     ("style_reel:phrases", STYLE_REEL_PHRASES, 32),
+    ("couverture_reelle", COUVERTURE_REELLE_PHRASES, 44),
 ];
 
 /// Texte normalisé, chiffres masqués et communes remplacées par un même repère.
