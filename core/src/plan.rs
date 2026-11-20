@@ -410,7 +410,7 @@ impl Registry {
                 prop.clone()
             }
         };
-        if normalize(expected, &spec.params_schema, 0) != given {
+        if !accepts(&normalize(expected, &spec.params_schema, 0), &given) {
             return Err(error(
                 "plan.type_mismatch",
                 step,
@@ -422,6 +422,34 @@ impl Registry {
         }
         Ok(())
     }
+}
+
+/// Une sortie `given` est acceptée par le paramètre `expected` si les formes sont égales, ou si
+/// le paramètre est facultatif et nullable (`{"type": ["string", "null"]}`, un `Option<String>`)
+/// et que la sortie est de son type sans le nul (`{"type": "string"}`) : `geocode.ban.path`
+/// pour `layer.add.path`. Le `default` du paramètre ne compte pas.
+fn accepts(expected: &Value, given: &Value) -> bool {
+    if expected == given {
+        return true;
+    }
+    let (Some(Value::Array(kinds)), Some(Value::String(kind))) =
+        (expected.get("type"), given.get("type"))
+    else {
+        return false;
+    };
+    let (Some(expected), Some(given)) = (expected.as_object(), given.as_object()) else {
+        return false;
+    };
+    let rest = |m: &serde_json::Map<String, Value>| {
+        m.iter()
+            .filter(|(k, _)| !matches!(k.as_str(), "type" | "default"))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+    kinds.len() == 2
+        && kinds.iter().any(|k| k == "null")
+        && kinds.iter().any(|k| k == kind.as_str())
+        && rest(expected) == rest(given)
 }
 
 /// Point qui tient lieu, pour la seule validation d'un plan, d'un élément `step:k.point` d'un
@@ -478,6 +506,48 @@ impl Registry {
         let Value::Object(map) = params else {
             return self.validate_params(id, params);
         };
+        let first = self.validate_without_references(id, map, spec, refs);
+        let Err(first_error) = first else {
+            return Ok(());
+        };
+        // Une règle qui porte sur la présence d'un paramètre référencé (`layer.add` : exactement
+        // un de `path`, `table` et `raster`) refuse le plan quand la référence est ôtée. Le type
+        // de la référence étant déjà contrôlé, une chaîne quelconque la remplace, pour les seuls
+        // paramètres de type chaîne libre : on ne fait ici qu'élargir ce qui est accepté.
+        let mut stood_in = map.clone();
+        for key in refs {
+            let free_text = param_schema(&spec.params_schema, key).is_some_and(|s| {
+                let kind = &s["type"];
+                (kind == "string"
+                    || kind
+                        .as_array()
+                        .is_some_and(|k| k.iter().any(|t| t == "string")))
+                    && s.get("enum").is_none()
+                    && s.get("$ref").is_none()
+            });
+            if free_text {
+                stood_in.insert(key.clone(), Value::String("step:reference".to_string()));
+            }
+        }
+        let others: Vec<String> = refs
+            .iter()
+            .filter(|k| !stood_in.get(*k).is_some_and(|v| v == "step:reference"))
+            .cloned()
+            .collect();
+        match self.validate_without_references(id, &stood_in, spec, &others) {
+            Ok(()) => Ok(()),
+            Err(_) => Err(first_error),
+        }
+    }
+
+    /// Valide les paramètres littéraux de `map`, les clés de `refs` étant ôtées.
+    fn validate_without_references(
+        &self,
+        id: &str,
+        map: &Map<String, Value>,
+        spec: &crate::registry::CommandSpec,
+        refs: &[String],
+    ) -> Result<(), crate::registry::RegistryError> {
         let mut literal = map.clone();
         for key in refs {
             literal.remove(key);

@@ -9368,7 +9368,10 @@ fn export_pdf_echelle_format(rng: &mut Rng) -> Option<Example> {
 // qu'aucun identifiant du registre ne contient : le jour où une commande les porte, le refus est
 // faux et le test le nomme.
 const NO_CONTOUR: &str = "Aucune commande du catalogue ne trace de courbes de niveau.";
-const NO_GEOCODING: &str = "Aucune commande du catalogue ne géocode une adresse.";
+// `geocode.ban` (ticket 16) géocode un fichier CSV d'adresses, jamais une adresse isolée : le refus
+// ne vise plus que l'adresse seule. Famille à revoir au ré-entraînement (ticket 17).
+const NO_GEOCODING: &str =
+    "Aucune commande du catalogue ne place une adresse isolée ; le géocodage ne traite qu'un fichier CSV d'adresses.";
 const NO_SHORTEST_PATH: &str =
     "Aucune commande du catalogue ne calcule de plus court chemin sur un réseau routier.";
 const NO_IMAGE_EXPORT: &str =
@@ -9457,7 +9460,7 @@ const OTHER_REFUSALS: &[(&str, &[&str])] = &[
 #[cfg(test)]
 const ABSENT_FUNCTIONS: &[(&str, &[&str])] = &[
     (NO_CONTOUR, &["contour", "isoline"]),
-    (NO_GEOCODING, &["geocod", "address"]),
+    (NO_GEOCODING, &["single_address", "address_lookup"]),
     (NO_SHORTEST_PATH, &["shortest_path", "network"]),
     (NO_IMAGE_EXPORT, &["image", "png"]),
     (NO_TRAVEL_TIME, &["travel_time", "distance_matrix"]),

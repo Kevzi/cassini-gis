@@ -70,9 +70,14 @@ fn temp_project(label: &str) -> (PathBuf, String) {
         N.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     ));
     std::fs::create_dir_all(&dir).unwrap();
-    // Les MNT de la recette, pour les exemples des commandes de terrain qui en lisent un.
+    // Les MNT et les CSV de la recette, pour les exemples des commandes qui lisent un fichier.
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures");
-    for name in ["mnt-plan-incline-2154.tif", "mnt-colline-2154.tif"] {
+    for name in [
+        "mnt-plan-incline-2154.tif",
+        "mnt-colline-2154.tif",
+        "adresses-test.csv",
+        "ban-test.csv",
+    ] {
         std::fs::copy(fixtures.join(name), dir.join(name)).unwrap();
     }
     let project = dir.join("p.qgz").to_string_lossy().replace('\\', "/");

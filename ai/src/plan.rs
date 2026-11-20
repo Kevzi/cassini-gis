@@ -894,6 +894,31 @@ mod tests {
         assert_eq!(registry().check_plan(&plan), Ok(()));
     }
 
+    /// Géocodage (ticket 16) : `geocode.ban` puis `layer.add` sur le CSV écrit, par `step:1.*`.
+    const GEOCODE: &str = r#"{"kind":"calls","calls":[{"command":"geocode.ban","params":{"addresses":"adresses.csv","ban":"adresses-74.csv","address_field":"adresse","postcode_field":"cp"}},{"command":"layer.add","params":{"crs":"step:1.crs","path":"step:1.path","x_field":"step:1.x_field","y_field":"step:1.y_field"}}]}"#;
+
+    #[test]
+    fn a_geocode_then_layer_add_plan_is_accepted_in_one_call() {
+        let mut calls = 0;
+        let plan = compose_plan(
+            &registry(),
+            &json!({"layers": []}),
+            "Place sur la carte les adresses de adresses.csv avec la BAN du 74.",
+            &mut |_| {
+                calls += 1;
+                Ok(done(GEOCODE))
+            },
+        )
+        .unwrap();
+        assert_eq!(calls, 1);
+        let Plan::Calls { calls } = &plan else {
+            panic!("{plan:?}")
+        };
+        assert_eq!(calls[0].command, "geocode.ban");
+        assert_eq!(calls[1].params["path"], "step:1.path");
+        assert_eq!(registry().check_plan(&plan), Ok(()));
+    }
+
     #[test]
     fn a_refusal_carries_its_reason_without_a_second_call() {
         let (result, seen) = compose(vec![done(

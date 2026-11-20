@@ -1,0 +1,10 @@
+id,adresse,cp,commune,nom
+1,12 Avenue de la Gare,74000,Annecy,exacte
+2,12 AV. DE LA GARE,,,autrement écrite
+3,5 chemin des ecoles,74000,annecy,sans accents
+4,8 pl st maurice,,,abréviations
+5,99 Rue Inconnue,74000,Annecy,introuvable
+6,4 Rue de l'Église,,,ambiguë sans filtre
+7,4 Rue de l'Église,74320,Sévrier,ambiguë départagée
+8,7 bis rue du lac,,,avec répétition
+9,7 rue du lac,,,sans répétition

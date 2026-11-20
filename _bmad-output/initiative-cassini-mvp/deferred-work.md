@@ -1270,3 +1270,10 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-jeu-de-phrases-reelles-et-mesure-de-couverture-de-depart-plan.md`
   summary: Diagnostiquer les baisses de plan_reel de 44/48 à 41/48 hors S15 et S23 (PL04, PL08, PL17, PL22, S24).
   evidence: Le rapport de départ de 10.8 attribue deux points à S15 et S23 (attendu devenu raster.zonal_statistics) et laisse le reste non analysé ; medium non vérifié, à lever avant la ré-épreuve de 10.17 en relançant plan_reel sur le modèle installé et en comparant phrase par phrase au 2026-11-16.
+
+- source_plan: `epic-catalogue-etendu-qgis/story-geocodage-sur-la-base-adresse-nationale-dans-le-noyau-plan.md`
+  summary: Géocodage BAN (10.16) : appariements manqués en silence que la relecture a relevés et que le ticket n'exigeait pas (répétition « bis » contre « b » de la BAN, lettre séparée « 12 b rue X », numéros « 12-14 », code postal « 74000.0 » ou « 74 000 », commune déléguée, points identiques écrits « 6.121 » et « 6.121000 »).
+  evidence: constaté par lecture de `geocode_ban.rs` (`parse_address`, `resolve`, `normalize_postcode`) ; tous donnent une adresse non appariée, jamais un mauvais point ; à reprendre si le jeu réel d'un département en montre la fréquence.
+- source_plan: `epic-catalogue-etendu-qgis/story-geocodage-sur-la-base-adresse-nationale-dans-le-noyau-plan.md`
+  summary: Géocodage BAN (10.16) : les messages d'erreur d'un CSV d'adresses vide, à ligne irrégulière ou à colonne d'en-tête avec espace disent « pas un CSV UTF-8 » ou « colonne absente », et les lignes de la BAN à lon/lat illisibles sont écartées sans compte ni avertissement.
+  evidence: `run()` et `read_ban` de `geocode_ban.rs` ; message trompeur, pas de résultat faux.

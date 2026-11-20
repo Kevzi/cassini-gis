@@ -455,7 +455,9 @@ pub fn invalid(registry: &Registry, inventory: &Value, phrases: &[Value]) -> Vec
                     .or_else(|| params["raster"].as_str())
                     .or_else(|| params["table"].as_str())
                     .unwrap_or_default();
-                if !known.unloaded.contains(path) {
+                // Un chemin tenu par une référence (`step:1.path`, après `geocode.ban`) n'est pas un
+                // fichier de l'inventaire.
+                if !path.starts_with("step:") && !known.unloaded.contains(path) {
                     out.push(format!(
                         "{id} : fichier absent des fichiers non chargés {path}"
                     ));

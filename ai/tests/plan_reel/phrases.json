@@ -399,11 +399,11 @@
   },
   {
     "id": "PL22",
-    "phrase": "Géocode le 3 avenue de Paris et place-le sur la carte.",
+    "phrase": "Donne-moi le plus court chemin en voiture entre la gare et le lycée.",
     "expected": {
       "kind": "refusal",
       "missing": [
-        "geocod"
+        "shortest"
       ]
     }
   },

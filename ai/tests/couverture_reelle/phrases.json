@@ -539,9 +539,10 @@
    "treatment": "paraphrase"
   },
   "expected": {
-   "kind": "refusal",
-   "missing": [
-    "geocode"
+   "kind": "plan",
+   "commands": [
+    "geocode.ban",
+    "layer.add"
    ]
   }
  },

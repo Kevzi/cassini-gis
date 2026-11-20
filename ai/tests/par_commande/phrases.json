@@ -2485,5 +2485,79 @@
         }
       ]
     }
+  },
+  {
+    "id": "GC1",
+    "command": "geocode.ban",
+    "phrase": "Trouve les coordonnées des adresses de donnees/adresses.csv avec la base adresse du 74, l'adresse est dans la colonne adresse.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "geocode.ban",
+          "params": {
+            "addresses": "donnees/adresses.csv",
+            "ban": "donnees/adresses-74.csv",
+            "address_field": "adresse"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "GC2",
+    "command": "geocode.ban",
+    "phrase": "Place sur la carte les clients de donnees/clients.csv (colonne adresse, code postal dans cp) d'après la BAN du 74.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "geocode.ban",
+          "params": {
+            "addresses": "donnees/clients.csv",
+            "ban": "donnees/adresses-74.csv",
+            "address_field": "adresse",
+            "postcode_field": "cp"
+          }
+        },
+        {
+          "command": "layer.add",
+          "params": {
+            "path": "step:1.path",
+            "crs": "step:1.crs",
+            "x_field": "step:1.x_field",
+            "y_field": "step:1.y_field"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "GC3",
+    "command": "geocode.ban",
+    "phrase": "Géocode donnees/magasins.csv sur la Base Adresse Nationale du 74, colonnes adresse et ville, puis affiche le résultat.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "geocode.ban",
+          "params": {
+            "addresses": "donnees/magasins.csv",
+            "ban": "donnees/adresses-74.csv",
+            "address_field": "adresse",
+            "city_field": "ville"
+          }
+        },
+        {
+          "command": "layer.add",
+          "params": {
+            "path": "step:1.path",
+            "crs": "step:1.crs",
+            "x_field": "step:1.x_field",
+            "y_field": "step:1.y_field"
+          }
+        }
+      ]
+    }
   }
 ]

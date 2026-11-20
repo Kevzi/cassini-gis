@@ -554,6 +554,55 @@ fn a_changed_input_diverges_at_its_step() {
 }
 
 #[test]
+fn a_geocoding_replays_identically_then_a_changed_address_file_diverges() {
+    // `geocode.ban` (epic 10, entrée 16) : ses deux CSV d'entrée sont des `path_params`, le journal
+    // en garde taille et date (AD-11), le CSV écrit est déterministe.
+    let (dir, project, _) = temp_project();
+    for name in ["adresses-test.csv", "ban-test.csv"] {
+        fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../fixtures")
+                .join(name),
+            dir.join(name),
+        )
+        .unwrap();
+    }
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, &project).unwrap();
+    let out = s
+        .call(
+            "geocode.ban",
+            json!({"addresses": "adresses-test.csv", "ban": "ban-test.csv",
+                "address_field": "adresse", "postcode_field": "cp"}),
+        )
+        .unwrap();
+    assert_eq!(out["matched_count"], 7);
+    let l = lines(&s);
+    assert_eq!(l[0]["inputs"].as_array().map(Vec::len), Some(2));
+    drop(s);
+    let (report, _) = replay_of(&registry, &project).unwrap();
+    assert_eq!(
+        report,
+        ReplayReport {
+            steps: 1,
+            identical: true,
+            warnings: vec![]
+        }
+    );
+    // Une adresse de plus : le rejeu s'arrête et nomme l'étape.
+    let mut text = fs::read_to_string(dir.join("adresses-test.csv")).unwrap();
+    text.push_str(
+        "10,1 rue du Lac,74000,Annecy,en plus
+",
+    );
+    fs::write(dir.join("adresses-test.csv"), text).unwrap();
+    let err = replay_of(&registry, &project).unwrap_err();
+    assert_eq!(err.code, "replay.diverged");
+    assert_eq!(err.step, Some(1));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn an_output_with_other_bytes_diverges() {
     let (dir, project, _) = temp_project();
     let registry = Registry::standard();

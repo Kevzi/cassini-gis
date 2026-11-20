@@ -1,0 +1,8 @@
+id;id_fantoir;numero;rep;nom_voie;code_postal;code_insee;nom_commune;code_insee_ancienne_commune;nom_ancienne_commune;x;y;lon;lat;type_position;alias;nom_ld;libelle_acheminement;nom_afnor;source_position;source_nom_voie;certification_commune;cad_parcelles
+74010_0001_00012;74010_0001;12;;Avenue de la Gare;74000;74010;Annecy;;;941000.10;6521000.20;6.121000;45.901000;entrée;;;ANNECY;AVENUE DE LA GARE;commune;commune;1;
+74010_0002_00005;74010_0002;5;;Chemin des Écoles;74000;74010;Annecy;;;941100.10;6521100.20;6.122000;45.902000;entrée;;;ANNECY;CHEMIN DES ECOLES;commune;commune;1;
+74010_0003_00008;74010_0003;8;;Place Saint-Maurice;74000;74010;Annecy;;;941200.10;6521200.20;6.123000;45.903000;entrée;;;ANNECY;PLACE SAINT MAURICE;commune;commune;1;
+74010_0004_00004;74010_0004;4;;Rue de l'Église;74000;74010;Annecy;;;941300.10;6521300.20;6.124000;45.904000;entrée;;;ANNECY;RUE DE L EGLISE;commune;commune;1;
+74268_0001_00004;74268_0001;4;;Rue de l'Église;74320;74268;Sévrier;;;941400.10;6521400.20;6.140000;45.850000;entrée;;;SEVRIER;RUE DE L EGLISE;commune;commune;1;
+74010_0005_00007;74010_0005;7;;Rue du Lac;74000;74010;Annecy;;;941500.10;6521500.20;6.125000;45.905000;entrée;;;ANNECY;RUE DU LAC;commune;commune;1;
+74010_0005_00007b;74010_0005;7;bis;Rue du Lac;74000;74010;Annecy;;;941510.10;6521510.20;6.125500;45.905500;entrée;;;ANNECY;RUE DU LAC;commune;commune;1;

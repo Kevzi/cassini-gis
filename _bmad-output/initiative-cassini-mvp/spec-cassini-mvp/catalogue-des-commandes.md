@@ -384,7 +384,7 @@ donne l'esquisse.
 | `network.shortest_path` | planifiée | qgis | epic 10, entrée 13 |
 | `network.prepare` | planifiée | qgis | epic 10, entrée 14 |
 | `layout.export_atlas` | planifiée | qgis | epic 10, entrée 15 |
-| `geocode.ban` | planifiée | core | epic 10, entrée 16 |
+| `geocode.ban` | faite | core | epic 10, entrée 16 |
 | `map.topographic_style` | faite | core | epic 11, entrée 20 (geste : 21) |
 | `map.graduated_style` | faite | core | epic 11, entrée 20 (geste : 21) |
 | `layer.set_style` | faite (dictée) | qgis | epic 11, entrée 20 (geste : 21) |
@@ -2297,7 +2297,7 @@ qu'ouvre ensuite une étape `layer.add` explicite. Non annulable.
 | `unmatched_count` | entier | Adresses introuvables. |
 
 ```json fiche
-{"id": "geocode.ban", "status": "planifiee", "runs_in": "core", "dictated_by_core": false,
+{"id": "geocode.ban", "status": "faite", "runs_in": "core", "dictated_by_core": false,
  "params": {"addresses": {"type": "string", "required": true},
             "ban": {"type": "string", "required": true},
             "address_field": {"type": "string", "required": true},

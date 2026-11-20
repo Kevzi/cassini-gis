@@ -30,6 +30,10 @@ libm = "=0.2.15"
 # l'extension contre le schema de sortie de sa commande. Sans fonctions par defaut : aucun acces
 # reseau (pas de resolution de $ref distants, ni de client HTTP).
 jsonschema = { version = "=0.61.2", default-features = false }
+# csv (Unlicense OR MIT), acceptee par le proprietaire le 2026-11-20 (ticket 16) : lecture du CSV
+# d'adresses et du CSV de la BAN, ecriture du CSV geocode, dans core/src/commands/geocode_ban.rs.
+# Pur Rust, sans reseau ni fonction facultative.
+csv = "1"
 
 # windows-sys (MIT OR Apache-2.0), acceptee par le proprietaire le 2026-10-30 (ticket 5.24) :
 # l'API Win32 des tubes nommes du canal d'IA externe (AD-14), compilee seulement sous Windows.
