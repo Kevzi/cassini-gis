@@ -285,6 +285,10 @@ pub struct LayoutExportPdfOutput {
     pub page_count: u64,
     /// Nombre de couches visibles dessinées sur la carte.
     pub layer_count: u64,
+    /// Noms des couches distantes visibles (cartes en ligne : WMS, WMTS, XYZ, tuiles vectorielles
+    /// distantes) écartées de la carte : un export n'ouvre aucune connexion réseau (AD-14).
+    #[serde(default)]
+    pub skipped_layers: Vec<String>,
     /// Noms de fichiers des sources des couches visibles, 50 au plus.
     #[schemars(length(max = 50))]
     pub sources: Vec<String>,
@@ -318,8 +322,8 @@ impl Delegated for LayoutExportPdf {
     fn spec() -> CommandSpec {
         CommandSpec::new::<LayoutExportPdfParams, LayoutExportPdfOutput>(
             "layout.export_pdf",
-            "Export PDF de la carte : produit une page (A4 paysage par défaut ; `page_size` de a4 à a0, `orientation` landscape ou portrait) montrant les couches visibles du projet, avec un titre, une légende, une barre d'échelle, une flèche du nord et les sources (noms des fichiers des couches). Avec `scale`, la carte est tenue à cette échelle (1:scale), centrée sur la carte affichée dans QGIS (à défaut, sur les couches visibles), et refusée si le cadre ne montre aucune couche ; sans `scale`, elle est cadrée sur l'emprise des couches. Avec `grid`, la carte porte un carroyage : `degrees` (graticule WGS84, intervalle en angle) ou `projected` (quadrillage dans le système `epsg`, intervalle en distance), étiquettes en décimal, ou `mgrs` (quadrillage UTM étiqueté en MGRS, comme les cartes USNG des secours, intervalle 1, 10 ou 100 km ; la zone et les carrés sont fournis par le noyau). `header` et `footer` : une ligne de texte libre en haut et en bas de la page, recopiée de la demande, 120 caractères au plus. La ligne des sources dit la résolution et la date de chaque source. Ne modifie ni le projet ni les couches.",
-            "PDF map export: produces a page (A4 landscape by default; `page_size` from a4 to a0, `orientation` landscape or portrait) showing the visible layers of the project, with a title, a legend, a scale bar, a north arrow and the sources (file names of the layers). With `scale`, the map is held at that scale (1:scale), centred on the map shown in QGIS (failing that, on the visible layers), and refused if the frame shows no layer; without `scale`, it is framed on the extent of the layers. With `grid`, the map carries a grid: `degrees` (WGS84 graticule, interval as an angle) or `projected` (grid in the `epsg` system, interval as a distance), with decimal labels, or `mgrs` (UTM grid labelled in MGRS, as on rescue USNG maps, interval 1, 10 or 100 km; zone and squares are filled by the core). `header` and `footer`: one free text line at the top and bottom of the page, copied from the request, 120 characters at most. The sources line gives the resolution and date of each source. Does not modify the project or the layers.",
+            "Export PDF de la carte : produit une page (A4 paysage par défaut ; `page_size` de a4 à a0, `orientation` landscape ou portrait) montrant les couches visibles du projet, avec un titre, une légende, une barre d'échelle, une flèche du nord et les sources (noms des fichiers des couches). Avec `scale`, la carte est tenue à cette échelle (1:scale), centrée sur la carte affichée dans QGIS (à défaut, sur les couches visibles), et refusée si le cadre ne montre aucune couche ; sans `scale`, elle est cadrée sur l'emprise des couches. Avec `grid`, la carte porte un carroyage : `degrees` (graticule WGS84, intervalle en angle) ou `projected` (quadrillage dans le système `epsg`, intervalle en distance), étiquettes en décimal, ou `mgrs` (quadrillage UTM étiqueté en MGRS, comme les cartes USNG des secours, intervalle 1, 10 ou 100 km ; la zone et les carrés sont fournis par le noyau). `header` et `footer` : une ligne de texte libre en haut et en bas de la page, recopiée de la demande, 120 caractères au plus. La ligne des sources dit la résolution et la date de chaque source. Seules les couches locales sont dessinées : les couches distantes (cartes en ligne) sont écartées et nommées dans `skipped_layers`. Ne modifie ni le projet ni les couches.",
+            "PDF map export: produces a page (A4 landscape by default; `page_size` from a4 to a0, `orientation` landscape or portrait) showing the visible layers of the project, with a title, a legend, a scale bar, a north arrow and the sources (file names of the layers). With `scale`, the map is held at that scale (1:scale), centred on the map shown in QGIS (failing that, on the visible layers), and refused if the frame shows no layer; without `scale`, it is framed on the extent of the layers. With `grid`, the map carries a grid: `degrees` (WGS84 graticule, interval as an angle) or `projected` (grid in the `epsg` system, interval as a distance), with decimal labels, or `mgrs` (UTM grid labelled in MGRS, as on rescue USNG maps, interval 1, 10 or 100 km; zone and squares are filled by the core). `header` and `footer`: one free text line at the top and bottom of the page, copied from the request, 120 characters at most. The sources line gives the resolution and date of each source. Only local layers are drawn: remote layers (online maps) are left out and named in `skipped_layers`. Does not modify the project or the layers.",
         )
         .runs_in(RunsIn::Qgis)
         .cancellable(false)
@@ -342,6 +346,7 @@ impl Delegated for LayoutExportPdf {
             "layout_export_pdf_needs_a_title",
             "layout_export_pdf_output_is_a_pdf_named_by_the_core",
             "layout_export_pdf_sources_are_bounded",
+            "layout_export_pdf_skipped_layers_name_the_remote_layers",
             "layout_export_pdf_leave_out_is_an_optional_list_of_ids",
             "layout_export_pdf_scale_is_an_optional_bounded_integer",
             "layout_export_pdf_center_is_filled_on_replay_from_the_result",
@@ -410,6 +415,34 @@ mod tests {
         let sources = &spec.output_schema["properties"]["sources"];
         assert_eq!(sources["maxItems"], json!(super::MAX_SOURCES));
         assert!(registry.check_contract().is_empty());
+    }
+
+    #[test]
+    fn layout_export_pdf_skipped_layers_name_the_remote_layers() {
+        let registry = Registry::standard();
+        let spec = registry.spec("layout.export_pdf").unwrap();
+        let skipped = &spec.output_schema["properties"]["skipped_layers"];
+        assert_eq!(skipped["type"], json!("array"));
+        assert_eq!(skipped["items"]["type"], json!("string"));
+        // Le résultat d'avant, sans la clé, reste lisible (journaux existants).
+        let required = spec.output_schema["required"].as_array().unwrap();
+        assert!(!required.contains(&json!("skipped_layers")));
+        let out = super::LayoutExportPdfOutput {
+            file: "a.pdf".into(),
+            page_count: 1,
+            layer_count: 1,
+            skipped_layers: vec!["Fond OSM".into()],
+            sources: vec![],
+            truncated: false,
+            source_details: vec![],
+            scale: None,
+            center: None,
+            warnings: vec![],
+        };
+        assert_eq!(
+            serde_json::to_value(&out).unwrap()["skipped_layers"],
+            json!(["Fond OSM"])
+        );
     }
 
     #[test]
@@ -483,6 +516,7 @@ mod tests {
             file: "a.pdf".into(),
             page_count: 1,
             layer_count: 1,
+            skipped_layers: vec![],
             sources: vec![],
             truncated: false,
             source_details: vec![],
@@ -536,6 +570,7 @@ mod tests {
             file: "a.pdf".into(),
             page_count: 1,
             layer_count: 1,
+            skipped_layers: vec![],
             sources: vec![],
             truncated: false,
             source_details: vec![],

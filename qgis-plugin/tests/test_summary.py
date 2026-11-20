@@ -432,6 +432,45 @@ class OtherCommandsTest(unittest.TestCase):
         text = say("layout.export_pdf", {"title": "T"}, windows, lang="en")
         self.assertEqual(text, 'Map "T" exported to PDF: file 2-layout.export_pdf.pdf, 2 pages.')
 
+    def test_export_pdf_names_the_remote_layers_left_out(self):
+        out = {"file": "/home/c/1-layout.export_pdf.pdf", "page_count": 1, "skipped_layers": ["Fond OSM", "Ortho"]}
+        self.assertEqual(
+            say("layout.export_pdf", {"title": "T"}, out),
+            "Carte « T » exportée en PDF : fichier 1-layout.export_pdf.pdf, 1 page ; "
+            "couches distantes écartées : Fond OSM, Ortho.",
+        )
+        self.assertEqual(
+            say("layout.export_pdf", {"title": "T"}, out, lang="en"),
+            'Map "T" exported to PDF: file 1-layout.export_pdf.pdf, 1 page; remote layers left out: Fond OSM, Ortho.',
+        )
+        # Aucune couche écartée : la phrase d'avant, sans rien en plus.
+        clean = dict(out, skipped_layers=[])
+        self.assertEqual(
+            say("layout.export_pdf", {"title": "T"}, clean),
+            "Carte « T » exportée en PDF : fichier 1-layout.export_pdf.pdf, 1 page.",
+        )
+
+    def test_export_atlas_sentences(self):
+        params = {"title": "Atlas des parcelles", "coverage_layer_id": "parcelles_2"}
+        # Avant le résultat : le plan dit déjà que les couches distantes ne sont pas dessinées.
+        self.assertEqual(
+            summary.label("layout.export_atlas", params, "fr", qgis_name),
+            "Export PDF de l'atlas « Atlas des parcelles », une page par entité de Parcelles "
+            "(les couches distantes ne sont pas dessinées)",
+        )
+        out = {"file": "/home/c/2-layout.export_atlas.pdf", "page_count": 12, "skipped_layers": ["Fond OSM"]}
+        self.assertEqual(
+            say("layout.export_atlas", params, out),
+            "Atlas « Atlas des parcelles » exporté en PDF, une page par entité de Parcelles : "
+            "fichier 2-layout.export_atlas.pdf, 12 pages ; couches distantes écartées : Fond OSM.",
+        )
+        self.assertNotIn("/home", say("layout.export_atlas", params, out))
+        self.assertEqual(
+            say("layout.export_atlas", params, dict(out, skipped_layers=[]), lang="en"),
+            'Atlas "Atlas des parcelles" exported to PDF, one page per feature of Parcelles: '
+            "file 2-layout.export_atlas.pdf, 12 pages.",
+        )
+
     def test_export_pdf_says_when_an_empty_result_framed_the_inputs(self):
         out = {"file": "/home/c/5-layout.export_pdf.pdf", "page_count": 1}
         focus = {"results": [{"layer_id": "d", "label": "Parcelles"}], "hidden": [], "frame": ["plu"],
@@ -1144,6 +1183,8 @@ SAMPLES = {
     "network.prepare": ({"layer_id": "chemins_1", "tolerance": {"value": 1.0, "unit": "m"}},
                         {"layer_id": "reseau_1", "name": "Réseau", "feature_count": 12, "crs": "EPSG:2154"}),
     "layout.export_pdf": ({"title": "Gares"}, {"file": "C:/d/gares.pdf", "page_count": 1}),
+    "layout.export_atlas": ({"title": "Atlas", "coverage_layer_id": "parcelles_2"},
+                            {"file": "C:/d/atlas.pdf", "page_count": 3, "skipped_layers": []}),
     "terrain.slope": ({"dem": DEM, "unit": "percent"},
                       {"file": "C:/d/pente.tif", "unit": "percent", "min": 0.0, "max": 152.34,
                        "nodata_cells": 0}),

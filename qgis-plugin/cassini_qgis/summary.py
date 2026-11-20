@@ -563,6 +563,36 @@ def scale_number(lang, n):
     return grouped.replace(",", " ") if texts.normalize(lang) == "fr" else grouped
 
 
+def _pdf_file_and_skipped(lang, r):
+    """Fin commune des phrases d'export PDF : fichier et pages, puis les couches distantes écartées
+    (cartes en ligne : un export ne se connecte pas au réseau)."""
+    text = ""
+    try:
+        file = file_name(r.get("file"))
+    except _Unreadable:
+        file = None
+    if file is not None:
+        pages = r.get("page_count")
+        if _is_int(pages):
+            text += texts.tr(lang, "sum_pdf_file_pages", file=file, pages=count(lang, "pages", pages))
+        else:
+            text += texts.tr(lang, "sum_pdf_file", file=file)
+    skipped = r.get("skipped_layers")
+    if isinstance(skipped, list) and skipped and all(isinstance(n, str) for n in skipped):
+        text += texts.tr(lang, "sum_pdf_skipped", layers=", ".join(_text(n) for n in skipped))
+    return text
+
+
+def _export_atlas(lang, p, r, names):
+    key = "sum_export_atlas_ask" if names.ahead else "sum_export_atlas"
+    text = texts.tr(lang, key, title=_text(p.get("title")), layer=names.layer(p.get("coverage_layer_id")))
+    if r:
+        text += _pdf_file_and_skipped(lang, r)
+    elif names.ahead:
+        text += texts.tr(lang, "sum_pdf_remote_note")
+    return text
+
+
 def _export_pdf(lang, p, r, names):
     key = "sum_export_pdf_ask" if names.ahead else "sum_export_pdf"
     text = texts.tr(lang, key, title=_text(p.get("title")))
@@ -574,16 +604,7 @@ def _export_pdf(lang, p, r, names):
     if _is_int(scale) and scale > 0:
         text += texts.tr(lang, "sum_pdf_scale", scale=scale_number(lang, scale))
     if r:
-        try:
-            file = file_name(r.get("file"))
-        except _Unreadable:
-            file = None
-        if file is not None:
-            pages = r.get("page_count")
-            if _is_int(pages):
-                text += texts.tr(lang, "sum_pdf_file_pages", file=file, pages=count(lang, "pages", pages))
-            else:
-                text += texts.tr(lang, "sum_pdf_file", file=file)
+        text += _pdf_file_and_skipped(lang, r)
     # Résultat d'un plan vide, en tout ou en partie (entrée 7.9), lu dans les paramètres
     # journalisés seuls.
     focus = p.get("focus")
@@ -1182,6 +1203,7 @@ _SENTENCES = {
     "layer.add": _layer_add,
     "layer.describe": _layer_describe,
     "layout.export_pdf": _export_pdf,
+    "layout.export_atlas": _export_atlas,
     "project.inventory": _inventory,
     "model.list": _model_list,
 }

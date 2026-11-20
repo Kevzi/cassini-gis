@@ -166,7 +166,11 @@ pub fn expected_calls(phrase: &Value) -> Option<&Vec<Value>> {
 pub fn expected_plan(calls: &[Value]) -> Plan {
     let mut calls = calls.to_vec();
     for call in &mut calls {
-        if call["command"] == "layout.export_pdf" && call["params"].get("title").is_none() {
+        if matches!(
+            call["command"].as_str(),
+            Some("layout.export_pdf" | "layout.export_atlas")
+        ) && call["params"].get("title").is_none()
+        {
             call["params"]["title"] = serde_json::json!("Carte");
         }
     }
@@ -230,10 +234,15 @@ pub fn known(inventory: &Value) -> Known {
 pub fn references(call: &Value) -> (Vec<String>, Vec<String>) {
     let params = &call["params"];
     let text = |v: &Value| v.as_str().map(str::to_string);
-    let mut layers: Vec<String> = ["layer_id", "overlay_layer_id", "points_layer_id"]
-        .iter()
-        .filter_map(|k| text(&params[*k]))
-        .collect();
+    let mut layers: Vec<String> = [
+        "layer_id",
+        "overlay_layer_id",
+        "points_layer_id",
+        "coverage_layer_id",
+    ]
+    .iter()
+    .filter_map(|k| text(&params[*k]))
+    .collect();
     for key in ["leave_out", "layers"] {
         layers.extend(
             params[key]

@@ -55,6 +55,11 @@ class FakeBackend:
     def visible_layers(self):
         return list(self.layers)
 
+    skipped = ()  # noms des couches distantes cochées, que le vrai fond écarte
+
+    def skipped_layers(self):
+        return list(self.skipped)
+
     def id_of(self, layer):
         return layer.lid
 
@@ -146,7 +151,8 @@ class LayoutExportTest(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual(
             result,
-            {"file": self.out, "page_count": 1, "layer_count": 2, "sources": ["gares.gpkg", "communes.shp"], "truncated": False,
+            {"file": self.out, "page_count": 1, "layer_count": 2, "skipped_layers": [],
+             "sources": ["gares.gpkg", "communes.shp"], "truncated": False,
              "source_details": [
                  {"source": "gares.gpkg", "resolution": None, "date": None, "date_origin": None},
                  {"source": "communes.shp", "resolution": None, "date": None, "date_origin": None},
@@ -454,7 +460,7 @@ class LayoutExportTest(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual(backend.kwargs, {})
         self.assertEqual(layout_export.page_dimensions(None), (297.0, 210.0))
-        self.assertEqual(set(result), {"file", "page_count", "layer_count", "sources", "truncated", "source_details"})
+        self.assertEqual(set(result), {"file", "page_count", "layer_count", "skipped_layers", "sources", "truncated", "source_details"})
         for extra in ({"page_size": None}, {"orientation": None}, {"grid": None}):
             backend = FakeBackend(TWO)
             (_, error), _ = run(backend, dict({"title": "Carte", "out": self.out}, **extra))
@@ -602,6 +608,60 @@ class LayoutExportTest(unittest.TestCase):
             {"map", "title", "legend", "scalebar", "northarrow", "sources"},
         )
 
+
+
+class RemoteLayersTest(unittest.TestCase):
+    """Couches distantes : écartées de la carte, nommées au résultat, aucun export sans couche locale."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.out = os.path.join(self.dir.name, "1-layout.export_pdf.pdf")
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def test_a_remote_layer_is_left_out_and_named(self):
+        backend = FakeBackend(TWO)
+        backend.skipped = ["Fond OpenStreetMap"]
+        (result, error), _ = run(backend, {"title": "Carte", "out": self.out})
+        self.assertIsNone(error)
+        self.assertEqual(result["skipped_layers"], ["Fond OpenStreetMap"])
+        self.assertEqual(result["layer_count"], 2)
+
+    def test_only_remote_layers_is_empty_and_names_them_without_file(self):
+        backend = FakeBackend([])
+        backend.skipped = ["Fond OSM", "Orthophotos"]
+        (result, error), _ = run(backend, {"title": "Carte", "out": self.out})
+        self.assertIsNone(result)
+        self.assertEqual(error.code, "layout.empty")
+        self.assertIn("Fond OSM, Orthophotos", error.message)
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_the_source_rule_tells_remote_from_local(self):
+        remote = layout_export.is_remote_source
+        web = "ht" + "tps://tile.example.org/{z}/{x}/{y}.png"
+        for provider, source in (
+            ("wms", "crs=EPSG:3857&format=image/png&type=xyz&url=" + web),
+            ("wms", "contextualWMSLegend=0&layers=x&url=" + web + "?"),
+            ("wfs", "pagingEnabled='true' typename='x' url='" + web + "'"),
+            ("vectortile", "type=xyz&url=" + web.replace(".png", ".pbf")),
+            ("arcgismapserver", "url=" + web),
+            ("arcgisfeatureserver", "url=" + web),
+            ("ogr", "/vsicurl/" + web),
+            ("gdal", web),
+        ):
+            self.assertTrue(remote(provider, source), (provider, source))
+        for provider, source in (
+            ("ogr", r"C:\donnees\parcelles.gpkg|layername=parcelles"),
+            ("gdal", "/home/x/mnt.tif"),
+            ("memory", "Point?crs=epsg:2154"),
+            ("delimitedtext", "file:///C:/x/gares.csv?type=csv&xField=x"),
+            ("wms", "type=xyz&url=file:///C:/tuiles/{z}/{x}/{y}.png"),
+            ("vectortile", "type=mbtiles&url=C:/tuiles/fond.mbtiles"),
+            ("", ""),
+            (None, None),
+        ):
+            self.assertFalse(remote(provider, source), (provider, source))
 
 
 class LegendFitTest(unittest.TestCase):

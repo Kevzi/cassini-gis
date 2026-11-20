@@ -383,7 +383,7 @@ donne l'esquisse.
 | `raster.contour` | faite | qgis | epic 10, entrée 26 |
 | `network.shortest_path` | faite | qgis | — |
 | `network.prepare` | faite | qgis | epic 10, entrée 14 |
-| `layout.export_atlas` | planifiée | qgis | epic 10, entrée 15 |
+| `layout.export_atlas` | faite | qgis | — |
 | `geocode.ban` | faite | core | epic 10, entrée 16 |
 | `map.topographic_style` | faite | core | epic 11, entrée 20 (geste : 21) |
 | `map.graduated_style` | faite | core | epic 11, entrée 20 (geste : 21) |
@@ -805,9 +805,7 @@ restent dans le projet.
                                  "frame": {"type": "array", "required": false, "items": "string"},
                                  "framed_on": {"type": "string", "required": true, "enum": ["results", "inputs", "visible_layers"]},
                                  "hide_band_labels": {"type": "boolean", "required": false}}}},
- "result": ["center", "file", "layer_count", "page_count", "scale", "source_details", "sources", "truncated", "warnings"],
- "planned_by": "epic 10, entrée 15 (skipped_layers)",
- "planned_result": ["skipped_layers"]}
+ "result": ["center", "file", "layer_count", "page_count", "scale", "skipped_layers", "source_details", "sources", "truncated", "warnings"]}
 ```
 
 ### `terrain.slope`
@@ -2283,7 +2281,7 @@ locales sont dessinées ; les couches distantes sont écartées et nommées (mê
 | `truncated` | booléen | Vrai si `sources` est tronquée. |
 
 ```json fiche
-{"id": "layout.export_atlas", "status": "planifiee", "runs_in": "qgis", "dictated_by_core": false,
+{"id": "layout.export_atlas", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
  "params": {"title": {"type": "string", "required": true},
             "coverage_layer_id": {"type": "string", "required": true},
             "label_field": {"type": "string", "required": false},

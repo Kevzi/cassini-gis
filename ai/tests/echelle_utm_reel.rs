@@ -227,11 +227,16 @@ fn the_bar_has_40_to_50_sentences_with_at_least_3_refusals_naming_what_is_missin
         .collect();
     assert!(refusals.len() >= 3, "{} refus", refusals.len());
     for p in refusals {
-        assert!(
-            p["expected"]["missing"]
+        // Une commande absente (`missing`), ou une option qu'une commande livrée n'a pas
+        // (`missing_params`, « commande:paramètre » : l'atlas n'a pas d'échelle).
+        let names = |key: &str| {
+            p["expected"][key]
                 .as_array()
-                .is_some_and(|m| !m.is_empty() && m.iter().all(Value::is_string)),
-            "{} : refus sans `missing`",
+                .is_some_and(|m| !m.is_empty() && m.iter().all(Value::is_string))
+        };
+        assert!(
+            names("missing") || names("missing_params"),
+            "{} : refus sans `missing` ni `missing_params`",
             p["id"]
         );
     }
@@ -298,7 +303,7 @@ fn a_refusal_turns_red_when_its_command_reaches_the_registry() {
     let mut tried = 0;
     for p in all.iter().filter(|p| p["expected"]["kind"] == "refusal") {
         let id = p["id"].as_str().unwrap();
-        for word in p["expected"]["missing"].as_array().unwrap() {
+        for word in p["expected"]["missing"].as_array().into_iter().flatten() {
             let mut grown = ids.clone();
             grown.push(format!("future.{}", word.as_str().unwrap()));
             let wrong = common::refusals_now_wrong(&grown, &all);

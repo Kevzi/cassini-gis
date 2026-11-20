@@ -668,8 +668,8 @@
     "phrase": "Fais un atlas PDF avec une page par commune au 1:25 000.",
     "expected": {
       "kind": "refusal",
-      "missing": [
-        "atlas"
+      "missing_params": [
+        "layout.export_atlas:scale"
       ]
     }
   },

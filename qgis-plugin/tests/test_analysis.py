@@ -28,6 +28,22 @@ class FakeHandle:
         self.cancelled = True
 
 
+class FakeMounted:
+    """Mise en page d'atlas montée par le fond : `removed` dit qu'elle a été retirée du projet."""
+
+    def __init__(self, coverage, title, label_field):
+        self.coverage, self.title, self.label_field = coverage, title, label_field
+        self.name = "cassini-atlas-test"
+        self.layers = [FakeLayer("fond", name="fond"), FakeLayer("gares")]
+        self.skipped = ["Fond OSM"]
+        self.names = ["fond.gpkg", "gares.gpkg"]
+        self.page_count = 3
+        self.removed = 0
+
+    def remove(self):
+        self.removed += 1
+
+
 class FakeBackend:
     """`run_algorithm` garde l'appel ; le test appelle `finished` quand il veut."""
 
@@ -46,6 +62,7 @@ class FakeBackend:
         self.out_fields = None  # champs des couches temporaire et produite, quand un test les fixe
         self.missing_algorithms = set()  # algorithmes absents du registre de traitement (AD-25)
         self.path_length, self.length_call = 600.0, None  # longueur lue sur la géométrie de la couche produite
+        self.mount_error, self.mounts = None, []  # genre `layout` : refus du montage, mises en page montées
 
     def algorithm_exists(self, algorithm_id):
         return algorithm_id not in self.missing_algorithms
@@ -113,6 +130,13 @@ class FakeBackend:
         self.near_call = (layer.lid, x, y, epsg, radius)
         self.near_work = work_epsg
         return self.near
+
+    def mount_atlas(self, coverage, title, label_field=None):
+        if self.mount_error is not None:
+            raise self.mount_error
+        mounted = FakeMounted(coverage, title, label_field)
+        self.mounts.append(mounted)
+        return mounted
 
     def transform_point(self, x, y, epsg, target_epsg):
         self.transform_call = (x, y, epsg, target_epsg)
@@ -2758,6 +2782,126 @@ class ContourTest(unittest.TestCase):
 
     def test_the_command_can_be_cancelled(self):
         self.assertTrue(analysis.derived_cancellable(analysis.ALGORITHMS)["raster.contour"])
+
+
+class AtlasTest(unittest.TestCase):
+    """`layout.export_atlas` : genre `layout` de la table fermée (AD-24), `native:atlaslayouttopdf`
+    sur une mise en page montée le temps de l'appel."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.out = os.path.join(self.dir.name, "1-layout.export_atlas.pdf")
+        self.entry = analysis.ALGORITHMS["layout.export_atlas"]
+        self.backend = FakeBackend(
+            [FakeLayer("zones", name="zones", fields=("nom", "code"), count=3), FakeLayer("vide", count=0),
+             FakeLayer("r", vector=False)]
+        )
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def params(self, **extra):
+        p = {"title": "Atlas des zones", "coverage_layer_id": "zones", "out": self.out}
+        p.update(extra)
+        return p
+
+    def test_three_features_make_three_pages_at_the_core_path(self):
+        g, calls = start(self.entry, self.backend, self.params())
+        algo, p = self.backend.calls[0]
+        self.assertEqual(algo, "native:atlaslayouttopdf")
+        self.assertEqual(p["COVERAGE_LAYER"].lid, "zones")
+        self.assertEqual(p["LAYOUT"], "cassini-atlas-test")
+        self.assertEqual([layer.lid for layer in p["LAYERS"]], ["fond", "gares"])  # locales seules
+        self.assertEqual(p["OUTPUT"], self.out)  # exactement le chemin dicté par le noyau
+        self.assertEqual(calls, [])
+        mounted = self.backend.mounts[0]
+        self.assertEqual((mounted.title, mounted.label_field), ("Atlas des zones", None))
+        self.assertEqual(mounted.removed, 0)  # montée jusqu'à la fin du calcul
+        self.backend.finished(True, {})
+        result, error = calls[0]
+        self.assertIsNone(error)
+        self.assertEqual(
+            result,
+            {"file": self.out, "page_count": 3, "layer_count": 2, "skipped_layers": ["Fond OSM"],
+             "sources": ["fond.gpkg", "gares.gpkg"], "truncated": False},
+        )
+        self.assertEqual(mounted.removed, 1)
+        self.assertTrue(os.path.exists(self.out))
+
+    def test_no_filter_or_sort_expression_is_ever_emitted(self):
+        start(self.entry, self.backend, self.params(label_field="nom"))
+        self.assertEqual(set(self.backend.calls[0][1]), {"COVERAGE_LAYER", "LAYOUT", "LAYERS", "OUTPUT"})
+
+    def test_the_label_field_is_checked_then_given_to_the_mounting(self):
+        start(self.entry, self.backend, self.params(label_field="nom"))
+        self.assertEqual(self.backend.mounts[0].label_field, "nom")
+
+    def test_an_unknown_label_field_is_refused_before_any_launch(self):
+        _, calls = start(self.entry, self.backend, self.params(label_field="zzz"))
+        self.assertEqual(calls[0][1].code, "analysis.unknown_field")
+        self.assertEqual((self.backend.calls, self.backend.mounts), ([], []))
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_an_expression_is_not_a_label_field(self):
+        _, calls = start(self.entry, self.backend, self.params(label_field="\"nom\" || 'x'"))
+        self.assertEqual(calls[0][1].code, "analysis.unknown_field")
+        self.assertEqual(self.backend.mounts, [])
+
+    def test_an_empty_coverage_is_refused_without_file(self):
+        _, calls = start(self.entry, self.backend, self.params(coverage_layer_id="vide"))
+        self.assertEqual(calls[0][1].code, "layer.empty")
+        self.assertEqual((self.backend.calls, self.backend.mounts), ([], []))
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_a_missing_or_raster_coverage_is_refused(self):
+        _, calls = start(self.entry, self.backend, self.params(coverage_layer_id="nope"))
+        self.assertEqual(calls[0][1].code, "layer.not_found")
+        _, calls = start(self.entry, self.backend, self.params(coverage_layer_id="r"))
+        self.assertEqual(calls[0][1].code, "layer.not_vector")
+        self.assertEqual(self.backend.mounts, [])
+
+    def test_a_blank_title_is_refused(self):
+        for title in ("", "   ", None, 3):
+            _, calls = start(self.entry, self.backend, self.params(title=title))
+            self.assertEqual(calls[0][1].code, "layout.bad_params", title)
+        self.assertEqual(self.backend.mounts, [])
+
+    def test_only_remote_layers_is_refused_without_file(self):
+        self.backend.mount_error = gestures.GestureError("layout.empty", "Aucune couche locale visible.")
+        _, calls = start(self.entry, self.backend, self.params())
+        self.assertEqual(calls[0][1].code, "layout.empty")
+        self.assertEqual(self.backend.calls, [])
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_a_failing_algorithm_removes_the_file_and_the_layout(self):
+        _, calls = start(self.entry, self.backend, self.params())
+        self.backend.finished(False, {})
+        self.assertEqual(calls[0][1].code, "layout.export_failed")
+        self.assertFalse(os.path.exists(self.out))
+        self.assertEqual(self.backend.mounts[0].removed, 1)
+
+    def test_an_empty_file_is_a_failure(self):
+        self.backend.write = False
+        _, calls = start(self.entry, self.backend, self.params())
+        self.backend.finished(True, {})
+        self.assertEqual(calls[0][1].code, "layout.export_failed")
+        self.assertEqual(self.backend.mounts[0].removed, 1)
+
+    def test_a_cancel_removes_the_layout_and_the_file(self):
+        g, calls = start(self.entry, self.backend, self.params())
+        g.cancel()
+        self.backend.finished(False, {})
+        self.assertEqual(calls[0][1].code, "qgis.cancelled")
+        self.assertEqual(self.backend.mounts[0].removed, 1)
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_the_row_is_valid_not_cancellable_and_never_touches_the_network(self):
+        self.assertEqual(analysis.validate_table({"layout.export_atlas": self.entry}), [])
+        self.assertFalse(analysis.derived_cancellable(analysis.ALGORITHMS)["layout.export_atlas"])
+        self.assertEqual(analysis.required_algorithms(self.entry), ["native:atlaslayouttopdf"])
+        self.assertIn("layout.export_atlas", analysis.available_chains(analysis.ALGORITHMS, self.backend))
+        self.backend.missing_algorithms = {"native:atlaslayouttopdf"}
+        self.assertNotIn("layout.export_atlas", analysis.available_chains(analysis.ALGORITHMS, self.backend))
 
 
 class FormHidesCoreFilledTest(unittest.TestCase):

@@ -423,6 +423,11 @@ def _scaled_setup(backend, directory):
 
 def _warnings_setup(backend, directory):
     backend.warnings = ["Un résultat n'a pas pu être mis en évidence."]
+    backend.skipped = ["Fond OpenStreetMap"]  # une couche distante écartée
+
+
+def _atlas():
+    return _analysis(ta.AtlasTest, lambda t: (t.backend, t.params()))
 
 
 def _inventory(layers, **kw):  # noqa: D103
@@ -528,6 +533,7 @@ def producers():
         ("layer.open_vector", "vecteur ouvert"): _open_vector,
         ("layer.remove", "couche retirée"): _remove,
         ("layer.set_style", "couche mise en forme"): _set_style,
+        ("layout.export_atlas", "trois pages"): _atlas,
         ("layout.export_pdf", "sans échelle"): _export(_no_setup),
         ("layout.export_pdf", "avec échelle et centre"): _export(
             _scaled_setup, {"scale": 25000}, layers=scaled_layers

@@ -18,5 +18,6 @@
   "data.convert_raster": true,
   "raster.zonal_statistics": true,
   "raster.contour": true,
+  "layout.export_atlas": false,
   "layer.remove": false
 }

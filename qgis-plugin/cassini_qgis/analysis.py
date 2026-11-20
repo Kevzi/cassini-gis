@@ -36,6 +36,10 @@ NO_PATH = "analysis.no_path"
 UNKNOWN_CRS = "data.unknown_crs"
 FORMAT_MISMATCH = "data.format_mismatch"
 INVALID_SOURCE = "layer.invalid_source"
+LAYER_EMPTY = "layer.empty"
+LAYOUT_BAD_PARAMS = "layout.bad_params"
+LAYOUT_EXPORT_FAILED = "layout.export_failed"
+MAX_SOURCES = 50  # borne du schéma de sortie du noyau (AD-8), la même que `layout.export_pdf`
 
 _UNIT_TO_METERS = {"m": 1.0, "km": 1000.0}
 
@@ -821,6 +825,15 @@ def summarize_area(backend, layer, params):
     return {"field": field, "unit": params["unit"]}
 
 
+def translate_atlas(params, layer):
+    """Paramètres neutres de `layout.export_atlas` -> paramètres de `native:atlaslayouttopdf`.
+
+    La couverture est la couche d'entrée ; le nom de la mise en page et les couches locales à
+    dessiner viennent du genre `layout` (clés `name_key` et `layers_key` de la table). Ni
+    `FILTER_EXPRESSION` ni `SORTBY_EXPRESSION` : aucune expression n'est émise (AD-23)."""
+    return {"COVERAGE_LAYER": layer}
+
+
 # Table fermée : id de commande -> chaîne fixe d'algorithmes (AD-24).
 #
 # Une ligne est une chaîne fixe d'étapes plus des attributs de la ligne :
@@ -890,6 +903,15 @@ def summarize_area(backend, layer, params):
 #   assign_crs: (facultatif, avec `raster`) paramètre du noyau qui déclare le code EPSG d'une
 #               source sans système : connu de QGIS (`data.unknown_crs` sinon), et refusé
 #               (`analysis.bad_params`) si la source a déjà un autre système ;
+#   layout    : (facultatif) genre `layout` (AD-24) : l'algorithme exporte une mise en page nommée du
+#               gestionnaire du projet. Le geste monte la mise en page des couches locales visibles
+#               (`backend.mount_atlas`), l'y ajoute le temps de l'appel et la retire dans tous les cas
+#               (succès, échec, annulation) ; `{"name_key": clé de l'algorithme qui reçoit son nom,
+#               "layers_key": clé qui reçoit les couches locales, "title": paramètre du noyau du titre}` ;
+#               `input` est la couche de couverture (une page par entité, vide : `layer.empty`) et
+#               `field` (facultatif) le champ ajouté au titre, vérifié contre les champs de la couche ;
+#               la sortie est un fichier PDF, jamais ajouté au projet ; le résultat est `file`,
+#               `page_count`, `layer_count`, `skipped_layers`, `sources`, `truncated` ;
 #   work_crs  : (facultatif) paramètre du noyau qui porte le système de calcul en mètres, que le
 #               noyau ne remplit que pour une couche en degrés (changement de cap du 2026-11-12,
 #               amendement RA06 d'AD-24). Rempli : inconnu de QGIS, `data.unknown_crs` ; pas en
@@ -1199,6 +1221,21 @@ ALGORITHMS = {
         "work_crs": WORK_EPSG,
         "geometry": "Line",
     },
+    "layout.export_atlas": {
+        "chain_version": 1,
+        "chain": [
+            {
+                "algorithm": "native:atlaslayouttopdf",
+                "translate": translate_atlas,
+                "output": "OUTPUT",
+                "on_failure": (LAYOUT_EXPORT_FAILED, "L'export de l'atlas a échoué : aucun fichier n'a été écrit."),
+            },
+        ],
+        "input": "coverage_layer_id",
+        "field": "label_field",
+        "field_optional": True,
+        "layout": {"name_key": "LAYOUT", "layers_key": "LAYERS", "title": "title"},
+    },
     "data.reproject": {
         "chain_version": 1,
         "chain": [
@@ -1490,6 +1527,17 @@ class QgisBackend(_ReadBackend):
         task.executed.connect(lambda ok, results: finished(bool(ok), results or {}))
         QgsApplication.taskManager().addTask(task)
         return handle
+
+    def mount_atlas(self, coverage, title, label_field=None):
+        """Monte la mise en page d'atlas des couches locales visibles et l'ajoute au gestionnaire du
+        projet (genre `layout`) ; rend un objet à `remove()`, `name`, `layers`, `skipped`, `names`,
+        `page_count`. `GestureError` (`layout.empty`) sans couche locale visible."""
+        try:  # le module de mise en page ne se charge que pour ce genre
+            from .layout_export import mount_atlas
+        except ImportError:  # pragma: no cover
+            from layout_export import mount_atlas
+
+        return mount_atlas(coverage, title, label_field)
 
     def transform_point(self, x, y, epsg, target_epsg):
         """Point (x, y) en EPSG:`epsg` transformé par QGIS vers EPSG:`target_epsg`."""
@@ -1827,6 +1875,7 @@ class ProcessingGesture:
         self._overlay_layer = None
         self._results = None
         self._pam = False  # réglage GDAL « pas de .aux.xml » pris par ce geste, à rendre à la fin
+        self._mounted = None  # genre `layout` : mise en page ajoutée au projet, retirée à la fin
 
     def start(self, params, done):
         self._done = done
@@ -1932,6 +1981,8 @@ class ProcessingGesture:
                 )
         if entry.get("field") and not (entry.get("field_optional") and not params.get(entry["field"])):
             self._check_field(params.get(entry["field"]), layer)
+        if entry.get("layout"):
+            self._begin_layout(params, layer)
         if entry.get("raster_input"):
             self._check_raster_input(params.get(entry["raster_input"]), layer)
         if entry.get("fields_list"):
@@ -1963,8 +2014,29 @@ class ProcessingGesture:
         parameters = step["translate"](self._params or {}, source, *extra)
         if self._overlay_layer is not None and step.get("overlay_key"):
             parameters[step["overlay_key"]] = self._overlay_layer
+        if self._mounted is not None:
+            # Genre `layout` : la mise en page montée, par son nom, et les seules couches locales.
+            spec = self._entry["layout"]
+            parameters[spec["name_key"]] = self._mounted.name
+            parameters[spec["layers_key"]] = list(self._mounted.layers)
         parameters[step.get("output", "OUTPUT")] = out if final else _TEMPORARY
         return parameters
+
+    def _begin_layout(self, params, coverage):
+        """Genre `layout` : refus avant tout lancement (titre vide, couverture sans entité), puis
+        montage de la mise en page, ajoutée au projet jusqu'à `_finish`."""
+        backend = self._backend
+        title = params.get(self._entry["layout"]["title"])
+        if not isinstance(title, str) or not title.strip():
+            raise GestureError(LAYOUT_BAD_PARAMS, "Le titre de l'atlas ne doit pas être vide.")
+        if backend.feature_count(coverage) == 0:
+            raise GestureError(
+                LAYER_EMPTY,
+                "La couche de couverture « %s » n'a aucune entité : l'atlas n'aurait aucune page."
+                % backend.name_of(coverage),
+            )
+        field = params.get(self._entry["field"]) if self._entry.get("field") else None
+        self._mounted = backend.mount_atlas(coverage, title, field or None)
 
     def _run_step(self, source):
         """Lance l'étape `self._index` de la chaîne sur la couche `source`."""
@@ -2179,6 +2251,8 @@ class ProcessingGesture:
             return self._written()
         if self._entry.get("table"):
             return self._entry["table"](backend, self._out, self._params or {})
+        if self._entry.get("layout"):
+            return self._exported_layout()
         if self._entry.get("raster") and not self._entry.get("layer_output"):
             epsg = backend.read_written_raster(self._out)
             if epsg is False:
@@ -2200,6 +2274,21 @@ class ProcessingGesture:
             extra = (self._results,) if self._entry.get("summary_results") else ()
             result.update(summary(backend, layer, self._params or {}, *extra))
         return result
+
+    def _exported_layout(self):
+        """Résultat du genre `layout` : le PDF écrit (jamais ajouté au projet) et ce que la mise en
+        page a dessiné ; un fichier absent ou vide est un échec nommé."""
+        mounted = self._mounted
+        if not os.path.isfile(self._out) or os.path.getsize(self._out) == 0:
+            raise GestureError(LAYOUT_EXPORT_FAILED, "L'export de l'atlas a échoué : aucun fichier n'a été écrit.")
+        return {
+            "file": self._out,
+            "page_count": mounted.page_count,
+            "layer_count": len(mounted.layers),
+            "skipped_layers": list(mounted.skipped),
+            "sources": list(mounted.names[:MAX_SOURCES]),
+            "truncated": len(mounted.names) > MAX_SOURCES,
+        }
 
     def _written(self):
         """Résultat d'une sortie fichier : relue à part, jamais ajoutée au projet."""
@@ -2227,6 +2316,10 @@ class ProcessingGesture:
             _remove(self._out)
 
     def _finish(self, result=None, error=None):
+        mounted, self._mounted = self._mounted, None
+        if mounted is not None:
+            with contextlib.suppress(Exception):
+                mounted.remove()  # la mise en page n'est au projet que le temps de l'appel
         if self._pam:
             self._pam = False
             _pam_restore()

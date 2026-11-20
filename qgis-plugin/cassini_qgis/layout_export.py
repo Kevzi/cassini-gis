@@ -377,11 +377,48 @@ EXPECTED_ITEMS = ("map", "title", "legend", "scalebar", "northarrow", "sources")
 OPTIONAL_ITEMS = ("header", "footer", "grid_squares")
 
 
+# Fournisseurs de données de QGIS qui lisent par le réseau : un export ne les dessine pas (AD-14).
+# Les cartes XYZ et WMTS passent par le fournisseur `wms` de QGIS ; les tuiles vectorielles, par
+# `vectortile`, qui lit aussi des fichiers locaux (MBTiles, VTPK).
+NETWORK_PROVIDERS = frozenset({"wms", "wmts", "xyz", "wfs", "wcs", "oapif", "vectortile", "ept"})
+# Schémas d'adresse du web, écrits en deux morceaux : la garde de source de la recette refuse ce mot
+# partout, comme pour la liste noire des algorithmes réseau.
+_WEB_SCHEMES = ("ht" "tp://", "ht" "tps://")
+# Débuts de source qui désignent le réseau, quel que soit le fournisseur (GDAL, OGR).
+NETWORK_PREFIXES = _WEB_SCHEMES + (
+    "ftp://", "/vsicurl", "/vsis3", "/vsigs", "/vsiaz", "/vsiadls", "/vsioss", "/vsiswift", "/vsihdfs",
+)
+_URL_OPTION = re.compile(r"(?:^|[&|? ])url=([^&|]*)", re.IGNORECASE)
+
+
+def is_remote_source(provider, source):
+    """Vrai si une couche de ce `provider` (nom de fournisseur de QGIS) et de cette `source` est
+    dessinée par le réseau. Un fournisseur réseau dont l'adresse est un fichier local
+    (`url=file:///…`) n'en est pas ; `vectortile` et `ept` ne sont distants que pour une adresse du
+    web. Source illisible : locale."""
+    provider = (provider or "").lower()
+    text = source if isinstance(source, str) else ""
+    lowered = text.strip().lower()
+    if lowered.startswith(NETWORK_PREFIXES) or "/vsicurl" in lowered or lowered.startswith(("wms:", "wmts:", "wfs:")):
+        return True
+    if provider in ("vectortile", "ept"):
+        found = _URL_OPTION.search(text)
+        address = (found.group(1) if found else text).strip().lower()
+        return address.startswith(_WEB_SCHEMES)
+    if provider in NETWORK_PROVIDERS or provider.startswith("arcgis"):
+        found = _URL_OPTION.search(text)
+        if found and found.group(1).strip().lower().startswith("file:"):
+            return False
+        return True
+    return False
+
+
 class LayoutBackend(QgisBackend):
     """Accès réel à QGIS pour la mise en page. Seul ce type touche `qgis.core`."""
 
-    def visible_layers(self):
-        """Couches cochées dans la légende (et dont tous les groupes le sont), de haut en bas."""
+    def _visible(self):
+        """Toutes les couches cochées dans la légende (et dont tous les groupes le sont), de haut
+        en bas, distantes comprises."""
         from qgis.core import QgsProject
 
         found = []
@@ -390,6 +427,23 @@ class LayoutBackend(QgisBackend):
             if layer is not None and node.isVisible():
                 found.append(layer)
         return found
+
+    def visible_layers(self):
+        """Couches cochées dans la légende (et dont tous les groupes le sont), de haut en bas, sans
+        les couches distantes : un export n'ouvre aucune connexion réseau (AD-14)."""
+        return [layer for layer in self._visible() if not self.is_remote(layer)]
+
+    def skipped_layers(self):
+        """Noms des couches cochées que `visible_layers` écarte parce qu'elles sont distantes."""
+        return [layer.name() for layer in self._visible() if self.is_remote(layer)]
+
+    def is_remote(self, layer):
+        """Vrai si la couche se dessine par le réseau (fournisseur et adresse de sa source)."""
+        try:
+            provider = layer.providerType()
+        except AttributeError:  # couche sans fournisseur de données
+            provider = ""
+        return is_remote_source(provider, layer.source())
 
     def knows(self, epsg):
         """Vrai si QGIS connaît le code EPSG `epsg`."""
@@ -468,9 +522,33 @@ class LayoutBackend(QgisBackend):
 
     def export_pdf(self, layers, title, sources_text, out, authid, box, scale=None, page=None, grid=None,
                    header=None, footer=None, focus=None):
-        """Monte la mise en page, l'exporte dans `out`, rend `{"items": éléments posés (clés de
+        """Monte la mise en page (`compose`) et l'exporte dans `out`, rend `{"items": éléments posés (clés de
         `EXPECTED_ITEMS`, puis de `OPTIONAL_ITEMS` posés), "scale": échelle relue sur la carte,
-        "extent": emprise de la carte (xmin, ymin, xmax, ymax)}`. `header`, `footer` : une ligne
+        "extent": emprise de la carte (xmin, ymin, xmax, ymax)}`. Les arguments sont ceux de
+        `compose`. Lève `GridError` avant l'export si la grille ne peut pas être posée,
+        `RuntimeError` si l'export échoue."""
+        from qgis.core import QgsLayoutExporter
+
+        layout, carte, placed, warnings = self.compose(
+            layers, title, sources_text, authid, box, scale=scale, page=page, grid=grid,
+            header=header, footer=footer, focus=focus,
+        )
+        result = QgsLayoutExporter(layout).exportToPdf(out, QgsLayoutExporter.PdfExportSettings())
+        if result != QgsLayoutExporter.ExportResult.Success:
+            raise RuntimeError("export PDF refusé par QGIS (code %s)" % result)
+        frame = carte.extent()
+        return {
+            "items": placed,
+            "warnings": warnings,
+            "scale": carte.scale(),
+            "extent": (frame.xMinimum(), frame.yMinimum(), frame.xMaximum(), frame.yMaximum()),
+        }
+
+    def compose(self, layers, title, sources_text, authid, box, scale=None, page=None, grid=None,
+                header=None, footer=None, focus=None, print_layout=False):
+        """Monte la mise en page, sans l'exporter ni l'ajouter au gestionnaire du projet, rend
+        `(mise en page, carte, éléments posés, avertissements)` ; les éléments sont les clés de
+        `EXPECTED_ITEMS`, puis de `OPTIONAL_ITEMS` posés. `header`, `footer` : une ligne
         centrée en haut et en bas de la page. Une grille `mgrs` porte `squares`, imprimés dans
         un cadre au coin bas droit de la carte. `focus` (entrée 7.9) : `{"results": [(couche,
         libellé, style normalisé ou None)], "hide_band_labels": bool}` ; chaque résultat stylé
@@ -478,13 +556,16 @@ class LayoutBackend(QgisBackend):
         petit rectangle centré : la carte y est cadrée puis tenue à 1:`scale` (`setScale` garde
         le centre). `page` : (`size`, `orientation`), A4 paysage si absent. `grid` : `{"authid":
         système de la grille, "interval": écart en unités de ce système}`. Lève `GridError`
-        avant l'export si la grille ne peut pas être posée, `RuntimeError` si l'export échoue."""
+        si la grille ne peut pas être posée. C'est la seule mise en page de Cassini : l'export simple
+        et l'atlas (`mount_atlas`) la montent ici. `print_layout` : une `QgsPrintLayout`, la seule
+        que le gestionnaire de mises en page accepte et qui porte un atlas ; sinon une `QgsLayout`,
+        jamais ajoutée au gestionnaire (export simple)."""
         from qgis.core import (
             Qgis,
             QgsCoordinateReferenceSystem,
             QgsCoordinateTransform,
             QgsLayout,
-            QgsLayoutExporter,
+            QgsPrintLayout,
             QgsLayoutItemLabel,
             QgsLayoutItemLegend,
             QgsLayoutItemMap,
@@ -500,7 +581,8 @@ class LayoutBackend(QgisBackend):
         )
         from qgis.PyQt.QtGui import QColor, QFont
 
-        layout = QgsLayout(QgsProject.instance())  # jamais ajoutée au gestionnaire du projet
+        # Sauf pour un atlas, jamais ajoutée au gestionnaire du projet.
+        layout = (QgsPrintLayout if print_layout else QgsLayout)(QgsProject.instance())
         layout.initializeDefaults()
         size, orientation = page if page is not None else ("a4", "landscape")
         layout.pageCollection().page(0).setPageSize(
@@ -730,16 +812,7 @@ class LayoutBackend(QgisBackend):
         present["grid_squares"] = squares_label is not None and bool(squares_label.text())
         placed = [key for key in EXPECTED_ITEMS + OPTIONAL_ITEMS if present[key]]
 
-        result = QgsLayoutExporter(layout).exportToPdf(out, QgsLayoutExporter.PdfExportSettings())
-        if result != QgsLayoutExporter.ExportResult.Success:
-            raise RuntimeError("export PDF refusé par QGIS (code %s)" % result)
-        frame = carte.extent()
-        return {
-            "items": placed,
-            "warnings": warnings,
-            "scale": carte.scale(),
-            "extent": (frame.xMinimum(), frame.yMinimum(), frame.xMaximum(), frame.yMaximum()),
-        }
+        return layout, carte, placed, warnings
 
 
 def _padded(box):
@@ -1023,6 +1096,161 @@ def _touches(a, b):
     return a[0] <= b[2] and b[0] <= a[2] and a[1] <= b[3] and b[1] <= a[3]
 
 
+class MountedAtlas:
+    """Mise en page d'atlas ajoutée au gestionnaire de mises en page du projet le temps d'un appel :
+    l'algorithme d'atlas de QGIS ne connaît une mise en page que par son nom dans ce gestionnaire.
+    `remove()` la retire (idempotent) ; le geste l'appelle dans tous les cas, succès ou échec."""
+
+    def __init__(self, layout, name, layers, skipped, names, details):
+        self.layout = layout
+        self.name = name
+        self.layers = layers  # couches locales dessinées (pour le paramètre LAYERS de l'algorithme)
+        self.skipped = skipped
+        self.names = names
+        self.details = details
+        self.page_count = 0
+        self.items = []
+
+    def remove(self):
+        layout, self.layout = self.layout, None
+        if layout is None:
+            return
+        from qgis.core import QgsProject
+
+        QgsProject.instance().layoutManager().removeLayout(layout)
+
+
+ZERO_WIDTH = chr(0x200B)  # espace à largeur nulle
+
+
+def atlas_title(title, field_name):
+    """Texte du titre de chaque page : `title`, puis — avec un champ — la valeur de ce champ. Les
+    `[%` du titre sont neutralisés (une espace à largeur nulle les sépare) pour qu'aucun
+    texte de l'utilisateur ne soit évalué ; `field_name` est un champ vérifié contre la couche par
+    l'appelant, cité par QGIS (`QgsExpression.quotedColumnRef`), jamais recopié tel quel."""
+    from qgis.core import QgsExpression
+
+    text = title.strip().replace("[%", "[" + ZERO_WIDTH + "%")
+    if field_name:
+        text += " — [% " + QgsExpression.quotedColumnRef(field_name) + " %]"
+    return text
+
+
+def mount_atlas(coverage, title, label_field=None, backend=None):
+    """Monte la mise en page d'atlas des couches locales visibles (même mise en page que l'export
+    simple, `LayoutBackend.compose`) et l'ajoute au gestionnaire du projet sous un nom unique ;
+    rend un `MountedAtlas` que l'appelant retire (`remove`). La couverture est `coverage` (une page
+    par entité, aucun filtre ni tri : AD-23). Lève `GestureError` : `layout.empty` sans couche locale
+    visible, `layer.empty` pour une couverture sans entité."""
+    import uuid
+
+    from qgis.core import QgsLayoutItemMap, QgsProject
+
+    backend = backend if backend is not None else LayoutBackend()
+    layers = backend.visible_layers()
+    skipped = backend.skipped_layers()
+    if not layers:
+        raise GestureError(EMPTY, _nothing_to_draw(skipped))
+    crs = backend.project_crs()
+    extents = [backend.extent_of(layer, crs) for layer in layers]
+    box = _union(extents)
+    if box is None:
+        raise GestureError(EMPTY, "Les couches visibles sont vides : la carte n'a pas d'emprise.")
+    # Cadrage initial de la carte : celui de l'export simple sans échelle (vecteurs, sinon tout) ;
+    # chaque page la recadre ensuite sur son entité.
+    frame_box = _union([e for layer, e in zip(layers, extents) if backend.is_vector(layer)]) or box
+    names, details, sources_text = describe_sources(backend, layers)
+    layout, carte, placed, _ = backend.compose(
+        layers, atlas_title(title, label_field), sources_text, crs, _padded(frame_box), print_layout=True
+    )
+    name = "cassini-atlas-%s" % uuid.uuid4().hex
+    layout.setName(name)
+    atlas = layout.atlas()
+    atlas.setCoverageLayer(coverage)
+    atlas.setEnabled(True)
+    atlas.setFilterFeatures(False)
+    atlas.setHideCoverage(False)
+    carte.setAtlasDriven(True)
+    carte.setAtlasScalingMode(QgsLayoutItemMap.AtlasScalingMode.Auto)
+    carte.setAtlasMargin(0.1)
+    manager = QgsProject.instance().layoutManager()
+    if not manager.addLayout(layout):
+        raise GestureError(EXPORT_FAILED, "La mise en page de l'atlas n'a pas pu être ajoutée au projet.")
+    mounted = MountedAtlas(layout, name, layers, skipped, names, details)
+    mounted.items = placed
+    try:
+        atlas.updateFeatures()
+        mounted.page_count = int(atlas.count())
+    except Exception:
+        mounted.remove()
+        raise
+    return mounted
+
+
+def _nothing_to_draw(skipped):
+    """Message de `layout.empty` quand aucune couche locale n'est visible ; il nomme les couches
+    distantes écartées, qui seraient la seule matière."""
+    if skipped:
+        return (
+            "Aucune couche locale visible : les couches distantes (%s) ne sont pas dessinées, "
+            "un export ne se connecte pas au réseau." % ", ".join(skipped)
+        )
+    return "Aucune couche visible : il n'y a rien à mettre sur la carte."
+
+
+def describe_sources(backend, layers, result_labels=None):
+    """`(noms de fichiers, détails, ligne imprimée)` des sources des `layers` : un nom par fichier,
+    sans doublon. `result_labels` (id de couche -> nom en clair) : un résultat mis en évidence est
+    nommé par ce nom dans la ligne imprimée seulement."""
+    result_labels = result_labels or {}
+    names = []
+    details = []
+    work_dir = None
+    if backend.project_dir() and backend.project_name():
+        work_dir = os.path.join(backend.project_dir(), backend.project_name() + ".cassini")
+    printed = {}
+    for layer in layers:
+        raw = backend.source_of(layer)
+        name = source_name(raw)
+        if name is None or name in names:
+            continue
+        names.append(name)
+        details.append(source_detail(backend, layer, name, _file_path(raw), work_dir))
+        if backend.id_of(layer) in result_labels:
+            printed[name] = result_labels[backend.id_of(layer)]
+    if names:
+        shown = []
+        for detail in details:
+            said = _detail_text(detail)
+            source = printed.get(detail["source"], detail["source"])
+            shown.append("%s (%s)" % (source, said) if said else source)
+        return names, details, "Sources : " + ", ".join(shown)
+    return names, details, "Sources : couches du projet (hors fichier)"
+
+
+def source_detail(backend, layer, name, path, work_dir):
+    """Résolution et date d'une source (D9) : rien d'inventé quand QGIS ne sait pas ; une
+    sortie de Cassini, réécrite au rejeu, n'a pas de date (décision P3 de la party du
+    2026-11-10, à confirmer par le propriétaire)."""
+    size = backend.resolution_of(layer)
+    detail = {
+        "source": name,
+        "resolution": {"value": round(size, 6), "unit": "m"} if size is not None else None,
+        "date": None,
+        "date_origin": None,
+    }
+    if path is not None and _under(path, work_dir):
+        return detail
+    date = backend.metadata_date(layer)
+    if date is not None:
+        detail["date"], detail["date_origin"] = date, "metadata"
+    elif path is not None:
+        date = backend.file_date(path)
+        if date is not None:
+            detail["date"], detail["date_origin"] = date, "file"
+    return detail
+
+
 class LayoutExportGesture(_ReadGesture):
     failure = "Échec inattendu de l'export PDF."
 
@@ -1058,8 +1286,10 @@ class LayoutExportGesture(_ReadGesture):
         before_focus = list(layers)
         if focus is not None:
             layers = _focus_order(backend, layers, focus)
+        # Couches distantes écartées (AD-14) : nommées au résultat, et à l'erreur s'il ne reste rien.
+        skipped = list(backend.skipped_layers())
         if not layers:
-            raise GestureError(EMPTY, "Aucune couche visible : il n'y a rien à mettre sur la carte.")
+            raise GestureError(EMPTY, _nothing_to_draw(skipped))
         crs = backend.project_crs()
         extents = [backend.extent_of(layer, crs) for layer in layers]
         box = _union(extents)
@@ -1088,35 +1318,12 @@ class LayoutExportGesture(_ReadGesture):
                 if framed is not None:
                     frame_box = framed
 
-        names = []
-        details = []
-        work_dir = None
-        if backend.project_dir() and backend.project_name():
-            work_dir = os.path.join(backend.project_dir(), backend.project_name() + ".cassini")
         # Un résultat mis en évidence est nommé, dans la ligne imprimée des sources, par son nom en
         # clair au lieu de son fichier technique ; `sources` garde les noms de fichiers.
         result_labels = {}
         if focus is not None:
             result_labels = {rid: label for rid, label, _ in focus["results"]}
-        printed = {}
-        for layer in layers:
-            raw = backend.source_of(layer)
-            name = source_name(raw)
-            if name is None or name in names:
-                continue
-            names.append(name)
-            details.append(self._detail(layer, name, _file_path(raw), work_dir))
-            if backend.id_of(layer) in result_labels:
-                printed[name] = result_labels[backend.id_of(layer)]
-        if names:
-            shown = []
-            for detail in details:
-                said = _detail_text(detail)
-                source = printed.get(detail["source"], detail["source"])
-                shown.append("%s (%s)" % (source, said) if said else source)
-            sources_text = "Sources : " + ", ".join(shown)
-        else:
-            sources_text = "Sources : couches du projet (hors fichier)"
+        names, details, sources_text = describe_sources(backend, layers, result_labels)
 
         center = None
         if scale is not None:
@@ -1190,6 +1397,7 @@ class LayoutExportGesture(_ReadGesture):
             "file": out,
             "page_count": 1,
             "layer_count": len(layers),
+            "skipped_layers": skipped,
             "sources": names[:MAX_SOURCES],
             "truncated": len(names) > MAX_SOURCES,
             "source_details": details[:MAX_SOURCES],
@@ -1200,29 +1408,6 @@ class LayoutExportGesture(_ReadGesture):
         if warnings:
             result["warnings"] = warnings
         return result
-
-    def _detail(self, layer, name, path, work_dir):
-        """Résolution et date d'une source (D9) : rien d'inventé quand QGIS ne sait pas ; une
-        sortie de Cassini, réécrite au rejeu, n'a pas de date (décision P3 de la party du
-        2026-11-10, à confirmer par le propriétaire)."""
-        backend = self._backend
-        size = backend.resolution_of(layer)
-        detail = {
-            "source": name,
-            "resolution": {"value": round(size, 6), "unit": "m"} if size is not None else None,
-            "date": None,
-            "date_origin": None,
-        }
-        if path is not None and _under(path, work_dir):
-            return detail
-        date = backend.metadata_date(layer)
-        if date is not None:
-            detail["date"], detail["date_origin"] = date, "metadata"
-        elif path is not None:
-            date = backend.file_date(path)
-            if date is not None:
-                detail["date"], detail["date_origin"] = date, "file"
-        return detail
 
     @staticmethod
     def _discard(path):

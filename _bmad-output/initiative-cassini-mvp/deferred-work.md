@@ -1284,3 +1284,10 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-difference-de-couches-analysis-difference-plan.md`
   summary: deux chemins de sonde de `qgis-plugin/README.md` contiennent un octet retour arrière (0x08) à la place de `\bin`.
   evidence: présents dans HEAD avant le ticket 10.21 (2 occurrences), la commande copiée depuis le README échoue.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-atlas-pdf-layout-export-atlas-plan.md`
+  summary: La phrase d'avant exécution de `layout.export_pdf` ne prévient pas que les couches distantes ne sont pas dessinées (seul l'atlas porte la note ; l'export simple les nomme après la run).
+  evidence: Ajouter `sum_pdf_remote_note` à `_export_pdf` allonge l'étiquette courte de l'étape et casse `test_agent_view` et `test_summary.LabelTest` ; à décider avec le propriétaire (note conditionnelle ou étiquette allongée).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-atlas-pdf-layout-export-atlas-plan.md`
+  summary: `is_remote_source` classe locales les couches de fournisseurs base de données réseau (postgres, mssql, oracle) ; la garde ne couvre que les fournisseurs listés (AD-14).
+  evidence: Non vérifié sous QGIS (maybe-false, sévérité moyenne si vrai) ; à trancher en vérifiant si ces fournisseurs entrent au périmètre « couche distante » du catalogue.

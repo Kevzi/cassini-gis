@@ -4910,6 +4910,13 @@ impl Executor for CrsQgis {
                 Ok(json!({"layer_id": format!("diff_g{}_{n}", self.generation),
                           "name": "diff", "feature_count": 0, "crs": "EPSG:2154"}))
             }
+            "layout.export_atlas" => {
+                self.buffers.borrow_mut().push(p.clone());
+                fs::write(p["out"].as_str().unwrap(), "pdf").unwrap();
+                Ok(json!({"file": p["out"], "page_count": 3, "layer_count": 2,
+                          "skipped_layers": ["Fond OSM"], "sources": ["zonage.gpkg"],
+                          "truncated": false}))
+            }
             "analysis.dissolve" => {
                 self.buffers.borrow_mut().push(p.clone());
                 let n = self.count.get() + 1;
@@ -5230,6 +5237,48 @@ fn a_difference_logs_its_output_and_replays_identically() {
         .is_some_and(|o| o.ends_with(".gpkg")));
     drop(s);
     // Rejeu : le même résultat (hors identifiant de couche, valeur de session).
+    let qgis = CrsQgis::new(2, &qgis_project);
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(&Router::new(&registry).with_qgis(qgis), &mut HashSet::new())
+        .unwrap();
+    assert_eq!(report, identical(1));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_atlas_logs_its_pdf_and_replays_identically() {
+    // `layout.export_atlas` (epic 10, entrée 15) : le noyau nomme le PDF (AD-10), la couche de
+    // couverture est journalisée, et les couches distantes écartées sont un résultat, pas un paramètre.
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let qgis = CrsQgis::new(1, &qgis_project);
+    let orders = qgis.buffers.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    let params = json!({"title": "Atlas du zonage", "coverage_layer_id": "zonage"});
+    let out = s.call("layout.export_atlas", params.clone()).unwrap();
+    assert_eq!(out["page_count"], 3);
+    assert_eq!(out["skipped_layers"], json!(["Fond OSM"]));
+    let l = lines(&s);
+    assert_eq!(l.len(), 1, "{l:?}");
+    assert_eq!(l[0]["params"]["coverage_layer_id"], "zonage");
+    let file = l[0]["params"]["out"].as_str().unwrap();
+    assert!(file.ends_with(".pdf"), "{file}");
+    // Le geste reçoit le chemin absolu, le journal garde le nom relatif au dossier de travail.
+    assert!(orders.borrow()[0]["out"]
+        .as_str()
+        .is_some_and(|o| Path::new(o).is_absolute() && o.ends_with(file)));
+    // Un champ d'étiquette inconnu du schéma, ou une expression de filtre, est refusé par le noyau.
+    for bad in [
+        json!({"title": "A", "coverage_layer_id": "zonage", "filter": "typezone = 'U'"}),
+        json!({"title": " ", "coverage_layer_id": "zonage"}),
+    ] {
+        let err = s.call("layout.export_atlas", bad).unwrap_err();
+        assert_eq!(err.code, "registry.invalid_params");
+    }
+    assert_eq!(lines(&s).len(), 1);
+    drop(s);
     let qgis = CrsQgis::new(2, &qgis_project);
     let report = Replay::load(&registry, &project)
         .unwrap()

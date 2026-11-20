@@ -2628,7 +2628,7 @@ engendrées, jamais recopiées d'une autre barre), sur l'inventaire de l'épreuv
   déblai/remblai, rayonnement solaire annuel. La crue est écrite sans cote ni rivière : une cote
   se ferait par `raster.reclassify` du MNT, une rivière absente de l'inventaire appellerait une
   question.
-- Mots-clés des refus : `atlas` (`layout.export_atlas`), `distance_matrix` (`analysis.distance_matrix`), `flood`
+- Mots-clés des refus : `atlas` n'en est plus un depuis le ticket 15 de l'epic 10 (`layout.export_atlas` est livrée ; EU33 refuse l'option `layout.export_atlas:scale`, l'atlas n'a pas d'échelle) ; `distance_matrix` (`analysis.distance_matrix`), `flood`
   (`terrain.flood_extent`) et `flow_accum` (`terrain.flow_accumulation`) sont des morceaux
   d'identifiants planifiés ou réservés du catalogue ; `export_image`, `image`, `cut_fill`,
   `volume`, `solar` et `insolation` sont des mots-clés anglais choisis pour un futur identifiant,

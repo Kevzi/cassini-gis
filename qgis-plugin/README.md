@@ -198,7 +198,7 @@ Recette manuelle de `raster.zonal_statistics` [ticket 12] (un MNT GeoTIFF et une
    intact et aucun `.aux.xml` n'apparaît à côté (`GDAL_PAM_ENABLED=NO` le temps du geste).
 3. Une couche de points : `analysis.bad_params` ; un raster absent : `layer.not_found` ; un fichier qui n'est
    pas un GeoTIFF : `layer.invalid_source` ; un raster à plusieurs bandes ou sans système : `analysis.bad_params`.
-4. Sonde sous QGIS 3.44 : `"C:\Program Files\QGIS 3.44.15in\python-qgis-ltr.bat" qgis-plugin/tests/probe_zonal_statistics.py`
+4. Sonde sous QGIS 3.44 : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat" qgis-plugin/tests/probe_zonal_statistics.py`
    doit finir par `VERDICT : OK`.
 
 Recette manuelle de `raster.contour` [ticket 26] (un MNT GeoTIFF d'une bande, avec système) :
@@ -212,7 +212,7 @@ Recette manuelle de `raster.contour` [ticket 26] (un MNT GeoTIFF d'une bande, av
 3. Un raster absent : `layer.not_found` ; un fichier qui n'est pas un GeoTIFF : `layer.invalid_source` ; un
    raster à plusieurs bandes ou sans système : `analysis.bad_params`. Un QGIS sans `gdal:contour` n'annonce
    pas la commande.
-4. Sonde sous QGIS 3.44 : `"C:\Program Files\QGIS 3.44.15in\python-qgis-ltr.bat" qgis-plugin/tests/probe_contour.py`
+4. Sonde sous QGIS 3.44 : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat" qgis-plugin/tests/probe_contour.py`
    doit finir par `VERDICT : OK`.
 
 Recette manuelle de `analysis.dissolve` [ticket 24] (une couche de parcelles ou de zones) :
@@ -357,7 +357,7 @@ nœud, doublons ; la chaîne n'emploie que des algorithmes `native:`) :
 3. Des extrémités plus éloignées que la tolérance ne sont pas reliées (la couche est rendue sans erreur).
 4. Couche en degrés : le noyau remplit `work_epsg`, l'accrochage se mesure en mètres, la couche rendue reste dans
    le système de la couche. Polygones ou points : `analysis.bad_params`, aucun fichier.
-5. Sonde sous le vrai QGIS : `"C:\Program Files\QGIS 3.44.15in\python-qgis-ltr.bat"
+5. Sonde sous le vrai QGIS : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat"
    qgis-plugin/tests/probe_prepare.py` doit finir par `VERDICT OK`. Constats consignés : `native:snapgeometries`
    avec `BEHAVIOR` 4 (extrémités seules, nœuds d'abord) contre elle-même, `native:splitwithlines` de la couche
    sur elle-même, `native:removenullgeometries`, `native:deleteduplicategeometries` (égalité topologique).
@@ -392,6 +392,22 @@ Recette manuelle de `analysis.isochrone` [ticket 11] (réseau apporté par l'uti
    de lier des tronçons qui ne se touchent pas. Un réseau aux nœuds franchement décalés
    reste à éprouver. L'origine doit être à moins de 100 m du
    réseau : les 8 gares de l'extrait en sont à 2 m à 17 m.
+
+Recette manuelle de `layout.export_atlas` [ticket 15] (trois zones, ou toute couche vecteur) :
+
+1. `layout.export_atlas` : `title` et `coverage_layer_id` (liste des couches vecteur) sont obligatoires,
+   `label_field` (liste des champs de la couche de couverture) est facultatif ; le fichier `out` est nommé par
+   le noyau, le panneau ne l'affiche pas.
+2. Avec une couche de trois entités : un seul PDF de trois pages apparaît dans le dossier de travail, une page par
+   entité, centrée sur elle, avec le titre (suivi de la valeur de `label_field` : « Atlas des zones — Bravo »),
+   la légende, la barre d'échelle, la flèche du nord et la ligne « Sources ».
+3. Ajoutez une couche XYZ (fond OpenStreetMap) et laissez-la cochée : l'atlas et `layout.export_pdf` ne la
+   dessinent pas, la nomment dans leur résumé (« couches distantes écartées : … ») et n'ouvrent aucune connexion
+   réseau. Si toutes les couches cochées sont distantes : `layout.empty`, aucun fichier.
+4. Une couche de couverture sans entité : `layer.empty`. Un champ absent de la couche : `analysis.unknown_field`.
+   Dans tous les cas, le projet ne garde aucune mise en page (celle de l'atlas n'y est que le temps du calcul).
+5. Sonde sous QGIS 3.44 : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat"
+   qgis-plugin/tests/probe_atlas.py` doit finir par `RÉSULTAT : OK`.
 
 Recette manuelle de `layout.export_pdf` [ticket 12] (jeu `../donnees-test-cassini/`) :
 
