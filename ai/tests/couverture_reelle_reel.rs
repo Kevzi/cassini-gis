@@ -116,7 +116,7 @@ fn percent(n: usize, total: usize) -> String {
 
 /// Le rapport en Markdown : une ligne par phrase (source, verdict, commande manquante), puis la
 /// part couverte. `answers` vaut `None` sans modèle.
-fn report(phrases: &[Value], answers: Option<&[Answer]>) -> String {
+fn report(phrases: &[Value], answers: Option<&[Answer]>, plans: Option<(usize, usize)>) -> String {
     let total = phrases.len();
     let covered = phrases.iter().filter(|p| is_covered(p)).count();
     let mut out =
@@ -141,6 +141,19 @@ fn report(phrases: &[Value], answers: Option<&[Answer]>) -> String {
             percent(covered_right, total),
             percent(right, total)
         ));
+    }
+    match plans {
+        Some((right, total)) => out.push_str(&format!(
+            "Taux de départ de l'epic 10, épreuve `plan_reel` : plans conformes {right}/{total}, soit {}.
+
+",
+            percent(right, total)
+        )),
+        None => out.push_str(
+            "Taux de départ de l'epic 10, épreuve `plan_reel` : plans conformes : non mesuré (CASSINI_PLANS_CONFORMES absent).
+
+",
+        ),
     }
     out.push_str("| Id | Source | Phrase | Attendu | Commande manquante |");
     out.push_str(if answers.is_some() {
@@ -193,6 +206,24 @@ fn report(phrases: &[Value], answers: Option<&[Answer]>) -> String {
         out.push('\n');
     }
     out
+}
+
+/// Lit « n/total » (la fin de la ligne `SCORE n/total plans conformes` de `plan_reel`).
+fn parse_plans_score(text: &str) -> Option<(usize, usize)> {
+    let (n, total) = text.trim().split_once('/')?;
+    let (n, total) = (n.trim().parse().ok()?, total.trim().parse().ok()?);
+    (total > 0 && n <= total).then_some((n, total))
+}
+
+/// Le taux de plans conformes de l'épreuve, donné par `CASSINI_PLANS_CONFORMES` (« n/48 »),
+/// relevé sur la ligne `SCORE` de `plan_reel` lancé sur le même modèle.
+fn plans_score_from_env() -> Option<(usize, usize)> {
+    let raw = std::env::var("CASSINI_PLANS_CONFORMES").ok()?;
+    Some(
+        parse_plans_score(&raw).unwrap_or_else(|| {
+            panic!("CASSINI_PLANS_CONFORMES : « n/total » attendu, reçu {raw:?}")
+        }),
+    )
 }
 
 fn write_report(text: &str) {
@@ -280,7 +311,7 @@ fn the_set_mixes_plans_questions_and_uncovered_requests() {
 #[test]
 fn the_report_gives_source_verdict_and_missing_command_for_every_sentence() {
     let all = phrases();
-    let text = report(&all, None);
+    let text = report(&all, None, None);
     for p in &all {
         let id = format!("| {} |", p["id"].as_str().unwrap());
         let line = text.lines().find(|l| l.starts_with(&id)).expect("ligne");
@@ -296,6 +327,22 @@ fn the_report_gives_source_verdict_and_missing_command_for_every_sentence() {
     assert!(text.contains(&format!("{covered}/{}", all.len())));
     // Sans modèle, le rapport est quand même écrit si on le demande.
     write_report(&text);
+}
+
+#[test]
+fn the_report_writes_the_conforming_plans_rate_when_given() {
+    let all = phrases();
+    let text = report(&all, None, Some((44, 48)));
+    assert!(
+        text.contains("plans conformes 44/48, soit 91.7 %"),
+        "{text}"
+    );
+    assert!(report(&all, None, None)
+        .contains("plans conformes : non mesuré (CASSINI_PLANS_CONFORMES absent)"));
+    assert_eq!(parse_plans_score("44/48"), Some((44, 48)));
+    assert_eq!(parse_plans_score(" 3 / 48 "), Some((3, 48)));
+    assert_eq!(parse_plans_score("50/48"), None);
+    assert_eq!(parse_plans_score("abc"), None);
 }
 
 #[test]
@@ -354,7 +401,7 @@ fn couverture_reelle_measures_what_the_local_agent_does_with_each_sentence() {
         );
         answers.push(answer);
     }
-    let text = report(&all, Some(&answers));
+    let text = report(&all, Some(&answers), plans_score_from_env());
     eprintln!("{}", text.lines().take(3).collect::<Vec<_>>().join("\n"));
     write_report(&text);
 }
