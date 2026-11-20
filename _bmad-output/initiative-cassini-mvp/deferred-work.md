@@ -1281,3 +1281,6 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `epic-catalogue-etendu-qgis/story-courbes-de-niveau-d-un-mnt-raster-contour-plan.md`
   summary: `raster.contour` (10.26) : les noms de paramètres de `gdal:contour` ne sont vérifiés que sous QGIS 3.44 ; le jeu sous 4.x et un GeoTIFF réel sans système de coordonnées (la matrice nomme un `.asc`, refusé plus tôt comme non-`.tif`) ne sont pas essayés sous QGIS.
   evidence: `probe_contour.py` n'a tourné que sur 3.44.15 ; la traduction est un jeu fixe de clés dans `translate_raster_contour`. À régler en lançant la sonde sur une série 4 installée, avant la livraison (10.19).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-difference-de-couches-analysis-difference-plan.md`
+  summary: deux chemins de sonde de `qgis-plugin/README.md` contiennent un octet retour arrière (0x08) à la place de `\bin`.
+  evidence: présents dans HEAD avant le ticket 10.21 (2 occurrences), la commande copiée depuis le README échoue.

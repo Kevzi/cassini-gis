@@ -1,6 +1,7 @@
 {
   "analysis.buffer": true,
   "analysis.intersect": true,
+  "analysis.difference": true,
   "analysis.select_by_attribute": true,
   "analysis.count_points_in_polygon": true,
   "analysis.nearest": true,

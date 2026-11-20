@@ -97,6 +97,15 @@ def translate_intersect(params, layer):
     }
 
 
+def translate_difference(params, layer):
+    """Paramètres neutres de `analysis.difference` -> paramètres de `native:difference`.
+
+    La couche à retrancher est ajoutée par le geste (clé `overlay_key` de la table) ;
+    `GRID_SIZE` reste à son défaut (aucune grille).
+    """
+    return {"INPUT": layer}
+
+
 # Opérateur du noyau -> code de `native:extractbyattribute` (jamais d'expression).
 _OPERATOR_CODES = {
     "eq": 0,
@@ -783,6 +792,19 @@ ALGORITHMS = {
         "input": "layer_id",
         "overlay": "overlay_layer_id",
     },
+    "analysis.difference": {
+        "chain_version": 1,
+        "chain": [
+            {
+                "algorithm": "native:difference",
+                "translate": translate_difference,
+                "output": "OUTPUT",
+                "overlay_key": "OVERLAY",
+            },
+        ],
+        "input": "layer_id",
+        "overlay": "overlay_layer_id",
+    },
     "analysis.select_by_attribute": {
         "chain_version": 1,
         "chain": [
@@ -1037,6 +1059,7 @@ CANCELLABLE_ALGORITHMS = frozenset(
     {
         "native:buffer",
         "native:intersection",
+        "native:difference",
         "native:extractbyattribute",
         "native:countpointsinpolygon",
         "native:zonalstatisticsfb",

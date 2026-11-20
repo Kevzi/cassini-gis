@@ -366,7 +366,7 @@ donne l'esquisse.
 | `terrain.least_cost_path` | faite | core | epic 11, entrée 10 |
 | `analysis.count_points_in_polygon` | faite | qgis | epic 10, entrée 2 |
 | `data.reproject` | faite | qgis | epic 10, entrée 7 |
-| `analysis.difference` | planifiée | qgis | epic 10, entrée 21 |
+| `analysis.difference` | faite | qgis | epic 10, entrée 21 |
 | `analysis.area` | planifiée | qgis | epic 10, entrée 22 |
 | `data.convert` | faite | qgis | epic 10, entrée 9 |
 | `data.convert_raster` | faite | qgis | epic 10, entrée 30 |
@@ -1763,7 +1763,7 @@ entrée 21). Un recouvrement total rend une couche vide, nommée dans le résult
 Résultat : `layer_id`, `name`, `crs`, `feature_count`.
 
 ```json fiche
-{"id": "analysis.difference", "status": "planifiee", "runs_in": "qgis", "dictated_by_core": false,
+{"id": "analysis.difference", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
  "params": {"layer_id": {"type": "string", "required": true},
             "overlay_layer_id": {"type": "string", "required": true},
             "out": {"type": "string", "required": false}},

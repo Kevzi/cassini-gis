@@ -5,6 +5,9 @@
   {"id": "analysis.intersect", "case": "couche créée",
    "result": {"layer_id": "inter_1", "name": "2-analysis.intersect", "feature_count": 3, "crs": "EPSG:2154"}},
 
+  {"id": "analysis.difference", "case": "couche créée",
+   "result": {"layer_id": "diff_1", "name": "6-analysis.difference", "feature_count": 2, "crs": "EPSG:2154"}},
+
   {"id": "analysis.isochrone", "case": "un polygone",
    "result": {"layer_id": "iso_1", "name": "5-analysis.isochrone", "feature_count": 1, "crs": "EPSG:2154"}},
 

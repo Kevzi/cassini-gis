@@ -141,6 +141,10 @@ def _intersect():
     return _analysis(ta.IntersectTest, lambda t: (t.backend, t.params()))
 
 
+def _difference():
+    return _analysis(ta.DifferenceTest, lambda t: (t.backend, t.params()))
+
+
 def _select():
     return _analysis(ta.SelectByAttributeTest, lambda t: (t.backend, t.params()))
 
@@ -449,6 +453,7 @@ def producers():
     return {
         ("analysis.buffer", "couche créée"): _buffer,
         ("analysis.intersect", "couche créée"): _intersect,
+        ("analysis.difference", "couche créée"): _difference,
         ("analysis.isochrone", "un polygone"): _isochrone,
         ("analysis.dissolve", "couche créée"): _dissolve,
         ("raster.contour", "couche de lignes"): _contour,

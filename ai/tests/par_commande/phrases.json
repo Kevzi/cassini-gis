@@ -425,6 +425,75 @@
     }
   },
   {
+    "id": "DIF1",
+    "command": "analysis.difference",
+    "phrase": "Les parcelles hors zone N du PLU.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "plu_zonage_a81d5c06_2e9f_4a37_b6c4_5f13e07d92a8",
+            "field": "typezone",
+            "operator": "eq",
+            "value": "N"
+          }
+        },
+        {
+          "command": "analysis.difference",
+          "params": {
+            "layer_id": "parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3",
+            "overlay_layer_id": "step:1.layer_id"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "DIF2",
+    "command": "analysis.difference",
+    "phrase": "Retire des parcelles les zones agricoles du PLU.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.select_by_attribute",
+          "params": {
+            "layer_id": "plu_zonage_a81d5c06_2e9f_4a37_b6c4_5f13e07d92a8",
+            "field": "typezone",
+            "operator": "eq",
+            "value": "A"
+          }
+        },
+        {
+          "command": "analysis.difference",
+          "params": {
+            "layer_id": "parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3",
+            "overlay_layer_id": "step:1.layer_id"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "DIF3",
+    "command": "analysis.difference",
+    "phrase": "Les parcelles moins les bâtiments.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.difference",
+          "params": {
+            "layer_id": "parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3",
+            "overlay_layer_id": "batiments_d27a60e8_4b95_4c31_9f7e_8a05d1b3c649"
+          }
+        }
+      ]
+    }
+  },
+  {
     "id": "DIS1",
     "command": "analysis.dissolve",
     "phrase": "Fusionne les parcelles par commune.",

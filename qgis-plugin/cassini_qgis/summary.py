@@ -222,6 +222,16 @@ def _intersect(lang, p, r, names):
     return text + (_out_layer(lang, r) if r else "")
 
 
+def _difference(lang, p, r, names):
+    text = texts.tr(
+        lang,
+        "sum_difference",
+        layer=names.layer(p.get("layer_id")),
+        overlay=names.layer(p.get("overlay_layer_id")),
+    )
+    return text + (_out_layer(lang, r) if r else "")
+
+
 _OPERATORS = ("eq", "ne", "lt", "lte", "gt", "gte", "contains", "begins_with")
 
 
@@ -1067,6 +1077,7 @@ _SENTENCES = {
     "layer.remove": _layer_remove,
     "analysis.buffer": _buffer,
     "analysis.intersect": _intersect,
+    "analysis.difference": _difference,
     "analysis.select_by_attribute": _select,
     "analysis.isochrone": _isochrone,
     "analysis.count_points_in_polygon": _count_points,

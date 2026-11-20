@@ -255,6 +255,19 @@ Recette manuelle de `analysis.intersect` et `analysis.select_by_attribute` [tick
 3. Sonde sous le vrai QGIS : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat"
    qgis-plugin/tests/probe_intersect_select.py` doit finir par `RÉSULTAT : OK`.
 
+Recette manuelle de `analysis.difference` [ticket 21] (deux couches de polygones) :
+
+1. `analysis.difference` : `layer_id` et `overlay_layer_id` sont deux listes de couches. La couche
+   nouvelle garde les entités de la première privées des parties que la seconde recouvre ; les deux
+   originaux ne bougent pas. Les deux mêmes couches donnent `analysis.bad_params`, un raster
+   `layer.not_vector`.
+2. Un recouvrement total rend une couche vide (0 entité), ajoutée au projet et nommée dans le résumé ;
+   un masque disjoint rend une copie de la première couche.
+3. Seuls les champs de la première couche sont gardés (aucun de la seconde) ; la colonne `fid` est
+   renumérotée par QGIS.
+4. Sonde sous QGIS 3.44 : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat"
+   qgis-plugin/tests/probe_difference.py` doit finir par `VERDICT : OK`.
+
 Recette manuelle de `analysis.count_points_in_polygon` [ticket 10.2] (jeu `../donnees-test-cassini/`) :
 
 1. Une couche de polygones (communes ou secteurs) et `gares-2154.csv` ouverts. Choisissez

@@ -94,6 +94,23 @@ class LayerCommandsTest(unittest.TestCase):
             "Intersection de Parcelles avec Tampon : nouvelle couche Parcelles retenues, 42 entités.",
         )
 
+    def test_difference(self):
+        params = {"layer_id": "parcelles_2", "overlay_layer_id": "tampon_3"}
+        out = {"layer_id": "x_4", "name": "Parcelles hors zone", "feature_count": 12}
+        self.assertEqual(
+            say("analysis.difference", params, out),
+            "Différence de Parcelles et Tampon : nouvelle couche Parcelles hors zone, 12 entités.",
+        )
+
+    def test_difference_empty_layer_is_named(self):
+        params = {"layer_id": "parcelles_2", "overlay_layer_id": "tampon_3"}
+        out = {"layer_id": "x_4", "name": "Vide", "feature_count": 0}
+        text = say("analysis.difference", params, out)
+        self.assertIn("nouvelle couche Vide, 0 entité", text)
+        self.assertEqual(
+            say("analysis.difference", params, None, lang="en"), "Difference of Parcelles and Tampon."
+        )
+
     def test_select_by_attribute_operators(self):
         params = {"layer_id": "parcelles_2", "field": "zone", "operator": "begins_with", "value": "U"}
         self.assertEqual(
@@ -1004,6 +1021,8 @@ SAMPLES = {
     "analysis.buffer": (BUFFER, BUFFER_OUT),
     "analysis.intersect": ({"layer_id": "parcelles_2", "overlay_layer_id": "tampon_3"},
                            {"layer_id": "x_4", "name": "Intersection", "feature_count": 2}),
+    "analysis.difference": ({"layer_id": "parcelles_2", "overlay_layer_id": "tampon_3"},
+                            {"layer_id": "x_5", "name": "Différence", "feature_count": 0}),
     "analysis.select_by_attribute": (
         {"layer_id": "parcelles_2", "field": "zone", "operator": "eq", "value": "U"},
         {"layer_id": "x_5", "name": "Sélection", "feature_count": 12}),

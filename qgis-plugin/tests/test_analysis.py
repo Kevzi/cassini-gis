@@ -497,6 +497,53 @@ class IntersectTest(unittest.TestCase):
         self.assertEqual(len(backend.calls), 1)  # l'intersection ne mesure rien
 
 
+class DifferenceTest(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.out = os.path.join(self.dir.name, "6-analysis.difference.gpkg")
+        self.entry = analysis.ALGORITHMS["analysis.difference"]
+        self.backend = FakeBackend([FakeLayer("a"), FakeLayer("b", name="ebc"), FakeLayer("r", vector=False)])
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def params(self, **extra):
+        p = {"layer_id": "a", "overlay_layer_id": "b", "out": self.out}
+        p.update(extra)
+        return p
+
+    def test_two_layers_go_to_the_algorithm(self):
+        g, calls = start(self.entry, self.backend, self.params())
+        algo, p = self.backend.calls[0]
+        self.assertEqual(algo, "native:difference")
+        self.assertEqual((p["INPUT"].lid, p["OVERLAY"].lid), ("a", "b"))
+        self.assertEqual(p["OUTPUT"], self.out)
+        self.assertNotIn("GRID_SIZE", p)
+        self.backend.finished(True, {})
+        self.assertIsNone(calls[0][1])
+        self.assertEqual(calls[0][0]["layer_id"], "out_1")
+
+    def test_same_layer_refused(self):
+        _, calls = start(self.entry, self.backend, self.params(overlay_layer_id="a"))
+        self.assertEqual(calls[0][1].code, "analysis.bad_params")
+        self.assertEqual(self.backend.calls, [])
+
+    def test_unknown_or_raster_overlay_refused(self):
+        _, calls = start(self.entry, self.backend, self.params(overlay_layer_id="nope"))
+        self.assertEqual(calls[0][1].code, "layer.not_found")
+        _, calls = start(self.entry, self.backend, self.params(overlay_layer_id="r"))
+        self.assertEqual(calls[0][1].code, "layer.not_vector")
+        self.assertEqual(self.backend.calls, [])
+
+    def test_the_command_is_cancellable(self):
+        self.assertIn("native:difference", analysis.CANCELLABLE_ALGORITHMS)
+
+    def test_degrees_are_accepted(self):
+        backend = FakeBackend([FakeLayer("a", metric=False), FakeLayer("b", metric=False)])
+        start(self.entry, backend, self.params())
+        self.assertEqual(len(backend.calls), 1)
+
+
 class SelectByAttributeTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
