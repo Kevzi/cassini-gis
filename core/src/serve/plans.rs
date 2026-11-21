@@ -475,12 +475,13 @@ pub(super) fn execute(state: &mut State<'_>, params: Option<&Value>) -> Result<V
             ));
         }
         let session = state.session.as_mut().expect("session vérifiée");
-        journal_steps.push(session.next_step());
         // La ligne porte sa place dans le plan : le journal suffit à retrouver les couches
         // intermédiaires (`intermediate_files`, ticket 5.34).
         let value = session
             .call_in_plan(&call.command, params, step)
             .map_err(|e| RpcError::business(e.at_step(step)))?;
+        // La ligne de la commande elle-même, non celle d'une reprojection dictée avant elle.
+        journal_steps.push(session.command_step());
         // Résultat brut, chemins absolus compris, vers l'extension (AD-9, 2026-11-04). Un raster
         // du noyau, lui, est ouvert par l'étape `layer.open_raster` que la session dicte
         // (ticket 4.9), un GeoJSON du noyau par `layer.open_vector` (AD-30). Le journal reste

@@ -60,6 +60,10 @@ pub struct TerrainHillshadeParams {
     /// Fichier de sortie : fourni par le noyau, dans le dossier de travail.
     #[serde(default)]
     pub out: String,
+    /// Système en mètres du calcul, en code EPSG : fourni par le noyau d'après l'en-tête du MNT
+    /// (ticket 33), jamais par l'appelant. Absent pour un MNT déjà en mètres.
+    #[serde(default)]
+    pub work_epsg: Option<u32>,
 }
 
 /// Résultat de `terrain.hillshade`.
@@ -166,6 +170,8 @@ impl Command for TerrainHillshade {
         .path_params(&["dem"])
         .output_params(&["out"])
         .output_ext(".tif")
+        // Un MNT en degrés est reprojeté avant la commande (`crate::work_crs`, ticket 33).
+        .work_crs_param("work_epsg", "dem")
         // Style dicté après l'ouverture du raster (bogue du fond noir, 2026-11-09).
         .result_style(crate::style::ResultStyle::Hillshade)
         .example(serde_json::json!({"dem": "mnt-colline-2154.tif"}))
@@ -186,12 +192,14 @@ impl Command for TerrainHillshade {
             "the_hill_shade_has_frozen_bytes",
             "two_runs_give_identical_bytes",
             "terrain_hillshade_runs_in_the_core_and_the_contract_accepts_it",
+            "terrain_hillshade_declares_its_work_crs",
         ])
     }
 
     fn run(&self, params: TerrainHillshadeParams) -> Result<TerrainHillshadeOutput, CommandFailure> {
         let sun = Sun::new(params.sun_azimuth, params.sun_altitude, params.z_factor)?;
         let dem = Dem::open(Path::new(params.dem.as_str())).map_err(CommandFailure::from)?;
+        crate::work_crs::check_dem_system(&dem, params.work_epsg)?;
         let (shade, nodata_cells) = horn_hillshade(&dem, &sun);
         shade
             .write_geotiff(Path::new(&params.out))
@@ -444,6 +452,31 @@ mod tests {
         hillshade(&input, &a, json!({})).unwrap();
         hillshade(&input, &b, json!({})).unwrap();
         assert_eq!(std::fs::read(&a).unwrap(), std::fs::read(&b).unwrap());
+    }
+
+    #[test]
+    fn terrain_hillshade_declares_its_work_crs() {
+        let registry = Registry::standard();
+        let spec = registry.spec("terrain.hillshade").unwrap();
+        assert_eq!(
+            spec.work_crs_param,
+            Some(("work_epsg".to_string(), "dem".to_string()))
+        );
+        assert!(spec.work_crs_on_raster());
+        let ok = json!({"dem": "mnt.tif", "work_epsg": 32632});
+        assert!(registry.validate_params("terrain.hillshade", &ok).is_ok());
+        let dir = Scratch::new("systeme-calcul");
+        let source = fixture("mnt-plan-incline-2154.tif");
+        let run = |work: u32, name: &str| {
+            registry.call(
+                "terrain.hillshade",
+                json!({"dem": source.to_string_lossy(), "work_epsg": work,
+                       "out": dir.join(name).to_string_lossy()}),
+            )
+        };
+        assert!(run(2154, "a.tif").is_ok());
+        assert_eq!(run(32632, "b.tif").unwrap_err().code(), "dem.work_mismatch");
+        assert!(!dir.join("b.tif").exists());
     }
 
     #[test]

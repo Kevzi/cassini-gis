@@ -35,6 +35,7 @@ use summary::{same_result, summarize};
 use crate::commands::layer_open_raster::OPEN_RASTER;
 use crate::commands::layer_open_vector::OPEN_VECTOR;
 use crate::commands::layer_set_style::SET_STYLE;
+use crate::commands::raster_reproject_work::REPROJECT_WORK;
 use crate::error::ErrorReport;
 use crate::exec::{Executor, Router};
 use crate::geojson::VECTOR_EXTENSIONS;
@@ -176,6 +177,9 @@ pub struct Session<'a> {
     /// Ligne du journal où la session a commencé le plan en cours (sa première étape, même
     /// refusée sans ligne) ; `None` hors plan. Borne les lignes lues pour `focus` (entrée 7.9).
     plan_start: Option<usize>,
+    /// Ligne du journal de la commande demandée par le dernier appel, après une éventuelle
+    /// reprojection dictée avant elle (ticket 33).
+    command_step: usize,
 }
 
 impl<'a> Session<'a> {
@@ -221,6 +225,7 @@ impl<'a> Session<'a> {
             chain_versions: BTreeMap::new(),
             pending_orders: Vec::new(),
             plan_start: None,
+            command_step: 0,
         })
     }
 
@@ -285,6 +290,12 @@ impl<'a> Session<'a> {
 
     pub fn mode(&self) -> Mode {
         self.mode
+    }
+
+    /// Ligne du journal de la commande du dernier appel (et non de la reprojection dictée avant
+    /// elle) : celle qu'un repère `out:<k>.<n>` d'un plan doit désigner.
+    pub fn command_step(&self) -> usize {
+        self.command_step
     }
 
     /// Numéro de la prochaine étape qui sera journalisée (à partir de 1).
@@ -385,6 +396,12 @@ impl<'a> Session<'a> {
             None => self.plan_start = None,
             Some(_) => {}
         }
+        // Un MNT en degrés est reprojeté avant la commande, par un ordre que le noyau dicte
+        // (ticket 33) : l'étape de la commande est alors celle qui suit cette ligne.
+        let mut params = params;
+        self.dictate_reprojection(id, &mut params, origin, plan_step)?;
+        let step = self.next_step;
+        self.command_step = step;
         let value = self.call_step(id, params, origin, plan_step)?;
         // Les ordres que l'étape demande (`layer.set_style`, puis `layer.arrange`) : chacun une
         // étape du journal, dans l'ordre, juste après sa ligne ; le premier refus arrête la suite
@@ -493,6 +510,111 @@ impl<'a> Session<'a> {
             if let Value::Object(map) = params {
                 map.insert(name.to_string(), json!(code));
             }
+        }
+        Ok(())
+    }
+
+    /// Lit l'inventaire du projet auprès de QGIS pour la commande `id`, hors du journal : une
+    /// lecture ratée est l'échec de la commande, nommée, avec le code de l'extension gardé.
+    fn read_inventory_for(&self, id: &str, why: &str) -> Result<Value, ErrorReport> {
+        self.router
+            .call(INVENTORY, json!({}))
+            .map_err(|e| match e {
+                RegistryError::Unavailable(_) => RegistryError::Unavailable(id.to_string()),
+                RegistryError::Cancelled(_) => RegistryError::Cancelled(id.to_string()),
+                other => RegistryError::Delegated {
+                    code: other.code().to_string(),
+                    message: format!(
+                        "La commande « {id} » n'est pas lancée : l'inventaire du projet n'a pas pu \
+                         être lu pour {why} ({other})"
+                    ),
+                },
+            })
+            .map_err(ErrorReport::from)
+    }
+
+    /// Commande de terrain dont le MNT est désigné par chemin (`work_crs_param` sur un
+    /// `RasterPath`, ticket 33) : le noyau ôte `work_epsg` de l'appelant, lit le système du MNT
+    /// dans son en-tête, et si le MNT est en degrés dicte `raster.reproject_work` **avant** la
+    /// commande, vers le système en mètres de `crate::work_crs::work_epsg_for_dem`. La commande
+    /// reçoit alors ce code et lit la sortie de la reprojection, désignée par `out:<k>.1` : le
+    /// journal garde les deux lignes, que le rejeu rejoue sans rien recalculer (AD-11).
+    ///
+    /// Rien n'est dicté, et la commande répond comme avant (`dem.not_projected` pour un MNT en
+    /// degrés) : quand le MNT est en mètres (résultat inchangé, amendement RA06), quand il est
+    /// illisible (la commande en dit la raison), quand l'extension n'annonce pas
+    /// `raster.reproject_work`, ou sans QGIS. Aucun système en mètres trouvable :
+    /// `dem.not_projected` qui dit pourquoi, avant tout ordre et sans ligne au journal.
+    fn dictate_reprojection(
+        &mut self,
+        id: &str,
+        params: &mut Value,
+        origin: Option<&str>,
+        plan_step: Option<usize>,
+    ) -> Result<(), ErrorReport> {
+        let Some(spec) = self.registry.spec(id) else {
+            return Ok(());
+        };
+        let Some((name, target)) = spec
+            .work_crs_param
+            .as_ref()
+            .filter(|_| spec.work_crs_on_raster())
+        else {
+            return Ok(());
+        };
+        let (name, target) = (name.clone(), target.clone());
+        // Le système de calcul n'est jamais celui de l'appelant : le noyau le choisit.
+        let Value::Object(map) = params else {
+            return Ok(());
+        };
+        map.remove(&name);
+        if self.mode == Mode::ReadOnly {
+            return Ok(());
+        }
+        // Des paramètres invalides sont refusés tels quels, avant toute lecture.
+        self.registry.validate_params(id, params)?;
+        let Some(raw) = params
+            .get(&target)
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+        else {
+            return Ok(());
+        };
+        let prior = journal_ids(&self.journal_path());
+        let resolver = Resolver {
+            registry: self.registry,
+            project_dir: &self.project_dir,
+            out_dir: &self.work_dir,
+        };
+        let path = if raw.starts_with("out:") {
+            resolver.resolve_reference(&raw, &prior)
+        } else {
+            resolver.resolve_path(&raw).map(|(_, absolute, _)| absolute)
+        };
+        // Un chemin ou un fichier illisible : la commande en donne elle-même la raison.
+        let Ok(Ok(dem_crs)) = path.map(|p| crate::dem::crs_of(&p)) else {
+            return Ok(());
+        };
+        if !matches!(dem_crs, crate::dem::DemCrs::Degrees { .. })
+            || !self.gestures.contains(REPROJECT_WORK)
+            || self.registry.spec(REPROJECT_WORK).is_none()
+        {
+            return Ok(());
+        }
+        let inventory = self.read_inventory_for(id, "choisir le système de calcul du MNT")?;
+        let label = Path::new(&raw)
+            .file_name()
+            .map_or_else(|| raw.clone(), |n| n.to_string_lossy().into_owned());
+        let Some(code) = crate::work_crs::work_epsg_for_dem(&dem_crs, &label, &inventory)? else {
+            return Ok(());
+        };
+        let order = json!({ "raster": raw, "work_epsg": code });
+        self.call_step(REPROJECT_WORK, order, origin, plan_step)?;
+        // `call_step` a écrit la ligne de la reprojection, réussie : c'est l'étape qui précède.
+        let reprojected = self.next_step - 1;
+        if let Value::Object(map) = params {
+            map.insert(target, json!(format!("out:{reprojected}.1")));
+            map.insert(name, json!(code));
         }
         Ok(())
     }
@@ -678,7 +800,12 @@ impl<'a> Session<'a> {
                 map.remove(name);
             }
             // Le système de calcul n'est jamais celui de l'appelant : le noyau le choisit (9.16).
-            if let Some((name, _)) = &spec.work_crs_param {
+            // (Pour un MNT désigné par chemin, `dictate_reprojection` l'a déjà fait, et rempli.)
+            if let Some((name, _)) = spec
+                .work_crs_param
+                .as_ref()
+                .filter(|_| !spec.work_crs_on_raster())
+            {
                 map.remove(name);
             }
             // La mise en évidence du résultat non plus : le noyau la tire du journal (7.9).
@@ -695,7 +822,11 @@ impl<'a> Session<'a> {
         // Une distance en mètres sur une couche en degrés : le noyau choisit le système en mètres
         // du calcul d'après l'inventaire lu auprès de QGIS, hors du journal ; il est journalisé
         // avec les paramètres et le rejeu le relit, sans le recalculer (entrée 9.16, AD-11).
-        if let Some((name, layer)) = &spec.work_crs_param {
+        if let Some((name, layer)) = spec
+            .work_crs_param
+            .as_ref()
+            .filter(|_| !spec.work_crs_on_raster())
+        {
             self.fill_work_crs(id, &mut params, name, layer)?;
         }
         // Le contrat de réseau (AD-28) : le noyau écrit les valeurs par défaut (vitesse du mode,
@@ -1073,6 +1204,21 @@ pub fn intermediate_files(registry: &Registry, journal: &Path) -> HashSet<String
         if plan_step.is_none() {
             continue;
         }
+        // La reprojection dictée d'un MNT (ticket 33) n'a pas de couche : son GeoTIFF est un
+        // intermédiaire du plan.
+        if line.get("id").and_then(Value::as_str) == Some(REPROJECT_WORK)
+            && line.get("error").is_none()
+            && line.get("cancelled").is_none()
+        {
+            hidden.insert(output_file(
+                step,
+                REPROJECT_WORK,
+                &["out".to_string()],
+                "out",
+                ".tif",
+            ));
+            continue;
+        }
         let Some(layer_id) = line.get("layer_id").and_then(Value::as_str) else {
             continue;
         };
@@ -1159,17 +1305,32 @@ fn current_plan(
     let mut lines: Vec<(usize, Value)> = Vec::new();
     let mut expected = plan_step.saturating_sub(1);
     for (i, raw) in all.iter().enumerate().rev() {
-        if expected == 0 {
-            break;
-        }
         let Some(line) = serde_json::from_str::<Value>(raw).ok() else {
+            if expected == 0 {
+                break;
+            }
             return Vec::new();
         };
-        if line.get("plan_step").and_then(Value::as_u64) != Some(expected as u64) {
-            return Vec::new();
-        }
         let id = line.get("id").and_then(Value::as_str).unwrap_or_default();
         let dictated = registry.spec(id).is_some_and(|spec| spec.dictated_by_core);
+        let found = line.get("plan_step").and_then(Value::as_u64);
+        // Plan complet : seule la reprojection dictée avant l'étape 1, de ce plan, reste à lire.
+        if expected == 0 {
+            if dictated && found == Some(1) && !lines.is_empty() && i + 1 >= start {
+                lines.push((i + 1, line));
+                continue;
+            }
+            break;
+        }
+        // Une reprojection dictée AVANT sa commande (ticket 33) a la place de la ligne qui la
+        // suit, déjà reçue : elle n'ouvre pas une nouvelle place.
+        if dictated && !lines.is_empty() && found == Some(expected as u64 + 1) {
+            lines.push((i + 1, line));
+            continue;
+        }
+        if found != Some(expected as u64) {
+            return Vec::new();
+        }
         lines.push((i + 1, line));
         if !dictated {
             expected -= 1;

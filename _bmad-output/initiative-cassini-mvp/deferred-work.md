@@ -1291,3 +1291,23 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-atlas-pdf-layout-export-atlas-plan.md`
   summary: `is_remote_source` classe locales les couches de fournisseurs base de données réseau (postgres, mssql, oracle) ; la garde ne couvre que les fournisseurs listés (AD-14).
   evidence: Non vérifié sous QGIS (maybe-false, sévérité moyenne si vrai) ; à trancher en vérifiant si ces fournisseurs entrent au périmètre « couche distante » du catalogue.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-mnt-en-degres-calcul-dans-un-systeme-en-metres-choisi-par-le-plan.md`
+  summary: Seconde moitié de 10.33 : geste QGIS `gdal:warpreproject` (bilinéaire, cellule par défaut) exécutant la reprojection du MNT dictée par le noyau, étape de reprojection de `raster.contour`, sonde `probe_dem_degrees.py` sous QGIS 3.44, fixture MNT en EPSG:4326, égalité avec le MNT reprojeté à la main.
+  evidence: ticket de 500 à 900 lignes et de risque high, découpé sur décision du propriétaire (2026-11-21) ; sans cette moitié un MNT en degrés reste refusé de bout en bout.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-mnt-en-degres-calcul-dans-un-systeme-en-metres-choisi-par-le-plan.md`
+  summary: Étendre le mécanisme work_epsg + reprojection dictée aux sept commandes de MNT restantes (terrain.viewshed, viewshed_cumulative, line_of_sight, peaks, cost_distance, least_cost_path, raster.weighted_overlay) et faire viser work_epsg à la complétion des points WGS84 (core/src/serve/plans.rs, 11.22).
+  evidence: la première moitié ne couvre que terrain.slope, aspect, hillshade et raster.reclassify ; les autres lisent par Dem::open et refusent encore un MNT en degrés (dem.not_projected), dont le champ de vision et la ligne de vue du cas d'usage ; weighted_overlay et cost_distance demandent une grille commune (raster.grid_mismatch).
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-mnt-en-degres-calcul-dans-un-systeme-en-metres-choisi-par-le-plan.md`
+  summary: Le geste de reprojection ne doit pas mélanger les classes d'un raster catégoriel en degrés passé à raster.reclassify (rééchantillonnage bilinéaire figé) ; choisir plus proche voisin pour un raster non-altitude, ou limiter le mécanisme aux MNT.
+  evidence: raster.reclassify est une commande de raster générique ; une couverture du sol en EPSG:4326 serait fondue sans erreur avant le reclassement (revue de 10.33).
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-mnt-en-degres-calcul-dans-un-systeme-en-metres-choisi-par-le-plan.md`
+  summary: Fuseau UTM d'une étendue (agent_inventory.rs utm_epsg) : exception 32V non appliquée à l'ouest, étendues à cheval sur l'antiméridien ou près du pôle, message de refus trompeur.
+  evidence: constat de revue sur du code antérieur à 10.33 (centre seul, 4-6°E donne 32632) ; non causé par ce ticket.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-mnt-en-degres-calcul-dans-un-systeme-en-metres-choisi-par-le-plan.md`
+  summary: Au rejeu, la reprojection est rejouée par QGIS (pas seulement le terrain) ; la comparaison du terrain peut diverger si GDAL/QGIS change ; la phrase « sans nouvelle reprojection » du plan est inexacte.
+  evidence: Replay::run n'inclut pas raster.reproject_work dans styling_gestures ; relecture des cas limites de 10.33.

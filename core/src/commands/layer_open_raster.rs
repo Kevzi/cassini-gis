@@ -79,7 +79,13 @@ mod tests {
         // vecteur `layer.open_vector` (AD-30) et les gestes de la mise en forme (entrée 11.20).
         let entry = serde_json::to_value(spec).unwrap();
         assert_eq!(entry["dictated_by_core"], json!(true));
-        let dictated = [OPEN_RASTER, OPEN_VECTOR, "layer.set_style", "layer.arrange"];
+        let dictated = [
+            OPEN_RASTER,
+            OPEN_VECTOR,
+            "layer.set_style",
+            "layer.arrange",
+            "raster.reproject_work",
+        ];
         for other in registry
             .specs()
             .filter(|s| !dictated.contains(&s.id.as_str()))

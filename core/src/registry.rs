@@ -340,10 +340,27 @@ impl CommandSpec {
     }
 
     /// Déclare le paramètre `name` que le noyau remplit du système de calcul en mètres choisi
-    /// pour la couche désignée par le paramètre `layer` (entrée 9.16).
+    /// pour la couche désignée par le paramètre `layer` (entrée 9.16), ou, quand `layer` est un
+    /// `RasterPath`, pour le MNT désigné par ce chemin (ticket 33, voir [`Self::work_crs_on_raster`]).
     pub fn work_crs_param(mut self, name: &str, layer: &str) -> Self {
         self.work_crs_param = Some((name.to_string(), layer.to_string()));
         self
+    }
+
+    /// Le système de calcul se choisit-il pour un raster ? Vrai quand `work_crs_param` désigne un
+    /// paramètre de type `RasterPath` : le MNT se désigne par chemin, jamais par id de couche, et
+    /// le noyau en lit le système dans l'en-tête du fichier (`crate::dem::crs_of`) au lieu de
+    /// l'inventaire. Un MNT en degrés est alors reprojeté par un ordre dicté avant la commande
+    /// (`raster.reproject_work`).
+    pub fn work_crs_on_raster(&self) -> bool {
+        self.work_crs_param.as_ref().is_some_and(|(_, target)| {
+            self.params_schema
+                .get("properties")
+                .and_then(|p| p.get(target))
+                .is_some_and(|schema| {
+                    crate::raster_path::is_raster_path(schema, &self.params_schema)
+                })
+        })
     }
 
     /// Déclare le paramètre `name` du contrat de réseau, dont le noyau écrit les valeurs par

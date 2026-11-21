@@ -4051,7 +4051,8 @@ mod tests {
                 "layer.open_raster",
                 "layer.open_vector",
                 "layer.set_style",
-                "layer.arrange"
+                "layer.arrange",
+                "raster.reproject_work"
             ]
             .contains(&e["id"].as_str().unwrap()))
             .all(|e| e.get("dictated_by_core").is_none()));

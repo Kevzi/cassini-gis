@@ -370,6 +370,7 @@ donne l'esquisse.
 | `analysis.area` | faite | qgis | epic 10, entrée 22 |
 | `data.convert` | faite | qgis | epic 10, entrée 9 |
 | `data.convert_raster` | faite | qgis | epic 10, entrée 30 |
+| `raster.reproject_work` | faite (dictée) | qgis | ticket 33 (noyau ; geste : suite) |
 | `layer.remove` | faite | qgis | epic 10, entrée 27 |
 | `analysis.nearest` | faite | qgis | epic 10, entrée 10 |
 | `analysis.distance_matrix` | planifiée | qgis | epic 10, entrée 10 |
@@ -817,6 +818,7 @@ Pente de chaque cellule d'un MNT, méthode de Horn (3 × 3), en degrés ou en po
 | `dem` | `RasterPath` | oui | GeoTIFF une bande, système projeté en mètres | MNT : chemin relatif au projet, ou `step:k`. |
 | `unit` | chaîne | oui | `degrees`, `percent` | Unité de la pente. |
 | `out` | chaîne | non | — | Fourni par le noyau. |
+| `work_epsg` | entier | non | code EPSG | Fourni par le noyau (ticket 33) : système en mètres du calcul, pour un MNT en degrés seulement ; absent pour un MNT en mètres. |
 
 | Résultat | Type | Sens |
 |---|---|---|
@@ -829,7 +831,8 @@ Pente de chaque cellule d'un MNT, méthode de Horn (3 × 3), en degrés ou en po
 {"id": "terrain.slope", "status": "faite", "runs_in": "core", "dictated_by_core": false,
  "params": {"dem": {"type": "RasterPath", "required": true},
             "unit": {"type": "string", "required": true, "enum": ["degrees", "percent"]},
-            "out": {"type": "string", "required": false}},
+            "out": {"type": "string", "required": false},
+            "work_epsg": {"type": "integer", "required": false}},
  "result": ["file", "max", "min", "nodata_cells", "unit"]}
 ```
 
@@ -1225,6 +1228,7 @@ plate (gradient nul) a l'exposition NoData (AD-31).
 |---|---|---|---|---|
 | `dem` | `RasterPath` | oui | GeoTIFF une bande, projeté en mètres | MNT : chemin relatif au projet, ou `step:k`. |
 | `out` | chaîne | non | — | Fourni par le noyau. |
+| `work_epsg` | entier | non | code EPSG | Fourni par le noyau (ticket 33), pour un MNT en degrés seulement, comme `terrain.slope`. |
 
 | Résultat | Type | Sens |
 |---|---|---|
@@ -1238,7 +1242,8 @@ commune dans `core/src/horn.rs`). Erreurs : celles du module raster unique (`dem
 ```json fiche
 {"id": "terrain.aspect", "status": "faite", "runs_in": "core", "dictated_by_core": false,
  "params": {"dem": {"type": "RasterPath", "required": true},
-            "out": {"type": "string", "required": false}},
+            "out": {"type": "string", "required": false},
+            "work_epsg": {"type": "integer", "required": false}},
  "result": ["file", "flat_cells", "nodata_cells"]}
 ```
 
@@ -1254,6 +1259,7 @@ rapporté au nord du quadrillage du MNT (AD-31).
 | `sun_altitude` | `Angle` | non | de 0 à 90°, défaut 45° | Hauteur du soleil au-dessus de l'horizon. |
 | `z_factor` | nombre | non | > 0, défaut 1 | Exagération verticale. |
 | `out` | chaîne | non | — | Fourni par le noyau. |
+| `work_epsg` | entier | non | code EPSG | Fourni par le noyau (ticket 33), pour un MNT en degrés seulement, comme `terrain.slope`. |
 
 | Résultat | Type | Sens |
 |---|---|---|
@@ -1270,7 +1276,8 @@ l'entrée 6 de l'epic 11 (`core/src/commands/terrain_hillshade.rs`).
             "sun_azimuth": {"type": "Angle", "required": false},
             "sun_altitude": {"type": "Angle", "required": false},
             "z_factor": {"type": "number", "required": false},
-            "out": {"type": "string", "required": false}},
+            "out": {"type": "string", "required": false},
+            "work_epsg": {"type": "integer", "required": false}},
  "result": ["file", "nodata_cells"]}
 ```
 
@@ -1383,6 +1390,7 @@ son rang ; une classe de valeur -9999 (le sans-donnée écrit) l'est aussi. Livr
 | `raster` | `RasterPath` | oui | une bande | Raster à reclasser. |
 | `classes` | liste de `{min?, max?, value}` | oui | 1 à 32 classes ; nombres | Table de classes, dans l'unité du raster. |
 | `out` | chaîne | non | — | Fourni par le noyau. |
+| `work_epsg` | entier | non | code EPSG | Fourni par le noyau (ticket 33), pour un raster en degrés seulement, comme `terrain.slope`. |
 
 | Résultat | Type | Sens |
 |---|---|---|
@@ -1398,7 +1406,8 @@ son rang ; une classe de valeur -9999 (le sans-donnée écrit) l'est aussi. Livr
                                   "fields": {"min": {"type": "number", "required": false},
                                              "max": {"type": "number", "required": false},
                                              "value": {"type": "number", "required": true}}}},
-            "out": {"type": "string", "required": false}},
+            "out": {"type": "string", "required": false},
+            "work_epsg": {"type": "integer", "required": false}},
  "result": ["counts", "file", "nodata_cells"]}
 ```
 
@@ -1874,6 +1883,52 @@ résumé le dit.
 {"id": "data.convert_raster", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
  "params": {"raster": {"type": "RasterPath", "required": true},
             "assign_epsg": {"type": "integer", "required": false},
+            "out": {"type": "string", "required": false}},
+ "result": ["epsg", "file"]}
+```
+
+### `raster.reproject_work`
+
+Reprojette un MNT en degrés vers le système en mètres que le noyau a choisi pour le calcul, et
+écrit un GeoTIFF (ticket 33, décision du propriétaire du 2026-11-21). **Dictée par le noyau,
+avant** une commande de terrain (`terrain.slope`, `terrain.aspect`, `terrain.hillshade`,
+`raster.reclassify`), jamais offerte au modèle ni au client MCP, refusée par `command.run`
+(`registry.dictated`). Aucune étape n'est ajoutée au plan montré (AD-23) ; le journal garde la
+ligne, avec le même `origin` et le même `plan_step` que la commande, et la commande lit sa
+sortie (`out:<k>.1`).
+
+Règle du noyau (fonction pure de l'en-tête du MNT et de l'inventaire, `core/src/work_crs.rs`),
+reprise de 9.16 mais appliquée au MNT, désigné par chemin :
+- MNT en mètres (liste fermée de `dem.rs`) : rien n'est dicté ni rempli, résultat inchangé
+  (amendement RA06 d'AD-24) ;
+- MNT en degrés : le système du projet s'il est en mètres, a un code EPSG et n'est pas un Mercator
+  mondial ; sinon le fuseau UTM sur WGS84 de l'étendue **du MNT** ; sinon `dem.not_projected`,
+  qui dit pourquoi, avant tout ordre et sans ligne au journal ;
+- l'extension n'annonce pas `raster.reproject_work` (ou pas de QGIS) : rien n'est dicté, la
+  commande répond `dem.not_projected` comme avant.
+
+`work_epsg` est journalisé avec la ligne de la commande et relu tel quel au rejeu, y compris
+après un changement du système du projet ; une ligne d'avant le ticket 33, sans `work_epsg`,
+se rejoue telle quelle (le système du calcul est celui du MNT). Une commande de terrain
+appelée avec un `work_epsg` qui n'est pas le système du MNT lu répond `dem.work_mismatch`.
+Rééchantillonnage bilinéaire et taille de cellule par défaut de `gdalwarp`, fixés dans la ligne
+de table de l'extension (seconde moitié du ticket 33, non livrée avec le noyau).
+
+| Paramètre | Type | Oblig. | Unité / valeurs | Sens |
+|---|---|---|---|---|
+| `raster` | `RasterPath` | oui | — | MNT en degrés à reprojeter. Il n'est pas modifié. |
+| `work_epsg` | entier | oui | code EPSG ≥ 1 | Système en mètres choisi par le noyau. |
+| `out` | chaîne | non | — | Fourni par le noyau. |
+
+| Résultat | Type | Sens |
+|---|---|---|
+| `file` | chaîne | GeoTIFF écrit. |
+| `epsg` | entier ou `null` | Système du GeoTIFF écrit. |
+
+```json fiche
+{"id": "raster.reproject_work", "status": "faite", "runs_in": "qgis", "dictated_by_core": true,
+ "params": {"raster": {"type": "RasterPath", "required": true},
+            "work_epsg": {"type": "integer", "required": true},
             "out": {"type": "string", "required": false}},
  "result": ["epsg", "file"]}
 ```

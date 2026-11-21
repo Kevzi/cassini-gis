@@ -84,6 +84,98 @@ pub fn work_epsg(inventory: &Value, layer_id: &str) -> Result<Option<u32>, Regis
     })
 }
 
+/// Code de refus d'un MNT en degrés pour lequel aucun système en mètres ne se trouve (AD-21 :
+/// le code que [`crate::dem::Dem::open`] donne déjà à un MNT hors mètres).
+pub const DEM_NOT_PROJECTED: &str = "dem.not_projected";
+
+/// Code de refus d'une commande de terrain dont le MNT n'est pas dans le système de calcul que le
+/// noyau a choisi (appel direct qui contourne la reprojection dictée).
+pub const DEM_WORK_MISMATCH: &str = "dem.work_mismatch";
+
+/// Code EPSG du système de calcul en mètres d'un MNT (ticket 33 ; règle de 9.16 appliquée à un
+/// raster, désigné par son chemin et non par un id de couche).
+///
+/// 1. MNT en mètres : `Ok(None)`, rien n'est reprojeté ni rempli (amendement RA06) ;
+/// 2. MNT en degrés : le système du projet s'il est en mètres, a un code `EPSG:n` et n'est pas un
+///    Mercator mondial ([`GLOBAL_MERCATOR`]), sinon le fuseau UTM sur WGS84 de l'**étendue du
+///    MNT** (la zone qu'on va reprojeter, toujours connue : elle est dans son en-tête), sinon
+///    `dem.not_projected` qui dit pourquoi, avant tout ordre.
+///
+/// Une fonction pure de l'en-tête du MNT et de l'inventaire rendu par `project.inventory`.
+pub fn work_epsg_for_dem(
+    dem: &crate::dem::DemCrs,
+    name: &str,
+    inventory: &Value,
+) -> Result<Option<u32>, RegistryError> {
+    use crate::dem::DemCrs;
+    let DemCrs::Degrees {
+        epsg,
+        west,
+        south,
+        east,
+        north,
+    } = *dem
+    else {
+        return Ok(None);
+    };
+    let project_metric = inventory.get("project_crs_unit").and_then(Value::as_str) == Some("m");
+    let project = inventory
+        .get("project_crs")
+        .and_then(Value::as_str)
+        .and_then(code_of)
+        // Seule la liste fermée de `dem.rs` : `Dem::open` refuserait le reste (3035, 27700,
+        // 2056…) après la reprojection (décision 3 du ticket 33).
+        .filter(|code| {
+            project_metric && u16::try_from(*code).is_ok_and(crate::dem::is_known_metric)
+        });
+    let utm = || {
+        utm_epsg(&serde_json::json!({"lonlat": {
+            "west": west, "south": south, "east": east, "north": north, "crs": "EPSG:4326"}}))
+    };
+    project.or_else(utm).map(Some).ok_or_else(|| {
+        let why = if project_metric {
+            "le système du projet, en mètres, ne convient pas au calcul (sans code EPSG, ou \
+             Mercator mondial, ou hors de la liste des systèmes en mètres que Cassini lit)"
+        } else {
+            "le projet est lui aussi en degrés"
+        };
+        let shown = epsg.map_or_else(
+            || "un système géographique".to_string(),
+            |c| format!("EPSG:{c}"),
+        );
+        RegistryError::Delegated {
+            code: DEM_NOT_PROJECTED.to_string(),
+            message: format!(
+                "Le MNT « {name} » est en {shown}, en degrés, et aucun système en mètres n'a pu \
+                 être choisi pour le calcul : {why}, et son étendue est trop large pour un fuseau \
+                 UTM (plus de deux fuseaux, ou latitude hors des limites). Passez le projet en \
+                 Lambert-93 (EPSG:2154), ou reprojetez le MNT dans QGIS (Raster > Projections > \
+                 Reprojeter)."
+            ),
+        }
+    })
+}
+
+/// Contrôle qu'un MNT lu est dans le système de calcul que le noyau a choisi pour lui
+/// (`work_epsg`). Sans `work_epsg` (MNT en mètres, ou ligne d'avant le ticket 33), le système
+/// du MNT est le système de calcul : rien à contrôler.
+pub fn check_dem_system(
+    dem: &crate::dem::Dem,
+    work_epsg: Option<u32>,
+) -> Result<(), crate::registry::CommandFailure> {
+    match work_epsg {
+        Some(code) if code != dem.epsg => Err(crate::registry::CommandFailure::new(
+            DEM_WORK_MISMATCH,
+            format!(
+                "Le MNT est en EPSG:{}, le système de calcul choisi par le noyau est EPSG:{code} : \
+                 la reprojection dictée avant la commande n'a pas eu lieu.",
+                dem.epsg
+            ),
+        )),
+        _ => Ok(()),
+    }
+}
+
 /// `EPSG:2154` donne `2154` ; tout autre système (`IGNF:LAMB93`, vide) ne donne rien.
 fn code_of(authid: &str) -> Option<u32> {
     epsg(authid)
@@ -266,6 +358,120 @@ mod tests {
         );
         assert_eq!(work_epsg(&inv, "autre").unwrap(), None);
         assert_eq!(work_epsg(&json!({}), "gares_1").unwrap(), None);
+    }
+
+    // --- MNT (ticket 33) ----------------------------------------------------------------
+
+    use crate::dem::DemCrs;
+
+    fn dem_deg(west: f64, south: f64, east: f64, north: f64) -> DemCrs {
+        DemCrs::Degrees {
+            epsg: Some(4326),
+            west,
+            south,
+            east,
+            north,
+        }
+    }
+
+    fn project(crs: &str, unit: &str) -> Value {
+        json!({"layers": [], "project_crs": crs, "project_crs_unit": unit})
+    }
+
+    #[test]
+    fn a_metric_dem_fills_nothing_whatever_the_project() {
+        for inv in [project("EPSG:4326", "deg"), project("EPSG:2154", "m")] {
+            let metric = DemCrs::Metric(2154);
+            assert_eq!(work_epsg_for_dem(&metric, "mnt", &inv).unwrap(), None);
+        }
+    }
+
+    #[test]
+    fn a_dem_in_degrees_takes_the_metric_project_system_then_the_utm_zone_of_the_dem() {
+        let annecy = dem_deg(5.8, 45.7, 6.4, 46.1);
+        let inv = project("EPSG:2154", "m");
+        assert_eq!(work_epsg_for_dem(&annecy, "mnt", &inv).unwrap(), Some(2154));
+        // Projet en degrés, ou en Mercator mondial, ou en mètres sans code : fuseau UTM du MNT.
+        for inv in [
+            project("EPSG:4326", "deg"),
+            project("EPSG:3857", "m"),
+            project("IGNF:LAMB93", "m"),
+        ] {
+            assert_eq!(
+                work_epsg_for_dem(&annecy, "mnt", &inv).unwrap(),
+                Some(32632),
+                "{inv}"
+            );
+        }
+        // Le fuseau suit le MNT, pas le projet : un MNT de l'ouest de la France est au fuseau 30.
+        let brest = dem_deg(-4.6, 48.3, -4.3, 48.5);
+        assert_eq!(
+            work_epsg_for_dem(&brest, "mnt", &project("EPSG:4326", "deg")).unwrap(),
+            Some(32630)
+        );
+        // Un projet métrique hors de la liste fermée (LAEA 3035, Grande-Bretagne 27700, Suisse
+        // 2056) : le fuseau UTM du MNT, car `Dem::open` refuserait ces systèmes.
+        for code in ["EPSG:3035", "EPSG:27700", "EPSG:2056"] {
+            assert_eq!(
+                work_epsg_for_dem(&annecy, "mnt", &project(code, "m")).unwrap(),
+                Some(32632),
+                "{code}"
+            );
+        }
+        // Un projet absent de l'inventaire (extension plus ancienne) : le fuseau UTM aussi.
+        assert_eq!(
+            work_epsg_for_dem(&annecy, "mnt", &json!({})).unwrap(),
+            Some(32632)
+        );
+    }
+
+    #[test]
+    fn a_dem_in_degrees_without_a_metric_system_is_a_clear_refusal() {
+        // Étendue sur plus de deux fuseaux UTM et projet en degrés.
+        let wide = dem_deg(-10.0, 40.0, 10.0, 50.0);
+        let err = work_epsg_for_dem(&wide, "mnt_france", &project("EPSG:4326", "deg")).unwrap_err();
+        assert_eq!(err.code(), DEM_NOT_PROJECTED);
+        let message = err.to_string();
+        assert!(message.contains("« mnt_france »"), "{message}");
+        assert!(message.contains("EPSG:4326"), "{message}");
+        assert!(message.contains("lui aussi en degrés"), "{message}");
+        assert!(message.contains("Lambert-93"), "{message}");
+        // Projet en mètres mais Mercator mondial : la raison change.
+        let err = work_epsg_for_dem(&wide, "mnt", &project("EPSG:3857", "m")).unwrap_err();
+        assert!(
+            err.to_string().contains("en mètres, ne convient pas"),
+            "{err}"
+        );
+        assert!(!err.to_string().contains("lui aussi en degrés"), "{err}");
+        // Un projet métrique de code connu sauve un MNT trop large pour un fuseau.
+        assert_eq!(
+            work_epsg_for_dem(&wide, "mnt", &project("EPSG:2154", "m")).unwrap(),
+            Some(2154)
+        );
+    }
+
+    #[test]
+    fn a_dem_system_check_compares_the_read_grid_to_the_chosen_system() {
+        let dem = crate::dem::Dem {
+            width: 1,
+            height: 1,
+            origin_x: 0.0,
+            origin_y: 1.0,
+            cell_size_x: 1.0,
+            cell_size_y: 1.0,
+            epsg: 32632,
+            nodata: None,
+            values: vec![1.0],
+        };
+        assert!(check_dem_system(&dem, None).is_ok());
+        assert!(check_dem_system(&dem, Some(32632)).is_ok());
+        let failure = check_dem_system(&dem, Some(2154)).unwrap_err();
+        assert_eq!(failure.code, DEM_WORK_MISMATCH);
+        assert!(
+            failure.message.contains("EPSG:32632"),
+            "{}",
+            failure.message
+        );
     }
 
     #[test]

@@ -26,6 +26,7 @@ const GT_RASTER_TYPE: u16 = 1025;
 const GEOGRAPHIC_TYPE: u16 = 2048;
 const PROJECTED_CS_TYPE: u16 = 3072;
 const PROJ_LINEAR_UNITS: u16 = 3076;
+const GEOG_ANGULAR_UNITS: u16 = 2054;
 
 const MODEL_TYPE_PROJECTED: u16 = 1;
 const MODEL_TYPE_GEOGRAPHIC: u16 = 2;
@@ -33,6 +34,7 @@ const RASTER_PIXEL_IS_AREA: u16 = 1;
 const RASTER_PIXEL_IS_POINT: u16 = 2;
 const USER_DEFINED: u16 = 32767;
 const LINEAR_METER: u16 = 9001;
+const ANGULAR_DEGREE: u16 = 9102;
 
 /// Plafond de la grille décodée, 1 Gio : un MNT de 1 m sur une commune passe (10 km × 10 km
 /// en Float32 font 400 Mo), la limite de `tiff` (256 Mo) ne le laissait pas. Il porte sur la
@@ -147,8 +149,95 @@ pub fn epsg_of(path: &Path) -> Result<u32, DemError> {
     Ok(read_header(path)?.epsg)
 }
 
+/// Système d'un MNT tel que son en-tête le déclare, lu sans exiger qu'il soit en mètres : ce que
+/// le noyau consulte pour choisir un système de calcul (ticket 33). Le MNT en degrés est le seul
+/// que le noyau fait reprojeter ; tout autre refus de [`Dem::open`] reste le sien.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DemCrs {
+    /// Système projeté en vrais mètres connu de Cassini (la liste fermée de [`Dem::open`]).
+    Metric(u32),
+    /// Système géographique en degrés, avec l'emprise du MNT en degrés.
+    Degrees {
+        /// Code EPSG du système géographique, s'il en a un.
+        epsg: Option<u32>,
+        west: f64,
+        south: f64,
+        east: f64,
+        north: f64,
+    },
+}
+
+/// Système d'un MNT, lu dans son en-tête seul : mêmes contrôles que [`Dem::open`] jusqu'au
+/// système, sans décoder la grille. Un système géographique en degrés n'est pas un refus ici :
+/// il rend [`DemCrs::Degrees`]. Tout autre cas que [`Dem::open`] refuse (sans code, unité non
+/// métrique, Mercator mondial, fichier illisible) garde le même refus.
+pub fn crs_of(path: &Path) -> Result<DemCrs, DemError> {
+    let header = read_raw_header(path)?;
+    match check_crs(&header.keys) {
+        Ok(epsg) => Ok(DemCrs::Metric(epsg)),
+        Err(e) if e.code == "dem.not_projected" && is_degrees(&header.keys) => {
+            let (ox, oy, sx, sy) = header.geo;
+            let (ox, oy) = if header.keys.get(GT_RASTER_TYPE) == Some(RASTER_PIXEL_IS_POINT) {
+                (ox - sx / 2.0, oy + sy / 2.0)
+            } else {
+                (ox, oy)
+            };
+            let epsg = header
+                .keys
+                .get(GEOGRAPHIC_TYPE)
+                .filter(|c| *c != USER_DEFINED && *c != 0)
+                .map(u32::from);
+            Ok(DemCrs::Degrees {
+                epsg,
+                west: ox,
+                south: oy - sy * f64::from(header.height),
+                east: ox + sx * f64::from(header.width),
+                north: oy,
+            })
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Le système déclaré est-il géographique, en degrés ? Une unité angulaire déclarée autre que le
+/// degré (radian, grade) n'en est pas un.
+fn is_degrees(keys: &GeoKeys) -> bool {
+    let geographic = match keys.get(GT_MODEL_TYPE) {
+        Some(MODEL_TYPE_GEOGRAPHIC) => true,
+        None => keys.get(PROJECTED_CS_TYPE).is_none() && keys.get(GEOGRAPHIC_TYPE).is_some(),
+        Some(_) => false,
+    };
+    geographic
+        && keys
+            .get(GEOG_ANGULAR_UNITS)
+            .is_none_or(|u| u == ANGULAR_DEGREE)
+}
+
 /// Ouvre un GeoTIFF et contrôle son en-tête : bandes, format, taille, géoréférencement, système.
 fn read_header(path: &Path) -> Result<Header, DemError> {
+    let raw = read_raw_header(path)?;
+    let epsg = check_crs(&raw.keys)?;
+    Ok(Header {
+        decoder: raw.decoder,
+        width: raw.width,
+        height: raw.height,
+        geo: raw.geo,
+        keys: raw.keys,
+        epsg,
+    })
+}
+
+/// En-tête d'un MNT avant le contrôle de son système.
+struct RawHeader {
+    decoder: Decoder<BufReader<File>>,
+    width: u32,
+    height: u32,
+    geo: (f64, f64, f64, f64),
+    keys: GeoKeys,
+}
+
+/// Lit l'en-tête d'un GeoTIFF et contrôle bandes, format, taille et géoréférencement.
+fn read_raw_header(path: &Path) -> Result<RawHeader, DemError> {
     let file = File::open(path).map_err(|e| {
         DemError::unreadable(format!(
             "Impossible d'ouvrir le MNT « {} » : {e}.",
@@ -195,14 +284,12 @@ fn read_header(path: &Path) -> Result<Header, DemError> {
 
     let geo = read_georeferencing(&mut decoder)?;
     let keys = read_geokeys(&mut decoder)?;
-    let epsg = check_crs(&keys)?;
-    Ok(Header {
+    Ok(RawHeader {
         decoder,
         width,
         height,
         geo,
         keys,
-        epsg,
     })
 }
 
@@ -571,7 +658,7 @@ fn check_crs(keys: &GeoKeys) -> Result<u32, DemError> {
 /// Liste fermée des systèmes projetés acceptés, connus pour être en vrais mètres :
 /// Lambert-93, coniques conformes 9 zones, Lambert zones (NTF), UTM WGS84 nord et sud,
 /// UTM ETRS89. Un système métrique légitime manquant s'y ajoute par un ticket.
-fn is_known_metric(epsg: u16) -> bool {
+pub(crate) fn is_known_metric(epsg: u16) -> bool {
     matches!(
         epsg,
         2154 | 3942..=3950 | 27561..=27564 | 27571..=27574 | 32601..=32660 | 32701..=32760
@@ -628,6 +715,55 @@ fn french(v: f64) -> String {
     // `-0` s'écrit `0`.
     let rounded = if rounded == 0.0 { 0.0 } else { rounded };
     format!("{rounded}").replace('.', ",")
+}
+
+/// Écrit un GeoTIFF en degrés (système géographique `geographic_epsg`) pour les tests des
+/// couches qui lisent le système d'un MNT : `width` × `height` cellules de `cell` degrés, coin
+/// haut-gauche (`west`, `north`), altitude 100 partout.
+#[cfg(test)]
+pub(crate) fn write_degrees_geotiff(
+    path: &Path,
+    (west, north): (f64, f64),
+    cell: f64,
+    (width, height): (u32, u32),
+    geographic_epsg: u16,
+) {
+    let mut buffer = Cursor::new(Vec::new());
+    {
+        let mut tiff = TiffEncoder::new(&mut buffer).unwrap();
+        let mut image = tiff.new_image::<Gray32Float>(width, height).unwrap();
+        let dir = image.encoder();
+        dir.write_tag(Tag::ModelPixelScaleTag, &[cell, cell, 0.0][..])
+            .unwrap();
+        dir.write_tag(
+            Tag::ModelTiepointTag,
+            &[0.0, 0.0, 0.0, west, north, 0.0][..],
+        )
+        .unwrap();
+        let keys: [u16; 16] = [
+            1,
+            1,
+            0,
+            3,
+            GT_MODEL_TYPE,
+            0,
+            1,
+            MODEL_TYPE_GEOGRAPHIC,
+            GT_RASTER_TYPE,
+            0,
+            1,
+            RASTER_PIXEL_IS_AREA,
+            GEOGRAPHIC_TYPE,
+            0,
+            1,
+            geographic_epsg,
+        ];
+        dir.write_tag(Tag::GeoKeyDirectoryTag, &keys[..]).unwrap();
+        image
+            .write_data(&vec![100.0f32; width as usize * height as usize])
+            .unwrap();
+    }
+    std::fs::write(path, buffer.into_inner()).unwrap();
 }
 
 #[cfg(test)]
@@ -918,6 +1054,72 @@ mod tests {
             e.message
         );
         assert!(e.message.contains("Raster > Projections > Reprojeter"));
+    }
+
+    // --- Système d'un MNT lu sans l'exiger en mètres (ticket 33) ------------------------------
+
+    #[test]
+    fn crs_of_reads_a_metric_dem_and_an_unreprojectable_one_like_open() {
+        let dir = scratch("systeme-metrique");
+        let p = dir.join("l93.tif");
+        raw_tiff::<GrayI16>(&p, 2, 2, &[1, 2, 3, 4], projected);
+        assert_eq!(crs_of(&p).unwrap(), DemCrs::Metric(2154));
+        // Un MNT dont le système n'est pas en degrés garde le refus d'`open` : pieds, Mercator.
+        let p = with_keys(
+            &dir,
+            "3857.tif",
+            &[
+                (GT_MODEL_TYPE, 1),
+                (PROJECTED_CS_TYPE, 3857),
+                (PROJ_LINEAR_UNITS, LINEAR_METER),
+            ],
+        );
+        assert_eq!(crs_of(&p).unwrap_err(), open_err(&p));
+        let p = dir.join("sans-cle.tif");
+        raw_tiff::<GrayI16>(&p, 2, 2, &[1, 2, 3, 4], georef);
+        assert_eq!(crs_of(&p).unwrap_err().code, "dem.no_epsg");
+        let absent = dir.join("absent.tif");
+        assert_eq!(crs_of(&absent).unwrap_err().code, "dem.unreadable");
+    }
+
+    #[test]
+    fn crs_of_reads_a_dem_in_degrees_with_its_extent() {
+        let dir = scratch("systeme-degres");
+        let p = dir.join("4326.tif");
+        write_degrees_geotiff(&p, (5.8, 46.1), 0.01, (60, 40), 4326);
+        let DemCrs::Degrees {
+            epsg,
+            west,
+            south,
+            east,
+            north,
+        } = crs_of(&p).unwrap()
+        else {
+            panic!("un MNT en degrés était attendu");
+        };
+        assert_eq!(epsg, Some(4326));
+        assert!((west - 5.8).abs() < 1e-9 && (north - 46.1).abs() < 1e-9);
+        assert!((east - 6.4).abs() < 1e-9, "{east}");
+        assert!((south - 45.7).abs() < 1e-9, "{south}");
+        // `open` continue de le refuser : c'est la commande qui ne lit que des mètres.
+        assert_eq!(open_err(&p).code, "dem.not_projected");
+        // Sans code de système géographique : degrés quand même.
+        let p = with_keys(&dir, "geo-sans-code.tif", &[(GT_MODEL_TYPE, 2)]);
+        assert!(matches!(
+            crs_of(&p).unwrap(),
+            DemCrs::Degrees { epsg: None, .. }
+        ));
+        // Unité angulaire déclarée autre que le degré (radian) : refus d'`open` inchangé.
+        let p = with_keys(
+            &dir,
+            "radians.tif",
+            &[
+                (GT_MODEL_TYPE, 2),
+                (GEOGRAPHIC_TYPE, 4326),
+                (GEOG_ANGULAR_UNITS, 9101),
+            ],
+        );
+        assert_eq!(crs_of(&p).unwrap_err().code, "dem.not_projected");
     }
 
     #[test]

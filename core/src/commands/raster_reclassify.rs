@@ -70,6 +70,10 @@ pub struct RasterReclassifyParams {
     /// Fichier de sortie : fourni par le noyau, dans le dossier de travail.
     #[serde(default)]
     pub out: String,
+    /// Système en mètres du calcul, en code EPSG : fourni par le noyau d'après l'en-tête du raster
+    /// (ticket 33), jamais par l'appelant. Absent pour un raster déjà en mètres.
+    #[serde(default)]
+    pub work_epsg: Option<u32>,
 }
 
 /// Cellules d'une valeur de sortie.
@@ -181,6 +185,8 @@ impl Command for RasterReclassify {
         .path_params(&["raster"])
         .output_params(&["out"])
         .output_ext(".tif")
+        // Un raster en degrés est reprojeté avant la commande (`crate::work_crs`, ticket 33).
+        .work_crs_param("work_epsg", "raster")
         .example(serde_json::json!({"raster": "mnt-colline-2154.tif", "classes": [
             {"max": 80.0, "value": 1.0},
             {"min": 80.0, "max": 120.0, "value": 2.0},
@@ -196,12 +202,14 @@ impl Command for RasterReclassify {
             "a_refused_raster_keeps_the_module_error",
             "two_reclassifications_give_identical_bytes",
             "raster_reclassify_runs_in_the_core_and_the_contract_accepts_it",
+            "raster_reclassify_declares_its_work_crs",
         ])
     }
 
     fn run(&self, params: RasterReclassifyParams) -> Result<RasterReclassifyOutput, CommandFailure> {
         check_classes(&params.classes)?;
         let raster = Dem::open(Path::new(params.raster.as_str())).map_err(CommandFailure::from)?;
+        crate::work_crs::check_dem_system(&raster, params.work_epsg)?;
         let (grid, counts, nodata_cells) = reclassify(&raster, &params.classes);
         grid.write_geotiff(Path::new(&params.out))
             .map_err(CommandFailure::from)?;
@@ -528,6 +536,32 @@ mod tests {
         let rb = call(&input, classes, &b).unwrap();
         assert_eq!(std::fs::read(&a).unwrap(), std::fs::read(&b).unwrap());
         assert_eq!(ra["counts"], rb["counts"]);
+    }
+
+    #[test]
+    fn raster_reclassify_declares_its_work_crs() {
+        let registry = Registry::standard();
+        let spec = registry.spec("raster.reclassify").unwrap();
+        assert_eq!(
+            spec.work_crs_param,
+            Some(("work_epsg".to_string(), "raster".to_string()))
+        );
+        assert!(spec.work_crs_on_raster());
+        let classes = json!([{"max": 80.0, "value": 1.0}, {"min": 80.0, "value": 2.0}]);
+        let ok = json!({"raster": "mnt.tif", "classes": classes, "work_epsg": 32632});
+        assert!(registry.validate_params("raster.reclassify", &ok).is_ok());
+        let dir = Scratch::new("systeme-calcul");
+        let source = fixture("mnt-colline-2154.tif");
+        let run = |work: u32, name: &str| {
+            registry.call(
+                "raster.reclassify",
+                json!({"raster": source.to_string_lossy(), "classes": classes,
+                       "work_epsg": work, "out": dir.join(name).to_string_lossy()}),
+            )
+        };
+        assert!(run(2154, "a.tif").is_ok());
+        assert_eq!(run(32632, "b.tif").unwrap_err().code(), "dem.work_mismatch");
+        assert!(!dir.join("b.tif").exists());
     }
 
     #[test]

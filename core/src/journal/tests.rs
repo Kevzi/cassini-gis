@@ -6720,3 +6720,438 @@ fn zonal_statistics_on_a_previous_step_raster_keeps_the_marker_and_replays_ident
     assert!(replayed.ends_with("1-terrain.slope.tif"), "{replayed}");
     let _ = fs::remove_dir_all(dir);
 }
+
+// -- Système de calcul d'un MNT en degrés (ticket 33) -------------------------------------------
+
+/// Ordres reçus par le QGIS de test, dans l'ordre : (commande, paramètres).
+type Orders = std::rc::Rc<std::cell::RefCell<Vec<(String, Value)>>>;
+
+/// QGIS de test d'un MNT en degrés : rend l'inventaire du projet et exécute `raster.reproject_work`
+/// en écrivant, à la place de la reprojection, un MNT en mètres dans le système demandé. Garde les
+/// ordres reçus, dans l'ordre.
+struct DemQgis {
+    project: std::rc::Rc<std::cell::RefCell<CrsProject>>,
+    orders: Orders,
+    /// La reprojection échoue par une erreur de l'extension.
+    failing: bool,
+}
+
+impl DemQgis {
+    fn new(project: &std::rc::Rc<std::cell::RefCell<CrsProject>>) -> Self {
+        DemQgis {
+            project: project.clone(),
+            orders: Default::default(),
+            failing: false,
+        }
+    }
+}
+
+impl Executor for DemQgis {
+    fn execute(&self, id: &str, p: Value) -> Result<Value, RegistryError> {
+        self.orders.borrow_mut().push((id.to_string(), p.clone()));
+        match id {
+            "project.inventory" => {
+                let project = self.project.borrow();
+                Ok(json!({"layers": [], "project_crs": project.project.0,
+                          "project_crs_unit": project.project.1, "extent": project.extent}))
+            }
+            "raster.reproject_work" => {
+                if self.failing {
+                    return Err(RegistryError::Delegated {
+                        code: "analysis.failed".into(),
+                        message: "La reprojection a échoué.".into(),
+                    });
+                }
+                let work = p["work_epsg"].as_u64().unwrap() as u32;
+                let (width, height) = (6u32, 6u32);
+                let values = (0..height)
+                    .flat_map(|_| (0..width).map(|col| 100.0 - col as f32))
+                    .collect();
+                crate::dem::Dem {
+                    width,
+                    height,
+                    origin_x: 652000.0,
+                    origin_y: 6850060.0,
+                    cell_size_x: 10.0,
+                    cell_size_y: 10.0,
+                    epsg: work,
+                    nodata: Some(-9999.0),
+                    values,
+                }
+                .write_geotiff(Path::new(p["out"].as_str().unwrap()))
+                .unwrap();
+                Ok(json!({"file": p["out"], "epsg": work}))
+            }
+            other => panic!("commande inattendue : {other}"),
+        }
+    }
+}
+
+const REPROJECT: &str = "raster.reproject_work";
+
+fn reproject_gestures() -> Vec<String> {
+    vec![REPROJECT.to_string(), "project.inventory".to_string()]
+}
+
+/// Écrit dans `dir` le MNT en degrés `name` (Annecy : 5,8 à 6,4 °E, 45,7 à 46,1 °N).
+fn write_annecy_degrees(dir: &Path, name: &str) {
+    crate::dem::write_degrees_geotiff(&dir.join(name), (5.8, 46.1), 0.01, (60, 40), 4326);
+}
+
+fn sent(orders: &Orders) -> Vec<String> {
+    orders.borrow().iter().map(|(c, _)| c.clone()).collect()
+}
+
+fn order_of(orders: &Orders, id: &str) -> Value {
+    orders
+        .borrow()
+        .iter()
+        .find(|(order, _)| order == id)
+        .map(|(_, p)| p.clone())
+        .unwrap()
+}
+
+#[test]
+fn a_slope_on_a_dem_in_degrees_dictates_the_reprojection_before_and_logs_the_work_system() {
+    let (dir, project, _) = temp_project();
+    write_annecy_degrees(&dir, "mnt4326.tif");
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let qgis = DemQgis::new(&qgis_project);
+    let orders = qgis.orders.clone();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(qgis)
+        .with_gestures(reproject_gestures());
+    // `work_epsg` de l'appelant : ôté, le noyau choisit.
+    let out = s
+        .call(
+            "terrain.slope",
+            json!({"dem": "mnt4326.tif", "unit": "degrees", "work_epsg": 4326}),
+        )
+        .unwrap();
+    assert_eq!(out["unit"], "degrees");
+    let l = lines(&s);
+    assert_eq!(l.len(), 2, "{l:?}");
+    // La reprojection est la première ligne, sur l'original, dans le système du projet.
+    assert_eq!(l[0]["id"], REPROJECT);
+    assert_eq!(l[0]["params"]["raster"], "mnt4326.tif", "{}", l[0]);
+    assert_eq!(l[0]["params"]["work_epsg"], 2154);
+    assert_eq!(l[0]["params"]["out"], "1-raster.reproject_work.tif");
+    assert!(l[0].get("layer_id").is_none());
+    // La pente lit sa sortie et journalise le système de calcul.
+    assert_eq!(l[1]["id"], "terrain.slope");
+    assert_eq!(l[1]["params"]["dem"], "out:1.1");
+    assert_eq!(l[1]["params"]["work_epsg"], 2154);
+    // Les ordres : l'inventaire, puis la reprojection (chemins absolus), rien d'autre.
+    assert_eq!(sent(&orders), ["project.inventory", REPROJECT]);
+    let order = order_of(&orders, REPROJECT);
+    assert_eq!(order["work_epsg"], 2154);
+    assert!(Path::new(order["raster"].as_str().unwrap()).is_absolute());
+    // Le fichier écrit est dans le système de calcul.
+    let slope = crate::dem::Dem::open(Path::new(out["file"].as_str().unwrap())).unwrap();
+    assert_eq!(slope.epsg, 2154);
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_metric_dem_is_never_reprojected_and_keeps_its_result() {
+    let (dir, project, _) = temp_project();
+    fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/mnt-plan-incline-2154.tif"),
+        dir.join("mnt.tif"),
+    )
+    .unwrap();
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let qgis = DemQgis::new(&qgis_project);
+    let orders = qgis.orders.clone();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(qgis)
+        .with_gestures(reproject_gestures());
+    let out = s
+        .call(
+            "terrain.slope",
+            json!({"dem": "mnt.tif", "unit": "percent", "work_epsg": 32632}),
+        )
+        .unwrap();
+    assert!((out["max"].as_f64().unwrap() - 10.0).abs() < 1e-4);
+    let l = lines(&s);
+    assert_eq!(l.len(), 1, "{l:?}");
+    assert_eq!(l[0]["id"], "terrain.slope");
+    // Ni reprojection ni `work_epsg` : la ligne est celle d'avant le ticket 33.
+    assert_eq!(l[0]["params"]["dem"], "mnt.tif");
+    assert!(l[0]["params"].get("work_epsg").is_none(), "{}", l[0]);
+    assert!(orders.borrow().is_empty(), "aucune lecture ni ordre");
+    drop(s);
+    // Rejeu d'une ligne sans `work_epsg` : identique, sans aucun ordre à QGIS.
+    let replay_qgis = DemQgis::new(&qgis_project);
+    let replay_orders = replay_qgis.orders.clone();
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(
+            &Router::new(&registry).with_qgis(replay_qgis),
+            &mut HashSet::new(),
+        )
+        .unwrap();
+    assert_eq!(report, identical(1));
+    assert!(replay_orders.borrow().is_empty());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn the_work_system_follows_the_project_then_the_utm_zone_of_the_dem() {
+    let (dir, project, _) = temp_project();
+    write_annecy_degrees(&dir, "mnt4326.tif");
+    let registry = Registry::standard();
+    // Projet en degrés : le fuseau UTM de l'étendue du MNT (fuseau 32).
+    let qgis_project = annecy_project();
+    qgis_project.borrow_mut().project = ("EPSG:4326".into(), "deg".into());
+    let qgis = DemQgis::new(&qgis_project);
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(qgis)
+        .with_gestures(reproject_gestures());
+    s.call("terrain.aspect", json!({"dem": "mnt4326.tif"}))
+        .unwrap();
+    // Projet en Mercator mondial : le fuseau UTM aussi.
+    qgis_project.borrow_mut().project = ("EPSG:3857".into(), "m".into());
+    s.call("terrain.hillshade", json!({"dem": "mnt4326.tif"}))
+        .unwrap();
+    let l = lines(&s);
+    assert_eq!(l.len(), 4, "{l:?}");
+    assert_eq!(l[0]["params"]["work_epsg"], 32632);
+    assert_eq!(l[1]["params"]["work_epsg"], 32632);
+    assert_eq!(l[2]["params"]["work_epsg"], 32632);
+    assert_eq!(l[3]["params"]["dem"], "out:3.1");
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_dem_in_degrees_without_any_metric_system_is_refused_before_any_order() {
+    let (dir, project, _) = temp_project();
+    // 20° de large : plus de deux fuseaux UTM.
+    crate::dem::write_degrees_geotiff(&dir.join("france.tif"), (-10.0, 50.0), 0.5, (40, 20), 4326);
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    qgis_project.borrow_mut().project = ("EPSG:4326".into(), "deg".into());
+    let qgis = DemQgis::new(&qgis_project);
+    let orders = qgis.orders.clone();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(qgis)
+        .with_gestures(reproject_gestures());
+    let err = s
+        .call(
+            "terrain.slope",
+            json!({"dem": "france.tif", "unit": "degrees"}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "dem.not_projected");
+    assert!(
+        err.message.contains("lui aussi en degrés"),
+        "{}",
+        err.message
+    );
+    assert!(err.message.contains("france.tif"), "{}", err.message);
+    // Seul l'inventaire a été lu : aucun ordre de reprojection, aucune ligne au journal.
+    assert_eq!(sent(&orders), ["project.inventory"]);
+    assert!(lines(&s).is_empty());
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn without_the_gesture_a_dem_in_degrees_is_refused_by_the_command_as_before() {
+    let (dir, project, _) = temp_project();
+    write_annecy_degrees(&dir, "mnt4326.tif");
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    // Extension plus ancienne : `raster.reproject_work` n'est pas annoncée.
+    let qgis = DemQgis::new(&qgis_project);
+    let orders = qgis.orders.clone();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(qgis)
+        .with_gestures(vec!["project.inventory".to_string()]);
+    let err = s
+        .call(
+            "terrain.slope",
+            json!({"dem": "mnt4326.tif", "unit": "degrees"}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "dem.not_projected");
+    assert!(
+        err.message.contains("reprojetez-le dans QGIS"),
+        "{}",
+        err.message
+    );
+    assert!(orders.borrow().is_empty());
+    // Sans QGIS du tout : même refus.
+    let (dir2, project2, _) = temp_project();
+    write_annecy_degrees(&dir2, "mnt4326.tif");
+    let mut bare = Session::open(&registry, &project2).unwrap();
+    let err = bare
+        .call(
+            "terrain.slope",
+            json!({"dem": "mnt4326.tif", "unit": "degrees"}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "dem.not_projected");
+    drop((s, bare));
+    let _ = fs::remove_dir_all(dir);
+    let _ = fs::remove_dir_all(dir2);
+}
+
+#[test]
+fn a_failed_reprojection_is_the_error_of_the_call_and_the_command_does_not_run() {
+    let (dir, project, _) = temp_project();
+    write_annecy_degrees(&dir, "mnt4326.tif");
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let mut qgis = DemQgis::new(&qgis_project);
+    qgis.failing = true;
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(qgis)
+        .with_gestures(reproject_gestures());
+    let err = s
+        .call(
+            "terrain.slope",
+            json!({"dem": "mnt4326.tif", "unit": "degrees"}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "analysis.failed");
+    let l = lines(&s);
+    assert_eq!(l.len(), 1, "{l:?}");
+    assert_eq!(l[0]["id"], REPROJECT);
+    assert_eq!(l[0]["error"], "analysis.failed");
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_reprojected_slope_replays_identically_with_the_logged_work_system() {
+    let (dir, project, _) = temp_project();
+    write_annecy_degrees(&dir, "mnt4326.tif");
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let qgis = DemQgis::new(&qgis_project);
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(qgis)
+        .with_gestures(reproject_gestures());
+    s.call(
+        "terrain.slope",
+        json!({"dem": "mnt4326.tif", "unit": "degrees"}),
+    )
+    .unwrap();
+    drop(s);
+    // Le projet change de système entre l'exécution et le rejeu : un nouveau choix donnerait le
+    // fuseau UTM (32632) ; le rejeu repasse le 2154 journalisé, sans relire l'inventaire.
+    qgis_project.borrow_mut().project = ("EPSG:4326".into(), "deg".into());
+    let replay_qgis = DemQgis::new(&qgis_project);
+    let replay_orders = replay_qgis.orders.clone();
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(
+            &Router::new(&registry).with_qgis(replay_qgis),
+            &mut HashSet::new(),
+        )
+        .unwrap();
+    assert_eq!(report, identical(2));
+    assert_eq!(
+        sent(&replay_orders),
+        [REPROJECT],
+        "pas d'inventaire au rejeu"
+    );
+    let order = order_of(&replay_orders, REPROJECT);
+    assert_eq!(order["work_epsg"], 2154);
+    assert!(
+        order["out"]
+            .as_str()
+            .unwrap()
+            .replace('\\', "/")
+            .contains("/replay/"),
+        "{order}"
+    );
+    // Rejeu sans extension : la reprojection n'est pas disponible, le rejeu s'arrête à cette
+    // étape, nommée.
+    let err = Replay::load(&registry, &project)
+        .unwrap()
+        .run(&Router::new(&registry), &mut HashSet::new())
+        .unwrap_err();
+    assert_eq!(err.code, "registry.unavailable");
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_reprojection_in_a_plan_keeps_the_place_of_its_step() {
+    let (dir, project, _) = temp_project();
+    write_annecy_degrees(&dir, "mnt4326.tif");
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let qgis = DemQgis::new(&qgis_project);
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(qgis)
+        .with_gestures(reproject_gestures());
+    s.call_in_plan(
+        "terrain.slope",
+        json!({"dem": "mnt4326.tif", "unit": "degrees"}),
+        1,
+    )
+    .unwrap();
+    s.call_in_plan("terrain.aspect", json!({"dem": "mnt4326.tif"}), 2)
+        .unwrap();
+    let l = lines(&s);
+    let places: Vec<u64> = l.iter().map(|x| x["plan_step"].as_u64().unwrap()).collect();
+    assert_eq!(places, [1, 1, 2, 2], "{l:?}");
+    // Le plan en cours, vu d'un troisième pas : les quatre lignes, chaque
+    // reprojection avec sa commande, à la même place.
+    let current = current_plan(&registry, &s.journal_path(), 3, Some(1));
+    let steps: Vec<usize> = current.iter().map(|(n, _)| *n).collect();
+    assert_eq!(steps, [1, 2, 3, 4], "{current:?}");
+    // Le GeoTIFF de chaque reprojection est un intermédiaire du plan.
+    let hidden = intermediate_files(&registry, &s.journal_path());
+    assert!(hidden.contains("1-raster.reproject_work.tif"), "{hidden:?}");
+    assert!(hidden.contains("3-raster.reproject_work.tif"), "{hidden:?}");
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_step_reference_after_a_reprojected_step_designates_the_command_line() {
+    let (dir, project, _) = temp_project();
+    write_annecy_degrees(&dir, "mnt4326.tif");
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(DemQgis::new(&qgis_project))
+        .with_gestures(reproject_gestures());
+    s.call_in_plan(
+        "terrain.slope",
+        json!({"dem": "mnt4326.tif", "unit": "degrees"}),
+        1,
+    )
+    .unwrap();
+    // La reprojection dictée est la ligne 1 ; la pente est la ligne 2, celle qu'un `step:1` cite.
+    assert_eq!(s.command_step(), 2);
+    let marker = format!("out:{}.1", s.command_step());
+    s.call_in_plan(
+        "raster.reclassify",
+        json!({"raster": marker, "classes": [{"max": 1000.0, "value": 1.0}]}),
+        2,
+    )
+    .unwrap();
+    let l = lines(&s);
+    assert_eq!(l[2]["id"], "raster.reclassify");
+    assert_eq!(l[2]["params"]["raster"], "out:2.1");
+    assert_eq!(l[1]["id"], "terrain.slope");
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}

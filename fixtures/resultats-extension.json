@@ -111,6 +111,9 @@
   {"id": "data.convert_raster", "case": "sans EPSG",
    "result": {"file": "1-data.convert_raster.tif", "epsg": null}},
 
+  {"id": "raster.reproject_work", "case": "MNT reprojeté",
+   "result": {"file": "1-raster.reproject_work.tif", "epsg": 32632}},
+
   {"id": "data.reproject", "case": "couche créée",
    "result": {"layer_id": "repro_1", "name": "1-data.reproject", "feature_count": 5, "crs": "EPSG:2154"}},
 

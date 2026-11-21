@@ -33,6 +33,10 @@ pub struct TerrainAspectParams {
     /// Fichier de sortie : fourni par le noyau, dans le dossier de travail.
     #[serde(default)]
     pub out: String,
+    /// Système en mètres du calcul, en code EPSG : fourni par le noyau d'après l'en-tête du MNT
+    /// (ticket 33), jamais par l'appelant. Absent pour un MNT déjà en mètres.
+    #[serde(default)]
+    pub work_epsg: Option<u32>,
 }
 
 /// Résultat de `terrain.aspect`.
@@ -120,6 +124,8 @@ impl Command for TerrainAspect {
         .path_params(&["dem"])
         .output_params(&["out"])
         .output_ext(".tif")
+        // Un MNT en degrés est reprojeté avant la commande (`crate::work_crs`, ticket 33).
+        .work_crs_param("work_epsg", "dem")
         // Style dicté après l'ouverture du raster (bogue du fond noir, 2026-11-09).
         .result_style(crate::style::ResultStyle::Aspect)
         .example(serde_json::json!({"dem": "mnt-plan-incline-2154.tif"}))
@@ -134,11 +140,13 @@ impl Command for TerrainAspect {
             "the_hill_aspect_has_frozen_bytes",
             "two_runs_give_identical_bytes",
             "terrain_aspect_runs_in_the_core_and_the_contract_accepts_it",
+            "terrain_aspect_declares_its_work_crs",
         ])
     }
 
     fn run(&self, params: TerrainAspectParams) -> Result<TerrainAspectOutput, CommandFailure> {
         let dem = Dem::open(Path::new(params.dem.as_str())).map_err(CommandFailure::from)?;
+        crate::work_crs::check_dem_system(&dem, params.work_epsg)?;
         let (aspect, stats) = horn_aspect(&dem);
         aspect
             .write_geotiff(Path::new(&params.out))
@@ -377,6 +385,31 @@ mod tests {
         let rb = aspect(&input, &b).unwrap();
         assert_eq!(std::fs::read(&a).unwrap(), std::fs::read(&b).unwrap());
         assert_eq!(ra["nodata_cells"], rb["nodata_cells"]);
+    }
+
+    #[test]
+    fn terrain_aspect_declares_its_work_crs() {
+        let registry = Registry::standard();
+        let spec = registry.spec("terrain.aspect").unwrap();
+        assert_eq!(
+            spec.work_crs_param,
+            Some(("work_epsg".to_string(), "dem".to_string()))
+        );
+        assert!(spec.work_crs_on_raster());
+        let ok = json!({"dem": "mnt.tif", "work_epsg": 32632});
+        assert!(registry.validate_params("terrain.aspect", &ok).is_ok());
+        let dir = Scratch::new("systeme-calcul");
+        let source = fixture("mnt-plan-incline-2154.tif");
+        let run = |work: u32, name: &str| {
+            registry.call(
+                "terrain.aspect",
+                json!({"dem": source.to_string_lossy(), "work_epsg": work,
+                       "out": dir.join(name).to_string_lossy()}),
+            )
+        };
+        assert!(run(2154, "a.tif").is_ok());
+        assert_eq!(run(32632, "b.tif").unwrap_err().code(), "dem.work_mismatch");
+        assert!(!dir.join("b.tif").exists());
     }
 
     #[test]
