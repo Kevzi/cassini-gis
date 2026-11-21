@@ -20,6 +20,7 @@ pub mod geodesy;
 pub mod geojson;
 pub mod horn;
 pub mod journal;
+pub mod out_of_catalogue;
 pub mod plan;
 pub mod plan_completion;
 pub mod point;

@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 
 use cassini_core::attribute_guard::guard_attributes_with_cuts;
 use cassini_core::commands::model_list::PromptKind;
+use cassini_core::out_of_catalogue::guard_out_of_catalogue;
 use cassini_core::plan::Plan;
 use cassini_core::point::{guard_coordinates, guard_rejected};
 use cassini_core::registry::{CommandSpec, Registry};
@@ -775,6 +776,11 @@ pub fn compose_plan_anchored_cut(
     if request.trim().is_empty() {
         return Err(AiError::EmptyPrompt.into());
     }
+    // Garde-fou hors catalogue (ticket 35) : une opération absente est refusée avant tout appel
+    // au modèle.
+    if let Some(reason) = guard_out_of_catalogue(registry, request) {
+        return Err(AgentError::Refused(reason));
+    }
     let grammar_start = std::time::Instant::now();
     let (grammar, fallbacks) = plan_grammar_built(registry, available);
     let grammar_build = grammar_start.elapsed();
@@ -1038,6 +1044,37 @@ mod tests {
         format!(
             r#"{{"kind":"calls","calls":[{{"command":"analysis.select_by_attribute","params":{{"layer_id":"zonage_1a2b","field":"{field}","operator":"eq","value":"{value}"}}}}]}}"#
         )
+    }
+
+    #[test]
+    fn an_absent_operation_is_refused_without_calling_the_model() {
+        let mut calls = 0;
+        let result = compose_plan(
+            &registry(),
+            &zoning(),
+            "Fais un profil d'altitude le long de la route nationale.",
+            &mut |_| {
+                calls += 1;
+                Ok(done("{}"))
+            },
+        );
+        assert!(matches!(result, Err(AgentError::Refused(_))), "{result:?}");
+        assert_eq!(calls, 0);
+    }
+
+    #[test]
+    fn a_covered_neighbour_still_reaches_the_model() {
+        let mut calls = 0;
+        let _ = compose_plan(
+            &registry(),
+            &zoning(),
+            "Découpe les parcelles par la commune.",
+            &mut |_| {
+                calls += 1;
+                Ok(done("{}"))
+            },
+        );
+        assert!(calls > 0);
     }
 
     fn guard_question(text: &str) -> Plan {
