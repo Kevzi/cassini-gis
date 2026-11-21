@@ -775,3 +775,25 @@ demande : 3,6 s, dont 0,5 s de lecture. Les lignes A0 à E sont celles d'une ses
 au relevé du matin), et la barre de 30 s de A0 n'est pas du ressort de ce ticket : elle est
 consignée telle que mesurée (32,3 s), pas abaissée. Issues de A0 à E identiques à celles du
 relevé précédent (même nombre d'étapes, mêmes questions).
+
+#### Relevé à froid du 2026-11-21 (fin de soirée, machine au repos, 4 % de charge avant le lancement) — ticket 34
+
+Même modèle, mêmes 4 cœurs (`0x55`), même inventaire, même commande que les relevés ci-dessus. Tableau extrait par script du fichier de sortie.
+
+Préchauffage : 28,3 s (ok)
+
+| id | vue (car.) | appels | chargement (s) | lecture du prompt (s) | jetons de l'invite | jetons repris | écriture (s) | jetons écrits | total (s) | issue |
+|---|---|---|---|---|---|---|---|---|---|---|
+| amorce | 3815 | 1 | 0,0 | 0,4 | 1572 | 1554 | 2,3 | 17 | 2,8 | plan, 1 étape(s) |
+| A0 | 3815 | 1 | 0,0 | 1,0 | 1603 | 1554 | 23,2 | 165 | 24,2 | plan, 5 étape(s) |
+| A | 3815 | 1 | 0,0 | 1,0 | 1607 | 1554 | 23,9 | 169 | 24,9 | plan, 5 étape(s) |
+| B1 | 3815 | 1 | 0,0 | 0,5 | 1575 | 1554 | 5,6 | 42 | 6,2 | plan, 1 étape(s) |
+| B2 | 3815 | 1 | 0,0 | 0,6 | 1586 | 1554 | 13,5 | 97 | 14,1 | plan, 3 étape(s) |
+| B3 | 3815 | 1 | 0,0 | 0,5 | 1575 | 1554 | 3,1 | 23 | 3,7 | plan, 1 étape(s) |
+| C | 3815 | 1 | 0,0 | 0,6 | 1581 | 1554 | 8,6 | 63 | 9,3 | plan, 2 étape(s) |
+| D | 3815 | 1 | 0,0 | 0,5 | 1575 | 1554 | 3,6 | 24 | 4,1 | question |
+| E | 3815 | 1 | 0,0 | 0,7 | 1588 | 1554 | 12,6 | 97 | 13,3 | question |
+
+Moyennes sur 8 phrases (8 appels, amorce exclue) : chargement 0,0 s, lecture du prompt 0,7 s, écriture 11,8 s, total 12,5 s
+
+Les deux barres du ticket 10.17 sont tenues sur ce relevé : amorce 2,8 s et A0 24,2 s, tous deux sous 30 s. L'écriture de A0 (165 jetons) a pris 23,2 s ici, 31,2 à 32,5 s dans deux relevés plus tôt dans la soirée et 26,5 s le matin : la durée de A0 varie d'environ 40 % avec l'état de la machine, la marge de 30 s n'est donc pas garantie d'un poste à l'autre.
