@@ -704,3 +704,23 @@ comme avant (A0 : 27,9 s au 5.9). Avec le prompt court du modèle livré, seule 
 s'allège quand une commande n'est pas annoncée ; la tête du prompt long (`SYSTEM` + catalogue +
 exemples) ne sert qu'aux modèles non ajustés. Pas de mesure d'un ensemble réduit : le critère est
 celui du catalogue complet.
+
+## Durée sur le catalogue complet, phrase longue (ticket 17, 2026-11-21)
+
+**État : procédure écrite, mesure non faite** (elle dépend du modèle ré-entraîné `continu-17-1`, à installer ou à pointer par `CASSINI_TEST_MODEL`). Barre du ticket : la phrase de démo et l'amorce (première phrase, qui paie le chargement) prennent chacune **moins de 30 s** sur processeur, 4 cœurs, catalogue complet. Décision du propriétaire : l'amorce compte ; au-delà de 30 s on cherche un préchauffage du modèle, on ne la sort pas de la mesure. Point de départ au 2026-11-20 : phrase de démo 28,5 s (10.5), amorce 33,1 s, donc l'amorce est la ligne qui tangente.
+
+Commande (PowerShell, 4 cœurs physiques, jamais `--features cuda`) :
+
+```powershell
+$env:CARGO_TARGET_DIR = "C:\ct"
+cargo test --release -p cassini-ai --test duree_reel --no-run
+$exe = Get-ChildItem C:\ct\release\deps\duree_reel-*.exe | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$env:CASSINI_TEST_MODEL = "C:\Users\kevin\cassini-modeles\continu-17-1\cassini-composition-4b-Q4_K_M.gguf"
+$env:CASSINI_TEST_THREADS = "4"
+$env:CASSINI_TEST_INVENTORY = "<donnees-test-cassini>\inventaire-....json"   # hors dépôt, inventaire traduit du scénario de démo
+$p = Start-Process $exe.FullName -ArgumentList "--ignored","--nocapture","duree_reel" -NoNewWindow -PassThru -RedirectStandardOutput mesure-17.txt -RedirectStandardError mesure-17.err
+$p.ProcessorAffinity = [IntPtr]0x55   # posé juste après Start-Process
+$p.WaitForExit()
+```
+
+L'inventaire de démo vit hors du dépôt (jeu de `../donnees-test-cassini/`, traduit comme pour la mesure du 10.5) ; sans la variable, l'essai passe les 25 phrases de l'épreuve, ce qui ne mesure pas la phrase de démo. À consigner ici après la mesure : modèle et date, tableau des phrases A à E, durée de l'amorce (WARMUP, « Décris le projet. », la première phrase) et de la phrase de démo, verdict contre 30 s. Si l'une dépasse, diagnostic et piste de préchauffage, sans abaisser la barre.

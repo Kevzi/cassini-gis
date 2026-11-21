@@ -3402,3 +3402,41 @@ proche de l'installé, sans le dépasser. L'écart de validation (289 contre 293
 17/20) ne départagent pas. **Décision du propriétaire : à consigner dans le plan.**
 
 Relevés bruts hors dépôt : `~/cassini-entrainement/5-55-mesures/base-5-55/` et `5-59-1-mesures/`.
+
+## Ré-entraînement de 10.17 (ticket 17, 2026-11-21)
+
+**État : préparé, non lancé.** Cette section est écrite avant la nuit ; les lignes « Résultat » sont à remplir par le propriétaire après la séance. Rien n'est installé ni poussé par l'assistant.
+
+**Familles ajoutées** (`training/src/families.rs`, poids 4 chacune, une famille par commande retenue par le diagnostic de `docs/couverture-phrases-reelles.md`) :
+
+| famille | commande | ce qu'elle enseigne |
+|---|---|---|
+| `longueurs_par_zone` | `analysis.sum_line_lengths` | la couche de polygones (communes ou quartiers) puis la couche de lignes (routes, rivières, pistes, lignes électriques, canalisations) ; `unit` posé seulement quand la phrase dit « kilomètres » ou « en mètres » ; `label_field` recopié de l'inventaire trois fois sur quatre |
+| `fusion_par_champ` | `analysis.dissolve` | un champ texte de la couche (deux une fois sur quatre), recopié de l'inventaire, jamais deviné |
+
+Les huit autres commandes de l'epic 10 sans famille (`analysis.area`, `difference`, `join_table`, `statistics_by_category`, `geocode.ban`, `layout.export_atlas`, `network.prepare`, `network.shortest_path`) n'en reçoivent pas : aucune ne pèse sur les 31 phrases réelles nécessaires (décision 4 du ticket). Leurs phrases de `par_commande` restent à passer contre le modèle neuf.
+
+**Ordre à respecter.** (1) 10.33 est construit et commité avant la nuit, sinon le modèle est ré-entraîné sur un catalogue qui bouge. (2) Le commit des familles est le même dans le worktree entraîné et dans `CASSINI-nuit` (les gardes de `nuit-5-55.sh` l'exigent), arbres propres, GPU libre.
+
+**Gardes avant la nuit** (sans GPU, dans le dépôt) :
+
+```powershell
+cargo test -p cassini-training                       # familles, garde anti-fuite (recouvrement.rs), barres
+cargo fmt --all -- --check
+cargo clippy -p cassini-training --all-targets -- -D warnings
+```
+
+**Commande de la nuit** (WSL, reprise du bras continu de `nuit-5-55.sh` : départ du modèle installé `ajuste-continu-5-61b`, 3 000 exemples dont la moitié de rappel, graine torch 1, générateur à `--seed 1`, juge de non-oubli `non_oubli.py` contre `reference-non-oubli-5-58-1`) :
+
+```bash
+cd ~/cassini-worktrees/5-55        # le worktree au commit des familles
+PARENT=~/cassini-entrainement/ajuste-continu-5-61b \
+NOM_CONTINU=continu-17-1 \
+bash training/entrainement/nuit-5-55.sh continu longueurs_par_zone,fusion_par_champ
+```
+
+Le parent doit contenir `rapport.json` et `travail/adaptateur-hf/adapter_model.safetensors`. Si le dossier du modèle installé porte un autre nom, le donner à `PARENT`. Durée attendue : environ une heure (52 min pour `continu-5-61b`). Le script copie le modèle dans `cassini-modeles/continu-17-1` **sans l'installer**, puis passe `plan_reel`, `question_reel`, `ecart_reel`, `echelle_utm_reel`, `terrain_reel`, `epic11_reel`, `style_reel`, `par_commande_reel`, les recettes d'Annecy, du gros projet et v4, et le juge. L'état est dans `~/cassini-entrainement/nuit-continu-17-1.etat`.
+
+À passer en plus, à la main, contre `continu-17-1` (jamais mesurées contre un vrai modèle) : les phrases NEA1 à NEA3, CHE1 à CHE3, PRE1 à PRE3 et ATL1 à ATL3 de `ai/tests/par_commande/phrases.json` (essai `par_commande_reel`, inclus dans la liste ci-dessus).
+
+**Résultat de non-oubli.** *À remplir par le propriétaire* : verdict du juge, `plan_reel` n/48 (barre 44/48), `question_reel`, `terrain_reel`, `par_commande_reel`, Annecy, gros projet, v4, durée d'entraînement, et la décision d'installer ou non. Si le juge refuse, la séance est consignée ici comme celles de 5.61, le modèle installé reste en place.

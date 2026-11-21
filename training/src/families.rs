@@ -198,6 +198,18 @@ pub static FAMILIES: &[Family] = &[
         weight: 4,
         make: plus_proche_voisin,
     },
+    // Ticket 17 : commandes de l'epic 10 sans exemple, relevees par le diagnostic de
+    // `docs/couverture-phrases-reelles.md` (CV04 longueurs par zone, CV09 fusion par champ).
+    Family {
+        name: "longueurs_par_zone",
+        weight: 4,
+        make: longueurs_par_zone,
+    },
+    Family {
+        name: "fusion_par_champ",
+        weight: 4,
+        make: fusion_par_champ,
+    },
     Family {
         name: "ouverture",
         weight: 4,
@@ -3590,6 +3602,125 @@ fn plus_proche_voisin(rng: &mut Rng) -> Option<Example> {
         json!({"command": "analysis.nearest", "params": params}),
     ]);
     Some(example("plus_proche_voisin", b, rng, request, expected))
+}
+
+/// « Calcule la longueur de routes par commune » : `analysis.sum_line_lengths`, la couche de
+/// polygones d'abord, celle des lignes ensuite ; l'unité seulement quand la phrase en donne une,
+/// le champ de nom (recopié de l'inventaire) trois fois sur quatre.
+fn longueurs_par_zone(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let zkey = *rng.pick(&["communes", "quartiers"]);
+    let labelled = rng.below(4) < 3;
+    let require: &[&str] = if labelled { &["nom"] } else { &[] };
+    let zones = b.add(rng, zkey, require, &[], &[]);
+    let z = &zones.theme.noun;
+    let l = pick_theme(rng, &b, |t| t.geom == Geom::Line && t.key != "reseau")?;
+    let lines = b.add(rng, l.key, &[], &[], &[]);
+    let pl = l.noun.pl;
+    let de_pl = de_plural(pl);
+    // L'unité : dite dans la phrase (km ou m), sinon absente du plan.
+    let (mut body, q, unit) = match rng.below(6) {
+        0 => (
+            format!("Calcule la longueur {de_pl} par {}", z.sg),
+            false,
+            None,
+        ),
+        1 => (
+            format!("Mesure le linéaire {de_pl} dans chaque {}", z.sg),
+            false,
+            None,
+        ),
+        2 => (
+            format!("Combien de kilomètres {de_pl} compte chaque {}", z.sg),
+            true,
+            Some("km"),
+        ),
+        3 => (
+            format!(
+                "Pour chaque {}, additionne la longueur {de_pl}, en kilomètres",
+                z.sg
+            ),
+            false,
+            Some("km"),
+        ),
+        4 => (
+            format!("Donne, en mètres, la longueur cumulée {de_pl} par {}", z.sg),
+            false,
+            Some("m"),
+        ),
+        _ => (
+            format!("Dans chaque {}, quel est le linéaire {de_pl}", z.sg),
+            true,
+            None,
+        ),
+    };
+    if labelled {
+        body.push_str(&match rng.below(2) {
+            0 => format!(", avec le nom de chaque {}", z.sg),
+            _ => format!(", en affichant le nom des {}", z.pl),
+        });
+    }
+    let request = finish(rng, &body, q, false);
+    let mut params = json!({"layer_id": zones.id, "lines_layer_id": lines.id});
+    if labelled {
+        params["label_field"] = json!(zones.field("nom")?.name);
+    }
+    if let Some(u) = unit {
+        params["unit"] = json!(u);
+    }
+    let expected = calls(vec![
+        json!({"command": "analysis.sum_line_lengths", "params": params}),
+    ]);
+    Some(example("longueurs_par_zone", b, rng, request, expected))
+}
+
+/// « Regroupe les zones du PLU de même destination » : `analysis.dissolve` sur un ou deux
+/// champs texte de la couche, recopiés de l'inventaire.
+fn fusion_par_champ(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let t = pick_theme(rng, &b, |t| {
+        t.geom == Geom::Polygon && !text_fields(t).is_empty()
+    })?;
+    let mut others: Vec<&'static FieldDef> = text_fields(t);
+    let first = *rng.pick(&others);
+    others.retain(|f| f.role != first.role);
+    let second = if !others.is_empty() && rng.chance(1, 4) {
+        Some(*rng.pick(&others))
+    } else {
+        None
+    };
+    let mut require = vec![first.role];
+    if let Some(s) = second {
+        require.push(s.role);
+    }
+    let layer = b.add(rng, t.key, &require, &[], &[]);
+    let say = |d: &FieldDef| {
+        d.label
+            .strip_prefix("de ")
+            .or_else(|| d.label.strip_prefix("d'"))
+            .unwrap_or(d.label)
+            .to_string()
+    };
+    let (pl, sg) = (t.noun.pl, t.noun.sg);
+    let what = match second {
+        Some(s) => format!("{} et {}", say(first), say(s)),
+        None => say(first),
+    };
+    let body = match rng.below(5) {
+        0 => format!("Rassemble les {pl} ayant la même valeur dans le champ {what}"),
+        1 => format!("Dissous la couche {} par {what}", layer.name),
+        2 => format!("Fais une seule entité par {what} parmi les {pl}"),
+        3 => format!("Agrège les {pl} qui ont la même valeur dans le champ {what}"),
+        _ => format!("Réunis chaque {sg} de même {what} en une seule"),
+    };
+    let request = finish(rng, &body, false, false);
+    let mut fields = vec![json!(layer.field(first.role)?.name)];
+    if let Some(s) = second {
+        fields.push(json!(layer.field(s.role)?.name));
+    }
+    let expected = calls(vec![json!({"command": "analysis.dissolve",
+        "params": {"layer_id": layer.id, "fields": fields}})]);
+    Some(example("fusion_par_champ", b, rng, request, expected))
 }
 
 // -- ouverture et description ----------------------------------------------
@@ -15705,6 +15836,64 @@ mod tests {
             }
         }
         assert!(limited > 50 && free > 100, "{limited} {free}");
+    }
+
+    #[test]
+    fn a_line_length_request_names_the_zones_then_the_lines_and_an_unit_only_when_written() {
+        let (mut km, mut m, mut none) = (0, 0, 0);
+        for e in valid(longueurs_par_zone, 600) {
+            assert_eq!(commands(&e), ["analysis.sum_line_lengths"], "{}", e.request);
+            let p = &call(&e, 0)["params"];
+            assert_ne!(p["layer_id"], p["lines_layer_id"], "{}", e.request);
+            match p.get("unit").and_then(Value::as_str) {
+                Some("km") => {
+                    km += 1;
+                    assert!(e.request.contains("kilomètres"), "{}", e.request);
+                }
+                Some(_) => {
+                    m += 1;
+                    assert!(e.request.contains("en mètres"), "{}", e.request);
+                }
+                None => {
+                    none += 1;
+                    assert!(
+                        !e.request.contains("kilomètres") && !e.request.contains("en mètres"),
+                        "{}",
+                        e.request
+                    );
+                }
+            }
+            if let Some(label) = p.get("label_field").and_then(Value::as_str) {
+                let zones = layer_of(&e, p["layer_id"].as_str().unwrap());
+                assert!(field_names(zones).contains(&label), "{}", e.request);
+            }
+        }
+        assert!(km > 50 && m > 20 && none > 100, "{km} {m} {none}");
+    }
+
+    #[test]
+    fn a_dissolve_request_groups_by_one_or_two_text_fields_of_the_layer() {
+        let (mut one, mut two) = (0, 0);
+        for e in valid(fusion_par_champ, 600) {
+            assert_eq!(commands(&e), ["analysis.dissolve"], "{}", e.request);
+            let p = &call(&e, 0)["params"];
+            let fields = p["fields"].as_array().unwrap();
+            let layer = layer_of(&e, p["layer_id"].as_str().unwrap());
+            for f in fields {
+                assert!(
+                    field_names(layer).contains(&f.as_str().unwrap()),
+                    "{}",
+                    e.request
+                );
+            }
+            if fields.len() == 1 {
+                one += 1;
+            } else {
+                two += 1;
+                assert!(e.request.contains(" et "), "{}", e.request);
+            }
+        }
+        assert!(one > 200 && two > 3, "{one} {two}");
     }
 
     #[test]

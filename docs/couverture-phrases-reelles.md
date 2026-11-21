@@ -27,6 +27,39 @@ Part couverte et bien rendue par l'agent local : 21/44, soit 47,7 %. Réponses c
 - Trois phrases non couvertes reçoivent un plan inventé au lieu d'un refus ou d'une question (CV37 vectorisation, CV39 étiquettes, CV42 calculatrice raster) : à surveiller, un plan inventé pour une commande absente est le pire cas.
 - Aucune phrase qui donne ses coordonnées n'est comptée en « question justifiée » : les quatre phrases E/N attendent un plan.
 
+## Diagnostic du ticket 17 (2026-11-21) : où tombent les phrases, par commande
+
+Mesure sur le modèle installé (`continu-5-61b`, non ré-entraîné), lue dans la colonne « Agent local » ci-dessous ; aucune mesure neuve, le but est de borner les familles à écrire. Trente-quatre phrases sont couvertes par le registre, 21 sont bien rendues : 13 couvertes ne le sont pas. La barre est de 31 sur 44 (70 %), il manque donc 10.
+
+| Commande attendue | Phrases | Rendu actuel | Famille d'exemples avant 17 | Décision |
+|---|---|---|---|---|
+| `analysis.sum_line_lengths` | CV04 | autre plan valide | aucune | **famille ajoutée** (`longueurs_par_zone`) |
+| `analysis.dissolve` | CV09 | refus | aucune | **famille ajoutée** (`fusion_par_champ`) |
+| `analysis.count_points_in_polygon` | CV03 | autre plan valide (confusion avec le voisin des longueurs) | 5 | rien : la famille voisine lève la confusion |
+| `terrain.slope`, `terrain.hillshade`, `terrain.peaks`, `map.graduated_style` | CV05, CV06, CV19, CV11 | question au lieu d'un plan | oui (3 à 11 chacune) | rien à écrire : le défaut est de réglage (le modèle demande une couche ou un champ que la phrase n'impose pas), pas d'absence d'exemples ; à mesurer après la nuit |
+| `raster.reclassify` | CV17 | autre plan valide | oui (6) | rien |
+| `raster.zonal_statistics` | CV26 | refus | oui (3) | rien : l'attendu a changé avec l'entrée 12, famille postérieure à `continu-5-61b` |
+| `geo.distance_azimuth`, `terrain.least_cost_path`, `analysis.isochrone`, `terrain.viewshed` | CV14, CV18, CV28, CV29 | question du garde-fou | oui | **hors catalogue** : la notation « 5.90 E 45.90 N » n'est pas lue ; consigné, ticket de garde-fou à ouvrir, non bloquant (décision 5 du ticket) |
+| aucune (refus attendu) | CV37, CV39, CV42 | plan inventé | n.a. | **hors catalogue**, à surveiller, ticket de garde-fou à ouvrir, non bloquant |
+
+Les commandes de l'epic 10 sans aucune famille, relevées par décompte dans le générateur : `analysis.area`, `analysis.difference`, `analysis.join_table`, `analysis.statistics_by_category`, `geocode.ban`, `layout.export_atlas`, `network.prepare`, `network.shortest_path`. Sur les 44 phrases réelles seules CV13 (`join_table`), CV27 (`statistics_by_category`) et CV35 (`geocode.ban`) en touchent une, et CV13 et CV27 sont déjà bien rendues sans famille : le modèle généralise depuis les schémas. Aucune de ces huit commandes ne pèse donc sur les 31 phrases nécessaires, et le ticket n'écrit pas de famille pour elles (décision 4 du ticket) ; leurs phrases de `par_commande` (NEA1 à NEA3, CHE1 à CHE3, PRE1 à PRE3, ATL1 à ATL3) restent à passer contre un vrai modèle au ré-entraînement.
+
+**Arithmétique de la barre, à lire avant la nuit.** Les 21 phrases déjà bien rendues, plus les neuf couvertes par le registre qu'une famille ou un ré-entraînement peut rattraper (CV03, CV04, CV05, CV06, CV09, CV11, CV17, CV19, CV26), font 30 sur 44 au mieux, soit une de moins que la barre de 31. CV35 n'est pas parmi ces neuf, et **on ne sait pas si elle figure parmi les 21 déjà bien rendues** : sa ligne « OK Question » date d'avant que son attendu devienne un plan (`geocode.ban`, sans famille), et le tableau la classe « non couverte » côté registre. Le plafond est donc de 29 (CV35 hors des 21) ou 30 (CV35 dedans), jamais 31 sans l'une des quatre phrases en notation E/N, que la décision 5 laisse hors du ticket. **Si la mesure d'après ré-entraînement donne 30, la barre est manquée : le rapport l'écrit, le ticket n'est pas clos, la barre n'est pas abaissée.** C'est la raison pour laquelle le propriétaire peut préférer lever le non-bloquant de CV14/CV18/CV28/CV29 (une famille de lecture de la notation « E/N ») avant la nuit.
+
+## Mesure après ré-entraînement (ticket 17)
+
+**État : à faire après la nuit, modèle `continu-17-1` (voir `docs/entrainement-du-modele.md`, « Ré-entraînement de 10.17 »).** Barres du ticket : couverte et bien rendue par l'agent au moins 31/44 (70 %), `plan_reel` au moins 44/48. Commandes, dans cet ordre (le chiffre de la première alimente la seconde) :
+
+```powershell
+$env:CASSINI_TEST_MODEL = "C:\Users\kevin\cassini-modeles\continu-17-1\cassini-composition-4b-Q4_K_M.gguf"
+cargo test -p cassini-ai --features gpu --test plan_reel -- --ignored --nocapture      # ligne SCORE n/48
+$env:CASSINI_PLANS_CONFORMES = "<n>/48"
+$env:CASSINI_COUVERTURE_RAPPORT = "$PWD\couverture-17.md"
+cargo test -p cassini-ai --features gpu --test couverture_reelle_reel -- --ignored --nocapture
+```
+
+Reporter ici : modèle et date, couverte et bien rendue n/44, plans conformes n/48, et la colonne « Agent local » refaite. Si une barre est manquée, l'écrire, poser le diagnostic (voir l'arithmétique plus haut : 30/44 est le plafond probable sans CV35 ni la notation E/N), et ne pas clore le ticket.
+
 ## Ordre recommandé des primitives restantes
 
 Proposition d'après la couverture, à valider par le propriétaire (étape humaine de l'entrée 8) ; `tickets.toml` n'est pas modifié. Commandes manquantes aux 10 phrases non couvertes : geocode (CV35), polygonize (CV37), label (CV39), clip (CV40), raster_calculator (CV42), heatmap (CV38), profile (CV41), watershed (CV36), radio_coverage (CV44), download (CV43, jamais : hors ligne).
