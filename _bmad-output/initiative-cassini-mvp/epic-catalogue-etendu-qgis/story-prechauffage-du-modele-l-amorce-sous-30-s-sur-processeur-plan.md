@@ -3,7 +3,7 @@ title: "Préchauffage du modèle : l'amorce sous 30 s sur processeur"
 type: 'feature'
 ticket: '34'
 created: '2026-11-21'
-status: 'built'
+status: done
 baseline_revision: '7daf1ce60f983729ec2ff3a3fe228f77e0ac426d'
 route: 'full'
 route_source: 'auto'

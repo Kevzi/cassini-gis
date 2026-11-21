@@ -3,7 +3,7 @@ title: 'Modèle ré-éprouvé et couverture mesurée sur le catalogue étendu'
 type: 'feature'
 ticket: '17'
 created: '2026-11-20'
-status: 'built'
+status: done
 baseline_revision: '5dca80fc76bc99d2a89970b3463ae14d090d9313'
 route: 'full'
 route_source: 'auto'
@@ -79,6 +79,8 @@ context:
 ## Implementation Notes
 
 Construction partielle voulue : diagnostic par commande, deux familles (`longueurs_par_zone`, `fusion_par_champ`), docs de la nuit. Nuit, installation, mesures et diagnostic du `plan_reel` restent au propriétaire ; 10.33 à construire avant.
+
+Suite : Clôture (2026-11-21) : modèle `base-17-1`, entraîné de zéro, non installé. Barres mesurées : couverture agent 32/44 (barre 31), `plan_reel` 44/48 (barre 44), amorce 2,8 s et phrase de démo 24,2 s sur 4 cœurs (barre 30 s) ; ticket 34 pour le préchauffage. Réserves consignées : A0 varie de 24 à 34 s selon l'état de la machine ; le juge de non-oubli refuse le modèle pour `echelle_utm_reel` (42/44 à 37/44, seuil 33 tenu) ; installation à décider par le propriétaire ; garde-fou hors catalogue (CV37, CV39, CV42, PL22) à ouvrir en ticket.
 
 ## Plan Change Log
 
