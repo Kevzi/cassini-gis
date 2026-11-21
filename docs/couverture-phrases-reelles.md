@@ -62,6 +62,8 @@ Les commandes de l'epic 10 sans aucune famille, relevées par décompte dans le 
 
 Les quatre premiers cas (S15, S23, PL23, PL08) suffisent à remonter à 44/48 s'ils sont rattrapés. À mesurer après la nuit, pas avant.
 
+**CV14, CV18, CV28, CV29 (notation « E/N »).** Le défaut était dans le garde-fou des coordonnées du noyau (aucun système écrit), pas dans le modèle. Décision du propriétaire, 2026-11-21 : la notation en degrés décimaux avec lettres d'hémisphère est lue comme du WGS84 (amendement d'AD-19, `core/src/point.rs`). Le noyau ne bloque donc plus ces quatre phrases ; le générateur écrit désormais ces points de deux manières sans système (`wgs84_coord`, `origin_point`). Le plafond de la barre remonte à 33 ou 34 sur 44 si le modèle les rend bien, la barre étant de 31. Le modèle installé ne connaît pas cette notation : mesure après la nuit.
+
 **Piège de la mesure.** `CASSINI_TEST_MODEL` doit désigner le fichier `.modele.json` du dossier, pas le `.gguf` : un `.gguf` seul est lu au long prompt (22 800 jetons, contexte de 8 192 dépassé, 0/48 par `PromptTooLong`). La ligne `Modèle : … prompt : Short` en tête de sortie le confirme.
 
 ## Mesure après ré-entraînement (ticket 17)

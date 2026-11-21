@@ -591,6 +591,14 @@ Correspondance avec les dossiers : `core/` l'hexagone et ses ports, `ai/` et
   noyau ne reprojette rien. Aucune étape n'est ajoutée au plan (AD-23) ; `work_epsg` est
   journalisé et relu au rejeu (AD-11). Les points en WGS84 restent convertis par la
   complétion de 11.22, vers `work_epsg`. Entrée 10.33, après la vidéo.
+- **Amendement (2026-11-21, entrée 10.17) :** le garde-fou des coordonnées lit comme du
+  WGS84 (4326) une paire de degrés décimaux suivis de lettres d'hémisphère, « 5.90 E 45.90 N »
+  ou « 45,90 N, 5,90 E » (longitude de 0 à 180 avec E, latitude de 0 à 90 avec N, décimales
+  obligatoires, un seul système par paire). Le système n'a plus à être écrit pour cette
+  notation : le point reste soumis à la règle de provenance (x et y viennent de la demande).
+  Un entier (« 31N »), une seule lettre ou un nombre hors plage laissent la question. Risque
+  assumé par le propriétaire : un auteur qui pense à un autre datum (NTF, ED50) est lu en
+  WGS84, d'où un décalage de quelques dizaines de mètres. `core/src/point.rs`.
 
 ### AD-20 — Le noyau lit ses rasters lui-même, derrière un seul module remplaçable
 

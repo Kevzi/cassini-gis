@@ -297,7 +297,89 @@ pub fn request_numbers(request: &str) -> Vec<f64> {
     let lower: Vec<char> = request.to_lowercase().chars().collect();
     numbers.extend(named_codes(&lower));
     numbers.extend(utm_codes(&lower));
+    numbers.extend(hemisphere_codes(&lower));
     numbers
+}
+
+/// Un nombre décimal collé à une lettre d'hémisphère, lu dans la demande (en minuscules) :
+/// (début, fin lettre comprise, valeur, `'e'` ou `'n'`).
+fn hemisphere_numbers(lower: &[char]) -> Vec<(usize, usize, f64, char)> {
+    let digit = |i: usize| lower.get(i).is_some_and(char::is_ascii_digit);
+    let blank = |i: usize| lower.get(i).is_some_and(|c| matches!(c, ' ' | '\u{a0}'));
+    let mut found = Vec::new();
+    let mut i = 0;
+    while i < lower.len() {
+        if !digit(i) {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while digit(i) {
+            i += 1;
+        }
+        let decimal = matches!(lower.get(i), Some('.' | ',')) && digit(i + 1);
+        if decimal {
+            i += 1;
+            while digit(i) {
+                i += 1;
+            }
+        }
+        let attached = start > 0 && (lower[start - 1].is_alphanumeric() || lower[start - 1] == '.');
+        if !decimal || attached {
+            continue;
+        }
+        let Ok(value) = lower[start..i]
+            .iter()
+            .map(|c| if *c == ',' { '.' } else { *c })
+            .collect::<String>()
+            .parse::<f64>()
+        else {
+            continue;
+        };
+        let mut j = i + usize::from(blank(i));
+        if lower.get(j) == Some(&'°') {
+            j += 1 + usize::from(blank(j + 1));
+        }
+        let word: String = lower[j.min(lower.len())..]
+            .iter()
+            .take_while(|c| c.is_alphabetic())
+            .collect();
+        let letter = match word.as_str() {
+            "e" | "est" => 'e',
+            "n" | "nord" => 'n',
+            _ => continue,
+        };
+        i = j + word.chars().count();
+        found.push((start, i, value, letter));
+    }
+    found
+}
+
+/// Le WGS84 (4326) pour chaque paire « longitude E latitude N » en degrés décimaux, dans l'un
+/// ou l'autre ordre (« 5.90 E 45.90 N », « 45,90 N, 5,90 E »). Décision du propriétaire,
+/// 2026-11-21 (assouplissement d'AD-19) : les lettres d'hémisphère, les décimales et des plages
+/// valides (longitude de 0 à 180, latitude de 0 à 90) disent assez que le système est
+/// géographique ; il est lu comme le WGS84, au risque assumé d'un décalage de quelques dizaines
+/// de mètres si l'auteur pense à un autre datum. Un entier (« 31N »), une seule lettre ou un
+/// nombre hors plage n'ouvrent rien : la question reste.
+fn hemisphere_codes(lower: &[char]) -> Vec<f64> {
+    let found = hemisphere_numbers(lower);
+    let mut codes = Vec::new();
+    let mut k = 0;
+    while k + 1 < found.len() {
+        let ((_, end, a, la), (start, _, b, lb)) = (found[k], found[k + 1]);
+        let (lon, lat) = if la == 'e' { (a, b) } else { (b, a) };
+        let joined = lower[end..start]
+            .iter()
+            .all(|c| matches!(c, ' ' | ',' | ';' | '/' | '\u{a0}'));
+        if la != lb && joined && (0.0..=180.0).contains(&lon) && (0.0..=90.0).contains(&lat) {
+            codes.push(4326.0);
+            k += 2;
+        } else {
+            k += 1;
+        }
+    }
+    codes
 }
 
 /// Codes des systèmes nommés écrits dans la demande (en minuscules) : Lambert-93, WGS84.
@@ -1284,6 +1366,69 @@ mod tests {
         );
         assert_eq!(request_numbers("WGS 84 652 000"), [84.0, 652000.0, 4326.0]);
         assert_eq!(request_numbers("le 93 652 000"), [93652000.0]);
+    }
+
+    #[test]
+    fn a_decimal_pair_with_hemisphere_letters_is_read_as_wgs84() {
+        assert_eq!(
+            request_numbers("du point 5.90 E 45.90 N"),
+            [5.9, 45.9, 4326.0]
+        );
+        for request in [
+            "5,90 E, 45,90 N",
+            "45.90 N 5.90 E",
+            "45.90° N / 5.90° E",
+            "5.90 Est 45.90 Nord",
+            "5.90\u{a0}E 45.90\u{a0}N",
+        ] {
+            assert_eq!(
+                request_numbers(request)
+                    .iter()
+                    .filter(|n| **n == 4326.0)
+                    .count(),
+                1,
+                "{request}"
+            );
+        }
+        // Deux points : un système chacun.
+        let two = request_numbers("entre 5.90 E 45.90 N et 6.10 E 45.80 N");
+        assert_eq!(two.iter().filter(|n| **n == 4326.0).count(), 2);
+        // Ni entier, ni lettre seule, ni deux lettres pareilles, ni hors plage, ni mot collé.
+        for request in [
+            "5 E 45 N",
+            "en UTM 31N",
+            "5.90 E 45.90",
+            "5.90 E 5.80 E",
+            "95.00 N 5.90 E",
+            "5.90 E 200.0 N",
+            "5.90 Ouest 45.90 N",
+            "5.90 E ou bien le mot 45.90 N",
+            "5.90 Ecole 45.90 N",
+        ] {
+            assert!(!request_numbers(request).contains(&4326.0), "{request}");
+        }
+    }
+
+    #[test]
+    fn a_point_in_hemisphere_notation_needs_no_written_system() {
+        let registry = Registry::standard();
+        let plan = line_of_sight(
+            json!({"x": 6.1, "y": 45.9, "epsg": 4326}),
+            json!({"x": 6.2, "y": 45.85, "epsg": 4326}),
+        );
+        let request = "Voit-on 6.20 E 45.85 N depuis 6.10 E 45.90 N ?";
+        assert_eq!(guard_coordinates(&registry, plan.clone(), request), plan);
+        // Un nombre inventé reste refusé, et un autre système que le 4326 aussi.
+        let invented = line_of_sight(
+            json!({"x": 6.1, "y": 45.9, "epsg": 4326}),
+            json!({"x": 6.3, "y": 45.85, "epsg": 4326}),
+        );
+        assert!(is_guard(&guard_coordinates(&registry, invented, request)));
+        let lambert = line_of_sight(
+            json!({"x": 6.1, "y": 45.9, "epsg": 2154}),
+            json!({"x": 6.2, "y": 45.85, "epsg": 2154}),
+        );
+        assert!(is_guard(&guard_coordinates(&registry, lambert, request)));
     }
 
     #[test]

@@ -1573,9 +1573,21 @@ mod tests {
         for e in &examples {
             let r = e.request.to_lowercase();
             let travel = modes.iter().any(|m| r.contains(m));
-            let coordinates = ["lambert", "epsg", "wgs", "utm"]
-                .iter()
-                .any(|c| r.contains(c));
+            // Depuis 10.17, des degrés décimaux suivis de « E » ou « N » valent un système (WGS84).
+            let chars: Vec<char> = r.chars().collect();
+            let hemisphere = chars.iter().enumerate().any(|(i, c)| {
+                let after = chars[i + 1..].iter().position(|c| !matches!(c, '°' | ' '));
+                matches!(c, '0'..='9')
+                    && after.is_some_and(|k| {
+                        let at = i + 1 + k;
+                        matches!(chars[at], 'e' | 'n')
+                            && !chars.get(at + 1).is_some_and(|c| c.is_alphabetic())
+                    })
+            });
+            let coordinates = hemisphere
+                || ["lambert", "epsg", "wgs", "utm"]
+                    .iter()
+                    .any(|c| r.contains(c));
             if travel && !coordinates {
                 travels += 1;
                 let refused = e.expected["reason"] == families::NO_MULTI_ORIGIN;

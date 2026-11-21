@@ -3250,9 +3250,15 @@ fn origin_point(rng: &mut Rng) -> Option<Origin> {
         let x: f64 = xs.parse().ok()?;
         let y: f64 = ys.parse().ok()?;
         let crs = *rng.pick(&["WGS84", "EPSG:4326", "WGS 84"]);
+        // Degrés décimaux et lettres d'hémisphère, sans système écrit (10.17, AD-19 assoupli).
+        let place = if rng.chance(1, 3) {
+            format!("le point {xs} E {ys} N")
+        } else {
+            format!("le point de longitude {xs} et de latitude {ys} ({crs})")
+        };
         return Some(Origin {
             point: json!({"x": x, "y": y, "epsg": 4326}),
-            place: format!("le point de longitude {xs} et de latitude {ys} ({crs})"),
+            place,
             coords: format!(" (longitude {xs}, latitude {ys}, {crs})"),
         });
     }
@@ -6802,10 +6808,14 @@ fn wgs84_coord(rng: &mut Rng, east: bool) -> Coord {
     let (xs, ys) = (text(lon), text(lat));
     let crs = (*rng.pick(&["WGS84", "EPSG:4326", "WGS 84"])).to_string();
     let bare = format!("{ys} N, {xs} E");
-    let place = match rng.below(3) {
+    // 10.17 (assouplissement d'AD-19, 2026-11-21) : les degrés décimaux avec lettres d'hémisphère,
+    // sans système écrit, se lisent en WGS84 ; la longitude vient parfois avant la latitude.
+    let place = match rng.below(5) {
         0 => format!("le point de longitude {xs} et de latitude {ys} ({crs})"),
         1 => format!("le point GPS {bare} ({crs})"),
-        _ => format!("le point {bare} ({crs})"),
+        2 => format!("le point {bare} ({crs})"),
+        3 => format!("le point {xs} E {ys} N"),
+        _ => format!("le point {ys}° N, {xs}° E"),
     };
     Coord {
         point: json!({"x": lon as f64 / 10_000.0, "y": lat as f64 / 10_000.0, "epsg": 4326}),
