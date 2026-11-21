@@ -408,13 +408,26 @@ hitl = false
 risk = "high"
 
 [[entry]]
+id = 34
+type = "story"
+title = "Prechauffage du modele : l'amorce sous 30 s sur processeur"
+description = "Lit la partie fixe de l'invite au chargement du modele, avant la premiere phrase de l'utilisateur, pour que l'amorce (premiere phrase d'une session) passe sous 30 s sur processeur. Mesure du 2026-11-21 sur base-17-1, 4 coeurs, catalogue complet, prompt court : amorce 31,6 s dont 26,5 s de lecture de l'invite (1 572 jetons) ; phrase de demo A0 27,9 s. Decision du proprietaire : l'amorce reste dans la mesure, on ne la sort pas du calcul."
+verify = "duree_reel sur 4 coeurs (masque 0x55), meme inventaire et meme modele que la mesure du 2026-11-21 : amorce strictement sous 30 s, A0 toujours sous 30 s, plans de A0 a E inchanges ; releve ajoute a docs/mesure-duree-par-phrase.md."
+covers = ["CAP-14"]
+after = []
+hitl = false
+risk = "medium"
+references = ["docs/mesure-duree-par-phrase.md#releve-du-2026-11-21-modele-base-17-1-ticket-10.17"]
+notes = ["Decision: 2026-11-21, le proprietaire garde l'amorce dans la mesure ; au-dela de 30 s on cherche un prechauffage, on ne sort pas l'amorce du calcul.", "Assumption: le prechauffage ne depend pas du modele ; il vaut pour base-17-1 comme pour le modele installe.", "Open question: faut-il precharger au demarrage de cassini serve (cout de memoire et de temps a l'ouverture de QGIS) ou a la premiere ouverture du panneau ?", "Le ticket 17 reste ouvert tant que l'amorce depasse 30 s ; il est rouvert a la mesure par ce ticket."]
+
+[[entry]]
 id = 18
 type = "story"
 title = "Refactor sweep"
 description = "Nettoyage seulement, dont la portee se fixe au demarrage a partir des plans et des constats de revue reportes pendant l'epic."
 verify = "Tests du noyau et de l'extension verts, cargo fmt et clippy sans avertissement, recette hors ligne verte."
 covers = ["CAP-6", "CAP-14"]
-after = [1, 2, 3, 4, 5, 6, 7, 8, 21, 22, 9, 10, 11, 23, 24, 20, 12, 26, 13, 14, 15, 16, 28, 29, 30, 31, 17, 27, 32, 33]
+after = [1, 2, 3, 4, 5, 6, 7, 8, 21, 22, 9, 10, 11, 23, 24, 20, 12, 26, 13, 14, 15, 16, 28, 29, 30, 31, 17, 27, 32, 33, 34]
 hitl = false
 risk = "low"
 

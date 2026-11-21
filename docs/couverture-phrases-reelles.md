@@ -68,11 +68,11 @@ Les quatre premiers cas (S15, S23, PL23, PL08) suffisent à remonter à 44/48 s'
 
 ## Mesure après ré-entraînement (ticket 17)
 
-**État : à faire après la nuit, modèle `continu-17-1` (voir `docs/entrainement-du-modele.md`, « Ré-entraînement de 10.17 »).** Barres du ticket : couverte et bien rendue par l'agent au moins 31/44 (70 %), `plan_reel` au moins 44/48. Commandes, dans cet ordre (le chiffre de la première alimente la seconde) :
+**État : à faire après la nuit, modèle `base-17-1` (voir `docs/entrainement-du-modele.md`, « Ré-entraînement de 10.17 »).** Barres du ticket : couverte et bien rendue par l'agent au moins 31/44 (70 %), `plan_reel` au moins 44/48. Commandes, dans cet ordre (le chiffre de la première alimente la seconde) :
 
 ```powershell
 # le fichier .modele.json du dossier, pas le .gguf (sinon long prompt : PromptTooLong)
-$env:CASSINI_TEST_MODEL = "C:\Users\kevin\cassini-modeles\continu-17-1\cassini-composition-4b.modele.json"
+$env:CASSINI_TEST_MODEL = "C:\Users\kevin\cassini-modeles\base-17-1\cassini-composition-4b.modele.json"
 cargo test -p cassini-ai --features gpu --test plan_reel -- --ignored --nocapture      # ligne SCORE n/48
 $env:CASSINI_PLANS_CONFORMES = "<n>/48"
 $env:CASSINI_COUVERTURE_RAPPORT = "$PWD\couverture-17.md"
@@ -80,6 +80,23 @@ cargo test -p cassini-ai --features gpu --test couverture_reelle_reel -- --ignor
 ```
 
 Reporter ici : modèle et date, couverte et bien rendue n/44, plans conformes n/48, et la colonne « Agent local » refaite. Si une barre est manquée, l'écrire, poser le diagnostic (voir l'arithmétique plus haut : 30/44 est le plafond probable sans CV35 ni la notation E/N), et ne pas clore le ticket.
+
+### Mesure du modèle `base-17-1` (2026-11-21, ticket 10.17)
+
+Modèle entraîné de zéro (`base`, graine 1, commit `ce8bc0a`), validation 284/300, essais sur GPU (RTX 3070 Ti), non installé.
+
+| Barre du ticket | Mesure | Seuil | Verdict |
+|---|---|---|---|
+| Couverture et bon rendu par l'agent | 32/44 (72,7 %) | 31/44 | tenue, d'une phrase |
+| Plans conformes (`plan_reel`) | 44/48 (91,7 %), mesuré deux fois | 44/48 | tenue, sans marge |
+| Phrase longue sur CPU, phrase de démo (A0) | 27,9 s | < 30 s | tenue (voir `mesure-duree-par-phrase.md`) |
+| Phrase longue sur CPU, amorce | 31,6 s | < 30 s | **manquée de 1,6 s** |
+
+Couverture du registre : 35/44 (79,5 %). Réponses conformes à l'attendu, refus compris : 37/44 (84,1 %).
+
+Les sept phrases non rendues par l'agent : CV05 (question au lieu de `terrain.slope`), CV27 (autre plan que `analysis.statistics_by_category`), CV35 (géocodage : question), CV39, CV40, CV41 (plans là où le catalogue n'a pas la commande) et CV42 (échec). CV14, CV18, CV28 et CV29, que le garde-fou refusait, sont rendues : le gain de la notation « 5.90 E 45.90 N » est mesuré.
+
+Le ticket 10.17 reste ouvert : l'amorce dépasse 30 s. La barre n'est pas abaissée.
 
 ## Ordre recommandé des primitives restantes
 

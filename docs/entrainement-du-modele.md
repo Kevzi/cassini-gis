@@ -3440,3 +3440,10 @@ Le parent doit contenir `rapport.json` et `travail/adaptateur-hf/adapter_model.s
 À passer en plus, à la main, contre `continu-17-1` (jamais mesurées contre un vrai modèle) : les phrases NEA1 à NEA3, CHE1 à CHE3, PRE1 à PRE3 et ATL1 à ATL3 de `ai/tests/par_commande/phrases.json` (essai `par_commande_reel`, inclus dans la liste ci-dessus).
 
 **Résultat de non-oubli.** *À remplir par le propriétaire* : verdict du juge, `plan_reel` n/48 (barre 44/48), `question_reel`, `terrain_reel`, `par_commande_reel`, Annecy, gros projet, v4, durée d'entraînement, et la décision d'installer ou non. Si le juge refuse, la séance est consignée ici comme celles de 5.61, le modèle installé reste en place.
+
+
+## Résultat de non-oubli de 10.17 : `base-17-1` (2026-11-21)
+
+Le parent `continu-5-61b` a trois maillons : la chaîne a refusé le bras `continu` (« recalage »). La nuit a donc été un entraînement de zéro (`base`, jeu complet de 8 600 exemples, graine 1, 537 pas, 2 h 27). Validation : 284/300 (94,7 %). Juge `non_oubli.py` contre `reference-non-oubli-5-58-1` : **refusé**, pour une seule raison, `echelle_utm_reel` en baisse (42/44 à 37/44, seuil 33 tenu). Tout le reste tient ou progresse (`plan_reel` 44/48, recette Annecy 19/20, `terrain_reel` 40/44, `epic11_reel` 46/49). Le modèle n'est pas installé ; c'est au propriétaire de décider.
+
+Deux incidents de chaîne, à corriger durablement : la construction de `llama-server` échoue sur l'interface web préconstruite (il faut `-DLLAMA_USE_PREBUILT_UI=OFF`), et la détection de l'architecture CUDA exige `LD_LIBRARY_PATH=/usr/lib/wsl/lib` sous WSL.

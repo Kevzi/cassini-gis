@@ -707,7 +707,7 @@ celui du catalogue complet.
 
 ## Durée sur le catalogue complet, phrase longue (ticket 17, 2026-11-21)
 
-**État : procédure écrite, mesure non faite** (elle dépend du modèle ré-entraîné `continu-17-1`, à installer ou à pointer par `CASSINI_TEST_MODEL`). Barre du ticket : la phrase de démo et l'amorce (première phrase, qui paie le chargement) prennent chacune **moins de 30 s** sur processeur, 4 cœurs, catalogue complet. Décision du propriétaire : l'amorce compte ; au-delà de 30 s on cherche un préchauffage du modèle, on ne la sort pas de la mesure. Point de départ au 2026-11-20 : phrase de démo 28,5 s (10.5), amorce 33,1 s, donc l'amorce est la ligne qui tangente.
+**État : procédure écrite, mesure non faite** (elle dépend du modèle ré-entraîné `base-17-1`, à installer ou à pointer par `CASSINI_TEST_MODEL`). Barre du ticket : la phrase de démo et l'amorce (première phrase, qui paie le chargement) prennent chacune **moins de 30 s** sur processeur, 4 cœurs, catalogue complet. Décision du propriétaire : l'amorce compte ; au-delà de 30 s on cherche un préchauffage du modèle, on ne la sort pas de la mesure. Point de départ au 2026-11-20 : phrase de démo 28,5 s (10.5), amorce 33,1 s, donc l'amorce est la ligne qui tangente.
 
 Commande (PowerShell, 4 cœurs physiques, jamais `--features cuda`) :
 
@@ -715,7 +715,7 @@ Commande (PowerShell, 4 cœurs physiques, jamais `--features cuda`) :
 $env:CARGO_TARGET_DIR = "C:\ct"
 cargo test --release -p cassini-ai --test duree_reel --no-run
 $exe = Get-ChildItem C:\ct\release\deps\duree_reel-*.exe | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-$env:CASSINI_TEST_MODEL = "C:\Users\kevin\cassini-modeles\continu-17-1\cassini-composition-4b-Q4_K_M.gguf"
+$env:CASSINI_TEST_MODEL = "C:\Users\kevin\cassini-modeles\base-17-1\cassini-composition-4b-Q4_K_M.gguf"
 $env:CASSINI_TEST_THREADS = "4"
 $env:CASSINI_TEST_INVENTORY = "<donnees-test-cassini>\inventaire-....json"   # hors dépôt, inventaire traduit du scénario de démo
 $p = Start-Process $exe.FullName -ArgumentList "--ignored","--nocapture","duree_reel" -NoNewWindow -PassThru -RedirectStandardOutput mesure-17.txt -RedirectStandardError mesure-17.err
@@ -724,3 +724,18 @@ $p.WaitForExit()
 ```
 
 L'inventaire de démo vit hors du dépôt (jeu de `../donnees-test-cassini/`, traduit comme pour la mesure du 10.5) ; sans la variable, l'essai passe les 25 phrases de l'épreuve, ce qui ne mesure pas la phrase de démo. À consigner ici après la mesure : modèle et date, tableau des phrases A à E, durée de l'amorce (WARMUP, « Décris le projet. », la première phrase) et de la phrase de démo, verdict contre 30 s. Si l'une dépasse, diagnostic et piste de préchauffage, sans abaisser la barre.
+
+
+### Relevé du 2026-11-21, modèle `base-17-1` (ticket 10.17)
+
+CPU seul, 4 fils, binaire d'essai épinglé sur 4 cœurs physiques (`0x55`), inventaire Villeneuve traduit, catalogue complet, prompt court.
+
+| Phrase | lecture (s) | écriture (s) | total (s) | issue |
+|---|---|---|---|---|
+| amorce | 26,5 | 2,5 | **31,6** | plan, 1 étape |
+| A0 (phrase de démo) | 1,3 | 26,5 | **27,9** | plan, 5 étapes |
+| A | 1,4 | 26,9 | 28,3 | plan, 5 étapes |
+| B1 / B2 / B3 | 0,6 à 0,8 | 6,4 / 15,1 / 3,5 | 7,0 / 15,9 / 4,2 | plans |
+| C / D / E | 0,6 à 0,9 | 9,6 / 3,9 / 14,1 | 10,4 / 4,5 / 15,0 | plan, question, question |
+
+Moyenne sur 8 phrases hors amorce : 14,2 s. La phrase de démo tient la barre (27,9 s < 30 s). **L'amorce la manque de 1,6 s** (31,6 s, contre 33,1 s au relevé du 10.5), à cause de la lecture de l'invite complète (26,5 s). Décision du propriétaire du 2026-11-21 : l'amorce reste dans la mesure ; la suite est un préchauffage du modèle, pas sa sortie du calcul.
