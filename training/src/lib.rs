@@ -1577,7 +1577,7 @@ mod tests {
             let chars: Vec<char> = r.chars().collect();
             let hemisphere = chars.iter().enumerate().any(|(i, c)| {
                 let after = chars[i + 1..].iter().position(|c| !matches!(c, '°' | ' '));
-                matches!(c, '0'..='9')
+                c.is_ascii_digit()
                     && after.is_some_and(|k| {
                         let at = i + 1 + k;
                         matches!(chars[at], 'e' | 'n')
