@@ -1311,3 +1311,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-mnt-en-degres-calcul-dans-un-systeme-en-metres-choisi-par-le-plan.md`
   summary: Au rejeu, la reprojection est rejouée par QGIS (pas seulement le terrain) ; la comparaison du terrain peut diverger si GDAL/QGIS change ; la phrase « sans nouvelle reprojection » du plan est inexacte.
   evidence: Replay::run n'inclut pas raster.reproject_work dans styling_gestures ; relecture des cas limites de 10.33.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-10-33b-geste-qgis-reprojection-du-mnt.md`
+  summary: Durcir le geste raster.reproject_work : poser le nodata de la source (SRTM -32768), garde sur la taille de grille (pôles, antiméridien, BIGTIFF), annulation en cours de calcul prouvée (la sonde annule avant le lancement), `.aux.xml` et bandes multiples contrôlés comme pour les autres gestes raster.
+  evidence: relecture des cas limites de la seconde moitié de 10.33 ; aucun n'est atteint par la sonde ni par le jeu de test actuel.

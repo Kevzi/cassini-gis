@@ -1215,6 +1215,8 @@ SAMPLES = {
                             {"file": "C:/d/1-data.convert_raster.tif", "epsg": 2154}),
     "data.convert": ({"layer_id": "gares_1", "format": "shp"},
                      {"file": "C:/d/3-data.convert.shp", "format": "shp", "feature_count": 3}),
+    "raster.reproject_work": ({"raster": "C:/donnees/annecy/mnt-4326.tif", "work_epsg": 32632},
+                              {"file": "C:/d/1-raster.reproject_work.tif", "epsg": 32632}),
     "layer.remove": ({"layer_id": "gares_1"}, {"layer_id": "gares_1"}),
     "terrain.aspect": ({"dem": DEM}, {"file": "C:/d/expo.tif", "flat_cells": 12,
                                       "nodata_cells": 0}),

@@ -36,9 +36,34 @@ pub struct RasterReprojectWorkParams {
     #[serde(deserialize_with = "epsg_code")]
     #[schemars(range(min = 1))]
     pub work_epsg: u32,
+    /// Rééchantillonnage de la reprojection : choisi par le noyau d'après la commande qui suit
+    /// (`resampling_for`), jamais par l'appelant ; journalisé et rejoué tel quel.
+    #[serde(default)]
+    pub resampling: Resampling,
     /// Fichier de sortie : fourni par le noyau, dans le dossier de travail.
     #[serde(default)]
     pub out: String,
+}
+
+/// Rééchantillonnage d'une reprojection de MNT.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Resampling {
+    /// Interpolation bilinéaire : des altitudes (pente, exposition, ombrage).
+    #[default]
+    Bilinear,
+    /// Plus proche voisin : des classes que l'interpolation mélangerait (`raster.reclassify`).
+    Nearest,
+}
+
+/// Rééchantillonnage que le noyau fixe pour la commande `command` qu'il va dicter après : plus
+/// proche voisin pour `raster.reclassify` (des classes), bilinéaire pour le relief.
+pub fn resampling_for(command: &str) -> Resampling {
+    if command == "raster.reclassify" {
+        Resampling::Nearest
+    } else {
+        Resampling::Bilinear
+    }
 }
 
 /// Un code EPSG est strictement positif : 0 est refusé par le noyau, pas par le geste.
@@ -73,7 +98,7 @@ impl Delegated for RasterReprojectWork {
             "Reprojects a DEM in degrees to the metric system the core chose for the computation, and writes a Float32 GeoTIFF, no-data -9999; dictated by the core before a terrain command, never offered. The original is not modified.",
         )
         .runs_in(RunsIn::Qgis)
-        .cancellable(false)
+        .cancellable(true)
         .path_params(&["raster"])
         .output_params(&["out"])
         .output_ext(".tif")
@@ -83,6 +108,7 @@ impl Delegated for RasterReprojectWork {
             "raster_reproject_work_is_delegated_and_dictated",
             "raster_reproject_work_takes_a_raster_and_a_positive_code",
             "raster_reproject_work_output_is_a_tif_named_by_the_core",
+            "the_core_picks_the_resampling_from_the_following_command",
         ])
     }
 }
@@ -100,7 +126,7 @@ mod tests {
         let registry = Registry::standard();
         let spec = registry.spec(REPROJECT_WORK).unwrap();
         assert_eq!(spec.runs_in, Some(RunsIn::Qgis));
-        assert_eq!(spec.cancellable, Some(false));
+        assert_eq!(spec.cancellable, Some(true));
         assert!(spec.dictated_by_core);
         let err = registry
             .call(REPROJECT_WORK, json!({"raster": "mnt.tif", "work_epsg": 2154}))
@@ -113,14 +139,16 @@ mod tests {
         let registry = Registry::standard();
         for good in [
             json!({"raster": "mnt.tif", "work_epsg": 32632}),
-            json!({"raster": "out:2.1", "work_epsg": 2154, "out": "3-raster.reproject_work.tif"}),
+            json!({"raster": "mnt.tif", "work_epsg": 32632, "resampling": "nearest"}),
+            json!({"raster": "out:2.1", "work_epsg": 2154, "resampling": "bilinear",
+                   "out": "3-raster.reproject_work.tif"}),
         ] {
             assert!(
                 registry.validate_params(REPROJECT_WORK, &good).is_ok(),
                 "{good}"
             );
         }
-        // Aucun paramètre de rééchantillonnage ni de taille de cellule : le geste les fixe.
+        // Ni taille de cellule ni rééchantillonnage hors de la liste fermée.
         for bad in [
             json!({}),
             json!({"raster": "mnt.tif"}),
@@ -134,6 +162,18 @@ mod tests {
             let err = registry.validate_params(REPROJECT_WORK, &bad).unwrap_err();
             assert_eq!(err.code(), "registry.invalid_params", "{bad}");
         }
+    }
+
+    #[test]
+    fn the_core_picks_the_resampling_from_the_following_command() {
+        use super::{resampling_for, Resampling};
+        for command in ["terrain.slope", "terrain.aspect", "terrain.hillshade"] {
+            assert_eq!(resampling_for(command), Resampling::Bilinear, "{command}");
+        }
+        assert_eq!(resampling_for("raster.reclassify"), Resampling::Nearest);
+        let registry = Registry::standard();
+        let spec = registry.spec(REPROJECT_WORK).unwrap();
+        assert!(spec.dictated_by_core, "jamais offerte au modèle");
     }
 
     #[test]

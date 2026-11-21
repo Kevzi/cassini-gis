@@ -608,7 +608,8 @@ impl<'a> Session<'a> {
         let Some(code) = crate::work_crs::work_epsg_for_dem(&dem_crs, &label, &inventory)? else {
             return Ok(());
         };
-        let order = json!({ "raster": raw, "work_epsg": code });
+        let resampling = crate::commands::raster_reproject_work::resampling_for(id);
+        let order = json!({ "raster": raw, "work_epsg": code, "resampling": resampling });
         self.call_step(REPROJECT_WORK, order, origin, plan_step)?;
         // `call_step` a écrit la ligne de la reprojection, réussie : c'est l'étape qui précède.
         let reprojected = self.next_step - 1;

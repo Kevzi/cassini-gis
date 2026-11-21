@@ -6837,6 +6837,8 @@ fn a_slope_on_a_dem_in_degrees_dictates_the_reprojection_before_and_logs_the_wor
     assert_eq!(l[0]["id"], REPROJECT);
     assert_eq!(l[0]["params"]["raster"], "mnt4326.tif", "{}", l[0]);
     assert_eq!(l[0]["params"]["work_epsg"], 2154);
+    // Relief : rééchantillonnage bilinéaire, choisi par le noyau et journalisé.
+    assert_eq!(l[0]["params"]["resampling"], "bilinear");
     assert_eq!(l[0]["params"]["out"], "1-raster.reproject_work.tif");
     assert!(l[0].get("layer_id").is_none());
     // La pente lit sa sortie et journalise le système de calcul.
@@ -6847,10 +6849,37 @@ fn a_slope_on_a_dem_in_degrees_dictates_the_reprojection_before_and_logs_the_wor
     assert_eq!(sent(&orders), ["project.inventory", REPROJECT]);
     let order = order_of(&orders, REPROJECT);
     assert_eq!(order["work_epsg"], 2154);
+    assert_eq!(order["resampling"], "bilinear");
     assert!(Path::new(order["raster"].as_str().unwrap()).is_absolute());
     // Le fichier écrit est dans le système de calcul.
     let slope = crate::dem::Dem::open(Path::new(out["file"].as_str().unwrap())).unwrap();
     assert_eq!(slope.epsg, 2154);
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_reclassify_on_a_dem_in_degrees_dictates_a_nearest_neighbour_reprojection() {
+    let (dir, project, _) = temp_project();
+    write_annecy_degrees(&dir, "mnt4326.tif");
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let qgis = DemQgis::new(&qgis_project);
+    let orders = qgis.orders.clone();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(qgis)
+        .with_gestures(reproject_gestures());
+    s.call(
+        "raster.reclassify",
+        json!({"raster": "mnt4326.tif", "classes": [{"max": 100000.0, "value": 1.0}]}),
+    )
+    .unwrap();
+    let l = lines(&s);
+    assert_eq!(l[0]["id"], REPROJECT, "{l:?}");
+    // Des classes : plus proche voisin, jamais celui que l'appelant voudrait.
+    assert_eq!(l[0]["params"]["resampling"], "nearest");
+    assert_eq!(order_of(&orders, REPROJECT)["resampling"], "nearest");
     drop(s);
     let _ = fs::remove_dir_all(dir);
 }

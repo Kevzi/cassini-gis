@@ -370,7 +370,7 @@ donne l'esquisse.
 | `analysis.area` | faite | qgis | epic 10, entrée 22 |
 | `data.convert` | faite | qgis | epic 10, entrée 9 |
 | `data.convert_raster` | faite | qgis | epic 10, entrée 30 |
-| `raster.reproject_work` | faite (dictée) | qgis | ticket 33 (noyau ; geste : suite) |
+| `raster.reproject_work` | faite (dictée) | qgis | ticket 33 (noyau et geste) |
 | `layer.remove` | faite | qgis | epic 10, entrée 27 |
 | `analysis.nearest` | faite | qgis | epic 10, entrée 10 |
 | `analysis.distance_matrix` | planifiée | qgis | epic 10, entrée 10 |
@@ -1911,13 +1911,21 @@ reprise de 9.16 mais appliquée au MNT, désigné par chemin :
 après un changement du système du projet ; une ligne d'avant le ticket 33, sans `work_epsg`,
 se rejoue telle quelle (le système du calcul est celui du MNT). Une commande de terrain
 appelée avec un `work_epsg` qui n'est pas le système du MNT lu répond `dem.work_mismatch`.
-Rééchantillonnage bilinéaire et taille de cellule par défaut de `gdalwarp`, fixés dans la ligne
-de table de l'extension (seconde moitié du ticket 33, non livrée avec le noyau).
+Le rééchantillonnage (`resampling`) est choisi par le noyau d'après la commande qui suit, journalisé
+et rejoué tel quel : `bilinear` avant `terrain.slope`, `terrain.aspect` et `terrain.hillshade`
+(des altitudes), `nearest` avant `raster.reclassify` (des classes). L'extension l'applique sans le
+deviner (`gdal:warpreproject`, taille de cellule par défaut de `gdalwarp`, GeoTIFF Float32,
+sans-donnée -9999). Dictée avant : `terrain.slope`, `terrain.aspect`, `terrain.hillshade`,
+`raster.reclassify`. Annulable (`qgis.cancelled`, aucun fichier partiel). Refus, avant tout
+lancement : `data.unknown_crs` (code inconnu de QGIS), `analysis.crs_not_metric` (système de calcul
+qui n'est pas en mètres), `analysis.bad_params` (code invalide, raster sans système, ou système de
+calcul égal à celui du raster : jamais d'identité).
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
 | `raster` | `RasterPath` | oui | — | MNT en degrés à reprojeter. Il n'est pas modifié. |
 | `work_epsg` | entier | oui | code EPSG ≥ 1 | Système en mètres choisi par le noyau. |
+| `resampling` | chaîne | non | `bilinear` (défaut), `nearest` | Choisi par le noyau selon la commande qui suit ; jamais par l'appelant. |
 | `out` | chaîne | non | — | Fourni par le noyau. |
 
 | Résultat | Type | Sens |
@@ -1929,6 +1937,7 @@ de table de l'extension (seconde moitié du ticket 33, non livrée avec le noyau
 {"id": "raster.reproject_work", "status": "faite", "runs_in": "qgis", "dictated_by_core": true,
  "params": {"raster": {"type": "RasterPath", "required": true},
             "work_epsg": {"type": "integer", "required": true},
+            "resampling": {"type": "string", "required": false, "enum": ["bilinear", "nearest"]},
             "out": {"type": "string", "required": false}},
  "result": ["epsg", "file"]}
 ```

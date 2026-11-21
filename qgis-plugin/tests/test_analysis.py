@@ -1947,6 +1947,122 @@ class ConvertRasterTest(unittest.TestCase):
         self.assertIn("data.convert_raster", registry.ids())
 
 
+class ReprojectWorkTest(unittest.TestCase):
+    """`raster.reproject_work` (ticket 33, seconde moitié) : reprojection fixe d'un MNT en degrés vers
+    le système en mètres que le noyau a choisi."""
+
+    SOURCES = {"mnt-4326.tif": "EPSG:4326", "classes-4326.tif": "EPSG:4326", "mnt-32632.tif": "EPSG:32632",
+               "sans.tif": None}
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.out = os.path.join(self.dir.name, "1-raster.reproject_work.tif")
+        self.entry = analysis.ALGORITHMS["raster.reproject_work"]
+        for name in self.SOURCES:
+            with open(os.path.join(self.dir.name, name), "wb") as f:
+                f.write(b"II*")
+        self.originals = {n: self.read(n) for n in self.SOURCES}
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def read(self, name):
+        with open(os.path.join(self.dir.name, name), "rb") as f:
+            return f.read()
+
+    def src(self, name):
+        return os.path.join(self.dir.name, name)
+
+    def params(self, name="mnt-4326.tif", work_epsg=32632):
+        return {"raster": self.src(name), "work_epsg": work_epsg, "out": self.out}
+
+    def backend(self, **kw):
+        b = RasterBackend(self.SOURCES, written_epsg=32632, **kw)
+        b.known = {2154, 32631, 32632, 4326}
+        return b
+
+    def test_the_row_is_a_fixed_warp_to_the_core_system(self):
+        self.assertEqual(self.entry["algorithm"], "gdal:warpreproject")
+        b = self.backend()
+        _, calls = start(self.entry, b, self.params())
+        algorithm, p = b.calls[0]
+        self.assertEqual(algorithm, "gdal:warpreproject")
+        self.assertEqual(p["INPUT"], self.src("mnt-4326.tif"))
+        self.assertEqual(p["OUTPUT"], self.out)
+        self.assertEqual(p["TARGET_CRS"], "EPSG:32632")
+        self.assertIsNone(p["SOURCE_CRS"])
+        self.assertIsNone(p["TARGET_RESOLUTION"])  # cellule par défaut de gdalwarp
+        self.assertIsNone(p["TARGET_EXTENT"])
+        self.assertEqual(p["DATA_TYPE"], 6)
+        self.assertEqual(p["NODATA"], -9999)
+        self.assertEqual(p["EXTRA"], "-srcband 1 -dstband 1")
+        b.finished(True, {"OUTPUT": self.out})
+        self.assertEqual(calls, [({"file": self.out, "epsg": 32632}, None)])
+        self.assertEqual(b.added, [])
+
+    def test_the_resampling_is_the_one_the_core_gave_never_guessed(self):
+        for name, index in (("bilinear", 1), ("nearest", 0)):
+            for source in ("mnt-4326.tif", "classes-4326.tif"):
+                b = self.backend()
+                start(self.entry, b, dict(self.params(source), resampling=name))
+                self.assertEqual(b.calls[0][1]["RESAMPLING"], index, (name, source))
+        b = self.backend()
+        start(self.entry, b, self.params())  # ligne sans `resampling` : bilinéaire
+        self.assertEqual(b.calls[0][1]["RESAMPLING"], 1)
+        b = self.backend()
+        _, calls = start(self.entry, b, dict(self.params(), resampling="cubic"))
+        self.assertEqual(calls[0][1].code, "analysis.bad_params")
+        self.assertEqual(b.calls, [])
+
+    def test_the_raster_own_system_is_refused_never_an_identity(self):
+        b = self.backend()
+        _, calls = start(self.entry, b, self.params("mnt-32632.tif"))
+        self.assertEqual(calls[0][1].code, "analysis.bad_params")
+        self.assertIn("EPSG:32632", calls[0][1].message)
+        self.assertNotIn(self.dir.name, calls[0][1].message)
+        self.assertEqual(b.calls, [])
+
+    def test_a_non_metric_unknown_or_missing_target_is_refused_before_launch(self):
+        for work, code in ((4326, "analysis.crs_not_metric"), (99999, "data.unknown_crs"),
+                           (0, "analysis.bad_params"), (None, "analysis.bad_params")):
+            b = self.backend()
+            _, calls = start(self.entry, b, self.params(work_epsg=work))
+            self.assertEqual(calls[0][1].code, code, work)
+            self.assertEqual(b.calls, [])
+        b = self.backend()
+        _, calls = start(self.entry, b, self.params("sans.tif"))
+        self.assertEqual(calls[0][1].code, "analysis.bad_params")
+        self.assertEqual(b.calls, [])
+
+    def test_a_failure_or_a_cancellation_leaves_no_partial_file(self):
+        b = self.backend()
+        _, calls = start(self.entry, b, self.params())
+        with open(self.out, "wb") as f:
+            f.write(b"x")
+        b.finished(False, {})
+        self.assertEqual(calls[0][1].code, "analysis.failed")
+        self.assertFalse(os.path.exists(self.out))
+        g, calls = start(self.entry, b, self.params())
+        with open(self.out, "wb") as f:
+            f.write(b"x")
+        g.cancel()
+        b.finished(False, {})
+        self.assertEqual(calls[0][1].code, "qgis.cancelled")
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_the_original_is_never_written(self):
+        b = self.backend()
+        start(self.entry, b, self.params())
+        b.finished(True, {})
+        for name, before in self.originals.items():
+            self.assertEqual(self.read(name), before, name)
+
+    def test_default_table_registers_the_reprojection(self):
+        registry = gestures.GestureRegistry()
+        analysis.register_all(registry, backend_factory=lambda: self.backend())
+        self.assertIn("raster.reproject_work", registry.ids())
+
+
 STATS_HEADER = ["cat", "count", "unique", "min", "max", "range", "sum", "mean"]
 
 

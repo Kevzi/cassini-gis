@@ -843,6 +843,20 @@ def _convert_raster(lang, p, r, names):
     return text
 
 
+def _reproject_work(lang, p, r, names):
+    """Le MNT reprojeté vers le système en mètres du calcul, dictée par le noyau ; affichage seul (AD-5)."""
+    value = p.get("raster")
+    raster = names.layer(value) if isinstance(value, str) and _STEP_REF.match(value) else file_name(value)
+    epsg = p.get("work_epsg")
+    if not _is_int(epsg):
+        raise _Unreadable()
+    key = "sum_reproject_work_ask" if names.ahead else "sum_reproject_work"
+    text = texts.tr(lang, key, raster=raster, epsg=epsg)
+    if not r:
+        return text
+    return text + _file_part(lang, r)
+
+
 def _layer_remove(lang, p, r, names):
     """La couche retirée du projet, aucun fichier effacé ; affichage seul (AD-5)."""
     key = "sum_layer_remove_ask" if names.ahead else "sum_layer_remove"
@@ -1182,6 +1196,7 @@ _SENTENCES = {
     "data.reproject": _reproject,
     "data.convert": _data_convert,
     "data.convert_raster": _convert_raster,
+    "raster.reproject_work": _reproject_work,
     "layer.remove": _layer_remove,
     "analysis.buffer": _buffer,
     "analysis.intersect": _intersect,

@@ -412,6 +412,39 @@ def translate_convert(params, layer):
 _RASTER_NODATA = -9999
 _RASTER_FLOAT32 = 6
 _RASTER_NEAREST = 0
+_RASTER_BILINEAR = 1
+
+
+# Rééchantillonnage choisi par le noyau (paramètre `resampling` de `raster.reproject_work`) -> index
+# de l'énumération `RESAMPLING` de `gdal:warpreproject` sous QGIS 3.44.
+_RESAMPLING = {"nearest": _RASTER_NEAREST, "bilinear": _RASTER_BILINEAR}
+
+
+def translate_reproject_work(params, raster):
+    """Paramètres neutres de `raster.reproject_work` -> paramètres de `gdal:warpreproject` vers le
+    système en mètres que le noyau a choisi (`work_epsg`), ticket 33.
+
+    Geste fixe, aucun choix laissé à l'appelant (AD-5, AD-24) : taille de cellule par défaut de
+    gdalwarp (`TARGET_RESOLUTION` vide), emprise de la source, Float32 et sans-donnée -9999 comme
+    `data.convert_raster`, première bande seulement. Le rééchantillonnage vient du noyau (`resampling`,
+    bilinéaire sans lui) : l'extension ne le devine pas d'après le type de la bande.
+    """
+    name = params.get("resampling", "bilinear")
+    if name not in _RESAMPLING:
+        raise GestureError(BAD_PARAMS, "Le rééchantillonnage doit être « nearest » ou « bilinear ».")
+    return {
+        "INPUT": raster,
+        "SOURCE_CRS": None,
+        "TARGET_CRS": "EPSG:%d" % _epsg_code(params.get(WORK_EPSG)),
+        "RESAMPLING": _RESAMPLING[name],
+        "NODATA": _RASTER_NODATA,
+        "TARGET_RESOLUTION": None,
+        "CREATION_OPTIONS": "COMPRESS=DEFLATE",
+        "DATA_TYPE": _RASTER_FLOAT32,
+        "TARGET_EXTENT": None,
+        "MULTITHREADING": False,
+        "EXTRA": "-srcband 1 -dstband 1",
+    }
 
 
 def translate_convert_raster(params, raster):
@@ -903,6 +936,8 @@ def translate_atlas(params, layer):
 #   assign_crs: (facultatif, avec `raster`) paramètre du noyau qui déclare le code EPSG d'une
 #               source sans système : connu de QGIS (`data.unknown_crs` sinon), et refusé
 #               (`analysis.bad_params`) si la source a déjà un autre système ;
+#   reproject_to : (facultatif, avec `raster`) paramètre du noyau qui porte le système en mètres de la
+#               reprojection (ticket 33) : connu de QGIS et en mètres, jamais le système du raster ;
 #   layout    : (facultatif) genre `layout` (AD-24) : l'algorithme exporte une mise en page nommée du
 #               gestionnaire du projet. Le geste monte la mise en page des couches locales visibles
 #               (`backend.mount_atlas`), l'y ajoute le temps de l'appel et la retire dans tous les cas
@@ -1261,6 +1296,20 @@ ALGORITHMS = {
         "input": "raster",
         "raster": True,
         "assign_crs": "assign_epsg",
+    },
+    # Ticket 33 : reprojection d'un MNT en degrés, dictée par le noyau avant une commande de terrain.
+    "raster.reproject_work": {
+        "chain_version": 1,
+        "chain": [
+            {
+                "algorithm": "gdal:warpreproject",
+                "translate": translate_reproject_work,
+                "output": "OUTPUT",
+            },
+        ],
+        "input": "raster",
+        "raster": True,
+        "reproject_to": WORK_EPSG,
     },
 }
 
@@ -2095,10 +2144,35 @@ class ProcessingGesture:
                     "« %s » a déjà un système (%s) : on ne déclare un système qu'à un raster qui "
                     "n'en a pas, et Cassini ne reprojette pas un raster." % (_file_name(path), current),
                 )
+        step = chain_of(entry)[-1]
+        target = None
+        if entry.get("reproject_to"):
+            # Reprojection dictée par le noyau : vers un système en mètres, jamais par identité (RA06).
+            target = params.get(entry["reproject_to"])
+            if isinstance(target, bool) or not isinstance(target, int) or target <= 0:
+                raise GestureError(BAD_PARAMS, "Le système de calcul doit être un code EPSG entier positif.")
+            if not backend.crs_is_known(target):
+                raise GestureError(UNKNOWN_CRS, "Système inconnu de QGIS : EPSG:%d." % target)
+            if not backend.epsg_is_metric(target):
+                raise GestureError(
+                    CRS_NOT_METRIC, "Le système de calcul EPSG:%d n'a pas le mètre pour unité." % target
+                )
+            current = backend.raster_crs(source)
+            if current is None:
+                raise GestureError(
+                    BAD_PARAMS,
+                    "« %s » n'a pas de système de coordonnées : déclarez-le d'abord (data.convert_raster)."
+                    % _file_name(path),
+                )
+            if backend.same_crs(source, target):
+                raise GestureError(
+                    BAD_PARAMS,
+                    "« %s » est déjà en EPSG:%d : un raster n'est jamais reprojeté vers son propre système."
+                    % (_file_name(path), target),
+                )
         # La source n'est plus tenue ouverte pendant le travail de QGIS (Windows garderait le
         # fichier d'origine verrouillé).
         source = None
-        step = chain_of(entry)[-1]
         algorithm_params = step["translate"](params, path)
         algorithm_params[step.get("output", "OUTPUT")] = out
         self._out = out
