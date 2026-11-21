@@ -3426,11 +3426,11 @@ cargo fmt --all -- --check
 cargo clippy -p cassini-training --all-targets -- -D warnings
 ```
 
-**Commande de la nuit** (WSL, reprise du bras continu de `nuit-5-55.sh` : départ du modèle installé `ajuste-continu-5-61b`, 3 000 exemples dont la moitié de rappel, graine torch 1, générateur à `--seed 1`, juge de non-oubli `non_oubli.py` contre `reference-non-oubli-5-58-1`) :
+**Commande de la nuit** (WSL, reprise du bras continu de `nuit-5-55.sh` : départ du modèle installé (dossier `continu-5-61b`), 3 000 exemples dont la moitié de rappel, graine torch 1, générateur à `--seed 1`, juge de non-oubli `non_oubli.py` contre `reference-non-oubli-5-58-1`) :
 
 ```bash
 cd ~/cassini-worktrees/5-55        # le worktree au commit des familles
-PARENT=~/cassini-entrainement/ajuste-continu-5-61b \
+PARENT=~/cassini-entrainement/continu-5-61b \
 NOM_CONTINU=continu-17-1 \
 bash training/entrainement/nuit-5-55.sh continu longueurs_par_zone,fusion_par_champ
 ```
