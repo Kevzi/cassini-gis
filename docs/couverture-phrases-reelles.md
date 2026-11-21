@@ -98,6 +98,18 @@ Les sept phrases non rendues par l'agent : CV05 (question au lieu de `terrain.sl
 
 Le ticket 10.17 reste ouvert : l'amorce dépasse 30 s. La barre n'est pas abaissée.
 
+### Mesure du garde-fou hors catalogue (2026-11-21, ticket 10.35)
+
+Même modèle `base-17-1` (non installé), même machine, avec le garde du noyau (`core/src/out_of_catalogue.rs`), sans ré-entraînement. Mesuré par `plan_reel` puis `couverture_reelle_reel`.
+
+| Barre | Avant | Après | Seuil | Verdict |
+|---|---|---|---|---|
+| Plans conformes (`plan_reel`) | 44/48 | 46/48 | 44/48 | tenue, avec marge |
+| Couverte et bien rendue par l'agent | 32/44 | 32/44 | 32/44 | tenue (les refus ne comptent pas dans ce chiffre) |
+| Réponses conformes, refus compris | 37/44 | 41/44 | — | +4 |
+
+CV39, CV40, CV41, CV42 (couverture), PL22 et S24 (`plan_reel`) rendent un refus, sans appel au modèle ; CV37 et CV43 restent refusées. Aucune phrase couverte des huit jeux d'essais n'est refusée par le garde (test `ai/tests/garde_hors_catalogue.rs`).
+
 ## Ordre recommandé des primitives restantes
 
 Proposition d'après la couverture, à valider par le propriétaire (étape humaine de l'entrée 8) ; `tickets.toml` n'est pas modifié. Commandes manquantes aux 10 phrases non couvertes : geocode (CV35), polygonize (CV37), label (CV39), clip (CV40), raster_calculator (CV42), heatmap (CV38), profile (CV41), watershed (CV36), radio_coverage (CV44), download (CV43, jamais : hors ligne).
