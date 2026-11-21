@@ -46,12 +46,31 @@ Les commandes de l'epic 10 sans aucune famille, relevées par décompte dans le 
 
 **Arithmétique de la barre, à lire avant la nuit.** Les 21 phrases déjà bien rendues, plus les neuf couvertes par le registre qu'une famille ou un ré-entraînement peut rattraper (CV03, CV04, CV05, CV06, CV09, CV11, CV17, CV19, CV26), font 30 sur 44 au mieux, soit une de moins que la barre de 31. CV35 n'est pas parmi ces neuf, et **on ne sait pas si elle figure parmi les 21 déjà bien rendues** : sa ligne « OK Question » date d'avant que son attendu devienne un plan (`geocode.ban`, sans famille), et le tableau la classe « non couverte » côté registre. Le plafond est donc de 29 (CV35 hors des 21) ou 30 (CV35 dedans), jamais 31 sans l'une des quatre phrases en notation E/N, que la décision 5 laisse hors du ticket. **Si la mesure d'après ré-entraînement donne 30, la barre est manquée : le rapport l'écrit, le ticket n'est pas clos, la barre n'est pas abaissée.** C'est la raison pour laquelle le propriétaire peut préférer lever le non-bloquant de CV14/CV18/CV28/CV29 (une famille de lecture de la notation « E/N ») avant la nuit.
 
+### `plan_reel` sur le modèle installé (2026-11-21)
+
+`continu-5-61b`, noyau gpu, prompt court : **40/48** plans conformes, 1 fausse question, 0 du garde-fou. Le plancher est 44/48 ; il manque 4. Huit échecs, par cause :
+
+| Phrases | Rendu | Cause | Rattrapable par la nuit ? |
+|---|---|---|---|
+| S15, S23 | refus « aucune commande ne calcule de statistiques sur un raster » ; plan invalide (`statistics_by_category` au lieu de `zonal_statistics`) | `raster.zonal_statistics` : famille postérieure à `continu-5-61b` | oui, la famille existe |
+| PL23 | refus « aucune commande ne trace de courbes de niveau » | `raster.contour` : idem | oui, la famille existe |
+| PL08 | `statistics_by_category` + `intersect` | `count_points_in_polygon` : idem | oui, la famille existe |
+| S24 | plan invalide (champ `viewshed` absent) au lieu du refus attendu | statistique de visibilité non offerte | peut-être |
+| PL04 | question « aucune valeur habitat… (valeurs : habitat, …) » | le modèle demande alors que la valeur est dans la liste | non sûr : défaut de réglage |
+| PL17 | bon plan en deux étapes, plus une troisième `intersect` en trop | étape parasite | non sûr |
+| PL22 | question sur les coordonnées au lieu du refus « bassin versant » | hors catalogue, garde-fou | non (ticket de garde-fou) |
+
+Les quatre premiers cas (S15, S23, PL23, PL08) suffisent à remonter à 44/48 s'ils sont rattrapés. À mesurer après la nuit, pas avant.
+
+**Piège de la mesure.** `CASSINI_TEST_MODEL` doit désigner le fichier `.modele.json` du dossier, pas le `.gguf` : un `.gguf` seul est lu au long prompt (22 800 jetons, contexte de 8 192 dépassé, 0/48 par `PromptTooLong`). La ligne `Modèle : … prompt : Short` en tête de sortie le confirme.
+
 ## Mesure après ré-entraînement (ticket 17)
 
 **État : à faire après la nuit, modèle `continu-17-1` (voir `docs/entrainement-du-modele.md`, « Ré-entraînement de 10.17 »).** Barres du ticket : couverte et bien rendue par l'agent au moins 31/44 (70 %), `plan_reel` au moins 44/48. Commandes, dans cet ordre (le chiffre de la première alimente la seconde) :
 
 ```powershell
-$env:CASSINI_TEST_MODEL = "C:\Users\kevin\cassini-modeles\continu-17-1\cassini-composition-4b-Q4_K_M.gguf"
+# le fichier .modele.json du dossier, pas le .gguf (sinon long prompt : PromptTooLong)
+$env:CASSINI_TEST_MODEL = "C:\Users\kevin\cassini-modeles\continu-17-1\cassini-composition-4b.modele.json"
 cargo test -p cassini-ai --features gpu --test plan_reel -- --ignored --nocapture      # ligne SCORE n/48
 $env:CASSINI_PLANS_CONFORMES = "<n>/48"
 $env:CASSINI_COUVERTURE_RAPPORT = "$PWD\couverture-17.md"
