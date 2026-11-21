@@ -39,6 +39,7 @@ use crate::commands::raster_reproject_work::REPROJECT_WORK;
 use crate::error::ErrorReport;
 use crate::exec::{Executor, Router};
 use crate::geojson::VECTOR_EXTENSIONS;
+use crate::plan_completion::TRANSFORM_POINT;
 use crate::raster_path::RASTER_EXTENSIONS;
 use crate::registry::{Registry, RegistryError, INVENTORY, ORDERS_FIELD, PROTOCOL_VERSION};
 use crate::style::spec::RESULT_RAMP_KIND;
@@ -608,6 +609,16 @@ impl<'a> Session<'a> {
         let Some(code) = crate::work_crs::work_epsg_for_dem(&dem_crs, &label, &inventory)? else {
             return Ok(());
         };
+        // Les points littéraux dans un autre système que `code` (un observateur WGS84 sur un MNT
+        // en degrés) sont convertis après la reprojection ; sans le geste, la commande répond
+        // comme avant et rien n'est dicté.
+        let foreign = crate::plan_completion::foreign_points(self.registry, id, params, code);
+        if !foreign.is_empty()
+            && (!self.gestures.contains(TRANSFORM_POINT)
+                || self.registry.spec(TRANSFORM_POINT).is_none())
+        {
+            return Ok(());
+        }
         let resampling = crate::commands::raster_reproject_work::resampling_for(id);
         let order = json!({ "raster": raw, "work_epsg": code, "resampling": resampling });
         self.call_step(REPROJECT_WORK, order, origin, plan_step)?;
@@ -616,6 +627,29 @@ impl<'a> Session<'a> {
         if let Value::Object(map) = params {
             map.insert(target, json!(format!("out:{reprojected}.1")));
             map.insert(name, json!(code));
+        }
+        // Une conversion par point, dans l'ordre des paramètres, juste après la reprojection :
+        // chacune une ligne du journal, que le rejeu rejoue ; la commande reçoit le point converti.
+        for site in foreign {
+            let order = json!({ "point": site.point, "target_epsg": code });
+            let result = self.call_step(TRANSFORM_POINT, order, origin, plan_step)?;
+            let converted = result
+                .get("point")
+                .filter(|p| p.get("epsg").and_then(Value::as_u64) == Some(u64::from(code)))
+                .cloned()
+                .ok_or_else(|| RegistryError::Delegated {
+                    code: "data.transform_failed".to_string(),
+                    message: format!(
+                        "La conversion d'un point n'a pas rendu un point en EPSG:{code} : la \
+                         commande « {id} » n'est pas lancée."
+                    ),
+                })?;
+            if let Some(slot) = params.get_mut(site.param.as_str()) {
+                match site.index {
+                    None => *slot = converted,
+                    Some(i) => slot[i] = converted,
+                }
+            }
         }
         Ok(())
     }
@@ -1313,7 +1347,13 @@ fn current_plan(
             return Vec::new();
         };
         let id = line.get("id").and_then(Value::as_str).unwrap_or_default();
-        let dictated = registry.spec(id).is_some_and(|spec| spec.dictated_by_core);
+        // La conversion d'un point dictée après la reprojection (ticket 33) n'est pas une étape du
+        // plan : elle porte la place de la commande qui la suit, comme la reprojection. Une
+        // conversion du plan, elle, porte sa propre place, jamais celle d'une ligne déjà reçue.
+        let dictated = registry.spec(id).is_some_and(|spec| spec.dictated_by_core)
+            || (id == TRANSFORM_POINT
+                && !lines.is_empty()
+                && line.get("plan_step").and_then(Value::as_u64) == Some(expected as u64 + 1));
         let found = line.get("plan_step").and_then(Value::as_u64);
         // Plan complet : seule la reprojection dictée avant l'étape 1, de ce plan, reste à lire.
         if expected == 0 {

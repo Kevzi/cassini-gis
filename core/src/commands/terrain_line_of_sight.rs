@@ -117,9 +117,13 @@ pub(crate) fn refraction<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TerrainLineOfSightParams {
-    /// Fichier MNT (GeoTIFF à une bande, système projeté en mètres), chemin relatif au projet
-    /// recopié de l'inventaire. DEM file path, relative to the project, copied from the inventory.
+    /// Fichier MNT (GeoTIFF à une bande, en mètres ou en degrés : le noyau reprojette un MNT en
+    /// degrés), chemin relatif au projet recopié de l'inventaire. DEM file path, relative to the project, copied from the inventory.
     pub dem: RasterPath,
+    /// Système en mètres du calcul, en code EPSG : fourni par le noyau d'après l'en-tête du MNT
+    /// (ticket 33), jamais par l'appelant. Absent pour un MNT déjà en mètres.
+    #[serde(default)]
+    pub work_epsg: Option<u32>,
     /// Position de l'observateur, dans le système du MNT.
     pub observer: Point,
     /// Position de la cible, dans le système du MNT.
@@ -460,6 +464,9 @@ impl Command for TerrainLineOfSight {
         .runs_in(RunsIn::Core)
         .cancellable(false)
         .path_params(&["dem"])
+        // Un MNT en degrés est reprojeté avant la commande, vers le système en mètres que choisit
+        // le noyau (`crate::work_crs`, ticket 33) ; le résultat garde ce système.
+        .work_crs_param("work_epsg", "dem")
         .example(serde_json::json!({
             "dem": "mnt-colline-2154.tif",
             "observer": {"x": 652030, "y": 6850250, "epsg": 2154},
@@ -488,6 +495,7 @@ impl Command for TerrainLineOfSight {
             "defaults_and_invalid_params",
             "two_runs_give_identical_results",
             "terrain_line_of_sight_runs_in_the_core_and_the_contract_accepts_it",
+            "terrain_line_of_sight_declares_its_work_crs",
         ])
     }
 
@@ -496,6 +504,7 @@ impl Command for TerrainLineOfSight {
         params: TerrainLineOfSightParams,
     ) -> Result<TerrainLineOfSightOutput, CommandFailure> {
         let dem = Dem::open(Path::new(params.dem.as_str())).map_err(CommandFailure::from)?;
+        crate::work_crs::check_dem_system(&dem, params.work_epsg)?;
         line_of_sight(&dem, &params)
     }
 }
@@ -523,6 +532,7 @@ mod tests {
     fn params(observer: Point, target: Point) -> TerrainLineOfSightParams {
         TerrainLineOfSightParams {
             dem: RasterPath(String::new()),
+            work_epsg: None,
             observer,
             target,
             observer_height: m(1.6),
@@ -816,6 +826,33 @@ mod tests {
         let b = call(p).unwrap();
         assert_eq!(a.to_string(), b.to_string());
         assert_eq!(a["visible"], false);
+    }
+
+    #[test]
+    fn terrain_line_of_sight_declares_its_work_crs() {
+        let registry = Registry::standard();
+        let spec = registry.spec("terrain.line_of_sight").unwrap();
+        assert_eq!(
+            spec.work_crs_param,
+            Some(("work_epsg".to_string(), "dem".to_string()))
+        );
+        // Le MNT se désigne par chemin : le système se lit dans son en-tête, pas dans l'inventaire.
+        assert!(spec.work_crs_on_raster());
+        let base = json!({"dem": "mnt.tif", "observer": {"x": 652030.0, "y": 6850250.0, "epsg": 2154}, "target": {"x": 652470.0, "y": 6850250.0, "epsg": 2154}});
+        let mut ok = base.clone();
+        ok["work_epsg"] = json!(32632);
+        assert!(registry.validate_params("terrain.line_of_sight", &ok).is_ok());
+        let mut bad = base.clone();
+        bad["work_epsg"] = json!(-1);
+        assert!(registry.validate_params("terrain.line_of_sight", &bad).is_err());
+        // Un MNT en mètres : le code du noyau est celui du MNT, ou la commande refuse.
+        let mut params = base;
+        params["dem"] = json!(fixture("mnt-colline-2154.tif").to_string_lossy());
+        params["work_epsg"] = json!(2154);
+        assert!(registry.call("terrain.line_of_sight", params.clone()).is_ok());
+        params["work_epsg"] = json!(32632);
+        let err = registry.call("terrain.line_of_sight", params).unwrap_err();
+        assert_eq!(err.code(), "dem.work_mismatch");
     }
 
     #[test]

@@ -6734,6 +6734,10 @@ struct DemQgis {
     orders: Orders,
     /// La reprojection échoue par une erreur de l'extension.
     failing: bool,
+    /// La conversion de point échoue (`data.unknown_crs`).
+    transform_failing: bool,
+    /// La conversion de point rend ce code EPSG au lieu de celui demandé.
+    wrong_point_epsg: Option<u64>,
 }
 
 impl DemQgis {
@@ -6742,6 +6746,8 @@ impl DemQgis {
             project: project.clone(),
             orders: Default::default(),
             failing: false,
+            transform_failing: false,
+            wrong_point_epsg: None,
         }
     }
 }
@@ -6781,6 +6787,24 @@ impl Executor for DemQgis {
                 .write_geotiff(Path::new(p["out"].as_str().unwrap()))
                 .unwrap();
                 Ok(json!({"file": p["out"], "epsg": work}))
+            }
+            // Conversion d'un point de test : un centième de degré depuis (5,8 °E ; 45,7 °N) vaut
+            // dix mètres depuis le coin du MNT de test en mètres.
+            "data.transform_point" => {
+                if self.transform_failing {
+                    return Err(RegistryError::Delegated {
+                        code: "data.unknown_crs".into(),
+                        message: "Système inconnu.".into(),
+                    });
+                }
+                let point = &p["point"];
+                let target = self
+                    .wrong_point_epsg
+                    .unwrap_or_else(|| p["target_epsg"].as_u64().unwrap());
+                Ok(json!({"point": {
+                    "x": 652000.0 + (point["x"].as_f64().unwrap() - 5.8) * 100.0,
+                    "y": 6850000.0 + (point["y"].as_f64().unwrap() - 45.7) * 100.0,
+                    "epsg": target}}))
             }
             other => panic!("commande inattendue : {other}"),
         }
@@ -7181,6 +7205,467 @@ fn a_step_reference_after_a_reprojected_step_designates_the_command_line() {
     assert_eq!(l[2]["id"], "raster.reclassify");
     assert_eq!(l[2]["params"]["raster"], "out:2.1");
     assert_eq!(l[1]["id"], "terrain.slope");
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+// -- Points et MNT en degrés : champ de vision, ligne de vue, points hauts (ticket 33, suite) ----
+
+const TRANSFORM: &str = "data.transform_point";
+
+fn point_gestures() -> Vec<String> {
+    let mut gestures = reproject_gestures();
+    gestures.push(TRANSFORM.to_string());
+    gestures
+}
+
+fn wgs(x: f64, y: f64) -> Value {
+    json!({"x": x, "y": y, "epsg": 4326})
+}
+
+fn ids_of(l: &[Value]) -> Vec<&str> {
+    l.iter().map(|x| x["id"].as_str().unwrap()).collect()
+}
+
+#[test]
+fn a_viewshed_on_a_dem_in_degrees_converts_the_wgs84_observer_after_the_reprojection() {
+    let (dir, project, _) = temp_project();
+    write_annecy_degrees(&dir, "mnt4326.tif");
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let qgis = DemQgis::new(&qgis_project);
+    let orders = qgis.orders.clone();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(qgis)
+        .with_gestures(point_gestures());
+    let out = s
+        .call(
+            "terrain.viewshed",
+            json!({"dem": "mnt4326.tif", "observer": wgs(5.9, 45.8),
+                   "radius": {"value": 40, "unit": "m"}}),
+        )
+        .unwrap();
+    assert!(out["visible_cells"].as_u64().unwrap() > 0);
+    let l = lines(&s);
+    // Reprojection, conversion du point, puis la commande, dans cet ordre.
+    assert_eq!(
+        ids_of(&l),
+        [REPROJECT, TRANSFORM, "terrain.viewshed"],
+        "{l:?}"
+    );
+    assert_eq!(l[1]["params"]["target_epsg"], 2154);
+    assert_eq!(l[1]["params"]["point"], wgs(5.9, 45.8));
+    assert_eq!(l[2]["params"]["dem"], "out:1.1");
+    assert_eq!(l[2]["params"]["work_epsg"], 2154);
+    assert_eq!(l[2]["params"]["observer"]["epsg"], 2154, "{}", l[2]);
+    assert_eq!(l[2]["params"]["observer"]["x"], 652010.0);
+    assert_eq!(l[2]["params"]["observer"]["y"], 6850010.0);
+    assert_eq!(l[0]["params"]["resampling"], "bilinear");
+    assert_eq!(sent(&orders), ["project.inventory", REPROJECT, TRANSFORM]);
+    // Le résultat est en mètres, dans le système de calcul.
+    let grid = crate::dem::Dem::open(Path::new(out["file"].as_str().unwrap())).unwrap();
+    assert_eq!(grid.epsg, 2154);
+    drop(s);
+    // Rejeu : les trois lignes, identiques, après un changement de système du projet.
+    qgis_project.borrow_mut().project = ("EPSG:4326".into(), "deg".into());
+    let replay_qgis = DemQgis::new(&qgis_project);
+    let replay_orders = replay_qgis.orders.clone();
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(
+            &Router::new(&registry).with_qgis(replay_qgis),
+            &mut HashSet::new(),
+        )
+        .unwrap();
+    assert_eq!(report, identical(3));
+    assert_eq!(sent(&replay_orders), [REPROJECT, TRANSFORM]);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_observer_already_in_the_work_system_adds_no_conversion() {
+    let (dir, project, _) = temp_project();
+    write_annecy_degrees(&dir, "mnt4326.tif");
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let qgis = DemQgis::new(&qgis_project);
+    let orders = qgis.orders.clone();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(qgis)
+        .with_gestures(point_gestures());
+    s.call(
+        "terrain.viewshed",
+        json!({"dem": "mnt4326.tif",
+               "observer": {"x": 652030.0, "y": 6850030.0, "epsg": 2154},
+               "radius": {"value": 40, "unit": "m"}}),
+    )
+    .unwrap();
+    let l = lines(&s);
+    assert_eq!(ids_of(&l), [REPROJECT, "terrain.viewshed"], "{l:?}");
+    assert_eq!(sent(&orders), ["project.inventory", REPROJECT]);
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_metric_dem_adds_no_step_for_the_four_commands() {
+    let (dir, project, _) = temp_project();
+    fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/mnt-colline-2154.tif"),
+        dir.join("mnt.tif"),
+    )
+    .unwrap();
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let qgis = DemQgis::new(&qgis_project);
+    let orders = qgis.orders.clone();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(qgis)
+        .with_gestures(point_gestures());
+    let o = json!({"x": 652030.0, "y": 6850250.0, "epsg": 2154});
+    let t = json!({"x": 652470.0, "y": 6850250.0, "epsg": 2154});
+    s.call(
+        "terrain.viewshed",
+        json!({"dem": "mnt.tif", "observer": o, "radius": {"value": 300, "unit": "m"},
+               "work_epsg": 32632}),
+    )
+    .unwrap();
+    s.call(
+        "terrain.viewshed_cumulative",
+        json!({"dem": "mnt.tif", "observers": [o], "radius": {"value": 300, "unit": "m"}}),
+    )
+    .unwrap();
+    s.call(
+        "terrain.line_of_sight",
+        json!({"dem": "mnt.tif", "observer": o, "target": t}),
+    )
+    .unwrap();
+    s.call("terrain.peaks", json!({"dem": "mnt.tif"})).unwrap();
+    let l = lines(&s);
+    assert_eq!(
+        ids_of(&l),
+        [
+            "terrain.viewshed",
+            "terrain.viewshed_cumulative",
+            "terrain.line_of_sight",
+            "terrain.peaks"
+        ],
+        "{l:?}"
+    );
+    for line in &l {
+        assert!(line["params"].get("work_epsg").is_none(), "{line}");
+        assert_eq!(line["params"]["dem"], "mnt.tif");
+    }
+    assert!(orders.borrow().is_empty(), "aucun ordre à QGIS");
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_cumulative_viewshed_converts_only_the_observers_of_another_system() {
+    let (dir, project, _) = temp_project();
+    write_annecy_degrees(&dir, "mnt4326.tif");
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(DemQgis::new(&qgis_project))
+        .with_gestures(point_gestures());
+    s.call(
+        "terrain.viewshed_cumulative",
+        json!({"dem": "mnt4326.tif",
+               "observers": [wgs(5.9, 45.8),
+                             {"x": 652030.0, "y": 6850030.0, "epsg": 2154},
+                             wgs(6.0, 45.9)],
+               "radius": {"value": 40, "unit": "m"}}),
+    )
+    .unwrap();
+    let l = lines(&s);
+    assert_eq!(
+        ids_of(&l),
+        [
+            REPROJECT,
+            TRANSFORM,
+            TRANSFORM,
+            "terrain.viewshed_cumulative"
+        ],
+        "{l:?}"
+    );
+    let observers = l[3]["params"]["observers"].as_array().unwrap();
+    assert_eq!(observers.len(), 3);
+    assert!(observers.iter().all(|o| o["epsg"] == 2154), "{observers:?}");
+    assert_eq!(observers[0]["x"], 652010.0);
+    assert_eq!(observers[1]["x"], 652030.0);
+    assert_eq!(observers[2]["x"], 652020.0);
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_line_of_sight_converts_both_points_and_peaks_come_back_in_the_work_system() {
+    let (dir, project, _) = temp_project();
+    write_annecy_degrees(&dir, "mnt4326.tif");
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(DemQgis::new(&qgis_project))
+        .with_gestures(point_gestures());
+    let out = s
+        .call(
+            "terrain.line_of_sight",
+            json!({"dem": "mnt4326.tif", "observer": wgs(5.9, 45.8), "target": wgs(5.85, 45.8)}),
+        )
+        .unwrap();
+    assert!(out.get("visible").is_some(), "{out}");
+    s.call("terrain.peaks", json!({"dem": "mnt4326.tif"}))
+        .unwrap();
+    let l = lines(&s);
+    assert_eq!(
+        ids_of(&l),
+        [
+            REPROJECT,
+            TRANSFORM,
+            TRANSFORM,
+            "terrain.line_of_sight",
+            REPROJECT,
+            "terrain.peaks"
+        ],
+        "{l:?}"
+    );
+    assert_eq!(l[3]["params"]["observer"]["epsg"], 2154);
+    assert_eq!(l[3]["params"]["target"]["epsg"], 2154);
+    assert_eq!(l[5]["params"]["work_epsg"], 2154);
+    assert_eq!(l[4]["params"]["resampling"], "bilinear");
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_observer_outside_the_reprojected_dem_is_refused_with_a_coherent_journal() {
+    let (dir, project, _) = temp_project();
+    write_annecy_degrees(&dir, "mnt4326.tif");
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(DemQgis::new(&qgis_project))
+        .with_gestures(point_gestures());
+    let err = s
+        .call(
+            "terrain.viewshed",
+            json!({"dem": "mnt4326.tif", "observer": wgs(7.0, 45.8)}),
+        )
+        .unwrap_err();
+    let l = lines(&s);
+    assert_eq!(
+        ids_of(&l),
+        [REPROJECT, TRANSFORM, "terrain.viewshed"],
+        "{l:?}"
+    );
+    assert!(l[0].get("error").is_none() && l[1].get("error").is_none());
+    assert_eq!(l[2]["error"], err.code.as_str());
+    assert_eq!(err.code, "terrain.outside_dem");
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn without_the_point_gesture_a_degrees_dem_keeps_its_old_refusal() {
+    let (dir, project, _) = temp_project();
+    write_annecy_degrees(&dir, "mnt4326.tif");
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let qgis = DemQgis::new(&qgis_project);
+    let orders = qgis.orders.clone();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(qgis)
+        .with_gestures(reproject_gestures());
+    let err = s
+        .call(
+            "terrain.viewshed",
+            json!({"dem": "mnt4326.tif", "observer": wgs(5.9, 45.8)}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "dem.not_projected");
+    // Rien n'est dicté : la reprojection n'a pas eu lieu en vain.
+    assert!(!sent(&orders).contains(&REPROJECT.to_string()));
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_dictated_conversion_keeps_the_place_of_its_command_in_a_plan() {
+    let (dir, project, _) = temp_project();
+    write_annecy_degrees(&dir, "mnt4326.tif");
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(DemQgis::new(&qgis_project))
+        .with_gestures(point_gestures());
+    s.call_in_plan(
+        "terrain.viewshed",
+        json!({"dem": "mnt4326.tif", "observer": wgs(5.9, 45.8),
+               "radius": {"value": 40, "unit": "m"}}),
+        1,
+    )
+    .unwrap();
+    s.call_in_plan("terrain.peaks", json!({"dem": "mnt4326.tif"}), 2)
+        .unwrap();
+    let l = lines(&s);
+    let places: Vec<u64> = l.iter().map(|x| x["plan_step"].as_u64().unwrap()).collect();
+    assert_eq!(places, [1, 1, 1, 2, 2], "{l:?}");
+    let current = current_plan(&registry, &s.journal_path(), 3, Some(1));
+    let steps: Vec<usize> = current.iter().map(|(n, _)| *n).collect();
+    assert_eq!(steps, [1, 2, 3, 4, 5], "{current:?}");
+    assert_eq!(s.command_step(), 5);
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_conversion_failing_after_the_reprojection_leaves_a_coherent_journal_and_replays() {
+    let (dir, project, _) = temp_project();
+    write_annecy_degrees(&dir, "mnt4326.tif");
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let mut qgis = DemQgis::new(&qgis_project);
+    qgis.transform_failing = true;
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(qgis)
+        .with_gestures(point_gestures());
+    let err = s
+        .call(
+            "terrain.viewshed",
+            json!({"dem": "mnt4326.tif", "observer": wgs(5.9, 45.8)}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "data.unknown_crs");
+    let l = lines(&s);
+    assert_eq!(ids_of(&l), [REPROJECT, TRANSFORM], "{l:?}");
+    assert!(l[0].get("error").is_none());
+    assert_eq!(l[1]["error"], "data.unknown_crs");
+    drop(s);
+    // Le rejeu ne panique pas : il rejoue ou s'arrête sur la ligne en échec.
+    let replay_qgis = DemQgis::new(&qgis_project);
+    let _ = Replay::load(&registry, &project).unwrap().run(
+        &Router::new(&registry).with_qgis(replay_qgis),
+        &mut HashSet::new(),
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_converted_point_in_the_wrong_system_is_refused_by_the_core() {
+    let (dir, project, _) = temp_project();
+    write_annecy_degrees(&dir, "mnt4326.tif");
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let mut qgis = DemQgis::new(&qgis_project);
+    qgis.wrong_point_epsg = Some(4326);
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(qgis)
+        .with_gestures(point_gestures());
+    let err = s
+        .call(
+            "terrain.viewshed",
+            json!({"dem": "mnt4326.tif", "observer": wgs(5.9, 45.8)}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "data.transform_failed");
+    assert!(err.message.contains("EPSG:2154"), "{}", err.message);
+    let l = lines(&s);
+    assert!(!ids_of(&l).contains(&"terrain.viewshed"), "{l:?}");
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn without_the_reprojection_gesture_the_four_commands_keep_the_old_refusal() {
+    let (dir, project, _) = temp_project();
+    write_annecy_degrees(&dir, "mnt4326.tif");
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(DemQgis::new(&qgis_project))
+        .with_gestures(vec![TRANSFORM.to_string(), "project.inventory".to_string()]);
+    let o = wgs(5.9, 45.8);
+    for (command, params) in [
+        (
+            "terrain.viewshed",
+            json!({"dem": "mnt4326.tif", "observer": o}),
+        ),
+        (
+            "terrain.viewshed_cumulative",
+            json!({"dem": "mnt4326.tif", "observers": [o]}),
+        ),
+        (
+            "terrain.line_of_sight",
+            json!({"dem": "mnt4326.tif", "observer": o, "target": o}),
+        ),
+        ("terrain.peaks", json!({"dem": "mnt4326.tif"})),
+    ] {
+        let err = s.call(command, params).unwrap_err();
+        assert_eq!(err.code, "dem.not_projected", "{command}");
+    }
+    assert!(!lines(&s).iter().any(|x| x["id"] == REPROJECT));
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn no_metric_system_refuses_before_any_order() {
+    let (dir, project, _) = temp_project();
+    // Étendue sur plus de deux fuseaux UTM, projet en degrés.
+    crate::dem::write_degrees_geotiff(&dir.join("large.tif"), (-10.0, 50.0), 1.0, (20, 10), 4326);
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    qgis_project.borrow_mut().project = ("EPSG:4326".into(), "deg".into());
+    let qgis = DemQgis::new(&qgis_project);
+    let orders = qgis.orders.clone();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(qgis)
+        .with_gestures(point_gestures());
+    let err = s
+        .call("terrain.peaks", json!({"dem": "large.tif"}))
+        .unwrap_err();
+    assert_eq!(err.code, "dem.not_projected");
+    assert!(lines(&s).is_empty());
+    assert_eq!(sent(&orders), ["project.inventory"]);
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_metric_dem_with_a_wgs84_point_is_still_refused() {
+    let (dir, project, _) = temp_project();
+    fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/mnt-colline-2154.tif"),
+        dir.join("mnt.tif"),
+    )
+    .unwrap();
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(DemQgis::new(&qgis_project))
+        .with_gestures(point_gestures());
+    let err = s
+        .call(
+            "terrain.viewshed",
+            json!({"dem": "mnt.tif", "observer": wgs(2.3, 48.7)}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "terrain.crs_mismatch");
     drop(s);
     let _ = fs::remove_dir_all(dir);
 }

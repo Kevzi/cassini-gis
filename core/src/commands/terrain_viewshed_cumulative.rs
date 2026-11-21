@@ -53,9 +53,13 @@ fn observers<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<Point>, D::Error> {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TerrainViewshedCumulativeParams {
-    /// Fichier MNT (GeoTIFF à une bande, système projeté en mètres), chemin relatif au projet
-    /// recopié de l'inventaire. DEM file path, relative to the project, copied from the inventory.
+    /// Fichier MNT (GeoTIFF à une bande, en mètres ou en degrés : le noyau reprojette un MNT en
+    /// degrés), chemin relatif au projet recopié de l'inventaire. DEM file path, relative to the project, copied from the inventory.
     pub dem: RasterPath,
+    /// Système en mètres du calcul, en code EPSG : fourni par le noyau d'après l'en-tête du MNT
+    /// (ticket 33), jamais par l'appelant. Absent pour un MNT déjà en mètres.
+    #[serde(default)]
+    pub work_epsg: Option<u32>,
     /// Positions des observateurs, de 1 à 32, dans le système du MNT.
     #[serde(deserialize_with = "observers")]
     #[schemars(length(min = 1, max = MAX_OBSERVERS))]
@@ -134,6 +138,7 @@ pub fn viewshed_cumulative(
     }
     let single = TerrainViewshedParams {
         dem: params.dem.clone(),
+        work_epsg: params.work_epsg,
         observer: params.observers[0],
         observer_height: params.observer_height,
         target_height: params.target_height,
@@ -222,6 +227,9 @@ impl Command for TerrainViewshedCumulative {
         .runs_in(RunsIn::Core)
         .cancellable(false)
         .path_params(&["dem"])
+        // Un MNT en degrés est reprojeté avant la commande, vers le système en mètres que choisit
+        // le noyau (`crate::work_crs`, ticket 33) ; le résultat garde ce système.
+        .work_crs_param("work_epsg", "dem")
         .output_params(&["out"])
         .output_ext(".tif")
         // Style dicté après l'ouverture du raster (bogue du fond noir, 2026-11-09).
@@ -255,6 +263,7 @@ impl Command for TerrainViewshedCumulative {
             "a_too_large_radius_writes_nothing",
             "two_runs_give_identical_bytes",
             "terrain_viewshed_cumulative_runs_in_the_core_and_the_contract_accepts_it",
+            "terrain_viewshed_cumulative_declares_its_work_crs",
         ])
     }
 
@@ -263,6 +272,7 @@ impl Command for TerrainViewshedCumulative {
         params: TerrainViewshedCumulativeParams,
     ) -> Result<TerrainViewshedCumulativeOutput, CommandFailure> {
         let dem = Dem::open(Path::new(params.dem.as_str())).map_err(CommandFailure::from)?;
+        crate::work_crs::check_dem_system(&dem, params.work_epsg)?;
         let (grid, stats) = viewshed_cumulative(&dem, &params)?;
         grid.write_geotiff(Path::new(&params.out))
             .map_err(CommandFailure::from)?;
@@ -301,6 +311,7 @@ mod tests {
     fn params(observers: Vec<Point>, radius_m: f64) -> TerrainViewshedCumulativeParams {
         TerrainViewshedCumulativeParams {
             dem: RasterPath(String::new()),
+            work_epsg: None,
             observers,
             observer_height: m(2.0),
             target_height: m(0.0),
@@ -318,6 +329,7 @@ mod tests {
     fn single(p: &TerrainViewshedCumulativeParams, o: Point) -> TerrainViewshedParams {
         TerrainViewshedParams {
             dem: RasterPath(String::new()),
+            work_epsg: None,
             observer: o,
             observer_height: p.observer_height,
             target_height: p.target_height,
@@ -639,6 +651,37 @@ mod tests {
         let written = Dem::open(&a).unwrap();
         let (grid, _) = viewshed_cumulative(&hill(), &params(west_east(), 1000.0)).unwrap();
         assert_eq!(written, grid);
+    }
+
+    #[test]
+    fn terrain_viewshed_cumulative_declares_its_work_crs() {
+        let registry = Registry::standard();
+        let spec = registry.spec("terrain.viewshed_cumulative").unwrap();
+        assert_eq!(
+            spec.work_crs_param,
+            Some(("work_epsg".to_string(), "dem".to_string()))
+        );
+        // Le MNT se désigne par chemin : le système se lit dans son en-tête, pas dans l'inventaire.
+        assert!(spec.work_crs_on_raster());
+        let base = json!({"dem": "mnt.tif", "observers": [{"x": 652030.0, "y": 6850250.0, "epsg": 2154}], "radius": {"value": 300, "unit": "m"}});
+        let mut ok = base.clone();
+        ok["work_epsg"] = json!(32632);
+        assert!(registry.validate_params("terrain.viewshed_cumulative", &ok).is_ok());
+        let mut bad = base.clone();
+        bad["work_epsg"] = json!(-1);
+        assert!(registry.validate_params("terrain.viewshed_cumulative", &bad).is_err());
+        // Un MNT en mètres : le code du noyau est celui du MNT, ou la commande refuse.
+        let dir = Scratch::new("systeme-calcul");
+        let mut params = base;
+        params["dem"] = json!(fixture("mnt-colline-2154.tif").to_string_lossy());
+        params["out"] = json!(dir.join("a.out").to_string_lossy());
+        params["work_epsg"] = json!(2154);
+        assert!(registry.call("terrain.viewshed_cumulative", params.clone()).is_ok());
+        params["work_epsg"] = json!(32632);
+        params["out"] = json!(dir.join("b.out").to_string_lossy());
+        let err = registry.call("terrain.viewshed_cumulative", params).unwrap_err();
+        assert_eq!(err.code(), "dem.work_mismatch");
+        assert!(!dir.join("b.out").exists());
     }
 
     #[test]

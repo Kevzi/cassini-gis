@@ -55,9 +55,13 @@ pub(crate) fn given_radius<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Opt
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TerrainViewshedParams {
-    /// Fichier MNT (GeoTIFF à une bande, système projeté en mètres), chemin relatif au projet
-    /// recopié de l'inventaire. DEM file path, relative to the project, copied from the inventory.
+    /// Fichier MNT (GeoTIFF à une bande, en mètres ou en degrés : le noyau reprojette un MNT en
+    /// degrés), chemin relatif au projet recopié de l'inventaire. DEM file path, relative to the project, copied from the inventory.
     pub dem: RasterPath,
+    /// Système en mètres du calcul, en code EPSG : fourni par le noyau d'après l'en-tête du MNT
+    /// (ticket 33), jamais par l'appelant. Absent pour un MNT déjà en mètres.
+    #[serde(default)]
+    pub work_epsg: Option<u32>,
     /// Position de l'observateur, dans le système du MNT.
     pub observer: Point,
     /// Hauteur de l'œil au-dessus du sol, avec son unité (1,6 m par défaut).
@@ -269,6 +273,9 @@ impl Command for TerrainViewshed {
         .runs_in(RunsIn::Core)
         .cancellable(false)
         .path_params(&["dem"])
+        // Un MNT en degrés est reprojeté avant la commande, vers le système en mètres que choisit
+        // le noyau (`crate::work_crs`, ticket 33) ; le résultat garde ce système.
+        .work_crs_param("work_epsg", "dem")
         .output_params(&["out"])
         .output_ext(".tif")
         // Style dicté après l'ouverture du raster (bogue du fond noir, 2026-11-09).
@@ -298,11 +305,13 @@ impl Command for TerrainViewshed {
             "defaults_and_invalid_params",
             "two_runs_give_identical_bytes",
             "terrain_viewshed_runs_in_the_core_and_the_contract_accepts_it",
+            "terrain_viewshed_declares_its_work_crs",
         ])
     }
 
     fn run(&self, params: TerrainViewshedParams) -> Result<TerrainViewshedOutput, CommandFailure> {
         let dem = Dem::open(Path::new(params.dem.as_str())).map_err(CommandFailure::from)?;
+        crate::work_crs::check_dem_system(&dem, params.work_epsg)?;
         let (grid, stats) = viewshed(&dem, &params)?;
         grid.write_geotiff(Path::new(&params.out))
             .map_err(CommandFailure::from)?;
@@ -339,6 +348,7 @@ mod tests {
     fn params(observer: Point, radius_m: f64) -> TerrainViewshedParams {
         TerrainViewshedParams {
             dem: RasterPath(String::new()),
+            work_epsg: None,
             observer,
             observer_height: m(1.6),
             target_height: m(0.0),
@@ -406,6 +416,7 @@ mod tests {
             let v = grid.value(col, row).unwrap();
             let los = TerrainLineOfSightParams {
                 dem: RasterPath(String::new()),
+                work_epsg: None,
                 observer: p.observer,
                 target: cell_centre(&dem, col, row),
                 observer_height: p.observer_height,
@@ -426,6 +437,7 @@ mod tests {
             let (col, row) = (k % 50, k / 50);
             let los = TerrainLineOfSightParams {
                 dem: RasterPath(String::new()),
+                work_epsg: None,
                 observer: p.observer,
                 target: cell_centre(&dem, col, row),
                 observer_height: p.observer_height,
@@ -443,6 +455,7 @@ mod tests {
     fn los_verdict(dem: &Dem, p: &TerrainViewshedParams, col: u32, row: u32) -> bool {
         let los = TerrainLineOfSightParams {
             dem: RasterPath(String::new()),
+            work_epsg: None,
             observer: p.observer,
             target: cell_centre(dem, col, row),
             observer_height: p.observer_height,
@@ -805,6 +818,37 @@ mod tests {
         .unwrap();
         assert_eq!(written, grid);
         assert_eq!(at(&written, &hill(), 3, 25), Some(1.0));
+    }
+
+    #[test]
+    fn terrain_viewshed_declares_its_work_crs() {
+        let registry = Registry::standard();
+        let spec = registry.spec("terrain.viewshed").unwrap();
+        assert_eq!(
+            spec.work_crs_param,
+            Some(("work_epsg".to_string(), "dem".to_string()))
+        );
+        // Le MNT se désigne par chemin : le système se lit dans son en-tête, pas dans l'inventaire.
+        assert!(spec.work_crs_on_raster());
+        let base = json!({"dem": "mnt.tif", "observer": {"x": 652030.0, "y": 6850250.0, "epsg": 2154}, "radius": {"value": 300, "unit": "m"}});
+        let mut ok = base.clone();
+        ok["work_epsg"] = json!(32632);
+        assert!(registry.validate_params("terrain.viewshed", &ok).is_ok());
+        let mut bad = base.clone();
+        bad["work_epsg"] = json!(-1);
+        assert!(registry.validate_params("terrain.viewshed", &bad).is_err());
+        // Un MNT en mètres : le code du noyau est celui du MNT, ou la commande refuse.
+        let dir = Scratch::new("systeme-calcul");
+        let mut params = base;
+        params["dem"] = json!(fixture("mnt-colline-2154.tif").to_string_lossy());
+        params["out"] = json!(dir.join("a.out").to_string_lossy());
+        params["work_epsg"] = json!(2154);
+        assert!(registry.call("terrain.viewshed", params.clone()).is_ok());
+        params["work_epsg"] = json!(32632);
+        params["out"] = json!(dir.join("b.out").to_string_lossy());
+        let err = registry.call("terrain.viewshed", params).unwrap_err();
+        assert_eq!(err.code(), "dem.work_mismatch");
+        assert!(!dir.join("b.out").exists());
     }
 
     #[test]

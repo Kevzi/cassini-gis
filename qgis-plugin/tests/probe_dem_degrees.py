@@ -18,6 +18,10 @@ qu'une copie entière (Int16) pour les classes.
    la pente, et la pente égale celle du MNT reprojeté à la main ; projet fermé et rouvert, rejeu du
    journal : `identical: true`. Le rééchantillonnage vient du noyau (`resampling`) : un MNT d'altitudes
    entières (Int16) reprojeté en « bilinear » égale le gdalwarp bilinéaire fait à la main.
+3. Ticket 33c, suite : `terrain.viewshed`, `terrain.viewshed_cumulative`, `terrain.line_of_sight` et
+   `terrain.peaks` sur le MNT en degrés, avec des points WGS84 — le noyau dicte la reprojection puis
+   `data.transform_point` pour chaque point, et le résultat égale celui du MNT reprojeté à la main avec
+   les points convertis à la main (Lambert-93).
 """
 
 import hashlib
@@ -33,7 +37,13 @@ ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "qgis-plugin", "cassini_qgis"))
 FIXTURE = os.path.join(ROOT, "fixtures", "mnt-colline-2154.tif")
 
-from qgis.core import QgsApplication, QgsCoordinateReferenceSystem, QgsProject  # noqa: E402
+from qgis.core import (  # noqa: E402
+    QgsApplication,
+    QgsCoordinateReferenceSystem,
+    QgsCoordinateTransform,
+    QgsPointXY,
+    QgsProject,
+)
 from qgis.PyQt.QtCore import QCoreApplication, QProcess, QTimer  # noqa: E402
 
 app = QgsApplication([], False)
@@ -250,9 +260,42 @@ def new_client(on_event):
 
 
 results = []
+
+
+def wgs84_of(x, y):
+    """Le point Lambert-93 (x, y) en WGS84, fait à la main (QgsCoordinateTransform)."""
+    tr = QgsCoordinateTransform(QgsCoordinateReferenceSystem("EPSG:2154"),
+                                QgsCoordinateReferenceSystem("EPSG:4326"), project)
+    p = tr.transform(QgsPointXY(x, y))
+    return {"x": p.x(), "y": p.y(), "epsg": 4326}
+
+
+def l93(x, y):
+    return {"x": x, "y": y, "epsg": 2154}
+
+
+RADIUS = {"value": 300, "unit": "m"}
+OBS = (652250.0, 6850250.0)
+OBS2 = (652100.0, 6850100.0)
+TARGET = (652400.0, 6850250.0)
+DEG, MAIN = "mnt/colline-4326.tif", "mnt/main-2154.tif"
 STEPS = [
-    ("terrain.slope", {"dem": "mnt/colline-4326.tif", "unit": "degrees"}),
-    ("terrain.slope", {"dem": "mnt/main-2154.tif", "unit": "degrees"}),
+    ("terrain.slope", {"dem": DEG, "unit": "degrees"}),
+    ("terrain.slope", {"dem": MAIN, "unit": "degrees"}),
+    ("terrain.viewshed", {"dem": DEG, "observer": wgs84_of(*OBS), "radius": RADIUS}),
+    ("terrain.viewshed", {"dem": MAIN, "observer": l93(*OBS), "radius": RADIUS}),
+    ("terrain.viewshed_cumulative",
+     {"dem": DEG, "observers": [wgs84_of(*OBS), wgs84_of(*OBS2)], "radius": RADIUS}),
+    ("terrain.viewshed_cumulative",
+     {"dem": MAIN, "observers": [l93(*OBS), l93(*OBS2)], "radius": RADIUS}),
+    ("terrain.line_of_sight",
+     {"dem": DEG, "observer": wgs84_of(*OBS), "target": wgs84_of(*TARGET),
+      "observer_height": {"value": 2, "unit": "m"}, "target_height": {"value": 2, "unit": "m"}}),
+    ("terrain.line_of_sight",
+     {"dem": MAIN, "observer": l93(*OBS), "target": l93(*TARGET),
+      "observer_height": {"value": 2, "unit": "m"}, "target_height": {"value": 2, "unit": "m"}}),
+    ("terrain.peaks", {"dem": DEG, "min_prominence": {"value": 5, "unit": "m"}}),
+    ("terrain.peaks", {"dem": MAIN, "min_prominence": {"value": 5, "unit": "m"}}),
 ]
 
 
@@ -276,7 +319,7 @@ def on_first(kind, payload):
 
 
 def between():
-    slope_deg, slope_hand = results
+    slope_deg, slope_hand = results[0], results[1]
     rows = read_journal()
     ids = [r["id"] for r in rows]
     print("       journal :", ids)
@@ -294,11 +337,69 @@ def between():
     gap = max((abs(x - y) for x, y in pairs if x != -9999 and y != -9999), default=0)
     check("pente : égale à celle du MNT reprojeté à la main (< 1e-3)", gap < 1e-3, gap)
     print("       pente : écart max %.2e" % gap)
+    check_points(rows)
     state["journal"] = rows
     state["client"].stop()
     project.clear()
     check("le projet rouvre", project.read(project_file))
     new_client(on_second)
+
+
+def same_raster(label, a, b):
+    mine, hand = grid(a["file"]), grid(b["file"])
+    check("%s : en EPSG:2154" % label, mine[7] == "2154", mine[7])
+    check("%s : même grille que celle du MNT reprojeté à la main" % label, mine[:3] == hand[:3],
+          (mine[:3], hand[:3]))
+    pairs = list(zip(flat(mine[6]), flat(hand[6])))
+    check("%s : mêmes cellules sans donnée" % label, all((x == -9999) == (y == -9999) for x, y in pairs))
+    gap = max((abs(x - y) for x, y in pairs if x != -9999 and y != -9999), default=0)
+    check("%s : égal à celui du MNT reprojeté à la main (< 1e-3)" % label, gap < 1e-3, gap)
+    return pairs
+
+
+def check_points(rows):
+    """Champ de vision, cumulé, ligne de vue, points hauts : degrés + points WGS84 contre la main."""
+    ids = [r["id"] for r in rows]
+    for command, count in (("terrain.viewshed", 1), ("terrain.viewshed_cumulative", 2), ("terrain.line_of_sight", 2)):
+        at = [i for i, r in enumerate(rows) if r["id"] == command and r["params"].get("work_epsg") == 2154]
+        check("%s : une ligne dictée avec work_epsg 2154" % command, len(at) == 1, ids)
+        if len(at) != 1:
+            continue
+        i = at[0]
+        before = ids[max(0, i - 1 - count):i]
+        check("%s : reprojection puis %d conversion(s) de point juste avant" % (command, count),
+              before == ["raster.reproject_work"] + ["data.transform_point"] * count, before)
+        converts = [r for r in rows[i - count:i]]
+        check("%s : conversions vers EPSG:2154" % command,
+              all(r["params"].get("target_epsg") == 2154 for r in converts))
+    peaks_at = [r for r in rows if r["id"] == "terrain.peaks" and r["params"].get("work_epsg") == 2154]
+    check("terrain.peaks : une ligne dictée avec work_epsg 2154", len(peaks_at) == 1)
+    transforms = [r for r in rows if r["id"] == "data.transform_point"]
+    check("cinq points WGS84 convertis en tout (1 + 2 + 2)", len(transforms) == 5, len(transforms))
+    # métrique : aucun point converti, aucune reprojection pour les calculs sur le MNT à la main
+    check("MNT métrique : une seule reprojection par calcul en degrés",
+          ids.count("raster.reproject_work") == 5, ids.count("raster.reproject_work"))
+    same_raster("champ de vision", results[2], results[3])
+    same_raster("champ de vision cumulé", results[4], results[5])
+    seen = results[2]
+    check("champ de vision : des cellules visibles", seen.get("visible_cells", 0) > 0, seen)
+    a, b = results[6], results[7]
+    check("ligne de vue : même verdict qu'à la main", a["visible"] == b["visible"], (a["visible"], b["visible"]))
+    check("ligne de vue : même distance (< 1e-3 m)", abs(a["distance"] - b["distance"]) < 1e-3,
+          (a["distance"], b["distance"]))
+    oa, ob = a.get("obstruction"), b.get("obstruction")
+    check("ligne de vue : même obstacle, en EPSG:2154",
+          (oa is None and ob is None)
+          or (oa is not None and ob is not None and oa["epsg"] == 2154
+              and abs(oa["x"] - ob["x"]) < 1e-3 and abs(oa["y"] - ob["y"]) < 1e-3), (oa, ob))
+    pa, pb = results[8], results[9]
+    check("points hauts : au moins un sommet", pa["feature_count"] >= 1, pa)
+    check("points hauts : mêmes sommets qu'à la main, en EPSG:2154",
+          pa["feature_count"] == pb["feature_count"]
+          and all(x["point"]["epsg"] == 2154 and abs(x["point"]["x"] - y["point"]["x"]) < 1e-3
+                  and abs(x["point"]["y"] - y["point"]["y"]) < 1e-3
+                  and abs(x["elevation"] - y["elevation"]) < 1e-3
+                  for x, y in zip(pa["peaks"], pb["peaks"])), (pa["peaks"], pb["peaks"]))
 
 
 def on_second(kind, payload):
@@ -320,7 +421,7 @@ if state["client"] is not None:
     state["client"].stop()
 for path, digest in originals.items():
     check("original toujours inchangé : %s" % os.path.basename(path), sha256(path) == digest)
-ok = len(checks) >= 20 and all(v for _, v in checks)
+ok = len(checks) >= 40 and all(v for _, v in checks)
 project.clear()
 shutil.rmtree(work, ignore_errors=True)
 print("RÉSULTAT :", "OK" if ok else "ÉCHEC")

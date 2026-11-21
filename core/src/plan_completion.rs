@@ -127,6 +127,39 @@ fn grid_of(
     found
 }
 
+/// Un point littéral d'une commande du noyau dont le système n'est pas `epsg`, tel que le noyau le
+/// convertit à l'exécution (ticket 33, MNT en degrés) : le nom du paramètre, son rang dans un
+/// tableau de `Point` s'il y en a un, et le point.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ForeignPoint {
+    pub param: String,
+    pub index: Option<usize>,
+    pub point: Value,
+}
+
+/// Les points littéraux de `params` (commande `command`) dont le système n'est pas `epsg`, dans
+/// l'ordre de [`sites_to_convert`]. Utilisé à l'exécution par la session, juste après la
+/// reprojection dictée d'un MNT en degrés.
+pub(crate) fn foreign_points(
+    registry: &Registry,
+    command: &str,
+    params: &Value,
+    epsg: u32,
+) -> Vec<ForeignPoint> {
+    let call = PlannedCall {
+        command: command.to_string(),
+        params: params.clone(),
+    };
+    sites_to_convert(registry, &call, epsg)
+        .into_iter()
+        .map(|s| ForeignPoint {
+            param: s.param,
+            index: s.index,
+            point: s.point,
+        })
+        .collect()
+}
+
 /// Les points littéraux de l'étape, en paramètre `Point` ou dans un tableau de `Point`, dont le
 /// système n'est pas `epsg` : dans l'ordre alphabétique des noms de paramètres, puis dans celui
 /// des éléments. Seulement pour une

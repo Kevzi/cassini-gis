@@ -268,6 +268,9 @@ pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<V
         let session = state.session.as_ref();
         // Le système du raster est lu dans l'en-tête du GeoTIFF, par la règle de chemin d'un
         // appel (AD-9, AD-20) ; illisible ou introuvable, il est inconnu et rien n'est ajouté.
+        // Un MNT en degrés est inconnu ici (`epsg_of` le refuse) : rien n'est converti à la
+        // proposition, le noyau convertit les points à l'exécution, vers le système de calcul qu'il
+        // choisit après la reprojection dictée (ticket 33).
         let raster_epsg = |raw: &str| {
             session
                 .and_then(|s| s.input_path(raw))

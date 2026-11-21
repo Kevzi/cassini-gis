@@ -170,6 +170,14 @@ mod tests {
         for command in ["terrain.slope", "terrain.aspect", "terrain.hillshade"] {
             assert_eq!(resampling_for(command), Resampling::Bilinear, "{command}");
         }
+        for command in [
+            "terrain.viewshed",
+            "terrain.viewshed_cumulative",
+            "terrain.line_of_sight",
+            "terrain.peaks",
+        ] {
+            assert_eq!(resampling_for(command), Resampling::Bilinear, "{command}");
+        }
         assert_eq!(resampling_for("raster.reclassify"), Resampling::Nearest);
         let registry = Registry::standard();
         let spec = registry.spec(REPROJECT_WORK).unwrap();

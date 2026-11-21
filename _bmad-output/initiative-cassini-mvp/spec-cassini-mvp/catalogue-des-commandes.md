@@ -844,7 +844,8 @@ valide (`terrain.no_elevation`) ; rayon d'au plus 500 cellules (`terrain.viewshe
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
-| `dem` | `RasterPath` | oui | GeoTIFF une bande, projeté en mètres | MNT : chemin relatif au projet, ou `step:k`. |
+| `dem` | `RasterPath` | oui | GeoTIFF une bande, en mètres ou en degrés (un MNT en degrés est reprojeté par le noyau) | MNT : chemin relatif au projet, ou `step:k`. |
+| `work_epsg` | entier | non | code EPSG | Fourni par le noyau (ticket 33), pour un MNT en degrés seulement, comme `terrain.slope`. |
 | `observer` | `Point` | oui | système du MNT | Position de l'observateur. |
 | `observer_height` | `Height` | non | défaut 1,6 m | Hauteur de l'œil au-dessus du sol. |
 | `target_height` | `Height` | non | défaut 0 m | Hauteur des cibles au-dessus du sol. |
@@ -860,11 +861,14 @@ valide (`terrain.no_elevation`) ; rayon d'au plus 500 cellules (`terrain.viewshe
 | `hidden_cells` | entier | Cellules du rayon masquées. |
 | `nodata_cells` | entier | Cellules sans donnée. |
 
-Dans un plan, un observateur d'un autre système que le MNT est converti par une étape `data.transform_point` que le noyau ajoute avant de montrer le plan (amendement d'AD-19, 2026-11-08) ; `terrain.crs_mismatch` reste l'erreur d'un appel direct.
+Dans un plan, pour un MNT en mètres, un observateur d'un autre système que le MNT est converti par une étape `data.transform_point` que le noyau ajoute avant de montrer le plan (amendement d'AD-19, 2026-11-08) ; pour un MNT en degrés, la conversion se fait à l'exécution (voir ci-dessous) ; `terrain.crs_mismatch` reste l'erreur d'un appel direct.
+
+MNT en degrés (ticket 33, suite) : le noyau le fait reprojeter avant la commande, comme pour `terrain.slope` (`raster.reproject_work`, bilinéaire), puis convertit en mètres, par une étape `data.transform_point` dictée juste après la reprojection, tout point littéral (l'observateur) dans un autre système que `work_epsg`. Le champ de vision est écrit dans `work_epsg`, en mètres, sans reprojection en retour. Un MNT en mètres, et un point déjà dans le bon système : résultat inchangé, aucune étape ajoutée. Sans le geste `data.transform_point`, rien n'est dicté et la commande répond `dem.not_projected` comme avant.
 
 ```json fiche
 {"id": "terrain.viewshed", "status": "faite", "runs_in": "core", "dictated_by_core": false,
  "params": {"dem": {"type": "RasterPath", "required": true},
+            "work_epsg": {"type": "integer", "required": false},
             "observer": {"type": "Point", "required": true},
             "observer_height": {"type": "Height", "required": false},
             "target_height": {"type": "Height", "required": false},
@@ -881,7 +885,8 @@ Ligne de vue entre deux points sur un MNT. Mêmes erreurs que `terrain.viewshed`
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
-| `dem` | `RasterPath` | oui | GeoTIFF une bande, projeté en mètres | MNT : chemin relatif au projet, ou `step:k`. |
+| `dem` | `RasterPath` | oui | GeoTIFF une bande, en mètres ou en degrés (un MNT en degrés est reprojeté par le noyau) | MNT : chemin relatif au projet, ou `step:k`. |
+| `work_epsg` | entier | non | code EPSG | Fourni par le noyau (ticket 33), pour un MNT en degrés seulement, comme `terrain.slope`. |
 | `observer` | `Point` | oui | système du MNT | Observateur. |
 | `target` | `Point` | oui | système du MNT | Cible. |
 | `observer_height` | `Height` | non | défaut 1,6 m | Hauteur de l'œil. |
@@ -900,11 +905,14 @@ Ligne de vue entre deux points sur un MNT. Mêmes erreurs que `terrain.viewshed`
 | `nodata_samples` | entier | Échantillons sans altitude. |
 | `unit` | chaîne | Toujours `m`. |
 
-Dans un plan, un observateur ou une cible d'un autre système que le MNT est converti par une étape `data.transform_point` que le noyau ajoute avant de montrer le plan (amendement d'AD-19, 2026-11-08) ; `terrain.crs_mismatch` reste l'erreur d'un appel direct.
+Dans un plan, pour un MNT en mètres, un observateur ou une cible d'un autre système que le MNT est converti par une étape `data.transform_point` que le noyau ajoute avant de montrer le plan (amendement d'AD-19, 2026-11-08) ; pour un MNT en degrés, la conversion se fait à l'exécution (voir ci-dessous) ; `terrain.crs_mismatch` reste l'erreur d'un appel direct.
+
+MNT en degrés (ticket 33, suite) : le noyau le fait reprojeter avant la commande, comme pour `terrain.slope` (`raster.reproject_work`, bilinéaire), puis convertit en mètres, par une étape `data.transform_point` dictée juste après la reprojection, chacun des deux points littéraux (observateur, cible) dans un autre système que `work_epsg`. Le premier obstacle (`obstruction`) est rendu dans `work_epsg`, en mètres. Un MNT en mètres, et un point déjà dans le bon système : résultat inchangé, aucune étape ajoutée. Sans le geste `data.transform_point`, rien n'est dicté et la commande répond `dem.not_projected` comme avant.
 
 ```json fiche
 {"id": "terrain.line_of_sight", "status": "faite", "runs_in": "core", "dictated_by_core": false,
  "params": {"dem": {"type": "RasterPath", "required": true},
+            "work_epsg": {"type": "integer", "required": false},
             "observer": {"type": "Point", "required": true},
             "target": {"type": "Point", "required": true},
             "observer_height": {"type": "Height", "required": false},
@@ -1202,7 +1210,7 @@ point WGS84 ou UTM au système d'un MNT, ou un point Lambert-93 à la géodésie
 |---|---|---|
 | `point` | `Point` | Point reprojeté, `epsg` égal à `target_epsg`. |
 
-Même code source et cible : le point est rendu tel quel. La reprojection est celle de QGIS
+Même code source et cible : le point est rendu tel quel. Le noyau l'émet aussi hors des plans : pour un MNT en degrés, il la dicte lui-même à l'exécution, juste après `raster.reproject_work`, pour chaque point littéral d'un autre système que `work_epsg` (journalisée et rejouée telle quelle). La reprojection est celle de QGIS
 (`QgsCoordinateTransform`, contexte de transformation du projet), jamais du noyau ; aucune
 couche n'est créée, aucun fichier écrit. Livrée par l'entrée 4 de l'epic 11
 (`core/src/commands/data_transform_point.rs`, geste dédié `qgis-plugin/cassini_qgis/point_transform.py`).
@@ -1289,7 +1297,8 @@ d'observateurs bornée par le schéma (AD-8).
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
-| `dem` | `RasterPath` | oui | GeoTIFF une bande, projeté en mètres | MNT : chemin relatif au projet, ou `step:k`. |
+| `dem` | `RasterPath` | oui | GeoTIFF une bande, en mètres ou en degrés (un MNT en degrés est reprojeté par le noyau) | MNT : chemin relatif au projet, ou `step:k`. |
+| `work_epsg` | entier | non | code EPSG | Fourni par le noyau (ticket 33), pour un MNT en degrés seulement, comme `terrain.slope`. |
 | `observers` | liste de `Point` | oui | de 1 à 32, système du MNT | Observateurs. |
 | `observer_height` | `Height` | non | défaut 1,6 m | Hauteur de l'œil, pour chacun. |
 | `target_height` | `Height` | non | défaut 0 m | Hauteur des cibles. |
@@ -1314,11 +1323,14 @@ observateurs sont contrôlés avant que rien ne soit écrit. Calcul non annulabl
 5 s au pire par observateur au rayon maximal, soit environ 2 min 30 s pour 32 (décision du
 propriétaire, 2026-11-06 : gardé tel quel, et dit). Livrée par l'entrée 7 de l'epic 11 (`core/src/commands/terrain_viewshed_cumulative.rs`).
 
-Dans un plan, chaque observateur d'un autre système que le MNT est converti par une étape `data.transform_point` que le noyau ajoute avant de montrer le plan, la liste recevant `step:k.point` à sa place (amendement d'AD-19, 2026-11-08) ; `terrain.crs_mismatch` reste l'erreur d'un appel direct.
+Dans un plan, pour un MNT en mètres, chaque observateur d'un autre système que le MNT est converti par une étape `data.transform_point` que le noyau ajoute avant de montrer le plan (pour un MNT en degrés, la conversion se fait à l'exécution, voir ci-dessous), la liste recevant `step:k.point` à sa place (amendement d'AD-19, 2026-11-08) ; `terrain.crs_mismatch` reste l'erreur d'un appel direct.
+
+MNT en degrés (ticket 33, suite) : le noyau le fait reprojeter avant la commande, comme pour `terrain.slope` (`raster.reproject_work`, bilinéaire), puis convertit en mètres, par une étape `data.transform_point` dictée juste après la reprojection, chaque observateur littéral de la liste dans un autre système que `work_epsg`. Le champ de vision cumulé est écrit dans `work_epsg`, en mètres, sans reprojection en retour. Un MNT en mètres, et un point déjà dans le bon système : résultat inchangé, aucune étape ajoutée. Sans le geste `data.transform_point`, rien n'est dicté et la commande répond `dem.not_projected` comme avant.
 
 ```json fiche
 {"id": "terrain.viewshed_cumulative", "status": "faite", "runs_in": "core", "dictated_by_core": false,
  "params": {"dem": {"type": "RasterPath", "required": true},
+            "work_epsg": {"type": "integer", "required": false},
             "observers": {"type": "array", "required": true, "items": "Point"},
             "observer_height": {"type": "Height", "required": false},
             "target_height": {"type": "Height", "required": false},
@@ -1340,7 +1352,8 @@ pour le plus haut), `elevation` et `prominence` (nombres, en mètres).
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
-| `dem` | `RasterPath` | oui | GeoTIFF une bande, projeté en mètres | MNT : chemin relatif au projet, ou `step:k`. |
+| `dem` | `RasterPath` | oui | GeoTIFF une bande, en mètres ou en degrés (un MNT en degrés est reprojeté par le noyau) | MNT : chemin relatif au projet, ou `step:k`. |
+| `work_epsg` | entier | non | code EPSG | Fourni par le noyau (ticket 33), pour un MNT en degrés seulement, comme `terrain.slope`. |
 | `min_prominence` | `Height` | non | défaut 10 m | Proéminence minimale. |
 | `min_distance` | `Distance` | non | défaut 100 m | Écart horizontal minimal entre deux sommets gardés. |
 | `max_count` | entier | non | 1 à 100, défaut 20 | Nombre maximal de sommets écrits. |
@@ -1366,9 +1379,12 @@ une hauteur négative ou une distance nulle sont refusés (`registry.invalid_par
 non annulable : au pire environ 15 octets par cellule en plus du MNT, soit environ 3,7 Gio
 de plus et de l'ordre d'une à deux minutes au plafond de 1 Gio. Livrée par l'entrée 15 de l'epic 11 (`core/src/commands/terrain_peaks.rs`).
 
+MNT en degrés (ticket 33, suite) : le noyau le fait reprojeter avant la commande, comme pour `terrain.slope` (`raster.reproject_work`, bilinéaire). Les sommets (GeoJSON et `peaks`) sont rendus dans `work_epsg`, en mètres, sans reprojection en retour. Un MNT en mètres : résultat inchangé, aucune étape ajoutée. Sans le geste `raster.reproject_work`, rien n'est dicté et la commande répond `dem.not_projected` comme avant.
+
 ```json fiche
 {"id": "terrain.peaks", "status": "faite", "runs_in": "core", "dictated_by_core": false,
  "params": {"dem": {"type": "RasterPath", "required": true},
+            "work_epsg": {"type": "integer", "required": false},
             "min_prominence": {"type": "Height", "required": false},
             "min_distance": {"type": "Distance", "required": false},
             "max_count": {"type": "integer", "required": false},
@@ -1892,6 +1908,7 @@ résumé le dit.
 Reprojette un MNT en degrés vers le système en mètres que le noyau a choisi pour le calcul, et
 écrit un GeoTIFF (ticket 33, décision du propriétaire du 2026-11-21). **Dictée par le noyau,
 avant** une commande de terrain (`terrain.slope`, `terrain.aspect`, `terrain.hillshade`,
+`terrain.viewshed`, `terrain.viewshed_cumulative`, `terrain.line_of_sight`, `terrain.peaks`,
 `raster.reclassify`), jamais offerte au modèle ni au client MCP, refusée par `command.run`
 (`registry.dictated`). Aucune étape n'est ajoutée au plan montré (AD-23) ; le journal garde la
 ligne, avec le même `origin` et le même `plan_step` que la commande, et la commande lit sa
@@ -1913,9 +1930,10 @@ se rejoue telle quelle (le système du calcul est celui du MNT). Une commande de
 appelée avec un `work_epsg` qui n'est pas le système du MNT lu répond `dem.work_mismatch`.
 Le rééchantillonnage (`resampling`) est choisi par le noyau d'après la commande qui suit, journalisé
 et rejoué tel quel : `bilinear` avant `terrain.slope`, `terrain.aspect` et `terrain.hillshade`
-(des altitudes), `nearest` avant `raster.reclassify` (des classes). L'extension l'applique sans le
+(des altitudes, champ de vision, ligne de vue et points hauts compris), `nearest` avant `raster.reclassify` (des classes). L'extension l'applique sans le
 deviner (`gdal:warpreproject`, taille de cellule par défaut de `gdalwarp`, GeoTIFF Float32,
 sans-donnée -9999). Dictée avant : `terrain.slope`, `terrain.aspect`, `terrain.hillshade`,
+`terrain.viewshed`, `terrain.viewshed_cumulative`, `terrain.line_of_sight`, `terrain.peaks`,
 `raster.reclassify`. Annulable (`qgis.cancelled`, aucun fichier partiel). Refus, avant tout
 lancement : `data.unknown_crs` (code inconnu de QGIS), `analysis.crs_not_metric` (système de calcul
 qui n'est pas en mètres), `analysis.bad_params` (code invalide, raster sans système, ou système de

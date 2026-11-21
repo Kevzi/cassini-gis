@@ -1315,3 +1315,15 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-10-33b-geste-qgis-reprojection-du-mnt.md`
   summary: Durcir le geste raster.reproject_work : poser le nodata de la source (SRTM -32768), garde sur la taille de grille (pôles, antiméridien, BIGTIFF), annulation en cours de calcul prouvée (la sonde annule avant le lancement), `.aux.xml` et bandes multiples contrôlés comme pour les autres gestes raster.
   evidence: relecture des cas limites de la seconde moitié de 10.33 ; aucun n'est atteint par la sonde ni par le jeu de test actuel.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-10-33c-mnt-en-degres-commandes-a-un-seul-mnt.md`
+  summary: Ticket B du MNT en degrés : terrain.cost_distance, terrain.least_cost_path et raster.weighted_overlay (plusieurs rasters) — généraliser `dictate_reprojection` à une liste de rasters (critères imbriqués, exclusions), grille commune prise sur le premier raster (paramètre de référence du geste), rééchantillonnage par raster (plus proche voisin pour surfaces de coût, classes et exclusions), sonde à deux rasters.
+  evidence: découpé du ticket A sur décision du propriétaire (2026-11-21) ; estimé à 1,5 à 2 jours, le plus gros coût de l'extension ; ces commandes refusent encore un MNT en degrés (dem.not_projected).
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-10-33c-mnt-en-degres-commandes-a-un-seul-mnt.md`
+  summary: Dans `dictate_reprojection`, faire les conversions de points (qui ne dépendent que de `work_epsg`) avant la reprojection, pour ne pas lancer un rééchantillonnage inutile quand une conversion échoue ; vérifier que `current_plan`/`last_plan` suivent le nouvel ordre.
+  evidence: relecture des cas limites de 10.33c ; un échec de conversion laisse aujourd'hui une ligne de reprojection et un .tif orphelins (journal cohérent).
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/plan-10-33c-mnt-en-degres-commandes-a-un-seul-mnt.md`
+  summary: Aucun contrôle d'ordre longitude/latitude pour un point en EPSG:4326 (lat/lon donné à l'envers → `terrain.outside_dem` avec des coordonnées converties) ; plages à valider dans le noyau ou dans le geste de conversion.
+  evidence: convention x=longitude documentée dans core/src/point.rs, aucune plage vérifiée ; antérieur à 10.33c.
