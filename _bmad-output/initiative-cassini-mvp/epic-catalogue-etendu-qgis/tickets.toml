@@ -421,13 +421,26 @@ references = ["docs/mesure-duree-par-phrase.md#releve-du-2026-11-21-modele-base-
 notes = ["Decision: 2026-11-21, le proprietaire garde l'amorce dans la mesure ; au-dela de 30 s on cherche un prechauffage, on ne sort pas l'amorce du calcul.", "Assumption: le prechauffage ne depend pas du modele ; il vaut pour base-17-1 comme pour le modele installe.", "Open question: faut-il precharger au demarrage de cassini serve (cout de memoire et de temps a l'ouverture de QGIS) ou a la premiere ouverture du panneau ?", "Le ticket 17 reste ouvert tant que l'amorce depasse 30 s ; il est rouvert a la mesure par ce ticket."]
 
 [[entry]]
+id = 35
+type = "story"
+title = "Garde-fou hors catalogue : refuser au lieu d'inventer un plan"
+description = "Quand la demande porte sur une operation absente du catalogue, le modele rend un plan invente ou echoue au lieu de refuser. Mesure du 2026-11-21 sur base-17-1 (docs/couverture-phrases-reelles.md) : CV39 (etiquettes de communes), CV40 (decoupe du MNT a une emprise) et CV41 (profil d'altitude) rendent un plan ; CV42 (soustraction de deux MNT) echoue ; dans plan_reel, PL22 rend une question de coordonnees au lieu d'un refus et S24 un plan invalide au lieu du refus attendu. CV37, CV43 sont deja refusees. Decision 5 du ticket 17 : ecarts consignes, ticket de garde-fou a ouvrir. Un refus attendu a la forme kind = refusal avec la liste missing. Le garde-fou ne change ni le catalogue ni ne cree de commande."
+verify = "Sur les phrases de couverture reelle et de plan_reel, CV39, CV40, CV41, CV42, PL22 et S24 rendent un refus ou une question justifiee, sans plan invente ; plan_reel reste a 44/48 au moins, la couverture agent a 32/44 au moins, les refus deja justes (CV37, CV43) le restent ; training/tests/recouvrement.rs vert ; releve ajoute a docs/couverture-phrases-reelles.md, mesure sur un modele reel et jamais ecrit a la main."
+covers = ["CAP-14"]
+after = [17]
+hitl = false
+risk = "medium"
+references = ["docs/couverture-phrases-reelles.md"]
+notes = ["Decision: 2026-11-21, ces ecarts hors catalogue sont non bloquants pour le ticket 17 et traites ici.", "Open question: garde deterministe cote noyau (liste de verbes et d'objets absents du catalogue), familles d'exemples de refus dans le generateur (donc un re-entrainement), ou les deux ? Un garde du noyau agit sans re-entrainement ; des familles ameliorent le modele mais demandent une nuit et un juge de non-oubli.", "Assumption: la mesure se fait sur le modele installe pour un garde du noyau seul, sur un modele re-entraine pour des familles.", "Open question: le garde deterministe peut-il distinguer une demande hors catalogue d'une demande couverte formulee autrement sans refuser a tort (cout en plans conformes) ?"]
+
+[[entry]]
 id = 18
 type = "story"
 title = "Refactor sweep"
 description = "Nettoyage seulement, dont la portee se fixe au demarrage a partir des plans et des constats de revue reportes pendant l'epic."
 verify = "Tests du noyau et de l'extension verts, cargo fmt et clippy sans avertissement, recette hors ligne verte."
 covers = ["CAP-6", "CAP-14"]
-after = [1, 2, 3, 4, 5, 6, 7, 8, 21, 22, 9, 10, 11, 23, 24, 20, 12, 26, 13, 14, 15, 16, 28, 29, 30, 31, 17, 27, 32, 33, 34]
+after = [1, 2, 3, 4, 5, 6, 7, 8, 21, 22, 9, 10, 11, 23, 24, 20, 12, 26, 13, 14, 15, 16, 28, 29, 30, 31, 17, 27, 32, 33, 34, 35]
 hitl = false
 risk = "low"
 
