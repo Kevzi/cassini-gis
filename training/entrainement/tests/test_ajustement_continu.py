@@ -21,6 +21,12 @@ sys.path.insert(0, str(HERE.parent))
 import pipeline  # noqa: E402
 from data import Example  # noqa: E402
 
+# Une séance de 3 000 exemples : le rappel est la part voulue ou le plancher du rappel stratifié
+# (15 par famille connue), le plus grand des deux ; le jeu ciblé prend le reste.
+FLOOR_TOTAL = 15 * len(pipeline.known_families())
+RECALL_3000 = max(1200, FLOOR_TOTAL)
+FOCUS_3000 = 3000 - RECALL_3000
+
 CALLS = '{"kind":"calls","calls":[{"command":"essai.synthetique","params":{"n":%d}}]}<|im_end|>'
 FAMILIES = "export_pdf_format,refus"
 SNAPSHOT = "/home/x/.cache/huggingface/hub/models--Qwen--Qwen3.5-4B/snapshots/" + pipeline.BASE_REVISION
@@ -125,9 +131,9 @@ class Continuation(unittest.TestCase):
         self.assertEqual(pipeline.effective_hyperparameters(continuation)["taux_apprentissage"], 5e-5)
         plan = pipeline.generation_plan(self.dir, pipeline.CONTINUOUS_COUNT, 300, continuation)
         self.assertEqual(list(plan), ["rappel", "cible", "validation"])
-        self.assertEqual(plan["rappel"][1:], (pipeline.TRAINING_SEED, 1200 + pipeline.RECALL_MARGIN,
+        self.assertEqual(plan["rappel"][1:], (pipeline.TRAINING_SEED, RECALL_3000 + pipeline.RECALL_MARGIN,
                                               ["--rappel-stratifie", "15"]))
-        self.assertEqual(plan["cible"][1:], (pipeline.FOCUS_SEED, 1800, ["--familles", FAMILIES]))
+        self.assertEqual(plan["cible"][1:], (pipeline.FOCUS_SEED, FOCUS_3000, ["--familles", FAMILIES]))
         self.assertEqual(plan["validation"][1:], (pipeline.VALIDATION_SEED, 300, []))
         lineage = pipeline.lineage(continuation, "d" * 40, 1)
         sha = weights_sha(parent)
@@ -341,9 +347,9 @@ class Lineage(unittest.TestCase):
 
 class RecallShare(unittest.TestCase):
     def test_the_recall_share_is_counted_on_the_final_set_and_never_below_the_floor(self):
-        self.assertEqual(pipeline.session_counts(3000, 0.4), (1200, 1800))
+        self.assertEqual(pipeline.session_counts(3000, 0.4), (RECALL_3000, FOCUS_3000))
         recall, focus = pipeline.session_counts(3001, 0.4)
-        self.assertEqual((recall, focus), (1201, 1800))
+        self.assertEqual((recall, focus), (max(1201, FLOOR_TOTAL), 3001 - max(1201, FLOOR_TOTAL)))
         self.assertGreaterEqual(recall / 3001, 0.4)
         # Un rappel trop court pour le plancher du rappel stratifié (15 par famille) : refusé avant
         # le GPU.
@@ -463,8 +469,11 @@ class Bounds(unittest.TestCase):
         self.assertEqual(constants, {"FOCUS_SEED": pipeline.FOCUS_SEED, "FOCUS_COUNT": pipeline.FOCUS_COUNT,
                                      "DEFAULT_COUNT": pipeline.TRAINING_COUNT, "RECALL_FLOOR": 15,
                                      "RECALL_VERSION": 1})
-        self.assertEqual(pipeline.session_counts(pipeline.CONTINUOUS_COUNT, pipeline.RECALL_SHARE)[1],
-                         pipeline.FOCUS_COUNT)
+        # Le jeu ciblé de la séance par défaut tient sous FOCUS_COUNT ; le plancher du rappel stratifié
+        # (RECALL_FLOOR par famille) peut le réduire quand les familles s'ajoutent.
+        recall, focus = pipeline.session_counts(pipeline.CONTINUOUS_COUNT, pipeline.RECALL_SHARE)
+        self.assertLessEqual(focus, pipeline.FOCUS_COUNT)
+        self.assertGreaterEqual(recall, 15 * len(pipeline.known_families()))
         # Une famille dont le nom suit une ligne de commentaire est lue aussi.
         self.assertIn("decompte_par_zone", pipeline.known_families())
 
@@ -650,8 +659,8 @@ class LaunchPastTheGpu(unittest.TestCase):
         self.assertEqual(report["hyperparametres"]["taux_apprentissage"], 5e-5)
         seance = report["donnees"]["seance"]
         self.assertEqual((seance["exemples_rappel"], seance["exemples_cible"], seance["rappel_marge_non_prise"]),
-                         (1200, 1800, pipeline.RECALL_MARGIN))
-        self.assertEqual(seance["part_rappel_comptee"], 0.4)
+                         (RECALL_3000, FOCUS_3000, pipeline.RECALL_MARGIN))
+        self.assertEqual(seance["part_rappel_comptee"], round(RECALL_3000 / 3000, 4))
         self.assertEqual(report["donnees"]["entrainement"], 3000)
         # En reprise, le maillon garde le commit enregistré.
         recorded = report["lignee"][-1]["commit"]

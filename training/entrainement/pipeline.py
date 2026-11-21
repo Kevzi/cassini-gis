@@ -556,22 +556,21 @@ def generator_constants() -> dict[str, int]:
 
 def session_counts(count: int, share: float) -> tuple[int, int]:
     """Exemples de rappel et exemples ciblés d'une séance de `count` exemples : le rappel est
-    arrondi au-dessus, pour que sa part ne tombe jamais sous `share`. Le jeu ciblé ne dépasse pas
-    `FOCUS_COUNT`, ni le rappel tiré (marge comprise) `DEFAULT_COUNT` : au-delà, ce qui est
-    entraîné sortirait de ce que `recouvrement.rs` contrôle."""
-    recall = math.ceil(count * share - 1e-9)
+    arrondi au-dessus, pour que sa part ne tombe jamais sous `share`, et il ne descend jamais sous
+    le plancher du rappel stratifié (`RECALL_FLOOR` par famille connue) : quand les familles
+    s'ajoutent, le plancher grossit le rappel et le jeu ciblé prend le reste. Le jeu ciblé ne
+    dépasse pas `FOCUS_COUNT`, ni le rappel tiré (marge comprise) `DEFAULT_COUNT` : au-delà, ce qui
+    est entraîné sortirait de ce que `recouvrement.rs` contrôle."""
+    bounds = generator_constants()
+    floor_total = bounds["RECALL_FLOOR"] * len(known_families())
+    recall = max(math.ceil(count * share - 1e-9), floor_total)
     focus = count - recall
     if recall < 1 or focus < 1:
-        raise PipelineStop(f"--exemples {count} : trop peu pour une séance avec rappel et jeu ciblé")
-    bounds = generator_constants()
+        raise PipelineStop(f"--exemples {count} : trop peu pour une séance avec rappel (plancher du rappel "
+                           f"stratifié : {bounds['RECALL_FLOOR']} par famille, {floor_total} en tout) et jeu ciblé")
     if focus > bounds["FOCUS_COUNT"]:
         raise PipelineStop(f"--exemples {count} : {focus} exemples ciblés, au plus {bounds['FOCUS_COUNT']} "
                            "(FOCUS_COUNT, la borne gardée par recouvrement.rs)")
-    # Le plancher du rappel stratifié (au plus `RECALL_FLOOR` par famille) doit tenir dans le rappel.
-    floor_total = bounds["RECALL_FLOOR"] * len(known_families())
-    if floor_total > recall:
-        raise PipelineStop(f"--exemples {count} : {recall} exemples de rappel, moins que le plancher du rappel "
-                           f"stratifié ({bounds['RECALL_FLOOR']} par famille, {floor_total} en tout)")
     if recall + RECALL_MARGIN > bounds["DEFAULT_COUNT"]:
         raise PipelineStop(f"--exemples {count} : {recall} exemples de rappel et {RECALL_MARGIN} de marge, au plus "
                            f"{bounds['DEFAULT_COUNT']} (DEFAULT_COUNT, le jeu graine 1 gardé par recouvrement.rs)")
