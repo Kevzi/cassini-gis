@@ -651,6 +651,19 @@ pub fn generate_measured(
     )
 }
 
+/// Préchauffage (ticket 34) : charge le modèle et lit `turns` (la tête fixe de l'invite) pour que
+/// l'instantané de sa fin soit gardé, puis s'arrête après un seul jeton, qui n'est rendu à
+/// personne. Même moteur, même verrou et mêmes fils que `generate_files_measured` : une demande
+/// qui arrive pendant la lecture attend le verrou, sans perte. L'appelant ignore l'erreur : un
+/// modèle absent ou illisible se redira à la première vraie demande.
+pub fn warm_files(
+    files: &ModelFiles,
+    turns: &[Turn],
+    threads: Option<NonZeroU32>,
+) -> Result<(), AiError> {
+    generate_files_measured(files, turns, None, 1, threads).map(|_| ())
+}
+
 /// Même génération que `generate_measured`, pour un modèle de plusieurs fichiers : la base est
 /// chargée, l'adaptateur initialisé une fois, puis posé sur chaque contexte neuf, avant la
 /// reprise d'un instantané. Base et adaptateur sont gardés ensemble, sous une seule clé.

@@ -1327,3 +1327,10 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/plan-10-33c-mnt-en-degres-commandes-a-un-seul-mnt.md`
   summary: Aucun contrôle d'ordre longitude/latitude pour un point en EPSG:4326 (lat/lon donné à l'envers → `terrain.outside_dem` avec des coordonnées converties) ; plages à valider dans le noyau ou dans le geste de conversion.
   evidence: convention x=longitude documentée dans core/src/point.rs, aucune plage vérifiée ; antérieur à 10.33c.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-prechauffage-du-modele-l-amorce-sous-30-s-sur-processeur-plan.md`
+  summary: Mesurer le préchauffage de l'inventaire sur un gros projet à vue triée (Annecy gros), où la vue dépend de la demande et l'instantané peut ne pas être repris.
+  evidence: `read_view_for_warmup` construit la vue pour une demande vide ; `propose` la construit pour la vraie demande ; au-delà du seuil de tri les préfixes divergent. Mesure faite seulement sur l'inventaire Villeneuve (amorce 3,7 s). Aucune mesure ne dit encore ce qui se passe sur un gros projet.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-prechauffage-du-modele-l-amorce-sous-30-s-sur-processeur-plan.md`
+  summary: Ajouter un délai de garde à `Channel::execute` et ne découvrir le modèle qu'une fois au préchauffage.
+  evidence: la lecture de `project.inventory` au préchauffage occupe la boucle principale comme celle de `plan.propose` ; si l'extension ne répond jamais, la boucle attend sans limite (code antérieur) ; `choose(None)` est appelé deux fois (`warmup` et `warm_inventory`).

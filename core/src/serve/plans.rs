@@ -50,6 +50,31 @@ pub trait Composer {
         inventory: &mut dyn FnMut() -> Result<ModelInventory, ErrorReport>,
     ) -> Result<Plan, ErrorReport>;
 
+    /// Préchauffage (ticket 34) : prépare, pour `available`, la tâche qui charge le modèle et lit
+    /// la partie fixe de l'invite avant la première demande. La tâche rendue ne lit rien du
+    /// compositeur ni du registre (elle part dans un fil à part) et ne rend jamais d'erreur : un
+    /// modèle absent se dira à la première vraie demande. Par défaut, rien à préchauffer.
+    fn warmup(
+        &self,
+        _registry: &Registry,
+        _available: &BTreeSet<String>,
+    ) -> Option<Box<dyn FnOnce() + Send>> {
+        None
+    }
+
+    /// Préchauffage avec l'inventaire (ticket 34, conception B) : comme `warmup`, pour la vue
+    /// `view` de l'inventaire du projet, lue par le noyau sans demande. La tâche rendue lit
+    /// l'invite complète (tête et inventaire), sans toucher au compositeur. `None` : le noyau
+    /// retombe sur la tâche de `warmup`, la tête seule.
+    fn warm_inventory(
+        &self,
+        _registry: &Registry,
+        _available: &BTreeSet<String>,
+        _view: &ModelInventory,
+    ) -> Option<Box<dyn FnOnce() + Send>> {
+        None
+    }
+
     /// Les modèles que l'utilisateur peut choisir, triés par nom : chacun
     /// `{"file", "size_bytes"}` et un `problem` facultatif. Ni dossier ni chemin (AD-9).
     /// Écart assumé à AD-15 (2026-10-18) : rendu hors registre, jamais journalisé.
@@ -62,6 +87,76 @@ fn unavailable() -> RpcError {
         "L'agent n'est pas disponible dans ce noyau : aucune composition de plan n'y est branchée."
             .to_string(),
     )
+}
+
+/// Variable qui coupe le préchauffage du modèle à l'ouverture de la session.
+pub(super) const NO_WARMUP_ENV: &str = "CASSINI_NO_WARMUP";
+
+/// Lance le préchauffage du modèle dans un fil détaché, juste après la réponse à `session.hello`.
+/// Le canal JSON-RPC ne se bloque pas (AD-4) : seule la lecture de l'inventaire, courte, se fait
+/// ici, comme celle de `plan.propose` mais sans demande, hors journal ; une demande reçue pendant
+/// cette lecture reçoit `session.busy`. L'invite est ensuite lue dans un fil à part, et une demande
+/// qui arrive pendant cette lecture attend le verrou du moteur. Un inventaire illisible (commande
+/// non annoncée, erreur de l'extension) laisse le préchauffage de la tête seule. Aucun message,
+/// aucune erreur ne remonte.
+pub(super) fn warm(state: &State<'_>) {
+    if std::env::var_os(NO_WARMUP_ENV).is_some() {
+        return;
+    }
+    let Some(composer) = state.composer else {
+        return;
+    };
+    let available = available_commands(state);
+    // Modèle absent ou illisible : rien à préchauffer, et aucun ordre n'est donné à l'extension.
+    let Some(head_only) = composer.warmup(state.registry, &available) else {
+        return;
+    };
+    let job = read_view_for_warmup(state)
+        .and_then(|view| composer.warm_inventory(state.registry, &available, &view))
+        .unwrap_or(head_only);
+    // Un fil qui ne démarre pas n'est pas une erreur : la première demande paiera.
+    let _ = std::thread::Builder::new()
+        .name("cassini-warmup".to_string())
+        .spawn(job);
+}
+
+/// La vue de l'inventaire telle que `plan.propose` la montrerait pour une demande vide, ou `None`
+/// si l'extension n'annonce pas `project.inventory` ou si la lecture échoue.
+fn read_view_for_warmup(state: &State<'_>) -> Option<ModelInventory> {
+    if !state.announced.contains("project.inventory") {
+        return None;
+    }
+    let raw = Channel {
+        link: state.link.clone(),
+    }
+    .execute("project.inventory", json!({}))
+    .ok()?;
+    let work_dir = state.session.as_ref().map(|s| s.work_dir().to_path_buf());
+    let journal = state.session.as_ref().map(|s| s.journal_path());
+    let registry = state.registry;
+    let now = Snapshot {
+        learned: agent_inventory(&raw),
+        files: work_dir.as_deref().map(work_files).unwrap_or_default(),
+        intermediates: journal
+            .as_deref()
+            .map(|j| intermediate_files(registry, j))
+            .unwrap_or_default(),
+        last: journal
+            .as_deref()
+            .map(|j| last_plan(registry, j))
+            .unwrap_or_default(),
+    };
+    Some(now.view("", &[]).0)
+}
+
+/// Les commandes que la session peut exécuter (règle d'AD-7), montrées au modèle.
+fn available_commands(state: &State<'_>) -> BTreeSet<String> {
+    state
+        .registry
+        .specs()
+        .filter(|spec| is_available(state, &spec.id, spec.runs_in))
+        .map(|spec| spec.id.clone())
+        .collect()
 }
 
 /// `agent.models` : les modèles du dossier des modèles, sans chemin, hors journal.
@@ -151,11 +246,7 @@ pub(super) fn propose(state: &mut State<'_>, params: Option<&Value>) -> Result<V
     let registry = state.registry;
     // Les commandes que le modèle peut voir : celles de la règle d'AD-7, ni plus ni moins que
     // `verify` en acceptera.
-    let available: BTreeSet<String> = registry
-        .specs()
-        .filter(|spec| is_available(state, &spec.id, spec.runs_in))
-        .map(|spec| spec.id.clone())
-        .collect();
+    let available = available_commands(state);
     // L'inventaire lu pour la première composition, gardé pour la redemande élargie : ni second
     // ordre à l'extension, ni autre état du projet entre les deux vues.
     let mut read: Option<Snapshot> = None;

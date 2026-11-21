@@ -739,3 +739,39 @@ CPU seul, 4 fils, binaire d'essai épinglé sur 4 cœurs physiques (`0x55`), inv
 | C / D / E | 0,6 à 0,9 | 9,6 / 3,9 / 14,1 | 10,4 / 4,5 / 15,0 | plan, question, question |
 
 Moyenne sur 8 phrases hors amorce : 14,2 s. La phrase de démo tient la barre (27,9 s < 30 s). **L'amorce la manque de 1,6 s** (31,6 s, contre 33,1 s au relevé du 10.5), à cause de la lecture de l'invite complète (26,5 s). Décision du propriétaire du 2026-11-21 : l'amorce reste dans la mesure ; la suite est un préchauffage du modèle, pas sa sortie du calcul.
+
+## Préchauffage du modèle (ticket 34, 2026-11-21)
+
+Le noyau, dans sa boucle principale, juste après avoir répondu à `session.hello`, lit
+`project.inventory` par le canal (sans demande, hors journal ; une demande reçue pendant cette
+lecture reçoit `session.busy`), construit la vue de l'inventaire, puis lance un fil détaché qui
+charge le modèle et lit l'invite complète, tête fixe et inventaire, pour créer les instantanés.
+Un inventaire illisible laisse le préchauffage de la tête seule ; `CASSINI_NO_WARMUP` coupe le
+tout. L'essai `duree_reel` fait de même avant l'amorce (`warm_files`, `warm_turns_with_inventory`)
+et imprime la durée. Relevé sorti tel quel de l'essai, base-17-1, 4 cœurs (`0x55`), même
+inventaire :
+
+Fils : 4  
+Préchauffage : 31,9 s (ok)
+
+| id | vue (car.) | appels | chargement (s) | lecture du prompt (s) | jetons de l'invite | jetons repris | écriture (s) | jetons écrits | total (s) | issue |
+|---|---|---|---|---|---|---|---|---|---|---|
+| amorce | 3815 | 1 | 0,0 | 0,5 | 1572 | 1554 | 3,0 | 17 | 3,6 | plan, 1 étape(s) |
+| A0 | 3815 | 1 | 0,0 | 1,1 | 1603 | 1554 | 31,2 | 165 | 32,3 | plan, 5 étape(s) |
+| A | 3815 | 1 | 0,0 | 1,3 | 1607 | 1554 | 31,6 | 169 | 32,9 | plan, 5 étape(s) |
+| B1 | 3815 | 1 | 0,0 | 0,6 | 1575 | 1554 | 7,4 | 42 | 8,0 | plan, 1 étape(s) |
+| B2 | 3815 | 1 | 0,0 | 0,7 | 1586 | 1554 | 17,6 | 97 | 18,4 | plan, 3 étape(s) |
+| B3 | 3815 | 1 | 0,0 | 0,6 | 1575 | 1554 | 4,2 | 23 | 4,8 | plan, 1 étape(s) |
+| C | 3815 | 1 | 0,0 | 0,7 | 1581 | 1554 | 11,6 | 63 | 12,4 | plan, 2 étape(s) |
+| D | 3815 | 1 | 0,0 | 0,6 | 1575 | 1554 | 4,6 | 24 | 5,2 | question |
+| E | 3815 | 1 | 0,0 | 0,8 | 1588 | 1554 | 15,9 | 97 | 16,8 | question |
+
+Moyennes sur 8 phrases (8 appels, amorce exclue) : chargement 0,0 s, lecture du prompt 0,8 s, écriture 15,5 s, total 16,3 s
+
+Le préchauffage coûte 31,9 s au lancement de la session (chargement du modèle et lecture des
+1 554 jetons de l'invite), payés avant la première phrase. L'amorce, elle, ne paie plus que sa
+demande : 3,6 s, dont 0,5 s de lecture. Les lignes A0 à E sont celles d'une session à chaud ; leur
+écriture dépend de la vitesse de la machine (A0 : 31,2 s pour 165 jetons ce soir-là, contre 26,5 s
+au relevé du matin), et la barre de 30 s de A0 n'est pas du ressort de ce ticket : elle est
+consignée telle que mesurée (32,3 s), pas abaissée. Issues de A0 à E identiques à celles du
+relevé précédent (même nombre d'étapes, mêmes questions).

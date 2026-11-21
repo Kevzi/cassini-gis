@@ -563,6 +563,45 @@ fn first_turns_anchored(
     vec![system, Turn::new(Role::User, request)]
 }
 
+/// Le tour système réduit à la tête fixe de `style` et de `available` : c'est la lecture du
+/// préchauffage. Ses jetons sont ceux, au début, de toute première tentative (même tête, même
+/// découpe), donc l'instantané pris à la fin de la tête est repris par `compose_plan_anchored_cut`.
+pub fn warm_turns(
+    style: PromptStyle,
+    registry: &Registry,
+    available: &BTreeSet<String>,
+) -> Vec<Turn> {
+    let head = match style {
+        PromptStyle::Full => fixed_system_text(registry, Some(available)),
+        PromptStyle::Short => SHORT_SYSTEM.to_string(),
+    };
+    vec![Turn::with_cached_head(Role::System, head, "")]
+}
+
+/// Comme `warm_turns`, avec l'inventaire du projet (ticket 34, conception B) : le tour système
+/// complet de la première tentative, tête, inventaire coupé aux frontières de ses couches et
+/// ancrage compris, mais sans le tour de l'utilisateur. Sa lecture crée les instantanés que la
+/// première vraie demande reprend, à condition que `inventory` et `user_layers` soient ceux que
+/// `compose_plan_anchored_cut` recevra.
+pub fn warm_turns_with_inventory(
+    style: PromptStyle,
+    registry: &Registry,
+    available: &BTreeSet<String>,
+    inventory: &Value,
+    user_layers: usize,
+) -> Vec<Turn> {
+    let mut turns = first_turns_anchored(
+        style,
+        registry,
+        Some(available),
+        inventory,
+        Some(user_layers),
+        "",
+    );
+    turns.truncate(1);
+    turns
+}
+
 /// Les tours de la redemande : la sortie rejetée, puis la liste des écarts.
 fn retry_turns(mut turns: Vec<Turn>, previous: &str, errors: &[String]) -> Vec<Turn> {
     // Bornée : une sortie rejetée peut être très longue, et la redemande doit tenir au contexte.
@@ -1489,6 +1528,44 @@ mod tests {
     }
 
     #[test]
+    fn the_warm_turns_with_inventory_are_the_first_attempt_without_the_request() {
+        let reg = registry();
+        let available = available_without(&reg, &["data.reproject"]);
+        let inv = inventory();
+        let warm = warm_turns_with_inventory(PromptStyle::Full, &reg, &available, &inv, 1);
+        let first = first_turns_anchored(
+            PromptStyle::Full,
+            &reg,
+            Some(&available),
+            &inv,
+            Some(1),
+            "x",
+        );
+        assert_eq!(warm.len(), 1);
+        // Le tour système est celui de la première tentative, à l'octet près : mêmes coupes.
+        assert_eq!(warm[0].cached_head, first[0].cached_head);
+        assert_eq!(warm[0].cached_parts, first[0].cached_parts);
+        assert_eq!(warm[0].anchor, first[0].anchor);
+        assert_eq!(warm[0].text, first[0].text);
+    }
+
+    #[test]
+    fn the_warm_turns_share_the_head_of_the_first_attempt() {
+        let reg = registry();
+        let available = available_without(&reg, &["data.reproject"]);
+        let warm = warm_turns(PromptStyle::Full, &reg, &available);
+        assert_eq!(warm.len(), 1);
+        assert_eq!(warm[0].cached_head, head_for(&reg, &available));
+        assert!(warm[0].text.is_empty() && warm[0].cached_parts.is_empty());
+        // Une autre tête : l'instantané ne serait pas repris, jamais un faux résultat.
+        let other = available_without(&reg, &[]);
+        assert_ne!(
+            warm_turns(PromptStyle::Full, &reg, &other)[0].cached_head,
+            warm[0].cached_head
+        );
+    }
+
+    #[test]
     fn an_unannounced_command_is_in_neither_the_fixed_head_nor_the_grammar() {
         let reg = registry();
         let all = available_without(&reg, &[]);
@@ -1884,7 +1961,8 @@ mod tests {
                 "layer.arrange",
                 "layer.open_raster",
                 "layer.open_vector",
-                "layer.set_style"
+                "layer.set_style",
+                "raster.reproject_work"
             ]
         );
         let mut bare = registry();

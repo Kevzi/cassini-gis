@@ -300,6 +300,34 @@ impl cassini_core::serve::Composer for ModelComposer {
             .map_err(|e| scrub(report(e.code(), e.to_string()), &hidden))
     }
 
+    fn warmup(
+        &self,
+        registry: &Registry,
+        available: &std::collections::BTreeSet<String>,
+    ) -> Option<Box<dyn FnOnce() + Send>> {
+        // Modèle absent ou illisible : rien ne se passe, la première demande rendra l'erreur.
+        let (chosen, _) = self.choose(None).ok()?;
+        let turns = cassini_ai::plan::warm_turns(chosen.style, registry, available);
+        Some(warm_job(chosen.files, turns))
+    }
+
+    fn warm_inventory(
+        &self,
+        registry: &Registry,
+        available: &std::collections::BTreeSet<String>,
+        view: &cassini_core::agent_inventory::ModelInventory,
+    ) -> Option<Box<dyn FnOnce() + Send>> {
+        let (chosen, _) = self.choose(None).ok()?;
+        let turns = cassini_ai::plan::warm_turns_with_inventory(
+            chosen.style,
+            registry,
+            available,
+            &view.inventory,
+            view.user_layers,
+        );
+        Some(warm_job(chosen.files, turns))
+    }
+
     fn models(&self, _registry: &Registry) -> Result<Vec<Value>, ErrorReport> {
         let (diagnosis, hidden) = self.discover()?;
         Ok(diagnosis
@@ -311,6 +339,21 @@ impl cassini_core::serve::Composer for ModelComposer {
             })
             .collect())
     }
+}
+
+/// La tâche de préchauffage (ticket 34) : lit `turns` avec le nombre de fils des vraies demandes, et
+/// ignore tout échec, qui se redira à la première demande.
+fn warm_job(
+    files: cassini_ai::ModelFiles,
+    turns: Vec<cassini_ai::Turn>,
+) -> Box<dyn FnOnce() + Send> {
+    let threads = std::env::var("CASSINI_THREADS")
+        .ok()
+        .and_then(|v| v.parse::<std::num::NonZeroU32>().ok())
+        .unwrap_or_else(cassini_ai::default_threads);
+    Box::new(move || {
+        let _ = cassini_ai::warm_files(&files, &turns, Some(threads));
+    })
 }
 
 /// Générateur du canal, branché sur le modèle `files`. Deux variables d'environnement servent à

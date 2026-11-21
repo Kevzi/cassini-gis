@@ -258,6 +258,8 @@ struct State<'a> {
     /// Ids des couches posées par les `journal.replay` de ce processus (ticket 5.36) : un rejeu
     /// suivant les laisse hors de sa carte. En mémoire seulement, perdue à la relance du noyau.
     replayed_layers: HashSet<String>,
+    /// `session.hello` vient d'être accepté : le préchauffage du modèle part après sa réponse.
+    warm_due: bool,
 }
 
 /// Sert le canal jusqu'à la fermeture de l'entrée. Rend une erreur si la sortie
@@ -358,6 +360,7 @@ fn serve_with<'a>(
             next_plan: 0,
             next_call: 0,
             replayed_layers: HashSet::new(),
+            warm_due: false,
         };
         let outcome = loop {
             // Entrée fermée pendant un ordre : la fin a déjà été lue.
@@ -393,6 +396,10 @@ fn serve_with<'a>(
                 if let Err(e) = link.send(&response) {
                     break Err(e);
                 }
+            }
+            // Après la réponse à `session.hello` : l'extension a sa poignée de main (ticket 34).
+            if std::mem::take(&mut state.warm_due) {
+                plans::warm(&state);
             }
             if let Some(e) = link.failure.borrow_mut().take() {
                 break Err(e);
@@ -969,6 +976,9 @@ fn hello(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, RpcErro
         .map(|entry| without_core_filled(state.registry, entry))
         .collect();
     state.link.external.set_catalogue(available);
+    // Le modèle se charge pendant que l'utilisateur tape (ticket 34) : la boucle lance le
+    // préchauffage une fois cette réponse écrite.
+    state.warm_due = true;
     let mut result = json!({
         "protocol_version": PROTOCOL_VERSION,
         "core_version": crate::VERSION,
@@ -1936,9 +1946,41 @@ mod tests {
         /// Applique le garde-fou des attributs au plan rendu, sur la vue reçue, comme le
         /// compositeur réel (ticket 5.57).
         guard_attributes: bool,
+        /// Préchauffages faits, dans l'ordre : l'ensemble reçu, et si l'inventaire y était. Le
+        /// travail, lent, se fait dans le fil détaché, jamais pendant `session.hello`. `None` :
+        /// ce compositeur n'a rien à préchauffer.
+        warmed: Option<Warmed>,
     }
 
+    type Warmed = std::sync::Arc<std::sync::Mutex<Vec<(std::collections::BTreeSet<String>, bool)>>>;
+
     impl Composer for FixedComposer {
+        fn warmup(
+            &self,
+            _registry: &Registry,
+            available: &std::collections::BTreeSet<String>,
+        ) -> Option<Box<dyn FnOnce() + Send>> {
+            let (warmed, available) = (self.warmed.clone()?, available.clone());
+            Some(Box::new(move || {
+                thread::sleep(Duration::from_millis(300));
+                warmed.lock().unwrap().push((available, false));
+            }))
+        }
+
+        fn warm_inventory(
+            &self,
+            _registry: &Registry,
+            available: &std::collections::BTreeSet<String>,
+            view: &crate::agent_inventory::ModelInventory,
+        ) -> Option<Box<dyn FnOnce() + Send>> {
+            let (warmed, available) = (self.warmed.clone()?, available.clone());
+            let with = view.user_layers == 1;
+            Some(Box::new(move || {
+                thread::sleep(Duration::from_millis(300));
+                warmed.lock().unwrap().push((available, with));
+            }))
+        }
+
         fn compose(
             &self,
             registry: &Registry,
@@ -2017,6 +2059,7 @@ mod tests {
             seen: Default::default(),
             chosen: Default::default(),
             available: Default::default(),
+            warmed: Default::default(),
             guard_attributes: false,
         })
     }
@@ -2975,6 +3018,7 @@ mod tests {
                 seen: Default::default(),
                 chosen: Default::default(),
                 available: Default::default(),
+                warmed: Default::default(),
                 guard_attributes: false,
             };
             let mut c = Client::start_with(CANCEL_GRACE, Some(failing));
@@ -3866,6 +3910,100 @@ mod tests {
         c.close().1.unwrap();
     }
 
+    /// Attend que le préchauffage ait tourné, rend ce qu'il a vu.
+    fn wait_warmed(warmed: &Warmed) -> (std::collections::BTreeSet<String>, bool) {
+        let deadline = Instant::now() + WAIT;
+        while warmed.lock().unwrap().is_empty() {
+            assert!(Instant::now() < deadline, "le préchauffage n'a pas tourné");
+            thread::sleep(Duration::from_millis(20));
+        }
+        warmed.lock().unwrap()[0].clone()
+    }
+
+    fn warming_client() -> (Client, Warmed) {
+        let mut composer = composer(demo_plan_for_warmup()).unwrap();
+        let warmed = Warmed::default();
+        composer.warmed = Some(warmed.clone());
+        (Client::start_with(CANCEL_GRACE, Some(composer)), warmed)
+    }
+
+    /// Ticket 34 : sans `project.inventory` annoncé, le préchauffage de la tête part après la
+    /// réponse à `session.hello`, dans un fil à part, avec les commandes que la session peut
+    /// exécuter ; une demande qui arrive pendant la lecture est servie, sans perte.
+    #[test]
+    fn the_session_hello_starts_the_head_warmup_without_waiting_for_it() {
+        let (mut c, warmed) = warming_client();
+        c.hello_with(&["test.make"]);
+        // Aucun ordre à l'extension : rien à lire.
+        c.send(json!({"jsonrpc":"2.0","id":2,"method":"command.run",
+            "params":{"command":"system.about","params":{}}}));
+        assert_eq!(c.recv()["result"]["protocol_version"], 2);
+        // La poignée de main est revenue, le travail lent n'est pas fini.
+        assert!(warmed.lock().unwrap().is_empty());
+        let (seen, with_inventory) = wait_warmed(&warmed);
+        assert!(seen.contains("system.about") && !with_inventory);
+        c.close().1.unwrap();
+    }
+
+    /// Ticket 34, conception B : après la réponse à `session.hello`, le noyau lit
+    /// `project.inventory` ; une demande reçue pendant cette lecture reçoit `session.busy`, puis le
+    /// préchauffage lit l'invite avec l'inventaire.
+    #[test]
+    fn the_warmup_reads_the_inventory_after_the_hello_reply() {
+        let (mut c, warmed) = warming_client();
+        c.hello_with(&ALL);
+        let order = c.recv();
+        assert_eq!(order["method"], "order.execute");
+        assert_eq!(order["params"]["command"], "project.inventory");
+        c.send(json!({"jsonrpc":"2.0","id":2,"method":"plan.propose",
+            "params":{"request":"Fais-le."}}));
+        assert_eq!(c.recv()["error"]["data"]["code"], "session.busy");
+        c.send(json!({"jsonrpc":"2.0","id":order["id"],
+            "result":{"layers":[{"layer_id":"couche_chaude","name":"couche_chaude","kind":"vector",
+                "geometry":"Polygon","crs":"EPSG:2154","feature_count":3,"fields":[]}],
+                "project_crs":"EPSG:2154","extent":null}}));
+        // Rien d'écrit sur le canal : ni message, ni journal.
+        c.assert_silent();
+        let (seen, with_inventory) = wait_warmed(&warmed);
+        assert!(seen.contains("test.make") && with_inventory);
+        // La session sert la demande suivante normalement.
+        c.send(json!({"jsonrpc":"2.0","id":3,"method":"command.run",
+            "params":{"command":"system.about","params":{}}}));
+        assert_eq!(c.recv()["result"]["protocol_version"], 2);
+        c.close().1.unwrap();
+    }
+
+    /// Ticket 34 : un inventaire en erreur laisse le préchauffage de la tête seule, sans message.
+    #[test]
+    fn a_failing_inventory_falls_back_to_the_head_warmup() {
+        let (mut c, warmed) = warming_client();
+        c.hello_with(&ALL);
+        let order = c.recv();
+        c.send(json!({"jsonrpc":"2.0","id":order["id"],
+            "error":{"code":-32000,"message":"non","data":{"code":"order.failed","message":"non"}}}));
+        c.assert_silent();
+        let (_, with_inventory) = wait_warmed(&warmed);
+        assert!(!with_inventory);
+        c.close().1.unwrap();
+    }
+
+    /// Ticket 34 : `CASSINI_NO_WARMUP` n'est pas testé ici (variable d'environnement du processus,
+    /// partagée entre les tests) ; un compositeur sans préchauffage ne donne aucun ordre.
+    #[test]
+    fn a_composer_without_warmup_gives_no_order_at_hello() {
+        let mut c = Client::start_with(
+            CANCEL_GRACE,
+            Some(composer(demo_plan_for_warmup()).unwrap()),
+        );
+        c.hello_with(&ALL);
+        c.assert_silent();
+        c.close().1.unwrap();
+    }
+
+    fn demo_plan_for_warmup() -> Value {
+        json!({"kind": "refusal", "reason": "sans objet"})
+    }
+
     /// Ticket 5.19 : une question ou un refus du modèle qui cite un identifiant court le montre
     /// avec l'identifiant de QGIS.
     #[test]
@@ -3880,6 +4018,7 @@ mod tests {
             seen: Default::default(),
             chosen: Default::default(),
             available: Default::default(),
+            warmed: Default::default(),
             guard_attributes: false,
         };
         let mut c = Client::start_with(CANCEL_GRACE, Some(composer));

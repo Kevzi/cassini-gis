@@ -231,6 +231,32 @@ fn duree_reel_par_phrase() {
         |n| n.to_string(),
     );
     println!("Fils : {fils}");
+    // Comme le noyau après `session.hello` (ticket 34, conception B) : le modèle est chargé et
+    // l'invite complète lue, tête fixe et inventaire (vue pour une demande vide), avant la
+    // première phrase. Le coût y est payé une fois, il est imprimé ici et la ligne de l'amorce ne
+    // le porte plus ; sans `CASSINI_NO_WARMUP`, la mesure reste celle d'avant.
+    if std::env::var_os("CASSINI_NO_WARMUP").is_none() {
+        let all: std::collections::BTreeSet<String> = registry
+            .specs()
+            .filter(|s| !s.dictated_by_core)
+            .map(|s| s.id.clone())
+            .collect();
+        let (view, users, _) = common::shown_view(&full, "");
+        let turns = cassini_ai::plan::warm_turns_with_inventory(
+            style,
+            &registry,
+            &all,
+            &view,
+            users.unwrap_or(0),
+        );
+        let begun = std::time::Instant::now();
+        let warmed = cassini_ai::warm_files(&files, &turns, threads);
+        println!(
+            "Préchauffage : {} s ({})",
+            secs(begun.elapsed()),
+            if warmed.is_ok() { "ok" } else { "échec" }
+        );
+    }
     println!();
     println!("| id | vue (car.) | appels | chargement (s) | lecture du prompt (s) | jetons de l'invite | jetons repris | écriture (s) | jetons écrits | total (s) | issue |");
     println!("|---|---|---|---|---|---|---|---|---|---|---|");

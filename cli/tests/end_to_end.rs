@@ -337,6 +337,17 @@ fn propose_with_models(project: &str, models: &Path) -> (Value, String) {
     )
     .unwrap();
     assert!(next(&mut text)["result"].is_object());
+    // Un modèle trouvé : le noyau lit l'inventaire après la poignée de main, pour préchauffer
+    // (ticket 34) ; l'échec du préchauffage reste silencieux.
+    let warm = next(&mut text);
+    assert_eq!(warm["params"]["command"], "project.inventory");
+    writeln!(
+        stdin,
+        "{}",
+        json!({"jsonrpc":"2.0","id":warm["id"],
+            "result":{"layers":[],"project_crs":"EPSG:2154","extent":null}})
+    )
+    .unwrap();
     writeln!(
         stdin,
         "{}",
@@ -399,8 +410,10 @@ fn serve_with_models(project: &str, models: &Path, messages: &[Value]) -> String
         .spawn()
         .expect("le binaire se lance");
     let mut stdin = child.stdin.take().unwrap();
+    // Sans `project.inventory` annoncé : le noyau n'en lit pas à l'ouverture (ticket 34), et ces
+    // essais n'attendent aucun ordre.
     let hello = json!({"jsonrpc":"2.0","id":1,"method":"session.hello",
-        "params":{"protocol_version":2,"commands":["project.inventory"],"project":project}});
+        "params":{"protocol_version":2,"commands":[],"project":project}});
     for message in std::iter::once(&hello).chain(messages) {
         writeln!(stdin, "{message}").unwrap();
     }
