@@ -27,7 +27,7 @@ fn any(text: &str, words: &[&str]) -> bool {
     words.iter().any(|w| text.contains(w))
 }
 
-const FAMILIES: [Family; 6] = [
+const FAMILIES: [Family; 10] = [
     Family {
         missing: "label",
         label: "l'étiquetage de la carte (afficher un champ en étiquette)",
@@ -117,6 +117,64 @@ const FAMILIES: [Family; 6] = [
                 && any(t, &["moyenne", "statistique"])
         },
     },
+    // Quatre familles de terrain de plus (2026-11-22, `base-22-2` : le modèle entraîné de zéro ne
+    // refusait plus TR33 à TR35, EP18 et EP20). Même règle : verbe et objet, jamais une couche
+    // du projet (« zones inondables » est une couche du PLU, couverte).
+    Family {
+        missing: "flood",
+        label: "la simulation d'une crue ou d'une inondation sur le terrain",
+        matches: |t| {
+            any(
+                t,
+                &[
+                    "simul",
+                    "propagation",
+                    "extension de la crue",
+                    "extension d une crue",
+                ],
+            ) && any(t, &["crue", "inondation"])
+                && any(
+                    t,
+                    &[
+                        "modele de terrain",
+                        "modele numerique",
+                        "mnt",
+                        "raster",
+                        "terrain",
+                    ],
+                )
+        },
+    },
+    Family {
+        missing: "flow_accum",
+        label: "l'accumulation des écoulements",
+        matches: |t| t.contains("accumulation") && t.contains("ecoulement"),
+    },
+    Family {
+        missing: "cut_fill",
+        label: "la cubature de déblai et de remblai",
+        matches: |t| {
+            any(t, &["cubature", "araser"]) || (t.contains("deblai") && t.contains("remblai"))
+        },
+    },
+    Family {
+        missing: "rough",
+        label: "l'indice de rugosité du terrain",
+        matches: |t| {
+            any(t, &["rugosite", "roughness"])
+                && any(
+                    t,
+                    &[
+                        "modele de terrain",
+                        "modele numerique",
+                        "mnt",
+                        "raster",
+                        "terrain",
+                        "relief",
+                    ],
+                )
+        },
+    },
 ];
 
 /// Texte de comparaison : minuscules, sans accents, apostrophes et traits d'union en espaces.
@@ -184,6 +242,14 @@ mod tests {
                 "Calcule le champ de vision depuis le point 656 120 / 6 848 060 (Lambert-93), à 25 m de haut, sur 2 km, puis sa moyenne par commune.",
                 "champ de vision",
             ),
+            ("Simule l'extension d'une crue de 2 m sur le MNT.", "crue"),
+            ("Calcule l'accumulation d'écoulement sur le MNT.", "écoulements"),
+            ("Calcule l'accumulation des écoulements sur le MNT.", "écoulements"),
+            (
+                "Calcule la cubature de déblai et de remblai pour araser le terrain à la cote 42 m.",
+                "cubature",
+            ),
+            ("Calcule l'indice de rugosité du terrain à partir du MNT.", "rugosité"),
         ] {
             let reason = refused(request).unwrap_or_else(|| panic!("non refusée : {request}"));
             assert!(reason.contains(name), "{request} -> {reason}");
@@ -204,6 +270,10 @@ mod tests {
             "Donne-moi l'altitude moyenne et maximale par commune.",
             "Calcule le champ de vision depuis ce point sur 2 km.",
             "Trouve les parcelles constructibles du PLU à moins de 500 m d'une gare à Annecy.",
+            "Montre les zones inondables du PLU sur la carte.",
+            "Superposition pondérée : accessibilité poids 2, calme poids 5, hors zones inondables.",
+            "Intitule la carte « Accumulation de population par commune ».",
+            "Quel est le terrain de sport le plus proche de la gare ?",
         ] {
             assert_eq!(refused(request), None, "{request}");
         }

@@ -48,9 +48,18 @@ fn no_covered_phrase_is_refused() {
 #[test]
 fn the_ticket_refusals_are_refused() {
     let registry = Registry::standard();
-    let wanted = ["CV39", "CV40", "CV41", "CV42", "PL22"];
+    // TR33 à TR35, EP18 et EP20 : refusés par le garde depuis `base-22-2` (le modèle de zéro ne
+    // les refusait plus de lui-même).
+    let wanted = [
+        "CV39", "CV40", "CV41", "CV42", "PL22", "TR33", "TR34", "TR35", "EP18", "EP20",
+    ];
     let mut found = 0;
-    for dir in ["couverture_reelle", "plan_reel"] {
+    for dir in [
+        "couverture_reelle",
+        "plan_reel",
+        "terrain_reel",
+        "epic11_reel",
+    ] {
         for p in phrases(dir) {
             if wanted.contains(&p["id"].as_str().unwrap()) {
                 let phrase = p["phrase"].as_str().unwrap();
