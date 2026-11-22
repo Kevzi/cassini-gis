@@ -2368,6 +2368,9 @@ pub struct Builder {
     wide_layers: usize,
     /// La prochaine couche d'un thème qui en a est élargie (`wide_next`).
     force_wide: bool,
+    /// Tableaux sans géométrie (CSV ouverts avec `table`), déjà au format de l'inventaire : ils
+    /// n'ont pas de thème, donc ne passent ni par les formes de QGIS ni par les distractions.
+    tables: Vec<Value>,
 }
 
 impl Builder {
@@ -2795,6 +2798,34 @@ impl Builder {
         }
     }
 
+    /// Ajoute un tableau sans géométrie (un CSV ouvert dans le projet, comme le rend le noyau :
+    /// géométrie nulle, pas de clé `epsg`, tous les champs en texte). Rend son identifiant,
+    /// que le plan cite. `slug` dit le début de l'identifiant, `file` le fichier source.
+    pub fn add_table_csv(
+        &mut self,
+        rng: &mut Rng,
+        name: &str,
+        slug: &str,
+        file: &str,
+        columns: &[&str],
+    ) -> String {
+        let id = layer_id(rng, slug);
+        let fields: Vec<Value> = columns
+            .iter()
+            .map(|c| json!({"name": c, "type": "string"}))
+            .collect();
+        self.tables.push(json!({
+            "layer_id": id,
+            "name": name,
+            "kind": "vector",
+            "geometry": null,
+            "feature_count": rng.range(50, 9_000),
+            "source": format!("donnees/{file}.csv"),
+            "fields": fields,
+        }));
+        id
+    }
+
     /// Ajoute une couche vecteur de distraction en degrés (EPSG:4326), qu'aucun plan ne cite
     /// (second essai de 11.23) : une analyse en mètres sur une autre couche, déjà en mètres, ne
     /// reprojette rien. Rend faux si aucun thème vecteur n'est libre.
@@ -2822,6 +2853,11 @@ impl Builder {
             .enumerate()
             .filter(|(i, _)| !self.distractors.contains(i))
             .map(|(_, l)| l.id.clone())
+            .chain(
+                self.tables
+                    .iter()
+                    .filter_map(|t| t["layer_id"].as_str().map(str::to_string)),
+            )
             .collect()
     }
 
@@ -2915,6 +2951,7 @@ impl Builder {
                 self.utm.is_some(),
             );
         }
+        layers.extend(self.tables.iter().cloned());
         rng.shuffle(&mut layers);
         let mut files: Vec<Value> = self
             .files

@@ -3455,6 +3455,16 @@ Garde-fous : aucun titre ne vaut « Réseau routier » seul (titre de EU13), auc
 
 Pour les inclure dans une séance continue : `bash training/entrainement/nuit-5-55.sh continu plus_court_chemin,export_pdf_titre_thematique` ; pour un ré-entraînement complet, elles font partie du jeu par défaut. Les décisions de ré-entraînement et les mesures restent au propriétaire.
 
+### Sept commandes sans famille (2026-11-22, essai réel de `base-22-1`)
+
+**Cause.** Un essai réel de `base-22-1` a montré que sept commandes du registre n'avaient aucune famille d'entraînement : le modèle n'en avait jamais vu un seul exemple, donc il ne savait pas les écrire. Ce sont `analysis.area`, `analysis.statistics_by_category`, `geocode.ban`, `layout.export_atlas`, `network.prepare`, `analysis.difference` et `analysis.join_table`. Sept familles étroites les couvrent maintenant : `surface_des_entites`, `statistiques_par_categorie`, `geocodage_ban`, `atlas_pdf`, `preparation_reseau`, `difference_de_couches` et `jointure_de_tableau` (poids 3 ou 4, de 5 à 7 tournures chacune, couches et champs toujours recopiés de l'inventaire). Pour la jointure, l'inventaire montre maintenant un tableau CSV sans géométrie, comme le noyau le rend.
+
+**Pour que ça ne se reproduise pas.** Le test `training/tests/couverture.rs` lit la liste des commandes dans le registre lui-même, tire des exemples de chaque famille, et échoue en nommant toute commande qu'aucune famille ne produit. Seules en sont dispensées les commandes dictées par le noyau (elles ne sont jamais offertes au modèle) et les commandes de test. Avant les sept familles, le test échouait en nommant exactement ces sept commandes. Toute commande ajoutée au registre devra désormais venir avec sa famille.
+
+**Réglages.** Le poids de `gros_projet` passe de 152 à 172, pour garder environ un quart de gros projets dans le jeu complet. La barre de gros projets du rappel stratifié passe de 15 à 10 % (152 sur 1 500, contre 227 avant : sept planchers de 15 de plus).
+
+**État : le ré-entraînement n'a pas encore été relancé.** Les sept familles n'ont pas été apprises par un modèle ; aucun résultat n'est mesuré. La décision de relancer reste au propriétaire.
+
 
 ## Résultat de non-oubli de 10.17 : `base-17-1` (2026-11-21)
 

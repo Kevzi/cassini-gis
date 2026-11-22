@@ -223,6 +223,45 @@ pub static FAMILIES: &[Family] = &[
         weight: 4,
         make: export_pdf_titre_thematique,
     },
+    // Essai réel `base-22-1` (2026-11-22) : sept commandes du registre n'avaient aucune famille,
+    // donc le modèle ne savait pas les écrire (`analysis.area`, `analysis.statistics_by_category`,
+    // `geocode.ban`, `layout.export_atlas`, `network.prepare`, `analysis.difference`,
+    // `analysis.join_table`). Le test `training/tests/couverture.rs` interdit d'y revenir.
+    Family {
+        name: "surface_des_entites",
+        weight: 4,
+        make: surface_des_entites,
+    },
+    Family {
+        name: "statistiques_par_categorie",
+        weight: 4,
+        make: statistiques_par_categorie,
+    },
+    Family {
+        name: "geocodage_ban",
+        weight: 3,
+        make: geocodage_ban,
+    },
+    Family {
+        name: "atlas_pdf",
+        weight: 3,
+        make: atlas_pdf,
+    },
+    Family {
+        name: "preparation_reseau",
+        weight: 3,
+        make: preparation_reseau,
+    },
+    Family {
+        name: "difference_de_couches",
+        weight: 4,
+        make: difference_de_couches,
+    },
+    Family {
+        name: "jointure_de_tableau",
+        weight: 3,
+        make: jointure_de_tableau,
+    },
     Family {
         name: "ouverture",
         weight: 4,
@@ -575,10 +614,11 @@ pub static FAMILIES: &[Family] = &[
     // triée du noyau. Chaque famille garde ainsi son compte, petits et gros projets ensemble.
     // Relevé de 128 à 148 en 5.54, lot 2, avec les familles de la première séance (22,5 % sinon ;
     // 25,8 % au jeu graine 1). Entrée 10.10 (`plus_proche_voisin`, poids 4) : 148 → 152, pour rester
-    // au-dessus de 23 % (22,6 % à 148).
+    // au-dessus de 23 % (22,6 % à 148). Essai réel `base-22-1` (sept familles de poids 24 au
+    // total) : 152 → 172, 1 922 gros projets sur 8 600 (22,3 %) à 152.
     Family {
         name: "gros_projet",
-        weight: 152,
+        weight: 172,
         make: gros_projet,
     },
 ];
@@ -3883,6 +3923,622 @@ fn fusion_par_champ(rng: &mut Rng) -> Option<Example> {
     let expected = calls(vec![json!({"command": "analysis.dissolve",
         "params": {"layer_id": layer.id, "fields": fields}})]);
     Some(example("fusion_par_champ", b, rng, request, expected))
+}
+
+// -- sept commandes sans famille (essai réel `base-22-1`, 2026-11-22) ---------
+
+/// Un thème polygone dont aucun champ ne dit déjà la surface : sur lui, « plus de 2 ha » ne peut
+/// viser que le champ que `analysis.area` ajoute, jamais un champ de la couche.
+fn without_area_field(t: &Theme) -> bool {
+    t.fields.iter().all(|f| {
+        !f.names.iter().any(|n| {
+            let n = n.to_lowercase();
+            n.contains("surf") || n.contains("superf") || n.contains("area") || n.contains("conten")
+        })
+    })
+}
+
+/// « Calcule la surface des parcelles en hectares » : `analysis.area` seul, avec une unité
+/// fermée (`m2` ou `ha`) ; ou, une fois sur deux, suivi d'un filtre sur le champ qu'il ajoute
+/// (`area_m2` ou `area_ha`, seuil dans la même unité), sur une couche sans champ de surface à elle.
+fn surface_des_entites(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let filtered = rng.chance(1, 2);
+    let t = pick_theme(rng, &b, |t| {
+        t.geom == Geom::Polygon && (!filtered || without_area_field(t))
+    })?;
+    let layer = b.add(rng, t.key, &[], &[], &[]);
+    let (pl, sg) = (t.noun.pl, t.noun.sg);
+    let hectares = rng.chance(1, 2);
+    let (unit, field) = if hectares {
+        ("ha", "area_ha")
+    } else {
+        ("m2", "area_m2")
+    };
+    let first = json!({"command": "analysis.area", "params": {"layer_id": layer.id, "unit": unit}});
+    if !filtered {
+        let words = if hectares {
+            *rng.pick(&["en hectares", "en ha"])
+        } else {
+            *rng.pick(&["en mètres carrés", "en m²"])
+        };
+        let (body, q) = match rng.below(6) {
+            0 => (format!("Calcule la surface des {pl} {words}"), false),
+            1 => (
+                format!(
+                    "Ajoute un champ de surface {words} à la couche « {} »",
+                    layer.name
+                ),
+                false,
+            ),
+            2 => (format!("Mesure l'aire de chaque {sg} {words}"), false),
+            3 => (format!("Quelle est la superficie des {pl} {words}"), true),
+            4 => (format!("Je veux la surface {words} des {pl}"), false),
+            _ => (format!("Donne-moi l'aire des {pl}, {words}"), false),
+        };
+        let request = finish(rng, &body, q, false);
+        let expected = calls(vec![first]);
+        return Some(example("surface_des_entites", b, rng, request, expected));
+    }
+    let n: u64 = if hectares {
+        *rng.pick(&[2, 5, 10, 20, 50])
+    } else {
+        *rng.pick(&[500, 1000, 2000, 5000, 10000, 20000])
+    };
+    let shown = if n >= 1000 && rng.chance(1, 2) {
+        thousands(n)
+    } else {
+        n.to_string()
+    };
+    let u = match (hectares, rng.chance(1, 2)) {
+        (true, true) => "ha",
+        (true, false) => "hectares",
+        (false, true) => "m²",
+        (false, false) => "mètres carrés",
+    };
+    let (op, size) = match rng.below(4) {
+        0 => ("gt", format!("de plus de {shown} {u}")),
+        1 => ("lt", format!("de moins de {shown} {u}")),
+        2 => ("gte", format!("d'au moins {shown} {u}")),
+        _ => ("lte", format!("d'au plus {shown} {u}")),
+    };
+    let np = format!("les {pl} {size}");
+    let (body, q) = match rng.below(5) {
+        0 => (
+            format!("Ne garde que {np}, d'après leur surface calculée"),
+            false,
+        ),
+        1 => (format!("Parmi les {pl}, lesquelles sont {size}"), true),
+        2 => (
+            format!("Calcule la surface des {pl} puis garde {np}"),
+            false,
+        ),
+        3 => (format!("Sélectionne {np}"), false),
+        _ => (format!("Je cherche {np}"), false),
+    };
+    let request = finish(rng, &body, q, false);
+    let expected = calls(vec![first, select(&step(1), field, op, &n.to_string())]);
+    Some(example("surface_des_entites", b, rng, request, expected))
+}
+
+/// « Compte les parcelles pour chaque section » : `analysis.statistics_by_category` sur un champ
+/// texte de la couche, avec la somme d'un champ numérique de la même couche une fois sur trois.
+fn statistiques_par_categorie(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    // Une fois sur trois, la somme d'un champ numérique : le thème en porte alors un.
+    let summed = rng.chance(1, 3);
+    let t = pick_theme(rng, &b, |t| {
+        vector(t) && !text_fields(t).is_empty() && (!summed || !number_fields(t).is_empty())
+    })?;
+    let cat = *rng.pick(&text_fields(t));
+    let sum = if summed {
+        Some(*rng.pick(&number_fields(t)))
+    } else {
+        None
+    };
+    let mut require = vec![cat.role];
+    if let Some(s) = sum {
+        require.push(s.role);
+    }
+    let layer = b.add(rng, t.key, &require, &[], &[]);
+    let say = |d: &FieldDef| {
+        d.label
+            .strip_prefix("de ")
+            .or_else(|| d.label.strip_prefix("d'"))
+            .unwrap_or(d.label)
+            .to_string()
+    };
+    let cat_name = layer.field(cat.role)?.name.clone();
+    // Le champ désigné par son libellé (« type de zone ») ou, une fois sur trois, par son nom.
+    let by = if rng.chance(1, 3) {
+        format!("le champ {cat_name}")
+    } else {
+        say(cat)
+    };
+    let pl = t.noun.pl;
+    let mut params = json!({"layer_id": layer.id, "category_field": cat_name});
+    let (body, q) = match sum {
+        None => match rng.below(6) {
+            0 => (format!("Compte les {pl} selon {by}"), false),
+            1 => (
+                format!("Fais un décompte des {pl} pour chaque valeur de {by}"),
+                false,
+            ),
+            2 => (
+                format!("Répartis les {pl} par {by} et donne les effectifs"),
+                false,
+            ),
+            3 => (
+                format!("Quel est le nombre de {pl} pour chaque valeur de {by}"),
+                true,
+            ),
+            4 => (
+                format!("Fais-moi un tableau de statistiques des {pl} par {by}"),
+                false,
+            ),
+            _ => (
+                format!("Récapitule les {pl} par {by}, avec leur nombre"),
+                false,
+            ),
+        },
+        Some(s) => {
+            let sum_name = layer.field(s.role)?.name.clone();
+            params["sum_field"] = json!(sum_name);
+            let what = if rng.chance(1, 3) {
+                format!("le champ {sum_name}")
+            } else {
+                say(s)
+            };
+            match rng.below(5) {
+                0 => (
+                    format!("Additionne {what} des {pl} pour chaque valeur de {by}"),
+                    false,
+                ),
+                1 => (format!("Donne le total de {what} des {pl} par {by}"), false),
+                2 => (
+                    format!("Calcule la somme de {what} pour les {pl}, par {by}"),
+                    false,
+                ),
+                3 => (
+                    format!("Quel est le total de {what} des {pl} pour chaque valeur de {by}"),
+                    true,
+                ),
+                _ => (
+                    format!("Fais le cumul de {what} des {pl}, groupé par {by}"),
+                    false,
+                ),
+            }
+        }
+    };
+    let request = finish(rng, &body, q, false);
+    let expected = calls(vec![
+        json!({"command": "analysis.statistics_by_category", "params": params}),
+    ]);
+    Some(example(
+        "statistiques_par_categorie",
+        b,
+        rng,
+        request,
+        expected,
+    ))
+}
+
+/// Les numéros de département dont l'utilisateur peut apporter l'extrait de la BAN.
+const BAN_DEPARTMENTS: &[&str] = &[
+    "74", "94", "92", "75", "91", "69", "38", "13", "33", "31", "35", "44", "67", "06", "59",
+];
+
+/// « Géolocalise les adresses de donnees/clients.csv avec la BAN du 92, colonne adresse » :
+/// `geocode.ban` sur deux fichiers CSV nommés par leur chemin (le CSV d'adresses, et
+/// `donnees/adresses-XX.csv`, l'extrait de la BAN du département ou le fichier que la demande
+/// nomme), avec le champ d'adresse, parfois le code postal ou la commune. Une fois sur deux, la
+/// demande veut les points sur la carte : `layer.add` suit, tout en `step:1.*`.
+fn geocodage_ban(rng: &mut Rng) -> Option<Example> {
+    let b = Builder::new();
+    let stem = *rng.pick(&[
+        "clients",
+        "fournisseurs",
+        "agences",
+        "sites_a_visiter",
+        "points_de_vente",
+        "livraisons",
+        "abonnes",
+        "adherents",
+        "contacts",
+    ]);
+    let addresses = format!("donnees/{stem}.csv");
+    let dep = *rng.pick(BAN_DEPARTMENTS);
+    let ban = format!("donnees/adresses-{dep}.csv");
+    let ban_text = if rng.chance(2, 5) {
+        format!("le fichier {ban}")
+    } else {
+        match rng.below(3) {
+            0 => format!("la Base Adresse Nationale du {dep}"),
+            1 => format!("la BAN du département {dep}"),
+            _ => format!("la base adresse du département {dep}"),
+        }
+    };
+    let address_field = *rng.pick(&["adresse", "adresse_postale", "adr", "adresse_complete"]);
+    let mut params = json!({"addresses": addresses, "ban": ban, "address_field": address_field});
+    let mut columns = format!("l'adresse est dans la colonne {address_field}");
+    match rng.below(5) {
+        0 | 1 => {
+            let f = *rng.pick(&["cp", "code_postal", "codepostal"]);
+            params["postcode_field"] = json!(f);
+            columns.push_str(&format!(", le code postal dans {f}"));
+        }
+        2 => {
+            let f = *rng.pick(&["ville", "commune", "localite"]);
+            params["city_field"] = json!(f);
+            columns.push_str(&format!(", la commune dans {f}"));
+        }
+        _ => {}
+    }
+    let on_map = rng.chance(1, 2);
+    let show = if on_map {
+        *rng.pick(&[
+            " et ajoute le résultat à la carte",
+            ", puis place les points sur la carte",
+            " et affiche les points obtenus",
+        ])
+    } else {
+        ""
+    };
+    let body = match rng.below(6) {
+        0 => format!("Géolocalise les adresses de {addresses} avec {ban_text} ({columns}){show}"),
+        1 => format!(
+            "Attribue des coordonnées aux adresses de {addresses} grâce à {ban_text} ; {columns}{show}"
+        ),
+        2 => format!(
+            "Associe un point de {ban_text} à chaque ligne de {addresses} ({columns}){show}"
+        ),
+        3 => format!("Passe {addresses} au géocodage avec {ban_text} : {columns}{show}"),
+        4 => format!(
+            "Convertis en points les adresses de {addresses} d'après {ban_text}, {columns}{show}"
+        ),
+        _ => format!("Localise sur {ban_text} les adresses de {addresses} ({columns}){show}"),
+    };
+    let request = finish(rng, &body, false, false);
+    let mut list = vec![json!({"command": "geocode.ban", "params": params})];
+    if on_map {
+        list.push(json!({"command": "layer.add", "params": {
+            "path": "step:1.path", "crs": "step:1.crs",
+            "x_field": "step:1.x_field", "y_field": "step:1.y_field"}}));
+    }
+    Some(example("geocodage_ban", b, rng, request, calls(list)))
+}
+
+/// Les tournures d'un champ texte qui s'accordent à « les {pl} » (« situées en section {v} »).
+fn text_phrases(def: &'static FieldDef) -> &'static [&'static str] {
+    match &def.kind {
+        Kind::Text { phrases, .. } => phrases,
+        _ => &[],
+    }
+}
+
+/// « Produis un atlas PDF des communes, une page pour chaque commune » : `layout.export_atlas`
+/// sur une couche de polygones ou de points, de titre « Atlas des communes » ou celui que la
+/// demande donne, avec `label_field` quand la demande met le nom dans le titre de chaque page.
+/// Une fois sur quatre, la couverture est un sous-ensemble : `analysis.select_by_attribute`
+/// d'abord, puis l'atlas sur `step:1.layer_id`.
+fn atlas_pdf(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let subset = rng.chance(1, 4);
+    let t = pick_theme(rng, &b, |t| {
+        matches!(t.geom, Geom::Polygon | Geom::Point)
+            && t.field("nom").is_some()
+            && (!subset || text_fields(t).iter().any(|f| !text_phrases(f).is_empty()))
+    })?;
+    let labelled = rng.chance(2, 3);
+    let mut require: Vec<&str> = Vec::new();
+    if labelled {
+        require.push("nom");
+    }
+    let chosen = if subset {
+        let usable: Vec<&'static FieldDef> = text_fields(t)
+            .into_iter()
+            .filter(|f| !text_phrases(f).is_empty())
+            .collect();
+        let f = *rng.pick(&usable);
+        require.push(f.role);
+        Some(f)
+    } else {
+        None
+    };
+    let layer = b.add(rng, t.key, &require, &[], &[]);
+    let (pl, sg) = (t.noun.pl, t.noun.sg);
+    let mut list = Vec::new();
+    let mut scope = String::new();
+    let coverage = if let Some(f) = chosen {
+        let inst = layer.field(f.role)?;
+        let value = *rng.pick(&inst.values);
+        let phrases = text_phrases(f);
+        let template = phrases[rng.below(phrases.len())];
+        scope = format!(" {}", fill(template, &t.noun, value.v));
+        list.push(select(&layer.id, &inst.name, "eq", value.v));
+        step(1)
+    } else {
+        layer.id.clone()
+    };
+    let title = if rng.chance(1, 3) {
+        pick_str(rng, USER_TITLES).to_string()
+    } else {
+        format!("Atlas des {pl}")
+    };
+    let user_title = !title.starts_with("Atlas des ");
+    let name_part = if labelled {
+        *rng.pick(&[
+            ", avec le nom dans le titre de chaque page",
+            ", le nom de l'entité en titre de page",
+        ])
+    } else {
+        ""
+    };
+    let title_part = if user_title {
+        let t = &title;
+        match rng.below(3) {
+            0 => format!(", intitulé « {t} »"),
+            1 => format!(", titré « {t} »"),
+            _ => format!(" avec le titre « {t} »"),
+        }
+    } else {
+        String::new()
+    };
+    let body = match rng.below(6) {
+        0 => format!(
+            "Produis un atlas PDF des {pl}{scope}, une page pour chaque {sg}{name_part}{title_part}"
+        ),
+        1 => format!(
+            "Exporte en PDF un atlas où chaque {sg}{scope} a sa page{name_part}{title_part}"
+        ),
+        2 => format!(
+            "Génère l'atlas des {pl}{scope} : un PDF avec une page par {sg}{name_part}{title_part}"
+        ),
+        3 => format!(
+            "Je voudrais un atlas des {pl}{scope} en PDF, une feuille par {sg}{name_part}{title_part}"
+        ),
+        4 => format!(
+            "Sors l'atlas PDF de la couche « {} »{scope}, une page par entité{name_part}{title_part}",
+            layer.name
+        ),
+        _ => format!(
+            "Crée un PDF de type atlas pour les {pl}{scope}, une page par {sg}{name_part}{title_part}"
+        ),
+    };
+    let request = finish(rng, &body, false, false);
+    let mut params = json!({"title": title, "coverage_layer_id": coverage});
+    if labelled {
+        params["label_field"] = json!(layer.field("nom")?.name);
+    }
+    list.push(json!({"command": "layout.export_atlas", "params": params}));
+    Some(example("atlas_pdf", b, rng, request, calls(list)))
+}
+
+/// « Prépare le réseau avant un calcul d'itinéraire » : `network.prepare` sur la couche de
+/// routes ; avec une tolérance en mètres quand la demande l'écrit ; une fois sur trois suivi
+/// d'une isochrone sur la couche préparée (`step:1.layer_id`).
+fn preparation_reseau(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let network = network(rng, &mut b);
+    let tolerance = if rng.chance(1, 2) {
+        Some(*rng.pick(&[2u64, 3, 5, 10, 15, 20, 50]))
+    } else {
+        None
+    };
+    let name = &network.name;
+    let base = match (tolerance, rng.below(5)) {
+        (None, 0) => format!("Prépare la couche « {name} » pour l'analyse de réseau"),
+        (None, 1) => {
+            "Répare la topologie du réseau : nœuds aux croisements, doublons retirés".to_string()
+        }
+        (None, 2) => format!("Rends « {name} » prêt pour un calcul d'itinéraire"),
+        (None, 3) => format!(
+            "Raccorde les extrémités proches et découpe aux intersections la couche « {name} »"
+        ),
+        (None, _) => "Prépare le réseau de voies avant les calculs de parcours".to_string(),
+        (Some(n), 0) => {
+            format!("Prépare « {name} » pour l'analyse de réseau, avec une tolérance de {n} m")
+        }
+        (Some(n), 1) => format!(
+            "Relie les extrémités à moins de {n} mètres l'une de l'autre sur « {name} » et découpe aux croisements"
+        ),
+        (Some(n), 2) => format!(
+            "Rends le réseau de « {name} » propre : extrémités accrochées à {n} m, doublons retirés"
+        ),
+        (Some(n), 3) => format!(
+            "Répare la topologie de « {name} » en acceptant {n} mètres d'écart entre extrémités"
+        ),
+        (Some(n), _) => format!("Prépare le réseau avec {n} m de tolérance d'accrochage"),
+    };
+    let mut params = json!({"layer_id": network.id});
+    if let Some(n) = tolerance {
+        params["tolerance"] = json!({"value": n, "unit": "m"});
+    }
+    let mut list = vec![json!({"command": "network.prepare", "params": params})];
+    let mut body = base;
+    if rng.chance(1, 3) {
+        let tr = travel(rng);
+        let origin = origin_point(rng)?;
+        body.push_str(&format!(
+            ", puis calcule l'isochrone {} {} depuis {}",
+            tr.de(),
+            tr.mode,
+            origin.place
+        ));
+        list.push(isochrone_call(&step(1), &origin.point, &tr));
+    }
+    let request = finish(rng, &body, false, false);
+    Some(example("preparation_reseau", b, rng, request, calls(list)))
+}
+
+/// « Retire des parcelles la partie recouverte par les zones inondables » : `analysis.difference`
+/// entre deux couches de polygones de l'inventaire ; ou, une fois sur trois, avec les zones du
+/// PLU d'un type donné comme couche à retrancher (sélection d'abord, puis `step:1.layer_id`).
+fn difference_de_couches(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let from = pick_theme(rng, &b, |t| {
+        t.geom == Geom::Polygon && t.group != "zonage" && !matches!(t.key, "communes" | "quartiers")
+    })?;
+    let first = b.add(rng, from.key, &[], &[], &[]);
+    let (pl, sg) = (from.noun.pl, from.noun.sg);
+    let mut list = Vec::new();
+    let (overlay, body) = if rng.chance(1, 3) {
+        let zoning = b.add(rng, "zonage", &["zone"], &[], &[]);
+        let inst = zoning.field("zone")?;
+        let value = *rng.pick(&inst.values);
+        list.push(select(&zoning.id, &inst.name, "eq", value.v));
+        let body = match rng.below(4) {
+            0 => format!(
+                "Garde la part des {pl} qui n'est pas dans les zones {} du PLU",
+                value.v
+            ),
+            1 => format!(
+                "Retranche les zones {} du PLU de la couche « {} »",
+                value.v, first.name
+            ),
+            2 => format!(
+                "Enlève des {pl} tout ce qui tombe en zone {} du PLU",
+                value.v
+            ),
+            _ => format!(
+                "Découpe les {pl} en laissant de côté les zones {} du PLU",
+                value.v
+            ),
+        };
+        (step(1), body)
+    } else {
+        let other = pick_theme(rng, &b, |t| t.geom == Geom::Polygon && t.group != "zonage")?;
+        let second = b.add(rng, other.key, &[], &[], &[]);
+        let target = if rng.chance(1, 2) {
+            format!("la couche « {} »", second.name)
+        } else {
+            other.the_layer.to_string()
+        };
+        let body = match rng.below(5) {
+            0 => format!("Retire des {pl} la partie recouverte par {target}"),
+            1 => format!(
+                "Calcule la différence entre la couche « {} » et {target}",
+                first.name
+            ),
+            2 => format!("Garde de chaque {sg} la part qui n'est pas sous {target}"),
+            3 => format!("Soustrais {target} aux {pl}"),
+            _ => format!("Que reste-t-il des {pl} une fois {target} enlevée"),
+        };
+        (second.id.clone(), body)
+    };
+    let q = body.starts_with("Que reste");
+    let request = finish(rng, &body, q, false);
+    list.push(json!({"command": "analysis.difference", "params": {
+        "layer_id": first.id, "overlay_layer_id": overlay}}));
+    Some(example(
+        "difference_de_couches",
+        b,
+        rng,
+        request,
+        calls(list),
+    ))
+}
+
+/// Un tableau que l'utilisateur joint à une couche : la couche (thème et champ clé), les noms
+/// possibles de la colonne clé du tableau, et les tableaux (nom, fichier, colonnes de données).
+struct JoinCase {
+    theme: &'static str,
+    role: &'static str,
+    table_keys: &'static [&'static str],
+    tables: &'static [(&'static str, &'static str, &'static [&'static str])],
+}
+
+const JOIN_CASES: &[JoinCase] = &[
+    JoinCase {
+        theme: "parcelles",
+        role: "id",
+        table_keys: &["id_parcelle", "idu", "parcelle_id"],
+        tables: &[
+            (
+                "Prix des mutations",
+                "prix_mutations",
+                &["prix_eur", "annee", "nature"],
+            ),
+            ("Taxe foncière", "taxe_fonciere", &["montant_taxe", "annee"]),
+            (
+                "Propriétaires",
+                "proprietaires",
+                &["proprietaire", "type_proprietaire"],
+            ),
+            (
+                "Occupation déclarée",
+                "occupation",
+                &["occupation", "date_declaration"],
+            ),
+        ],
+    },
+    JoinCase {
+        theme: "communes",
+        role: "insee",
+        table_keys: &["CODGEO", "code_insee", "INSEE_COM"],
+        tables: &[
+            ("Revenus", "revenus", &["revenu_median", "taux_pauvrete"]),
+            (
+                "Population historique",
+                "population_historique",
+                &["pop_2015", "pop_2020"],
+            ),
+            (
+                "Logements vacants",
+                "logements_vacants",
+                &["nb_vacants", "part_vacants"],
+            ),
+            ("Emplois", "emplois", &["nb_emplois", "secteur"]),
+        ],
+    },
+];
+
+/// « Joins le tableau « Prix des mutations » aux parcelles avec le champ id_parcelle » :
+/// `analysis.join_table` entre une couche et un tableau CSV sans géométrie de l'inventaire, avec
+/// le champ clé de la couche et celui du tableau (parfois de noms différents), recopiés de
+/// l'inventaire.
+fn jointure_de_tableau(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let case = rng.pick(JOIN_CASES);
+    let t = theme(case.theme);
+    let layer = b.add(rng, case.theme, &[case.role], &[], &[]);
+    let (table_name, file, extras) = *rng.pick(case.tables);
+    let field = layer.field(case.role)?.name.clone();
+    let table_key = if rng.chance(1, 2) {
+        field.clone()
+    } else {
+        (*rng.pick(case.table_keys)).to_string()
+    };
+    let mut columns = vec![table_key.as_str()];
+    columns.extend(extras.iter().copied());
+    rng.shuffle(&mut columns);
+    let table_id = b.add_table_csv(rng, table_name, file, file, &columns);
+    let key = if field == table_key {
+        format!("le champ {field}")
+    } else {
+        format!("{field} côté couche et {table_key} côté tableau")
+    };
+    let (pl, sg) = (t.noun.pl, t.noun.sg);
+    let body = match rng.below(6) {
+        0 => format!("Joins le tableau « {table_name} » aux {pl} avec {key}"),
+        1 => {
+            format!("Complète les {pl} avec les colonnes de « {table_name} », en rapprochant {key}")
+        }
+        2 => format!(
+            "Fais une jointure entre la couche « {} » et le tableau « {table_name} » sur {key}",
+            layer.name
+        ),
+        3 => format!(
+            "Rattache à chaque {sg} la ligne correspondante du tableau « {table_name} » ({key})"
+        ),
+        4 => format!("Enrichis les {pl} avec « {table_name} » : la clé est {key}"),
+        _ => format!("Je veux les colonnes de « {table_name} » sur les {pl}, jointes par {key}"),
+    };
+    let request = finish(rng, &body, false, false);
+    let expected = calls(vec![json!({"command": "analysis.join_table", "params": {
+        "layer_id": layer.id, "table_layer_id": table_id,
+        "field": field, "table_field": table_key}})]);
+    Some(example("jointure_de_tableau", b, rng, request, expected))
 }
 
 // -- ouverture et description ----------------------------------------------
@@ -16091,6 +16747,242 @@ mod tests {
             }
         }
         assert!(scaled > 150 && bare > 80, "{scaled} {bare}");
+    }
+
+    fn has_field(e: &Example, layer: &str, field: &str) -> bool {
+        layer_of(e, layer)["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["name"] == field)
+    }
+
+    #[test]
+    fn an_area_request_has_a_closed_unit_and_a_filter_only_in_the_unit_it_writes() {
+        let (mut m2, mut ha, mut filtered) = (0, 0, 0);
+        for e in valid(surface_des_entites, 600) {
+            let p = &call(&e, 0)["params"];
+            let unit = p["unit"].as_str().unwrap();
+            match unit {
+                "m2" => m2 += 1,
+                _ => {
+                    assert_eq!(unit, "ha", "{}", e.request);
+                    ha += 1;
+                }
+            }
+            if commands(&e).len() == 2 {
+                filtered += 1;
+                assert_eq!(
+                    commands(&e),
+                    ["analysis.area", "analysis.select_by_attribute"]
+                );
+                let s = &call(&e, 1)["params"];
+                assert_eq!(s["layer_id"], "step:1.layer_id", "{}", e.request);
+                assert_eq!(s["field"], format!("area_{unit}"), "{}", e.request);
+                let digits: String = e.request.chars().filter(char::is_ascii_digit).collect();
+                assert_eq!(digits, s["value"].as_str().unwrap(), "{}", e.request);
+                // Un filtre vise le champ que la commande ajoute, jamais un champ de surface
+                // que la couche aurait déjà.
+                let id = p["layer_id"].as_str().unwrap();
+                assert!(!has_field(&e, id, "surface_m2"), "{}", e.request);
+            } else {
+                assert_eq!(commands(&e), ["analysis.area"], "{}", e.request);
+            }
+        }
+        assert!(
+            m2 > 100 && ha > 100 && filtered > 100,
+            "{m2} {ha} {filtered}"
+        );
+    }
+
+    #[test]
+    fn a_statistics_request_names_a_text_field_and_a_number_field_of_the_same_layer() {
+        let (mut counted, mut summed) = (0, 0);
+        for e in valid(statistiques_par_categorie, 600) {
+            assert_eq!(commands(&e), ["analysis.statistics_by_category"]);
+            let p = &call(&e, 0)["params"];
+            let id = p["layer_id"].as_str().unwrap();
+            let category = layer_of(&e, id)["fields"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|f| f["name"] == p["category_field"])
+                .unwrap_or_else(|| panic!("{}", e.request));
+            assert_eq!(category["type"], "string", "{}", e.request);
+            match p.get("sum_field") {
+                Some(sum) => {
+                    summed += 1;
+                    assert!(has_field(&e, id, sum.as_str().unwrap()), "{}", e.request);
+                }
+                None => counted += 1,
+            }
+        }
+        assert!(counted > 100 && summed > 50, "{counted} {summed}");
+    }
+
+    #[test]
+    fn a_geocoding_request_names_both_files_and_chains_layer_add_on_the_result_only_when_asked() {
+        let (mut plain, mut mapped, mut postcode, mut city) = (0, 0, 0, 0);
+        for e in valid(geocodage_ban, 600) {
+            let p = &call(&e, 0)["params"];
+            assert_eq!(call(&e, 0)["command"], "geocode.ban");
+            assert!(
+                e.request.contains(p["addresses"].as_str().unwrap()),
+                "{}",
+                e.request
+            );
+            assert!(
+                e.request.contains(p["address_field"].as_str().unwrap()),
+                "{}",
+                e.request
+            );
+            let ban = p["ban"].as_str().unwrap();
+            let dep = ban.strip_prefix("donnees/adresses-").unwrap();
+            let dep = dep.strip_suffix(".csv").unwrap();
+            assert!(e.request.contains(dep), "{}", e.request);
+            postcode += usize::from(p.get("postcode_field").is_some());
+            city += usize::from(p.get("city_field").is_some());
+            if commands(&e).len() == 2 {
+                mapped += 1;
+                assert_eq!(call(&e, 1)["command"], "layer.add");
+                assert_eq!(call(&e, 1)["params"]["x_field"], "step:1.x_field");
+                assert_eq!(call(&e, 1)["params"]["path"], "step:1.path");
+            } else {
+                plain += 1;
+            }
+        }
+        assert!(plain > 100 && mapped > 100, "{plain} {mapped}");
+        assert!(postcode > 100 && city > 30, "{postcode} {city}");
+    }
+
+    #[test]
+    fn an_atlas_request_covers_a_layer_or_a_subset_and_labels_only_when_the_name_is_asked() {
+        let (mut labelled, mut subset, mut titled) = (0, 0, 0);
+        for e in valid(atlas_pdf, 600) {
+            let last = commands(&e).len() - 1;
+            assert_eq!(commands(&e)[last], "layout.export_atlas", "{}", e.request);
+            let p = &call(&e, last)["params"];
+            let title = p["title"].as_str().unwrap();
+            if !title.starts_with("Atlas des ") {
+                titled += 1;
+                assert!(e.request.contains(title), "{}", e.request);
+            }
+            assert_eq!(
+                p.get("label_field").is_some(),
+                e.request.contains("le nom"),
+                "{}",
+                e.request
+            );
+            labelled += usize::from(p.get("label_field").is_some());
+            if last == 1 {
+                subset += 1;
+                assert_eq!(call(&e, 0)["command"], "analysis.select_by_attribute");
+                assert_eq!(p["coverage_layer_id"], "step:1.layer_id");
+            } else {
+                let id = p["coverage_layer_id"].as_str().unwrap();
+                assert!(layer_of(&e, id)["geometry"].as_str().is_some());
+            }
+        }
+        assert!(
+            labelled > 200 && subset > 100 && titled > 100,
+            "{labelled} {subset} {titled}"
+        );
+    }
+
+    #[test]
+    fn a_network_preparation_works_on_the_roads_and_writes_its_tolerance_and_its_isochrone() {
+        let (mut tolerance, mut isochrone) = (0, 0);
+        for e in valid(preparation_reseau, 600) {
+            assert_eq!(call(&e, 0)["command"], "network.prepare");
+            let p = &call(&e, 0)["params"];
+            let id = p["layer_id"].as_str().unwrap();
+            assert!(layer_of(&e, id)["geometry"]
+                .as_str()
+                .unwrap()
+                .contains("LineString"));
+            if let Some(t) = p.get("tolerance") {
+                tolerance += 1;
+                assert_eq!(t["unit"], "m");
+                assert!(e.request.contains(&t["value"].to_string()), "{}", e.request);
+            }
+            if commands(&e).len() == 2 {
+                isochrone += 1;
+                assert_eq!(call(&e, 1)["command"], "analysis.isochrone");
+                assert_eq!(call(&e, 1)["params"]["layer_id"], "step:1.layer_id");
+            }
+        }
+        assert!(
+            tolerance > 150 && isochrone > 100,
+            "{tolerance} {isochrone}"
+        );
+    }
+
+    #[test]
+    fn a_difference_request_takes_a_polygon_layer_minus_another_or_a_selection_of_zones() {
+        let (mut two_layers, mut zones) = (0, 0);
+        for e in valid(difference_de_couches, 600) {
+            let last = commands(&e).len() - 1;
+            assert_eq!(commands(&e)[last], "analysis.difference", "{}", e.request);
+            let p = &call(&e, last)["params"];
+            let first = p["layer_id"].as_str().unwrap();
+            assert_ne!(first, p["overlay_layer_id"], "{}", e.request);
+            assert!(layer_of(&e, first)["geometry"]
+                .as_str()
+                .unwrap()
+                .contains("Polygon"));
+            if last == 1 {
+                zones += 1;
+                assert_eq!(call(&e, 0)["command"], "analysis.select_by_attribute");
+                assert_eq!(p["overlay_layer_id"], "step:1.layer_id");
+            } else {
+                two_layers += 1;
+                let other = p["overlay_layer_id"].as_str().unwrap();
+                assert!(layer_of(&e, other)["geometry"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Polygon"));
+            }
+        }
+        assert!(two_layers > 200 && zones > 100, "{two_layers} {zones}");
+    }
+
+    #[test]
+    fn a_table_join_cites_a_geometry_free_table_and_a_key_field_of_each_side() {
+        let (mut same, mut different) = (0, 0);
+        for e in valid(jointure_de_tableau, 600) {
+            assert_eq!(commands(&e), ["analysis.join_table"], "{}", e.request);
+            let p = &call(&e, 0)["params"];
+            let layer = p["layer_id"].as_str().unwrap();
+            let table = p["table_layer_id"].as_str().unwrap();
+            assert_ne!(layer, table);
+            assert!(layer_of(&e, table)["geometry"].is_null());
+            assert!(
+                has_field(&e, layer, p["field"].as_str().unwrap()),
+                "{}",
+                e.request
+            );
+            assert!(
+                has_field(&e, table, p["table_field"].as_str().unwrap()),
+                "{}",
+                e.request
+            );
+            assert!(
+                e.request.contains(p["field"].as_str().unwrap()),
+                "{}",
+                e.request
+            );
+            if p["field"] == p["table_field"] {
+                same += 1;
+            } else {
+                different += 1;
+                assert!(
+                    e.request.contains(p["table_field"].as_str().unwrap()),
+                    "{}",
+                    e.request
+                );
+            }
+        }
+        assert!(same > 100 && different > 100, "{same} {different}");
     }
 
     #[test]

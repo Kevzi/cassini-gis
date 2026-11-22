@@ -158,7 +158,9 @@ pub fn validate(registry: &Registry, example: &Example) -> Result<(), String> {
                     }
                 }
                 if let Some(path) = call.params["path"].as_str() {
-                    if !files.contains(path) {
+                    // Un chemin `step:k.path` est la sortie d'une étape précédente (le CSV que
+                    // `geocode.ban` vient d'écrire) : `check_plan` a déjà vérifié la référence.
+                    if !path.starts_with("step:") && !files.contains(path) {
                         return Err(format!("étape {} : fichier absent « {path} »", index + 1));
                     }
                 }
@@ -1719,7 +1721,12 @@ mod tests {
         // 18 à 17 %.
         // 10.17 bis : deux familles de plus (`plus_court_chemin`, `export_pdf_titre_thematique`,
         // plancher de 15 chacune) : 227 sur 1 500 (15,1 %), la barre passe de 17 à 15 %.
-        assert!(big * 100 >= 1500 * 15, "{big} gros projets");
+        // 10.17 ter (`base-22-1`, 2026-11-22) : sept familles de plus (`surface_des_entites`,
+        // `statistiques_par_categorie`, `geocodage_ban`, `atlas_pdf`, `preparation_reseau`,
+        // `difference_de_couches`, `jointure_de_tableau`, plancher de 15 chacune), et `gros_projet`
+        // relevé de 152 à 172 pour garder 23 % du jeu complet : 152 sur 1 500 (10,1 %) contre 227,
+        // la barre passe de 15 à 10 %. Mesuré : le plancher prend 105 places de plus sur 1 560.
+        assert!(big * 100 >= 1500 * 10, "{big} gros projets");
         // Le plancher puis le surplus, chacun dans l'ordre du jeu complet.
         let floor_len: usize = sizes.values().map(|&n| n.min(RECALL_FLOOR)).sum();
         assert!(positions[..floor_len].windows(2).all(|w| w[0] < w[1]));
