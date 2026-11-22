@@ -28,6 +28,10 @@ compte pas dans l'ensemble ; la validation aussi, sauf si les deux jeux ont la m
 (mêmes totaux par sorte), car le jeu de validation est tiré du générateur à chaque entraînement.
 Aucune barre comptée : à décider.
 
+`--mode base` (candidat entraîné de zéro, qui ne peut pas tenir « une phrase par barre » : chaque
+tirage en perd et en gagne une vingtaine au hasard) juge l'ensemble : voir `REGLE_BASE`. Le mode
+`continu`, par défaut, garde la règle ci-dessus.
+
 Codes de sortie : 0 installable, 1 refusé, 2 relevé illisible, usage faux ou erreur imprévue,
 3 à décider.
 
@@ -50,6 +54,22 @@ from typing import Any
 TOLERANCE = 1
 # Le rejeu identique ne se perd pas.
 TOLERANCE_REJEU = 0
+# Deux modes. `continu` : le candidat prolonge son parent, qui bouge à peine, donc une phrase
+# de tolérance par barre. `base` : le candidat est entraîné de zéro ; chaque tirage perd et gagne
+# une vingtaine de phrases au hasard (mesure de base-22-1 : 29 perdues, 24 gagnées pour +1 net),
+# donc la règle porte sur l'ensemble : le total des séries ne baisse pas, une série ne
+# s'effondre pas (au plus TOLERANCE_SERIE_BASE phrases perdues), aucune commande à zéro, et les
+# recettes, le rejeu et les seuils propres tiennent comme en `continu`.
+CONTINU = "continu"
+BASE = "base"
+TOLERANCE_SERIE_BASE = 3
+TOTAL_SERIES = "total_des_series"
+REGLE_BASE = (
+    "modèle de zéro : le total des phrases justes des séries ne baisse pas ; une série perd au plus "
+    f"{TOLERANCE_SERIE_BASE} phrases ; une commande ne tombe pas à 0 phrase juste (3 essais) quand le "
+    "parent en réussissait au moins 2, ou n'existait pas ; la recette, le rejeu identique et les seuils "
+    "propres tiennent comme en mode continu ; une commande absente du candidat est à décider"
+)
 # Barres montrées sans compter dans le verdict d'ensemble, tant que 5.50 n'en fait pas une barre.
 INDICATIVES = {"recette:gros", "recette:gros:rejeu"}
 # Préfixe des identifiants de phrase d'une recette (`== RA01 : …`) → nom de la recette.
@@ -359,7 +379,24 @@ def modeles_nommes(releves: Releves) -> list[str]:
     return noms
 
 
-def verdict_barre(barre: str, parent: Score | None, candidat: Score | None) -> str:
+def est_serie(barre: str) -> bool:
+    """Une série d'essais (plan_reel, ecart_reel…) : ni commande, ni recette, ni validation."""
+    return not (
+        barre == "validation"
+        or barre == "par_commande_reel"
+        or barre.startswith(("par_commande:", "recette:"))
+    )
+
+
+def verdict_barre(barre: str, parent: Score | None, candidat: Score | None, mode: str = CONTINU) -> str:
+    if mode == BASE and barre.startswith("par_commande:"):
+        # Plancher : une commande qui rend 0 phrase juste (3 essais) est une commande que le
+        # modèle ne sait pas faire. Le parent déjà à 0 ou 1 sur 3 n'est pas un point de comparaison.
+        if candidat is None:
+            return NON_COMPARABLE  # commande renommée ou retirée : le propriétaire tranche
+        if candidat.justes > 0:
+            return TENUE
+        return TENUE if parent is not None and parent.justes < 2 else BAISSE
     if parent is None:
         return SANS_PARENT
     if candidat is None:
@@ -370,8 +407,36 @@ def verdict_barre(barre: str, parent: Score | None, candidat: Score | None) -> s
         return NON_COMPARABLE
     if parent.seuil is True and candidat.seuil is None:
         return NON_COMPARABLE  # seuil du candidat inconnu (section coupée) : rien ne dit qu'il tient
-    tolerance = TOLERANCE_REJEU if barre.endswith(":rejeu") else TOLERANCE
+    if barre.endswith(":rejeu"):
+        tolerance = TOLERANCE_REJEU
+    elif mode == BASE and est_serie(barre):
+        tolerance = TOLERANCE_SERIE_BASE
+    else:
+        tolerance = TOLERANCE
     return TENUE if candidat.justes >= parent.justes - tolerance else BAISSE
+
+
+def ligne_total_des_series(parent: Releves, candidat: Releves) -> dict[str, Any] | None:
+    """Mode base : la somme des phrases justes des séries comparables ne doit pas baisser."""
+    communes = [
+        b
+        for b, p in parent.barres.items()
+        if est_serie(b)
+        and b not in INDICATIVES
+        and b in candidat.barres
+        and candidat.barres[b].total == p.total
+    ]
+    if not communes:
+        return None
+    p = Score(sum(parent.barres[b].justes for b in communes), sum(parent.barres[b].total for b in communes), "séries")
+    c = Score(sum(candidat.barres[b].justes for b in communes), p.total, "séries")
+    return {
+        "barre": TOTAL_SERIES,
+        "parent": detail(p),
+        "candidat": detail(c),
+        "verdict": TENUE if c.justes >= p.justes else BAISSE,
+        "indicative": False,
+    }
 
 
 def ordre(barre: str) -> tuple[int, str]:
@@ -407,7 +472,7 @@ def composition_texte(score: Score) -> str:
     return "/".join(f"{sorte} {n}" for sorte, n in sorted(score.composition.items()))
 
 
-def comparer(parent: Releves, candidat: Releves) -> dict[str, Any]:
+def comparer(parent: Releves, candidat: Releves, mode: str = CONTINU) -> dict[str, Any]:
     """Le verdict de chaque barre et le verdict d'ensemble, en dictionnaire prêt pour le JSON."""
     avertissements = parent.avertissements + candidat.avertissements
     noms = list(parent.barres)
@@ -417,6 +482,9 @@ def comparer(parent: Releves, candidat: Releves) -> dict[str, Any]:
     for barre in noms:
         p, c = parent.barres.get(barre), candidat.barres.get(barre)
         indicative = barre in INDICATIVES
+        if mode == BASE and barre == "par_commande_reel":
+            # Total de commandes différentes d'un modèle à l'autre : jugé commande par commande.
+            indicative = True
         if barre == "validation":
             if p is None or c is None:
                 indicative = True
@@ -432,10 +500,13 @@ def comparer(parent: Releves, candidat: Releves) -> dict[str, Any]:
                 "barre": barre,
                 "parent": detail(p),
                 "candidat": detail(c),
-                "verdict": verdict_barre(barre, p, c),
+                "verdict": verdict_barre(barre, p, c, mode),
                 "indicative": indicative,
             }
         )
+    if mode == BASE and (total := ligne_total_des_series(parent, candidat)) is not None:
+        premier = next((i for i, l in enumerate(lignes) if not est_serie(l["barre"])), len(lignes))
+        lignes.insert(premier, total)
     comptees = [l["verdict"] for l in lignes if not l["indicative"]]
     if any(v in (BAISSE, ABSENTE) for v in comptees):
         ensemble = REFUSE
@@ -460,7 +531,10 @@ def comparer(parent: Releves, candidat: Releves) -> dict[str, Any]:
     return {
         "verdict": ensemble,
         "code": CODES[ensemble],
-        "regle": (
+        "mode": mode,
+        "regle": REGLE_BASE
+        if mode == BASE
+        else (
             f"une barre tient si le candidat a au plus {TOLERANCE} phrase juste de moins que le parent, "
             "sur le même total ; le rejeu identique ne se perd pas ; un seuil propre que le parent passait "
             "et que le candidat manque est une baisse ; une barre du parent absente du candidat refuse ; "
@@ -512,6 +586,12 @@ def main(argv: list[str] | None = None) -> int:
     lecteur.add_argument("--parent", nargs="+", required=True, type=Path, help="relevés du modèle installé")
     lecteur.add_argument("--candidat", nargs="+", required=True, type=Path, help="relevés du nouveau modèle")
     lecteur.add_argument("--json", type=Path, help="écrit aussi le résultat en JSON dans ce fichier")
+    lecteur.add_argument(
+        "--mode",
+        choices=(CONTINU, BASE),
+        default=CONTINU,
+        help="continu : candidat prolongeant son parent (défaut) ; base : candidat entraîné de zéro",
+    )
     arguments = lecteur.parse_args(argv)
     try:
         if arguments.json:
@@ -520,7 +600,7 @@ def main(argv: list[str] | None = None) -> int:
                 raise ReleveIllisible(f"{arguments.json} : `--json` désigne un des relevés, il serait écrasé.")
             # Un verdict périmé ne doit pas survivre à un lancement qui échoue.
             arguments.json.unlink(missing_ok=True)
-        resultat = comparer(lire_releves(arguments.parent), lire_releves(arguments.candidat))
+        resultat = comparer(lire_releves(arguments.parent), lire_releves(arguments.candidat), arguments.mode)
         print(en_texte(resultat))
         if arguments.json:
             # En dernier, par un fichier provisoire renommé : un JSON n'existe, entier, que pour

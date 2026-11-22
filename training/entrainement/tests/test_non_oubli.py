@@ -422,6 +422,95 @@ class Regles(Cas):
         self.assertTrue(any("hors de la section par_commande_reel" in a for a in releves.avertissements))
 
 
+class ModeBase(Cas):
+    """Un modèle de zéro perd et gagne des phrases au hasard : le juge regarde l'ensemble."""
+
+    def lancer_base(self, parent, candidat):
+        sortie_json = self.dossier / "base.json"
+        sortie_json.unlink(missing_ok=True)
+        args = ["--mode", "base", "--parent", *map(str, parent), "--candidat", *map(str, candidat)]
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            code = non_oubli.main([*args, "--json", str(sortie_json)])
+        return code, json.loads(sortie_json.read_text(encoding="utf-8"))
+
+    def releves(self, series, commandes=()):
+        sections = [(nom, f"SCORE {j}/{t} phrases") for nom, (j, t) in series.items()]
+        texte = essais(*sections)
+        if commandes:
+            lignes = ["=== par_commande_reel ==="]
+            lignes += [f"SCORE {c} {j}/3" for c, j in commandes]
+            lignes += ["=== fin par_commande_reel : 0 ==="]
+            texte = texte.replace("=== TOUT FINI ===", "\n".join(lignes) + "\n=== TOUT FINI ===")
+        return self.fichier(texte)
+
+    def test_le_bruit_d_un_tirage_ne_refuse_pas(self):
+        # La forme du cas réel de base-22-1 : une série en gagne 4, deux en perdent 2, total égal.
+        p = self.releves({"plan_reel": (44, 48), "ecart_reel": (38, 40), "echelle_utm_reel": (42, 44)})
+        c = self.releves({"plan_reel": (48, 48), "ecart_reel": (36, 40), "echelle_utm_reel": (40, 44)})
+        code, r = self.lancer_base([p], [c])
+        self.assertEqual((code, r["verdict"]), (0, "installable"))
+        self.assertEqual(self.verdict(r, TOTAL), "tenue")
+        # La même paire est refusée par la règle continue.
+        self.assertEqual(self.lancer([p], [c])[0], 1)
+
+    def test_le_total_qui_baisse_refuse(self):
+        p = self.releves({"plan_reel": (44, 48), "ecart_reel": (38, 40)})
+        c = self.releves({"plan_reel": (46, 48), "ecart_reel": (35, 40)})
+        code, r = self.lancer_base([p], [c])
+        self.assertEqual((code, self.verdict(r, TOTAL)), (1, "baisse"))
+
+    def test_une_serie_qui_s_effondre_refuse_meme_avec_un_bon_total(self):
+        p = self.releves({"plan_reel": (30, 48), "ecart_reel": (38, 40)})
+        c = self.releves({"plan_reel": (48, 48), "ecart_reel": (34, 40)})
+        code, r = self.lancer_base([p], [c])
+        self.assertEqual(self.verdict(r, TOTAL), "tenue")
+        self.assertEqual((code, self.verdict(r, "ecart_reel")), (1, "baisse"))
+
+    def test_une_commande_a_zero_refuse(self):
+        p = self.releves({"plan_reel": (40, 48)}, [("terrain.slope", 3), ("geo.bearing", 1)])
+        c = self.releves(
+            {"plan_reel": (44, 48)},
+            [("terrain.slope", 0), ("geo.bearing", 0), ("network.prepare", 0), ("raster.contour", 3)],
+        )
+        code, r = self.lancer_base([p], [c])
+        self.assertEqual(code, 1)
+        self.assertEqual(self.verdict(r, "par_commande:terrain.slope"), "baisse")  # 3/3 -> 0/3
+        self.assertEqual(self.verdict(r, "par_commande:geo.bearing"), "tenue")  # parent déjà à 1/3
+        self.assertEqual(self.verdict(r, "par_commande:network.prepare"), "baisse")  # nouvelle, à 0
+        self.assertEqual(self.verdict(r, "par_commande:raster.contour"), "tenue")  # nouvelle, sait faire
+
+    def test_commandes_un_seul_succes_suffit(self):
+        p = self.releves({"plan_reel": (40, 48)}, [("terrain.slope", 3)])
+        c = self.releves({"plan_reel": (40, 48)}, [("terrain.slope", 1), ("raster.contour", 1)])
+        code, r = self.lancer_base([p], [c])
+        self.assertEqual((code, r["verdict"]), (0, "installable"))
+
+    def test_une_commande_absente_est_a_decider(self):
+        p = self.releves({"plan_reel": (40, 48)}, [("terrain.slope", 3), ("analysis.old", 3)])
+        c = self.releves({"plan_reel": (40, 48)}, [("terrain.slope", 3)])
+        code, r = self.lancer_base([p], [c])
+        self.assertEqual((code, self.verdict(r, "par_commande:analysis.old")), (3, "non comparable"))
+
+    def test_le_rejeu_et_le_seuil_propre_tiennent_toujours(self):
+        p = self.fichier(essais(("plan_reel", "SCORE 40/48 plans")))
+        c = self.fichier(essais(("plan_reel", "SCORE 48/48 plans", 1)))  # seuil raté
+        self.assertEqual(self.lancer_base([p], [c])[0], 1)
+        pr = self.fichier(recette("SCORE : 18/20 (barre 15)"), "recette-annecy-a.txt")
+        cr = self.fichier(recette("SCORE : 20/20 (barre 15)", rejeu=False), "recette-annecy-b.txt")
+        code, r = self.lancer_base([pr], [cr])
+        self.assertEqual((code, self.verdict(r, "recette:annecy:rejeu")), (1, "baisse"))
+
+    def test_le_mode_continu_reste_celui_par_defaut(self):
+        p = self.releves({"plan_reel": (44, 48)})
+        c = self.releves({"plan_reel": (41, 48)})
+        code, _, _, r = self.lancer([p], [c])
+        self.assertEqual((code, r["mode"]), (1, "continu"))
+
+
+TOTAL = "total_des_series"
+
+
 class VraisFormats(Cas):
     """Extraits des relevés gardés : BOM, fins de ligne Windows, accents abîmés par la console,
     sous-scores d'`ecart_reel`, rapport d'entraînement. Seul écart avec le vrai relevé de

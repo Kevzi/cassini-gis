@@ -178,8 +178,9 @@ print('VALIDATION %s/%s ; maillons %d ; exemples %s' % (v.get('justes', '?'), v.
     fi
   done
 
-  # 4. Le juge, le même pour les deux bras, contre les mêmes relevés. Rien n'est installé.
-  python3 -I training/entrainement/non_oubli.py --parent "$REF"/* --candidat "${CANDIDAT[@]}" \
+  # 4. Le juge, contre les mêmes relevés, en mode `base` pour un modèle de zéro (qui perd et gagne
+  # une vingtaine de phrases au hasard à chaque tirage) et `continu` sinon. Rien n'est installé.
+  python3 -I training/entrainement/non_oubli.py --mode "$kind" --parent "$REF"/* --candidat "${CANDIDAT[@]}" \
     --json "$MES/non-oubli.json" > "$MES/non-oubli.txt" 2>&1
   code=$?
   case $code in
