@@ -210,6 +210,19 @@ pub static FAMILIES: &[Family] = &[
         weight: 4,
         make: fusion_par_champ,
     },
+    // Essai réel `echelle_utm_reel` (EU34, EU13) : `network.shortest_path` n'avait aucune famille
+    // (le modèle composait distance et chemin de moindre coût), et un titre qui nomme une couche
+    // (« Réseau routier ») était refusé comme un choix de couches.
+    Family {
+        name: "plus_court_chemin",
+        weight: 4,
+        make: plus_court_chemin,
+    },
+    Family {
+        name: "export_pdf_titre_thematique",
+        weight: 4,
+        make: export_pdf_titre_thematique,
+    },
     Family {
         name: "ouverture",
         weight: 4,
@@ -3678,6 +3691,149 @@ fn longueurs_par_zone(rng: &mut Rng) -> Option<Example> {
         json!({"command": "analysis.sum_line_lengths", "params": params}),
     ]);
     Some(example("longueurs_par_zone", b, rng, request, expected))
+}
+
+/// Les façons de dire le mode d'un trajet de `network.shortest_path` : `walk` ou `car`, avec
+/// les mots d'une isochrone et « par la route », qui dit la voiture sans la nommer.
+fn route_mode(rng: &mut Rng) -> (&'static str, &'static str) {
+    if rng.chance(1, 2) {
+        ("walk", *rng.pick(&["à pied", "en marchant", "à la marche"]))
+    } else {
+        (
+            "car",
+            *rng.pick(&["en voiture", "en auto", "en véhicule", "par la route"]),
+        )
+    }
+}
+
+/// Un point de la phrase : « 452 000 / 5 410 000 (UTM 31N) » sans « le point » devant une fois
+/// sur deux quand la tournure le permet, sinon « le point ... ».
+fn bare_point(rng: &mut Rng, o: &Origin) -> String {
+    match o.place.strip_prefix("le point ") {
+        Some(rest) if !rest.starts_with("de ") && rng.chance(1, 2) => rest.to_string(),
+        _ => o.place.clone(),
+    }
+}
+
+/// « Trouve l'itinéraire le plus court en voiture entre 452 000 / 5 410 000 (UTM 31N) et
+/// 458 500 / 5 404 000 (UTM 31N) » : `network.shortest_path` seul, sur la couche de routes de
+/// l'inventaire, avec un mode fermé (`walk` ou `car`) et deux points portant leur code EPSG
+/// (UTM 31N ou 32N, Lambert-93, WGS84). Jamais `geo.distance_azimuth` ni un chemin de moindre
+/// coût du terrain : la phrase nomme un réseau, pas un relief.
+fn plus_court_chemin(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let network = network(rng, &mut b);
+    let (mode, words) = route_mode(rng);
+    let (start, end) = if rng.chance(1, 2) {
+        let zone = if rng.chance(1, 2) { 31 } else { 32 };
+        (utm_origin_in(rng, zone)?, utm_origin_in(rng, zone)?)
+    } else {
+        (origin_point(rng)?, origin_point(rng)?)
+    };
+    if start.point == end.point {
+        return None;
+    }
+    let (a, z) = (bare_point(rng, &start), bare_point(rng, &end));
+    let via = if rng.chance(1, 3) {
+        format!(" sur la couche « {} »", network.name)
+    } else {
+        String::new()
+    };
+    let (body, q) = match rng.below(7) {
+        0 => (
+            format!("Calcule le chemin le plus court {words} entre {a} et {z}{via}"),
+            false,
+        ),
+        1 => (
+            format!("Trouve l'itinéraire le plus court {words} de {a} à {z}{via}"),
+            false,
+        ),
+        2 => (
+            format!("Quel est le trajet le plus court {words} entre {a} et {z}{via}"),
+            true,
+        ),
+        3 => (
+            format!("Donne le plus court chemin {words} depuis {a} jusqu'à {z}{via}"),
+            false,
+        ),
+        4 => (
+            format!("Trace l'itinéraire le plus rapide {words} entre {a} et {z}{via}"),
+            false,
+        ),
+        5 => (
+            format!("Je veux aller {words} de {a} à {z}{via} par le chemin le plus court"),
+            false,
+        ),
+        _ => (
+            format!("Cherche le trajet le plus court {words} entre {a} et {z}{via}"),
+            false,
+        ),
+    };
+    let request = finish(rng, &body, q, false);
+    let expected = calls(vec![json!({"command": "network.shortest_path", "params": {
+        "layer_id": network.id, "start": start.point, "end": end.point, "mode": mode}})]);
+    Some(example("plus_court_chemin", b, rng, request, expected))
+}
+
+/// Titres de carte qui nomment une couche ou un thème (« Réseau routier communal ») : un titre
+/// n'est pas un choix de couches. Jamais « Réseau routier » seul, titre de la phrase EU13 de
+/// `echelle_utm_reel` (garde `recouvrement.rs`). La clé est la couche du titre, s'il y en a une.
+const THEMATIC_TITLES: &[(&str, Option<&str>)] = &[
+    ("Réseau routier communal", Some("routes")),
+    ("Réseau routier principal", Some("routes")),
+    ("Routes et chemins", Some("routes")),
+    ("Réseau hydrographique", Some("rivieres")),
+    ("Les rivières du territoire", Some("rivieres")),
+    ("Implantation des gares", Some("gares")),
+    ("Plan des communes", Some("communes")),
+    ("Parcelles et bâtiments", Some("parcelles")),
+    ("Zones inondables", Some("inondables")),
+    ("Carte des écoles", Some("ecoles")),
+    ("Bâtiments du quartier", Some("batiments")),
+    ("Occupation du sol", None),
+    ("Réseaux et équipements", None),
+];
+
+/// « Exporte un PDF de la carte au 1:25 000, intitulé « Réseau routier communal » » :
+/// `layout.export_pdf` avec `title`, et `scale` quand la phrase donne une échelle. Le titre peut
+/// nommer une couche : ce n'est pas un choix de couches à montrer (refus `NO_LAYER_CHOICE`, qui
+/// vise « une carte qui ne montre que les gares et les routes »).
+fn export_pdf_titre_thematique(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let (title, key) = *rng.pick(THEMATIC_TITLES);
+    if let Some(key) = key {
+        if rng.chance(2, 3) {
+            b.add(rng, key, &[], &[], &[]);
+        }
+    }
+    b.distract(rng, 1, vector);
+    let scale = if rng.chance(2, 3) {
+        Some(*rng.pick(&SCALES))
+    } else {
+        None
+    };
+    let at = scale.map(|s| format!(" {}", scale_text(rng, s)));
+    let sc = at.as_deref().unwrap_or("");
+    let body = match rng.below(6) {
+        0 => format!("Exporte un PDF de la carte{sc}, intitulé « {title} »"),
+        1 => format!("Sors la carte en PDF{sc} sous le titre « {title} »"),
+        2 => format!("Fais un PDF de la carte{sc}, titré « {title} »"),
+        3 => format!("Génère la carte en PDF{sc} avec « {title} » comme titre"),
+        4 => format!("Produis un PDF de la carte{sc} dont le titre est « {title} »"),
+        _ => format!("Exporte la carte en PDF{sc}, titre : « {title} »"),
+    };
+    let request = finish(rng, &body, false, false);
+    let call = match scale {
+        Some(s) => pdf_at(title, s),
+        None => pdf(title),
+    };
+    Some(example(
+        "export_pdf_titre_thematique",
+        b,
+        rng,
+        request,
+        calls(vec![call]),
+    ))
 }
 
 /// « Regroupe les zones du PLU de même destination » : `analysis.dissolve` sur un ou deux
@@ -15879,6 +16035,62 @@ mod tests {
             }
         }
         assert!(km > 50 && m > 20 && none > 100, "{km} {m} {none}");
+    }
+
+    #[test]
+    fn a_shortest_path_request_has_one_call_on_the_roads_with_a_closed_mode_and_two_points() {
+        let (mut walk, mut car, mut utm) = (0, 0, 0);
+        for e in valid(plus_court_chemin, 600) {
+            assert_eq!(commands(&e), ["network.shortest_path"], "{}", e.request);
+            let p = &call(&e, 0)["params"];
+            let id = p["layer_id"].as_str().unwrap();
+            let geometry = layer_of(&e, id)["geometry"].as_str().unwrap();
+            assert!(geometry.contains("LineString"), "{}", e.request);
+            assert_ne!(p["start"], p["end"], "{}", e.request);
+            match p["mode"].as_str().unwrap() {
+                "walk" => {
+                    walk += 1;
+                    assert!(!e.request.contains("voiture"), "{}", e.request);
+                }
+                _ => car += 1,
+            }
+            if e.request.contains("UTM") {
+                utm += 1;
+                let code = p["start"]["epsg"].as_u64().unwrap();
+                assert!(code == 32631 || code == 32632, "{}", e.request);
+                assert_eq!(p["start"]["epsg"], p["end"]["epsg"], "{}", e.request);
+            }
+            assert!(p.get("network").is_none(), "{}", e.request);
+        }
+        assert!(walk > 100 && car > 100 && utm > 100, "{walk} {car} {utm}");
+    }
+
+    #[test]
+    fn a_titled_pdf_export_may_name_a_layer_and_gives_the_scale_only_when_written() {
+        let (mut scaled, mut bare) = (0, 0);
+        for e in valid(export_pdf_titre_thematique, 600) {
+            assert_eq!(commands(&e), ["layout.export_pdf"], "{}", e.request);
+            let p = &call(&e, 0)["params"];
+            let title = p["title"].as_str().unwrap();
+            assert!(e.request.contains(title), "{}", e.request);
+            assert_ne!(title, "Réseau routier", "titre de la phrase EU13");
+            if p.get("scale").is_some() {
+                scaled += 1;
+                assert!(
+                    e.request.chars().any(|c| c.is_ascii_digit()),
+                    "{}",
+                    e.request
+                );
+            } else {
+                bare += 1;
+                assert!(
+                    !e.request.chars().any(|c| c.is_ascii_digit()),
+                    "{}",
+                    e.request
+                );
+            }
+        }
+        assert!(scaled > 150 && bare > 80, "{scaled} {bare}");
     }
 
     #[test]

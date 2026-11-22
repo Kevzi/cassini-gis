@@ -1717,7 +1717,9 @@ mod tests {
         // n'y change presque rien (160 : 289, 172 : 292) : la barre passe de 20 à 18 %.
         // 5.61 : une famille de plus (plancher de 15) : 266 sur 1 500 (17,7 %), la barre passe de
         // 18 à 17 %.
-        assert!(big * 100 >= 1500 * 17, "{big} gros projets");
+        // 10.17 bis : deux familles de plus (`plus_court_chemin`, `export_pdf_titre_thematique`,
+        // plancher de 15 chacune) : 227 sur 1 500 (15,1 %), la barre passe de 17 à 15 %.
+        assert!(big * 100 >= 1500 * 15, "{big} gros projets");
         // Le plancher puis le surplus, chacun dans l'ordre du jeu complet.
         let floor_len: usize = sizes.values().map(|&n| n.min(RECALL_FLOOR)).sum();
         assert!(positions[..floor_len].windows(2).all(|w| w[0] < w[1]));

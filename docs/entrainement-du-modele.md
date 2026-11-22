@@ -3442,6 +3442,20 @@ Le parent doit contenir `rapport.json` et `travail/adaptateur-hf/adapter_model.s
 **Résultat de non-oubli.** *À remplir par le propriétaire* : verdict du juge, `plan_reel` n/48 (barre 44/48), `question_reel`, `terrain_reel`, `par_commande_reel`, Annecy, gros projet, v4, durée d'entraînement, et la décision d'installer ou non. Si le juge refuse, la séance est consignée ici comme celles de 5.61, le modèle installé reste en place.
 
 
+## Deux familles après l'essai réel `echelle_utm_reel` (10.17, suite)
+
+**État : générateur modifié, ré-entraînement from scratch non lancé.** Aucun résultat mesuré : les deux familles n'ont pas encore été apprises par un modèle. Elles répondent à deux phrases perdues par `base-17-1` à l'essai `echelle_utm_reel` (`ai/tests/echelle_utm_reel/phrases.json`).
+
+| famille (poids 4) | commande | ce qu'elle enseigne |
+|---|---|---|
+| `plus_court_chemin` | `network.shortest_path` | un seul appel sur la couche de routes de l'inventaire, `mode` fermé (`walk` pour « à pied », « en marchant », « à la marche » ; `car` pour « en voiture », « en auto », « en véhicule », « par la route »), `start` et `end` avec leur code EPSG (UTM 31N ou 32N, Lambert-93, WGS84). Jamais `geo.distance_azimuth` ni `terrain.least_cost_path` : la phrase nomme un réseau, pas un relief. Corrige EU34, où le modèle composait ces deux commandes faute d'exemple. |
+| `export_pdf_titre_thematique` | `layout.export_pdf` | un titre qui nomme une couche ou un thème (« Réseau routier communal », « Zones inondables »...) est un `title`, pas un choix de couches ; `scale` posé seulement quand la phrase écrit une échelle. Corrige EU13, refusé à tort par fuite de `NO_LAYER_CHOICE`, qui reste intacte pour « une carte qui ne montre que les gares et les routes ». |
+
+Garde-fous : aucun titre ne vaut « Réseau routier » seul (titre de EU13), aucune tournure ne reprend « par les routes » d'EU34 ; `training/tests/recouvrement.rs` reste vert. La barre de gros projets du rappel stratifié passe de 17 à 15 % (227 sur 1 500 avec ces deux planchers de 15), comme à chaque famille ajoutée depuis 5.58.
+
+Pour les inclure dans une séance continue : `bash training/entrainement/nuit-5-55.sh continu plus_court_chemin,export_pdf_titre_thematique` ; pour un ré-entraînement complet, elles font partie du jeu par défaut. Les décisions de ré-entraînement et les mesures restent au propriétaire.
+
+
 ## Résultat de non-oubli de 10.17 : `base-17-1` (2026-11-21)
 
 Le parent `continu-5-61b` a trois maillons : la chaîne a refusé le bras `continu` (« recalage »). La nuit a donc été un entraînement de zéro (`base`, jeu complet de 8 600 exemples, graine 1, 537 pas, 2 h 27). Validation : 284/300 (94,7 %). Juge `non_oubli.py` contre `reference-non-oubli-5-58-1` : **refusé**, pour une seule raison, `echelle_utm_reel` en baisse (42/44 à 37/44, seuil 33 tenu). Tout le reste tient ou progresse (`plan_reel` 44/48, recette Annecy 19/20, `terrain_reel` 40/44, `epic11_reel` 46/49). Le modèle n'est pas installé ; c'est au propriétaire de décider.
