@@ -2,7 +2,7 @@
 name=Cassini
 qgisMinimumVersion=3.44
 qgisMaximumVersion=4.99
-version=0.1.4
+version=0.1.5
 author=Cassini
 description=Interface en langage naturel pour QGIS : décrivez votre analyse en français, une IA locale la prépare, vous la validez, QGIS l'exécute. Hors ligne.
 email=cassini-sig@proton.me
@@ -35,6 +35,7 @@ about=Cassini est l'interface en français de QGIS, pilotée par une IA qui tour
     L'extension est sous licence GPL, comme QGIS. Le moteur (Apache-2.0) est un programme distinct, lancé comme processus séparé et joint par un canal documenté (JSON-RPC sur l'entrée et la sortie standard) : il ne lie jamais QGIS. Le texte de la frontière et les licences des composants livrés sont fournis avec l'installeur.
     ÉTAT DU PROJET
     Version de jeunesse (0.1). Quelques fonctions bien faites plutôt que beaucoup à moitié finies ; l'extension n'affiche aucune parité avec QGIS. Retours et signalements bienvenus sur le suivi des anomalies ou à cassini-sig@proton.me.
-changelog=0.1.4 : catalogue étendu (données, analyses vectorielles et raster, réseau, mise en page, géocodage), nouveau modèle local, garde-fou contre les demandes hors catalogue, fiche détaillée de l'extension.
+changelog=0.1.5 : catalogue étendu (données, analyses vectorielles et raster, réseau, mise en page, géocodage), nouveau modèle local, garde-fou contre les demandes hors catalogue.
+    0.1.4 : fiche détaillée de l'extension.
     0.1.3 : mise à jour du moteur et des installeurs (licences livrées, mise à jour depuis le menu Démarrer, installeur Linux).
 tags=offline,ai,français,terrain,mnt,pdf,hors ligne,llm,langage naturel,analyse
