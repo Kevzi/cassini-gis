@@ -1334,3 +1334,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-prechauffage-du-modele-l-amorce-sous-30-s-sur-processeur-plan.md`
   summary: Ajouter un délai de garde à `Channel::execute` et ne découvrir le modèle qu'une fois au préchauffage.
   evidence: la lecture de `project.inventory` au préchauffage occupe la boucle principale comme celle de `plan.propose` ; si l'extension ne répond jamais, la boucle attend sans limite (code antérieur) ; `choose(None)` est appelé deux fois (`warmup` et `warm_inventory`).
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-livraison-du-catalogue-etendu-dans-une-version-publiee-plan.md`
+  summary: Phrase GC3 (« Géocode … sur la BAN du 74, puis affiche le résultat ») : le modèle base-22-2 ajoute une étape `layer.describe` sur la sortie de `geocode.ban`, le noyau refuse le plan (`agent.plan_invalid`), deux fois sur deux.
+  evidence: essai de la 0.1.5 installée par l'installeur complet, 18 phrases (3 par famille data, analysis, raster, network, layout, geocode) : 17 correctes (dont CHE3, question attendue), GC3 seule en échec. Le garde-fou a joué : rien n'est exécuté. Pas de coupure réseau réelle ni de second poste.
