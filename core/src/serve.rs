@@ -184,6 +184,13 @@ struct Link<'a> {
     /// L'entrée standard s'est fermée (la fin a pu être lue pendant un ordre). La file ne se
     /// ferme pas d'elle-même : le canal d'IA externe en tient une entrée.
     input_closed: Cell<bool>,
+    /// La lecture d'inventaire du préchauffage est en vol (ticket 34) : l'ordre vient du noyau, pas
+    /// de l'utilisateur, donc une demande de l'extension reçue pendant ce temps attend au lieu
+    /// d'être refusée `session.busy`.
+    warming: Cell<bool>,
+    /// Les lignes de l'extension mises en attente pendant le préchauffage, rendues à la boucle
+    /// avant toute nouvelle lecture.
+    deferred: RefCell<std::collections::VecDeque<String>>,
     /// Le canal d'IA externe et ses relais.
     external: external::Hub,
 }
@@ -344,6 +351,8 @@ fn serve_with<'a>(
             current: RefCell::new(None),
             failure: RefCell::new(None),
             input_closed: Cell::new(false),
+            warming: Cell::new(false),
+            deferred: RefCell::new(Default::default()),
             external: hub,
         });
         let mut state = State {
@@ -367,9 +376,14 @@ fn serve_with<'a>(
             if link.input_closed.get() {
                 break Ok(());
             }
-            let msg = match link.rx.recv() {
-                Ok(msg) => msg,
-                Err(_) => break Ok(()),
+            // Une demande arrivée pendant le préchauffage passe avant toute nouvelle lecture.
+            let deferred = link.deferred.borrow_mut().pop_front();
+            let msg = match deferred {
+                Some(line) => Msg::Line(line),
+                None => match link.rx.recv() {
+                    Ok(msg) => msg,
+                    Err(_) => break Ok(()),
+                },
             };
             let line = match msg {
                 Msg::Line(line) => line,
@@ -530,10 +544,7 @@ fn handle_line(state: &mut State<'_>, line: &str) -> Option<Value> {
         Ok(Incoming::Call { id, method, params }) => {
             // Un seul état d'occupation (AD-29) : un appel de relais réservé, même encore en file,
             // passe avant l'extension, qui reçoit `session.busy`.
-            let occupies = matches!(
-                method.as_str(),
-                "command.run" | "plan.propose" | "plan.execute" | "journal.replay"
-            );
+            let occupies = occupies_executor(&method);
             let link = state.link.clone();
             if occupies && !link.external.reserve(Source::Extension) {
                 return respond(id, Err(busy()));
@@ -596,6 +607,14 @@ fn dispatch(
 
 fn invalid_params(why: &str) -> RpcError {
     RpcError::protocol(INVALID_PARAMS, &format!("Paramètres invalides : {why}"))
+}
+
+/// Les méthodes de l'extension qui prennent l'exécutant (AD-29).
+fn occupies_executor(method: &str) -> bool {
+    matches!(
+        method,
+        "command.run" | "plan.propose" | "plan.execute" | "journal.replay"
+    )
 }
 
 /// L'exécutant est pris (AD-29) : refus immédiat, rien n'est mis en file.
@@ -835,6 +854,11 @@ impl Executor for Channel<'_> {
                     method,
                     params,
                 }) => {
+                    // Préchauffage : la demande de l'utilisateur attend la fin de la lecture.
+                    if link.warming.get() && occupies_executor(&method) {
+                        link.deferred.borrow_mut().push_back(line);
+                        continue;
+                    }
                     let flight = InFlight {
                         command: id,
                         order_id: &order_id,
@@ -3946,8 +3970,9 @@ mod tests {
     }
 
     /// Ticket 34, conception B : après la réponse à `session.hello`, le noyau lit
-    /// `project.inventory` ; une demande reçue pendant cette lecture reçoit `session.busy`, puis le
-    /// préchauffage lit l'invite avec l'inventaire.
+    /// `project.inventory` ; une demande reçue pendant cette lecture attend la fin de la lecture
+    /// puis est servie (jamais `session.busy`, démo 11.14 du 2026-11-23), et le préchauffage lit
+    /// l'invite avec l'inventaire.
     #[test]
     fn the_warmup_reads_the_inventory_after_the_hello_reply() {
         let (mut c, warmed) = warming_client();
@@ -3957,13 +3982,20 @@ mod tests {
         assert_eq!(order["params"]["command"], "project.inventory");
         c.send(json!({"jsonrpc":"2.0","id":2,"method":"plan.propose",
             "params":{"request":"Fais-le."}}));
-        assert_eq!(c.recv()["error"]["data"]["code"], "session.busy");
+        // La demande est en attente : aucune réponse tant que la lecture n'est pas finie.
+        c.assert_silent();
         c.send(json!({"jsonrpc":"2.0","id":order["id"],
             "result":{"layers":[{"layer_id":"couche_chaude","name":"couche_chaude","kind":"vector",
                 "geometry":"Polygon","crs":"EPSG:2154","feature_count":3,"fields":[]}],
                 "project_crs":"EPSG:2154","extent":null}}));
-        // Rien d'écrit sur le canal : ni message, ni journal.
-        c.assert_silent();
+        // La demande attendue est servie (elle lit à son tour l'inventaire), sans `session.busy`.
+        let own_order = c.recv();
+        assert_eq!(own_order["params"]["command"], "project.inventory");
+        c.send(json!({"jsonrpc":"2.0","id":own_order["id"],
+            "result":{"layers":[],"project_crs":"EPSG:2154","extent":null}}));
+        let served = c.recv();
+        assert_eq!(served["id"], 2);
+        assert_ne!(served["error"]["data"]["code"], "session.busy", "{served}");
         let (seen, with_inventory) = wait_warmed(&warmed);
         assert!(seen.contains("test.make") && with_inventory);
         // La session sert la demande suivante normalement.

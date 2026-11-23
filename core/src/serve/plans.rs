@@ -126,11 +126,13 @@ fn read_view_for_warmup(state: &State<'_>) -> Option<ModelInventory> {
     if !state.announced.contains("project.inventory") {
         return None;
     }
+    state.link.warming.set(true);
     let raw = Channel {
         link: state.link.clone(),
     }
-    .execute("project.inventory", json!({}))
-    .ok()?;
+    .execute("project.inventory", json!({}));
+    state.link.warming.set(false);
+    let raw = raw.ok()?;
     let work_dir = state.session.as_ref().map(|s| s.work_dir().to_path_buf());
     let journal = state.session.as_ref().map(|s| s.journal_path());
     let registry = state.registry;
