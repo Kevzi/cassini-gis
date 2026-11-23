@@ -454,3 +454,42 @@ covers = ["CAP-14"]
 after = [18]
 hitl = true
 risk = "medium"
+
+[[entry]]
+id = 36
+type = "story"
+title = "Matrice de distances (analysis.distance_matrix)"
+description = "Ajoute analysis.distance_matrix, delegue a un algorithme de distance du cadre de traitement de QGIS (native:distancematrix, a verifier dans la documentation de QGIS 3.44) : distances entre les entites d'une couche d'entree et celles d'une couche cible, avec le nombre de voisins en parametre, sortie en table nouvelle. Meme regle que analysis.nearest pour une couche en degres : calcul dans le systeme en metres choisi par le noyau."
+verify = "Test de l'extension sur deux couches synthetiques : la matrice rendue porte les distances attendues avec leur unite, un nombre de voisins limite la sortie, une couche en degres est calculee en metres, et la commande n'est pas annoncee si l'algorithme manque (AD-25) ; l'agent compose « donne-moi les distances entre chaque ecole et chaque gare » dans un plan valide, et la commande a sa famille d'entrainement."
+covers = ["CAP-14"]
+after = [10]
+hitl = false
+risk = "medium"
+references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-24", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-25", "spec-cassini-mvp/catalogue-des-commandes.md"]
+notes = ["Decision: 2026-11-23 — le proprietaire veut les trois primitives promises par l'epic et restees sans entree (analysis.distance_matrix, raster.polygonize, raster.align), decouvertes par la retrospective de l'epic ; cette entree, issue de la description de 10.10, n'a jamais ete construite.", "Open question: un seul passage de re-entrainement pour les trois commandes, apres la derniere ; fixer le seuil de bruit du juge avant ce cycle (retro de l'epic 10)."]
+
+[[entry]]
+id = 37
+type = "story"
+title = "Polygonisation d'un raster (raster.polygonize)"
+description = "Ajoute raster.polygonize, delegue a gdal:polygonize par le cadre de traitement de QGIS : transforme une bande d'un raster en couche de polygones portant la valeur de chaque zone, sortie en couche nouvelle (le raster d'origine n'est jamais modifie)."
+verify = "Test de l'extension sur le raster synthetique de l'entree 20 : les polygones rendus recouvrent les zones attendues avec leur valeur, la bande est un parametre, et la commande n'est pas annoncee si gdal:polygonize manque (AD-25) ; l'agent compose « transforme ce raster en polygones » dans un plan valide, et la commande a sa famille d'entrainement."
+covers = ["CAP-14"]
+after = [12]
+hitl = false
+risk = "low"
+references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-24", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-25", "spec-cassini-mvp/catalogue-des-commandes.md"]
+notes = ["Decision: 2026-11-23 — voir l'entree 36 ; identifiant gdal: admis faute d'algorithme native: equivalent (decision du 2026-11-04)."]
+
+[[entry]]
+id = 38
+type = "story"
+title = "Alignement de rasters (raster.align)"
+description = "Ajoute raster.align, delegue a native:alignrasters (a verifier dans la documentation de QGIS 3.44) : aligne un ou plusieurs rasters sur la grille d'un raster de reference (systeme, taille de cellule, emprise), methode de reechantillonnage en parametre, sorties en rasters nouveaux."
+verify = "Test de l'extension sur deux rasters synthetiques de grilles differentes : les sorties partagent la grille de reference, la methode de reechantillonnage est un parametre, les originaux ne sont pas modifies, et la commande n'est pas annoncee si l'algorithme manque (AD-25) ; l'agent compose « aligne ce raster sur le MNT » dans un plan valide, et la commande a sa famille d'entrainement."
+covers = ["CAP-14"]
+after = [37]
+hitl = false
+risk = "medium"
+references = ["architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-24", "architecture-noyau-et-facade-qgis/architecture-noyau-et-facade-qgis.md#ad-25", "spec-cassini-mvp/catalogue-des-commandes.md"]
+notes = ["Decision: 2026-11-23 — voir l'entree 36."]
