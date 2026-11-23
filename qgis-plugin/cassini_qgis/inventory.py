@@ -465,19 +465,26 @@ class ProjectInventoryGesture(_ReadGesture):
         except Exception:
             return None
 
+    def _raster_size(self, layer):
+        """Largeur et hauteur d'un raster en cellules, ou None si le moteur ne les donne pas ou si
+        elles sont illisibles : des dimensions illisibles n'empêchent pas l'inventaire."""
+        if not hasattr(self._backend, "raster_size"):
+            return None
+        try:
+            width, height = self._backend.raster_size(layer)
+            return (width, height) if width > 0 and height > 0 else None
+        except Exception:
+            return None
+
     def _facts(self, layer, kind):
         """Faits bruts d'une couche : sorte, géométrie, nombre d'objets, champs. Ceux d'une couche
         vectorielle inchangée sont repris de la phrase précédente (`_FACTS`)."""
         backend = self._backend
         if kind != "vector":
             facts = {"kind": kind, "geometry": None, "fields": []}
-            if kind == "raster" and hasattr(backend, "raster_size"):
-                try:
-                    width, height = backend.raster_size(layer)
-                    if width > 0 and height > 0:
-                        facts["width"], facts["height"] = width, height
-                except Exception:  # des dimensions illisibles n'empêchent pas l'inventaire
-                    pass
+            size = self._raster_size(layer) if kind == "raster" else None
+            if size:
+                facts["width"], facts["height"] = size
             return facts
         try:
             key = backend.facts_key(layer) if hasattr(backend, "facts_key") else None
