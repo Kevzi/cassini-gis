@@ -39,9 +39,9 @@ French request into a sequence of typed commands that the user reviews before an
 
 | Fichier | Contenu |
 |---|---|
-| `cassini-composition-4b-0.2.0-Q4_K_M.gguf` | modèle quantifié Q4_K_M, 2 783 446 944 octets |
+| `cassini-composition-4b-0.3.0-Q4_K_M.gguf` | modèle quantifié Q4_K_M, 2 783 446 944 octets |
 
-SHA-256 : `1c430872c0cedf23e52b0ef26ee8ac5aaf72aa4d8f0213711fbb40c61ca2695e`
+SHA-256 : `97bdc957e980bba98e9c1775e1d10a0f14d9e1c31a9446458ab5b54eb799f41a`
 
 Posé dans le dossier `models\` à côté de `cassini.exe`, le noyau le trouve seul. Les installeurs
 de Cassini le téléchargent depuis cette adresse et vérifient cette empreinte.

@@ -6,7 +6,7 @@ message en français et sans laisser de fichier, si le modèle est introuvable, 
 l'espace disque manque.
 
 Usage :
-    python -I installer/telecharger_modele.py --sortie modele/cassini-composition-4b-0.2.0-Q4_K_M.gguf
+    python -I installer/telecharger_modele.py --sortie modele/cassini-composition-4b-0.3.0-Q4_K_M.gguf
 """
 
 import argparse

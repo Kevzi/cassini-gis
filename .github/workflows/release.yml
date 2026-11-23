@@ -417,7 +417,7 @@ jobs:
       # Le modèle (~2,8 Go) vient de Hugging Face (publié par 7.3) ; jamais construit ici.
       # Le script vérifie l'espace libre avant de télécharger et l'empreinte après.
       - name: Téléchargement du modèle (empreinte vérifiée)
-        run: python -I installer/telecharger_modele.py --sortie modele/cassini-composition-4b-0.2.0-Q4_K_M.gguf
+        run: python -I installer/telecharger_modele.py --sortie modele/cassini-composition-4b-0.3.0-Q4_K_M.gguf
 
       - name: Compilation de l'installeur complet
         run: |
@@ -459,9 +459,9 @@ jobs:
           # Le modèle est listé par model.list (le noyau le cherche dans models\ à côté de lui).
           $liste = & "$dir\bin\cassini.exe" run model.list | Out-String
           Write-Host $liste
-          if ($liste -notmatch 'cassini-composition-4b-0.2.0-Q4_K_M\.gguf') { throw "model.list ne liste pas le modèle" }
+          if ($liste -notmatch 'cassini-composition-4b-0.3.0-Q4_K_M\.gguf') { throw "model.list ne liste pas le modèle" }
           if ($liste -notmatch [string]$modele.taille) { throw "model.list ne donne pas la taille $($modele.taille)" }
-          $gguf = "$dir\bin\models\cassini-composition-4b-0.2.0-Q4_K_M.gguf"
+          $gguf = "$dir\bin\models\cassini-composition-4b-0.3.0-Q4_K_M.gguf"
           if ((Get-FileHash $gguf -Algorithm SHA256).Hash.ToLower() -ne $modele.sha256) { throw "SHA-256 du modèle installé différent" }
           if (-not (Test-Path "$dir\extension\cassini_qgis-$version.zip")) { throw "archive de l'extension absente" }
           $info = Get-Content "$dir\bin\installation.json" -Raw | ConvertFrom-Json

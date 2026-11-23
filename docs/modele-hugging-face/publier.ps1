@@ -10,8 +10,8 @@
 $ErrorActionPreference = 'Stop'
 
 $repo = 'KevziFar/cassini-composition-4b-GGUF'
-$nom = 'cassini-composition-4b-0.2.0-Q4_K_M.gguf'
-$sha = '1c430872c0cedf23e52b0ef26ee8ac5aaf72aa4d8f0213711fbb40c61ca2695e'
+$nom = 'cassini-composition-4b-0.3.0-Q4_K_M.gguf'
+$sha = '97bdc957e980bba98e9c1775e1d10a0f14d9e1c31a9446458ab5b54eb799f41a'
 $modele = Join-Path $env:LOCALAPPDATA 'Cassini\bin\models\cassini-composition-4b-Q4_K_M.gguf'
 $ici = $PSScriptRoot
 $racine = Split-Path (Split-Path $ici)

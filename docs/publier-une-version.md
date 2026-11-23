@@ -118,7 +118,7 @@ porte met à jour l'autre, et le désinstalleur ne retire que ce que le dernier 
    `installation.json` et `models\` (le modèle et sa déclaration) ; `%LOCALAPPDATA%\Cassini\extension`
    reçoit l'archive de l'extension.
 3. Dans une console : `%LOCALAPPDATA%\Cassini\bin\cassini.exe run system.about` répond, et
-   `cassini.exe run model.list` liste `cassini-composition-4b-0.2.0-Q4_K_M.gguf`.
+   `cassini.exe run model.list` liste `cassini-composition-4b-0.3.0-Q4_K_M.gguf`.
 4. Dans QGIS : Extensions, Installer depuis un ZIP, choisir l'archive du dossier `extension`.
 5. Rejouer la démo : le panneau trouve le noyau et le modèle sans réseau.
 6. Désinstaller (Paramètres, Applications) : le noyau et le modèle disparaissent.
@@ -184,7 +184,7 @@ si le modèle du manifeste n'est pas déjà dans `bin\models`, ce nouveau modèl
   proposé par défaut que si un `.gguf` est déjà installé).
 
 **Le nom installé du modèle porte sa version** (`installer/modele.json`, champ `nom_installe`, par
-exemple `cassini-composition-4b-0.2.0-Q4_K_M.gguf`) : un nouveau modèle ne remplace jamais l'ancien
+exemple `cassini-composition-4b-0.3.0-Q4_K_M.gguf`) : un nouveau modèle ne remplace jamais l'ancien
 et aucun fichier de `models` n'est supprimé ni écrasé. Un nouveau modèle publié change donc le
 nom dans `installer/modele.json` (et dans `cassini-hors-ligne.iss`, `NomModele`, et `release.yml`).
 La déclaration de la porte 2 garde le nom fixe `cassini-composition-4b.modele.json` ; si elle nomme

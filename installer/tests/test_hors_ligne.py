@@ -167,9 +167,9 @@ class TestModele(Base):
 
     def test_declaration_du_depot(self):
         d = tm.lire_declaration()
-        self.assertEqual(d["sha256"], "1c430872c0cedf23e52b0ef26ee8ac5aaf72aa4d8f0213711fbb40c61ca2695e")
+        self.assertEqual(d["sha256"], "97bdc957e980bba98e9c1775e1d10a0f14d9e1c31a9446458ab5b54eb799f41a")
         self.assertEqual(d["taille"], 2783446944)
-        self.assertTrue(d["url"].endswith("/cassini-composition-4b-0.2.0-Q4_K_M.gguf"))
+        self.assertTrue(d["url"].endswith("/cassini-composition-4b-0.3.0-Q4_K_M.gguf"))
         self.assertTrue(d["url"].startswith("https://huggingface.co/KevziFar/cassini-composition-4b-GGUF/"))
 
     def test_declaration_incomplete(self):
