@@ -460,7 +460,7 @@ pub static FAMILIES: &[Family] = &[
     },
     Family {
         name: "recoupement",
-        weight: 3,
+        weight: 4,
         make: recoupement,
     },
     Family {
@@ -8933,6 +8933,7 @@ const INTERSECTION_WORDS: &[&str] = &[
     "le croisement des deux azimuts",
     "le point où se coupent les deux directions",
     "l'intersection des relèvements pris depuis",
+    "l'intersection des relèvements",
 ];
 
 /// Une tournure ambiguë, jamais engendrée. Les fragments se cherchent dans la demande normalisée
@@ -9612,7 +9613,23 @@ fn recoupement(rng: &mut Rng) -> Option<Example> {
     // Tournures d'avant 5.53, gardées à côté des listes (jamais « à la boussole », D4). Séance 2
     // de 5.54 (0/3 au recoupement, les stations reprojetées vers 4326 sans raison) : trois
     // tournures neuves, les stations en WGS84 ou en UTM toujours recopiées telles qu'écrites.
-    let (mut body, q) = match rng.below(11) {
+    // Base-24-1 (0/3 sur BI1 à BI3, recoupement) : trois tournures neuves, l'impératif « Recoupe deux
+    // visées », la phrase nominale « Intersection des relèvements » et la visée d'un repère.
+    let (mut body, q) = match rng.below(14) {
+        11 => (
+            format!("Recoupe deux visées : {t1} depuis {pa} et {t2} depuis {pc}"),
+            false,
+        ),
+        12 => (
+            format!("Intersection des relèvements {t1} depuis {pa} et {t2} depuis {pc}"),
+            false,
+        ),
+        13 => (
+            format!(
+                "Depuis {pa} je vois un repère à l'azimut {t1}, et depuis {pc} à l'azimut {t2}. Où est-il"
+            ),
+            true,
+        ),
         8 => (
             format!("Situe le point visé à l'azimut {t1} depuis {pa} et à l'azimut {t2} depuis {pc}"),
             false,

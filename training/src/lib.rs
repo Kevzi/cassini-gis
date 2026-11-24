@@ -981,7 +981,8 @@ mod tests {
             .count();
         // 5.61, lot 3 : plancher 100 → 90 et part planifiée 20 → 17 % ; le décalage de la graine (famille MGRS)
         // a mené la famille à 96 et 19 planifiés, hors des anciennes bornes.
-        assert!(close.len() >= 90, "{}", close.len());
+        // Base-24-2 : le poids de `recoupement` passe de 3 à 4, la part des couches proches baisse ; plancher 75.
+        assert!(close.len() >= 75, "{}", close.len());
         assert!(
             planned * 6 >= close.len() && planned * 2 <= close.len(),
             "{planned} / {}",

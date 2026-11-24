@@ -889,7 +889,7 @@
   {
     "id": "CC2",
     "command": "coord.convert",
-    "phrase": "Traduis la référence MGRS 31UDQ 4930 1240 en UTM.",
+    "phrase": "Traduis en UTM la référence MGRS 31UDQ 4930 1240.",
     "expected": {
       "kind": "calls",
       "calls": [
