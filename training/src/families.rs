@@ -331,6 +331,13 @@ pub static FAMILIES: &[Family] = &[
         weight: 3,
         make: courbes_de_niveau,
     },
+    // Ticket 37 (epic 10) : `raster.polygonize`. Aucune famille de refus n'était à reprendre :
+    // « transforme ce raster en polygones » restait sans plan (poids 3, comme `courbes_de_niveau`).
+    Family {
+        name: "vectorisation_raster",
+        weight: 3,
+        make: vectorisation_raster,
+    },
     // Les trois commandes de terrain (4.6) : MNT désigné par sa source, points écrits.
     Family {
         name: "pente",
@@ -6037,6 +6044,102 @@ fn courbes_de_niveau(rng: &mut Rng) -> Option<Example> {
         request,
         calls(vec![step]),
     ))
+}
+
+/// Ticket 37 (epic 10) : polygonisation d'un raster, `raster.polygonize`. Trois formes : un raster
+/// désigné par sa `source` (la bande 1 par défaut, jamais écrite) ; une bande écrite (« bande 2 »),
+/// recopiée dans `band` ; un raster que la demande vient de classer (`raster.reclassify`, puis
+/// `step:1`). Un raster nommé absent de l'inventaire : la question du raster, jamais un plan.
+fn vectorisation_raster(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    raster_distractors(rng, &mut b);
+    let key = *rng.pick(&RAW_RASTERS);
+    let raster = if rng.chance(1, 8) {
+        b.exclude(key);
+        None
+    } else {
+        Some(b.add_raster(rng, key, 2154))
+    };
+    let s = raster_words(rng, key, raster.as_ref());
+    let kind = rng.below(5);
+    let (body, q, band, classes) = match kind {
+        0 | 1 => {
+            let (body, q) = match rng.below(6) {
+                0 => (format!("Transforme {s} en polygones"), false),
+                1 => (format!("Vectorise {s}"), false),
+                2 => (format!("Convertis {s} en couche de polygones"), false),
+                3 => (
+                    format!("Polygonise {s}, un polygone par zone de même valeur"),
+                    false,
+                ),
+                4 => (format!("Peux-tu transformer {s} en polygones"), true),
+                _ => (format!("Fais des polygones à partir {}", s_de(&s)), false),
+            };
+            (body, q, None, None)
+        }
+        2 => {
+            let n = rng.range(2, 4);
+            let body = match rng.below(3) {
+                0 => format!("Transforme la bande {n} de {s} en polygones"),
+                1 => format!("Vectorise la bande {n} de {s}"),
+                _ => format!("Polygonise {s}, bande {n}"),
+            };
+            (body, false, Some(n), None)
+        }
+        _ => {
+            let noise = key == "bruit";
+            let values: &[u64] = if noise {
+                &[45, 50, 55, 60, 65, 70, 75]
+            } else {
+                &[50, 100, 150, 200, 300, 500, 1000]
+            };
+            let n = *rng.pick(values);
+            let t = if noise {
+                format!("{n} dB")
+            } else {
+                format!("{} m", thousands(n))
+            };
+            let body = match rng.below(3) {
+                0 => format!("Classe {s} en deux catégories : moins de {t} et plus de {t}, puis transforme le résultat en polygones"),
+                1 => format!("Reclasse {s} en deux classes, sous {t} et au-dessus de {t}, et vectorise-les"),
+                _ => format!("Découpe {s} en deux classes : moins de {t}, plus de {t}, puis polygonise le raster obtenu"),
+            };
+            let classes = json!([{"max": n, "value": 1}, {"min": n, "value": 2}]);
+            (body, false, None, Some(classes))
+        }
+    };
+    let request = finish(rng, &body, q, false);
+    let expected = match &raster {
+        Some(r) => {
+            let mut steps = Vec::new();
+            let mut params = serde_json::Map::new();
+            match classes {
+                Some(classes) => {
+                    steps.push(json!({"command": "raster.reclassify",
+                        "params": {"raster": r.source, "classes": classes}}));
+                    params.insert("raster".into(), json!("step:1"));
+                }
+                None => {
+                    params.insert("raster".into(), json!(r.source));
+                }
+            }
+            if let Some(band) = band {
+                params.insert("band".into(), json!(band));
+            }
+            steps.push(json!({"command": "raster.polygonize", "params": params}));
+            calls(steps)
+        }
+        None => question(missing_raster_question(rng, key)),
+    };
+    Some(example("vectorisation_raster", b, rng, request, expected))
+}
+
+/// « à partir de l'accessibilité » / « à partir de la couche « X » » : le sujet d'un raster après
+/// « à partir ».
+fn s_de(subject: &str) -> String {
+    format!("de {subject}")
+        .replace("de le ", "du ")
+        .replace("de les ", "des ")
 }
 
 /// Après 5.49 (RA09 d'Annecy, « tampon autour des routes » sans distance : 10 m inventés) : un
@@ -13863,6 +13966,58 @@ mod tests {
             .iter()
             .find(|l| l["kind"] == "raster" && l["source"] == dem)
             .unwrap_or_else(|| panic!("MNT « {dem} » absent : {}", e.request))
+    }
+
+    #[test]
+    fn raster_polygonization_is_planned_from_the_raster_source() {
+        // Ticket 37 : le raster par son `source`, ou `step:1` après un reclassement ; la bande n'est
+        // posée que si la demande l'écrit ; un raster absent donne la question, jamais un plan.
+        let examples = valid(vectorisation_raster, 300);
+        let (mut plain, mut banded, mut chained, mut asked) = (0, 0, 0, 0);
+        for e in &examples {
+            if e.expected.get("calls").is_none() {
+                asked += 1;
+                continue;
+            }
+            let calls = e.expected["calls"].as_array().unwrap();
+            let last = calls.last().unwrap();
+            assert_eq!(last["command"], "raster.polygonize", "{}", e.request);
+            let params = &last["params"];
+            let raster = params["raster"].as_str().unwrap();
+            match calls.len() {
+                1 => {
+                    assert!(
+                        e.inventory["layers"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .any(|l| l["kind"] == "raster" && l["source"] == raster),
+                        "raster « {raster} » absent : {}",
+                        e.request
+                    );
+                    match params.get("band") {
+                        Some(band) => {
+                            banded += 1;
+                            assert!(
+                                e.request.contains(&format!("bande {band}")),
+                                "{}",
+                                e.request
+                            );
+                        }
+                        None => {
+                            plain += 1;
+                            assert!(!e.request.contains("bande"), "{}", e.request);
+                        }
+                    }
+                }
+                _ => {
+                    chained += 1;
+                    assert_eq!(raster, "step:1", "{}", e.request);
+                    assert_eq!(calls[0]["command"], "raster.reclassify", "{}", e.request);
+                }
+            }
+        }
+        assert!(plain > 0 && banded > 0 && chained > 0 && asked > 0);
     }
 
     #[test]

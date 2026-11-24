@@ -639,6 +639,42 @@ fn a_contour_call_journals_its_dem_as_an_input() {
     let _ = fs::remove_dir_all(dir);
 }
 
+struct PolygonizeQgis;
+impl Executor for PolygonizeQgis {
+    fn execute(&self, id: &str, p: Value) -> Result<Value, RegistryError> {
+        assert_eq!(id, "raster.polygonize");
+        assert!(Path::new(p["raster"].as_str().unwrap()).is_absolute());
+        fs::write(p["out"].as_str().unwrap(), "gpkg").unwrap();
+        Ok(json!({"layer_id": "p_1", "name": "zones", "feature_count": 4, "crs": "EPSG:2154"}))
+    }
+}
+
+#[test]
+fn a_polygonize_call_journals_its_raster_as_an_input() {
+    // `raster.polygonize` (epic 10, ticket 37) : le raster est un `path_param` (taille et date au
+    // journal, AD-11), le chemin journalisé reste relatif au projet.
+    let (dir, project, _) = temp_project();
+    fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/mnt-plan-incline-2154.tif"),
+        dir.join("classes.tif"),
+    )
+    .unwrap();
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, &project)
+        .unwrap()
+        .with_qgis(PolygonizeQgis);
+    s.call(
+        "raster.polygonize",
+        json!({"raster": "classes.tif", "band": 1}),
+    )
+    .unwrap();
+    let l = lines(&s);
+    assert_eq!(l[0]["params"]["raster"], "classes.tif");
+    assert_eq!(l[0]["inputs"].as_array().map(Vec::len), Some(1));
+    drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
 #[test]
 fn an_output_with_other_bytes_diverges() {
     let (dir, project, _) = temp_project();

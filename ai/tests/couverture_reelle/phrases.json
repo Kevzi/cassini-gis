@@ -575,7 +575,6 @@
   "expected": {
    "kind": "refusal",
    "missing": [
-    "polygonize",
     "vectorize"
    ]
   }

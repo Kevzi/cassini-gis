@@ -379,7 +379,7 @@ donne l'esquisse.
 | `analysis.join_table` | faite | qgis | epic 10, entrée 23 |
 | `analysis.dissolve` | faite | qgis | epic 10, entrée 24 |
 | `raster.zonal_statistics` | faite | qgis | epic 10, entrée 12 |
-| `raster.polygonize` | planifiée | qgis | epic 10 (entrée ajoutée après la 12) |
+| `raster.polygonize` | faite | qgis | epic 10, entrée 37 |
 | `raster.align` | planifiée | qgis | epic 10 (entrée ajoutée après la 12) |
 | `raster.contour` | faite | qgis | epic 10, entrée 26 |
 | `network.shortest_path` | faite | qgis | — |
@@ -2213,19 +2213,30 @@ plusieurs bandes), `analysis.unknown_field`, `layer.invalid_source`, `analysis.f
 
 ### `raster.polygonize`
 
-Polygones des zones de même valeur d'un raster (algorithme visé : `gdal:polygonize`, à
-vérifier au ticket), champ `value` sur chaque polygone.
+Polygones des zones de même valeur d'un raster (`gdal:polygonize`), champ `value` sur chaque
+polygone. Une zone est un ensemble de cellules contiguës de même valeur, au sens de 4 voisins
+(pas de diagonale).
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
-| `raster` | `RasterPath` | oui | une bande | Raster à vectoriser (par exemple reclassé). |
+| `raster` | `RasterPath` | oui | — | Raster à vectoriser (par exemple reclassé) : un chemin du projet, ou `step:k` (aucune unité en jeu). |
+| `band` | entier | non | à partir de 1, 1 par défaut | Bande à vectoriser. Une bande absente du raster est refusée avant tout lancement (`analysis.bad_params`). |
 | `out` | chaîne | non | — | Fourni par le noyau. |
 
 Résultat : `layer_id`, `name`, `crs`, `feature_count`.
 
+Livrée par l'entrée 37 de l'epic 10 (`core/src/commands/raster_polygonize.rs`, ligne de la table
+`ALGORITHMS` de `qgis-plugin/cassini_qgis/analysis.py`). Changement de cap léger : le paramètre
+`band` est ajouté à la fiche d'origine (la vérification du ticket veut la bande en paramètre),
+comme pour `analysis.distance_matrix`. Le raster doit être un GeoTIFF avec système de
+coordonnées, mais peut avoir plusieurs bandes. Erreurs : `layer.not_found`,
+`layer.invalid_source`, `analysis.bad_params` (raster sans système, bande absente),
+`analysis.failed`.
+
 ```json fiche
-{"id": "raster.polygonize", "status": "planifiee", "runs_in": "qgis", "dictated_by_core": false,
+{"id": "raster.polygonize", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
  "params": {"raster": {"type": "RasterPath", "required": true},
+            "band": {"type": "integer", "required": false},
             "out": {"type": "string", "required": false}},
  "result": ["crs", "feature_count", "layer_id", "name"]}
 ```

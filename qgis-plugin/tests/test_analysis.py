@@ -3131,6 +3131,122 @@ class ContourTest(unittest.TestCase):
         self.assertTrue(analysis.derived_cancellable(analysis.ALGORITHMS)["raster.contour"])
 
 
+class PolygonizeTest(unittest.TestCase):
+    """`raster.polygonize` (epic 10, ticket 37) : entrée raster par chemin, sortie en couche de polygones,
+    `gdal:polygonize`, bande au choix, champ `value`, quatre voisins."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.out = os.path.join(self.dir.name, "1-raster.polygonize.gpkg")
+        self.entry = analysis.ALGORITHMS["raster.polygonize"]
+        self.raster = os.path.join(self.dir.name, "classes.tif")
+        for name in ("classes.tif", "multi.tif", "sans-systeme.tif", "classes.asc"):
+            with open(os.path.join(self.dir.name, name), "wb") as f:
+                f.write(b"x")
+        self.originals = {n: self.read(n) for n in os.listdir(self.dir.name)}
+        self.sources = {
+            "classes.tif": "EPSG:2154", "multi.tif": "EPSG:2154", "sans-systeme.tif": None, "classes.asc": "EPSG:2154",
+        }
+        self.backend = ZonalBackend(self.sources, bands={"multi.tif": 3}, loaded_count=4)
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def read(self, name):
+        with open(os.path.join(self.dir.name, name), "rb") as f:
+            return f.read()
+
+    def path(self, name):
+        return os.path.join(self.dir.name, name)
+
+    def params(self, **extra):
+        p = {"raster": self.raster, "out": self.out}
+        p.update(extra)
+        return p
+
+    def test_the_row_is_gdal_polygonize_with_the_value_field_and_four_neighbours(self):
+        self.assertEqual(self.entry["algorithm"] if "algorithm" in self.entry else self.entry["chain"][0]["algorithm"],
+                         "gdal:polygonize")
+        self.assertEqual(analysis.required_algorithms(self.entry), ["gdal:polygonize"])
+        _, calls = start(self.entry, self.backend, self.params())
+        algo, p = self.backend.calls[0]
+        self.assertEqual(algo, "gdal:polygonize")
+        self.assertEqual((p["INPUT"], p["BAND"], p["FIELD"]), (self.raster, 1, "value"))
+        self.assertIs(p["EIGHT_CONNECTEDNESS"], False)
+        self.assertEqual(p["OUTPUT"], self.out)
+        self.backend.finished(True, {})
+        result, error = calls[0]
+        self.assertIsNone(error)
+        self.assertEqual(
+            result, {"layer_id": "out_1", "name": "1-raster.polygonize", "feature_count": 4, "crs": "EPSG:2154"}
+        )
+        self.assertEqual(self.backend.loaded, self.out)
+
+    def test_a_chosen_band_is_passed_on_in_a_multiband_raster(self):
+        _, calls = start(self.entry, self.backend, self.params(raster=self.path("multi.tif"), band=2))
+        self.assertEqual(self.backend.calls[0][1]["BAND"], 2)
+        self.backend.finished(True, {})
+        self.assertIsNone(calls[0][1])
+
+    def test_a_multiband_raster_without_band_uses_the_first(self):
+        start(self.entry, self.backend, self.params(raster=self.path("multi.tif")))
+        self.assertEqual(self.backend.calls[0][1]["BAND"], 1)
+
+    def test_a_missing_band_is_refused_before_any_launch(self):
+        for band in (4, 99):
+            backend = ZonalBackend(self.sources, bands={"multi.tif": 3})
+            _, calls = start(self.entry, backend, self.params(raster=self.path("multi.tif"), band=band))
+            self.assertEqual(backend.calls, [])
+            self.assertEqual(calls[0][1].code, analysis.BAD_PARAMS)
+            self.assertFalse(os.path.exists(self.out))
+        backend = ZonalBackend(self.sources)
+        _, calls = start(self.entry, backend, self.params(band=2))  # raster à une bande
+        self.assertEqual((backend.calls, calls[0][1].code), ([], analysis.BAD_PARAMS))
+
+    def test_an_invalid_band_is_refused_before_any_launch(self):
+        for band in (0, -1, "2", 1.5, True):
+            backend = ZonalBackend(self.sources, bands={"multi.tif": 3})
+            _, calls = start(self.entry, backend, self.params(raster=self.path("multi.tif"), band=band))
+            self.assertEqual(backend.calls, [], band)
+            self.assertEqual(calls[0][1].code, analysis.BAD_PARAMS, band)
+
+    def test_unreadable_rasters_are_refused_with_the_existing_codes(self):
+        cases = (
+            (self.path("absent.tif"), analysis.NOT_FOUND),
+            (self.path("classes.asc"), analysis.INVALID_SOURCE),
+            (self.path("sans-systeme.tif"), analysis.BAD_PARAMS),
+        )
+        for raster, code in cases:
+            backend = ZonalBackend(self.sources, bands={"multi.tif": 3})
+            _, calls = start(self.entry, backend, self.params(raster=raster))
+            self.assertEqual(backend.calls, [], raster)
+            self.assertEqual(calls[0][1].code, code, raster)
+        self.assertEqual({n: self.read(n) for n in os.listdir(self.dir.name)}, self.originals)
+
+    def test_a_failure_leaves_no_partial_file_and_the_source_intact(self):
+        _, calls = start(self.entry, self.backend, self.params())
+        self.backend.finished(False, {})
+        self.assertEqual(calls[0][1].code, analysis.FAILED)
+        self.assertFalse(os.path.exists(self.out))
+        self.assertEqual({n: self.read(n) for n in os.listdir(self.dir.name) if n in self.originals}, self.originals)
+
+    def test_a_missing_algorithm_is_not_announced(self):
+        backend = FakeBackend()
+        self.assertIn("raster.polygonize", analysis.available_chains(analysis.ALGORITHMS, backend))
+        backend.missing_algorithms = {"gdal:polygonize"}
+        self.assertNotIn("raster.polygonize", analysis.available_chains(analysis.ALGORITHMS, backend))
+
+    def test_the_command_can_be_cancelled(self):
+        self.assertTrue(analysis.derived_cancellable(analysis.ALGORITHMS)["raster.polygonize"])
+
+    def test_raster_contour_still_refuses_a_multiband_raster(self):
+        contour = analysis.ALGORITHMS["raster.contour"]
+        backend = ZonalBackend(self.sources, bands={"multi.tif": 3})
+        _, calls = start(contour, backend, {"raster": self.path("multi.tif"),
+                                            "interval": {"value": 5, "unit": "m"}, "out": self.out})
+        self.assertEqual((backend.calls, calls[0][1].code), ([], analysis.BAD_PARAMS))
+
+
 class AtlasTest(unittest.TestCase):
     """`layout.export_atlas` : genre `layout` de la table fermée (AD-24), `native:atlaslayouttopdf`
     sur une mise en page montée le temps de l'appel."""

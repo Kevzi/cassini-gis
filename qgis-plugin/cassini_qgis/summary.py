@@ -412,6 +412,21 @@ def _contour(lang, p, r, names):
     return text + (_out_layer(lang, r) if r else "")
 
 
+def _polygonize(lang, p, r, names):
+    """Polygonisation d'un raster : un fichier (ou une étape), une bande facultative."""
+    value = p.get("raster")
+    if not isinstance(value, str) or not value:
+        raise _Unreadable()
+    band = p.get("band")
+    if band is not None and (isinstance(band, bool) or not isinstance(band, int) or band < 1):
+        raise _Unreadable()
+    raster = names.layer(value) if _STEP_REF.match(value) else file_name(value)
+    text = texts.tr(lang, "sum_polygonize", raster=raster)
+    if band is not None and band != 1:
+        text += texts.tr(lang, "sum_polygonize_band", band=band)
+    return text + (_out_layer(lang, r) if r else "")
+
+
 def _geocode(lang, p, r, names):
     """Géocodage d'un CSV d'adresses sur la BAN : deux fichiers, puis le décompte des adresses."""
     addresses, ban = p.get("addresses"), p.get("ban")
@@ -1246,6 +1261,7 @@ _SENTENCES = {
     "analysis.count_points_in_polygon": _count_points,
     "raster.zonal_statistics": _raster_zonal,
     "raster.contour": _contour,
+    "raster.polygonize": _polygonize,
     "geocode.ban": _geocode,
     "analysis.nearest": _nearest,
     "analysis.dissolve": _dissolve,

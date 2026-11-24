@@ -619,6 +619,29 @@ def translate_raster_contour(params, raster):
     }
 
 
+# Polygonisation (`gdal:polygonize`) : une zone de cellules contiguës de même valeur devient un polygone,
+# champ `value`. Quatre voisins (pas de diagonale). Noms des paramètres de QGIS 3.44 et 4.x : `INPUT`, `BAND`,
+# `FIELD`, `EIGHT_CONNECTEDNESS`, `EXTRA` ; la sortie est `OUTPUT`.
+_POLYGONIZE_FIELD = "value"
+
+
+def translate_raster_polygonize(params, raster):
+    """Paramètres neutres de `raster.polygonize` -> paramètres de `gdal:polygonize`, qui écrit une couche de
+    polygones nouvelle (jamais le raster). `band` absent vaut 1 ; le noyau refuse déjà 0 et les non-entiers."""
+    band = params.get("band")
+    if band is None:
+        band = 1
+    if isinstance(band, bool) or not isinstance(band, int) or band < 1:
+        raise GestureError(BAD_PARAMS, "La bande doit être un entier à partir de 1.")
+    return {
+        "INPUT": raster,
+        "BAND": band,
+        "FIELD": _POLYGONIZE_FIELD,
+        "EIGHT_CONNECTEDNESS": False,
+        "EXTRA": None,
+    }
+
+
 def summarize_raster_zonal(backend, layer, params):
     """Lignes du résumé des 100 premiers polygones de la couche produite : `mean`, `min` et `max` avec
     l'unité du raster (déclarée par `unit`, sinon lue du fichier, à défaut le mètre) ; un polygone qui ne
@@ -1023,6 +1046,9 @@ def translate_atlas(params, layer):
 #   layer_output : (facultatif, avec `raster`) la sortie est une couche de lignes ou de polygones ajoutée au
 #               projet (résultat `layer_id`, `name`, `feature_count`, `crs`), et non un GeoTIFF ; le raster
 #               d'entrée est contrôlé comme un `raster_input` (GeoTIFF d'une bande, avec système) ;
+#   band_param : (facultatif, avec `layer_output`) paramètre du noyau qui choisit la bande du raster d'entrée
+#               (entier à partir de 1, 1 si absent) : le raster peut alors avoir plusieurs bandes, mais pas
+#               moins que la bande demandée (`analysis.bad_params`, avant tout lancement) ;
 #   assign_crs: (facultatif, avec `raster`) paramètre du noyau qui déclare le code EPSG d'une
 #               source sans système : connu de QGIS (`data.unknown_crs` sinon), et refusé
 #               (`analysis.bad_params`) si la source a déjà un autre système ;
@@ -1158,6 +1184,16 @@ ALGORITHMS = {
         "input": "raster",
         "raster": True,
         "layer_output": True,
+    },
+    "raster.polygonize": {
+        "chain_version": 1,
+        "chain": [
+            {"algorithm": "gdal:polygonize", "translate": translate_raster_polygonize, "output": "OUTPUT"},
+        ],
+        "input": "raster",
+        "raster": True,
+        "layer_output": True,
+        "band_param": "band",
     },
     "analysis.nearest": {
         "chain_version": 1,
@@ -1483,6 +1519,7 @@ CANCELLABLE_ALGORITHMS = frozenset(
         "native:countpointsinpolygon",
         "native:zonalstatisticsfb",
         "gdal:contour",
+        "gdal:polygonize",
         "native:joinbynearest",
         "native:joinattributestable",
         "native:dissolve",
@@ -2257,7 +2294,7 @@ class ProcessingGesture:
         if entry.get("layer_output"):
             # Entrée raster, sortie couche : mêmes gardes qu'un raster lu par une analyse de polygones, et
             # avant toute ouverture du fichier (le réglage « pas de .aux.xml » doit précéder la première).
-            self._check_raster_input(path, None)
+            self._check_raster_input(path, None, band_param=entry.get("band_param"), params=params)
         if not isinstance(path, str) or not path or not os.path.isfile(path):
             raise GestureError(NOT_FOUND, "Aucun fichier raster « %s »." % _file_name(path))
         source = backend.raster_source(path)
@@ -2313,12 +2350,20 @@ class ProcessingGesture:
         self._out = out
         return backend.run_algorithm(step["algorithm"], algorithm_params, self._on_finished)
 
-    def _check_raster_input(self, path, layer):
+    def _check_raster_input(self, path, layer, band_param=None, params=None):
         """Raster lu en entrée d'une analyse de polygones : fichier GeoTIFF existant et lisible, une seule
         bande, un système de coordonnées. Un système différent de celui de la couche n'est pas refusé : QGIS
         reprojette lui-même les polygones vers celui du raster (constat de la sonde, résultats exacts).
-        Libéré aussitôt : QGIS le rouvrira seul pour l'algorithme."""
+        Libéré aussitôt : QGIS le rouvrira seul pour l'algorithme. Avec `band_param`, le raster peut avoir
+        plusieurs bandes : seule la bande demandée doit exister."""
         backend = self._backend
+        band = 1
+        if band_param:
+            band = (params or {}).get(band_param)
+            if band is None:
+                band = 1
+            if isinstance(band, bool) or not isinstance(band, int) or band < 1:
+                raise GestureError(BAD_PARAMS, "La bande doit être un entier à partir de 1.")
         if not isinstance(path, str) or not path or not os.path.isfile(path):
             raise GestureError(NOT_FOUND, "Aucun fichier raster « %s »." % _file_name(path))
         if not self._pam:
@@ -2333,7 +2378,13 @@ class ProcessingGesture:
                 INVALID_SOURCE, "QGIS ne sait pas lire « %s » comme un raster." % _file_name(path)
             )
         try:
-            if backend.raster_band_count(source) != 1:
+            count = backend.raster_band_count(source)
+            if band_param and band > count:
+                raise GestureError(
+                    BAD_PARAMS,
+                    "« %s » a %d bande(s) : la bande %d n'existe pas." % (_file_name(path), count, band),
+                )
+            if not band_param and count != 1:
                 raise GestureError(
                     BAD_PARAMS,
                     "« %s » a plusieurs bandes : cette commande ne porte que sur un raster à une bande."

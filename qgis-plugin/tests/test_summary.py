@@ -1205,6 +1205,8 @@ SAMPLES = {
                      "matched_count": 7, "unmatched_count": 2}),
     "raster.contour": ({"raster": DEM, "interval": {"value": 5, "unit": "m"}},
                        {"layer_id": "c_9", "name": "Courbes", "feature_count": 21, "crs": "EPSG:2154"}),
+    "raster.polygonize": ({"raster": DEM},
+                          {"layer_id": "p_9", "name": "Zones", "feature_count": 4, "crs": "EPSG:2154"}),
     "analysis.join_table": ({"layer_id": "parcelles_2", "table_layer_id": "prix_4", "field": "id",
                              "table_field": "id"},
                             {"layer_id": "j_8", "name": "Jointure", "feature_count": 4, "crs": "EPSG:2154",

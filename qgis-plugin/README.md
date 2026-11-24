@@ -215,6 +215,19 @@ Recette manuelle de `raster.contour` [ticket 26] (un MNT GeoTIFF d'une bande, av
 4. Sonde sous QGIS 3.44 : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat" qgis-plugin/tests/probe_contour.py`
    doit finir par `VERDICT : OK`.
 
+Recette manuelle de `raster.polygonize` [ticket 37] (un GeoTIFF de classes, par exemple un raster reclassé, avec système) :
+
+1. `raster.polygonize` : `raster` est un sélecteur de fichier GeoTIFF (ou `step:k`, un raster reclassé est le cas
+   d'usage), `band` une bande facultative (entier à partir de 1, la première par défaut). Une couche de polygones
+   nouvelle, un par zone de cellules contiguës de même valeur (quatre voisins, pas de diagonale), champ `value`,
+   est ajoutée au projet (`gdal:polygonize`).
+2. Le raster d'origine reste intact et aucun `.aux.xml` n'apparaît à côté.
+3. Une bande absente du raster (4 sur 3 bandes) : `analysis.bad_params`, avant tout lancement ; un raster absent :
+   `layer.not_found` ; pas un GeoTIFF : `layer.invalid_source` ; sans système : `analysis.bad_params`. Un QGIS sans
+   `gdal:polygonize` n'annonce pas la commande.
+4. Sonde sous QGIS 3.44 : `"C:\Program Files\QGIS 3.44.15in\python-qgis-ltr.bat" qgis-plugin/tests/probe_polygonize.py`
+   doit finir par `VERDICT : OK`.
+
 Recette manuelle de `analysis.dissolve` [ticket 24] (une couche de parcelles ou de zones) :
 
 1. `analysis.dissolve` : `layer_id` est une liste de couches, `fields` une liste à cases à cocher des

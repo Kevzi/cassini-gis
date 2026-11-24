@@ -116,7 +116,7 @@ Proposition d'après la couverture, à valider par le propriétaire (étape huma
 
 1. Terminer l'entrée 12 (zonal, CV26) : déjà le plus demandé des restants du voie unique.
 2. Géocodage (entrée 16) : seule primitive de la voie unique qu'une phrase réelle demande (CV35), et PL22 de l'épreuve le demande aussi ; le sortir de sa place en bout de voie (derrière 15) serait un gain de couverture net.
-3. Vectorisation d'un raster (`raster.polygonize`, ajoutée par le changement de cap du 2026-11-05) : CV37.
+3. Vectorisation d'un raster (`raster.polygonize`, ajoutée par le changement de cap du 2026-11-05, livrée par l'entrée 37 de l'epic 10) : CV37 reste un refus juste (« image satellite », plusieurs bandes RGB, bâtiments à extraire : la commande ne détecte rien) ; son `missing` ne garde que `vectorize`.
 4. Entrées à créer si la couverture doit encore monter : découpage par masque (CV40), calculatrice raster (CV42), étiquettes (CV39). Carte de chaleur et profil (CV38, CV41) ensuite ; hydrologie et couverture radio restent hors périmètre (V2).
 5. En queue : atlas (15). Le plus court chemin (13) et la préparation de réseau (14) sont faits ; la préparation a ses trois phrases de `par_commande` (PRE1 en plan avec l'isochrone, « prépare le réseau de chemins avant l'isochrone », PRE2 en plan, PRE3 en question), hors des 44 phrases réelles : aucune de ces 44 ne la demande ni ne demande l'atlas ; le jeu est petit (44), donc ce n'est pas la preuve qu'ils sont inutiles, mais aucune mesure ne les soutient.
 
@@ -166,7 +166,7 @@ Hors ligne : `cargo test -p cassini-ai --test couverture_reelle_reel` (la couver
 | CV34 | Documentation QGIS en français (docs.qgis.org/fr), CC BY-SA 4.0 (visibilité sans point d'observation) | Montre la visibilité depuis le sommet. | question justifiée | — | OK Question |
 | CV35 | gis.stackexchange.com, question récurrente, CC BY-SA 4.0 ; thème repris, formulation réécrite (géocodage d'adresses) | Géocode cette liste d'adresses et place-les sur la carte. | non couverte | geocode | OK Question |
 | CV36 | gis.stackexchange.com, question récurrente, CC BY-SA 4.0 ; thème repris, formulation réécrite (hydrologie, bassin versant) | Calcule le bassin versant de ce ruisseau. | non couverte | watershed, hydrology | OK Question |
-| CV37 | gis.stackexchange.com, question récurrente, CC BY-SA 4.0 ; thème repris, formulation réécrite (vectorisation d'une image) | Transforme les bâtiments de cette image satellite en polygones. | non couverte | polygonize, vectorize | ÉCART Plan |
+| CV37 | gis.stackexchange.com, question récurrente, CC BY-SA 4.0 ; thème repris, formulation réécrite (vectorisation d'une image) | Transforme les bâtiments de cette image satellite en polygones. | non couverte | vectorize | ÉCART Plan |
 | CV38 | supports de cours et de TP de SIG publics des universités françaises ; thème repris, formulation réécrite (carte de chaleur) | Fais une carte de chaleur des accidents de la route. | non couverte | heatmap | OK Question |
 | CV39 | QGIS Training Manual (docs.qgis.org), CC BY-SA 4.0 (étiquettes de la carte) | Mets en étiquette le nom de chaque commune sur la carte. | non couverte | label | ÉCART Plan |
 | CV40 | gis.stackexchange.com, question récurrente, CC BY-SA 4.0 ; thème repris, formulation réécrite (découpage d'un raster par un masque) | Découpe le modèle de terrain selon l'emprise de la commune. | non couverte | clip | OK Question |

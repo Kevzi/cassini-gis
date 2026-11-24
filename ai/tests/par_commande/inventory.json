@@ -105,6 +105,29 @@
       ]
     },
     {
+      "layer_id": "ecoles_8b3d51c7_4e96_4a20_b1f8_6d07c2a9e354",
+      "name": "Écoles",
+      "kind": "vector",
+      "geometry": "Point",
+      "epsg": 2154,
+      "feature_count": 4,
+      "source": "donnees/ecoles.gpkg",
+      "fields": [
+        {
+          "name": "nom",
+          "type": "string"
+        },
+        {
+          "name": "niveau",
+          "type": "string",
+          "values": [
+            "primaire",
+            "collège"
+          ]
+        }
+      ]
+    },
+    {
       "layer_id": "routes_09b3d7f2_6c18_4e5b_a0d9_3e41c8f25b67",
       "name": "Routes",
       "kind": "vector",

@@ -711,7 +711,9 @@
           "command": "analysis.dissolve",
           "params": {
             "layer_id": "parcelles_3f9c2a1e_7b40_4d5a_9e12_0c8a6d4b71f3",
-            "fields": ["commune"]
+            "fields": [
+              "commune"
+            ]
           }
         }
       ]
@@ -728,7 +730,9 @@
           "command": "analysis.dissolve",
           "params": {
             "layer_id": "plu_zonage_a81d5c06_2e9f_4a37_b6c4_5f13e07d92a8",
-            "fields": ["typezone"]
+            "fields": [
+              "typezone"
+            ]
           }
         }
       ]
@@ -745,7 +749,10 @@
           "command": "analysis.dissolve",
           "params": {
             "layer_id": "plu_zonage_a81d5c06_2e9f_4a37_b6c4_5f13e07d92a8",
-            "fields": ["typezone", "destdomi"]
+            "fields": [
+              "typezone",
+              "destdomi"
+            ]
           }
         }
       ]
@@ -2897,6 +2904,71 @@
     }
   },
   {
+    "id": "NV4",
+    "command": "raster.polygonize",
+    "phrase": "Transforme le masque des zones inondables en polygones.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "raster.polygonize",
+          "params": {
+            "raster": "donnees/zones_inondables_masque.tif"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "NV5",
+    "command": "raster.polygonize",
+    "phrase": "Vectorise le raster de calme, bande 2.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "raster.polygonize",
+          "params": {
+            "raster": "donnees/note_calme.tif",
+            "band": 2
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "NV6",
+    "command": "raster.polygonize",
+    "phrase": "Classe la note d'accessibilité en deux catégories, sous 5 et au-dessus, puis fais-en des polygones.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "raster.reclassify",
+          "params": {
+            "raster": "donnees/note_accessibilite.tif",
+            "classes": [
+              {
+                "max": 5,
+                "value": 1
+              },
+              {
+                "min": 5,
+                "value": 2
+              }
+            ]
+          }
+        },
+        {
+          "command": "raster.polygonize",
+          "params": {
+            "raster": "step:1"
+          }
+        }
+      ]
+    }
+  },
+  {
     "id": "ATL1",
     "command": "layout.export_atlas",
     "phrase": "Fais-moi un atlas PDF des communes, une page par commune avec son nom en titre.",
@@ -2953,6 +3025,64 @@
             "title": "Gares du réseau",
             "coverage_layer_id": "gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1",
             "label_field": "nom"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "DM1",
+    "command": "analysis.distance_matrix",
+    "phrase": "Quelle distance sépare chacune de nos écoles de chacune des gares ?",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.distance_matrix",
+          "params": {
+            "layer_id": "ecoles_8b3d51c7_4e96_4a20_b1f8_6d07c2a9e354",
+            "label_field": "nom",
+            "target_layer_id": "gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1",
+            "target_label_field": "nom"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "DM2",
+    "command": "analysis.distance_matrix",
+    "phrase": "Sors un tableau croisé écoles-gares des distances, mais seulement avec les 2 gares les plus proches de chaque école.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.distance_matrix",
+          "params": {
+            "layer_id": "ecoles_8b3d51c7_4e96_4a20_b1f8_6d07c2a9e354",
+            "label_field": "nom",
+            "target_layer_id": "gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1",
+            "target_label_field": "nom",
+            "neighbors": 2
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "DM3",
+    "command": "analysis.distance_matrix",
+    "phrase": "Il me faut toutes les distances à vol d'oiseau entre le semis d'écoles et les gares, dans un tableau.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "analysis.distance_matrix",
+          "params": {
+            "layer_id": "ecoles_8b3d51c7_4e96_4a20_b1f8_6d07c2a9e354",
+            "label_field": "nom",
+            "target_layer_id": "gares_c5e0b94d_1a67_4f82_8d03_9b2e6a7c40f1",
+            "target_label_field": "nom"
           }
         }
       ]
