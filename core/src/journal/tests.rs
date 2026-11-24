@@ -1698,6 +1698,24 @@ impl Executor for ProjectQgis {
                 Ok(json!({"file": out, "epsg": p.get("assign_epsg").cloned()
                     .unwrap_or(json!(2154))}))
             }
+            // Comme le geste de `raster.align` : deux rasters lus (chemins absolus), une copie du
+            // MNT de test écrite à l'emplacement du noyau, les originaux intacts.
+            "raster.align" => {
+                for key in ["raster", "reference"] {
+                    let source = Path::new(p[key].as_str().unwrap());
+                    assert!(
+                        source.is_absolute() && source.is_file(),
+                        "{}",
+                        source.display()
+                    );
+                }
+                let out = p["out"].as_str().unwrap().to_string();
+                assert!(out.ends_with(".tif"), "{out}");
+                let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../fixtures/mnt-plan-incline-2154.tif");
+                fs::copy(fixture, &out).unwrap();
+                Ok(json!({"file": out}))
+            }
             "layout.export_pdf" => {
                 self.seen
                     .borrow_mut()
@@ -7760,5 +7778,64 @@ fn a_metric_dem_with_a_wgs84_point_is_still_refused() {
         .unwrap_err();
     assert_eq!(err.code, "terrain.crs_mismatch");
     drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+// ---- Epic 10, entrée 38 : `raster.align`, deux rasters en entrée, puis l'ouverture dictée ----
+
+/// Session d'origine : deux GeoTIFF, l'un aligné sur l'autre par QGIS, puis la sortie ouverte par
+/// l'étape que le noyau dicte.
+fn align_journal(project_file: &Path, project: &std::rc::Rc<OpenProject>) -> String {
+    let dir = project_file.parent().unwrap();
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/mnt-plan-incline-2154.tif");
+    fs::copy(&fixture, dir.join("classes.tif")).unwrap();
+    fs::copy(&fixture, dir.join("mnt.tif")).unwrap();
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, project_file)
+        .unwrap()
+        .with_qgis(ProjectQgis::new(project, 1))
+        .with_raster_opening(true);
+    let aligned = s
+        .call(
+            "raster.align",
+            json!({"raster": "classes.tif", "reference": "mnt.tif", "resampling": "nearest"}),
+        )
+        .unwrap();
+    assert!(aligned["file"]
+        .as_str()
+        .unwrap()
+        .ends_with("1-raster.align.tif"));
+    let l = lines(&s);
+    let ids: Vec<&str> = l.iter().map(|l| l["id"].as_str().unwrap()).collect();
+    assert_eq!(ids, ["raster.align", "layer.open_raster"]);
+    // Les deux rasters sont journalisés relatifs, chacun avec son empreinte (AD-11).
+    assert_eq!(l[0]["params"]["raster"], json!("classes.tif"));
+    assert_eq!(l[0]["params"]["reference"], json!("mnt.tif"));
+    assert_eq!(l[0]["inputs"].as_array().unwrap().len(), 2);
+    assert_eq!(l[1]["params"], json!({"path": "out:1.1"}));
+    fs::read_to_string(s.journal_path()).unwrap()
+}
+
+#[test]
+fn an_align_call_journals_both_rasters_as_inputs_and_opens_its_output() {
+    let (dir, project_file, token) = temp_project();
+    let journal = align_journal(&project_file, &OpenProject::with_base());
+    assert!(!journal.contains(&token), "aucun chemin absolu au journal");
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_aligned_raster_replays_identically_with_two_resolved_paths() {
+    let (dir, project_file, _) = temp_project();
+    let project = OpenProject::with_base();
+    align_journal(&project_file, &project);
+    let identical = ReplayReport {
+        steps: 2,
+        identical: true,
+        warnings: vec![],
+    };
+    let (outcome, _) = replay_in(&project_file, &project, 2, &mut HashSet::new());
+    assert_eq!(outcome.unwrap(), identical);
     let _ = fs::remove_dir_all(dir);
 }

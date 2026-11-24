@@ -126,6 +126,9 @@
   {"id": "data.convert_raster", "case": "sans EPSG",
    "result": {"file": "1-data.convert_raster.tif", "epsg": null}},
 
+  {"id": "raster.align", "case": "raster aligné",
+   "result": {"file": "1-raster.align.tif"}},
+
   {"id": "raster.reproject_work", "case": "MNT reprojeté",
    "result": {"file": "1-raster.reproject_work.tif", "epsg": 32632}},
 

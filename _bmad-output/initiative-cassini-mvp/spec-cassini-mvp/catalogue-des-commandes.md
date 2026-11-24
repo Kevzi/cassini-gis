@@ -380,7 +380,7 @@ donne l'esquisse.
 | `analysis.dissolve` | faite | qgis | epic 10, entrée 24 |
 | `raster.zonal_statistics` | faite | qgis | epic 10, entrée 12 |
 | `raster.polygonize` | faite | qgis | epic 10, entrée 37 |
-| `raster.align` | planifiée | qgis | epic 10 (entrée ajoutée après la 12) |
+| `raster.align` | faite | qgis | epic 10, entrée 38 |
 | `raster.contour` | faite | qgis | epic 10, entrée 26 |
 | `network.shortest_path` | faite | qgis | — |
 | `network.prepare` | faite | qgis | epic 10, entrée 14 |
@@ -2244,9 +2244,22 @@ coordonnées, mais peut avoir plusieurs bandes. Erreurs : `layer.not_found`,
 ### `raster.align`
 
 Rééchantillonne un raster sur la grille d'un raster de référence (système, taille de
-cellule, origine, dimensions), pour qu'il se combine dans le noyau (AD-20). Algorithme visé
-`native:alignrasters`, repli `native:alignsingleraster`, à trancher au ticket. Le noyau
-dicte ensuite `layer.open_raster`.
+cellule, origine, dimensions), pour qu'il se combine dans le noyau (AD-20). Algorithme :
+`native:alignsingleraster`, avec `EXTENT` posé sur l'emprise de la référence (sans lui, la
+sortie garderait l'emprise de la source). Le noyau dicte ensuite `layer.open_raster`.
+
+Livrée par l'entrée 38 de l'epic 10 (`core/src/commands/raster_align.rs`, ligne de la table
+`ALGORITHMS` de `qgis-plugin/cassini_qgis/analysis.py`). Changement de cap léger : le ticket
+parlait d'un ou plusieurs rasters ; la commande n'en aligne qu'un (une sortie par commande,
+`writes_one_raster`), et `native:alignrasters` est écarté (pas de méthode globale, `.aux.xml`
+à côté de la source). Les deux rasters sont des GeoTIFF d'une bande avec système de
+coordonnées, ou `step:k` (un raster sans système est refusé avant lancement, `analysis.bad_params`,
+car QGIS le supposerait dans le système de la référence). Une référence dans un autre système
+que le raster est admise : la sortie prend le système de la référence. Emprises sans
+recouvrement : `analysis.failed`. Limite constatée par la sonde : une source qui ne couvre pas toute
+la référence donne une sortie rognée à l'emprise commune (QGIS intersecte l'emprise demandée avec
+celle de la source). Erreurs : `layer.not_found`, `layer.invalid_source`,
+`analysis.bad_params`, `analysis.failed`. Non annoncée si l'algorithme manque (AD-25).
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
@@ -2260,7 +2273,7 @@ dicte ensuite `layer.open_raster`.
 | `file` | chaîne | GeoTIFF aligné. |
 
 ```json fiche
-{"id": "raster.align", "status": "planifiee", "runs_in": "qgis", "dictated_by_core": false,
+{"id": "raster.align", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
  "params": {"raster": {"type": "RasterPath", "required": true},
             "reference": {"type": "RasterPath", "required": true},
             "resampling": {"type": "string", "required": false, "enum": ["nearest", "bilinear"]},

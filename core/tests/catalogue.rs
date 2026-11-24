@@ -1138,7 +1138,7 @@ fn every_non_test_command_has_a_fiche_and_planned_ids_are_not_registered() {
         let fiche = fiches.iter().find(|f| f.id == spec.id);
         assert_eq!(fiche.map(|f| f.status), Some(Status::Done), "{}", spec.id);
     }
-    assert!(fiches.iter().any(|f| f.status == Status::Planned));
+    // Ticket 38 : `raster.align` était la dernière fiche planifiée ; il peut n'en rester aucune.
     assert!(fiches.iter().any(|f| f.status == Status::Reserved));
 }
 

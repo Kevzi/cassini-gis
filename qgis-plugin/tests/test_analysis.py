@@ -2029,6 +2029,10 @@ class RasterBackend(FakeBackend):
     def same_crs(self, layer, epsg):
         return layer.crs == "EPSG:%d" % epsg
 
+    def raster_extent(self, layer):
+        self.extent_of = getattr(self, "extent_of", []) + [layer.path]
+        return "100.0,300.0,200.0,400.0 [%s]" % layer.crs
+
     def read_written_raster(self, path):
         if not self.written_readable or not os.path.exists(path):
             return False
@@ -3129,6 +3133,136 @@ class ContourTest(unittest.TestCase):
 
     def test_the_command_can_be_cancelled(self):
         self.assertTrue(analysis.derived_cancellable(analysis.ALGORITHMS)["raster.contour"])
+
+
+class AlignTest(unittest.TestCase):
+    """`raster.align` (epic 10, ticket 38) : deux rasters en entrée, `native:alignsingleraster` avec l'emprise
+    de la référence, sortie GeoTIFF, résultat `file` seul."""
+
+    SOURCES = {"classes.tif": "EPSG:2154", "mnt.tif": "EPSG:2154", "mnt-3857.tif": "EPSG:3857",
+               "multi.tif": "EPSG:2154", "sans-systeme.tif": None, "classes.asc": "EPSG:2154"}
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.out = os.path.join(self.dir.name, "1-raster.align.tif")
+        self.entry = analysis.ALGORITHMS["raster.align"]
+        for name in self.SOURCES:
+            with open(os.path.join(self.dir.name, name), "wb") as f:
+                f.write(b"II*" + name.encode())
+        self.originals = {n: self.read(n) for n in self.SOURCES}
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def read(self, name):
+        with open(os.path.join(self.dir.name, name), "rb") as f:
+            return f.read()
+
+    def path(self, name):
+        return os.path.join(self.dir.name, name)
+
+    def backend(self, **kw):
+        return ZonalBackend(self.SOURCES, bands={"multi.tif": 3}, **kw)
+
+    def params(self, **extra):
+        p = {"raster": self.path("classes.tif"), "reference": self.path("mnt.tif"), "out": self.out}
+        p.update(extra)
+        return p
+
+    def assert_no_output(self):
+        self.assertEqual([n for n in os.listdir(self.dir.name) if n.startswith("1-raster.align")], [])
+
+    def test_the_row_is_the_single_raster_alignment_on_the_reference_extent(self):
+        self.assertEqual(self.entry["algorithm"], "native:alignsingleraster")
+        self.assertEqual(analysis.required_algorithms(self.entry), ["native:alignsingleraster"])
+        b = self.backend()
+        _, calls = start(self.entry, b, self.params())
+        algorithm, p = b.calls[0]
+        self.assertEqual(algorithm, "native:alignsingleraster")
+        self.assertEqual(p["INPUT"], self.path("classes.tif"))
+        self.assertEqual(p["REFERENCE_LAYER"], self.path("mnt.tif"))
+        self.assertEqual(p["OUTPUT"], self.out)
+        self.assertFalse(p["RESCALE"])
+        self.assertEqual(p["RESAMPLING_METHOD"], 0)  # `nearest` par défaut
+        # L'emprise de la référence, lue à part et dans son système ; jamais celle de la source.
+        self.assertEqual(p["EXTENT"], "100.0,300.0,200.0,400.0 [EPSG:2154]")
+        self.assertEqual(b.extent_of, [self.path("mnt.tif")])
+        b.finished(True, {"OUTPUT": self.out})
+        # Résultat `file` seul (fiche du catalogue) ; le GeoTIFF n'entre pas au projet.
+        self.assertEqual(calls, [({"file": self.out}, None)])
+        self.assertEqual(b.added, [])
+
+    def test_the_resampling_is_nearest_or_bilinear_only(self):
+        for name, index in (("nearest", 0), ("bilinear", 1)):
+            b = self.backend()
+            start(self.entry, b, self.params(resampling=name))
+            self.assertEqual(b.calls[0][1]["RESAMPLING_METHOD"], index, name)
+        b = self.backend()
+        _, calls = start(self.entry, b, self.params(resampling="cubic"))
+        self.assertEqual(calls[0][1].code, analysis.BAD_PARAMS)
+        self.assertEqual(b.calls, [])
+
+    def test_a_reference_in_another_system_is_admitted(self):
+        b = self.backend()
+        _, calls = start(self.entry, b, self.params(reference=self.path("mnt-3857.tif")))
+        self.assertEqual(len(b.calls), 1)
+        self.assertTrue(b.calls[0][1]["EXTENT"].endswith("[EPSG:3857]"))
+        b.finished(True, {})
+        self.assertEqual(calls[0][0], {"file": self.out})
+
+    def test_either_raster_unreadable_is_refused_before_any_launch(self):
+        cases = (
+            ("raster", "absent.tif", analysis.NOT_FOUND),
+            ("reference", "absent.tif", analysis.NOT_FOUND),
+            ("raster", "classes.asc", analysis.INVALID_SOURCE),
+            ("reference", "classes.asc", analysis.INVALID_SOURCE),
+            ("raster", "multi.tif", analysis.BAD_PARAMS),
+            ("reference", "multi.tif", analysis.BAD_PARAMS),
+            ("raster", "sans-systeme.tif", analysis.BAD_PARAMS),
+            ("reference", "sans-systeme.tif", analysis.BAD_PARAMS),
+        )
+        for key, name, code in cases:
+            b = self.backend()
+            _, calls = start(self.entry, b, self.params(**{key: self.path(name)}))
+            self.assertEqual(b.calls, [], (key, name))
+            self.assertEqual(calls[0][1].code, code, (key, name))
+            self.assertNotIn(self.dir.name, calls[0][1].message)
+            self.assert_no_output()
+        self.assertEqual({n: self.read(n) for n in self.SOURCES}, self.originals)
+
+    def test_a_failure_leaves_no_partial_file_and_the_originals_intact(self):
+        # Emprises sans recouvrement : QGIS échoue, le message du noyau est `analysis.failed`.
+        b = self.backend()
+        _, calls = start(self.entry, b, self.params())
+        with open(self.out, "wb") as f:
+            f.write(b"partiel")
+        b.finished(False, {})
+        self.assertEqual(calls[0][1].code, analysis.FAILED)
+        self.assert_no_output()
+        self.assertEqual({n: self.read(n) for n in self.SOURCES}, self.originals)
+
+    def test_an_unreadable_output_is_a_failure_and_is_removed(self):
+        b = self.backend(written_readable=False)
+        _, calls = start(self.entry, b, self.params())
+        b.finished(True, {})
+        self.assertEqual(calls[0][1].code, analysis.FAILED)
+        self.assert_no_output()
+
+    def test_a_missing_algorithm_is_not_announced(self):
+        backend = FakeBackend()
+        self.assertIn("raster.align", analysis.available_chains(analysis.ALGORITHMS, backend))
+        backend.missing_algorithms = {"native:alignsingleraster"}
+        self.assertNotIn("raster.align", analysis.available_chains(analysis.ALGORITHMS, backend))
+
+    def test_the_command_can_be_cancelled(self):
+        self.assertTrue(analysis.derived_cancellable(analysis.ALGORITHMS)["raster.align"])
+        b = self.backend()
+        g, calls = start(self.entry, b, self.params())
+        g.cancel()
+        self.assertTrue(b.handle.cancelled)
+        b.finished(False, {})
+        self.assertEqual(calls[0][1].code, "qgis.cancelled")
+        self.assert_no_output()
 
 
 class PolygonizeTest(unittest.TestCase):

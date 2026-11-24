@@ -338,6 +338,13 @@ pub static FAMILIES: &[Family] = &[
         weight: 3,
         make: vectorisation_raster,
     },
+    // Ticket 38 (epic 10) : `raster.align`. Aucune famille de refus n'était à reprendre : « aligne ce
+    // raster sur le MNT » restait sans plan (poids 3, comme `courbes_de_niveau`).
+    Family {
+        name: "alignement_raster",
+        weight: 3,
+        make: alignement_raster,
+    },
     // Les trois commandes de terrain (4.6) : MNT désigné par sa source, points écrits.
     Family {
         name: "pente",
@@ -6132,6 +6139,70 @@ fn vectorisation_raster(rng: &mut Rng) -> Option<Example> {
         None => question(missing_raster_question(rng, key)),
     };
     Some(example("vectorisation_raster", b, rng, request, expected))
+}
+
+/// Ticket 38 (epic 10) : alignement d'un raster sur la grille du MNT, `raster.align`. Les deux
+/// rasters se désignent par leur `source`, recopiée de l'inventaire (le raster à aligner, puis le MNT
+/// pour `reference`). `resampling` n'est posé que si la demande écrit la méthode (« bilinéaire »,
+/// « au plus proche voisin ») ; sinon le défaut du noyau s'applique. Un raster nommé absent de
+/// l'inventaire : la question du raster, jamais un plan.
+fn alignement_raster(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let dem = b.add_dem(rng, 2154);
+    let key = *rng.pick(&RAW_RASTERS);
+    let raster = if rng.chance(1, 8) {
+        b.exclude(key);
+        None
+    } else {
+        Some(b.add_raster(rng, key, 2154))
+    };
+    let s = raster_words(rng, key, raster.as_ref());
+    let of = dem_words(rng, &dem);
+    let on = match rng.below(4) {
+        0 => "le MNT".to_string(),
+        1 => "le modèle numérique de terrain".to_string(),
+        2 => format!("la couche « {} »", dem.name),
+        _ => "le terrain".to_string(),
+    };
+    let (body, q) = match rng.below(5) {
+        0 => (format!("Aligne {s} sur la grille {of}"), false),
+        1 => (format!("Mets {s} sur la même grille {of}"), false),
+        2 => (format!("Rééchantillonne {s} sur la grille {of}"), false),
+        3 => (format!("Peux-tu aligner {s} sur {on}"), true),
+        _ => (
+            format!("Aligne {s} sur {on}, pour pouvoir les combiner"),
+            false,
+        ),
+    };
+    let method = match rng.below(4) {
+        0 => Some((
+            "bilinear",
+            *rng.pick(&[", par interpolation bilinéaire", ", en bilinéaire"]),
+        )),
+        1 => Some((
+            "nearest",
+            *rng.pick(&[", au plus proche voisin", ", sans interpoler"]),
+        )),
+        _ => None,
+    };
+    let body = match method {
+        Some((_, text)) => format!("{body}{text}"),
+        None => body,
+    };
+    let request = finish(rng, &body, q, false);
+    let expected = match &raster {
+        Some(r) => {
+            let mut params = serde_json::Map::new();
+            params.insert("raster".into(), json!(r.source));
+            params.insert("reference".into(), json!(dem.source));
+            if let Some((name, _)) = method {
+                params.insert("resampling".into(), json!(name));
+            }
+            calls(vec![json!({"command": "raster.align", "params": params})])
+        }
+        None => question(missing_raster_question(rng, key)),
+    };
+    Some(example("alignement_raster", b, rng, request, expected))
 }
 
 /// « à partir de l'accessibilité » / « à partir de la couche « X » » : le sujet d'un raster après
@@ -14018,6 +14089,60 @@ mod tests {
             }
         }
         assert!(plain > 0 && banded > 0 && chained > 0 && asked > 0);
+    }
+
+    #[test]
+    fn raster_alignment_is_planned_from_the_two_sources() {
+        // Ticket 38 : le raster et le MNT par leur `source` ; `resampling` seulement quand la demande
+        // écrit la méthode ; un raster absent donne la question, jamais un plan.
+        let examples = valid(alignement_raster, 300);
+        let (mut plain, mut bilinear, mut nearest, mut asked) = (0, 0, 0, 0);
+        for e in &examples {
+            if e.expected.get("calls").is_none() {
+                asked += 1;
+                continue;
+            }
+            let calls = e.expected["calls"].as_array().unwrap();
+            assert_eq!(calls.len(), 1, "{}", e.request);
+            assert_eq!(calls[0]["command"], "raster.align", "{}", e.request);
+            let params = &calls[0]["params"];
+            let layers = e.inventory["layers"].as_array().unwrap();
+            for key in ["raster", "reference"] {
+                let source = params[key].as_str().unwrap();
+                assert!(
+                    layers
+                        .iter()
+                        .any(|l| l["kind"] == "raster" && l["source"] == source),
+                    "raster « {source} » absent : {}",
+                    e.request
+                );
+            }
+            assert_ne!(params["raster"], params["reference"], "{}", e.request);
+            let r = e.request.to_lowercase();
+            match params.get("resampling").and_then(|v| v.as_str()) {
+                Some("bilinear") => {
+                    bilinear += 1;
+                    assert!(r.contains("bilinéaire"), "{}", e.request);
+                }
+                Some("nearest") => {
+                    nearest += 1;
+                    assert!(
+                        r.contains("plus proche voisin") || r.contains("sans interpoler"),
+                        "{}",
+                        e.request
+                    );
+                }
+                _ => {
+                    plain += 1;
+                    assert!(
+                        !r.contains("bilinéaire") && !r.contains("interpol"),
+                        "{}",
+                        e.request
+                    );
+                }
+            }
+        }
+        assert!(plain > 0 && bilinear > 0 && nearest > 0 && asked > 0);
     }
 
     #[test]

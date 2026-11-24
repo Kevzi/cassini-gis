@@ -228,6 +228,22 @@ Recette manuelle de `raster.polygonize` [ticket 37] (un GeoTIFF de classes, par 
 4. Sonde sous QGIS 3.44 : `"C:\Program Files\QGIS 3.44.15in\python-qgis-ltr.bat" qgis-plugin/tests/probe_polygonize.py`
    doit finir par `VERDICT : OK`.
 
+Recette manuelle de `raster.align` [ticket 38] (deux GeoTIFF d'une bande avec système, de grilles différentes) :
+
+1. `raster.align` : `raster` et `reference` sont des sélecteurs de fichier GeoTIFF (ou `step:k`), `resampling`
+   une liste fermée (`nearest` par défaut, `bilinear`). Un GeoTIFF nouveau est écrit, qui a le système, la
+   taille de cellule, l'origine et les dimensions de la référence, et il est ajouté au projet
+   (`native:alignsingleraster`, avec l'emprise de la référence).
+2. Les deux rasters d'origine restent intacts et aucun `.aux.xml` n'apparaît à côté.
+3. Limite constatée par la sonde : si la source ne couvre pas toute la référence, la sortie est rognée à
+   l'emprise commune (19 colonnes au lieu de 20 pour 5,5 m manquants) ; sans aucun recouvrement :
+   `analysis.failed`, aucun fichier.
+4. Un raster ou une référence absent : `layer.not_found` ; pas un GeoTIFF : `layer.invalid_source` ; sans
+   système ou à plusieurs bandes : `analysis.bad_params`, avant tout lancement. Un QGIS sans
+   `native:alignsingleraster` n'annonce pas la commande.
+5. Sonde sous QGIS 3.44 : `"C:\Program Files\QGIS 3.44.15in\python-qgis-ltr.bat" qgis-plugin/tests/probe_align.py`
+   doit finir par `VERDICT : OK` (la phase 2 cherche le noyau dans `CASSINI_CORE`).
+
 Recette manuelle de `analysis.dissolve` [ticket 24] (une couche de parcelles ou de zones) :
 
 1. `analysis.dissolve` : `layer_id` est une liste de couches, `fields` une liste à cases à cocher des

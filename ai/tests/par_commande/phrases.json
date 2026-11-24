@@ -3087,5 +3087,48 @@
         }
       ]
     }
+  },
+  {
+    "id": "NV7",
+    "command": "raster.align",
+    "phrase": "Cale la note de calme sur la grille du MNT.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "raster.align",
+          "params": {
+            "raster": "donnees/note_calme.tif",
+            "reference": "donnees/mnt_5m.tif"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "NV8",
+    "command": "raster.align",
+    "phrase": "Ramène le coût de déplacement à la résolution et à l'emprise du MNT, en bilinéaire.",
+    "expected": {
+      "kind": "calls",
+      "calls": [
+        {
+          "command": "raster.align",
+          "params": {
+            "raster": "donnees/cout_deplacement.tif",
+            "reference": "donnees/mnt_5m.tif",
+            "resampling": "bilinear"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "NV9",
+    "command": "raster.align",
+    "phrase": "Aligne l'occupation du sol sur le MNT.",
+    "expected": {
+      "kind": "question"
+    }
   }
 ]

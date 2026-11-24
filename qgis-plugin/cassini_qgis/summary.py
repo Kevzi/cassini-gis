@@ -909,6 +909,23 @@ def _reproject_work(lang, p, r, names):
     return text + _file_part(lang, r)
 
 
+def _align(lang, p, r, names):
+    """Un raster réécrit sur la grille d'un autre ; chacun est un fichier ou une étape ; affichage seul (AD-5)."""
+    parts = []
+    for key in ("raster", "reference"):
+        value = p.get(key)
+        if not isinstance(value, str) or not value:
+            raise _Unreadable()
+        parts.append(names.layer(value) if _STEP_REF.match(value) else file_name(value))
+    method = p.get("resampling")
+    if method is not None and method not in ("nearest", "bilinear"):
+        raise _Unreadable()
+    text = texts.tr(lang, "sum_align", raster=parts[0], reference=parts[1])
+    if method == "bilinear":
+        text += texts.tr(lang, "sum_align_bilinear")
+    return text + (_file_part(lang, r) if r else "")
+
+
 def _layer_remove(lang, p, r, names):
     """La couche retirée du projet, aucun fichier effacé ; affichage seul (AD-5)."""
     key = "sum_layer_remove_ask" if names.ahead else "sum_layer_remove"
@@ -1262,6 +1279,7 @@ _SENTENCES = {
     "raster.zonal_statistics": _raster_zonal,
     "raster.contour": _contour,
     "raster.polygonize": _polygonize,
+    "raster.align": _align,
     "geocode.ban": _geocode,
     "analysis.nearest": _nearest,
     "analysis.dissolve": _dissolve,

@@ -1732,7 +1732,9 @@ mod tests {
         // passe de 10 à 9 %.
         // Ticket 37 (`vectorisation_raster`, plancher de 15) : 128 sur 1 500 (8,5 %) contre 140, la
         // barre passe de 9 à 8 %.
-        assert!(big * 100 >= 1500 * 8, "{big} gros projets");
+        // Ticket 38 (`alignement_raster`, plancher de 15) : 117 sur 1 500 (7,8 %) contre 128, la barre
+        // passe de 8 à 7 %.
+        assert!(big * 100 >= 1500 * 7, "{big} gros projets");
         // Le plancher puis le surplus, chacun dans l'ordre du jeu complet.
         let floor_len: usize = sizes.values().map(|&n| n.min(RECALL_FLOOR)).sum();
         assert!(positions[..floor_len].windows(2).all(|w| w[0] < w[1]));

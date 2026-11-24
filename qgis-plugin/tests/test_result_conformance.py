@@ -318,6 +318,19 @@ def _convert():
         t.tearDown()
 
 
+def _align():
+    t = ta.AlignTest("setUp")
+    t.setUp()
+    try:
+        backend = t.backend()
+        _, calls = ta.start(t.entry, backend, t.params())
+        backend.finished(True, {})
+        assert calls[0][1] is None, calls
+        return calls[0][0]
+    finally:
+        t.tearDown()
+
+
 def _reproject_work():
     t = ta.ReprojectWorkTest("setUp")
     t.setUp()
@@ -560,6 +573,7 @@ def producers():
         ("data.convert", "GeoPackage"): _convert,
         ("data.convert_raster", "avec EPSG"): _convert_raster(2154),
         ("data.convert_raster", "sans EPSG"): _convert_raster(None),
+        ("raster.align", "raster aligné"): _align,
         ("raster.reproject_work", "MNT reprojeté"): _reproject_work,
         ("data.reproject", "couche créée"): _reproject,
         ("data.transform_point", "point reprojeté"): _transform_point,

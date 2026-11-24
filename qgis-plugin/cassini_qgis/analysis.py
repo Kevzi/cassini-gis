@@ -474,6 +474,33 @@ def translate_convert_raster(params, raster):
     }
 
 
+# Alignement (`native:alignsingleraster`, ticket 38) : le raster est réécrit sur la grille de la référence
+# (système, cellule, origine). Noms des paramètres de QGIS 3.44 : `INPUT`, `REFERENCE_LAYER`,
+# `RESAMPLING_METHOD` (0 plus proche voisin, 1 bilinéaire), `RESCALE`, `EXTENT`, `OUTPUT` ; ni `CRS` ni
+# taille de cellule, qui viennent de la référence. `EXTENT` est l'emprise de la référence dans son système :
+# sans lui la sortie garde l'emprise de la source (constat de la sonde : 21 lignes au lieu de 20). Le geste
+# la lit (`backend.raster_extent`) et la passe sous `_REFERENCE_EXTENT` : la traduction ne lit rien.
+_REFERENCE_EXTENT = "_reference_extent"
+
+
+def translate_raster_align(params, raster):
+    """Paramètres neutres de `raster.align` -> paramètres de `native:alignsingleraster`. `resampling` absent
+    vaut `nearest` (des classes ne se mélangent pas) ; le noyau refuse déjà toute autre méthode."""
+    name = params.get("resampling") or "nearest"
+    if name not in _RESAMPLING:
+        raise GestureError(BAD_PARAMS, "Le rééchantillonnage doit être « nearest » ou « bilinear ».")
+    extent = params.get(_REFERENCE_EXTENT)
+    if not isinstance(extent, str) or not extent:
+        raise GestureError(FAILED, "L'emprise de la référence est illisible.")
+    return {
+        "INPUT": raster,
+        "REFERENCE_LAYER": params.get("reference"),
+        "RESAMPLING_METHOD": _RESAMPLING[name],
+        "RESCALE": False,
+        "EXTENT": extent,
+    }
+
+
 # Champs écrits par `native:countpointsinpolygon` ; le noyau ne les connaît pas. Avec `WEIGHT`,
 # l'algorithme écrit la somme pondérée à la place du décompte dans son champ : le décompte et la
 # somme sont donc deux passes, chacune avec son propre champ.
@@ -1049,6 +1076,11 @@ def translate_atlas(params, layer):
 #   band_param : (facultatif, avec `layer_output`) paramètre du noyau qui choisit la bande du raster d'entrée
 #               (entier à partir de 1, 1 si absent) : le raster peut alors avoir plusieurs bandes, mais pas
 #               moins que la bande demandée (`analysis.bad_params`, avant tout lancement) ;
+#   reference_input : (facultatif, avec `raster`) paramètre du noyau qui nomme un second `RasterPath`, la
+#               référence dont la sortie prend la grille (ticket 38) : contrôlée comme le raster d'entrée
+#               (GeoTIFF d'une bande avec système, `layer.not_found`, `layer.invalid_source`,
+#               `analysis.bad_params`), avant toute ouverture ; son emprise est lue et donnée à la traduction ;
+#   file_only : (facultatif, avec `raster`) le résultat est `file` seul, sans `epsg` ;
 #   assign_crs: (facultatif, avec `raster`) paramètre du noyau qui déclare le code EPSG d'une
 #               source sans système : connu de QGIS (`data.unknown_crs` sinon), et refusé
 #               (`analysis.bad_params`) si la source a déjà un autre système ;
@@ -1450,6 +1482,17 @@ ALGORITHMS = {
         "raster": True,
         "assign_crs": "assign_epsg",
     },
+    # Ticket 38 : un raster réécrit sur la grille d'un autre ; sortie GeoTIFF, résultat `file` seul.
+    "raster.align": {
+        "chain_version": 1,
+        "chain": [
+            {"algorithm": "native:alignsingleraster", "translate": translate_raster_align, "output": "OUTPUT"},
+        ],
+        "input": "raster",
+        "raster": True,
+        "reference_input": "reference",
+        "file_only": True,
+    },
     # Ticket 33 : reprojection d'un MNT en degrés, dictée par le noyau avant une commande de terrain.
     "raster.reproject_work": {
         "chain_version": 1,
@@ -1520,6 +1563,7 @@ CANCELLABLE_ALGORITHMS = frozenset(
         "native:zonalstatisticsfb",
         "gdal:contour",
         "gdal:polygonize",
+        "native:alignsingleraster",
         "native:joinbynearest",
         "native:joinattributestable",
         "native:dissolve",
@@ -1947,6 +1991,14 @@ class QgisBackend(_ReadBackend):
         """Nombre de bandes du raster ouvert à part."""
         return int(layer.bandCount())
 
+    def raster_extent(self, layer):
+        """Emprise du raster ouvert à part dans son propre système, au format du paramètre d'emprise du
+        cadre de traitement : `xmin,xmax,ymin,ymax [système]`."""
+        rect, crs = layer.extent(), layer.crs()
+        return "%r,%r,%r,%r [%s]" % (
+            rect.xMinimum(), rect.xMaximum(), rect.yMinimum(), rect.yMaximum(), crs.authid() or crs.toWkt(),
+        )
+
     def raster_unit(self, path):
         """Unité de la première bande du GeoTIFF, telle que GDAL la porte (`metre`…) ; None si le fichier n'en
         déclare pas, si GDAL n'est pas joignable ou si le fichier est illisible. Lecture seule."""
@@ -2295,6 +2347,18 @@ class ProcessingGesture:
             # Entrée raster, sortie couche : mêmes gardes qu'un raster lu par une analyse de polygones, et
             # avant toute ouverture du fichier (le réglage « pas de .aux.xml » doit précéder la première).
             self._check_raster_input(path, None, band_param=entry.get("band_param"), params=params)
+        extent = None
+        if entry.get("reference_input"):
+            # Deux rasters lus : mêmes gardes pour chacun, avant toute ouverture (le réglage « pas de
+            # .aux.xml » précède la première), puis l'emprise de la référence pour la traduction.
+            reference = params.get(entry["reference_input"])
+            self._check_raster_input(path, None)
+            self._check_raster_input(reference, None)
+            extent_source = backend.raster_source(reference)
+            try:
+                extent = backend.raster_extent(extent_source)
+            finally:
+                extent_source = None  # relâché avant l'algorithme
         if not isinstance(path, str) or not path or not os.path.isfile(path):
             raise GestureError(NOT_FOUND, "Aucun fichier raster « %s »." % _file_name(path))
         source = backend.raster_source(path)
@@ -2345,6 +2409,8 @@ class ProcessingGesture:
         # La source n'est plus tenue ouverte pendant le travail de QGIS (Windows garderait le
         # fichier d'origine verrouillé).
         source = None
+        if extent is not None:
+            params = dict(params, **{_REFERENCE_EXTENT: extent})
         algorithm_params = step["translate"](params, path)
         algorithm_params[step.get("output", "OUTPUT")] = out
         self._out = out
@@ -2517,6 +2583,8 @@ class ProcessingGesture:
             epsg = backend.read_written_raster(self._out)
             if epsg is False:
                 raise GestureError(FAILED, "Le GeoTIFF écrit est illisible.")
+            if self._entry.get("file_only"):
+                return {"file": self._out}
             return {"file": self._out, "epsg": epsg}
         name = os.path.splitext(os.path.basename(self._out))[0]  # radical donné par le noyau (AD-10)
         layer = backend.load_output(self._out, name)

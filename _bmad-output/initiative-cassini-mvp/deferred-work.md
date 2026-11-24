@@ -1338,3 +1338,10 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-livraison-du-catalogue-etendu-dans-une-version-publiee-plan.md`
   summary: Phrase GC3 (« Géocode … sur la BAN du 74, puis affiche le résultat ») : le modèle base-22-2 ajoute une étape `layer.describe` sur la sortie de `geocode.ban`, le noyau refuse le plan (`agent.plan_invalid`), deux fois sur deux.
   evidence: essai de la 0.1.5 installée par l'installeur complet, 18 phrases (3 par famille data, analysis, raster, network, layout, geocode) : 17 correctes (dont CHE3, question attendue), GC3 seule en échec. Le garde-fou a joué : rien n'est exécuté. Pas de coupure réseau réelle ni de second poste.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-alignement-de-rasters-raster-align-plan.md`
+  summary: Noms de paramètres de `native:alignsingleraster` (`RESAMPLING_METHOD`, `REFERENCE_LAYER`, `EXTENT`) vérifiés sous QGIS 3.44 seulement, alors que l'extension annonce 4.99.
+  evidence: Même limite que `raster.contour` ; aucun QGIS 4.x sur le poste ; à vérifier dès qu'une série 4.x est installée (sévérité medium, non vérifiée).
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-alignement-de-rasters-raster-align-plan.md`
+  summary: `raster.align` rogne la sortie à l'emprise commune quand la source ne couvre qu'une partie de la référence : cellule et origine sont celles de la référence, pas les dimensions.
+  evidence: Sonde : 19 colonnes au lieu de 20 pour 5,5 m manquants ; documenté au catalogue et au README de l'extension ; refus ou remplissage en sans-donnée à décider si un enchaînement avec un MNT plus large pose problème.
