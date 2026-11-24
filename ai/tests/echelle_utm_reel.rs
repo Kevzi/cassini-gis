@@ -17,9 +17,9 @@
 //! écritures (page, orientation ou titre compris), exports au bout d'une sélection, d'un tampon ou
 //! d'une isochrone, isochrones depuis un point UTM 31N ou 32N, et 4 refus qui nomment dans
 //! `missing` ce qui manque au registre : un morceau d'un identifiant planifié du catalogue
-//! (`atlas` de `layout.export_atlas`, `shortest_path`, `distance_matrix`) ou, sans identifiant
+//! (`atlas` de `layout.export_atlas`, `shortest_path`) ou, sans identifiant
 //! au catalogue, des mots-clés anglais choisis pour un futur identifiant (`export_image`,
-//! `image`) : le jour où un identifiant du registre contient un de ces mots, le refus devient
+//! `image`, `travel_time` depuis le ticket 36 de l'epic 10, qui livre `analysis.distance_matrix`) : le jour où un identifiant du registre contient un de ces mots, le refus devient
 //! faux et le test sans modèle nomme la phrase. Les attendus
 //! passent tous les contrôles communs (`common::invalid`). Une seule comparaison pour les 44
 //! (`common::same_calls`) : titre d'export comparé exactement quand l'attendu en porte un, sinon

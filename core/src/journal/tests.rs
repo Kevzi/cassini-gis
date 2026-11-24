@@ -4962,6 +4962,17 @@ impl Executor for CrsQgis {
                           "truncated": false}),
                 )
             }
+            "analysis.distance_matrix" => {
+                self.buffers.borrow_mut().push(p.clone());
+                fs::write(
+                    p["out"].as_str().unwrap(),
+                    "depart,cible,distance\nA,B,120.5\n",
+                )
+                .unwrap();
+                Ok(json!({"file": p["out"], "pair_count": 1,
+                          "rows": [{"label": "A → B", "values": {"distance": {"value": 120.5, "unit": "m"}}}],
+                          "truncated": false}))
+            }
             "analysis.statistics_by_category" => {
                 self.buffers.borrow_mut().push(p.clone());
                 fs::write(p["out"].as_str().unwrap(), "zonage,count\nU,5\n").unwrap();
@@ -5061,6 +5072,52 @@ fn a_nearest_join_of_a_layer_in_degrees_logs_the_metric_work_system() {
     assert!(orders.borrow()[1].get("work_epsg").is_none());
     assert_eq!(orders.borrow().len(), 2);
     drop(s);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_distance_matrix_of_a_layer_in_degrees_logs_the_metric_work_system_and_replays_identically() {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let qgis_project = annecy_project();
+    let qgis = CrsQgis::new(1, &qgis_project);
+    let orders = qgis.buffers.clone();
+    let mut s = Session::open(&registry, &project).unwrap().with_qgis(qgis);
+    let matrix = |from: &str, to: &str| {
+        json!({"layer_id": from, "label_field": "nom",
+               "target_layer_id": to, "target_label_field": "nom", "neighbors": 2})
+    };
+    // Couche de départ en degrés : le noyau remplit `work_epsg`, journalisé, transmis au geste.
+    let out = s
+        .call("analysis.distance_matrix", matrix("gares", "zonage"))
+        .unwrap();
+    assert_eq!(out["rows"][0]["values"]["distance"]["unit"], "m");
+    // Couche en mètres : rien n'est rempli, même si l'appelant en donne un.
+    let mut forced = matrix("zonage", "gares");
+    forced["work_epsg"] = json!(4326);
+    s.call("analysis.distance_matrix", forced).unwrap();
+    // Même couche des deux côtés : refus du noyau, rien n'est exécuté ni journalisé.
+    let err = s
+        .call("analysis.distance_matrix", matrix("gares", "gares"))
+        .unwrap_err();
+    assert_eq!(err.code, "registry.invalid_params");
+    let l = lines(&s);
+    assert_eq!(l.len(), 2, "{l:?}");
+    assert_eq!(l[0]["params"]["work_epsg"], 2154, "{}", l[0]);
+    assert_eq!(orders.borrow()[0]["work_epsg"], 2154);
+    assert!(l[1]["params"].get("work_epsg").is_none(), "{}", l[1]);
+    assert!(l[0]["params"]["out"]
+        .as_str()
+        .is_some_and(|o| o.ends_with(".csv")));
+    assert_eq!(orders.borrow().len(), 2);
+    drop(s);
+    // Rejeu : le même résultat.
+    let qgis = CrsQgis::new(2, &qgis_project);
+    let report = Replay::load(&registry, &project)
+        .unwrap()
+        .run(&Router::new(&registry).with_qgis(qgis), &mut HashSet::new())
+        .unwrap();
+    assert_eq!(report, identical(2));
     let _ = fs::remove_dir_all(dir);
 }
 

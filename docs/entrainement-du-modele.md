@@ -2610,7 +2610,7 @@ engendrées, jamais recopiées d'une autre barre), sur l'inventaire de l'épreuv
 
 | Barre | Phrases | Fichier des phrases neuves | Refus attendus | Seuil |
 |---|---|---|---|---|
-| `echelle_utm_reel` | 8 + 36 = **44** | `ai/tests/echelle_utm_reel/phrases.json` (`EU01`…`EU36`) | 3 neufs : `atlas`, `export_image`/`image`, `distance_matrix` (le quatrième, `shortest_path`, EU34, est un plan depuis `network.shortest_path`, ticket 13 de l'epic 10) | ≥ 7/8 de réponses attendues arrondi vers le bas, soit **38/44** (86,4 %) |
+| `echelle_utm_reel` | 8 + 36 = **44** | `ai/tests/echelle_utm_reel/phrases.json` (`EU01`…`EU36`) | 3 neufs : `atlas`, `export_image`/`image`, `distance_matrix` (devenu `travel_time` au ticket 36 de l'epic 10 : `analysis.distance_matrix` est livrée, EU36 demande une durée de trajet, que le registre ne calcule toujours pas) (le quatrième, `shortest_path`, EU34, est un plan depuis `network.shortest_path`, ticket 13 de l'epic 10) | ≥ 7/8 de réponses attendues arrondi vers le bas, soit **38/44** (86,4 %) |
 | `terrain_reel` | 8 + 36 = **44** | `ai/tests/terrain_reel/phrases.json` (`TR01`…`TR36`) | 4 neufs : `flood`, `flow_accum`, `cut_fill`/`volume`, `solar`/`insolation` | ≥ 7/8 de réponses attendues arrondi vers le bas, soit **38/44** (86,4 %) |
 
 - `echelle_utm_reel` : exports à une échelle sous toutes ses écritures (« 1 : 2 500 », « 1/50 000e »,
@@ -2628,7 +2628,7 @@ engendrées, jamais recopiées d'une autre barre), sur l'inventaire de l'épreuv
   déblai/remblai, rayonnement solaire annuel. La crue est écrite sans cote ni rivière : une cote
   se ferait par `raster.reclassify` du MNT, une rivière absente de l'inventaire appellerait une
   question.
-- Mots-clés des refus : `atlas` n'en est plus un depuis le ticket 15 de l'epic 10 (`layout.export_atlas` est livrée ; EU33 refuse l'option `layout.export_atlas:scale`, l'atlas n'a pas d'échelle) ; `distance_matrix` (`analysis.distance_matrix`), `flood`
+- Mots-clés des refus : `atlas` n'en est plus un depuis le ticket 15 de l'epic 10 (`layout.export_atlas` est livrée ; EU33 refuse l'option `layout.export_atlas:scale`, l'atlas n'a pas d'échelle) ; `distance_matrix` n'en est plus un depuis le ticket 36 de l'epic 10 (`analysis.distance_matrix` est livrée ; EU36 nomme `travel_time`), `flood`
   (`terrain.flood_extent`) et `flow_accum` (`terrain.flow_accumulation`) sont des morceaux
   d'identifiants planifiés ou réservés du catalogue ; `export_image`, `image`, `cut_fill`,
   `volume`, `solar` et `insolation` sont des mots-clés anglais choisis pour un futur identifiant,

@@ -227,6 +227,14 @@ def _statistics(table, summed=False, params=None):
     return lambda: _analysis(ta.StatisticsByCategoryTest, setup)
 
 
+def _distance_matrix(table):
+    def setup(t):
+        t.backend.table = table
+        return t.backend, t.params()
+
+    return lambda: _analysis(ta.DistanceMatrixTest, setup)
+
+
 def _line_lengths(unit):
     def setup(t):
         t.backend.numbers = [("Nord", 6206.4), ("Sud", 3885.5), ("Vide", 0.0)][: 3 if unit == "m" else 2]
@@ -510,6 +518,12 @@ def producers():
         ),
         ("analysis.statistics_by_category", "tronqué"): _statistics(
             (["zonage", "count"], [[str(i), "1"] for i in range(150)], 150)
+        ),
+        ("analysis.distance_matrix", "toutes les paires"): _distance_matrix(
+            (["InputID", "TargetID", "Distance"], [["A", "G1", "120.5"], ["A", "G2", "80"], ["B", "G1", "15"]], 3)
+        ),
+        ("analysis.distance_matrix", "tronqué"): _distance_matrix(
+            (["InputID", "TargetID", "Distance"], [["A", "G%d" % i, str(i)] for i in range(150)], 150)
         ),
         ("analysis.sum_line_lengths", "en mètres"): _line_lengths("m"),
         ("network.shortest_path", "une ligne"): _shortest_path,

@@ -52,6 +52,18 @@
                        {"label": "2", "values": {"count": {"value": 2.0, "unit": "entités"}}}],
               "truncated": true}},
 
+  {"id": "analysis.distance_matrix", "case": "toutes les paires",
+   "result": {"file": "3-analysis.distance_matrix.csv", "pair_count": 3,
+              "rows": [{"label": "A → G2", "values": {"distance": {"value": 80.0, "unit": "m"}}},
+                       {"label": "A → G1", "values": {"distance": {"value": 120.5, "unit": "m"}}},
+                       {"label": "B → G1", "values": {"distance": {"value": 15.0, "unit": "m"}}}],
+              "truncated": false}},
+  {"id": "analysis.distance_matrix", "case": "tronqué",
+   "result": {"file": "3-analysis.distance_matrix.csv", "pair_count": 150,
+              "rows": [{"label": "A → G0", "values": {"distance": {"value": 0.0, "unit": "m"}}},
+                       {"label": "A → G1", "values": {"distance": {"value": 1.0, "unit": "m"}}}],
+              "truncated": true}},
+
   {"id": "analysis.sum_line_lengths", "case": "en mètres",
    "result": {"layer_id": "longueurs_1", "name": "3-analysis.sum_line_lengths", "feature_count": 3, "crs": "EPSG:2154",
               "rows": [{"label": "Nord", "values": {"length": {"value": 6206.4, "unit": "m"}}},

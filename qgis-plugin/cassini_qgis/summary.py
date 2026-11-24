@@ -510,6 +510,43 @@ def _statistics_by_category(lang, p, r, names):
     return text
 
 
+def _distance_matrix(lang, p, r, names):
+    """Le tableau des distances écrit par QGIS : un fichier, jamais une couche ; affichage seul (AD-5)."""
+    text = texts.tr(
+        lang,
+        "sum_matrix",
+        layer=names.layer(p.get("layer_id")),
+        target=names.layer(p.get("target_layer_id")),
+    )
+    neighbors = p.get("neighbors")
+    if neighbors is not None:
+        if not _is_int(neighbors) or neighbors < 1:
+            raise _Unreadable()
+        text += texts.tr(lang, "sum_matrix_neighbors", n=neighbors)
+    text += _computed_in(lang, p, r, names)
+    if not r:
+        return text
+    try:
+        file = file_name(r.get("file"))
+    except _Unreadable:
+        return text
+    rows, pairs = r.get("rows"), r.get("pair_count")
+    if not isinstance(rows, list) or not _is_int(pairs) or r.get("truncated") is not False:
+        return text + texts.tr(lang, "sum_file", file=file)  # 100 premières lignes : le total n'est pas sûr
+    text += texts.tr(lang, "sum_matrix_file", file=file, count=count(lang, "pairs", pairs))
+    shortest = None
+    for row in rows:
+        values = row.get("values") if isinstance(row, dict) else None
+        cell = values.get("distance") if isinstance(values, dict) else None
+        d = cell.get("value") if isinstance(cell, dict) else None
+        if isinstance(row, dict) and isinstance(row.get("label"), str) and _is_number(d):
+            if shortest is None or d < shortest[1]:
+                shortest = (row["label"], d)
+    if shortest is not None and len(rows) > 1:
+        text += texts.tr(lang, "sum_matrix_min", label=shortest[0], distance=number(lang, round(shortest[1])))
+    return text
+
+
 def _sum_line_lengths(lang, p, r, names):
     unit = p.get("unit", "m")
     if unit not in ("m", "km"):
@@ -1214,6 +1251,7 @@ _SENTENCES = {
     "analysis.dissolve": _dissolve,
     "analysis.join_table": _join_table,
     "analysis.statistics_by_category": _statistics_by_category,
+    "analysis.distance_matrix": _distance_matrix,
     "analysis.sum_line_lengths": _sum_line_lengths,
     "layer.add": _layer_add,
     "layer.describe": _layer_describe,

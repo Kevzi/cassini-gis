@@ -292,6 +292,55 @@ class NearestSummaryTest(unittest.TestCase):
         )
 
 
+class DistanceMatrixSummaryTest(unittest.TestCase):
+    PARAMS = {"layer_id": "parcelles_2", "label_field": "nom", "target_layer_id": "gares_1", "target_label_field": "nom"}
+    OUT = {
+        "file": "C:/d/3-analysis.distance_matrix.csv",
+        "pair_count": 2,
+        "rows": [
+            {"label": "A → G1", "values": {"distance": {"value": 120.4, "unit": "m"}}},
+            {"label": "B → G1", "values": {"distance": {"value": 15.0, "unit": "m"}}},
+        ],
+        "truncated": False,
+    }
+
+    def test_the_table_is_a_file_with_its_shortest_pair(self):
+        self.assertEqual(
+            say("analysis.distance_matrix", self.PARAMS, self.OUT),
+            "Distances entre les points de Parcelles et ceux de Gares : tableau "
+            "3-analysis.distance_matrix.csv, 2 paires ; la plus courte : B → G1, 15 m.",
+        )
+        self.assertEqual(
+            say("analysis.distance_matrix", self.PARAMS, self.OUT, lang="en"),
+            "Distances between the points of Parcelles and those of Gares: table "
+            "3-analysis.distance_matrix.csv, 2 pairs; shortest: B → G1, 15 m.",
+        )
+
+    def test_neighbors_and_work_system_are_named(self):
+        params = dict(self.PARAMS, neighbors=3, work_epsg=2154)
+        text = say("analysis.distance_matrix", params, self.OUT)
+        self.assertIn(", les 3 plus proches de chaque point de départ", text)
+        self.assertIn("EPSG:2154", text)
+
+    def test_a_truncated_table_names_no_shortest_pair(self):
+        text = say("analysis.distance_matrix", self.PARAMS, dict(self.OUT, truncated=True))
+        self.assertEqual(
+            text, "Distances entre les points de Parcelles et ceux de Gares : fichier 3-analysis.distance_matrix.csv."
+        )
+
+    def test_no_path_is_shown(self):
+        self.assertNotIn("C:/", say("analysis.distance_matrix", self.PARAMS, self.OUT))
+
+    def test_without_result_only_parameters(self):
+        self.assertEqual(
+            say("analysis.distance_matrix", self.PARAMS),
+            "Distances entre les points de Parcelles et ceux de Gares.",
+        )
+
+    def test_an_unreadable_neighbors_value_falls_back(self):
+        self.assertNotIn("plus proches", say("analysis.distance_matrix", dict(self.PARAMS, neighbors=0)))
+
+
 class StatisticsByCategorySummaryTest(unittest.TestCase):
     PARAMS = {"layer_id": "parcelles_2", "category_field": "zonage"}
     OUT = {
@@ -1167,6 +1216,12 @@ SAMPLES = {
         {"file": "C:/d/3-analysis.statistics_by_category.csv",
          "rows": [{"label": "U", "values": {"count": {"value": 5, "unit": "entités"}}},
                   {"label": "N", "values": {"count": {"value": 3, "unit": "entités"}}}],
+         "truncated": False}),
+    "analysis.distance_matrix": ({"layer_id": "parcelles_2", "label_field": "nom", "target_layer_id": "gares_1",
+                                  "target_label_field": "nom"},
+        {"file": "C:/d/3-analysis.distance_matrix.csv", "pair_count": 2,
+         "rows": [{"label": "A → G1", "values": {"distance": {"value": 120.0, "unit": "m"}}},
+                  {"label": "B → G1", "values": {"distance": {"value": 15.0, "unit": "m"}}}],
          "truncated": False}),
     "analysis.sum_line_lengths": ({"layer_id": "communes_2", "lines_layer_id": "routes_1"},
         {"layer_id": "l_7", "name": "Longueurs", "feature_count": 3, "crs": "EPSG:2154", "rows": [], "truncated": False}),

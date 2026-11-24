@@ -8,6 +8,7 @@
   "analysis.join_table": true,
   "analysis.dissolve": true,
   "analysis.statistics_by_category": true,
+  "analysis.distance_matrix": true,
   "analysis.sum_line_lengths": true,
   "analysis.area": true,
   "analysis.isochrone": true,

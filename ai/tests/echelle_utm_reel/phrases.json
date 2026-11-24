@@ -716,7 +716,7 @@
     "expected": {
       "kind": "refusal",
       "missing": [
-        "distance_matrix"
+        "travel_time"
       ]
     }
   }

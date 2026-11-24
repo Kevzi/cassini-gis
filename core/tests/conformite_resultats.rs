@@ -110,6 +110,7 @@ fn the_shape_variants_are_all_present() {
         ("analysis.count_points_in_polygon", "sans zone"),
         ("analysis.statistics_by_category", "avec somme"),
         ("analysis.statistics_by_category", "tronqué"),
+        ("analysis.distance_matrix", "tronqué"),
         ("analysis.sum_line_lengths", "en kilomètres"),
         ("analysis.area", "en hectares"),
         ("data.convert_raster", "sans EPSG"),

@@ -198,6 +198,14 @@ pub static FAMILIES: &[Family] = &[
         weight: 4,
         make: plus_proche_voisin,
     },
+    // Entrée 10.36 : `analysis.distance_matrix`, les distances entre deux couches de points (les
+    // `neighbors` plus proches de chaque départ une fois sur trois). Elle remplace le refus
+    // « matrice de distances » de `refus_fonction_absente`, faux depuis que la commande existe.
+    Family {
+        name: "matrice_de_distances",
+        weight: 4,
+        make: matrice_de_distances,
+    },
     // Ticket 17 : commandes de l'epic 10 sans exemple, relevees par le diagnostic de
     // `docs/couverture-phrases-reelles.md` (CV04 longueurs par zone, CV09 fusion par champ).
     Family {
@@ -3661,6 +3669,62 @@ fn plus_proche_voisin(rng: &mut Rng) -> Option<Example> {
         json!({"command": "analysis.nearest", "params": params}),
     ]);
     Some(example("plus_proche_voisin", b, rng, request, expected))
+}
+
+/// « Donne-moi les distances entre chaque école et chaque gare » : `analysis.distance_matrix`, la
+/// couche de départ d'abord, celle d'arrivée ensuite, chacune avec son champ de nom (recopié de
+/// l'inventaire). Le nombre de voisins seulement quand la phrase le donne : toujours au moins deux, car
+/// « la plus proche » est `analysis.nearest`.
+fn matrice_de_distances(rng: &mut Rng) -> Option<Example> {
+    let mut b = Builder::new();
+    let named = |t: &Theme| ordinary(t) && t.geom == Geom::Point && t.field("nom").is_some();
+    let a = pick_theme(rng, &b, named)?;
+    let start = b.add(rng, a.key, &["nom"], &[], &[]);
+    let t = pick_theme(rng, &b, named)?;
+    let target = b.add(rng, t.key, &["nom"], &[], &[]);
+    let (a_sg, t_sg) = (a.noun.sg, t.noun.sg);
+    let (a_les, t_les) = (a.noun.les(), t.noun.les());
+    let neighbors = rng.chance(1, 3).then(|| 2 + rng.below(4) as u32);
+    let (mut body, q) = match rng.below(5) {
+        0 => (
+            format!("Donne-moi les distances entre chaque {a_sg} et chaque {t_sg}"),
+            false,
+        ),
+        1 => (
+            format!("Calcule la matrice de distances entre {a_les} et {t_les}"),
+            false,
+        ),
+        2 => (
+            format!("Quelle est la distance de chaque {a_sg} à chaque {t_sg}"),
+            true,
+        ),
+        3 => (
+            format!("Fais un tableau des distances entre {a_les} et {t_les}"),
+            false,
+        ),
+        _ => (
+            format!("Mesure les distances de chaque {a_sg} à {t_les}"),
+            false,
+        ),
+    };
+    let mut params = json!({
+        "layer_id": start.id,
+        "label_field": start.field("nom")?.name,
+        "target_layer_id": target.id,
+        "target_label_field": target.field("nom")?.name,
+    });
+    if let Some(k) = neighbors {
+        body.push_str(&format!(
+            ", en gardant les {k} {} les plus proches de chaque {a_sg}",
+            t.noun.pl
+        ));
+        params["neighbors"] = json!(k);
+    }
+    let request = finish(rng, &body, q, false);
+    let expected = calls(vec![
+        json!({"command": "analysis.distance_matrix", "params": params}),
+    ]);
+    Some(example("matrice_de_distances", b, rng, request, expected))
 }
 
 /// « Calcule la longueur de routes par commune » : `analysis.sum_line_lengths`, la couche de
@@ -10489,7 +10553,7 @@ const OTHER_REFUSALS: &[(&str, &[&str])] = &[
 const ABSENT_FUNCTIONS: &[(&str, &[&str])] = &[
     (NO_GEOCODING, &["single_address", "address_lookup"]),
     (NO_IMAGE_EXPORT, &["image", "png"]),
-    (NO_TRAVEL_TIME, &["travel_time", "distance_matrix"]),
+    (NO_TRAVEL_TIME, &["travel_time"]),
     (NO_FLOOD, &["flood"]),
     (NO_FLOW, &["flow"]),
     (NO_WATERSHED, &["watershed", "basin"]),
@@ -16655,6 +16719,40 @@ mod tests {
             } else {
                 free += 1;
                 assert!(!e.request.contains("à moins d"), "{}", e.request);
+            }
+        }
+        assert!(limited > 50 && free > 100, "{limited} {free}");
+    }
+
+    #[test]
+    fn a_distance_matrix_request_names_two_point_layers_with_their_labels_and_neighbors_only_when_written(
+    ) {
+        let (mut limited, mut free) = (0, 0);
+        for e in valid(matrice_de_distances, 600) {
+            assert_eq!(commands(&e), ["analysis.distance_matrix"], "{}", e.request);
+            let p = &call(&e, 0)["params"];
+            assert_ne!(p["layer_id"], p["target_layer_id"], "{}", e.request);
+            for (layer, field) in [
+                ("layer_id", "label_field"),
+                ("target_layer_id", "target_label_field"),
+            ] {
+                let layer = layer_of(&e, p[layer].as_str().unwrap());
+                assert!(
+                    field_names(layer).contains(&p[field].as_str().unwrap()),
+                    "{}",
+                    e.request
+                );
+            }
+            match p.get("neighbors").and_then(Value::as_u64) {
+                Some(k) => {
+                    limited += 1;
+                    assert!((2..=5).contains(&k), "{}", e.request);
+                    assert!(e.request.contains(&format!("les {k} ")), "{}", e.request);
+                }
+                None => {
+                    free += 1;
+                    assert!(!e.request.contains("plus proches"), "{}", e.request);
+                }
             }
         }
         assert!(limited > 50 && free > 100, "{limited} {free}");

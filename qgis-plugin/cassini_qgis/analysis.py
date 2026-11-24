@@ -794,6 +794,96 @@ def _as_number(text):
         raise GestureError(FAILED, "La table des statistiques contient une valeur qui n'est pas un nombre.")
 
 
+# `qgis:distancematrix` (fournisseur « qgis » du module Processing, pas `native:`), matrice « linéaire »
+# (type 0) : une ligne par paire, colonnes `InputID`, `TargetID`, `Distance`. Les types « standard » et
+# « résumé » ne sont jamais demandés : le premier est faux quand il y a moins de voisins que de cibles.
+_MATRIX_LINEAR = 0
+_MATRIX_MAX_PAIRS = 100000  # au-delà, sans `neighbors`, le tableau n'a plus de sens : refus avant lancement
+_MATRIX_COLUMNS = ("InputID", "TargetID", "Distance")
+
+
+def _matrix_neighbors(params):
+    """Nombre de voisins demandé (entier au moins égal à 1), ou None : toutes les cibles."""
+    neighbors = params.get("neighbors")
+    if neighbors is not None and (isinstance(neighbors, bool) or not isinstance(neighbors, int) or neighbors < 1):
+        raise GestureError(BAD_PARAMS, "Le nombre de voisins doit être un entier au moins égal à 1.")
+    return neighbors
+
+
+def translate_distance_matrix(params, layer, backend):
+    """Paramètres neutres de `analysis.distance_matrix` -> paramètres de `qgis:distancematrix`.
+
+    Refus avant tout lancement, ici parce que la traduction est appelée avant l'algorithme : une couche
+    multipartie (QGIS la refuse, sans le dire clairement) et trop de paires sans `neighbors` (le tableau
+    aurait des millions de lignes). La couche cible est ajoutée par le geste (clé `overlay`) ; QGIS la
+    transforme lui-même vers le système de la couche de départ, que la chaîne a mis en mètres."""
+    target = backend.layer(params.get("target_layer_id"))
+    for one in (layer, target):
+        if one is not None and backend.is_multipart(one):
+            raise GestureError(
+                BAD_PARAMS,
+                "La couche « %s » est une couche de multipoints : cette commande ne lit que des points simples."
+                % backend.name_of(one),
+            )
+    neighbors = _matrix_neighbors(params)
+    if neighbors is not None and backend.has_repeated_values(layer, params["label_field"]):
+        # Le tri des voisins regroupe les lignes par étiquette de départ : deux départs de même nom
+        # (ou sans nom) se partageraient les k voisins, en silence.
+        raise GestureError(
+            BAD_PARAMS,
+            "Le champ « %s » de la couche « %s » a des valeurs vides ou en double : avec un nombre de voisins, "
+            "choisissez un champ dont chaque valeur est unique." % (params["label_field"], backend.name_of(layer)),
+        )
+    if neighbors is None and target is not None:
+        pairs = backend.feature_count(layer) * backend.feature_count(target)
+        if pairs > _MATRIX_MAX_PAIRS:
+            raise GestureError(
+                BAD_PARAMS,
+                "%d paires de points : trop pour un tableau lisible (au plus %d). "
+                "Donnez le nombre de voisins à garder par point de départ." % (pairs, _MATRIX_MAX_PAIRS),
+            )
+    return {
+        "INPUT": layer,
+        "INPUT_FIELD": params["label_field"],
+        "TARGET_FIELD": params["target_label_field"],
+        "MATRIX_TYPE": _MATRIX_LINEAR,
+        "NEAREST_POINTS": neighbors if neighbors is not None else 0,  # 0 : toutes les cibles
+    }
+
+
+def translate_distance_matrix_nearest(params, layer):
+    """Seconde étape, `native:extractbyexpression` : garde les `neighbors` premières cibles de chaque
+    départ. QGIS garde toutes les cibles à égale distance de la k-ième (sonde) : on classe donc chaque
+    départ par distance, puis par ordre d'écriture, et on ne garde que les k premières. Sans `neighbors`,
+    l'expression est vraie pour toute ligne (la dernière étape d'une chaîne n'est jamais conditionnelle)."""
+    neighbors = _matrix_neighbors(params)
+    if neighbors is None:
+        expression = "true"
+    else:
+        expression = 'array_find(array_agg($id, group_by:="InputID", order_by:="Distance"), $id) < %d' % neighbors
+    return {"INPUT": layer, "EXPRESSION": expression}
+
+
+def summarize_distance_matrix(backend, out, params):
+    """Résultat du tableau écrit (clé `table`) : `file`, le nombre de paires et les 100 premières lignes,
+    « départ → cible » et distance en mètres. QGIS ne trie pas les cibles d'un même départ : les lignes
+    affichées le sont, par distance croissante, départ après départ (le fichier garde l'ordre de QGIS)."""
+    header, rows, total = backend.table_rows(out, _MAX_ROWS)
+    if tuple(header[: len(_MATRIX_COLUMNS)]) != _MATRIX_COLUMNS:
+        raise GestureError(FAILED, "La matrice de distances n'a pas rendu les colonnes attendues.")
+    first_seen = {}
+    for row in rows:
+        first_seen.setdefault(row[0], len(first_seen))
+    rows = sorted(rows, key=lambda row: (first_seen[row[0]], _as_number(row[2])))
+    summary = []
+    for rank, row in enumerate(rows, start=1):
+        start = "" if row[0] is None else str(row[0]).strip()
+        target = "" if row[1] is None else str(row[1]).strip()
+        label = "%s → %s" % (start, target) if start and target else str(rank)
+        summary.append({"label": label, "values": {"distance": {"value": _as_number(row[2]), "unit": "m"}}})
+    return {"file": out, "pair_count": total, "rows": summary, "truncated": total > len(rows)}
+
+
 # Champs écrits par `native:sumlinelengths` : la longueur, puis le nombre de lignes. Si l'entrée porte
 # déjà un champ de ce nom, QGIS le remplace sur place (sonde) : on lit donc la longueur par son nom.
 _LENGTH_FIELD = "length_m"
@@ -1141,6 +1231,33 @@ ALGORITHMS = {
         "numeric_field": "sum_field",
         "table": summarize_statistics_by_category,
     },
+    "analysis.distance_matrix": {
+        "chain_version": 1,
+        "chain": [
+            _REPROJECT_TO_WORK,
+            {
+                "algorithm": "qgis:distancematrix",
+                "translate": translate_distance_matrix,
+                "output": "OUTPUT",
+                "overlay_key": "TARGET",
+                "with_backend": True,
+            },
+            {
+                "algorithm": "native:extractbyexpression",
+                "translate": translate_distance_matrix_nearest,
+                "output": "OUTPUT",
+            },
+        ],
+        "input": "layer_id",
+        "metric": True,
+        "work_crs": WORK_EPSG,
+        "overlay": "target_layer_id",
+        "overlay_geometry": "Point",
+        "overlay_field": "target_label_field",
+        "field": "label_field",
+        "geometry": "Point",
+        "table": summarize_distance_matrix,
+    },
     "analysis.sum_line_lengths": {
         "chain_version": 1,
         "chain": [
@@ -1372,6 +1489,7 @@ CANCELLABLE_ALGORITHMS = frozenset(
         "native:extractbyexpression",
         "native:fieldcalculator",
         "qgis:statisticsbycategories",
+        "qgis:distancematrix",
         "native:sumlinelengths",
         "native:serviceareafrompoint",
         "native:shortestpathpointtopoint",
@@ -1711,6 +1829,23 @@ class QgisBackend(_ReadBackend):
                 number = 0.0
             pairs.append((text, number))
         return pairs, self.feature_count(layer) > limit
+
+    def has_repeated_values(self, layer, field):
+        """Vrai si le champ a une valeur vide, ou une valeur portée par deux entités."""
+        seen = set()
+        for feature in layer.getFeatures():
+            value = feature[field]
+            text = "" if value is None else str(value).strip()
+            if text in ("", "NULL") or text in seen:
+                return True
+            seen.add(text)
+        return False
+
+    def is_multipart(self, layer):
+        """Vrai si la couche est de type multipartie (multipoints, multilignes, multipolygones)."""
+        from qgis.core import QgsWkbTypes
+
+        return QgsWkbTypes.isMultiType(layer.wkbType())
 
     def table_rows(self, path, limit):
         """(noms des colonnes, `limit` premières lignes en textes, nombre total de lignes) du tableau

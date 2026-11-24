@@ -315,6 +315,26 @@ Recette manuelle de `analysis.statistics_by_category` [ticket 11, epic 10] (jeu 
    `qgis:statisticsbycategories` (fournisseur « qgis » du module Processing, pas `native:`) ; il est annoncé
    seulement si ce fournisseur est chargé (AD-25).
 
+Recette manuelle de `analysis.distance_matrix` [ticket 36, epic 10] (jeu `../donnees-test-cassini/`) :
+
+1. Deux couches de points ouvertes (par exemple les gares et les écoles). Choisissez `analysis.distance_matrix` :
+   `layer_id` et `target_layer_id` sont des listes de couches, `label_field` et `target_label_field` les listes
+   des champs de chaque couche (le champ qui nomme les entités dans le tableau, obligatoire), `neighbors` un
+   nombre facultatif. Une couche de lignes, de polygones ou de multipoints est refusée au lancement
+   (`analysis.bad_params`, aucun fichier écrit).
+2. Lancez : un fichier `.csv` apparaît dans le dossier de travail, à côté du projet, avec les colonnes `InputID`,
+   `TargetID` et `Distance` (mètres), une ligne par paire ; il n'est pas ajouté à la carte. `rows` donne les
+   100 premières paires, départ après départ, la cible la plus proche d'abord ; le fichier garde toutes les paires.
+   Avec `neighbors`, seules les cibles les plus proches de chaque départ restent, même à égale distance.
+3. Deux couches de plus de 100 000 paires au total (par exemple 400 x 300) sans `neighbors` : refus avant tout
+   calcul, le message demande le nombre de voisins.
+4. Une couche de départ en degrés (WGS84) : les distances sont calculées dans le système en mètres que choisit le
+   noyau (`work_epsg`) et sont en mètres.
+5. Sonde sous le vrai QGIS : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat"
+   qgis-plugin/tests/probe_distance_matrix.py` doit finir par `RÉSULTAT : OK`. L'algorithme est
+   `qgis:distancematrix` (fournisseur « qgis » du module Processing, pas `native:`) ; la commande est annoncée
+   seulement si ce fournisseur est chargé (AD-25).
+
 Recette manuelle de `analysis.sum_line_lengths` [ticket 11, epic 10] :
 
 1. Une couche de polygones (communes) et une couche de lignes (routes) ouvertes. Choisissez

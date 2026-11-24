@@ -14,10 +14,11 @@ import gestures  # noqa: E402
 
 
 class FakeLayer:
-    def __init__(self, lid, name="gares", crs="EPSG:2154", vector=True, metric=True, count=8, fields=("zone", "pop"), geometry="Point"):
+    def __init__(self, lid, name="gares", crs="EPSG:2154", vector=True, metric=True, count=8, fields=("zone", "pop"), geometry="Point", multi=False):
         self.lid, self.name, self.crs, self.vector, self.metric, self.count = lid, name, crs, vector, metric, count
         self.fields = [(f, "String") for f in fields]
         self.geometry = geometry
+        self.multi = multi
 
 
 class FakeHandle:
@@ -62,6 +63,7 @@ class FakeBackend:
         self.out_fields = None  # champs des couches temporaire et produite, quand un test les fixe
         self.missing_algorithms = set()  # algorithmes absents du registre de traitement (AD-25)
         self.path_length, self.length_call = 600.0, None  # longueur lue sur la géométrie de la couche produite
+        self.repeated, self.repeated_call = False, None  # champ aux valeurs vides ou en double
         self.mount_error, self.mounts = None, []  # genre `layout` : refus du montage, mises en page montées
 
     def algorithm_exists(self, algorithm_id):
@@ -103,6 +105,13 @@ class FakeBackend:
 
     def geometry_of(self, layer):
         return layer.geometry
+
+    def is_multipart(self, layer):
+        return layer.multi
+
+    def has_repeated_values(self, layer, field):
+        self.repeated_call = (layer.lid, field)
+        return self.repeated
 
     def counts_of(self, layer, count_field, label_field, limit, weight_field=None):
         self.counts_call = (count_field, label_field, limit, weight_field)
@@ -1086,6 +1095,228 @@ class NearestTest(unittest.TestCase):
             _, calls = start(self.entry, self.backend, self.params(**{key: value}))
             self.assertEqual(calls[0][1].code, code)
         self.assertEqual(self.backend.calls, [])
+
+    def test_cancellation_leaves_no_file(self):
+        g, calls = start(self.entry, self.backend, self.params())
+        g.cancel()
+        self.backend.finished(False, {})
+        self.assertEqual(calls[0][1].code, "qgis.cancelled")
+        self.assertFalse(os.path.exists(self.out))
+
+
+class DistanceMatrixTest(unittest.TestCase):
+    """Matrice de distances : `qgis:distancematrix`, type linéaire, une ligne par paire ; couche de
+    départ en degrés reprojetée d'abord vers `work_epsg` ; refus avant tout lancement ; lignes lues du
+    tableau écrit, jamais ajouté au projet."""
+
+    HEADER = ["InputID", "TargetID", "Distance"]
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.out = os.path.join(self.dir.name, "3-analysis.distance_matrix.csv")
+        self.entry = analysis.ALGORITHMS["analysis.distance_matrix"]
+        self.backend = FakeBackend(
+            [
+                FakeLayer("e", name="ecoles", count=4, fields=("nom",)),
+                FakeLayer("g", name="gares", count=3, fields=("nom",)),
+                FakeLayer("w", name="ecoles_wgs", crs="EPSG:4326", metric=False, count=4, fields=("nom",)),
+                FakeLayer("p", name="parcelles", geometry="Polygon", fields=("nom",)),
+                FakeLayer("l", name="routes", geometry="Line", fields=("nom",)),
+                FakeLayer("m", name="multipoints", multi=True, fields=("nom",)),
+                FakeLayer("big", name="grande", count=400, fields=("nom",)),
+                FakeLayer("r", vector=False),
+            ]
+        )
+        self.backend.table = (self.HEADER, [["A", "G1", "120.5"], ["A", "G2", "80"], ["B", "G1", "15"]], 3)
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def params(self, **extra):
+        p = {"layer_id": "e", "label_field": "nom", "target_layer_id": "g", "target_label_field": "nom", "out": self.out}
+        p.update(extra)
+        return p
+
+    def run_chain(self, **extra):
+        """La matrice, puis le tri des voisins : la dernière étape seule répond."""
+        _, calls = start(self.entry, self.backend, self.params(**extra))
+        self.backend.finished(True, {"OUTPUT": "matrice"})
+        self.backend.finished(True, {})
+        return calls
+
+    def test_all_pairs_go_to_a_linear_matrix_written_as_the_table(self):
+        _, calls = start(self.entry, self.backend, self.params())
+        algo, p = self.backend.calls[0]
+        self.assertEqual(algo, "qgis:distancematrix")
+        self.assertEqual((p["INPUT"].lid, p["TARGET"].lid), ("e", "g"))
+        self.assertEqual((p["INPUT_FIELD"], p["TARGET_FIELD"]), ("nom", "nom"))
+        self.assertEqual(p["MATRIX_TYPE"], 0)  # linéaire, jamais « standard » ni « résumé »
+        self.assertEqual(p["NEAREST_POINTS"], 0)  # 0 : toutes les cibles
+        self.assertEqual(p["OUTPUT"], "TEMPORARY_OUTPUT")
+        self.backend.finished(True, {"OUTPUT": "matrice"})
+        algo, p = self.backend.calls[1]
+        self.assertEqual(algo, "native:extractbyexpression")
+        self.assertEqual((p["INPUT"].lid, p["EXPRESSION"], p["OUTPUT"]), ("matrice", "true", self.out))
+        self.backend.finished(True, {})
+        result, error = calls[0]
+        self.assertIsNone(error)
+        self.assertEqual(
+            result,
+            {
+                "file": self.out,
+                "pair_count": 3,
+                "rows": [
+                    {"label": "A → G2", "values": {"distance": {"value": 80.0, "unit": "m"}}},
+                    {"label": "A → G1", "values": {"distance": {"value": 120.5, "unit": "m"}}},
+                    {"label": "B → G1", "values": {"distance": {"value": 15.0, "unit": "m"}}},
+                ],
+                "truncated": False,
+            },
+        )
+        self.assertEqual(self.backend.table_call, (self.out, 100))
+        self.assertFalse(hasattr(self.backend, "loaded"))  # le tableau n'est jamais ajouté au projet
+
+    def test_neighbors_limit_the_targets_of_each_start(self):
+        self.run_chain(neighbors=2)
+        self.assertEqual(self.backend.calls[0][1]["NEAREST_POINTS"], 2)
+        # À égale distance, QGIS garde toutes les cibles : la seconde étape ne garde que les k premières.
+        self.assertEqual(
+            self.backend.calls[1][1]["EXPRESSION"],
+            'array_find(array_agg($id, group_by:="InputID", order_by:="Distance"), $id) < 2',
+        )
+
+    def test_repeated_or_empty_labels_are_refused_only_with_neighbors(self):
+        self.backend.repeated = True
+        _, calls = start(self.entry, self.backend, self.params(neighbors=2))
+        self.assertEqual(calls[0][1].code, "analysis.bad_params")
+        self.assertIn("unique", calls[0][1].message)
+        self.assertEqual(self.backend.calls, [])
+        self.assertEqual(self.backend.repeated_call, ("e", "nom"))
+        # Sans nombre de voisins, rien n'est regroupé : la matrice est faite.
+        start(self.entry, self.backend, self.params())
+        self.assertEqual(self.backend.calls[0][0], "qgis:distancematrix")
+
+    def test_a_bad_neighbors_value_is_refused_before_any_launch(self):
+        for bad in (0, -1, 1.5, "2", True):
+            _, calls = start(self.entry, self.backend, self.params(neighbors=bad))
+            self.assertEqual(calls[0][1].code, "analysis.bad_params", bad)
+        self.assertEqual(self.backend.calls, [])
+
+    def test_a_layer_in_degrees_is_reprojected_first_and_measured_in_meters(self):
+        _, calls = start(self.entry, self.backend, self.params(layer_id="w", work_epsg=2154))
+        self.assertEqual(self.backend.calls[0][0], "native:reprojectlayer")
+        self.assertEqual(self.backend.calls[0][1]["TARGET_CRS"], "EPSG:2154")
+        self.backend.finished(True, {"OUTPUT": "reprojetee"})
+        algo, p = self.backend.calls[1]
+        self.assertEqual(algo, "qgis:distancematrix")
+        self.assertEqual(p["INPUT"].lid, "reprojetee")
+        self.assertEqual(p["TARGET"].lid, "g")  # la cible n'est pas reprojetée par le geste
+        self.backend.finished(True, {"OUTPUT": "matrice"})
+        self.assertEqual(self.backend.calls[2][0], "native:extractbyexpression")
+        self.backend.finished(True, {})
+        self.assertIsNone(calls[0][1])
+
+    def test_without_work_crs_a_layer_in_degrees_is_refused(self):
+        _, calls = start(self.entry, self.backend, self.params(layer_id="w"))
+        self.assertEqual(calls[0][1].code, "analysis.crs_not_metric")
+        self.assertEqual(self.backend.calls, [])
+
+    def test_a_truncated_table_reports_the_full_pair_count(self):
+        self.backend.table = (self.HEADER, [["A", "G%d" % i, str(i)] for i in range(150)], 150)
+        calls = self.run_chain()
+        result = calls[0][0]
+        self.assertEqual((len(result["rows"]), result["pair_count"], result["truncated"]), (100, 150, True))
+
+    def test_rows_of_one_start_are_listed_nearest_first(self):
+        self.backend.table = (self.HEADER, [["A", "G1", "30"], ["B", "G1", "5"], ["A", "G2", "10"], ["B", "G2", "2"]], 4)
+        calls = self.run_chain()
+        self.assertEqual(
+            [row["label"] for row in calls[0][0]["rows"]],
+            ["A → G2", "A → G1", "B → G2", "B → G1"],
+        )
+
+    def test_an_empty_name_falls_back_to_the_rank(self):
+        self.backend.table = (self.HEADER, [["", "G1", "30"], ["A", None, "5"]], 2)
+        calls = self.run_chain()
+        self.assertEqual([row["label"] for row in calls[0][0]["rows"]], ["1", "2"])
+
+    def test_unexpected_columns_fail_cleanly(self):
+        self.backend.table = (["a", "b"], [["x", "y"]], 1)
+        calls = self.run_chain()
+        self.assertEqual(calls[0][1].code, "analysis.failed")
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_too_many_pairs_without_neighbors_are_refused_before_any_launch(self):
+        # 400 x 400 = 160 000 paires : au-delà de 100 000.
+        self.backend.items["big2"] = FakeLayer("big2", name="grande2", count=400, fields=("nom",))
+        _, calls = start(self.entry, self.backend, self.params(layer_id="big", target_layer_id="big2"))
+        self.assertEqual(calls[0][1].code, "analysis.bad_params")
+        self.assertIn("voisins", calls[0][1].message)
+        self.assertEqual(self.backend.calls, [])
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_neighbors_lift_the_pair_ceiling(self):
+        self.backend.items["big2"] = FakeLayer("big2", name="grande2", count=400, fields=("nom",))
+        self.run_chain(layer_id="big", target_layer_id="big2", neighbors=3)
+        self.assertEqual(self.backend.calls[0][1]["NEAREST_POINTS"], 3)
+
+    def test_exactly_the_ceiling_is_accepted(self):
+        self.backend.items["a"] = FakeLayer("a", name="a", count=1000, fields=("nom",))
+        self.backend.items["b"] = FakeLayer("b", name="b", count=100, fields=("nom",))
+        start(self.entry, self.backend, self.params(layer_id="a", target_layer_id="b"))
+        self.assertEqual(self.backend.calls[0][0], "qgis:distancematrix")
+
+    def test_lines_polygons_and_multipoints_are_refused_before_any_launch(self):
+        for key, value, code in (
+            ("layer_id", "p", "analysis.bad_params"),
+            ("layer_id", "l", "analysis.bad_params"),
+            ("target_layer_id", "p", "analysis.bad_params"),
+            ("target_layer_id", "l", "analysis.bad_params"),
+            ("layer_id", "m", "analysis.bad_params"),
+            ("target_layer_id", "m", "analysis.bad_params"),
+        ):
+            _, calls = start(self.entry, self.backend, self.params(**{key: value}))
+            self.assertEqual(calls[0][1].code, code, (key, value))
+        self.assertEqual(self.backend.calls, [])
+
+    def test_the_multipoint_refusal_names_the_layer(self):
+        _, calls = start(self.entry, self.backend, self.params(layer_id="m"))
+        self.assertIn("multipoints", calls[0][1].message)
+
+    def test_an_unknown_label_field_is_refused(self):
+        for key in ("label_field", "target_label_field"):
+            _, calls = start(self.entry, self.backend, self.params(**{key: "absent"}))
+            self.assertEqual(calls[0][1].code, "analysis.unknown_field")
+        self.assertEqual(self.backend.calls, [])
+
+    def test_same_layer_refused(self):
+        _, calls = start(self.entry, self.backend, self.params(target_layer_id="e"))
+        self.assertEqual(calls[0][1].code, "analysis.bad_params")
+        self.assertEqual(self.backend.calls, [])
+
+    def test_unknown_or_raster_layers_refused(self):
+        for key, value, code in (
+            ("layer_id", "nope", "layer.not_found"),
+            ("layer_id", "r", "layer.not_vector"),
+            ("target_layer_id", "nope", "layer.not_found"),
+            ("target_layer_id", "r", "layer.not_vector"),
+        ):
+            _, calls = start(self.entry, self.backend, self.params(**{key: value}))
+            self.assertEqual(calls[0][1].code, code)
+        self.assertEqual(self.backend.calls, [])
+
+    def test_the_chain_is_registered_and_cancellable(self):
+        self.assertEqual(self.entry["chain_version"], 1)
+        self.assertEqual(analysis.validate_table(), [])
+        self.assertTrue(analysis.derived_cancellable(analysis.ALGORITHMS)["analysis.distance_matrix"])
+
+    def test_a_missing_algorithm_makes_the_command_unavailable(self):
+        self.assertIn("analysis.distance_matrix", analysis.available_chains(analysis.ALGORITHMS, self.backend))
+        for missing in ("qgis:distancematrix", "native:extractbyexpression"):
+            self.backend.missing_algorithms = {missing}
+            available = analysis.available_chains(analysis.ALGORITHMS, self.backend)
+            self.assertNotIn("analysis.distance_matrix", available, missing)
+            self.assertIn("analysis.buffer", available)
 
     def test_cancellation_leaves_no_file(self):
         g, calls = start(self.entry, self.backend, self.params())

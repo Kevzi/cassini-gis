@@ -373,7 +373,7 @@ donne l'esquisse.
 | `raster.reproject_work` | faite (dictée) | qgis | ticket 33 (noyau et geste) |
 | `layer.remove` | faite | qgis | epic 10, entrée 27 |
 | `analysis.nearest` | faite | qgis | epic 10, entrée 10 |
-| `analysis.distance_matrix` | planifiée | qgis | epic 10, entrée 10 |
+| `analysis.distance_matrix` | faite | qgis | epic 10, entrée 36 |
 | `analysis.statistics_by_category` | faite | qgis | epic 10, entrée 11 |
 | `analysis.sum_line_lengths` | faite | qgis | epic 10, entrée 11 |
 | `analysis.join_table` | faite | qgis | epic 10, entrée 23 |
@@ -2028,32 +2028,42 @@ proche d'une seconde couche, et la distance (epic 10, entrée 10).
 
 ### `analysis.distance_matrix`
 
-Matrice des distances entre les entités de deux couches de points ; livre la sortie
-`table` du geste générique (epic 10, entrée 10). Chaque ligne de `rows` : une entité de
-départ, `values` donnant la distance vers chaque cible (unité `m`).
+Matrice des distances, en mètres, entre les entités de deux couches de points (epic 10,
+entrées 10 puis 36) ; livre la sortie `table` du geste générique. Chaque ligne de `rows` :
+une paire (départ, cible), libellée « départ → cible », avec `values.distance` en `m`. Le
+tableau écrit garde toutes les paires, les lignes affichées sont les 100 premières, départ
+après départ, la plus proche cible d'abord. Algorithme de QGIS : `qgis:distancematrix`
+(fournisseur « qgis » du module Processing), type linéaire. Changement de cap léger du
+2026-11-24 : les deux champs d'identifiant deviennent obligatoires (QGIS en exige un), le
+nombre de voisins `neighbors` et `work_epsg` s'ajoutent, `pair_count` rejoint le résultat.
 
 | Paramètre | Type | Oblig. | Unité / valeurs | Sens |
 |---|---|---|---|---|
-| `layer_id` | chaîne | oui | — | Points de départ. |
-| `target_layer_id` | chaîne | oui | — | Points d'arrivée. |
-| `label_field` | chaîne | non | — | Champ qui nomme les départs ; sinon le rang. |
-| `target_label_field` | chaîne | non | — | Champ qui nomme les arrivées ; sinon le rang. |
+| `layer_id` | chaîne | oui | — | Points de départ, couche de points simples. |
+| `label_field` | chaîne | oui | champ de `layer_id` | Champ qui nomme les départs ; avec `neighbors`, chaque valeur doit être unique et non vide (refus avant lancement sinon). |
+| `target_layer_id` | chaîne | oui | — | Points d'arrivée, différente de `layer_id`. |
+| `target_label_field` | chaîne | oui | champ de `target_layer_id` | Champ qui nomme les arrivées. |
+| `neighbors` | entier | non | ≥ 1 | Cibles gardées par départ, les plus proches ; absent, toutes les paires, refusées au-delà de 100 000. |
 | `out` | chaîne | non | — | Fourni par le noyau. |
+| `work_epsg` | entier | non | code EPSG | Fourni par le noyau, pour un départ en degrés seulement, comme `analysis.nearest` : les distances sont en mètres. |
 
 | Résultat | Type | Sens |
 |---|---|---|
-| `file` | chaîne | Table écrite. |
-| `rows` | liste de `SummaryRow` | Distances, bornées par le noyau. |
-| `truncated` | booléen | Vrai si la table dépasse `rows`. |
+| `file` | chaîne | Table écrite, toutes les paires gardées. |
+| `pair_count` | entier | Nombre de paires du tableau. |
+| `rows` | liste de `SummaryRow` | Une ligne par paire, bornée à 100. |
+| `truncated` | booléen | Vrai si le tableau dépasse `rows`. |
 
 ```json fiche
-{"id": "analysis.distance_matrix", "status": "planifiee", "runs_in": "qgis", "dictated_by_core": false,
+{"id": "analysis.distance_matrix", "status": "faite", "runs_in": "qgis", "dictated_by_core": false,
  "params": {"layer_id": {"type": "string", "required": true},
+            "label_field": {"type": "string", "required": true},
             "target_layer_id": {"type": "string", "required": true},
-            "label_field": {"type": "string", "required": false},
-            "target_label_field": {"type": "string", "required": false},
-            "out": {"type": "string", "required": false}},
- "result": ["file", "rows", "truncated"]}
+            "target_label_field": {"type": "string", "required": true},
+            "neighbors": {"type": "integer", "required": false},
+            "out": {"type": "string", "required": false},
+            "work_epsg": {"type": "integer", "required": false}},
+ "result": ["file", "pair_count", "rows", "truncated"]}
 ```
 
 ### `analysis.statistics_by_category`
