@@ -33,6 +33,7 @@ esac
 E=~/cassini-entrainement
 WT=${WT:-~/cassini-worktrees/5-55}
 PARENT=${PARENT:-$E/ajuste-continu-5-58-1}
+GRAINE_TORCH=${GRAINE_TORCH:-1}
 NOM_BASE=${NOM_BASE:-base-5-55}
 NOM_CONTINU=${NOM_CONTINU:-continu-5-55}
 MODELES=/mnt/c/Users/kevin/cassini-modeles
@@ -100,7 +101,7 @@ bras() {
     return 1
   fi
   : > "$ETAT"
-  etat "début bras $kind ($(git -C "$WT" rev-parse --short HEAD), essais sur CASSINI-nuit $(git -C "$NUIT" rev-parse --short HEAD)), sortie $NOM, graine torch 1${FAMILLES:+, familles $FAMILLES, part de rappel $PART_RAPPEL, parent $PARENT}"
+  etat "début bras $kind ($(git -C "$WT" rev-parse --short HEAD), essais sur CASSINI-nuit $(git -C "$NUIT" rev-parse --short HEAD)), sortie $NOM, graine torch $GRAINE_TORCH${FAMILLES:+, familles $FAMILLES, part de rappel $PART_RAPPEL, parent $PARENT}"
   mkdir -p "$MES"
   cd "$WT" || { etat "ÉCHEC worktree"; return 1; }
 
@@ -109,11 +110,11 @@ bras() {
   if [ "$kind" = base ]; then
     etat "début entraînement de zéro, jeu complet par défaut"
     uv run --project training/entrainement python training/entrainement/pipeline.py --sortie "$OUT" \
-      --graine-torch 1 > "$E/$NOM.log" 2>&1
+      --graine-torch $GRAINE_TORCH > "$E/$NOM.log" 2>&1
   else
     etat "début séance continue depuis $PARENT"
     uv run --project training/entrainement python training/entrainement/pipeline.py --sortie "$OUT" \
-      --depuis "$PARENT" --familles "$FAMILLES" --graine-torch 1 --exemples 3000 --part-rappel "$PART_RAPPEL" \
+      --depuis "$PARENT" --familles "$FAMILLES" --graine-torch $GRAINE_TORCH --exemples 3000 --part-rappel "$PART_RAPPEL" \
       > "$E/$NOM.log" 2>&1
   fi
   rc=$?
