@@ -415,7 +415,7 @@ fn accepts_string(schema: &Value, root: &Value, depth: usize) -> bool {
 }
 
 /// `domaine.verbe` : deux segments snake_case, commençant par une lettre minuscule.
-fn is_valid_id(id: &str) -> bool {
+pub(crate) fn is_valid_id(id: &str) -> bool {
     let segment_ok = |s: &str| {
         let mut chars = s.chars();
         chars.next().is_some_and(|c| c.is_ascii_lowercase())

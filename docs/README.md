@@ -29,6 +29,10 @@
 - `canal-local.md` — le contrat des messages du canal local : ordres du noyau
   vers l'extension (`order.execute`), annulation (`request.cancel`) et erreurs.
 
+- `api-publique-du-registre.md` — composer un programme noyau avec ses propres commandes
+  (`Registry::with_added`, `cassini::run_program`), refus au démarrage, annonce, recette
+  paramétrée et exigence AD-1 pour l'intégrateur.
+
 - `entrainement-du-modele.md` — le jeu d'exemples d'entraînement engendré depuis le
   registre (commande de génération, familles, règle du jeu tenu à l'écart) et le score
   de référence de Qwen3.5-9B sur ce jeu.

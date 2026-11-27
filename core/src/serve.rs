@@ -1026,9 +1026,13 @@ fn hello(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, RpcErro
     // Le modèle se charge pendant que l'utilisateur tape (ticket 34) : la boucle lance le
     // préchauffage une fois cette réponse écrite.
     state.warm_due = true;
+    let program = state.registry.program();
     let mut result = json!({
         "protocol_version": PROTOCOL_VERSION,
         "core_version": crate::VERSION,
+        "program_name": program.name,
+        "program_version": program.version,
+        "added_commands": state.registry.added_commands(),
         "read_only": read_only,
         "commands": catalogue(state),
         "history": history,
@@ -1399,6 +1403,9 @@ mod tests {
         assert_eq!(r[0]["result"]["read_only"], false);
         assert!(r[0]["result"].get("message").is_none());
         assert_eq!(r[0]["result"]["core_version"], crate::VERSION);
+        assert_eq!(r[0]["result"]["program_name"], "cassini");
+        assert_eq!(r[0]["result"]["program_version"], crate::VERSION);
+        assert_eq!(r[0]["result"]["added_commands"], json!([]));
         assert_eq!(r[0]["result"]["protocol_version"], 2);
         // La poignée de main seule n'écrit aucune étape : le fichier n'existe pas.
         assert!(!journal.exists());

@@ -1,24 +1,51 @@
-//! Commande `system.about` : versions du noyau et du protocole.
+//! Commande `system.about` : versions du noyau et du protocole, identité du programme.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::registry::{Command, CommandFailure, CommandSpec, Registration, RunsIn, PROTOCOL_VERSION};
+use crate::registry::{
+    Command, CommandFailure, CommandSpec, ProgramInfo, Registration, RunsIn, PROTOCOL_VERSION,
+};
 
 /// Paramètres de `system.about` : aucun, et aucun champ inconnu accepté.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AboutParams {}
 
-/// Résultat de `system.about`.
+/// Résultat de `system.about`. Les champs d'annonce du programme (entrée 2.14) sont figés :
+/// nom et version du programme, version du noyau dont il dérive, commandes ajoutées.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct AboutOutput {
     pub core_version: String,
     pub protocol_version: u32,
+    pub program_name: String,
+    pub program_version: String,
+    pub added_commands: Vec<String>,
 }
 
-/// Commande `system.about` : versions du noyau et du protocole.
-pub struct SystemAbout;
+/// Commande `system.about` : versions du noyau et du protocole, programme et commandes ajoutées.
+pub struct SystemAbout {
+    program: ProgramInfo,
+    added: Vec<String>,
+}
+
+impl SystemAbout {
+    /// Le programme officiel : aucune commande ajoutée.
+    pub fn official() -> Self {
+        SystemAbout {
+            program: ProgramInfo::official(),
+            added: Vec::new(),
+        }
+    }
+
+    /// Un programme composé : son identité et les ids de ses commandes ajoutées.
+    pub fn announcing(program: &ProgramInfo, added: &[String]) -> Self {
+        SystemAbout {
+            program: program.clone(),
+            added: added.to_vec(),
+        }
+    }
+}
 
 impl Command for SystemAbout {
     type Params = AboutParams;
@@ -27,8 +54,8 @@ impl Command for SystemAbout {
     fn spec() -> CommandSpec {
         CommandSpec::new::<AboutParams, AboutOutput>(
             "system.about",
-            "Donne la version du noyau et celle du protocole.",
-            "Reports the core version and the protocol version.",
+            "Donne la version du noyau et celle du protocole, le programme et ses commandes ajoutées.",
+            "Reports the core version and the protocol version, the program and its added commands.",
         )
         .runs_in(RunsIn::Core)
         .cancellable(false)
@@ -40,11 +67,14 @@ impl Command for SystemAbout {
         Ok(AboutOutput {
             core_version: crate::VERSION.to_string(),
             protocol_version: PROTOCOL_VERSION,
+            program_name: self.program.name.clone(),
+            program_version: self.program.version.clone(),
+            added_commands: self.added.clone(),
         })
     }
 }
 
-inventory::submit! { Registration(|r| r.register(SystemAbout)) }
+inventory::submit! { Registration(|r| r.register(SystemAbout::official())) }
 
 #[cfg(test)]
 mod tests {
@@ -58,7 +88,13 @@ mod tests {
             .unwrap();
         assert_eq!(
             out,
-            json!({"core_version": crate::VERSION, "protocol_version": PROTOCOL_VERSION})
+            json!({
+                "core_version": crate::VERSION,
+                "protocol_version": PROTOCOL_VERSION,
+                "program_name": "cassini",
+                "program_version": crate::VERSION,
+                "added_commands": [],
+            })
         );
     }
 }

@@ -26,6 +26,23 @@ pub const BAD_RESULT: &str = "qgis.bad_result";
 /// Version du protocole du noyau.
 pub const PROTOCOL_VERSION: u32 = 2;
 
+/// Version de l'API publique du registre (entrée 2.14) : la surface qu'un programme composé
+/// emploie (`Registry`, `Command`, `CommandSpec`, `ProgramInfo`, `AddedCommands`,
+/// `Registry::with_added`, `recipe`). Distincte de [`PROTOCOL_VERSION`], qui versionne le canal.
+/// Elle monte d'un cran à chaque changement incompatible de cette surface.
+pub const REGISTRY_API_VERSION: u32 = 1;
+
+/// Nom du programme officiel, annoncé par `system.about` et `session.hello`.
+pub const OFFICIAL_PROGRAM: &str = "cassini";
+
+/// Familles (domaines) du catalogue public : réservées au programme officiel. Une commande
+/// ajoutée par un programme composé ne peut appartenir à aucune d'elles (amendement d'AD-6,
+/// 2026-11-10).
+pub const CATALOGUE_FAMILIES: [&str; 14] = [
+    "layer", "project", "analysis", "network", "raster", "data", "layout", "geocode", "terrain",
+    "coord", "geo", "map", "system", "model",
+];
+
 /// Où s'exécute une commande.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -542,12 +559,124 @@ pub struct Registration(pub fn(&mut Registry));
 
 inventory::collect!(Registration);
 
+/// Identité d'un programme noyau : nom et version, annoncés par `system.about` et
+/// `session.hello`. Le programme officiel s'appelle [`OFFICIAL_PROGRAM`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ProgramInfo {
+    pub name: String,
+    pub version: String,
+}
+
+impl ProgramInfo {
+    /// L'identité du programme officiel : `cassini`, à la version du noyau.
+    pub fn official() -> Self {
+        ProgramInfo {
+            name: OFFICIAL_PROGRAM.to_string(),
+            version: crate::VERSION.to_string(),
+        }
+    }
+
+    pub fn new(name: impl Into<String>, version: impl Into<String>) -> Self {
+        ProgramInfo {
+            name: name.into(),
+            version: version.into(),
+        }
+    }
+
+    /// Vrai pour le programme officiel.
+    pub fn is_official(&self) -> bool {
+        self.name.trim().eq_ignore_ascii_case(OFFICIAL_PROGRAM)
+    }
+}
+
+/// Refus d'une composition de programme, au démarrage (entrée 2.14). Chaque message nomme
+/// l'identifiant fautif.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProgramError {
+    /// Le nom du programme est vide ou usurpe celui du programme officiel.
+    ProgramName(String),
+    /// L'identifiant n'a pas la forme `domaine.verbe`.
+    InvalidId(String),
+    /// L'identifiant est déjà au registre (officiel, ou ajouté plus tôt).
+    DuplicateId(String),
+    /// Le domaine de l'identifiant est une famille du catalogue.
+    ReservedFamily { id: String, family: String },
+    /// La commande ajoutée ne déclare pas `runs_in: core`.
+    NotCore(String),
+}
+
+impl ProgramError {
+    /// Code stable, destiné aux machines.
+    pub fn code(&self) -> &'static str {
+        match self {
+            ProgramError::ProgramName(_) => "program.name",
+            ProgramError::InvalidId(_) => "program.invalid_id",
+            ProgramError::DuplicateId(_) => "program.duplicate_id",
+            ProgramError::ReservedFamily { .. } => "program.reserved_family",
+            ProgramError::NotCore(_) => "program.not_core",
+        }
+    }
+}
+
+impl fmt::Display for ProgramError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ProgramError::ProgramName(name) => write!(
+                f,
+                "Le nom de programme « {name} » est refusé : il doit être non vide et différent de « {OFFICIAL_PROGRAM} »."
+            ),
+            ProgramError::InvalidId(id) => write!(
+                f,
+                "La commande ajoutée « {id} » est refusée : l'identifiant doit être de la forme `domaine.verbe`, en snake_case."
+            ),
+            ProgramError::DuplicateId(id) => write!(
+                f,
+                "La commande ajoutée « {id} » est refusée : cet identifiant est déjà au registre."
+            ),
+            ProgramError::ReservedFamily { id, family } => write!(
+                f,
+                "La commande ajoutée « {id} » est refusée : la famille « {family} » appartient au catalogue public."
+            ),
+            ProgramError::NotCore(id) => write!(
+                f,
+                "La commande ajoutée « {id} » est refusée : une commande ajoutée doit déclarer `runs_in: core`."
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ProgramError {}
+
+type Installer = Box<dyn FnOnce(&mut Registry) + Send + Sync>;
+
+/// Les commandes qu'un programme composé ajoute au registre officiel. Chacune est une
+/// [`Command`] Rust : une commande déléguée à QGIS n'est pas ajoutable (AD-24).
+#[derive(Default)]
+pub struct AddedCommands(Vec<Installer>);
+
+impl AddedCommands {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Ajoute une commande à la liste.
+    pub fn with<C: Command + Send + Sync + 'static>(mut self, command: C) -> Self {
+        self.0
+            .push(Box::new(move |registry| registry.register(command)));
+        self
+    }
+}
+
 /// Le registre : id de commande vers description et exécution.
 #[derive(Default)]
 pub struct Registry {
     entries: BTreeMap<String, Entry>,
     /// Ids inscrits plus d'une fois, une entrée par tentative écartée.
     duplicates: Vec<String>,
+    /// Programme qui a composé ce registre ; `None` pour le programme officiel.
+    program: Option<ProgramInfo>,
+    /// Ids des commandes ajoutées au registre officiel, dans l'ordre des ids.
+    added: Vec<String>,
 }
 
 impl Registry {
@@ -697,6 +826,77 @@ impl Registry {
         self.entries.remove(id).is_some()
     }
 
+    /// Identité du programme qui a composé ce registre : `cassini` pour le registre officiel.
+    pub fn program(&self) -> ProgramInfo {
+        self.program.clone().unwrap_or_else(ProgramInfo::official)
+    }
+
+    /// Ids des commandes ajoutées au registre officiel : vide pour le programme officiel.
+    pub fn added_commands(&self) -> &[String] {
+        &self.added
+    }
+
+    /// Compose le registre d'un programme : le registre officiel plus les commandes `added`
+    /// (entrée 2.14). Le registre refuse, au démarrage, un nom de programme usurpé, un
+    /// identifiant mal formé, déjà inscrit ou d'une famille du catalogue, et une commande qui ne
+    /// déclare pas `runs_in: core`. Aucune commande n'est chargée à l'exécution : `added` est
+    /// compilé dans le programme.
+    pub fn with_added(info: ProgramInfo, added: AddedCommands) -> Result<Self, ProgramError> {
+        if info.name.trim().is_empty() || info.name.trim().eq_ignore_ascii_case(OFFICIAL_PROGRAM) {
+            return Err(ProgramError::ProgramName(info.name));
+        }
+        let mut registry = Self::standard();
+        let mut ids = Vec::new();
+        for install in added.0 {
+            // Chaque commande s'inscrit seule, le temps d'être inspectée avant d'entrer.
+            let mut alone = Self::new();
+            install(&mut alone);
+            // Exactement une commande par installeur : zéro ou plusieurs est une erreur de
+            // composition, jamais ignorée en silence.
+            if alone.entries.len() != 1 {
+                return Err(ProgramError::InvalidId(format!(
+                    "(un ajout doit inscrire exactement une commande, {} inscrites)",
+                    alone.entries.len()
+                )));
+            }
+            let (id, entry) = alone.entries.pop_first().expect("une entrée vérifiée");
+            if !crate::contract::is_valid_id(&id) {
+                return Err(ProgramError::InvalidId(id));
+            }
+            if registry.entries.contains_key(&id) {
+                return Err(ProgramError::DuplicateId(id));
+            }
+            // Le MCP aplatit l'id en remplaçant le point par un souligné (`mcp::tool_name`) :
+            // `layer_add.x` et `layer.add_x` donneraient le même outil, le second serait masqué.
+            let flat = id.replace('.', "_");
+            if registry.entries.keys().any(|k| k.replace('.', "_") == flat) {
+                return Err(ProgramError::DuplicateId(id));
+            }
+            let family = id.split('.').next().unwrap_or_default();
+            if CATALOGUE_FAMILIES.contains(&family) {
+                return Err(ProgramError::ReservedFamily {
+                    family: family.to_string(),
+                    id,
+                });
+            }
+            if entry.spec.runs_in != Some(RunsIn::Core) || entry.handler.is_none() {
+                return Err(ProgramError::NotCore(id));
+            }
+            ids.push(id.clone());
+            registry.entries.insert(id, entry);
+        }
+        ids.sort();
+        // `system.about` annonce le programme : l'entrée officielle est remplacée par la même
+        // commande, qui connaît l'identité et les commandes ajoutées.
+        registry.entries.remove("system.about");
+        registry.register(crate::commands::system_about::SystemAbout::announcing(
+            &info, &ids,
+        ));
+        registry.program = Some(info);
+        registry.added = ids;
+        Ok(registry)
+    }
+
     /// Appelle une commande avec ses paramètres en JSON.
     pub fn call(&self, id: &str, params: Value) -> Result<Value, RegistryError> {
         let entry = self
@@ -777,7 +977,9 @@ mod tests {
             .unwrap();
         assert_eq!(
             out,
-            json!({"core_version": crate::VERSION, "protocol_version": 2})
+            json!({"core_version": crate::VERSION, "protocol_version": 2,
+                "program_name": "cassini", "program_version": crate::VERSION,
+                "added_commands": []})
         );
     }
 
@@ -892,5 +1094,155 @@ mod tests {
         sorted.sort();
         assert_eq!(ids, sorted);
         assert!(ids.contains(&"system.about".to_string()));
+    }
+    macro_rules! added_command {
+        ($name:ident, $id:literal, $runs_in:expr) => {
+            struct $name;
+            impl Command for $name {
+                type Params = NoParams;
+                type Output = ClosedOutput;
+                fn spec() -> CommandSpec {
+                    let spec = CommandSpec::new::<NoParams, ClosedOutput>($id, "Essai.", "Test.")
+                        .cancellable(false);
+                    match $runs_in {
+                        Some(runs_in) => spec.runs_in(runs_in),
+                        None => spec,
+                    }
+                }
+                fn run(&self, _params: NoParams) -> Result<ClosedOutput, CommandFailure> {
+                    Ok(ClosedOutput { ok: true })
+                }
+            }
+        };
+    }
+
+    added_command!(Fine, "exemple.fine", Some(RunsIn::Core));
+    added_command!(Second, "autre.second", Some(RunsIn::Core));
+    added_command!(InFamily, "layer.foo", Some(RunsIn::Core));
+    added_command!(Official, "terrain.slope", Some(RunsIn::Core));
+    added_command!(Undeclared, "exemple.none", None);
+    added_command!(ToQgis, "exemple.qgis", Some(RunsIn::Qgis));
+    added_command!(Malformed, "exemple", Some(RunsIn::Core));
+    added_command!(Shadowed, "exemple_fine.x", Some(RunsIn::Core));
+    added_command!(FineX, "exemple.fine_x", Some(RunsIn::Core));
+
+    #[test]
+    fn an_installer_must_register_exactly_one_command() {
+        let mut none = AddedCommands::new();
+        none.0.push(Box::new(|_| {}));
+        let err = compose(none).err().unwrap();
+        assert_eq!(err.code(), "program.invalid_id");
+        let mut two = AddedCommands::new();
+        two.0.push(Box::new(|r| {
+            r.register(Fine);
+            r.register(Second);
+        }));
+        let err = compose(two).err().unwrap();
+        assert_eq!(err.code(), "program.invalid_id");
+    }
+
+    #[test]
+    fn an_id_flattening_to_the_same_mcp_name_is_a_duplicate() {
+        // Le nom MCP aplati d'un id déjà au registre ne peut pas être repris par un autre id.
+        // Entre deux ajouts : `exemple.fine_x` puis `exemple_fine.x`.
+        let err = compose(AddedCommands::new().with(FineX).with(Shadowed))
+            .err()
+            .unwrap();
+        assert_eq!(err, ProgramError::DuplicateId("exemple_fine.x".into()));
+    }
+
+    fn compose(added: AddedCommands) -> Result<Registry, ProgramError> {
+        Registry::with_added(ProgramInfo::new("derive", "1.2.3"), added)
+    }
+
+    #[test]
+    fn an_added_command_is_served_and_announced() {
+        let registry = compose(AddedCommands::new().with(Second).with(Fine)).unwrap();
+        assert_eq!(
+            registry.call("exemple.fine", json!({})).unwrap(),
+            json!({"ok": true})
+        );
+        assert_eq!(registry.added_commands(), ["autre.second", "exemple.fine"]);
+        assert_eq!(registry.program(), ProgramInfo::new("derive", "1.2.3"));
+        assert_eq!(
+            registry.call("system.about", json!({})).unwrap(),
+            json!({"core_version": crate::VERSION, "protocol_version": PROTOCOL_VERSION,
+                "program_name": "derive", "program_version": "1.2.3",
+                "added_commands": ["autre.second", "exemple.fine"]})
+        );
+        // Le registre officiel est intact : rien n'a fui dans `standard()`.
+        let official = Registry::standard();
+        assert!(official.spec("exemple.fine").is_none());
+        assert!(official.added_commands().is_empty());
+        assert_eq!(official.program(), ProgramInfo::official());
+    }
+
+    #[test]
+    fn a_catalogue_family_is_refused_naming_the_id_and_the_family() {
+        let err = compose(AddedCommands::new().with(InFamily)).err().unwrap();
+        assert_eq!(
+            err,
+            ProgramError::ReservedFamily {
+                id: "layer.foo".into(),
+                family: "layer".into()
+            }
+        );
+        assert!(err.to_string().contains("layer.foo") && err.to_string().contains("layer"));
+        // Toute famille du catalogue est réservée, et le registre n'en emploie pas d'autre.
+        let standard = Registry::standard();
+        for family in CATALOGUE_FAMILIES {
+            assert!(standard
+                .specs()
+                .any(|s| s.id.starts_with(&format!("{family}."))));
+        }
+        for spec in standard.specs() {
+            let domain = spec.id.split('.').next().unwrap();
+            assert!(
+                domain == "test" || CATALOGUE_FAMILIES.contains(&domain),
+                "{}",
+                spec.id
+            );
+        }
+    }
+
+    #[test]
+    fn an_official_id_is_a_duplicate_and_an_added_id_cannot_be_added_twice() {
+        let err = compose(AddedCommands::new().with(Official)).err().unwrap();
+        assert_eq!(err, ProgramError::DuplicateId("terrain.slope".into()));
+        let err = compose(AddedCommands::new().with(Fine).with(Fine))
+            .err()
+            .unwrap();
+        assert_eq!(err, ProgramError::DuplicateId("exemple.fine".into()));
+    }
+
+    #[test]
+    fn runs_in_must_be_core_and_the_id_well_formed() {
+        for (added, id) in [
+            (AddedCommands::new().with(Undeclared), "exemple.none"),
+            (AddedCommands::new().with(ToQgis), "exemple.qgis"),
+        ] {
+            let err = compose(added).err().unwrap();
+            assert_eq!(err, ProgramError::NotCore(id.into()));
+            assert!(err.to_string().contains(id));
+        }
+        let err = compose(AddedCommands::new().with(Malformed)).err().unwrap();
+        assert_eq!(err, ProgramError::InvalidId("exemple".into()));
+    }
+
+    #[test]
+    fn a_program_cannot_take_the_official_name() {
+        for name in [
+            "cassini",
+            "Cassini",
+            " ",
+            " cassini",
+            "cassini ",
+            " CASSINI ",
+        ] {
+            let err = Registry::with_added(ProgramInfo::new(name, "1"), AddedCommands::new())
+                .err()
+                .unwrap();
+            assert_eq!(err.code(), "program.name");
+        }
     }
 }

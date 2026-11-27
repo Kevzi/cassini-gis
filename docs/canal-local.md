@@ -20,7 +20,7 @@ répond par ses versions, son catalogue et le mode de la session :
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"session.hello","params":{"protocol_version":2,"commands":["layer.add"],"project":"C:/a/p.qgz"}}
-{"jsonrpc":"2.0","id":1,"result":{"protocol_version":2,"core_version":"0.1.0","read_only":false,"commands":[…]}}
+{"jsonrpc":"2.0","id":1,"result":{"protocol_version":2,"core_version":"0.1.0","program_name":"cassini","program_version":"0.1.0","added_commands":[],"read_only":false,"commands":[…]}}
 ```
 
 Réponse d'une seconde session, quand le journal du projet est déjà tenu :
@@ -85,6 +85,9 @@ Réponse d'une seconde session, quand le journal du projet est déjà tenu :
   locales ; un noyau relancé sur le même projet garde les lignes de la session. C'est
   un ajout compatible, le protocole reste à la version 2 ; le noyau seul lit le journal
   (AD-11), l'extension n'ouvre jamais le fichier.
+- La réponse annonce aussi le programme branché (entrée 2.14, `api-publique-du-registre.md`) :
+  `program_name`, `program_version` et `added_commands` (vide pour le programme officiel `cassini`).
+  Champs ajoutés, figés ; le protocole reste à la version 2.
 - Le démarrage ne lance **aucune commande journalisée** : l'extension lit `core_version` et
   `protocol_version` dans cette réponse, et non plus par un `system.about`. Le panneau peut
   ensuite demander `agent.models`, qui n'est pas journalisé. Ouvrir ou rouvrir un projet

@@ -401,17 +401,21 @@ donne l'esquisse.
 
 ### `system.about`
 
-Version du noyau et du protocole. Aucun paramètre.
+Version du noyau et du protocole, et identité du programme (entrée 2.14, changement de cap
+`change-commandes-d-un-module-exterieur`). Aucun paramètre.
 
 | Résultat | Type | Sens |
 |---|---|---|
 | `core_version` | chaîne | Version du noyau. |
 | `protocol_version` | entier | Version du protocole (2). |
+| `program_name` | chaîne | Nom du programme : `cassini` pour le programme officiel. |
+| `program_version` | chaîne | Version du programme. |
+| `added_commands` | liste de chaînes | Identifiants des commandes ajoutées par un programme composé ; vide pour le programme officiel. |
 
 ```json fiche
 {"id": "system.about", "status": "faite", "runs_in": "core", "dictated_by_core": false,
  "params": {},
- "result": ["core_version", "protocol_version"]}
+ "result": ["core_version", "protocol_version", "program_name", "program_version", "added_commands"]}
 ```
 
 ### `model.list`

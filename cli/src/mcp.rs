@@ -39,6 +39,7 @@ use rmcp::{ErrorData as McpError, Peer, RoleServer, ServerHandler};
 use serde_json::{json, Value};
 use tokio::sync::{oneshot, Mutex};
 
+use crate::Program;
 use relay::{Answer, AttachError, Relay};
 
 /// Réponse du registre à un appel : le résultat, ou l'erreur de AD-21.
@@ -465,11 +466,22 @@ impl ServerHandler for CassiniMcp {
 /// AD-9/AD-10) : le verrou du projet n'est jamais tenu entre deux appels (AD-13). Annonce d'abord
 /// sur `opened` si le projet s'ouvre, puis sert les appels jusqu'à la fermeture du canal.
 fn worker(
+    program: Program,
     project: Option<PathBuf>,
     opened: mpsc::Sender<Result<(), ErrorReport>>,
     jobs: mpsc::Receiver<Job>,
 ) {
-    let registry = Registry::standard();
+    let registry = match program.registry() {
+        Ok(registry) => registry,
+        Err(e) => {
+            let _ = opened.send(Err(ErrorReport {
+                code: e.code().to_string(),
+                message: e.to_string(),
+                step: None,
+            }));
+            return;
+        }
+    };
     match project {
         None => {
             let _ = opened.send(Ok(()));
@@ -512,10 +524,11 @@ pub(crate) fn parse(args: &[String]) -> Option<Option<PathBuf>> {
 /// du flux.
 /// Rend 0 quand le client ferme l'entrée, 1 si le projet ne s'ouvre pas (avant tout échange) ou
 /// si le canal casse.
-pub(crate) fn serve(project: Option<PathBuf>, err: &mut dyn Write) -> i32 {
+pub(crate) fn serve(program: &Program, project: Option<PathBuf>, err: &mut dyn Write) -> i32 {
     let (jobs, inbox) = mpsc::channel();
     let (opened, opening) = mpsc::channel();
-    let thread = std::thread::spawn(move || worker(project, opened, inbox));
+    let worker_program = program.clone();
+    let thread = std::thread::spawn(move || worker(worker_program, project, opened, inbox));
     match opening.recv() {
         Ok(Ok(())) => {}
         Ok(Err(e)) => {
@@ -534,7 +547,11 @@ pub(crate) fn serve(project: Option<PathBuf>, err: &mut dyn Write) -> i32 {
     }
     // Sans nom de canal résolu, le serveur reste autonome.
     let channel = ChannelName::for_user().ok();
-    let handler = CassiniMcp::new(&Registry::standard(), jobs, channel);
+    let registry = match program.registry() {
+        Ok(registry) => registry,
+        Err(e) => return io_failure(err, &e.to_string()),
+    };
+    let handler = CassiniMcp::new(&registry, jobs, channel);
     let modes = handler.modes.clone();
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()

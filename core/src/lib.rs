@@ -25,6 +25,7 @@ pub mod plan;
 pub mod plan_completion;
 pub mod point;
 pub mod raster_path;
+pub mod recipe;
 pub mod registry;
 pub mod serve;
 pub mod style;
