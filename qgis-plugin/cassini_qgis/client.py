@@ -536,16 +536,18 @@ class CoreClient:
             # Les étapes passées du journal, que le noyau rend pour le panneau (réouverture).
             history = result.get("history")
             history = [h for h in history if isinstance(h, dict)] if isinstance(history, list) else []
-            self._finish(
-                READY,
-                {
-                    "core_version": result.get("core_version"),
-                    "protocol_version": result.get("protocol_version"),
-                    "commands": self.catalogue(),
-                    "history": history,
-                    "read_only": self._read_only,
-                },
-            )
+            chain = result.get("journal_chain")
+            ready = {
+                "core_version": result.get("core_version"),
+                "protocol_version": result.get("protocol_version"),
+                "commands": self.catalogue(),
+                "history": history,
+                "read_only": self._read_only,
+            }
+            # État de la chaîne d'empreintes du journal : absent d'un noyau plus ancien.
+            if isinstance(chain, dict):
+                ready["journal_chain"] = chain
+            self._finish(READY, ready)
 
     def _run_answer(self, msg):
         run, self._run = self._run, None

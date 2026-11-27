@@ -1345,3 +1345,13 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-alignement-de-rasters-raster-align-plan.md`
   summary: `raster.align` rogne la sortie à l'emprise commune quand la source ne couvre qu'une partie de la référence : cellule et origine sont celles de la référence, pas les dimensions.
   evidence: Sonde : 19 colonnes au lieu de 20 pour 5,5 m manquants ; documenté au catalogue et au README de l'extension ; refus ou remplissage en sans-donnée à décider si un enchaînement avec un MNT plus large pose problème.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-registre-projet-import/story-journal-chaine-par-empreinte-plan.md`
+  summary: Une seconde fenêtre qui ouvre le journal pendant l'écriture d'une ligne peut annoncer une fausse rupture `unreadable`, gardée jusqu'au prochain lancement.
+  evidence: `append` écrit en un seul `write_all` sans atomicité vis-à-vis d'une lecture ; `hello` calcule l'état une fois. À régler en relisant l'état si seule la dernière ligne est en cause, ou en ne le calculant qu'une fois la ligne terminée par `\n`.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-registre-projet-import/story-journal-chaine-par-empreinte-plan.md`
+  summary: Une chaîne rompue ne peut pas être acquittée ni re-scellée : l'avis revient à chaque ouverture.
+  evidence: Le plan interdit de réécrire ou réparer ; aucune commande n'écrit un nouveau point de départ. Décision de produit à prendre si les utilisateurs corrigent un journal à la main.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-registre-projet-import/story-journal-chaine-par-empreinte-plan.md`
+  summary: Les valeurs de `chain` et de `prev` ne sont pas contrôlées (`chain:0` compte comme chaîné) et `append` écrase un `prev`/`chain` de premier niveau.
+  evidence: `verify_chain_bytes` ne teste que `contains_key` ; aucun conflit aujourd'hui (`versions.chain` est imbriqué), à durcir quand `chain` passera à 2.

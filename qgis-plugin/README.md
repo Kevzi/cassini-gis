@@ -116,7 +116,13 @@ Recette manuelle du panneau [9.4] (dans QGIS, avec un noyau installé) :
    noyau de la seconde fenêtre reste lancé ; son panneau affiche le bandeau « Ce
    projet est ouvert dans une autre fenêtre QGIS. Ici, vous pouvez seulement
    rejouer. », grise saisie, Envoyer, Lancer, modèle et IA externe avec leur
-   raison, et ne laisse que « Rejouer le journal » (AD-11). Fermez la première
+   raison, et ne laisse que « Rejouer le journal » (AD-11). Si `session.hello` rend
+   `journal_chain` à l'état `broken` (une ligne du journal modifiée, retirée ou insérée à la main
+   depuis son écriture), le panneau l'écrit en clair avec le numéro de la ligne ; il ne bloque rien
+   et ne dit rien d'un journal intact ou d'avant le chaînage (en lecture seule, l'avis s'ajoute au
+   bandeau). La chaîne garde l'intégrité, pas l'auteur : la dernière ligne modifiée, des lignes
+   retirées en fin de journal, ou `prev` et `chain` retirés de toutes les lignes ne se voient pas.
+   Fermez la première
    fenêtre, puis « Relancer » dans le bandeau : la session reprend l'écriture.
 
 Recette manuelle de `layer.add` [9.5] (dans QGIS, avec un noyau qui annonce la

@@ -1006,22 +1006,31 @@ impl<'a> Session<'a> {
                 }
             }
         }
-        self.append(&Value::Object(line))?;
+        self.append(line)?;
         self.next_step += 1;
         outcome.map_err(ErrorReport::from)
     }
 
-    /// Ajoute une ligne au journal, en un seul `write`, et la rend durable.
-    fn append(&self, line: &Value) -> Result<(), JournalError> {
+    /// Ajoute une ligne au journal, en un seul `write`, et la rend durable. La ligne est chaînée à
+    /// la précédente : `prev` (SHA-256 des octets exacts de la dernière ligne écrite, sans son
+    /// saut de ligne, `null` pour la première) et `chain: 1`. Une ligne ancienne n'est jamais
+    /// réécrite, une ligne tronquée non plus : la nouvelle s'y chaîne par ses octets lus.
+    fn append(&self, mut line: Map<String, Value>) -> Result<(), JournalError> {
         let path = self.journal_path();
         let mut text = String::new();
-        // Une fin de ligne manquante (arrêt brutal) ne doit pas coller deux étapes.
+        let mut prev = Value::Null;
         if let Ok(existing) = fs::read(&path) {
+            // Une fin de ligne manquante (arrêt brutal) ne doit pas coller deux étapes.
             if !existing.is_empty() && !existing.ends_with(b"\n") {
                 text.push('\n');
             }
+            if let Some(last) = written_lines(&existing).last() {
+                prev = json!(sha256_hex(last));
+            }
         }
-        text.push_str(&line.to_string());
+        line.insert(PREV_KEY.into(), prev);
+        line.insert(CHAIN_KEY.into(), json!(CHAIN_VERSION));
+        text.push_str(&Value::Object(line).to_string());
         text.push('\n');
         let mut file = OpenOptions::new()
             .create(true)
@@ -1031,6 +1040,115 @@ impl<'a> Session<'a> {
         file.write_all(text.as_bytes()).map_err(io_error)?;
         file.sync_data().map_err(io_error)?;
         Ok(())
+    }
+
+    /// État de la chaîne d'empreintes du journal de cette session (voir `verify_chain`).
+    /// Lecture seule : rien n'est écrit, même quand la session est en lecture seule.
+    pub fn chain_state(&self) -> ChainState {
+        verify_chain(&self.journal_path())
+    }
+}
+
+/// Clé de l'empreinte de la ligne précédente, posée sur chaque ligne écrite.
+const PREV_KEY: &str = "prev";
+/// Clé du marqueur de chaîne ; sa valeur est la version du chaînage.
+const CHAIN_KEY: &str = "chain";
+const CHAIN_VERSION: u64 = 1;
+
+/// État de la chaîne d'empreintes d'un journal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChainState {
+    /// Toutes les lignes chaînées se suivent ; `unchained_upto` compte les lignes anciennes, sans
+    /// chaînage, qui les précèdent (0 pour un journal entièrement neuf ou vide).
+    Intact { unchained_upto: usize },
+    /// Journal ancien : aucune ligne ne porte `chain` ; `upto` est sa dernière ligne.
+    Unchained { upto: usize },
+    /// Première rupture, à la ligne `line` (à partir de 1).
+    Broken { line: usize, reason: ChainBreak },
+}
+
+/// Motif d'une rupture de chaîne.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChainBreak {
+    /// `prev` ne correspond pas aux octets de la ligne précédente (modifiée, retirée, insérée).
+    PrevMismatch,
+    /// Une ligne sans `prev` ni `chain` après le début de la chaîne.
+    PrevMissing,
+    /// La ligne n'est pas un objet JSON lisible (ligne tronquée comprise).
+    Unreadable,
+}
+
+impl ChainBreak {
+    /// Nom stable du motif, tel que `session.hello` le rend.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ChainBreak::PrevMismatch => "prev_mismatch",
+            ChainBreak::PrevMissing => "prev_missing",
+            ChainBreak::Unreadable => "unreadable",
+        }
+    }
+}
+
+/// SHA-256 hexadécimal (minuscule) d'octets.
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// Lignes écrites d'un journal, en octets et sans leur saut de ligne : les lignes blanches sont
+/// ignorées, la dernière tronquée comprise. `\r\n` vaut un saut de ligne (un journal passé en
+/// CRLF par un éditeur ou git reste intact) : un seul `\r` final est retiré avant le hachage.
+fn written_lines(bytes: &[u8]) -> impl Iterator<Item = &[u8]> {
+    bytes
+        .split(|b| *b == b'\n')
+        .map(|l| l.strip_suffix(b"\r").unwrap_or(l))
+        .filter(|l| !String::from_utf8_lossy(l).trim().is_empty())
+}
+
+/// Relit le journal `path` et vérifie sa chaîne d'empreintes, sans rien écrire. Un journal absent
+/// ou vide est `Intact`. La première rupture est rendue ; la modification de la toute dernière
+/// ligne ne se voit pas sans successeur.
+pub fn verify_chain(path: &Path) -> ChainState {
+    match fs::read(path) {
+        Ok(bytes) => verify_chain_bytes(&bytes),
+        Err(_) => ChainState::Intact { unchained_upto: 0 },
+    }
+}
+
+fn verify_chain_bytes(bytes: &[u8]) -> ChainState {
+    let mut previous: Option<&[u8]> = None;
+    let mut chained = false;
+    let mut unchained_upto = 0;
+    for (i, raw) in written_lines(bytes).enumerate() {
+        let n = i + 1;
+        let broken = |reason| ChainState::Broken { line: n, reason };
+        let Ok(Value::Object(row)) = serde_json::from_slice::<Value>(raw) else {
+            return broken(ChainBreak::Unreadable);
+        };
+        if !chained && !row.contains_key(CHAIN_KEY) {
+            unchained_upto = n;
+            previous = Some(raw);
+            continue;
+        }
+        if !row.contains_key(PREV_KEY) {
+            return broken(ChainBreak::PrevMissing);
+        }
+        chained = true;
+        let expected = previous.map_or(Value::Null, |p| json!(sha256_hex(p)));
+        if row[PREV_KEY] != expected {
+            return broken(ChainBreak::PrevMismatch);
+        }
+        previous = Some(raw);
+    }
+    if chained || unchained_upto == 0 {
+        ChainState::Intact { unchained_upto }
+    } else {
+        ChainState::Unchained {
+            upto: unchained_upto,
+        }
     }
 }
 
@@ -1670,6 +1788,14 @@ impl<'a> Replay<'a> {
         }
         let mut ids = Vec::new();
         let mut warnings = Vec::new();
+        // Une chaîne rompue est signalée avant la première étape, sans refuser le rejeu : ce
+        // contrôle ne lit que les octets, le rejeu ne lit jamais `prev` ni `chain`.
+        if let ChainState::Broken { line, reason } = verify_chain_bytes(text.as_bytes()) {
+            warnings.push(format!(
+                "Le journal a été modifié depuis son écriture : la chaîne d'empreintes est rompue à la ligne {line} ({}) ; le rejeu continue.",
+                reason.as_str()
+            ));
+        }
         for (i, line) in lines.iter().enumerate() {
             let step = i + 1;
             let id = line

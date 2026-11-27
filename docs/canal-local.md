@@ -29,6 +29,24 @@ Réponse d'une seconde session, quand le journal du projet est déjà tenu :
 {"jsonrpc":"2.0","id":1,"result":{"protocol_version":2,"core_version":"0.1.0","read_only":true,"message":"Le journal de ce projet est tenu par une autre session : cette session est en lecture seule, rien n'est exécuté ni écrit.","commands":[…]}}
 ```
 
+- `journal_chain` est toujours présent (ajout compatible, le protocole reste à la version 2) :
+  l'état de la chaîne d'empreintes du journal, relu à l'ouverture de la session, lecture seule
+  comprise, sans rien écrire. `{"state": "intact" | "unchained" | "broken", "line": …, "reason": …}`.
+  Chaque ligne écrite porte `prev` (SHA-256 hexadécimal des octets exacts de la ligne précédente,
+  sans son saut de ligne ; `null` pour la première) et `chain: 1`. `intact` : toutes les lignes
+  chaînées se suivent (un journal absent ou vide l'est ; `line` est alors `null`, ou la dernière ligne
+  ancienne, non chaînée, d'un ancien journal prolongé) ; `unchained` : journal d'avant le
+  chaînage, aucune ligne ne porte `chain`, `line` est sa dernière ligne ; `broken` : première
+  rupture à la ligne `line` (à partir de 1), `reason` valant `prev_mismatch` (`prev` ne
+  correspond pas à la ligne précédente : modifiée, retirée ou insérée), `prev_missing` (ligne
+  sans `prev` après le début de la chaîne) ou `unreadable` (ligne illisible, dont une dernière
+  ligne tronquée ; la suivante s'y chaîne par ses octets lus, sans réécriture). `line` et `reason`
+  valent `null` quand ils ne s'appliquent pas. Limite : la chaîne garde l'intégrité, pas
+  l'auteur. Ne se voient pas la modification de la toute dernière ligne (sans successeur), le retrait
+  des dernières lignes, ni le retrait de `prev` et de `chain` de toutes les lignes (le journal se lit
+  alors comme un ancien journal, `unchained`). Un journal passé en CRLF reste `intact`. Le rejeu ne lit pas ces clés : une chaîne rompue est signalée par un
+  avertissement avant la première étape, jamais refusée. Le panneau n'affiche que la rupture.
+  Exemple : `{"journal_chain": {"state": "broken", "line": 4, "reason": "prev_mismatch"}}`.
 - `style_kinds` (facultatif, ajout compatible du 2026-11-09) : les formes de `StyleSpec` que le
   geste `layer.set_style` de l'extension sait appliquer, par exemple
   `["categories", "elevation_ramp", "graduated", "hillshade", "result_ramp", "single"]`. Le

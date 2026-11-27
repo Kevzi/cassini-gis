@@ -36,7 +36,7 @@ use crate::commands::layer_open_vector::OPEN_VECTOR;
 use crate::error::ErrorReport;
 use crate::exec::{Executor, Router};
 pub use crate::external::ChannelName;
-use crate::journal::{JournalError, Mode, Replay, Session};
+use crate::journal::{ChainState, JournalError, Mode, Replay, Session};
 use crate::registry::{Registry, RegistryError, RunsIn, PROTOCOL_VERSION};
 
 const PARSE_ERROR: i64 = -32700;
@@ -880,6 +880,26 @@ impl Executor for Channel<'_> {
 /// Nombre d'étapes passées que `session.hello` rend au panneau.
 const HISTORY_LIMIT: usize = 200;
 
+/// `journal_chain` de `session.hello` : `state` (`intact`, `unchained` ou `broken`), `line` (la
+/// ligne de la rupture ; la dernière ligne ancienne, non chaînée, d'un journal `unchained` ou d'un
+/// ancien journal prolongé `intact` ; sinon `null`) et
+/// `reason` (motif d'une rupture, sinon `null`).
+fn journal_chain_json(chain: &ChainState) -> Value {
+    match chain {
+        ChainState::Intact { unchained_upto } => {
+            // Un ancien journal prolongé reste `intact` : `line` garde sa part non chaînée.
+            let line = (*unchained_upto > 0).then_some(*unchained_upto);
+            json!({"state": "intact", "line": line, "reason": null})
+        }
+        ChainState::Unchained { upto } => {
+            json!({"state": "unchained", "line": upto, "reason": null})
+        }
+        ChainState::Broken { line, reason } => {
+            json!({"state": "broken", "line": line, "reason": reason.as_str()})
+        }
+    }
+}
+
 fn hello(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, RpcError> {
     if state.session.is_some() {
         return Err(RpcError::coded(
@@ -985,6 +1005,9 @@ fn hello(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, RpcErro
     // Les dernières étapes du journal, pour le panneau à la réouverture du projet : un ajout
     // compatible de la réponse, comme `read_only` ; rien n'est exécuté ni journalisé.
     let history = session.history(HISTORY_LIMIT);
+    // État de la chaîne d'empreintes du journal, relu en lecture seule : un ajout compatible
+    // de la réponse, rien n'est écrit même quand la session est en lecture seule.
+    let journal_chain = journal_chain_json(&session.chain_state());
     state.session = Some(session);
     state.project = Some(project.to_string());
     state.announced = commands;
@@ -1009,6 +1032,7 @@ fn hello(state: &mut State<'_>, params: Option<&Value>) -> Result<Value, RpcErro
         "read_only": read_only,
         "commands": catalogue(state),
         "history": history,
+        "journal_chain": journal_chain,
     });
     if read_only {
         result["message"] = json!(JournalError::ReadOnly.to_string());
@@ -1429,6 +1453,69 @@ mod tests {
         assert_eq!(r[0]["result"]["message"], json!(refusal.message));
         drop(first);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn hello_reports_the_journal_chain_and_a_read_only_session_writes_nothing() {
+        let dir = temp_dir();
+        let project = project_in(&dir);
+        let journal = dir.join("p.cassini/journal.jsonl");
+        // Pas de journal : intact.
+        let r = exchange(&[hello_line(2, &[], &project)]);
+        assert_eq!(
+            r[0]["result"]["journal_chain"],
+            json!({"state": "intact", "line": null, "reason": null})
+        );
+        exchange(&[
+            hello_line(2, &[], &project),
+            run_line(2, "system.about", json!({})),
+            run_line(3, "system.about", json!({})),
+            run_line(4, "system.about", json!({})),
+        ]);
+        let r = exchange(&[hello_line(2, &[], &project)]);
+        assert_eq!(r[0]["result"]["journal_chain"]["state"], "intact");
+        // Un octet de la ligne 2 change : la rupture est à la ligne 3.
+        let text = std::fs::read_to_string(&journal).unwrap();
+        let mut rows: Vec<String> = text.lines().map(str::to_string).collect();
+        assert_eq!(rows.len(), 3);
+        rows[1] = rows[1].replacen("\"step\":2", "\"step\":9", 1);
+        std::fs::write(
+            &journal,
+            rows.join(
+                "
+",
+            ) + "
+",
+        )
+        .unwrap();
+        let r = exchange(&[hello_line(2, &[], &project)]);
+        assert_eq!(
+            r[0]["result"]["journal_chain"],
+            json!({"state": "broken", "line": 3, "reason": "prev_mismatch"})
+        );
+        // Lecture seule : l'état est rendu, le fichier reste identique octet pour octet.
+        let before = std::fs::read(&journal).unwrap();
+        let registry = Registry::standard();
+        let first = Session::open(&registry, Path::new(&project)).unwrap();
+        let r = exchange(&[hello_line(2, &[], &project)]);
+        assert_eq!(r[0]["result"]["read_only"], true);
+        assert_eq!(r[0]["result"]["journal_chain"]["state"], "broken");
+        assert_eq!(r[0]["result"]["journal_chain"]["line"], 3);
+        drop(first);
+        assert_eq!(std::fs::read(&journal).unwrap(), before);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn an_extended_old_journal_stays_intact_and_keeps_its_unchained_part() {
+        assert_eq!(
+            journal_chain_json(&ChainState::Intact { unchained_upto: 0 }),
+            json!({"state": "intact", "line": null, "reason": null})
+        );
+        assert_eq!(
+            journal_chain_json(&ChainState::Intact { unchained_upto: 2 }),
+            json!({"state": "intact", "line": 2, "reason": null})
+        );
     }
 
     #[test]

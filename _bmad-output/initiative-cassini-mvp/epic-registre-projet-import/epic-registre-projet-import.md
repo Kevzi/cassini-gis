@@ -98,3 +98,4 @@ pas.
 - Waits on epic 6 because: le journal chaîné (13) se construit après la démo.
 - Waits on epic 7 because: l'API publique du registre (14) ne se construit pas avant la publication.
 - Waits on epic 10 because: l'API publique du registre (14) attend la stabilisation du catalogue étendu.
+- Decision: 2026-11-27 — entrée 13 construite : `prev` et `chain: 1` posés par `Session::append`, `verify_chain` en lecture seule, `journal_chain` dans `session.hello`, avertissement avant le rejeu (`Replay::load`), bandeau du panneau en cas de rupture. Ligne tronquée : `broken` avec le motif `unreadable`, la suivante s'y chaîne par ses octets lus. Limite assumée : la dernière ligne modifiée ne se voit pas sans successeur.

@@ -156,6 +156,19 @@ class ClientTest(unittest.TestCase):
         self.p.feed(reply(1, {"commands": [], "history": past[:1] + ["pas un objet"] + past[1:]}))
         self.assertEqual(self.events[0][1]["history"], past)
 
+    def test_hello_journal_chain_reaches_ready_only_when_it_is_an_object(self):
+        chain = {"state": "broken", "line": 4, "reason": "prev_mismatch"}
+        self.c.start("cassini", "/p.qgz")
+        self.p.feed(reply(1, {"commands": [], "journal_chain": chain}))
+        self.assertEqual(self.events[0][1]["journal_chain"], chain)
+        # Une valeur qui n'est pas un objet est ignorée.
+        other = FakeProcess()
+        events = []
+        c = client.CoreClient(other, lambda k, v: events.append((k, v)))
+        c.start("cassini", "/p.qgz")
+        other.feed(reply(1, {"commands": [], "journal_chain": "rompue"}))
+        self.assertNotIn("journal_chain", events[0][1])
+
     def test_hello_without_versions_is_ready_with_none(self):
         self.c.start("cassini", "/p.qgz")
         self.p.feed(reply(1, {"commands": []}))
@@ -604,10 +617,11 @@ class FakePanel:
     def set_install_info(self, info, reminder=False):
         self.install_infos.append((info, reminder))
 
-    def set_ready(self, catalogue, history=(), read_only=False):
+    def set_ready(self, catalogue, history=(), read_only=False, journal_chain=None):
         self.ready = catalogue
         self.history = list(history)
         self.read_only = read_only
+        self.journal_chain = journal_chain
 
     def on_event(self, kind, payload):
         self.events.append((kind, payload))
@@ -894,6 +908,49 @@ class PanelBannerTest(unittest.TestCase):
         panel.set_banner("died")
         self.assertFalse(panel.read_only)
 
+    def test_a_broken_journal_chain_is_told_in_plain_words_and_blocks_nothing(self):
+        catalogue = [{"id": "system.about", "description_fr": "Version du noyau."}]
+        panel = self.panel
+        panel.project_file = "C:/a/chain.qgz"
+        broken = {"state": "broken", "line": 4, "reason": "prev_mismatch"}
+        panel.set_ready(catalogue, [], journal_chain=broken)
+        # Prêt, rien de bloqué : le bandeau d'état reste vide, l'avis a sa propre ligne.
+        self.assertTrue(panel.ready)
+        self.assertIsNone(panel.banner)
+        self.assertEqual(panel.journal_break, 4)
+        fr = texts.tr("fr", "journal_broken", line=4)
+        self.assertIn("ligne 4", fr)
+        self.assertIn("line 4", texts.tr("en", "journal_broken", line=4))
+        self.assertIn(fr, self.announced)
+        # Intact, ancien (`unchained`), absent ou illisible : rien à dire.
+        for state in (
+            {"state": "intact", "line": None, "reason": None},
+            {"state": "unchained", "line": 3, "reason": None},
+            None,
+            "rompue",
+            {"state": "broken", "line": "x"},
+        ):
+            self.announced.clear()
+            panel.set_ready(catalogue, [], journal_chain=state)
+            self.assertIsNone(panel.journal_break, state)
+            self.assertEqual(self.announced, [texts.tr("fr", "live_ready")])
+        # Le noyau meurt : l'avis tombe avec le noyau.
+        panel.set_ready(catalogue, [], journal_chain=broken)
+        panel.set_banner("died")
+        self.assertIsNone(panel.journal_break)
+
+    def test_a_broken_journal_chain_is_told_in_read_only_too(self):
+        catalogue = [{"id": "system.about", "description_fr": "Version du noyau."}]
+        panel = self.panel
+        panel.project_file = "C:/a/chain_ro.qgz"
+        broken = {"state": "broken", "line": 3, "reason": "prev_mismatch"}
+        panel.set_ready(catalogue, [], read_only=True, journal_chain=broken)
+        self.assertEqual(panel.banner, "read_only")
+        self.assertEqual(panel.journal_break, 3)
+        expected = texts.tr("fr", "read_only") + " " + texts.tr("fr", "journal_broken", line=3)
+        self.assertEqual(self.announced, [expected])
+        self.assertIn("line 3", texts.tr("en", "journal_broken", line=3))
+
     def test_set_ready_fills_the_log_from_history_once_per_project(self):
         catalogue = [{"id": "system.about", "description_fr": "Version du noyau."}]
         past = [{"step": 1, "command": "system.about", "params": {}, "result": {}}]
@@ -940,6 +997,14 @@ class PluginBehaviourTest(unittest.TestCase):
         self.mod.analysis.QgisBackend = backend
         self.addCleanup(setattr, self.mod.analysis, 'QgisBackend', real_backend)
         self.addCleanup(setattr, self.mod.locator, 'locate', self.mod.locator.locate)
+
+    def test_ready_hands_the_journal_chain_to_the_panel(self):
+        self.p.list_models = lambda: None
+        chain = {"state": "broken", "line": 2, "reason": "prev_mismatch"}
+        self.p._on_event(client.READY, {"commands": [], "history": [], "journal_chain": chain})
+        self.assertEqual(self.p.panel.journal_chain, chain)
+        self.p._on_event(client.READY, {"commands": [], "history": []})
+        self.assertIsNone(self.p.panel.journal_chain)
 
     def fake_client(self):
         real = self.mod.client.CoreClient

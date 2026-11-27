@@ -393,6 +393,7 @@ class CassiniPanel(QWidget):
         self.ready = False
         self.banner = "no_project"
         self.banner_message = None  # texte du noyau à montrer tel quel dans le bandeau
+        self.journal_break = None  # ligne où la chaîne du journal est rompue ; None si rien à dire
         self.running = False
         self.last = None  # {"kind", "command", "result"/"message"/"code"}
         self.selected = None  # entrée du catalogue choisie
@@ -931,6 +932,7 @@ class CassiniPanel(QWidget):
         self.focus = None
         if kind is not None:
             self.ready = False
+            self.journal_break = None
             self._drop_stale_run()
         self.render()
         if kind is not None:
@@ -962,11 +964,18 @@ class CassiniPanel(QWidget):
         """Session en lecture seule : noyau prêt, bandeau de lecture seule (AD-11)."""
         return bool(self.ready and self.banner == "read_only")
 
-    def set_ready(self, catalogue, history=(), read_only=False):
+    def set_ready(self, catalogue, history=(), read_only=False, journal_chain=None):
         """Noyau prêt. `read_only` : le journal est tenu par une autre session ; le bandeau
-        le dit et seul « Rejouer le journal » reste actif (EXPERIENCE.md, AD-11)."""
+        le dit et seul « Rejouer le journal » reste actif (EXPERIENCE.md, AD-11).
+        `journal_chain` : état de la chaîne d'empreintes (`session.hello`) ; seule une rupture
+        s'affiche, dans un bandeau qui ne bloque rien : `intact` et `unchained` ne disent rien."""
         self._drop_stale_run()
         self.ready = True
+        self.journal_break = None
+        if isinstance(journal_chain, dict) and journal_chain.get("state") == "broken":
+            line = journal_chain.get("line")
+            if isinstance(line, int) and not isinstance(line, bool) and line >= 1:
+                self.journal_break = line
         self.banner = "read_only" if read_only else None
         self.banner_message = None
         self.replay = None  # noyau (re)lancé : l'issue d'un rejeu précédent ne vaut plus
@@ -994,9 +1003,14 @@ class CassiniPanel(QWidget):
         self.selected = None
         self.render()
         if read_only:
-            _announce(self.banner_text, self._banner_text(self.t))
+            text = self._banner_text(self.t)
+            if self.journal_break is not None:
+                text += " " + self.t("journal_broken", line=self.journal_break)
+            _announce(self.banner_text, text)
         else:
             _announce(self.title, self.t("live_ready"))
+            if self.journal_break is not None:
+                _announce(self.banner_text, self.t("journal_broken", line=self.journal_break))
 
     def _close_plan_entry(self, status, step=None):
         """Ferme la ligne de l'étape en cours ; si le verdict nomme une autre étape
@@ -1216,11 +1230,22 @@ class CassiniPanel(QWidget):
             self.install_note.setText(t("update_reminder"))
 
         usable = self.ready and self.banner is None
-        if self.banner is None:
+        if self.banner is None and self.ready and self.journal_break is not None:
+            # Chaîne du journal rompue : un avis, sans bouton, qui ne désactive rien.
+            text = t("journal_broken", line=self.journal_break)
+            self.banner_text.setText(text)
+            self.banner_text.setAccessibleName(text)
+            self.banner_button.setVisible(False)
+            self.banner_home.setVisible(False)
+            self.banner_zone.setVisible(True)
+        elif self.banner is None:
             self.banner_zone.setVisible(False)
         else:
             action = BANNERS[self.banner][1]
             text = self._banner_text(t)
+            if self.banner == "read_only" and self.ready and self.journal_break is not None:
+                # Lecture seule : l'avis de rupture s'ajoute au texte, sans rien désactiver de plus.
+                text += " " + t("journal_broken", line=self.journal_break)
             self.banner_text.setText(text)
             self.banner_text.setAccessibleName(text)
             self.banner_button.setVisible(action is not None)

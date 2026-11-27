@@ -267,7 +267,10 @@ class CassiniPlugin:
             # Lecture seule : le noyau reste vivant, le panneau ne laisse que le rejeu (AD-11).
             read_only = payload.get("read_only") is True
             self.panel.set_ready(
-                payload.get("commands", []), payload.get("history", []), read_only=read_only
+                payload.get("commands", []),
+                payload.get("history", []),
+                read_only=read_only,
+                journal_chain=payload.get("journal_chain"),
             )
             if not read_only:
                 self.list_models()  # la liste des Réglages, dès que le noyau est prêt

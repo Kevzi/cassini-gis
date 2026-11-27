@@ -3381,6 +3381,9 @@ fn styling_journal(project: &Path, legacy: bool) -> PathBuf {
             .map(|line| {
                 let mut v: Value = serde_json::from_str(line).unwrap();
                 v.as_object_mut().unwrap().remove("replay");
+                // Un vrai ancien journal : ni `prev` ni `chain`.
+                v.as_object_mut().unwrap().remove("prev");
+                v.as_object_mut().unwrap().remove("chain");
                 v.to_string()
             })
             .collect();
@@ -7837,5 +7840,302 @@ fn an_aligned_raster_replays_identically_with_two_resolved_paths() {
     };
     let (outcome, _) = replay_in(&project_file, &project, 2, &mut HashSet::new());
     assert_eq!(outcome.unwrap(), identical);
+    let _ = fs::remove_dir_all(dir);
+}
+
+// --- Journal chaîné par empreinte (ticket 13) ---
+
+fn sha_of(line: &str) -> String {
+    sha256_hex(line.as_bytes())
+}
+
+/// Écrit `n` appels de `system.about` dans un journal neuf ; rend (dossier, projet, texte).
+fn chained_journal(n: usize) -> (PathBuf, PathBuf, String) {
+    let (dir, project, _) = temp_project();
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, &project).unwrap();
+    for _ in 0..n {
+        s.call("system.about", json!({})).unwrap();
+    }
+    let text = fs::read_to_string(s.journal_path()).unwrap();
+    drop(s);
+    (dir, project, text)
+}
+
+fn journal_file(project: &Path) -> PathBuf {
+    project
+        .parent()
+        .unwrap()
+        .join("p.cassini")
+        .join(JOURNAL_FILE)
+}
+
+/// Change des octets d'une ligne sans changer son sens : un espace après `"chain":`.
+fn touch(row: &str) -> String {
+    row.replacen("\"chain\":1", "\"chain\": 1", 1)
+}
+
+#[test]
+fn a_new_journal_chains_each_line_to_the_bytes_of_the_previous_one() {
+    let (dir, project, text) = chained_journal(3);
+    let rows: Vec<&str> = text.lines().collect();
+    assert_eq!(rows.len(), 3);
+    let parsed: Vec<Value> = rows
+        .iter()
+        .map(|r| serde_json::from_str(r).unwrap())
+        .collect();
+    assert_eq!(parsed[0]["prev"], Value::Null);
+    assert_eq!(parsed[1]["prev"], json!(sha_of(rows[0])));
+    assert_eq!(parsed[2]["prev"], json!(sha_of(rows[1])));
+    assert!(parsed.iter().all(|r| r["chain"] == json!(1)));
+    assert_eq!(
+        verify_chain(&journal_file(&project)),
+        ChainState::Intact { unchained_upto: 0 }
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_absent_or_empty_journal_is_intact() {
+    let (dir, project, _) = temp_project();
+    assert_eq!(
+        verify_chain(&journal_file(&project)),
+        ChainState::Intact { unchained_upto: 0 }
+    );
+    fs::create_dir_all(dir.join("p.cassini")).unwrap();
+    fs::write(journal_file(&project), "").unwrap();
+    assert_eq!(
+        verify_chain(&journal_file(&project)),
+        ChainState::Intact { unchained_upto: 0 }
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_modified_line_breaks_the_chain_at_the_next_line() {
+    let (dir, project, text) = chained_journal(4);
+    let mut rows: Vec<String> = text.lines().map(str::to_string).collect();
+    rows[1] = touch(&rows[1]);
+    fs::write(journal_file(&project), rows.join("\n") + "\n").unwrap();
+    assert_eq!(
+        verify_chain(&journal_file(&project)),
+        ChainState::Broken {
+            line: 3,
+            reason: ChainBreak::PrevMismatch
+        }
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_removed_line_breaks_the_chain_at_the_line_after_the_cut() {
+    let (dir, project, text) = chained_journal(4);
+    let mut rows: Vec<String> = text.lines().map(str::to_string).collect();
+    rows.remove(1);
+    fs::write(journal_file(&project), rows.join("\n") + "\n").unwrap();
+    assert_eq!(
+        verify_chain(&journal_file(&project)),
+        ChainState::Broken {
+            line: 2,
+            reason: ChainBreak::PrevMismatch
+        }
+    );
+    // La première ligne retirée : la nouvelle première ne porte pas `prev: null`.
+    let mut rows: Vec<String> = text.lines().map(str::to_string).collect();
+    rows.remove(0);
+    fs::write(journal_file(&project), rows.join("\n") + "\n").unwrap();
+    assert_eq!(
+        verify_chain(&journal_file(&project)),
+        ChainState::Broken {
+            line: 1,
+            reason: ChainBreak::PrevMismatch
+        }
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_inserted_line_breaks_the_chain_at_that_line() {
+    let (dir, project, text) = chained_journal(3);
+    let rows: Vec<String> = text.lines().map(str::to_string).collect();
+    // Sans `prev` ni `chain`.
+    let bare = json!({"step": 9, "id": "system.about", "params": {}, "result": {}}).to_string();
+    let mut with_bare = rows.clone();
+    with_bare.insert(2, bare);
+    fs::write(journal_file(&project), with_bare.join("\n") + "\n").unwrap();
+    assert_eq!(
+        verify_chain(&journal_file(&project)),
+        ChainState::Broken {
+            line: 3,
+            reason: ChainBreak::PrevMissing
+        }
+    );
+    // Avec un `prev` faux, après la chaîne.
+    let wrong = json!({"step": 9, "id": "system.about", "params": {}, "result": {},
+        "prev": "0".repeat(64), "chain": 1})
+    .to_string();
+    let mut with_wrong = rows;
+    with_wrong.push(wrong);
+    fs::write(journal_file(&project), with_wrong.join("\n") + "\n").unwrap();
+    assert_eq!(
+        verify_chain(&journal_file(&project)),
+        ChainState::Broken {
+            line: 4,
+            reason: ChainBreak::PrevMismatch
+        }
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_old_journal_is_unchained_and_an_extended_one_is_intact_on_the_new_side() {
+    let (dir, project, text) = chained_journal(2);
+    let registry = Registry::standard();
+    // Un ancien journal : les mêmes lignes, sans `prev` ni `chain`.
+    let old_text: String = text
+        .lines()
+        .map(|l| {
+            let mut v: Value = serde_json::from_str(l).unwrap();
+            v.as_object_mut().unwrap().remove("prev");
+            v.as_object_mut().unwrap().remove("chain");
+            format!(
+                "{v}
+"
+            )
+        })
+        .collect();
+    fs::write(journal_file(&project), &old_text).unwrap();
+    assert_eq!(
+        verify_chain(&journal_file(&project)),
+        ChainState::Unchained { upto: 2 }
+    );
+    // Rejeu identique d'un ancien journal, sans avertissement de chaîne.
+    let (report, warnings) = replay_of(&registry, &project).unwrap();
+    assert!(report.identical && warnings.is_empty());
+    assert_eq!(
+        fs::read_to_string(journal_file(&project)).unwrap(),
+        old_text
+    );
+
+    // Prolongé : les lignes anciennes ne sont pas réécrites, la première neuve se chaîne à la 2e.
+    let mut s = Session::open(&registry, &project).unwrap();
+    s.call("system.about", json!({})).unwrap();
+    s.call("system.about", json!({})).unwrap();
+    let text = fs::read_to_string(s.journal_path()).unwrap();
+    drop(s);
+    assert!(text.starts_with(&old_text));
+    let rows: Vec<&str> = text.lines().collect();
+    let third: Value = serde_json::from_str(rows[2]).unwrap();
+    assert_eq!(third["prev"], json!(sha_of(rows[1])));
+    assert_eq!(
+        verify_chain(&journal_file(&project)),
+        ChainState::Intact { unchained_upto: 2 }
+    );
+    let (report, warnings) = replay_of(&registry, &project).unwrap();
+    assert!(report.identical && warnings.is_empty());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_truncated_last_line_is_unreadable_and_the_next_line_chains_to_its_bytes() {
+    let (dir, project, text) = chained_journal(2);
+    let path = journal_file(&project);
+    let cut = &text[..text.len() - 20];
+    fs::write(&path, cut).unwrap();
+    assert_eq!(
+        verify_chain(&path),
+        ChainState::Broken {
+            line: 2,
+            reason: ChainBreak::Unreadable
+        }
+    );
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, &project).unwrap();
+    s.call("system.about", json!({})).unwrap();
+    let after = fs::read_to_string(s.journal_path()).unwrap();
+    drop(s);
+    // La ligne tronquée n'est pas réécrite ; la suivante s'y chaîne par ses octets lus.
+    assert!(after.starts_with(cut));
+    let rows: Vec<&str> = after.lines().collect();
+    assert_eq!(rows.len(), 3);
+    let last: Value = serde_json::from_str(rows[2]).unwrap();
+    assert_eq!(last["prev"], json!(sha_of(rows[1])));
+    // Elle reste rompue tant que le fichier n'est pas réparé à la main.
+    assert_eq!(
+        verify_chain(&path),
+        ChainState::Broken {
+            line: 2,
+            reason: ChainBreak::Unreadable
+        }
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_session_in_read_only_mode_reads_the_chain_and_writes_nothing() {
+    let (dir, project, _) = chained_journal(2);
+    let registry = Registry::standard();
+    let first = Session::open(&registry, &project).unwrap();
+    let second = Session::open(&registry, &project).unwrap();
+    assert_eq!(second.mode(), Mode::ReadOnly);
+    let before = fs::read(journal_file(&project)).unwrap();
+    assert_eq!(
+        second.chain_state(),
+        ChainState::Intact { unchained_upto: 0 }
+    );
+    assert_eq!(fs::read(journal_file(&project)).unwrap(), before);
+    drop((first, second));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_broken_chain_warns_before_the_first_step_and_replays_unchanged() {
+    let (dir, project, text) = chained_journal(3);
+    let registry = Registry::standard();
+    let (intact_report, intact_warnings) = replay_of(&registry, &project).unwrap();
+    assert!(intact_warnings.is_empty());
+    let mut rows: Vec<String> = text.lines().map(str::to_string).collect();
+    rows[0] = touch(&rows[0]);
+    fs::write(journal_file(&project), rows.join("\n") + "\n").unwrap();
+    let replay = Replay::load(&registry, &project).unwrap();
+    assert_eq!(replay.warnings().len(), 1);
+    assert!(replay.warnings()[0].contains("ligne 2"));
+    let (report, warnings) = replay_of(&registry, &project).unwrap();
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(report.steps, intact_report.steps);
+    assert_eq!(report.identical, intact_report.identical);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_journal_rewritten_with_crlf_stays_intact_and_an_append_still_verifies() {
+    let (dir, project, text) = chained_journal(3);
+    let path = journal_file(&project);
+    fs::write(&path, text.replace('\n', "\r\n")).unwrap();
+    assert_eq!(
+        verify_chain(&path),
+        ChainState::Intact { unchained_upto: 0 }
+    );
+    let registry = Registry::standard();
+    let mut s = Session::open(&registry, &project).unwrap();
+    s.call("system.about", json!({})).unwrap();
+    drop(s);
+    assert_eq!(
+        verify_chain(&path),
+        ChainState::Intact { unchained_upto: 0 }
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn removing_the_last_line_is_not_detected_which_is_the_documented_limit() {
+    let (dir, project, text) = chained_journal(3);
+    let mut rows: Vec<&str> = text.lines().collect();
+    rows.pop();
+    fs::write(journal_file(&project), rows.join("\n") + "\n").unwrap();
+    assert_eq!(
+        verify_chain(&journal_file(&project)),
+        ChainState::Intact { unchained_upto: 0 }
+    );
     let _ = fs::remove_dir_all(dir);
 }
