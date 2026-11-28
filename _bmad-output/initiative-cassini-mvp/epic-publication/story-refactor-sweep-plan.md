@@ -3,14 +3,14 @@ title: 'Refactor sweep de l epic publication'
 type: 'chore'
 ticket: '13'
 created: '2026-11-23'
-status: 'ready-for-dev'
+status: 'in-review'
 baseline_revision: 'f1117af5c0994efa9e466517c8005c24137028eb'
 route: 'full'
 route_source: 'auto'
 risk: 'medium'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick']
 review_loop_iteration: 0
 context: []
 ---

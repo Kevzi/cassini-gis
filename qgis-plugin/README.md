@@ -231,7 +231,7 @@ Recette manuelle de `raster.polygonize` [ticket 37] (un GeoTIFF de classes, par 
 3. Une bande absente du raster (4 sur 3 bandes) : `analysis.bad_params`, avant tout lancement ; un raster absent :
    `layer.not_found` ; pas un GeoTIFF : `layer.invalid_source` ; sans système : `analysis.bad_params`. Un QGIS sans
    `gdal:polygonize` n'annonce pas la commande.
-4. Sonde sous QGIS 3.44 : `"C:\Program Files\QGIS 3.44.15in\python-qgis-ltr.bat" qgis-plugin/tests/probe_polygonize.py`
+4. Sonde sous QGIS 3.44 : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat" qgis-plugin/tests/probe_polygonize.py`
    doit finir par `VERDICT : OK`.
 
 Recette manuelle de `raster.align` [ticket 38] (deux GeoTIFF d'une bande avec système, de grilles différentes) :
@@ -247,7 +247,7 @@ Recette manuelle de `raster.align` [ticket 38] (deux GeoTIFF d'une bande avec sy
 4. Un raster ou une référence absent : `layer.not_found` ; pas un GeoTIFF : `layer.invalid_source` ; sans
    système ou à plusieurs bandes : `analysis.bad_params`, avant tout lancement. Un QGIS sans
    `native:alignsingleraster` n'annonce pas la commande.
-5. Sonde sous QGIS 3.44 : `"C:\Program Files\QGIS 3.44.15in\python-qgis-ltr.bat" qgis-plugin/tests/probe_align.py`
+5. Sonde sous QGIS 3.44 : `"C:\Program Files\QGIS 3.44.15\bin\python-qgis-ltr.bat" qgis-plugin/tests/probe_align.py`
    doit finir par `VERDICT : OK` (la phase 2 cherche le noyau dans `CASSINI_CORE`).
 
 Recette manuelle de `analysis.dissolve` [ticket 24] (une couche de parcelles ou de zones) :

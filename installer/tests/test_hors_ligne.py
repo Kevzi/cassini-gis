@@ -99,6 +99,11 @@ class TestArchive(Base):
 
 
 class TestModele(Base):
+    def setUp(self):
+        super().setUp()
+        self.attentes = []
+        self._dormir = lambda s: self.attentes.append(s)
+
     def decl(self, contenu: bytes, sha=None, taille=None):
         src = self.d / "src.gguf"
         src.write_bytes(contenu)
@@ -141,9 +146,94 @@ class TestModele(Base):
         tm.urllib.request.urlopen = lambda *a, **k: Coupe()
         try:
             with self.assertRaises(tm.ModeleErreur):
-                tm.telecharger(self.decl(b"gguf"), out, marge=0)
+                tm.telecharger(self.decl(b"gguf"), out, marge=0, dormir=self._dormir)
         finally:
             tm.urllib.request.urlopen = orig
+        self.assertFalse(out.exists())
+
+    def test_coupure_passagere_puis_reprise(self):
+        contenu = b"gguf" * 10
+        d = self.decl(contenu)
+        reel = tm.urllib.request.urlopen
+        appels = []
+
+        class Coupe:
+            def __enter__(s):
+                return s
+
+            def __exit__(s, *a):
+                return False
+
+            def read(s, n):
+                raise http.client.IncompleteRead(b"par")
+
+        def faux(url, timeout=None):
+            appels.append(url)
+            return Coupe() if len(appels) <= 2 else reel(url, timeout=timeout)
+
+        out = self.d / "m.gguf"
+        tm.urllib.request.urlopen = faux
+        try:
+            tm.telecharger(d, out, marge=0, dormir=self._dormir)
+        finally:
+            tm.urllib.request.urlopen = reel
+        self.assertEqual(len(appels), 3)
+        self.assertEqual(out.read_bytes(), contenu)
+        self.assertEqual(len(self.attentes), 2)
+        self.assertLess(self.attentes[0], self.attentes[1])
+
+    def test_trois_essais_au_plus(self):
+        d = self.decl(b"gguf")
+        d["url"] = (self.d / "absent.gguf").as_uri()
+        with self.assertRaises(tm.ModeleErreur) as c:
+            tm.telecharger(d, self.d / "m.gguf", marge=0, dormir=self._dormir)
+        self.assertIn("3 essais", str(c.exception))
+        self.assertEqual(len(self.attentes), 2)
+
+    def test_adresse_http_refusee_avant_connexion(self):
+        d = self.decl(b"gguf")
+        d["url"] = "http://exemple.invalid/m.gguf"
+        reel = tm.urllib.request.urlopen
+
+        def interdit(*a, **k):
+            raise AssertionError("connexion tentée")
+
+        tm.urllib.request.urlopen = interdit
+        try:
+            with self.assertRaises(tm.ModeleErreur) as c:
+                tm.telecharger(d, self.d / "m.gguf", marge=0)
+        finally:
+            tm.urllib.request.urlopen = reel
+        self.assertIn("https", str(c.exception))
+
+    def test_redirection_vers_http_refusee(self):
+        h = tm._RedirectionHttps()
+        req = tm.urllib.request.Request("https://huggingface.co/m.gguf")
+        with self.assertRaises(tm.ModeleErreur) as c:
+            h.redirect_request(req, None, 302, "Found", {}, "http://exemple.invalid/m.gguf")
+        self.assertIn("https", str(c.exception))
+        suite = h.redirect_request(req, None, 302, "Found", {}, "https://cdn.exemple.invalid/m.gguf")
+        self.assertEqual(suite.full_url, "https://cdn.exemple.invalid/m.gguf")
+
+    def test_delai_global_depasse(self):
+        out = self.d / "m.gguf"
+        with self.assertRaises(tm.ModeleErreur) as c:
+            tm.telecharger(self.decl(b"gguf"), out, marge=0, delai_global=-1.0, dormir=self._dormir)
+        self.assertIn("délai global", str(c.exception))
+        self.assertFalse(out.exists())
+        self.assertEqual(self.attentes, [])
+
+    def test_delai_global_en_cours_de_lecture(self):
+        out = self.d / "m.gguf"
+        horloge = iter([0.0, 0.0, 10.0, 10.0, 10.0])
+        reel = tm.time.monotonic
+        tm.time.monotonic = lambda: next(horloge)
+        try:
+            with self.assertRaises(tm.ModeleErreur) as c:
+                tm.telecharger(self.decl(b"gguf"), out, marge=0, delai_global=5.0, dormir=self._dormir)
+        finally:
+            tm.time.monotonic = reel
+        self.assertIn("délai global", str(c.exception))
         self.assertFalse(out.exists())
 
     def test_declaration_sha_et_taille_invalides(self):
@@ -159,7 +249,7 @@ class TestModele(Base):
         d = self.decl(b"gguf")
         d["url"] = (self.d / "absent.gguf").as_uri()
         with self.assertRaises(tm.ModeleErreur):
-            tm.telecharger(d, self.d / "m.gguf", marge=0)
+            tm.telecharger(d, self.d / "m.gguf", marge=0, dormir=self._dormir)
 
     def test_espace_insuffisant(self):
         with self.assertRaises(tm.ModeleErreur):

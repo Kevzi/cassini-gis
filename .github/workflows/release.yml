@@ -21,8 +21,10 @@ on:
   workflow_dispatch:
 
 # Seul workflow à écrire : la publication de la release.
+# `actions: read` : la vérification de la recette verte lit les exécutions du workflow Recette.
 permissions:
   contents: write
+  actions: read
 
 jobs:
   # ---- Linux (7.7) : noyau processeur, deux archives, preuve de cassini.sh ----
@@ -33,6 +35,20 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
+
+      # Sur étiquette seulement (l'essai à blanc, lancé à la main, n'est pas concerné) : la recette
+      # (workflow recette.yml) doit avoir réussi sur ce commit exact, sinon rien n'est construit.
+      - name: Recette verte du commit
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          n=$(gh run list --workflow recette.yml --commit "$GITHUB_SHA" --status success --json databaseId --jq 'length')
+          if [ "${n:-0}" -lt 1 ]; then
+            echo "::error::release arrêtée : la recette n'a pas réussi sur le commit $GITHUB_SHA (étiquette $GITHUB_REF_NAME). Attendre une recette verte sur ce commit, puis poser l'étiquette."
+            exit 1
+          fi
+          echo "recette verte sur $GITHUB_SHA ($n exécution)"
 
       - uses: actions/setup-python@v7
         with:
@@ -221,7 +237,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $proof = "$PWD\proof"
-          New-Item -ItemType Directory -Force "$proof\valide", "$proof\altere" | Out-Null
+          New-Item -ItemType Directory -Force "$proof\valide" | Out-Null
           Copy-Item dist\noyau\* "$proof\"
           $fichiers = @(Get-ChildItem dist\noyau -File | ForEach-Object { $_.FullName })
           # Modèle de preuve : un petit fichier servi en local, sous le nom et avec les champs
@@ -243,14 +259,19 @@ jobs:
           New-Item -ItemType Directory -Force "$proof\modele-altere" | Out-Null
           python -I installer/manifeste.py --etiquette $env:TAG --base-url http://127.0.0.1:8000 --modele "$proof\modele-altere.json" --sortie "$proof\modele-altere\manifeste.json" @fichiers
           if ($LASTEXITCODE -ne 0) { throw "manifeste de preuve (modèle altéré) : échec" }
-          # Manifeste altéré : le premier caractère de l'empreinte de la DERNIÈRE entrée de
-          # `fichiers` (une DLL, ni le noyau ni le modèle) est changé.
+          # Manifestes altérés : un par entrée de `fichiers` (noyau, DLL, textes), le premier
+          # caractère de l'empreinte de CETTE entrée seule étant changé ; la section modèle,
+          # après les entrées, n'est pas touchée.
           $json = Get-Content "$proof\valide\manifeste.json" -Raw
           $avantModele = $json.Substring(0, $json.IndexOf('"modele"'))
-          $m = [regex]::Matches($avantModele, '"sha256": "(.)') | Select-Object -Last 1
-          $c = if ($m.Groups[1].Value -eq '0') { '1' } else { '0' }
-          $json = $json.Remove($m.Groups[1].Index, 1).Insert($m.Groups[1].Index, $c)
-          [IO.File]::WriteAllText("$proof\altere\manifeste.json", $json)
+          $entrees = @([regex]::Matches($avantModele, '"sha256": "(.)'))
+          if ($entrees.Count -ne $fichiers.Count) { throw "manifeste : $($entrees.Count) empreintes pour $($fichiers.Count) fichiers" }
+          for ($k = 0; $k -lt $entrees.Count; $k++) {
+            $pos = $entrees[$k].Groups[1].Index
+            $c = if ($entrees[$k].Groups[1].Value -eq '0') { '1' } else { '0' }
+            New-Item -ItemType Directory -Force "$proof\altere-$k" | Out-Null
+            [IO.File]::WriteAllText("$proof\altere-$k\manifeste.json", $json.Remove($pos, 1).Insert($pos, $c))
+          }
 
           $srv = Start-Process python -ArgumentList '-I','-m','http.server','8000','--bind','127.0.0.1','--directory',$proof -PassThru -WindowStyle Hidden
           try {
@@ -391,12 +412,14 @@ jobs:
             if (Test-Path "$dir1c\bin\*") { throw "un fichier a été posé malgré le modèle altéré" }
             Write-Host "modèle altéré refusé (code $($p.ExitCode))"
 
-            # 2. Empreinte altérée : installation refusée, rien posé.
-            $dir2 = "$proof\inst-altere"
-            $p = Start-Process $inst -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$dir2",'/MANIFESTE=http://127.0.0.1:8000/altere/manifeste.json' -Wait -PassThru
-            if ($p.ExitCode -eq 0) { throw "l'installation altérée aurait dû être refusée" }
-            if (Test-Path "$dir2\bin\*") { throw "un fichier a été posé malgré l'empreinte fausse" }
-            Write-Host "empreinte altérée refusée (code $($p.ExitCode))"
+            # 2. Empreinte altérée, une entrée à la fois : chaque installation est refusée, rien posé.
+            for ($k = 0; $k -lt $entrees.Count; $k++) {
+              $dir2 = "$proof\inst-altere-$k"
+              $p = Start-Process $inst -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$dir2","/MANIFESTE=http://127.0.0.1:8000/altere-$k/manifeste.json" -Wait -PassThru
+              if ($p.ExitCode -eq 0) { throw "l'installation altérée (entrée $k) aurait dû être refusée" }
+              if (Test-Path "$dir2\bin\*") { throw "un fichier a été posé malgré l'empreinte fausse (entrée $k)" }
+            }
+            Write-Host "empreinte altérée refusée pour chacune des $($entrees.Count) entrées"
 
             # 3. Manifeste injoignable (aucun serveur sur ce port) : installation refusée.
             $dir3 = "$proof\inst-injoignable"

@@ -1143,29 +1143,29 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
   evidence: relecture de 7.9 (2026-11-12) ; `current_plan` borné au plan en cours (`plan_start`).
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-publication/story-balle-tracante-etiquette-release-et-installeur-en-ligne-mini-plan.md`
-  summary: La release ne rejoue pas la recette complète (fmt, clippy, tests) avant de publier.
+  summary: RÉSOLU (refactor sweep 13) : l'étape « Recette verte du commit » de release.yml arrête la release avant toute construction si recette.yml n'a pas réussi sur le commit étiqueté. Constat d'origine : La release ne rejoue pas la recette complète (fmt, clippy, tests) avant de publier.
   evidence: release.yml ne lance que le manifeste, la construction et la garde hors ligne ; une étiquette peut tomber sur un commit jamais vert (Edge Case Hunter, Blind Hunter). Contrôle manuel dans docs/publier-une-version.md.
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-publication/story-balle-tracante-etiquette-release-et-installeur-en-ligne-mini-plan.md`
-  summary: Prouver l'installeur et le manifeste sans étiquette (déclencheur workflow_dispatch sans publication).
+  summary: RÉSOLU : le déclencheur workflow_dispatch de release.yml fait l'essai à blanc sans publier. Constat d'origine : Prouver l'installeur et le manifeste sans étiquette (déclencheur workflow_dispatch sans publication).
   evidence: seule une étiquette exécute le .iss ; une erreur coûte une étiquette publique à supprimer (Verification Gap, Intent Alignment).
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-publication/story-balle-tracante-etiquette-release-et-installeur-en-ligne-mini-plan.md`
-  summary: Publier l'empreinte SHA-256 de l'installeur lui-même sur la page d'accueil et la release (7.12).
+  summary: RÉSOLU : les empreintes de l'installeur figurent sur la page et la release. Constat d'origine : Publier l'empreinte SHA-256 de l'installeur lui-même sur la page d'accueil et la release (7.12).
   evidence: l'avertissement SmartScreen demande de confiance sans moyen de vérifier ; Q6 de l'epic place les empreintes sur la page (Blind Hunter).
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-publication/story-balle-tracante-etiquette-release-et-installeur-en-ligne-mini-plan.md`
-  summary: Preuves de refus plus strictes : lire le journal de l'installeur (/LOG=) pour la cause du refus. Non vérifié, maybe-false.
+  summary: REPORTÉ (refactor sweep 13, sans correction) : Preuves de refus plus strictes : lire le journal de l'installeur (/LOG=) pour la cause du refus. Non vérifié, maybe-false.
   evidence: code de sortie non nul seulement ; se règle au premier passage réel sur Windows (Edge Case Hunter, Blind Hunter).
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-publication/story-balle-tracante-etiquette-release-et-installeur-en-ligne-mini-plan.md`
-  summary: Champ de schéma dans manifeste.json et fichier du noyau verrouillé lors d'une mise à jour, pour 7.5.
+  summary: REPORTÉ (refactor sweep 13, sans correction ; le format du manifeste ne change pas) : Champ de schéma dans manifeste.json et fichier du noyau verrouillé lors d'une mise à jour, pour 7.5.
   evidence: le format du manifeste est lu par recherche de texte ; « Mettre à jour Cassini » le fera évoluer (Blind Hunter, Edge Case Hunter).
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-publication/story-porte-2-sous-windows-un-seul-fichier-installable-reseau-coup-plan.md`
-  summary: Nouvelle tentative avec attente croissante pour le téléchargement du modèle (2,8 Go) dans la release.
+  summary: RÉSOLU (refactor sweep 13) : trois essais avec attente croissante dans telecharger_modele.py. Constat d'origine : Nouvelle tentative avec attente croissante pour le téléchargement du modèle (2,8 Go) dans la release.
   evidence: un incident passager de Hugging Face fait échouer toute la release, à relancer à la main (Blind Hunter, Edge Case Hunter).
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-publication/story-porte-2-sous-windows-un-seul-fichier-installable-reseau-coup-plan.md`
-  summary: Limiter l'adresse du modèle à https, ajouter un délai global au téléchargement et durcir la détection de binaire de l'archive d'extension.
+  summary: RÉSOLU en partie (refactor sweep 13) : https exigé (file:// toléré pour les tests) et délai global ajoutés ; REPORTÉ sans correction : la détection de binaire de l'archive d'extension. Constat d'origine : Limiter l'adresse du modèle à https, ajouter un délai global au téléchargement et durcir la détection de binaire de l'archive d'extension.
   evidence: les tests utilisent file:// ; un serveur qui goutte à goutte bloque la CI ; un zip imbriqué passerait pour « sans binaire » (Edge Case Hunter).
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-publication/story-noyau-gpu-vulkan-construit-par-la-recette-windows-plan.md`
-  summary: La boucle multi-entrées de l'installeur en ligne (cassini-en-ligne.iss) n'est prouvée que par l'essai à blanc de la release, et la preuve n'altère que la dernière empreinte.
+  summary: RÉSOLU (refactor sweep 13) : la preuve altère chaque entrée du manifeste, une à la fois ; reste vrai : boucle Pascal prouvée seulement par l'essai à blanc de la release. Constat d'origine : La boucle multi-entrées de l'installeur en ligne (cassini-en-ligne.iss) n'est prouvée que par l'essai à blanc de la release, et la preuve n'altère que la dernière empreinte.
   evidence: Pascal Script avec avancée par Pos/Copy, aucun test unitaire ; à vérifier au premier `gh workflow run release.yml` (manifeste valide puis altéré, éventuellement une altération sur chaque entrée).
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-export-et-demo/story-la-demo-passe-par-la-pente-du-mnt-plan.md`
@@ -1282,7 +1282,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
   summary: `raster.contour` (10.26) : les noms de paramètres de `gdal:contour` ne sont vérifiés que sous QGIS 3.44 ; le jeu sous 4.x et un GeoTIFF réel sans système de coordonnées (la matrice nomme un `.asc`, refusé plus tôt comme non-`.tif`) ne sont pas essayés sous QGIS.
   evidence: `probe_contour.py` n'a tourné que sur 3.44.15 ; la traduction est un jeu fixe de clés dans `translate_raster_contour`. À régler en lançant la sonde sur une série 4 installée, avant la livraison (10.19).
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-difference-de-couches-analysis-difference-plan.md`
-  summary: deux chemins de sonde de `qgis-plugin/README.md` contiennent un octet retour arrière (0x08) à la place de `\bin`.
+  summary: RÉSOLU : octet 0x08 retiré du README. Constat d'origine : deux chemins de sonde de `qgis-plugin/README.md` contiennent un octet retour arrière (0x08) à la place de `\bin`.
   evidence: présents dans HEAD avant le ticket 10.21 (2 occurrences), la commande copiée depuis le README échoue.
 
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-catalogue-etendu-qgis/story-atlas-pdf-layout-export-atlas-plan.md`
@@ -1363,3 +1363,6 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-grammaire-limitee-aux-commandes-connues-du-modele-plan.md`
   summary: Le préchauffage du modèle se fait sur le modèle par défaut (`choose(None)`), alors que la requête peut en choisir un autre dont la déclaration connaît d'autres commandes ajoutées.
   evidence: `ModelComposer::warm` dans `cli/src/lib.rs` (conception d'avant 5.52) ; l'effet est un cache de tête de prompt perdu, pas une réponse fausse.
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-publication/story-refactor-sweep-plan.md`
+  summary: REPORTÉ (refactor sweep 13, sans correction) : message « à jour » affiché avant les pages de l'installeur ; champ de schéma du manifeste ; lecture du journal `/LOG=` pour la cause d'un refus ; détection de binaire de l'archive d'extension (zip imbriqué).
+  evidence: constats moyens ou de faible valeur de l'epic 7, listés dans le plan ; aucun ne change le format du manifeste ni l'installeur Windows.
