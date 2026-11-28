@@ -3,7 +3,7 @@ title: 'Refactor sweep de l epic publication'
 type: 'chore'
 ticket: '13'
 created: '2026-11-23'
-status: 'in-review'
+status: 'built'
 baseline_revision: 'f1117af5c0994efa9e466517c8005c24137028eb'
 route: 'full'
 route_source: 'auto'
@@ -61,6 +61,22 @@ context: []
 - Given une coupure passagère, when le modèle se télécharge, then il aboutit sans intervention et son SHA-256 est vérifié.
 - Given une étiquette sur un commit sans recette verte, when la release démarre, then elle échoue avant de construire.
 - Given un manifeste dont une entrée est altérée, when l'installeur est prouvé, then il refuse pour chacune des entrées.
+
+## Review Triage Log
+
+Passe 1 (quick) : 1 medium, 6 low.
+
+| Constat | Verdict | Route | Preuve / action |
+|---|---|---|---|
+| Redirection https vers http non bloquée | medium | patch | `_RedirectionHttps` et `test_redirection_vers_http_refusee` |
+| Recette verte acceptée sur tout événement ou branche | low | rejeté | la recette a bien réussi sur ce commit ; filtrer l'événement risque un faux refus non testable ici |
+| Branche « délai global avant un nouvel essai » non testée | low | rejeté | correctif = test seul |
+| Test de délai fragile (liste de 5 valeurs) | low | rejeté | test seul, sans effet produit |
+| Erreurs HTTP définitives retentées | low | rejeté | 3 essais, 15 s d'attente au pire |
+| Pas de reprise partielle | low | rejeté | la matrice dit « reprend » = nouvel essai, SHA-256 vérifié à chaque fois |
+| Correction du README hors plan | false | rejeté | l'entrée « RÉSOLU » du plan l'exige |
+
+La vérification complète (recette verte sur une nouvelle étiquette, essai à blanc `gh workflow run release.yml`) n'est pas faite : elle part sur GitHub et attend l'accord du propriétaire.
 
 ## Verification
 
