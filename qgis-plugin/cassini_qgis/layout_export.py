@@ -74,6 +74,7 @@ La mise en page de QGIS ne tourne pas hors du fil principal : l'export est synch
 le seul endroit qui touche `qgis.core`, les tests mettent une doublure.
 """
 
+import contextlib
 import math
 import os
 import re
@@ -1411,8 +1412,6 @@ class LayoutExportGesture(_ReadGesture):
 
     @staticmethod
     def _discard(path):
-        try:
+        with contextlib.suppress(OSError):  # pragma: no cover
             if os.path.exists(path):
                 os.remove(path)
-        except OSError:  # pragma: no cover
-            pass

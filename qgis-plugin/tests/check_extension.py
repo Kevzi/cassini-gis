@@ -89,6 +89,31 @@ def check_imports(pkg):
     return errors
 
 
+def find_silent_handlers(source, path="<source>"):
+    """Gestionnaires `except` dont le corps n'est que `pass` (équivalent de Bandit B110)."""
+    tree = ast.parse(source, filename=path)
+    return [
+        f"{path}:{node.lineno} : « except … : pass » refusé (Bandit B110, bloquant au dépôt d'extensions) ; "
+        "journaliser, affecter explicitement, utiliser contextlib.suppress ou un except plus précis avec un corps réel"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ExceptHandler) and all(isinstance(s, ast.Pass) for s in node.body)
+    ]
+
+
+def check_silent_except(pkg):
+    errors = []
+    for dirpath, _dirs, files in os.walk(pkg):
+        for name in sorted(files):
+            if name.endswith(".py"):
+                path = os.path.join(dirpath, name)
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        errors += find_silent_handlers(f.read(), path)
+                except (SyntaxError, UnicodeDecodeError):
+                    pass  # déjà signalé par check_imports
+    return errors
+
+
 def check_size(pkg):
     total = 0
     for dirpath, _dirs, files in os.walk(pkg):
@@ -165,7 +190,7 @@ def check_table(pkg, rows=None):
 
 
 def run(pkg, publication=False):
-    errors = check_imports(pkg) + check_size(pkg) + check_metadata(pkg) + check_table(pkg)
+    errors = check_imports(pkg) + check_silent_except(pkg) + check_size(pkg) + check_metadata(pkg) + check_table(pkg)
     return errors + check_publication(pkg) if publication else errors
 
 

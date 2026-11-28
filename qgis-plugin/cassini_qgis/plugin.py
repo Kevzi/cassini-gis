@@ -4,6 +4,7 @@ Qt uniquement par `qgis.PyQt` (AD-18). Aucune logique métier ici : le noyau
 décide, le panneau affiche (AD-4).
 """
 
+import contextlib
 import datetime
 import os
 
@@ -97,10 +98,8 @@ class CassiniPlugin:
         ):
             if signal is None:
                 continue
-            try:
+            with contextlib.suppress(TypeError, RuntimeError):
                 signal.disconnect(slot)
-            except (TypeError, RuntimeError):
-                pass
         if self.dock is not None:
             self.iface.removeDockWidget(self.dock)
             self.dock.deleteLater()

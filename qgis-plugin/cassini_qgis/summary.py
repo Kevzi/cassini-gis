@@ -1111,7 +1111,7 @@ def _line_of_sight(lang, p, r, names):
                 lang, "sum_los_hidden", obstruction=obstruction, distance=distance
             )
     except _Unreadable:
-        pass
+        return text
     return text
 
 

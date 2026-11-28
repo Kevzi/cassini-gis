@@ -12,7 +12,7 @@ au-delà de 2.35 (Ubuntu 22.04) : la garde lit `objdump -T`.
 
 Usage :
     python -I installer/assembler_linux.py --binaire target/release/cassini \\
-        --modele modele/cassini-composition-4b-0.3.0-Q4_K_M.gguf --textes dist/licences --version 0.1.1 --sortie dist-linux
+        --modele modele/cassini-composition-4b-0.3.0-Q4_K_M.gguf --textes dist/licences --version 0.1.5 --sortie dist-linux
 """
 
 import argparse

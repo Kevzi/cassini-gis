@@ -99,6 +99,21 @@ class GardeTest(unittest.TestCase):
         for mot in ("email", "homepage", "repository", "tracker", "experimental", "traceur", "a.svg", "LICENSE"):
             self.assertIn(mot, texte)
 
+    def test_except_pass_refuse(self):
+        src = "try:\n    x = 1\nexcept OSError:\n    pass\n"
+        errs = ce.check_silent_except(self.pkg(src))
+        self.assertEqual(len(errs), 1)
+        self.assertIn("mod.py:3", errs[0])
+        self.assertIn("B110", errs[0])
+
+    def test_except_avec_corps_reel_accepte(self):
+        for corps in ("value = None", "return 0", "raise"):
+            with self.subTest(corps=corps):
+                src = f"def f():\n    try:\n        x = 1\n    except OSError:\n        {corps}\n"
+                self.assertEqual(ce.check_silent_except(self.pkg(src)), [])
+        src = "import contextlib\nwith contextlib.suppress(OSError):\n    pass\n"
+        self.assertEqual(ce.check_silent_except(self.pkg(src)), [])
+
     def test_noyau_sans_qgis(self):
         for crate in ("core", "cli", "ai"):
             path = os.path.join(ROOT, crate, "Cargo.toml")

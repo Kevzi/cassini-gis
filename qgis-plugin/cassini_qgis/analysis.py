@@ -2111,10 +2111,8 @@ def _remove(path):
     if ext.lower() == ".shp":
         paths += [stem + companion for companion in _SHAPEFILE_COMPANIONS]
     for candidate in paths:
-        try:
+        with contextlib.suppress(OSError):
             os.remove(candidate)
-        except OSError:
-            pass
 
 
 def _file_name(path):
