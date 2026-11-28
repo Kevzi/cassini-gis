@@ -35,3 +35,7 @@ gpu = ["cassini-ai/gpu"]
 # Lecture de la table d'imports du binaire, PE sous Windows et ELF sous Linux (licence Apache-2.0 OR MIT), tests seulement.
 [dev-dependencies]
 object = { version = "0.40", default-features = false, features = ["read_core", "pe", "elf"] }
+# Ticket 5.52 : une commande ajoutee d'essai pour prouver le filtre des commandes connues ; deja dans
+# l'arbre (MIT OR Apache-2.0), tests seulement.
+schemars = "1"
+serde = { version = "1", features = ["derive"] }

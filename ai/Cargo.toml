@@ -38,6 +38,10 @@ windows-sys = { version = "0.61", features = [
 # produit n'embarque pas le generateur. Crate du depot, aucune dependance externe ajoutee.
 [dev-dependencies]
 cassini-training = { path = "../training" }
+# Ticket 5.52 : une commande ajoutee d'essai (schema des parametres) pour prouver la grammaire
+# limitee aux commandes connues ; deja dans l'arbre (MIT OR Apache-2.0), jamais dans le produit.
+schemars = "1"
+serde = { version = "1", features = ["derive"] }
 
 [features]
 # Mesure seulement : CUDA n'est jamais livre (bibliotheques proprietaires NVIDIA).

@@ -1359,3 +1359,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-facade-qgis/story-programme-noyau-choisi-dans-les-reglages-annonce-et-confirme-plan.md`
   summary: Un binaire remplacé entre la confirmation (empreinte) et le lancement par QProcess est lancé sans nouvelle empreinte.
   evidence: `plugin._trusted` calcule le SHA-256, puis `client.start(program)` relit le fichier plus tard ; le fermer demanderait de lancer une copie vérifiée.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-agent-et-mcp/story-grammaire-limitee-aux-commandes-connues-du-modele-plan.md`
+  summary: Le préchauffage du modèle se fait sur le modèle par défaut (`choose(None)`), alors que la requête peut en choisir un autre dont la déclaration connaît d'autres commandes ajoutées.
+  evidence: `ModelComposer::warm` dans `cli/src/lib.rs` (conception d'avant 5.52) ; l'effet est un cache de tête de prompt perdu, pas une réponse fausse.

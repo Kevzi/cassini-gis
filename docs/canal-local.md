@@ -246,6 +246,11 @@ la raison ; elle n'est jamais prise par défaut. Aucun GGUF n'est ouvert pour li
 - Une erreur de découverte (`models.no_folder`, `models.unreadable`) remplace le dossier par
   « (dossier des modèles) ».
 
+La déclaration peut porter un champ facultatif `commands` : les commandes ajoutées par un
+programme dérivé que ce modèle a apprises (ticket 5.52). Seules celles-là entrent dans sa
+grammaire et son prompt ; un GGUF seul, sans déclaration, les voit toutes. Cette liste ne change
+pas le catalogue de la session ni les outils MCP. Voir `docs/dossier-des-modeles.md`.
+
 ### `plan.propose` (extension vers noyau)
 
 ```json

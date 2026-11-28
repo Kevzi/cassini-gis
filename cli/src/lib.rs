@@ -384,7 +384,10 @@ impl cassini_core::serve::Composer for ModelComposer {
     ) -> Option<Box<dyn FnOnce() + Send>> {
         // Modèle absent ou illisible : rien ne se passe, la première demande rendra l'erreur.
         let (chosen, _) = self.choose(None).ok()?;
-        let turns = cassini_ai::plan::warm_turns(chosen.style, registry, available);
+        let offered = chosen
+            .offered_set(registry, Some(available))
+            .unwrap_or_else(|| available.clone());
+        let turns = cassini_ai::plan::warm_turns(chosen.style, registry, &offered);
         Some(warm_job(chosen.files, turns))
     }
 
@@ -395,10 +398,13 @@ impl cassini_core::serve::Composer for ModelComposer {
         view: &cassini_core::agent_inventory::ModelInventory,
     ) -> Option<Box<dyn FnOnce() + Send>> {
         let (chosen, _) = self.choose(None).ok()?;
+        let offered = chosen
+            .offered_set(registry, Some(available))
+            .unwrap_or_else(|| available.clone());
         let turns = cassini_ai::plan::warm_turns_with_inventory(
             chosen.style,
             registry,
-            available,
+            &offered,
             &view.inventory,
             view.user_layers,
         );
@@ -481,9 +487,23 @@ fn measured_generator(
 struct ChosenModel {
     files: cassini_ai::ModelFiles,
     style: cassini_ai::plan::PromptStyle,
+    /// Commandes ajoutées par un programme dérivé que la déclaration nomme (ticket 5.52) ; `None` :
+    /// un GGUF seul, sans déclaration, qui les voit toutes.
+    known: Option<std::collections::BTreeSet<String>>,
 }
 
 impl ChosenModel {
+    /// Les commandes décrites au modèle : celles de `available` (`None` : toutes), sans les
+    /// commandes ajoutées que ce modèle ne connaît pas. Un seul filtre pour le prompt, la grammaire
+    /// et le préchauffage.
+    fn offered_set(
+        &self,
+        registry: &Registry,
+        available: Option<&std::collections::BTreeSet<String>>,
+    ) -> Option<std::collections::BTreeSet<String>> {
+        cassini_ai::plan::restrict_to_known(registry, available, self.known.as_ref())
+    }
+
     /// Compose le plan de `request` dans le prompt que ce modèle attend. `user_layers` : le nombre
     /// de couches de l'utilisateur en tête de `inventory`, quand il est connu (ticket 5.19).
     fn compose(
@@ -522,10 +542,11 @@ impl ChosenModel {
             &cassini_ai::plan::GenerationRequest,
         ) -> Result<cassini_ai::Completion, cassini_ai::AiError>,
     ) -> Result<cassini_core::plan::Plan, cassini_ai::plan::AgentError> {
+        let offered = self.offered_set(registry, available);
         cassini_ai::plan::compose_plan_anchored_cut(
             self.style,
             registry,
-            available,
+            offered.as_ref(),
             inventory,
             user_layers,
             cut_layers,
@@ -552,9 +573,13 @@ impl ChosenModel {
 /// Résout le fichier `path` d'un modèle par `cassini_ai::plan::resolve_model`, seule façon
 /// de lire une déclaration ; la CLI n'en garde que la mise en forme de l'erreur.
 fn resolve_model(path: &Path) -> Result<ChosenModel, ErrorReport> {
-    let (files, style) =
-        cassini_ai::plan::resolve_model(path).map_err(|e| report(e.code(), e.to_string()))?;
-    Ok(ChosenModel { files, style })
+    let (files, style, known) =
+        cassini_ai::plan::resolve_model_known(path).map_err(|e| report(e.code(), e.to_string()))?;
+    Ok(ChosenModel {
+        files,
+        style,
+        known,
+    })
 }
 
 fn report(code: &str, message: String) -> ErrorReport {
@@ -864,6 +889,75 @@ fn print_composed(
 
 #[cfg(test)]
 mod tests {
+    // Ticket 5.52 : le filtre des commandes ajoutées connues du modèle.
+    #[derive(serde::Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    struct EchoParams {
+        /// Texte à rendre.
+        text: String,
+    }
+
+    #[derive(serde::Serialize, schemars::JsonSchema)]
+    struct EchoOutput {
+        /// Le texte reçu.
+        text: String,
+    }
+
+    struct Echo;
+    impl cassini_core::registry::Command for Echo {
+        type Params = EchoParams;
+        type Output = EchoOutput;
+        fn spec() -> cassini_core::registry::CommandSpec {
+            cassini_core::registry::CommandSpec::new::<EchoParams, EchoOutput>(
+                "exemple.echo",
+                "Rend le texte reçu.",
+                "Returns the given text.",
+            )
+            .runs_in(cassini_core::registry::RunsIn::Core)
+            .cancellable(false)
+            .example(serde_json::json!({"text": "bonjour"}))
+        }
+        fn run(&self, p: EchoParams) -> Result<EchoOutput, cassini_core::registry::CommandFailure> {
+            Ok(EchoOutput { text: p.text })
+        }
+    }
+
+    #[test]
+    fn offered_set_hides_added_commands_the_model_does_not_know() {
+        use std::collections::BTreeSet;
+        let derived = Registry::with_added(
+            cassini_core::registry::ProgramInfo::new("derive", "1"),
+            cassini_core::registry::AddedCommands::new().with(Echo),
+        )
+        .unwrap();
+        let model = |known: Option<BTreeSet<String>>| ChosenModel {
+            files: cassini_ai::ModelFiles::single(Path::new("m.gguf")),
+            style: cassini_ai::plan::PromptStyle::Full,
+            known,
+        };
+        let has = |m: &ChosenModel, reg: &Registry| {
+            m.offered_set(reg, None)
+                .is_none_or(|set| set.contains("exemple.echo"))
+        };
+        assert!(has(&model(None), &derived));
+        assert!(!has(&model(Some(BTreeSet::new())), &derived));
+        assert!(has(
+            &model(Some(["exemple.echo".to_string()].into())),
+            &derived
+        ));
+        // Registre officiel : l'ensemble offert reste celui d'avant.
+        let official = Registry::standard();
+        assert_eq!(
+            model(Some(BTreeSet::new())).offered_set(&official, None),
+            None
+        );
+        let all: BTreeSet<String> = official.specs().map(|s| s.id.clone()).collect();
+        assert_eq!(
+            model(Some(BTreeSet::new())).offered_set(&official, Some(&all)),
+            Some(all)
+        );
+    }
+
     use super::*;
 
     fn call(args: &[&str]) -> (i32, String, String) {
@@ -1385,6 +1479,7 @@ mod tests {
             ChosenModel {
                 files: ModelFiles::with_adapter(dir.join("base.gguf"), dir.join("lora.gguf")),
                 style: PromptStyle::Short,
+                known: Some(Default::default()),
             }
         );
         let hidden = chosen.hidden();
@@ -1398,6 +1493,7 @@ mod tests {
             ChosenModel {
                 files: ModelFiles::single(&gguf),
                 style: PromptStyle::Full,
+                known: None,
             }
         );
         // Une déclaration absente est un modèle introuvable, nommé par son seul fichier.

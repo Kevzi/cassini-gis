@@ -130,6 +130,34 @@ fn offered<'a>(
         .filter(move |s| !s.dictated_by_core && available.is_none_or(|set| set.contains(&s.id)))
 }
 
+/// L'ensemble des commandes offertes au modèle quand sa déclaration ne connaît qu'une partie des
+/// commandes ajoutées par un programme dérivé (ticket 5.52). `known` : les identifiants que la
+/// déclaration nomme (`None` : pas de déclaration, un GGUF seul, qui voit toutes les commandes
+/// ajoutées). Le résultat se passe comme `available` à la grammaire, au prompt et au préchauffage :
+/// un seul filtre pour les trois. Une commande ajoutée que `known` ne nomme pas en sort ; un
+/// identifiant de `known` que le registre ignore n'ajoute rien. Pour le registre officiel
+/// (`added_commands()` vide), `available` est rendu tel quel : rien ne change à l'octet.
+pub fn restrict_to_known(
+    registry: &Registry,
+    available: Option<&BTreeSet<String>>,
+    known: Option<&BTreeSet<String>>,
+) -> Option<BTreeSet<String>> {
+    let Some(known) = known else {
+        return available.cloned();
+    };
+    if registry.added_commands().is_empty() {
+        return available.cloned();
+    }
+    Some(
+        registry
+            .specs()
+            .filter(|s| available.is_none_or(|set| set.contains(&s.id)))
+            .filter(|s| !registry.added_commands().contains(&s.id) || known.contains(&s.id))
+            .map(|s| s.id.clone())
+            .collect(),
+    )
+}
+
 /// Grammaire GBNF d'un plan : `{"kind":"calls","calls":[{"command":<id du
 /// registre>,"params":<paramètres>}, ...]}`, `{"kind":"refusal","reason":<texte>}` ou
 /// `{"kind":"question","question":<texte>}`.
@@ -628,7 +656,11 @@ fn retry_turns(mut turns: Vec<Turn>, previous: &str, errors: &[String]) -> Vec<T
 /// Juge une sortie du modèle. `Ok(plan)` seulement si elle est exactement du
 /// JSON de plan et passe `check_plan` ; sinon la liste des écarts. Rien n'est
 /// corrigé ici : AD-23.
-fn judge(registry: &Registry, completion: &Completion) -> Result<Plan, Vec<String>> {
+fn judge(
+    registry: &Registry,
+    available: Option<&BTreeSet<String>>,
+    completion: &Completion,
+) -> Result<Plan, Vec<String>> {
     if completion.truncated {
         return Err(vec![
             "la réponse a été coupée avant la fin : elle est trop longue".to_string(),
@@ -660,6 +692,18 @@ fn judge(registry: &Registry, completion: &Completion) -> Result<Plan, Vec<Strin
             // qui en nomme un est rejeté, pas corrigé.
             let mut errors = Vec::new();
             for (index, call) in calls.iter().enumerate() {
+                // Une commande ajoutée que le modèle ne connaît pas (ticket 5.52) est rejetée,
+                // même si la grammaire l'avait laissée passer : elle n'est jamais offerte.
+                if available.is_some_and(|set| !set.contains(&call.command))
+                    && registry.added_commands().contains(&call.command)
+                {
+                    errors.push(format!(
+                        "étape {} : la commande « {} » n'est pas offerte à ce modèle",
+                        index + 1,
+                        call.command
+                    ));
+                    continue;
+                }
                 let Some(spec) = registry.spec(&call.command) else {
                     continue; // `check_plan` le signale
                 };
@@ -805,7 +849,7 @@ pub fn compose_plan_anchored_cut(
             Err(AiError::PromptTooLong) if attempt > 0 => break,
             Err(e) => return Err(e.into()),
         };
-        match judge(registry, &completion) {
+        match judge(registry, available, &completion) {
             Ok(Plan::Refusal { reason }) => return Err(AgentError::Refused(reason)),
             // Garde-fous de AD-23 sur le plan validé, sans redemande : un point qui ne vient ni
             // de la demande ni d'une étape, puis une valeur ou un champ que l'inventaire montré
@@ -844,13 +888,22 @@ pub fn compose_plan_anchored_cut(
 /// Une déclaration absente rend `ModelNotFound` à son seul nom de fichier, comme un GGUF
 /// absent ; une déclaration illisible rend `BadDeclaration`, sans recopier son dossier.
 pub fn resolve_model(path: &Path) -> Result<(ModelFiles, PromptStyle), AiError> {
+    resolve_model_known(path).map(|(files, style, _)| (files, style))
+}
+
+/// Comme `resolve_model`, avec les commandes ajoutées que le modèle connaît (ticket 5.52) : `None`
+/// pour un GGUF seul, qui ne limite rien ; `Some` (peut-être vide) pour une déclaration, qui nomme
+/// celles qu'elle a apprises par son champ `commands`.
+pub fn resolve_model_known(
+    path: &Path,
+) -> Result<(ModelFiles, PromptStyle, Option<BTreeSet<String>>), AiError> {
     use cassini_core::commands::model_list::{is_declaration, read_declaration};
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
     if !is_declaration(&name) {
-        return Ok((ModelFiles::single(path), PromptStyle::Full));
+        return Ok((ModelFiles::single(path), PromptStyle::Full, None));
     }
     if !path.is_file() {
         return Err(AiError::ModelNotFound(name.into()));
@@ -870,7 +923,8 @@ pub fn resolve_model(path: &Path) -> Result<(ModelFiles, PromptStyle), AiError> 
     if let (Some(adapter), Some(expected)) = (&files.adapter, &declaration.adapter_sha256) {
         crate::verify_fingerprint(adapter, expected)?;
     }
-    Ok((files, declaration.prompt.into()))
+    let known = declaration.commands.iter().cloned().collect();
+    Ok((files, declaration.prompt.into(), Some(known)))
 }
 
 /// Générateur branché sur le modèle local `model` (contraint par la grammaire).
@@ -1328,7 +1382,7 @@ mod tests {
     #[test]
     fn a_center_chosen_by_the_model_is_rejected() {
         let bad = r#"{"kind":"calls","calls":[{"command":"layout.export_pdf","params":{"title":"Carte","scale":25000,"center":{"x":650000,"y":6850000,"epsg":2154}}}]}"#;
-        let errors = judge(&registry(), &done(bad)).unwrap_err();
+        let errors = judge(&registry(), None, &done(bad)).unwrap_err();
         assert!(
             errors
                 .iter()
@@ -2070,7 +2124,7 @@ mod tests {
             let Some(retry) = &e.retry else {
                 continue;
             };
-            let errors = judge(&reg, &done(&retry.rejected)).unwrap_err();
+            let errors = judge(&reg, None, &done(&retry.rejected)).unwrap_err();
             assert_eq!(errors, retry.errors, "{}", e.request);
             let first = first_turns(PromptStyle::Short, &reg, &e.inventory, &e.request);
             let turns = retry_turns(first, &retry.rejected, &errors);
@@ -2501,7 +2555,7 @@ mod tests {
             let Some(retry) = &e.retry else {
                 continue;
             };
-            let errors = judge(&reg, &done(&retry.rejected)).expect_err(&e.request);
+            let errors = judge(&reg, None, &done(&retry.rejected)).expect_err(&e.request);
             assert_eq!(errors, retry.errors, "{}", e.request);
             let first = first_turns(PromptStyle::Short, &reg, &e.inventory, &e.request);
             let turns = retry_turns(first, &retry.rejected, &errors);
@@ -2848,5 +2902,135 @@ mod tests {
             full_tokens + MAX_PLAN_TOKENS <= crate::N_CTX as usize,
             "le budget ne laisse pas la place à la réponse"
         );
+    }
+
+    // -- ticket 5.52 : grammaire limitée aux commandes connues du modèle --------------------
+
+    #[derive(serde::Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    struct EchoParams {
+        /// Texte à rendre.
+        text: String,
+    }
+
+    #[derive(serde::Serialize, schemars::JsonSchema)]
+    struct EchoOutput {
+        /// Le texte reçu.
+        text: String,
+    }
+
+    struct Echo;
+    impl cassini_core::registry::Command for Echo {
+        type Params = EchoParams;
+        type Output = EchoOutput;
+        fn spec() -> cassini_core::registry::CommandSpec {
+            cassini_core::registry::CommandSpec::new::<EchoParams, EchoOutput>(
+                "exemple.echo",
+                "Rend le texte reçu.",
+                "Returns the given text.",
+            )
+            .runs_in(cassini_core::registry::RunsIn::Core)
+            .cancellable(false)
+            .example(serde_json::json!({"text": "bonjour"}))
+        }
+        fn run(&self, p: EchoParams) -> Result<EchoOutput, cassini_core::registry::CommandFailure> {
+            Ok(EchoOutput { text: p.text })
+        }
+    }
+
+    fn derived() -> Registry {
+        Registry::with_added(
+            cassini_core::registry::ProgramInfo::new("derive", "1"),
+            cassini_core::registry::AddedCommands::new().with(Echo),
+        )
+        .unwrap()
+    }
+
+    fn known(ids: &[&str]) -> BTreeSet<String> {
+        ids.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn mentions(reg: &Registry, offered: Option<&BTreeSet<String>>) -> (bool, bool) {
+        let grammar = plan_grammar_built(reg, offered).0;
+        let head = fixed_system_text(reg, offered);
+        (
+            grammar.contains("\\\"exemple.echo\\\""),
+            head.contains("\"id\":\"exemple.echo\""),
+        )
+    }
+
+    #[test]
+    fn an_added_command_the_declaration_does_not_name_is_out_of_grammar_and_prompt() {
+        let reg = derived();
+        // Déclaration sans le champ (ou qui nomme une inconnue) : rien d'ajouté.
+        for k in [known(&[]), known(&["x.y"])] {
+            let set = restrict_to_known(&reg, None, Some(&k));
+            assert_eq!(mentions(&reg, set.as_ref()), (false, false));
+        }
+        // La déclaration la nomme : grammaire et prompt.
+        let k = known(&["exemple.echo"]);
+        let set = restrict_to_known(&reg, None, Some(&k));
+        assert_eq!(mentions(&reg, set.as_ref()), (true, true));
+        // GGUF seul : tout est vu.
+        assert_eq!(
+            mentions(&reg, restrict_to_known(&reg, None, None).as_ref()),
+            (true, true)
+        );
+        // Le registre officiel contient toujours les mêmes commandes, avec ou sans déclaration.
+        let official = registry();
+        assert_eq!(restrict_to_known(&official, None, Some(&known(&[]))), None);
+        let all = available_without(&official, &[]);
+        assert_eq!(
+            restrict_to_known(&official, Some(&all), Some(&known(&[]))),
+            Some(all)
+        );
+        // Le filtre respecte aussi `available`.
+        let some = available_without(&reg, &["data.reproject"]);
+        let set = restrict_to_known(&reg, Some(&some), Some(&known(&["exemple.echo"]))).unwrap();
+        assert!(!set.contains("data.reproject") && set.contains("exemple.echo"));
+    }
+
+    #[test]
+    fn the_official_grammar_is_unchanged_by_a_declaration() {
+        let reg = registry();
+        let before = plan_grammar(&reg);
+        let set = restrict_to_known(&reg, None, Some(&known(&[])));
+        assert_eq!(plan_grammar_built(&reg, set.as_ref()).0, before);
+        assert_eq!(
+            fixed_system_text(&reg, set.as_ref()),
+            fixed_system_text(&reg, None)
+        );
+    }
+
+    #[test]
+    fn a_plan_naming_an_excluded_added_command_is_rejected() {
+        let reg = derived();
+        let plan = r#"{"kind":"calls","calls":[{"command":"exemple.echo","params":{"text":"a"}}]}"#;
+        let run = |offered: Option<&BTreeSet<String>>| {
+            let mut gen = |_: &GenerationRequest| Ok(done(plan));
+            compose_plan_anchored_cut(
+                PromptStyle::Full,
+                &reg,
+                offered,
+                &inventory(),
+                None,
+                None,
+                "Répète a.",
+                &mut gen,
+            )
+        };
+        let excluded = restrict_to_known(&reg, None, Some(&known(&[])));
+        match run(excluded.as_ref()) {
+            Err(AgentError::PlanInvalid(errors)) => {
+                assert!(errors[0].contains("exemple.echo"), "{errors:?}")
+            }
+            other => panic!("{other:?}"),
+        }
+        let named = restrict_to_known(&reg, None, Some(&known(&["exemple.echo"])));
+        assert!(matches!(run(named.as_ref()), Ok(Plan::Calls { .. })));
+        // GGUF seul : plan accepté.
+        assert!(matches!(run(None), Ok(Plan::Calls { .. })));
+        // Toujours au catalogue du registre : la commande reste connue et exécutable.
+        assert!(reg.spec("exemple.echo").is_some());
     }
 }

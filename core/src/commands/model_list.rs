@@ -62,6 +62,11 @@ pub struct ModelDeclaration {
     /// Empreinte SHA-256 (64 hexadécimaux) du GGUF de l'adaptateur ; absente : non déclarée.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adapter_sha256: Option<String>,
+    /// Identifiants des commandes ajoutées par un programme dérivé (2.14) que ce modèle a apprises ;
+    /// absent : aucune. Seules ces commandes ajoutées entrent dans sa grammaire et son prompt ; un
+    /// identifiant que le registre ne connaît pas est ignoré (ticket 5.52).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub commands: Vec<String>,
 }
 
 /// Message du diagnostic et du panneau quand le modèle n'a pas d'empreinte déclarée.
@@ -650,6 +655,10 @@ mod tests {
         std::fs::write(&f, r#"{"model":"m.gguf"}"#).unwrap();
         let d = read_declaration(&f).unwrap();
         assert_eq!((d.adapter, d.prompt), (None, PromptKind::Full));
+        // Ticket 5.52 : le champ `commands` est facultatif ; une ancienne déclaration n'en nomme aucune.
+        assert!(d.commands.is_empty());
+        std::fs::write(&f, r#"{"model":"m.gguf","commands":["exemple.echo"]}"#).unwrap();
+        assert_eq!(read_declaration(&f).unwrap().commands, vec!["exemple.echo"]);
         // Le message d'erreur ne porte pas le chemin.
         let e = read_declaration(&dir.join("absent.modele.json")).unwrap_err();
         assert!(!e.contains(dir.to_str().unwrap()), "{e}");

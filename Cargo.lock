@@ -342,6 +342,8 @@ dependencies = [
  "cassini-core",
  "object",
  "rmcp",
+ "schemars 1.2.2",
+ "serde",
  "serde_json",
  "tokio",
 ]
@@ -355,6 +357,8 @@ dependencies = [
  "llama-cpp-2",
  "llama-cpp-sys-2",
  "num_cpus",
+ "schemars 1.2.2",
+ "serde",
  "serde_json",
  "windows-sys 0.61.2",
 ]

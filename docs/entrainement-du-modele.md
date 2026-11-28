@@ -1569,6 +1569,7 @@ petit fichier `*.modele.json` posé à côté de ses GGUF :
 - `model` : le GGUF du modèle (la base, quand un adaptateur est nommé) ;
 - `adapter` (facultatif) : l'adaptateur LoRA posé sur cette base, un seul ;
 - `prompt` : `short` pour le prompt court de l'entraînement, `full` (ou absent) pour le long.
+- `commands` (facultatif) : les commandes ajoutées par un programme dérivé que le modèle a apprises (ticket 5.52) ; absent, aucune.
 
 Des noms de fichiers seuls, du même dossier que la déclaration : une déclaration qui nomme
 un dossier, un séparateur ou `..`, qui n'est pas du JSON lisible ou qui porte un champ

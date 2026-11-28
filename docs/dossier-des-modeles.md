@@ -25,3 +25,23 @@ dans le dossier lui-même (pas de sous-dossiers), triés par nom.
 3. Pointer `CASSINI_MODELS` vers un dossier absent : l'erreur `models.no_folder` apparaît.
 
 Codes d'erreur : `models.no_folder`, `models.unreadable` (dossier illisible).
+
+## Commandes ajoutées connues du modèle (ticket 5.52)
+
+Un programme noyau dérivé (entrée 2.14) peut ajouter des commandes que le modèle local n'a
+jamais apprises. La déclaration `*.modele.json` nomme celles qu'il connaît par un champ
+facultatif `commands` :
+
+```json
+{"model": "base.gguf", "adapter": "lora.gguf", "prompt": "short", "commands": ["exemple.echo"]}
+```
+
+- Seules les commandes ajoutées nommées là entrent dans le prompt, la grammaire et le
+  préchauffage du modèle ; les autres en sont exclues, et un plan qui les nomme est rejeté.
+- Une déclaration sans le champ reste valide : elle ne connaît aucune commande ajoutée. Un
+  identifiant que le registre ne connaît pas est ignoré, sans erreur.
+- Un GGUF seul, sans déclaration (long prompt, essais, sans promesse de justesse), n'a rien qui
+  limite le catalogue : il voit toutes les commandes ajoutées.
+- Le registre officiel n'a aucune commande ajoutée : rien ne change pour lui.
+- Le catalogue de session, le formulaire du panneau et les outils MCP listent toujours les
+  commandes ajoutées, connues du modèle ou non.
