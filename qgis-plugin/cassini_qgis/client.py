@@ -540,6 +540,8 @@ class CoreClient:
             ready = {
                 "core_version": result.get("core_version"),
                 "protocol_version": result.get("protocol_version"),
+                "program_name": result.get("program_name"),
+                "program_version": result.get("program_version"),
                 "commands": self.catalogue(),
                 "history": history,
                 "read_only": self._read_only,

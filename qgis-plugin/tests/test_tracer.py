@@ -137,6 +137,7 @@ class ClientTest(unittest.TestCase):
         self.assertEqual(
             self.events,
             [(client.READY, {"core_version": "0.1.0", "protocol_version": 2,
+                             "program_name": None, "program_version": None,
                              "commands": catalogue, "history": [], "read_only": False})],
         )
 
@@ -174,7 +175,8 @@ class ClientTest(unittest.TestCase):
         self.p.feed(reply(1, {"commands": []}))
         self.assertEqual(
             self.events,
-            [(client.READY, {"core_version": None, "protocol_version": None, "commands": [],
+            [(client.READY, {"core_version": None, "protocol_version": None,
+                             "program_name": None, "program_version": None, "commands": [],
                              "history": [], "read_only": False})],
         )
         self.assertEqual(len(self.p.written), 1)
@@ -203,6 +205,7 @@ class ClientTest(unittest.TestCase):
         self.assertEqual(
             self.events,
             [(client.READY, {"core_version": "0.1.0", "protocol_version": 2,
+                             "program_name": None, "program_version": None,
                              "commands": [{"id": "system.about"}], "history": past,
                              "read_only": True})],
         )
@@ -617,7 +620,8 @@ class FakePanel:
     def set_install_info(self, info, reminder=False):
         self.install_infos.append((info, reminder))
 
-    def set_ready(self, catalogue, history=(), read_only=False, journal_chain=None):
+    def set_ready(self, catalogue, history=(), read_only=False, journal_chain=None,
+                  program_name=None, program_version=None):
         self.ready = catalogue
         self.history = list(history)
         self.read_only = read_only
@@ -678,11 +682,12 @@ def load_plugin():
         "S", (), {"value": lambda self, *a: "", "setValue": lambda self, *a: None}), Qt=object,
         QUrl=lambda url: url)
     mod("qgis.PyQt.QtGui", QDesktopServices=StubDesktop)
-    mod("qgis.PyQt.QtWidgets", QDockWidget=StubWidget, QFileDialog=StubWidget)
+    mod("qgis.PyQt.QtWidgets", QDockWidget=StubWidget, QFileDialog=StubWidget,
+        QMessageBox=StubWidget)
     pkg = types.ModuleType("cassini_stub")
     pkg.__path__ = [PKG]
     sys.modules["cassini_stub"] = pkg
-    for n in ("client", "gestures", "installation", "locator", "texts"):
+    for n in ("client", "gestures", "installation", "locator", "texts", "trust"):
         sys.modules["cassini_stub." + n] = sys.modules[n]
     mod("cassini_stub.panel", CassiniPanel=FakePanel)
     return importlib.import_module("cassini_stub.plugin")
@@ -845,12 +850,14 @@ class PanelBannerTest(unittest.TestCase):
         del panel.render  # le vrai render de la classe
         for name in ("title", "settings_button", "settings_zone", "lang_label", "lang_box",
                      "model_label", "banner_zone", "banner_text", "banner_button", "banner_home",
-                     "install_label", "install_note", "input",
+                     "install_label", "install_note", "input", "core_label", "core_value", "core_help",
+                     "core_choose", "core_clear", "program_line", "program_note",
                      "send_button", "details", "expert", "footer"):
             setattr(panel, name, Recorder())
         for name in ("_render_models", "_render_external", "_render_agent", "_render_result",
                      "_render_thread", "_render_log", "_render_commands", "_render_buttons"):
             setattr(panel, name, lambda: None)
+        panel.core_setting = lambda: ""
         panel._controls = lambda: {"expert_enabled": False}  # activations : hors de ce test
         panel._focus_inside = lambda: False  # guidage du focus [12.2] : hors de ce test
         panel._move_focus = lambda inside: None
@@ -980,6 +987,43 @@ class PanelBannerTest(unittest.TestCase):
         self.assertEqual(self.panel._banner_text(self.panel.t), texts.tr("fr", "died"))
 
 
+class ProgramLineTest(PanelBannerTest):
+    """Nom, version et mention dérivée du programme branché (9.15)."""
+
+    def _render(self, name, version="1.2.3", ready=True):
+        class Label:
+            visible = text = None
+
+            def setVisible(self, v):
+                self.visible = v
+
+            def setText(self, t):
+                self.text = t
+
+        self.panel.ready = ready
+        self.panel.program_name, self.panel.program_version = name, version
+        self.panel.program_line, self.panel.program_note = Label(), Label()
+        self.panel._render_program(lambda key, **kw: key + str(kw))
+        return self.panel.program_line, self.panel.program_note
+
+    def test_official_program_shows_name_and_version_without_note(self):
+        line, note = self._render("cassini")
+        self.assertTrue(line.visible)
+        self.assertIn("1.2.3", line.text)
+        self.assertFalse(note.visible)
+
+    def test_derived_program_shows_the_note_and_the_ad14_limit(self):
+        line, note = self._render("programme-exemple")
+        self.assertIn("programme-exemple", line.text)
+        self.assertTrue(note.visible)
+        self.assertIn("program_derived", note.text)
+        self.assertIn("program_ad14", note.text)
+
+    def test_nothing_shown_before_ready_or_without_a_name(self):
+        self.assertFalse(self._render("cassini", ready=False)[0].visible)
+        self.assertFalse(self._render(None)[0].visible)
+
+
 class PluginBehaviourTest(unittest.TestCase):
     def setUp(self):
         self.mod = load_plugin()
@@ -987,6 +1031,7 @@ class PluginBehaviourTest(unittest.TestCase):
         self.iface = type("I", (), {"mainWindow": lambda i: self.window})()
         self.p = self.mod.CassiniPlugin(self.iface)
         self.p.panel = FakePanel(self.p)
+        self.p._trusted = lambda program, origin: True  # la confiance a ses propres tests
         StubProcess.created = 0
         # Le registre de traitement de QGIS est remplace par une doublure (AD-25).
         self.missing = set()
@@ -997,6 +1042,37 @@ class PluginBehaviourTest(unittest.TestCase):
         self.mod.analysis.QgisBackend = backend
         self.addCleanup(setattr, self.mod.analysis, 'QgisBackend', real_backend)
         self.addCleanup(setattr, self.mod.locator, 'locate', self.mod.locator.locate)
+
+    def _launch_with(self, origin, confirm):
+        """Lance avec un vrai `_trusted` ; `confirm` répond à la boîte de confirmation."""
+        del self.p._trusted  # la vraie décision de confiance
+        program = os.path.abspath(__file__)  # un fichier lisible quelconque
+        self.mod.locator.locate = lambda setting: (program, origin)
+        self.asked = []
+        self.p._confirm_program = lambda prog, digest: self.asked.append(digest) or confirm
+        self.p.project_path = "C:/a/p.qgz"
+        self.fake_client()
+        self.p._launch()
+
+    def test_refused_confirmation_creates_no_process_and_remembers_nothing(self):
+        self._launch_with("variable CASSINI_CORE", confirm=False)
+        self.assertEqual(len(self.asked), 1)
+        self.assertEqual(StubProcess.created, 0)
+        self.assertIsNone(self.p.client)
+        self.assertEqual(self.p.panel.banners[-1], "trust_refused")
+
+    def test_official_install_location_is_launched_without_question(self):
+        self._launch_with(self.mod.trust.OFFICIAL_ORIGIN, confirm=False)
+        self.assertEqual(self.asked, [])
+        self.assertEqual(StubProcess.created, 1)
+
+    def test_unreadable_program_is_refused_without_question(self):
+        del self.p._trusted
+        self.mod.locator.locate = lambda setting: ("C:/n-existe-pas/cassini.exe", "PATH")
+        self.p._confirm_program = lambda *a: self.fail("pas de question")
+        self.p._launch()
+        self.assertEqual(StubProcess.created, 0)
+        self.assertEqual(self.p.panel.banners[-1], "trust_unreadable")
 
     def test_ready_hands_the_journal_chain_to_the_panel(self):
         self.p.list_models = lambda: None

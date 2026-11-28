@@ -48,6 +48,32 @@ _FR = {
         "page d'accueil, ou désignez le fichier. Rien n'est téléchargé ici."
     ),
     "open_home": "Ouvrir la page d'accueil",
+    "core_program_label": "Programme noyau (réglage cassini/core_path)",
+    "core_program_help": (
+        "Laissez vide pour le noyau installé. Un autre programme, ou la variable CASSINI_CORE, "
+        "demande votre confirmation au premier lancement."
+    ),
+    "core_program_none": "(noyau installé)",
+    "core_program_choose": "Choisir…",
+    "core_program_clear": "Effacer",
+    "program_line": "Programme : {name} {version}",
+    "program_derived": "Programme dérivé de Cassini.",
+    "program_ad14": (
+        "La preuve hors ligne (AD-14) ne couvre que le programme officiel : "
+        "ce programme n'est pas couvert."
+    ),
+    "trust_title": "Programme noyau non officiel",
+    "trust_text": (
+        "Ce programme n'est pas le noyau installé de Cassini :\n{path}\n\n"
+        "Il sera lancé avec vos données. Empreinte SHA-256 :\n{digest}\n\nLe lancer ?"
+    ),
+    "trust_refused": (
+        "Programme noyau non lancé : vous n'avez pas confirmé ce programme. "
+        "Choisissez un autre noyau ou videz le réglage."
+    ),
+    "trust_unreadable": (
+        "Programme noyau non lancé : son empreinte n'a pas pu être calculée (fichier illisible)."
+    ),
     "install_version": "Version installée : {version}, le {date}",
     "update_reminder": (
         "Cette installation date de plus de trois mois. Lancez « Mettre à jour "
@@ -417,6 +443,32 @@ _EN = {
         "point to the file. Nothing is downloaded here."
     ),
     "open_home": "Open the home page",
+    "core_program_label": "Core program (setting cassini/core_path)",
+    "core_program_help": (
+        "Leave empty for the installed core. Another program, or the CASSINI_CORE variable, "
+        "asks for your confirmation the first time it runs."
+    ),
+    "core_program_none": "(installed core)",
+    "core_program_choose": "Choose…",
+    "core_program_clear": "Clear",
+    "program_line": "Program: {name} {version}",
+    "program_derived": "Program derived from Cassini.",
+    "program_ad14": (
+        "The offline proof (AD-14) covers the official program only: "
+        "this program is not covered."
+    ),
+    "trust_title": "Unofficial core program",
+    "trust_text": (
+        "This program is not the installed Cassini core:\n{path}\n\n"
+        "It will run with your data. SHA-256 fingerprint:\n{digest}\n\nRun it?"
+    ),
+    "trust_refused": (
+        "Core program not started: you did not confirm this program. "
+        "Choose another core or clear the setting."
+    ),
+    "trust_unreadable": (
+        "Core program not started: its fingerprint could not be computed (unreadable file)."
+    ),
     "install_version": "Installed version: {version}, on {date}",
     "update_reminder": (
         "This installation is more than three months old. Run “Update Cassini” "

@@ -1355,3 +1355,7 @@ Chaque entrée vient d'un plan qui a rétréci son périmètre ou d'un constat d
 - source_plan: `_bmad-output/initiative-cassini-mvp/epic-registre-projet-import/story-journal-chaine-par-empreinte-plan.md`
   summary: Les valeurs de `chain` et de `prev` ne sont pas contrôlées (`chain:0` compte comme chaîné) et `append` écrase un `prev`/`chain` de premier niveau.
   evidence: `verify_chain_bytes` ne teste que `contains_key` ; aucun conflit aujourd'hui (`versions.chain` est imbriqué), à durcir quand `chain` passera à 2.
+
+- source_plan: `_bmad-output/initiative-cassini-mvp/epic-facade-qgis/story-programme-noyau-choisi-dans-les-reglages-annonce-et-confirme-plan.md`
+  summary: Un binaire remplacé entre la confirmation (empreinte) et le lancement par QProcess est lancé sans nouvelle empreinte.
+  evidence: `plugin._trusted` calcule le SHA-256, puis `client.start(program)` relit le fichier plus tard ; le fermer demanderait de lancer une copie vérifiée.

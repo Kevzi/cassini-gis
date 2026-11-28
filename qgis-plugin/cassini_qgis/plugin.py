@@ -10,9 +10,9 @@ import os
 from qgis.core import QgsApplication, QgsProject
 from qgis.PyQt.QtCore import QProcess, QSettings, Qt, QTimer, QUrl
 from qgis.PyQt.QtGui import QDesktopServices
-from qgis.PyQt.QtWidgets import QDockWidget, QFileDialog
+from qgis.PyQt.QtWidgets import QDockWidget, QFileDialog, QMessageBox
 
-from . import analysis, client, delegated, gestures, installation, locator, panel, texts
+from . import analysis, client, delegated, gestures, installation, locator, panel, texts, trust
 
 PROBE_MS = 3000  # resonde du noyau tant que le bandeau « moteur introuvable » est affiché
 SLOW_TICKS = 100  # 100 x 100 ms : un geste de test de dix secondes
@@ -159,6 +159,48 @@ class CassiniPlugin:
             self.project_path = None
             self._refresh()
 
+    def clear_core(self):
+        """Vide le réglage : retour à la recherche ordinaire (variable, installation, PATH)."""
+        QSettings().remove(locator.SETTING_KEY)
+        self.project_path = None
+        self._refresh()
+
+    def _confirm_program(self, program, digest):
+        """Boîte de confirmation d'un programme non officiel ; vrai si l'utilisateur accepte."""
+        lang = self.panel.lang if self.panel else "fr"
+        box = QMessageBox(self.iface.mainWindow())
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle(texts.tr(lang, "trust_title"))
+        box.setTextFormat(Qt.TextFormat.PlainText)  # le chemin vient du réglage ou de l'environnement
+        box.setText(texts.tr(lang, "trust_text", path=program, digest=digest))
+        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        return box.exec() == QMessageBox.StandardButton.Yes
+
+    def _forget_install_info(self):
+        if self.panel is not None:
+            self.panel.set_install_info(None)  # rien n'est lancé : pas de version à décrire
+
+    def _trusted(self, program, origin):
+        """Décision de confiance avant tout lancement ; une bannière dit le refus."""
+        settings = QSettings()
+        accepted = trust.parse_accepted(settings.value(trust.ACCEPTED_KEY, ""))
+        action, digest = trust.decide(program, origin, accepted)
+        if action == "launch":
+            return True
+        if action == "refuse":
+            self.project_path = None
+            self._forget_install_info()
+            self._banner("trust_unreadable")
+            return False
+        if not self._confirm_program(program, digest):
+            self.project_path = None
+            self._forget_install_info()
+            self._banner("trust_refused")
+            return False
+        settings.setValue(trust.ACCEPTED_KEY, trust.dump_accepted(trust.remember(accepted, digest)))
+        return True
+
     def open_home(self):
         """Ouvre la page d'accueil d'AD-17 dans le navigateur ; rien n'est téléchargé ici."""
         QDesktopServices.openUrl(QUrl(installation.HOME_URL))
@@ -217,7 +259,10 @@ class CassiniPlugin:
             self._start_probe()
             return
         self._stop_probe()
-        program, _origin = found
+        program, origin = found
+        # Avant QProcess : un refus ne laisse ni processus ni client.
+        if not self._trusted(program, origin):
+            return
         if self.panel is not None:
             info = installation.read(program)
             now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
@@ -271,6 +316,8 @@ class CassiniPlugin:
                 payload.get("history", []),
                 read_only=read_only,
                 journal_chain=payload.get("journal_chain"),
+                program_name=payload.get("program_name"),
+                program_version=payload.get("program_version"),
             )
             if not read_only:
                 self.list_models()  # la liste des Réglages, dès que le noyau est prêt

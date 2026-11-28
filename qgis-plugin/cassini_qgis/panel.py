@@ -40,11 +40,13 @@ from . import (
     external,
     form,
     layer_remove,
+    locator,
     models,
     runlog,
     summary,
     texts,
     thread,
+    trust,
 )
 
 
@@ -176,6 +178,8 @@ BANNERS = {
     "starting": ("starting", None),
     "not_found": ("not_found", "choose"),
     "died": ("died", "relaunch"),
+    "trust_refused": ("trust_refused", "choose"),  # programme non confirmé : rien n'est lancé
+    "trust_unreadable": ("trust_unreadable", "choose"),
     "refused": ("refused", "choose"),  # pas de Relancer : même noyau, même refus
     # Seconde fenêtre QGIS sur le même projet : noyau vivant, seul le rejeu reste (AD-11).
     # Relancer : la session reprend l'écriture quand la première fenêtre a lâché le journal.
@@ -362,6 +366,8 @@ class CassiniPanel(QWidget):
 
     install_info = None  # version lue dans installation.json (set_install_info)
     install_reminder = False
+    program_name = None  # annoncés par session.hello (set_ready)
+    program_version = None
 
     def __init__(self, actions):
         super().__init__()
@@ -547,6 +553,26 @@ class CassiniPanel(QWidget):
         self.external_reason.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
+        # Programme noyau (AD-17) : le réglage cassini/core_path, choisi, jamais saisi.
+        self.core_label = QLabel()
+        self.core_value = QLabel()
+        self.core_value.setTextFormat(Qt.TextFormat.PlainText)
+        self.core_value.setWordWrap(True)
+        self.core_value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.core_help = QLabel()
+        self.core_help.setWordWrap(True)
+        self.core_choose = QPushButton()
+        self.core_choose.clicked.connect(lambda *_: self._actions.choose_core())
+        self.core_clear = QPushButton()
+        self.core_clear.clicked.connect(lambda *_: self._actions.clear_core())
+        core_row = QHBoxLayout()
+        core_row.addWidget(self.core_choose)
+        core_row.addWidget(self.core_clear)
+        core_row.addStretch(1)
+        sl.addWidget(self.core_label)
+        sl.addWidget(self.core_value)
+        sl.addLayout(core_row)
+        sl.addWidget(self.core_help)
         sl.addWidget(self.external_switch)
         sl.addWidget(self.external_ask)
         sl.addWidget(self.external_reason)
@@ -559,6 +585,16 @@ class CassiniPanel(QWidget):
         self.install_note.setWordWrap(True)
         sl.addWidget(self.install_label)
         sl.addWidget(self.install_note)
+
+        # Programme branché, en permanence : nom, version, mention dérivée (session.hello).
+        self.program_line = QLabel()
+        self.program_line.setTextFormat(Qt.TextFormat.PlainText)  # texte venu du programme
+        self.program_line.setWordWrap(True)
+        self.program_line.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.program_note = QLabel()
+        self.program_note.setWordWrap(True)
+        col.addWidget(self.program_line)
+        col.addWidget(self.program_note)
 
         # Bandeau d'état : un seul à la fois.
         self.banner_zone = QWidget()
@@ -964,13 +1000,18 @@ class CassiniPanel(QWidget):
         """Session en lecture seule : noyau prêt, bandeau de lecture seule (AD-11)."""
         return bool(self.ready and self.banner == "read_only")
 
-    def set_ready(self, catalogue, history=(), read_only=False, journal_chain=None):
+    def set_ready(self, catalogue, history=(), read_only=False, journal_chain=None,
+                  program_name=None, program_version=None):
         """Noyau prêt. `read_only` : le journal est tenu par une autre session ; le bandeau
         le dit et seul « Rejouer le journal » reste actif (EXPERIENCE.md, AD-11).
         `journal_chain` : état de la chaîne d'empreintes (`session.hello`) ; seule une rupture
         s'affiche, dans un bandeau qui ne bloque rien : `intact` et `unchained` ne disent rien."""
         self._drop_stale_run()
         self.ready = True
+        self.program_name = program_name if isinstance(program_name, str) and program_name else None
+        self.program_version = (
+            program_version if isinstance(program_version, str) and program_version else None
+        )
         self.journal_break = None
         if isinstance(journal_chain, dict) and journal_chain.get("state") == "broken":
             line = journal_chain.get("line")
@@ -1219,6 +1260,13 @@ class CassiniPanel(QWidget):
         self.lang_box.setAccessibleName(t("settings_language"))
         self.model_label.setText(t("settings_model"))
         self._render_models()
+        self.core_label.setText(t("core_program_label"))
+        self.core_help.setText(t("core_program_help"))
+        self.core_choose.setText(t("core_program_choose"))
+        self.core_clear.setText(t("core_program_clear"))
+        self.core_value.setText(self.core_setting() or t("core_program_none"))
+        self.core_clear.setEnabled(bool(self.core_setting()))
+        self._render_program(t)
         info = self.install_info
         self.install_label.setVisible(info is not None)
         self.install_note.setVisible(info is not None and self.install_reminder)
@@ -2113,6 +2161,23 @@ class CassiniPanel(QWidget):
         if self._actions.reject(plan_id):
             self.agent.start_rejecting()
             self.render()
+
+    def _render_program(self, t):
+        """Nom et version du programme branché ; mention dérivée et limite d'AD-14 si besoin."""
+        shown = self.ready and self.program_name is not None
+        self.program_line.setVisible(shown)
+        derived = shown and trust.is_derived(self.program_name)
+        self.program_note.setVisible(derived)
+        if shown:
+            self.program_line.setText(
+                t("program_line", name=self.program_name, version=self.program_version or "")
+            )
+        if derived:
+            self.program_note.setText(t("program_derived") + " " + t("program_ad14"))
+
+    def core_setting(self):
+        value = QSettings().value(locator.SETTING_KEY, "") or ""
+        return str(value)
 
     def set_install_info(self, info, reminder=False):
         """Version lue par le plugin dans `installation.json` (ou None) et rappel dû ou non."""
